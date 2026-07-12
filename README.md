@@ -12,6 +12,10 @@ The first usable vertical slice is system-level:
 
 This slice is intended to prove controlled change, immutable history, exact baselines, controlled document generation, verification evidence, and an end-to-end audit story before expanding to software HLRs and LLRs.
 
+## Interactive Showcase
+
+The local [AeroLink FMS 3.3 showcase](showcase/README.md) implements the Phase 0.5 fictional walkthrough defined in [SHOWCASE_STORY_FMS_3_3.md](SHOWCASE_STORY_FMS_3_3.md). It is an interactive design-validation prototype, not production software.
+
 ## Authoritative Documents
 
 | Document | Purpose |
