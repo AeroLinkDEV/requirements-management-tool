@@ -1,0 +1,17 @@
+meta {
+  name: SCR Page
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/scrs?projectId={{projectId}}&page=1&pageSize=50
+  body: none
+  auth: none
+}
+
+params:query {
+  projectId: {{projectId}}
+  page: 1
+  pageSize: 50
+}

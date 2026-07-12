@@ -39,6 +39,7 @@ Open `http://127.0.0.1:5173`. Local development uses PostgreSQL on port `55432`;
 Set-Location product\client
 npm.cmd run lint
 npm.cmd run build
+npm.cmd run test:e2e
 ```
 
 ## Structure
@@ -50,3 +51,4 @@ npm.cmd run build
 - `client`: React and TypeScript user interface
 - `docs/ARCHITECTURE.md`: technical direction and boundaries
 - `docs/SCALE_FOUNDATION.md`: PostgreSQL setup, migrations, scale generator, targets, and measured results
+- `api/AeroLink API`: Bruno collection for exercising the local HTTP API
