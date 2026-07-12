@@ -21,6 +21,8 @@ This slice is intended to prove controlled change, immutable history, exact base
 | [Domain model and glossary](DOMAIN_MODEL_AND_GLOSSARY.md) | Shared vocabulary and lifecycle concepts |
 | [Product principles](PRODUCT_PRINCIPLES.md) | Non-negotiable behavioral rules |
 | [Design vision and dashboards](DESIGN_VISION_AND_DASHBOARDS.md) | North-star mockups, role-aware dashboards, trusted metrics, and showcase direction |
+| [FMS 3.3 showcase story](SHOWCASE_STORY_FMS_3_3.md) | Canonical fictional data and walkthrough for the interactive concept |
+| [Identifiers and requirement fields proposal](IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md) | Proposed numbering, revision display, and mandatory-field policy |
 | [System-level workflow](SYSTEM_LEVEL_WORKFLOW.md) | Decision-complete first-slice behavior and paper scenarios |
 | [Feature catalog](FEATURE_CATALOG.md) | Stable, phased capability inventory |
 | [Release roadmap](RELEASE_ROADMAP.md) | Incremental delivery strategy and exit criteria |

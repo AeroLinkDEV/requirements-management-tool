@@ -36,7 +36,7 @@ The workflow assumes these conceptual roles; one person may hold multiple roles 
 - **Program Administrator:** configures authorized users, roles, and program-level policy.
 - **System Administrator:** operates the platform without authority to erase controlled history.
 
-Exact quorum and independence policies are configurable decisions to be resolved before implementation.
+For the initial product behavior, approval is unanimous among the reviewers assigned as required: every required reviewer must approve the same artifact revision. Any required reviewer rejection or request for changes prevents approval. Independence rules and the approval-authentication ceremony remain to be defined.
 
 ## 3. SCR Lifecycle
 
@@ -68,6 +68,7 @@ Selected -> Deferred (with controlled reason)
 - Draft SCRs may be revised by authorized users and may miss an intended release without losing history.
 - Submission freezes the submitted revision for review. Rework creates a new reviewable revision rather than rewriting the reviewed snapshot.
 - Every review comment requiring action must be dispositioned before approval.
+- Approval requires every assigned required reviewer to approve the same submitted revision; approval of an earlier revision does not carry forward after rework.
 - Rejection preserves the SCR and review history. A materially revised proposal proceeds as a new SCR revision or a replacement SCR according to policy.
 - Approval makes the proposed changes eligible for baseline selection; it does not itself change the effective baseline.
 - Deferral records who deferred the SCR, when, why, and any new target release.
@@ -140,12 +141,15 @@ Completed executions are immutable. A clerical correction uses a controlled amen
 
 ### Outcome Rules
 
-- **Pass:** Recorded evidence supports that the procedure's expected outcomes were met.
-- **Fail:** One or more required outcomes were not met. The failure remains visible even after later success.
+- **Pass:** The test was completed and a qualified human reviewer concluded that the recorded execution and evidence successfully verify the applicable requirement(s). Automated step outcomes alone do not create an approved Pass.
+- **Fail:** The test was completed and a qualified human reviewer concluded that the execution did not verify one or more applicable requirements or demonstrated that expected behavior was not satisfied. The failure remains visible even after later success.
 - **Not Applicable:** The procedure or step is inapplicable under the recorded configuration and requires justification.
-- **Blocked / Not Run:** Candidate operational states, not satisfactory verification results. Their exact distinction and use must be resolved before implementation.
+- **Blocked:** The execution could not reach a valid verification conclusion—for example, it could not run, the environment/configuration prevented completion, or the procedure did not adequately test the requirement. Blocked is neither Pass nor Fail and requires disposition.
+- **Not Run:** The planned execution has not started. It is neither a verification result nor interchangeable with Blocked.
 
 A failed execution may link to one or more PRs or external PR references. A later retest links to the earlier execution, relevant correction/change, and its own evidence. Reporting may show the latest valid status but must preserve the full sequence.
+
+A PR may also be raised when review identifies that an applicable requirement is not fully covered by verification. That PR can drive creation or revision of test procedures and remains linked through the resulting execution and coverage closure.
 
 ## 8. Traceability and Completeness
 

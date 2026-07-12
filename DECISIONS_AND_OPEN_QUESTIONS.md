@@ -126,6 +126,54 @@ Future entries use:
 - **Rationale:** A realistic show-and-tell experience will validate desirability, terminology, information architecture, dashboard priorities, and workflow comprehension at far lower cost than production code.
 - **Consequences:** The showcase must be labeled as a concept and must not imply production authentication, workflow enforcement, audit integrity, compliance, data persistence, integration, or deployment readiness.
 
+### DEC-015 - System Engineer and Manager Are the Initial Primary Users
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** Prioritize the System Engineer and Manager experiences in the initial product slice and interactive showcase.
+- **Rationale:** These roles have the strongest immediate need to understand controlled change, progress, review demand, verification status, and release readiness.
+- **Consequences:** Dashboard and workflow validation begins with these two perspectives; supporting quality, configuration, and administration needs remain in scope but do not dilute the first showcase.
+
+### DEC-016 - Initial Hierarchy Is Software-Oriented
+
+- **Date:** 2026-07-11
+- **Status:** Accepted as default
+- **Decision:** Use `Program -> Project -> Software Product -> Software Release` as the initial default hierarchy, with optional additional system/product/configuration levels where a program requires them.
+- **Rationale:** Current target programs are primarily software-oriented and move from program/project directly into software lifecycle management.
+- **Consequences:** The first model must not require artificial hierarchy levels, while remaining extensible for programs with richer system structures.
+
+### DEC-017 - Approval Requires Every Required Reviewer
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** An artifact revision is approved only when every reviewer assigned as required approves that exact revision.
+- **Rationale:** Approval represents agreement of the complete required review group, not a majority or partial quorum.
+- **Consequences:** Rejection or requested changes block approval; rework creates a new submitted revision and earlier reviewer approvals do not silently carry forward.
+
+### DEC-018 - Retired Requirements Are Omitted from the Effective Document
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** A requirement retired by an approved change is not present in the next effective SYSRD.
+- **Rationale:** The effective document should contain the requirements applicable to that baseline.
+- **Consequences:** The retired requirement remains retrievable through prior baselines, SCR history, comparison reports, traceability, and audit records, but is omitted from the successor SYSRD body.
+
+### DEC-019 - Verification Outcomes Require Human Judgment
+
+- **Date:** 2026-07-11
+- **Status:** Accepted direction
+- **Decision:** Pass and Fail are controlled human conclusions about whether an execution successfully verified applicable requirements; Blocked means a valid verification conclusion could not be reached.
+- **Rationale:** Test execution data alone does not determine whether the requirement was adequately verified.
+- **Consequences:** Outcome records require reviewer attribution and evidence. Blocked is neither Pass nor Fail and requires a reason and disposition.
+
+### DEC-020 - FMS Version 3.3 Is the Showcase Scenario
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** Use an FMS Version 3.2 to 3.3 release story driven by two SCRs: one introduces a Round Robin function and one incorporates fixes for four linked PRs.
+- **Rationale:** This reflects a realistic software-oriented program and exercises change, requirements, verification coverage, problem reports, baselines, dashboards, and traceability in one story.
+- **Consequences:** [SHOWCASE_STORY_FMS_3_3.md](SHOWCASE_STORY_FMS_3_3.md) is the canonical fictional dataset and walkthrough. The second-change interpretation remains an assumption until confirmed.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
@@ -134,36 +182,37 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 - **ASM-002:** Artifact numbers are globally unique across programs; exact prefixes, digit lengths, and revision display syntax are configurable or decided later.
 - **ASM-003:** The first slice supports multiple programs even if initial validation uses one reference program.
 - **ASM-004:** Requirements may include controlled images/figures as part of revisioned content.
-- **ASM-005:** Exact review roles, quorum, and independence vary by organization/program and require controlled configuration.
+- **ASM-005:** Exact review roles and independence rules vary by organization/program and require controlled configuration; unanimous approval by all assigned required reviewers is fixed initial behavior.
 - **ASM-006:** PR references may point to an external system until full PR management exists.
-- **ASM-007:** The initial platform records at least Pass, Fail, and Not Applicable; additional operational states require precise definitions.
+- **ASM-007:** The initial platform records Pass, Fail, Blocked, Not Run, and Not Applicable using the meanings in [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md); detailed step/result transition rules still require validation.
 - **ASM-008:** Source Word files remain unmodified in the repository root during the initial consolidation.
 - **ASM-009:** GitHub will eventually become the shared remote source of truth, but no repository details are assumed.
 - **ASM-010:** Dashboard values are computed only from records the current user is authorized to know exist.
 - **ASM-011:** The first interactive showcase uses deterministic fictional data and simulated state changes rather than a production backend.
+- **ASM-012:** The user’s “second PR which incorporates 4 PR bug fixes” means a second SCR linked to four PRs.
 
 ## Open Questions Required Before Phase 1 Technical Planning
 
 | ID | Question | Why It Matters | Decision Owner / Timing |
 | --- | --- | --- | --- |
-| OQ-001 | What is the exact program/project/product/system/configuration hierarchy? | Determines ownership, access, identifiers, applicability, and baseline scope | Product owner before domain/data design |
-| OQ-002 | What global identifier and revision display conventions are required for SCRs, requirements, procedures, executions, and documents? | Affects migration, usability, external references, and never-reuse rules | Product/configuration stakeholders before data design |
-| OQ-003 | Which requirement fields are mandatory in the first slice, and which are program-configurable? | Controls validation, import, review, and SYSRD content | Requirements stakeholders before Phase 1 |
-| OQ-004 | Which workflow states, reviewer roles, quorum rules, and independence constraints are mandatory versus configurable? | Controls the review/approval engine and authorization model | Quality/configuration/product stakeholders before Phase 2 design |
+| OQ-001 | Which optional product/system/configuration layers are needed beyond the accepted `Program -> Project -> Software Product -> Software Release` default? | Determines applicability and baseline scope for programs that do not fit the software-oriented default | Product owner before domain/data design |
+| OQ-002 | Should the project accept the identifier and whole-number revision convention proposed in [IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md](IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md), and should the numeric sequence be global across types or per prefix? | Affects migration, usability, external references, and never-reuse rules | Product/configuration stakeholders before data design |
+| OQ-003 | Which proposed platform-mandatory requirement fields should be accepted, and which existing FMS fields must be preserved or made program-configurable? | Controls validation, import, review, and SYSRD content | Requirements stakeholders before Phase 1 |
+| OQ-004 | Which workflow states, reviewer roles, and independence constraints are mandatory versus configurable beyond unanimous required-reviewer approval? | Controls the review/approval engine and authorization model | Quality/configuration/product stakeholders before Phase 2 design |
 | OQ-005 | What constitutes an electronic approval, and is password re-entry or another signature ceremony required? | Affects identity, audit evidence, usability, and policy | Security/quality stakeholders before Phase 2 |
 | OQ-006 | What are the allowed verification methods, and can one requirement require multiple methods? | Affects completeness logic and document output | Verification stakeholders before Phase 1 completion |
 | OQ-007 | Are test case and test suite separate first-slice artifacts, or is procedure plus execution configuration sufficient? | Avoids redundant objects and unclear trace semantics | Verification stakeholders before Phase 3 design |
-| OQ-008 | What exact meanings and approval effects apply to Pass, Fail, Not Applicable, Blocked, and Not Run? | Prevents misleading traceability and release status | Verification/quality stakeholders before Phase 3 |
+| OQ-008 | What detailed transition, amendment, and release-gate rules apply to the accepted Pass, Fail, Not Applicable, Blocked, and Not Run meanings? | Prevents misleading traceability and release status | Verification/quality stakeholders before Phase 3 |
 | OQ-009 | When must a failed execution have a PR, anomaly, or formal disposition? | Controls completeness and release gates | Quality/program stakeholders before Phase 3 |
-| OQ-010 | How are requirement retirements presented in a successor SYSRD: omitted, listed in a change section, or marked retired? | Affects controlled document semantics and historical clarity | Product/configuration stakeholders before Phase 2 |
+| OQ-010 | Should a successor SYSRD include a separate change summary listing retired requirements even though they are omitted from its effective requirement body? | Affects document change communication without weakening the effective-content rule | Product/configuration stakeholders before Phase 2 |
 | OQ-011 | How are conflicting approved SCRs affecting the same requirement ordered or resolved? | Required for deterministic candidate-baseline construction | Configuration/product stakeholders before Phase 2 |
 | OQ-012 | Does reproducible document generation require byte-identical PDFs or content-equivalent outputs with explained metadata differences? | Drives generator, archive, validation, and platform constraints | Product/quality stakeholders before Phase 2 |
 | OQ-013 | What legacy SYSRD structure and import quality should the first migration workflow support? | Import was requested but depends heavily on source format and validation needs | Product owner after sample documents are available |
 | OQ-014 | What production data volumes, response-time targets, availability, RPO, and RTO are required? | Converts quality ambitions into testable architecture constraints | Operations/product owner before production architecture |
 | OQ-015 | What GitHub organization/repository name, visibility, branch policy, and contributor workflow should be used? | Required before publishing the local repository | Repository owner before remote setup |
-| OQ-016 | Which manager, engineer, configuration/quality, and administrator personas and decisions must each dashboard support? | Determines dashboard information priority and avoids generic one-size-fits-all views | Product owner and representative users before showcase build |
+| OQ-016 | Which specific decisions and recurring tasks must the accepted Manager and System Engineer dashboards support first? | Determines dashboard information priority and avoids generic views | Product owner and representative users before showcase build |
 | OQ-017 | What exact definitions, thresholds, applicability rules, and owners govern the initial dashboard measures? | Prevents misleading readiness and completeness indicators | Product/process owners before showcase validation |
-| OQ-018 | Which representative fictional program, release, requirements, SCRs, tests, results, and user roles should form the showcase story? | Creates coherent reusable prototype data and presentation flow | Product owner before showcase build |
+| OQ-018 | Which details in the accepted FMS Version 3.3 fictional story need correction or richer realism before the showcase build? | Keeps the reusable prototype data credible without using sensitive real program data | Product owner before showcase build |
 
 ## Open Questions for Later Phases
 

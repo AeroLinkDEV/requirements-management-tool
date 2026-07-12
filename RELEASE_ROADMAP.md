@@ -65,7 +65,7 @@ Exit evidence:
 Capabilities:
 
 - SCR introductions, modifications, retirements, target releases, and deferrals;
-- review, comments, dispositions, rework, rejection, approval, quorum, and independence;
+- review, comments, dispositions, rework, rejection, unanimous required-reviewer approval, and independence;
 - impact analysis and suspect links;
 - candidate/approved baselines and comparison; and
 - draft-watermarked and approved SYSRD generation with exact provenance and hashes.

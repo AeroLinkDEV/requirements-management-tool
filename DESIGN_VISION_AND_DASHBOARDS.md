@@ -44,6 +44,8 @@ The complete manager-facing narrative is available in [the AeroLink concept deck
 
 ## Dashboard Audiences
 
+The first showcase and initial usable product prioritize **System Engineers** and **Managers**. Configuration/quality and administrator dashboards remain important supporting views but are secondary to proving those two primary experiences.
+
 ### Management Dashboard
 
 Managers need concise program and release health with enough evidence to make decisions. The view should prioritize:
@@ -75,7 +77,7 @@ Configuration-management and quality users need release-control and process evid
 
 - candidate-baseline validation failures;
 - approved items not yet selected, or selected items lacking required approval;
-- unresolved review comments and independence/quorum exceptions;
+- unresolved review comments, missing required-reviewer approvals, and independence exceptions;
 - document-generation jobs, provenance, and hashes;
 - audit and administrative exceptions;
 - withdrawn or superseded outputs; and
@@ -182,3 +184,5 @@ A presenter can:
 8. return to a dashboard whose status visibly reflects the simulated story.
 
 The purpose is to validate desirability, workflow comprehension, terminology, information architecture, and stakeholder alignment—not to prove technical feasibility or production readiness.
+
+The canonical fictional scenario and presentation flow are defined in [SHOWCASE_STORY_FMS_3_3.md](SHOWCASE_STORY_FMS_3_3.md).

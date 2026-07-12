@@ -35,11 +35,15 @@ The stable identity and revision identity must remain separate even if a display
 
 **Program**: The primary organizational and access-control boundary for lifecycle data. Artifact numbers are globally unique even when artifacts belong to different programs.
 
-**Product / System**: The controlled subject to which requirements, tests, releases, and other lifecycle data apply. The exact hierarchy among program, project, product, and system remains to be defined.
+**Project**: The principal body of work within a program. In the initial target environment, a project commonly proceeds directly to a software product rather than requiring a deep aircraft/system/product hierarchy.
+
+**Software Product**: The controlled software item delivered by a project, such as a Flight Management System. It has software releases and baselines.
+
+**Product / System**: An optional controlled engineering layer when a program needs it. The initial default hierarchy is `Program -> Project -> Software Product -> Software Release`; additional product/system/configuration layers may be enabled when required.
 
 **Configuration / Variant**: A defined applicability context that distinguishes product forms or options. Advanced variant management is later scope, but the initial model must not prevent it.
 
-**Release**: A planned or delivered product/software version used to target changes and collect approved baseline contents. An SCR may target a release and later be deferred through a controlled decision.
+**Release**: A planned or delivered product/software version used to target changes and collect approved baseline contents. For example, approved SCRs selected against the FMS Software Version 3.2 baseline create the candidate contents for Version 3.3. An SCR may target a release and later be deferred through a controlled decision.
 
 **Baseline**: An immutable, named set of exact artifact and relationship revisions approved for a defined purpose. Candidate baselines may be assembled and reviewed; released baselines cannot be edited.
 
