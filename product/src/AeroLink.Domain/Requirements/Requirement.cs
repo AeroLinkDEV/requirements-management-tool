@@ -3,7 +3,7 @@ using AeroLink.Domain.Common;
 
 namespace AeroLink.Domain.Requirements;
 
-public enum RequirementRevisionState { Active, Retired }
+public enum RequirementRevisionState { Active, Superseded, Retired }
 
 /// <summary>Stable identity for a requirement across all of its immutable revisions.</summary>
 public sealed class RequirementArtifact

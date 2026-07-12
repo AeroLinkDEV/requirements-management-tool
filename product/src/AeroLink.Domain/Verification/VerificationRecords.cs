@@ -4,21 +4,24 @@ namespace AeroLink.Domain.Verification;
 
 public enum TestProcedureState { Draft, Approved, Retired }
 public enum TestOutcome { Pass, Fail, Blocked }
+public enum TestProcedureLevel { System, HighLevel, LowLevel }
 
 public sealed class TestProcedure
 {
     private TestProcedure() { }
-    public TestProcedure(Guid projectId, string baseNumber, string title, string ownerId, DateTimeOffset now)
+    public TestProcedure(Guid projectId, string baseNumber, string title, string ownerId, DateTimeOffset now,
+        TestProcedureLevel level = TestProcedureLevel.HighLevel)
     {
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A test procedure title is required.");
         Id = Guid.NewGuid(); ProjectId = projectId; BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
-        Title = title.Trim(); OwnerId = ownerId.Trim(); CreatedAt = now;
+        Title = title.Trim(); OwnerId = ownerId.Trim(); CreatedAt = now; Level = level;
     }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public string BaseNumber { get; private set; } = string.Empty;
     public string Title { get; private set; } = string.Empty;
     public string OwnerId { get; private set; } = string.Empty;
+    public TestProcedureLevel Level { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 }
 

@@ -2,7 +2,7 @@ using AeroLink.Domain.Common;
 
 namespace AeroLink.Domain.ChangeControl;
 
-public enum RequirementLevel { System, HighLevel }
+public enum RequirementLevel { System, HighLevel, LowLevel }
 public enum RequirementChangeKind { Introduce, Modify, Retire }
 
 public sealed record RequirementChangeDraft(string BaseNumber, int Revision, RequirementLevel Level,

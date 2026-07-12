@@ -5,9 +5,11 @@ import ScrWorkspace from "./ScrWorkspace";
 import BaselineCenter from "./BaselineCenter";
 import HistoryExplorer from "./HistoryExplorer";
 import VerificationCenter from "./VerificationCenter";
+import LifecycleExplorer from "./LifecycleExplorer";
 import "./App.css";
 import "./Onboarding.css";
 import "./DashboardInteractions.css";
+import "./Showcase.css";
 
 type Scr = {
   id: string;
@@ -24,6 +26,7 @@ type Metrics = {
   inReview: number;
   approved: number;
 };
+type Overview = {systemRequirements:number;highLevelRequirements:number;lowLevelRequirements:number;historicalScrs:number;historicalSwcrs:number;activeRequests:number;traceLinks:number;testProcedures:number;testExecutions:number;controlledDocuments:number;softwareBuilds:number};
 type Release = { id: string; version: string; isReleased: boolean };
 type Workspace = {
   program: { id: string; name: string; code: string };
@@ -42,13 +45,14 @@ function App() {
       inReview: 0,
       approved: 0,
     }),
+    [overview,setOverview]=useState<Overview>(),
     [workspaces, setWorkspaces] = useState<Workspace[]>([]),
     [activeId, setActiveId] = useState(""),
     [connected, setConnected] = useState(false),
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
     [selectedScrId, setSelectedScrId] = useState(""),
-    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "verification">("dashboard");
+    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "verification" | "lifecycle">("dashboard");
   const loadWorkspaces = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/workspaces`),
@@ -67,17 +71,19 @@ function App() {
   const loadData = useCallback(async () => {
     if (!project) return;
     try {
-      const [a, b] = await Promise.all([
-        fetch(`${API}/api/scrs?projectId=${project.project.id}`),
-        fetch(`${API}/api/dashboard?projectId=${project.project.id}`),
+      const [a, b, c] = await Promise.all([
+        fetch(`${API}/api/scrs?projectId=${project.project.id}&releaseId=${release?.id ?? ''}`),
+        fetch(`${API}/api/dashboard?projectId=${project.project.id}&releaseId=${release?.id ?? ''}`),
+        fetch(`${API}/api/showcase/overview?projectId=${project.project.id}`),
       ]);
       const page = await a.json();
       setScrs(Array.isArray(page.items) ? page.items : []);
       setMetrics(await b.json());
+      if(c.ok)setOverview(await c.json());
     } catch {
       setConnected(false);
     }
-  }, [project]);
+  }, [project, release]);
   useEffect(() => {
     loadWorkspaces();
   }, [loadWorkspaces]);
@@ -222,6 +228,8 @@ function App() {
     );
   if (view === "verification" && project && release)
     return <VerificationCenter api={API} projectId={project.project.id} releaseId={release.id} onBack={() => setView("dashboard")}/>;
+  if (view === "lifecycle" && project)
+    return <LifecycleExplorer api={API} projectId={project.project.id} releases={project.releases} onBack={() => setView("dashboard")}/>;
   return (
     <div className="shell">
       <aside>
@@ -253,11 +261,13 @@ function App() {
             "✓  Verification",
             "⌘  Baselines",
             "↗  Traceability",
+            "▤  Documents",
           ].map((x, i) => (
             <button className={i === 0 ? "active" : ""} key={x} onClick={() => {
               if (x.includes("Baselines")) setView("baselines");
               if (x.includes("Verification")) setView("verification");
-              if (x.includes("Change Requests") || x.includes("Requirements") || x.includes("Traceability")) setView("history");
+              if (x.includes("Traceability") || x.includes("Documents")) setView("lifecycle");
+              if (x.includes("Change Requests") || x.includes("Requirements")) setView("history");
             }}>
               {x}
             </button>
@@ -325,6 +335,7 @@ function App() {
             </article>
           ))}
         </section>
+        {overview&&overview.systemRequirements>0&&<section className="programInventory"><div><p className="eyebrow">RELEASED 1.5 PRODUCT BASELINE</p><h3>Complete FMS lifecycle inventory</h3><span>Active release 1.6 inherits this controlled foundation.</span></div>{[["System requirements",overview.systemRequirements],["HLR",overview.highLevelRequirements],["LLR",overview.lowLevelRequirements],["Trace links",overview.traceLinks],["Test procedures",overview.testProcedures],["Test executions",overview.testExecutions]].map(([label,value])=><article key={String(label)}><b>{Number(value).toLocaleString()}</b><small>{label}</small></article>)}</section>}
         <section className="grid">
           <div className="panel work">
             <div className="panelhead">

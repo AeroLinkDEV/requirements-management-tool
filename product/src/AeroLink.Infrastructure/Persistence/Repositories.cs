@@ -13,6 +13,7 @@ public sealed class ScrRepository(AeroLinkDbContext db) : IScrRepository
         var page = Math.Max(1, query.Page);
         var pageSize = Math.Clamp(query.PageSize, 1, 200);
         var source = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == query.ProjectId);
+        if (query.TargetReleaseId is not null) source = source.Where(x => x.TargetReleaseId == query.TargetReleaseId);
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             var search = query.Search.Trim();
@@ -25,7 +26,7 @@ public sealed class ScrRepository(AeroLinkDbContext db) : IScrRepository
             : source.OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.BaseNumber);
         var items = await ordered
             .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(x => new ScrListItem(x.Id, x.BaseNumber, x.Revision, x.Title, x.State, x.AuthorId,
+            .Select(x => new ScrListItem(x.Id, x.BaseNumber, x.Revision, x.Title, x.State, x.Type, x.AuthorId,
                 x.TargetReleaseId, x.RequirementChanges.Count, x.UpdatedAt)).ToListAsync(cancellationToken);
         return new PagedResult<ScrListItem>(items, page, pageSize, total);
     }

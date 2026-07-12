@@ -4,6 +4,7 @@ using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Traceability;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -29,6 +30,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<TestProcedureRevision> TestProcedureRevisions => Set<TestProcedureRevision>();
     public DbSet<TestRequirementCoverage> TestCoverage => Set<TestRequirementCoverage>();
     public DbSet<TestExecution> TestExecutions => Set<TestExecution>();
+    public DbSet<RequirementTraceLink> RequirementTraces => Set<RequirementTraceLink>();
+    public DbSet<ControlledDocument> ControlledDocuments => Set<ControlledDocument>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -76,6 +79,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Solution).HasMaxLength(8000).IsRequired();
             b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired();
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Type).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.Version).IsConcurrencyToken();
             b.Ignore(x => x.DisplayNumber); b.Ignore(x => x.ActiveReviewCycle);
             b.HasIndex(x => new { x.ProjectId, x.BaseNumber, x.Revision }).IsUnique();
@@ -186,6 +190,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("test_procedures"); b.HasKey(x => x.Id); b.Property(x => x.BaseNumber).HasMaxLength(30).IsRequired();
             b.Property(x => x.Title).HasMaxLength(300).IsRequired(); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired();
+            b.Property(x => x.Level).HasConversion<string>().HasMaxLength(30);
             b.HasIndex(x => new { x.ProjectId, x.BaseNumber }).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -214,6 +219,25 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SoftwareBuild>().WithMany().HasForeignKey(x => x.SoftwareBuildId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<TestExecution>().WithMany().HasForeignKey(x => x.RetestOfExecutionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<RequirementTraceLink>(b =>
+        {
+            b.ToTable("requirement_trace_links"); b.HasKey(x => x.Id); b.Property(x => x.Type).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Rationale).HasMaxLength(2000); b.HasIndex(x => new { x.SourceRevisionId, x.TargetRevisionId, x.Type }).IsUnique();
+            b.HasIndex(x => x.TargetRevisionId); b.HasIndex(x => x.ProjectId);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.SourceRevisionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.TargetRevisionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ControlledDocument>(b =>
+        {
+            b.ToTable("controlled_documents"); b.HasKey(x => x.Id); b.Property(x => x.Type).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.DocumentNumber).HasMaxLength(30).IsRequired(); b.Property(x => x.Title).HasMaxLength(300).IsRequired();
+            b.Property(x => x.ContentHash).HasMaxLength(64).IsRequired(); b.HasIndex(x => new { x.ProjectId, x.DocumentNumber, x.Revision }).IsUnique();
+            b.HasIndex(x => new { x.BaselineId, x.Type });
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

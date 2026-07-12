@@ -12,9 +12,9 @@ public interface IScrRepository
     Task SaveAsync(CancellationToken cancellationToken);
 }
 
-public sealed record ScrQuery(Guid ProjectId, int Page = 1, int PageSize = 50, string? Search = null, ScrState? State = null);
+public sealed record ScrQuery(Guid ProjectId, int Page = 1, int PageSize = 50, string? Search = null, ScrState? State = null, Guid? TargetReleaseId = null);
 public sealed record ScrListItem(Guid Id, string BaseNumber, int Revision, string Title, ScrState State,
-    string AuthorId, Guid TargetReleaseId, int RequirementCount, DateTimeOffset UpdatedAt);
+    ChangeRequestType Type, string AuthorId, Guid TargetReleaseId, int RequirementCount, DateTimeOffset UpdatedAt);
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount)
 {
     public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);

@@ -4,6 +4,9 @@ This directory contains the real application foundation. The visual showcase rem
 
 ## Current vertical slice
 
+- optional deterministic FMS live program with a released 1.5 baseline and active 1.6 development release
+- 150 system requirements, 400 HLRs, 700 LLRs, 105 historical SCR/SWCR records, 1,100 typed traces, 515 procedures, 520 executions, and six controlled outputs
+
 - clean Program, software Project, and initial Release onboarding; optional FMS demonstration data
 - SCR creation with proposed system or high-level software requirement changes
 - author-selected, ordered approval sequences

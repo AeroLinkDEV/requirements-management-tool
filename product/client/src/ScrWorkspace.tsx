@@ -2,12 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import './ScrWorkspace.css'
 
-type Requirement={id:string;displayNumber:string;level:'System'|'HighLevel';kind:'Introduce'|'Modify'|'Retire';statement:string;rationale:string;verificationMethod:string}
+type Requirement={id:string;displayNumber:string;level:'System'|'HighLevel'|'LowLevel';kind:'Introduce'|'Modify'|'Retire';statement:string;rationale:string;verificationMethod:string}
 type Step={position:number;approverId:string;approverName:string;state:string;decidedAt?:string}
 type Cycle={id:string;sequence:number;state:string;snapshotHash:string;startedAt:string;completedAt?:string;closureReason?:string;steps:Step[]}
 type Audit={eventType:string;actorId:string;detail:string;occurredAt:string}
-type ScrDetail={id:string;baseNumber:string;revision:number;displayNumber:string;title:string;problem:string;analysis:string;solution:string;authorId:string;version:number;state:string;createdAt:string;updatedAt:string;requirementChanges:Requirement[];reviewCycles:Cycle[];audit:Audit[]}
-type DraftRequirement={baseNumber:string;revision:number;level:'System'|'HighLevel';kind:'Introduce'|'Modify'|'Retire';statement:string;rationale:string;verificationMethod:string}
+type ScrDetail={id:string;baseNumber:string;revision:number;displayNumber:string;type:string;title:string;problem:string;analysis:string;solution:string;authorId:string;version:number;state:string;createdAt:string;updatedAt:string;requirementChanges:Requirement[];reviewCycles:Cycle[];audit:Audit[]}
+type DraftRequirement={baseNumber:string;revision:number;level:'System'|'HighLevel'|'LowLevel';kind:'Introduce'|'Modify'|'Retire';statement:string;rationale:string;verificationMethod:string}
 type Approver={userId:string;name:string}
 type Props={api:string;scrId:string;onBack:()=>void;onChanged:()=>Promise<void>}
 const base=(display:string)=>display.replace(/\.\d{2}$/,'')

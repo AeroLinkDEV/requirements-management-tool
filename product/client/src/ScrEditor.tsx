@@ -5,7 +5,7 @@ import "./ScrEditor.css";
 type RequirementDraft = {
   baseNumber: string;
   revision: number;
-  level: "System" | "HighLevel";
+  level: "System" | "HighLevel" | "LowLevel";
   kind: "Introduce" | "Modify" | "Retire";
   statement: string;
   rationale: string;
@@ -38,6 +38,7 @@ export default function ScrEditor({
   onSaved,
 }: Props) {
   const [changes, setChanges] = useState<RequirementDraft[]>([blank()]),
+    [changeType,setChangeType]=useState<"System"|"Software">("Software"),
     [saving, setSaving] = useState(false),
     [error, setError] = useState("");
   const update = (
@@ -65,6 +66,7 @@ export default function ScrEditor({
         analysis: data.get("analysis"),
         solution: data.get("solution"),
         authorId: data.get("authorId"),
+        type: changeType,
         requirementChanges: changes,
       }),
     });
@@ -85,8 +87,8 @@ export default function ScrEditor({
           <button className="back" onClick={onCancel}>
             ← Command Center
           </button>
-          <p className="eyebrow">CHANGE CONTROL / NEW SCR</p>
-          <h1>Create System Change Request</h1>
+          <p className="eyebrow">CHANGE CONTROL / NEW {changeType==='Software'?'SWCR':'SCR'}</p>
+          <h1>Create {changeType} Change Request</h1>
           <p>
             Capture the case for change and its proposed requirement revisions.
             The complete SCR will later enter review.
@@ -104,6 +106,7 @@ export default function ScrEditor({
             </div>
           </div>
           <div className="fields three">
+            <label>Request type<select aria-label="Change request type" value={changeType} onChange={e=>setChangeType(e.target.value as 'System'|'Software')}><option value="System">System SCR</option><option value="Software">Software SWCR</option></select></label>
             <label>
               SCR number
               <input
@@ -219,6 +222,7 @@ export default function ScrEditor({
                   >
                     <option value="System">System</option>
                     <option value="HighLevel">Software HLR</option>
+                    <option value="LowLevel">Software LLR</option>
                   </select>
                 </label>
                 <label>

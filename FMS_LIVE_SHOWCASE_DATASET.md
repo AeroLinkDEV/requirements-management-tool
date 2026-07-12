@@ -1,0 +1,65 @@
+# FMS Live Showcase Dataset
+
+## Purpose
+
+The FMS live showcase is a deterministic, production-shaped program used for demonstrations, continuing development, regression testing, and performance validation. It uses the same domain and persistence rules as user-created programs and is not a disconnected mock-data layer.
+
+The showcase coexists with the clean **Create a new program** workflow. Its program code is `FMSLIVE`, and repeated generation is idempotent.
+
+## Released FMS 1.5 baseline
+
+| Controlled content | Exact count |
+|---|---:|
+| System requirements | 150 |
+| High-level software requirements (HLRs) | 400 |
+| Low-level software requirements (LLRs) | 700 |
+| Effective requirement revisions | 1,250 |
+| Historical system SCRs | 30 |
+| Historical software SWCRs | 75 |
+| HLR-to-system trace links | 400 |
+| LLR-to-HLR trace links | 700 |
+| Test procedures | 515 |
+| Test executions, including retained retests | 520 |
+| Controlled document records | 6 |
+| Released software builds | 1 |
+
+Requirement identities are stable and revisions are immutable. Requirements at revision `.01` or `.02` include retained superseded revisions. Every effective requirement revision is included in the exact FMS 1.5 baseline and has at least one version-aware test-procedure coverage link.
+
+The released build is `FMS-1.5.0-RELEASE`. It references the frozen and materialized FMS 1.5 baseline, whose SCR manifest and effective-requirement manifest have independent SHA-256 hashes.
+
+## Allocation and verification
+
+- Each HLR derives from an exact system-requirement revision.
+- Each LLR derives from an exact HLR revision.
+- Trace links are typed and version-aware.
+- Test coverage links reference exact requirement and procedure revisions.
+- One test procedure may cover multiple requirement revisions.
+- Initial failed executions and their passing retests remain independently visible.
+
+## Controlled outputs
+
+The baseline records a SYSRD, HLR SWRD, LLR SWRD, System Test Procedures, HLR Test Procedures, and LLR Test Procedures. Each record identifies its exact release, baseline, revision, artifact count, generation time, and content hash.
+
+## Active FMS 1.6 development
+
+FMS 1.6 begins from the FMS 1.5 predecessor baseline and contains eight controlled change requests:
+
+- 2 Approved and selected in the working candidate baseline
+- 2 In Review
+- 3 Draft
+- 1 Deferred
+
+The active changes include a new system-level oceanic round-robin function and representative HLR and LLR modifications. The FMS 1.6 candidate remains editable and is not released.
+
+## Terminology
+
+- `SCR` identifies a system change request.
+- `SWCR` identifies a software change request.
+- An SWCR can affect HLRs, LLRs, or both.
+- System, High-Level, and Low-Level are formal requirement and test-procedure levels.
+
+## Generation and validation
+
+Local development enables the dataset through `DemoData:Enabled`. The generator creates `FMSLIVE` only when it does not already exist and never deletes or modifies unrelated programs.
+
+Automated validation proves exact counts, idempotence, complete baseline membership, complete test coverage, active-release state distribution, artifact searchability, trace/document access, and clean onboarding when demonstration data is disabled.

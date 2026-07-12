@@ -10,7 +10,7 @@ The first usable vertical slice is system-level:
 
 > SCR -> system requirement revisions -> review and approval -> baseline -> SYSRD -> system test procedure -> externally produced results and evidence -> traceability
 
-This slice is intended to prove controlled change, immutable history, exact baselines, controlled document generation, verification evidence, and an end-to-end audit story before expanding to software HLRs and LLRs.
+This slice proved controlled change, immutable history, exact baselines, controlled document generation, verification evidence, and an end-to-end audit story. Implementation has now expanded through software HLRs, LLRs, SWCRs, typed traceability, and build-specific verification.
 
 ## Interactive Showcase
 
@@ -18,7 +18,7 @@ The local [AeroLink FMS 3.3 showcase](showcase/README.md) implements the Phase 0
 
 ## Real Product
 
-The [AeroLink product application](product/README.md) is separate from the showcase. It currently provides an ASP.NET Core API, executable domain rules, SQLite local development storage with a PostgreSQL production path, automated domain tests, and a React dashboard connected to live API data.
+The [AeroLink product application](product/README.md) is separate from the original visual showcase. It currently provides an ASP.NET Core API, executable domain rules, PostgreSQL local persistence, isolated SQLite tests, automated domain and browser tests, and a React application connected to live lifecycle data.
 
 ## Authoritative Documents
 
@@ -30,6 +30,7 @@ The [AeroLink product application](product/README.md) is separate from the showc
 | [Product principles](PRODUCT_PRINCIPLES.md) | Non-negotiable behavioral rules |
 | [Design vision and dashboards](DESIGN_VISION_AND_DASHBOARDS.md) | North-star mockups, role-aware dashboards, trusted metrics, and showcase direction |
 | [FMS 3.3 showcase story](SHOWCASE_STORY_FMS_3_3.md) | Canonical fictional data and walkthrough for the interactive concept |
+| [FMS live showcase dataset](FMS_LIVE_SHOWCASE_DATASET.md) | Deterministic released 1.5 lifecycle baseline and active 1.6 development program |
 | [Identifiers and requirement fields proposal](IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md) | Proposed numbering, revision display, and mandatory-field policy |
 | [System-level workflow](SYSTEM_LEVEL_WORKFLOW.md) | Decision-complete first-slice behavior and paper scenarios |
 | [Feature catalog](FEATURE_CATALOG.md) | Stable, phased capability inventory |

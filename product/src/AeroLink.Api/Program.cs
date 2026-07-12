@@ -4,6 +4,7 @@ using AeroLink.Domain.Common;
 using AeroLink.Domain.Contracts;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Traceability;
 using AeroLink.Infrastructure;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -26,10 +27,13 @@ await using (var scope = app.Services.CreateAsyncScope())
     var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
     if (db.Database.IsNpgsql()) await db.Database.MigrateAsync();
     else await db.Database.EnsureCreatedAsync();
-    if (builder.Configuration.GetValue<bool>("DemoData:Enabled")) await SeedData.EnsureSeededAsync(db);
+    if (builder.Configuration.GetValue<bool>("DemoData:Enabled"))
+        await scope.ServiceProvider.GetRequiredService<FmsShowcaseSeeder>().EnsureSeededAsync();
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "AeroLink API" }));
+
+app.MapPost("/api/showcase/seed", async (FmsShowcaseSeeder seeder, CancellationToken ct) => Results.Ok(await seeder.EnsureSeededAsync(ct)));
 
 app.MapGet("/api/programs", async (AeroLinkDbContext db, CancellationToken ct) =>
     Results.Ok(await db.Programs.AsNoTracking().Select(p => new { p.Id, p.Name, p.Code }).ToListAsync(ct)));
@@ -74,9 +78,9 @@ app.MapGet("/api/context", async (AeroLinkDbContext db, CancellationToken ct) =>
     releases = await db.Releases.AsNoTracking().OrderBy(x => x.Version).ToListAsync(ct)
 }));
 
-app.MapGet("/api/scrs", async (Guid projectId, int page, int pageSize, string? search, ScrState? state, IScrRepository repository, CancellationToken ct) =>
+app.MapGet("/api/scrs", async (Guid projectId, Guid? releaseId, int? page, int? pageSize, string? search, ScrState? state, IScrRepository repository, CancellationToken ct) =>
 {
-    var result = await repository.QueryAsync(new ScrQuery(projectId, page == 0 ? 1 : page, pageSize == 0 ? 50 : pageSize, search, state), ct);
+    var result = await repository.QueryAsync(new ScrQuery(projectId, page is null or 0 ? 1 : page.Value, pageSize is null or 0 ? 50 : pageSize.Value, search, state, releaseId), ct);
     return Results.Ok(new { result.Page, result.PageSize, result.TotalCount, result.TotalPages, items = result.Items.Select(ApiMap.ScrSummary) });
 });
 
@@ -208,7 +212,7 @@ app.MapPost("/api/scrs", async (CreateScrRequest request, IScrRepository reposit
     try
     {
         var scr = new SystemChangeRequest(request.BaseNumber, 0, request.ProjectId, request.TargetReleaseId,
-            request.Title, request.Problem, request.Analysis, request.Solution, request.AuthorId, DateTimeOffset.UtcNow);
+            request.Title, request.Problem, request.Analysis, request.Solution, request.AuthorId, DateTimeOffset.UtcNow, request.Type);
         await repository.AddAsync(scr, ct); await repository.SaveAsync(ct);
         return Results.Created($"/api/scrs/{scr.Id}", ApiMap.ScrDetail(scr));
     }
@@ -221,7 +225,7 @@ app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, IScrReposit
     {
         var now = DateTimeOffset.UtcNow;
         var scr = new SystemChangeRequest(request.BaseNumber, 0, request.ProjectId, request.TargetReleaseId,
-            request.Title, request.Problem, request.Analysis, request.Solution, request.AuthorId, now);
+            request.Title, request.Problem, request.Analysis, request.Solution, request.AuthorId, now, request.Type);
         foreach (var change in request.RequirementChanges)
             scr.AddRequirementChange(request.AuthorId, change.BaseNumber, change.Revision, change.Level, change.Kind,
                 change.Statement, change.Rationale, change.VerificationMethod, now);
@@ -388,9 +392,64 @@ app.MapGet("/api/requirements/{id:guid}/history", async (Guid id, AeroLinkDbCont
     return Results.Ok(new { artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(), revisions });
 });
 
-app.MapGet("/api/dashboard", async (Guid? projectId, AeroLinkDbContext db, CancellationToken ct) =>
+app.MapGet("/api/showcase/overview", async (Guid projectId, AeroLinkDbContext db, CancellationToken ct) =>
 {
-    var source = db.SystemChangeRequests.AsNoTracking().Where(x => projectId == null || x.ProjectId == projectId);
+    var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).OrderBy(x => x.Version).ToListAsync(ct);
+    var releasedIds = releases.Where(x => x.IsReleased).Select(x => x.Id).ToArray(); var activeIds = releases.Where(x => !x.IsReleased).Select(x => x.Id).ToArray();
+    var requests = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId);
+    var requirements = db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId);
+    return Results.Ok(new {
+        releases = releases.Select(x => new { x.Id, x.Version, x.IsReleased }),
+        systemRequirements = await requirements.CountAsync(x => x.Level == RequirementLevel.System, ct),
+        highLevelRequirements = await requirements.CountAsync(x => x.Level == RequirementLevel.HighLevel, ct),
+        lowLevelRequirements = await requirements.CountAsync(x => x.Level == RequirementLevel.LowLevel, ct),
+        historicalScrs = await requests.CountAsync(x => x.Type == ChangeRequestType.System && releasedIds.Contains(x.TargetReleaseId), ct),
+        historicalSwcrs = await requests.CountAsync(x => x.Type == ChangeRequestType.Software && releasedIds.Contains(x.TargetReleaseId), ct),
+        activeRequests = await requests.CountAsync(x => activeIds.Contains(x.TargetReleaseId), ct),
+        traceLinks = await db.RequirementTraces.CountAsync(x => x.ProjectId == projectId, ct),
+        testProcedures = await db.TestProcedures.CountAsync(x => x.ProjectId == projectId, ct),
+        testExecutions = await db.TestExecutions.CountAsync(x => x.ProjectId == projectId, ct),
+        controlledDocuments = await db.ControlledDocuments.CountAsync(x => x.ProjectId == projectId, ct),
+        softwareBuilds = await db.SoftwareBuilds.CountAsync(x => x.ProjectId == projectId, ct)
+    });
+});
+
+app.MapGet("/api/documents", async (Guid projectId, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var rows = await (from document in db.ControlledDocuments.AsNoTracking().Where(x => x.ProjectId == projectId)
+                      join release in db.Releases.AsNoTracking() on document.ReleaseId equals release.Id
+                      join baseline in db.CandidateBaselines.AsNoTracking() on document.BaselineId equals baseline.Id
+                      orderby document.Type select new { document.Id, type = document.Type.ToString(), document.DocumentNumber, document.Revision, document.Title,
+                          document.ContentHash, document.ArtifactCount, document.GeneratedAt, release = release.Version,
+                          baselineId = baseline.Id, baseline = baseline.BaseNumber + "." + (baseline.Revision < 10 ? "0" : "") + baseline.Revision }).ToListAsync(ct);
+    return Results.Ok(rows.Select(x => new { x.Id, x.type, displayNumber = x.DocumentNumber + "." + x.Revision.ToString("D2"), x.Title, x.ContentHash, x.ArtifactCount, x.GeneratedAt, x.release, x.baselineId, x.baseline }));
+});
+
+app.MapGet("/api/traceability", async (Guid projectId, Guid? baselineId, string? search, int page, int pageSize, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
+    if (baselineId is null) baselineId = await db.CandidateBaselines.Where(x => x.ProjectId == projectId && x.RequirementsMaterializedAt != null).OrderByDescending(x => x.FrozenAt).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+    if (baselineId is null) return Results.Ok(new { page, pageSize, totalCount = 0, items = Array.Empty<object>() });
+    var source = from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
+                 join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
+                 join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id
+                 select new { artifact, revision };
+    if (!string.IsNullOrWhiteSpace(search)) { var q = search.Trim().ToLower(); source = source.Where(x => x.artifact.BaseNumber.ToLower().Contains(q) || x.revision.Statement.ToLower().Contains(q)); }
+    var total = await source.CountAsync(ct); var selected = await source.OrderBy(x => x.artifact.BaseNumber).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+    var selectedIds = selected.Select(x => x.revision.Id).ToList(); var links = await db.RequirementTraces.AsNoTracking().Where(x => selectedIds.Contains(x.SourceRevisionId) || selectedIds.Contains(x.TargetRevisionId)).ToListAsync(ct);
+    var relatedIds = links.SelectMany(x => new[] { x.SourceRevisionId, x.TargetRevisionId }).Distinct().ToList();
+    var related = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x => relatedIds.Contains(x.Id)) join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id select new { revision.Id, artifact.BaseNumber, revision.Revision, level = artifact.Level.ToString() }).ToDictionaryAsync(x => x.Id, ct);
+    var coverage = await db.TestCoverage.AsNoTracking().Where(x => selectedIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
+    var items = selected.Select(x => new { x.artifact.Id, revisionId = x.revision.Id, displayNumber = x.artifact.BaseNumber + "." + x.revision.Revision.ToString("D2"), level = x.artifact.Level.ToString(), x.revision.Statement,
+        parents = links.Where(l => l.SourceRevisionId == x.revision.Id).Select(l => new { id = l.TargetRevisionId, displayNumber = related[l.TargetRevisionId].BaseNumber + "." + related[l.TargetRevisionId].Revision.ToString("D2"), related[l.TargetRevisionId].level, type = l.Type.ToString() }),
+        children = links.Where(l => l.TargetRevisionId == x.revision.Id).Select(l => new { id = l.SourceRevisionId, displayNumber = related[l.SourceRevisionId].BaseNumber + "." + related[l.SourceRevisionId].Revision.ToString("D2"), related[l.SourceRevisionId].level, type = l.Type.ToString() }),
+        testCount = coverage.Count(c => c.RequirementRevisionId == x.revision.Id) });
+    return Results.Ok(new { baselineId, page, pageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)pageSize), items });
+});
+
+app.MapGet("/api/dashboard", async (Guid? projectId, Guid? releaseId, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var source = db.SystemChangeRequests.AsNoTracking().Where(x => (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.TargetReleaseId == releaseId));
     return Results.Ok(new {
         totalScrs = await source.CountAsync(ct),
         draft = await source.CountAsync(x => x.State == ScrState.Draft, ct),
@@ -403,12 +462,12 @@ app.MapGet("/api/test-procedures", async (Guid projectId, string? search, AeroLi
 {
     var source = db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId);
     if (!string.IsNullOrWhiteSpace(search)) { var q = search.Trim().ToLower(); source = source.Where(x => x.BaseNumber.ToLower().Contains(q) || x.Title.ToLower().Contains(q)); }
-    var items = await source.OrderBy(x => x.BaseNumber).Select(x => new { x.Id, x.BaseNumber, x.Title, x.OwnerId, x.CreatedAt }).ToListAsync(ct);
+    var items = await source.OrderBy(x => x.BaseNumber).Select(x => new { x.Id, x.BaseNumber, x.Title, x.OwnerId, x.Level, x.CreatedAt }).ToListAsync(ct);
     var ids = items.Select(x => x.Id).ToList(); var revisions = await db.TestProcedureRevisions.AsNoTracking().Where(x => ids.Contains(x.ProcedureId)).ToListAsync(ct);
     var revisionIds = revisions.Select(x => x.Id).ToList(); var coverage = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
     var executions = await db.TestExecutions.AsNoTracking().Where(x => revisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
     return Results.Ok(items.Select(x => { var latest = revisions.Where(r => r.ProcedureId == x.Id).OrderByDescending(r => r.Revision).FirstOrDefault(); var lastRun = latest is null ? null : executions.Where(e => e.ProcedureRevisionId == latest.Id).OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).FirstOrDefault();
-        return new { x.Id, displayNumber = latest is null ? x.BaseNumber : x.BaseNumber + "." + latest.Revision.ToString("D2"), x.Title, x.OwnerId,
+        return new { x.Id, displayNumber = latest is null ? x.BaseNumber : x.BaseNumber + "." + latest.Revision.ToString("D2"), x.Title, x.OwnerId, level = x.Level.ToString(),
             revisionId = latest?.Id, revision = latest?.Revision, state = latest?.State.ToString(), objective = latest?.Objective,
             requirementCount = latest is null ? 0 : coverage.Count(c => c.ProcedureRevisionId == latest.Id), lastOutcome = lastRun?.Outcome.ToString(), lastExecutedAt = lastRun?.ExecutedAt }; }));
 });
@@ -418,7 +477,7 @@ app.MapPost("/api/test-procedures", async (CreateTestProcedureRequest request, A
     if (await db.TestProcedures.AnyAsync(x => x.ProjectId == request.ProjectId && x.BaseNumber == request.BaseNumber.Trim().ToUpper(), ct)) return Results.Conflict(new { error = "That test procedure identifier already exists." });
     var requirementIds = request.RequirementRevisionIds.Distinct().ToList();
     if (await db.RequirementRevisions.CountAsync(x => requirementIds.Contains(x.Id), ct) != requirementIds.Count) return Results.BadRequest(new { error = "Every coverage link must reference an authoritative requirement revision." });
-    try { var procedure = new TestProcedure(request.ProjectId, request.BaseNumber, request.Title, request.OwnerId, DateTimeOffset.UtcNow);
+    try { var procedure = new TestProcedure(request.ProjectId, request.BaseNumber, request.Title, request.OwnerId, DateTimeOffset.UtcNow, request.Level);
         var revision = new TestProcedureRevision(procedure.Id, 0, request.Objective, request.Preconditions, request.Steps, request.ExpectedResult, TestProcedureState.Approved, request.OwnerId, DateTimeOffset.UtcNow);
         db.AddRange(procedure, revision); db.TestCoverage.AddRange(requirementIds.Select(id => new TestRequirementCoverage(revision.Id, id))); await db.SaveChangesAsync(ct);
         return Results.Created($"/api/test-procedures/{procedure.Id}", new { procedure.Id, revisionId = revision.Id, displayNumber = procedure.BaseNumber + ".00" }); }
@@ -470,9 +529,9 @@ app.Run();
 
 public partial class Program { }
 
-record CreateScrRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId);
+record CreateScrRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, ChangeRequestType Type = ChangeRequestType.System);
 record DraftRequirementRequest(string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
-record CreateScrDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, List<DraftRequirementRequest> RequirementChanges);
+record CreateScrDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, List<DraftRequirementRequest> RequirementChanges, ChangeRequestType Type = ChangeRequestType.System);
 record UpdateScrDraftRequest(long ExpectedVersion, string ActorId, string Title, string Problem, string Analysis, string Solution, List<DraftRequirementRequest> RequirementChanges);
 record CreateWorkspaceRequest(string ProgramName, string ProgramCode, string ProjectName, string SoftwareProduct, string InitialRelease, bool InitialReleaseIsReleased);
 record RequirementChangeRequest(string ActorId, string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
@@ -484,7 +543,7 @@ record CreateBaselineRequest(string BaseNumber, int Revision, Guid ProjectId, Gu
 record BaselineSelectionRequest(Guid ScrId, string ActorId);
 record BaselineActorRequest(string ActorId);
 record CreateBuildRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, string BuildNumber, string Description, string RecordedBy);
-record CreateTestProcedureRequest(Guid ProjectId, string BaseNumber, string Title, string OwnerId, string Objective, string Preconditions, string Steps, string ExpectedResult, List<Guid> RequirementRevisionIds);
+record CreateTestProcedureRequest(Guid ProjectId, string BaseNumber, string Title, string OwnerId, string Objective, string Preconditions, string Steps, string ExpectedResult, List<Guid> RequirementRevisionIds, TestProcedureLevel Level = TestProcedureLevel.HighLevel);
 record RecordTestExecutionRequest(Guid ProjectId, Guid ProcedureRevisionId, Guid? SoftwareBuildId, Guid? RetestOfExecutionId, TestOutcome Outcome, string ExecutedBy, string Configuration, string Determination, string EvidenceReference, DateTimeOffset ExecutedAt);
 
 static class ApiMap
@@ -495,10 +554,10 @@ static class ApiMap
         project = new { project.Id, project.Name, project.SoftwareProduct },
         release = new { release.Id, release.Version, release.IsReleased }
     };
-    public static object ScrSummary(ScrListItem x) => new { x.Id, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.Title, state = x.State.ToString(), x.AuthorId, x.TargetReleaseId, x.RequirementCount, x.UpdatedAt };
+    public static object ScrSummary(ScrListItem x) => new { x.Id, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.Title, state = x.State.ToString(), type = x.Type.ToString(), x.AuthorId, x.TargetReleaseId, x.RequirementCount, x.UpdatedAt };
     public static object ScrDetail(SystemChangeRequest x) => new
     {
-        x.Id, x.BaseNumber, x.Revision, x.DisplayNumber, x.ProjectId, x.TargetReleaseId, x.Title, x.Problem, x.Analysis, x.Solution, x.AuthorId, x.Version,
+        x.Id, x.BaseNumber, x.Revision, x.DisplayNumber, x.ProjectId, x.TargetReleaseId, type = x.Type.ToString(), x.Title, x.Problem, x.Analysis, x.Solution, x.AuthorId, x.Version,
         state = x.State.ToString(), x.CreatedAt, x.UpdatedAt,
         requirementChanges = x.RequirementChanges.Select(r => new { r.Id, r.DisplayNumber, level = r.Level.ToString(), kind = r.Kind.ToString(), r.Statement, r.Rationale, r.VerificationMethod }),
         reviewCycles = x.ReviewCycles.OrderBy(c => c.Sequence).Select(c => new { c.Id, c.Sequence, state = c.State.ToString(), c.SnapshotHash, c.StartedAt, c.CompletedAt, c.ClosureReason, steps = c.Steps.OrderBy(s => s.Position).Select(s => new { s.Position, s.ApproverId, s.ApproverName, state = s.State.ToString(), s.DecidedAt }) }),
@@ -515,16 +574,4 @@ static class ApiMap
         }),
         events = x.Events.OrderByDescending(e => e.OccurredAt).Select(e => new { e.EventType, e.ActorId, e.Detail, e.OccurredAt })
     };
-}
-
-static class SeedData
-{
-    public static async Task EnsureSeededAsync(AeroLinkDbContext db)
-    {
-        if (await db.Programs.AnyAsync()) return;
-        var program = new ProgramRecord("Flight Management System", "FMS");
-        var project = new ProjectRecord(program.Id, "FMS Software", "Flight Management Software");
-        db.AddRange(program, project, new SoftwareRelease(project.Id, "3.2", true), new SoftwareRelease(project.Id, "3.3", false));
-        await db.SaveChangesAsync();
-    }
 }

@@ -1,0 +1,28 @@
+import { expect, test } from '@playwright/test'
+
+test('FMS 1.5 released baseline supports active 1.6 work and full lifecycle exploration', async ({ page, request }) => {
+  test.setTimeout(60_000)
+  const seed = await request.post('http://127.0.0.1:5080/api/showcase/seed', { timeout: 45_000 })
+  expect(seed.ok(), await seed.text()).toBeTruthy()
+  await page.goto('/')
+  await page.locator('.program select').selectOption({ label: 'Flight Management System Live Program' })
+  await expect(page.getByText('FMS Product Development · 1.6')).toBeVisible()
+  await expect(page.getByText('Complete FMS lifecycle inventory')).toBeVisible()
+  await expect(page.getByText('1,100')).toBeVisible()
+  await expect(page.getByText('515')).toBeVisible()
+  await expect(page.getByText('520')).toBeVisible()
+  await expect(page.getByText('Total SCRs').locator('..').getByText('8')).toBeVisible()
+
+  await page.getByRole('button', { name: /Requirements/ }).click()
+  await page.getByRole('button', { name: /Requirement History/ }).click()
+  await page.getByLabel('Search history').fill('LLR-00000700')
+  await expect(page.getByText(/LLR-00000700/).first()).toBeVisible()
+  await page.getByRole('button', { name: /Command Center/ }).click()
+  await page.getByRole('button', { name: /Traceability/ }).click()
+  await expect(page.getByRole('heading', { name: 'Traceability & Documents' })).toBeVisible()
+  await expect(page.getByText('1,250 requirements')).toBeVisible()
+  await page.getByRole('button', { name: /Controlled Documents/ }).click()
+  await expect(page.getByText('SYSRD-00000015.00')).toBeVisible()
+  await expect(page.getByText('HLRD-00000015.00')).toBeVisible()
+  await expect(page.getByText('LLRD-00000015.00')).toBeVisible()
+})

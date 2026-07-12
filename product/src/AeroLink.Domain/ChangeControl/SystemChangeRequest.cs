@@ -5,6 +5,7 @@ using AeroLink.Domain.Common;
 namespace AeroLink.Domain.ChangeControl;
 
 public enum ScrState { Draft, InReview, Approved, Deferred, SelectedForBaseline }
+public enum ChangeRequestType { System, Software }
 
 public sealed class SystemChangeRequest
 {
@@ -14,7 +15,8 @@ public sealed class SystemChangeRequest
     private SystemChangeRequest() { }
 
     public SystemChangeRequest(string baseNumber, int revision, Guid projectId, Guid targetReleaseId,
-        string title, string problem, string analysis, string solution, string authorId, DateTimeOffset now)
+        string title, string problem, string analysis, string solution, string authorId, DateTimeOffset now,
+        ChangeRequestType type = ChangeRequestType.System)
     {
         Id = Guid.NewGuid();
         BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
@@ -26,6 +28,7 @@ public sealed class SystemChangeRequest
         Analysis = analysis.Trim();
         Solution = solution.Trim();
         AuthorId = authorId;
+        Type = type;
         State = ScrState.Draft;
         CreatedAt = now;
         UpdatedAt = now;
@@ -43,6 +46,7 @@ public sealed class SystemChangeRequest
     public string Analysis { get; private set; } = string.Empty;
     public string Solution { get; private set; } = string.Empty;
     public string AuthorId { get; private set; } = string.Empty;
+    public ChangeRequestType Type { get; private set; }
     public ScrState State { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -160,7 +164,7 @@ public sealed class SystemChangeRequest
         EnsureAuthor(actorId);
         if (State != ScrState.Approved) throw new DomainException("Only an approved SCR can advance to its next revision.");
         var next = new SystemChangeRequest(BaseNumber, Revision + 1, ProjectId, TargetReleaseId,
-            Title, Problem, Analysis, Solution, AuthorId, now);
+            Title, Problem, Analysis, Solution, AuthorId, now, Type);
         foreach (var item in _requirementChanges)
             next.AddRequirementChange(actorId, item.BaseNumber, item.Revision, item.Level, item.Kind,
                 item.Statement, item.Rationale, item.VerificationMethod, now);
@@ -181,6 +185,14 @@ public sealed class SystemChangeRequest
         State = ScrState.Approved;
         UpdatedAt = now;
         Audit("RemovedFromCandidateBaseline", actorId, $"Returned {DisplayNumber} to Approved eligibility.", now);
+    }
+
+    public void Defer(string actorId, string reason, DateTimeOffset now)
+    {
+        EnsureAuthor(actorId);
+        if (State is not (ScrState.Draft or ScrState.Approved)) throw new DomainException("Only a Draft or Approved change request can be deferred.");
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A deferral reason is required.");
+        State = ScrState.Deferred; UpdatedAt = now; Audit("ChangeRequestDeferred", actorId, reason.Trim(), now);
     }
 
     private void ValidateReadyForReview()

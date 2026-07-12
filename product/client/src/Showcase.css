@@ -1,0 +1,8 @@
+.programInventory { display: grid; grid-template-columns: 1.8fr repeat(6, 1fr); gap: 10px; align-items: stretch; margin: 0 0 18px; }
+.programInventory > div { background: linear-gradient(125deg, #eef6ff, #eef9f6); border: 1px solid #d6e5eb; border-radius: 11px; padding: 14px; }
+.programInventory h3 { margin: 4px 0; font: 600 13px Manrope; }
+.programInventory > div span { color: #748095; font-size: 9px; }
+.programInventory article { background: white; border: 1px solid #dfe5ec; border-radius: 11px; padding: 14px 10px; display: flex; flex-direction: column; justify-content: center; }
+.programInventory article b { font: 700 18px Manrope; color: #173955; }
+.programInventory article small { color: #7e8998; font-size: 8px; margin-top: 4px; }
+@media(max-width:1100px){.programInventory{grid-template-columns:repeat(3,1fr)}.programInventory>div{grid-column:1/-1}}

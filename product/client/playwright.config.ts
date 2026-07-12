@@ -20,7 +20,7 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: `powershell.exe -NoProfile -Command "$env:Database__Provider='Sqlite'; $env:ConnectionStrings__AeroLink='Data Source=${e2eDatabase}'; & '${dotnet}' run --project ../src/AeroLink.Api --urls http://127.0.0.1:5080"`,
+      command: `powershell.exe -NoProfile -Command "$env:Database__Provider='Sqlite'; $env:DemoData__Enabled='false'; $env:ConnectionStrings__AeroLink='Data Source=${e2eDatabase}'; & '${dotnet}' run --project ../src/AeroLink.Api --urls http://127.0.0.1:5080"`,
       url: 'http://127.0.0.1:5080/health',
       reuseExistingServer: true,
       timeout: 120_000,

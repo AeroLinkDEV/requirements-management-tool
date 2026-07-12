@@ -21,6 +21,7 @@ public static class DependencyInjection
         services.AddScoped<IProgramRepository, ProgramRepository>();
         services.AddScoped<IBaselineRepository, BaselineRepository>();
         services.AddScoped<RequirementBaselineMaterializer>();
+        services.AddScoped<FmsShowcaseSeeder>();
         return services;
     }
 }
