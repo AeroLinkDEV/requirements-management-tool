@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 var command = args.FirstOrDefault()?.ToLowerInvariant() ?? "help";
 var profile = Option("--profile") ?? "small";
 var connection = Environment.GetEnvironmentVariable("AEROLINK_SCALE_CONNECTION")
-    ?? "Host=127.0.0.1;Port=55432;Database=aerolink_scale;Username=postgres";
+    ?? "Host=127.0.0.1;Port=54329;Database=aerolink_scale;Username=postgres";
 var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
 await using var db = new AeroLinkDbContext(options);
 

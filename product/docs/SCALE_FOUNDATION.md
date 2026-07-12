@@ -2,7 +2,7 @@
 
 ## Production-like local database
 
-Development now uses PostgreSQL 18.4 on `127.0.0.1:55432`. The binaries and data directory live under ignored `product/.local/`; they are never committed. Run the scripts with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\<script-name>` so setup also works on Windows machines whose default policy blocks local scripts. Run `Setup-Postgres.ps1` once, then use `Start-Postgres.ps1` and `Stop-Postgres.ps1`.
+Development now uses PostgreSQL 18.4 on `127.0.0.1:54329`. The binaries and data directory live under ignored `product/.local/`; they are never committed. Run the scripts with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\<script-name>` so setup also works on Windows machines whose default policy blocks local scripts. Run `Setup-Postgres.ps1` once, then use `Start-Postgres.ps1` and `Stop-Postgres.ps1`.
 
 PostgreSQL is the production path. SQLite remains available only for isolated tests and zero-administration experiments.
 
@@ -33,7 +33,7 @@ SCRs carry a numeric optimistic-concurrency version. Every changed SCR advances 
 Example:
 
 ```powershell
-$env:AEROLINK_SCALE_CONNECTION='Host=127.0.0.1;Port=55432;Database=aerolink_scale;Username=postgres'
+$env:AEROLINK_SCALE_CONNECTION='Host=127.0.0.1;Port=54329;Database=aerolink_scale;Username=postgres'
 & "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- generate --profile medium --reset
 & "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- benchmark
 ```

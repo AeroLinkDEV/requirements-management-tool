@@ -30,7 +30,7 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Open `http://127.0.0.1:5173`. Local development uses PostgreSQL on port `55432`; application startup applies versioned migrations. A fresh database opens the guided New Program workflow, and demonstration data is disabled by default. SQLite remains available for isolated tests. Set `DemoData:Enabled` to `true` only when the explicit FMS sample workspace is wanted.
+Open `http://127.0.0.1:5173`. Local development uses PostgreSQL on port `54329`; application startup applies versioned migrations. A fresh database opens the guided New Program workflow, and demonstration data is disabled by default. SQLite remains available for isolated tests. Set `DemoData:Enabled` to `true` only when the explicit FMS sample workspace is wanted.
 
 ## Verify
 
