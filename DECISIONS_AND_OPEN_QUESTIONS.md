@@ -213,7 +213,7 @@ Future entries use:
 - **Status:** Accepted
 - **Decision:** Any change to an approved SCR creates the next SCR revision, even when the associated SYSRD/SWRD or release baseline has not yet been approved or released.
 - **Rationale:** The approved SCR revision is a completed controlled record and cannot be edited in place.
-- **Consequences:** The new revision begins in Draft, receives an author-selected approval group, and requires unanimous fresh approval. The earlier approved revision remains visible and may be superseded for release selection.
+- **Consequences:** The new revision begins in Draft, receives an author-selected ordered approval sequence, and requires unanimous fresh approval. The earlier approved revision remains visible and may be superseded for release selection.
 
 ### DEC-026 - SCR Author Selects the Approval Group
 
@@ -221,7 +221,15 @@ Future entries use:
 - **Status:** Accepted
 - **Decision:** The SCR author has authority to select the people whose approval is required for that SCR review cycle.
 - **Rationale:** The author determines the appropriate approval participants for the content and affected disciplines.
-- **Consequences:** Approval requires every selected approver. The selected group and any changes to it are audited; constraints on changing the group after submission remain to be defined.
+- **Consequences:** Approval requires every selected approver in the author-defined order. DEC-027 defines how that sequence may change after submission.
+
+### DEC-027 - SCR Review Is Sequential with Controlled Approver Replacement
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** SCR review proceeds through the author-selected approvers in order. Before a future approver’s turn is reached, the author may replace that approver without restarting completed stages. Active and completed stages are locked. If a completed approval used the wrong person, the review cycle is cancelled and restarted from the first approver.
+- **Rationale:** Sequential review reflects the actual process, permits practical correction of future assignments, and prevents an invalid completed approval from contributing to final approval.
+- **Consequences:** Every substitution and cancellation is audited. Cancelled decisions remain historical but do not count. Restart uses the same submitted snapshot when content is unchanged; content changes follow the applicable Draft/revision rules.
 
 ## Working Assumptions
 
@@ -231,7 +239,7 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 - **ASM-002:** Artifact numbers are globally unique across programs; exact prefixes, digit lengths, and revision display syntax are configurable or decided later.
 - **ASM-003:** The first slice supports multiple programs even if initial validation uses one reference program.
 - **ASM-004:** Requirements may include controlled images/figures as part of revisioned content.
-- **ASM-005:** Exact review roles and independence rules vary by organization/program; the SCR author selects the approval group and unanimous approval by that group is fixed initial behavior.
+- **ASM-005:** Exact review roles and independence rules vary by organization/program; the SCR author selects the ordered approval sequence and unanimous sequential approval is fixed initial behavior.
 - **ASM-006:** PR references may point to an external system until full PR management exists.
 - **ASM-007:** The initial platform records Pass, Fail, Blocked, Not Run, and Not Applicable using the meanings in [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md); detailed step/result transition rules still require validation.
 - **ASM-008:** Source Word files remain unmodified in the repository root during the initial consolidation.
@@ -247,7 +255,7 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 | OQ-001 | Which optional product/system/configuration layers are needed beyond the accepted `Program -> Project -> Software Product -> Software Release` default? | Determines applicability and baseline scope for programs that do not fit the software-oriented default | Product owner before domain/data design |
 | OQ-002 | Should numeric sequences be global across all artifact types or unique within each prefix? The accepted base/suffix format is documented in [IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md](IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md). | Affects identifier generation and external references | Product/configuration stakeholders before data design |
 | OQ-003 | Which proposed requirement-change fields must be complete before an SCR can be submitted, and which existing FMS fields must be preserved or program-configurable? | Controls SCR package validation, import, review, and generated documents | Requirements stakeholders before Phase 1 |
-| OQ-004 | May an SCR author add or remove selected approvers after a review cycle has started, and what restart/audit behavior applies? Which independence constraints override author selection? | Controls review integrity while preserving author authority | Quality/configuration/product stakeholders before Phase 2 design |
+| OQ-004 | Which independence or organizational policy constraints, if any, may prevent the author from selecting a particular approver? | Controls review integrity while preserving accepted author authority and sequential replacement behavior | Quality/configuration/product stakeholders before Phase 2 design |
 | OQ-005 | What constitutes an electronic approval, and is password re-entry or another signature ceremony required? | Affects identity, audit evidence, usability, and policy | Security/quality stakeholders before Phase 2 |
 | OQ-006 | What are the allowed verification methods, and can one requirement require multiple methods? | Affects completeness logic and document output | Verification stakeholders before Phase 1 completion |
 | OQ-007 | Are test case and test suite separate first-slice artifacts, or is procedure plus execution configuration sufficient? | Avoids redundant objects and unclear trace semantics | Verification stakeholders before Phase 3 design |

@@ -65,7 +65,7 @@ Exit evidence:
 Capabilities:
 
 - SCR introductions, modifications, retirements, target releases, and deferrals;
-- author-selected approval groups, review-cycle snapshots, comments, dispositions, pre-approval rework, rejection, unanimous approval, and independence;
+- author-selected ordered approval sequences, review-cycle snapshots, controlled future-approver substitution, cancellation/restart, comments, dispositions, pre-approval rework, rejection, unanimous approval, and independence;
 - impact analysis and suspect links;
 - candidate/approved baselines and comparison; and
 - draft-watermarked and approved SYSRD generation with exact provenance and hashes.

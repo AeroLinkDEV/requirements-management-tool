@@ -45,8 +45,9 @@ This catalog is the authoritative capability inventory. Feature identifiers are 
 
 | ID | Capability | Rationale | Priority | Phase | Dependencies | Acceptance Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
-| WF-001 | Review cycles | Produce controlled review evidence without unnecessary pre-approval revisions | Must | 2 | PF-002, PF-003, PF-006 | Each submission retains its snapshot, selected approvers, comments and decisions; pre-approval rework returns the same revision to Draft |
-| WF-002 | Approval policy | Enforce unanimous author-selected approval and independence | Must | 2 | WF-001 | Approval is blocked unless every approver selected by the artifact author approves the same submitted snapshot and comment/independence rules are met |
+| WF-001 | Sequential review cycles | Produce controlled review evidence without unnecessary pre-approval revisions | Must | 2 | PF-002, PF-003, PF-006 | Each submission retains its snapshot, ordered approvers, comments and decisions; review advances one person at a time and pre-approval rework returns the same revision to Draft |
+| WF-002 | Approval policy | Enforce unanimous author-selected approval and independence | Must | 2 | WF-001 | Approval is blocked unless every approver in the author-selected sequence approves the same submitted snapshot and comment/independence rules are met |
+| WF-003 | Controlled approver substitution and restart | Correct future assignments without invalidating completed work, while rejecting wrong completed approvals | Must | 2 | WF-001, WF-002, PF-007 | The author may replace only not-yet-reached approvers; a wrong completed approver cancels the cycle and restarts review with complete audit history |
 | BL-001 | Releases and candidate baselines | Assemble controlled successor configurations | Must | 2 | SR-002, SCR-002 | A candidate records predecessor and exact selected revisions |
 | BL-002 | Immutable approved baselines | Preserve exact released content | Must | 2 | BL-001, WF-002 | Approved baseline contents cannot be edited; correction creates a successor |
 | BL-003 | Baseline comparison | Explain changes between releases | Must | 2 | BL-002 | Users see introduced, modified, retired, and unchanged artifacts between baselines |

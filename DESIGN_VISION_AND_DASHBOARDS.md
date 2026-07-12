@@ -77,7 +77,7 @@ Configuration-management and quality users need release-control and process evid
 
 - candidate-baseline validation failures;
 - approved items not yet selected, or selected items lacking required approval;
-- unresolved review comments, missing selected-approver decisions, and independence exceptions;
+- unresolved review comments, the active approval stage, pending sequential approvers, cancelled/restarted cycles, and independence exceptions;
 - document-generation jobs, provenance, and hashes;
 - audit and administrative exceptions;
 - withdrawn or superseded outputs; and

@@ -36,7 +36,7 @@ The workflow assumes these conceptual roles; one person may hold multiple roles 
 - **Program Administrator:** configures authorized users, roles, and program-level policy.
 - **System Administrator:** operates the platform without authority to erase controlled history.
 
-For the initial product behavior, the SCR author selects the people required to approve the SCR. Approval is unanimous among that author-selected approval group: every selected approver must approve the same SCR revision and submitted content. Requirements contained in an SCR are not reviewed or approved independently. Any selected approver rejection or request for changes prevents approval. Independence rules and the approval-authentication ceremony remain to be defined.
+For the initial product behavior, the SCR author selects and orders the people required to approve the SCR. Review proceeds sequentially in that order; only the active approver can record the next decision. Approval is unanimous among the author-selected sequence: every selected approver must approve the same SCR revision and submitted content. Requirements contained in an SCR are not reviewed or approved independently. Any selected approver rejection or request for changes prevents approval. Independence rules and the approval-authentication ceremony remain to be defined.
 
 ## 3. SCR Lifecycle
 
@@ -68,8 +68,11 @@ Selected -> Deferred (with controlled reason)
 - Draft SCRs may be revised by authorized users and may miss an intended release without losing history.
 - The SCR author decides when the complete package is technically ready to submit. Submission validation checks that required Problem, Analysis, Solution, requirement-change, reviewer, link, and impact information is present; it does not replace the author’s engineering judgment.
 - Submission creates an immutable review-cycle snapshot of the current SCR revision.
+- The approval sequence advances one person at a time. Completed and active stages are locked against ordinary name substitution.
+- Before a future approver’s turn is reached, the SCR author may replace that person without cancelling approvals already completed. The change, reason, actor, time, old approver, new approver, and resulting sequence are audited.
+- If an approver who already approved was the wrong person, the approval workflow is cancelled. All decisions from that cycle become historical and non-counting, the corrected sequence is established, and review restarts from the first approver against the same submitted snapshot unless the SCR content also changes.
 - If the SCR has never been approved and an approver requests changes, the SCR returns to Draft **without increasing its revision number**. The review cycle, comments, decisions, and submitted snapshot remain historical; the author edits the same business revision and resubmits it for a new review cycle.
-- If an already approved SCR requires any content change, the approved revision remains immutable and the SCR advances to its next revision. The author selects the approval group for the new revision, and every selected approver must approve again.
+- If an already approved SCR requires any content change, the approved revision remains immutable and the SCR advances to its next revision. The author selects the ordered approval sequence for the new revision, and every selected approver must approve again.
 - Every review comment requiring action must be dispositioned before approval.
 - Approval requires every author-selected approver to approve the same submitted revision and review-cycle snapshot. Approval decisions from an earlier review cycle do not carry into a resubmission after requested changes, even when the SCR revision number remains unchanged.
 - Rejection preserves the SCR and review history. A materially revised proposal proceeds as a new SCR revision or a replacement SCR according to policy.

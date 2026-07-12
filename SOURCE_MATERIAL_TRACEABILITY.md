@@ -91,7 +91,7 @@ Disposition values:
 | System level should be distinguished from DO-178 software scope | Corrected | Standards posture in [PROJECT_VISION.md](PROJECT_VISION.md) |
 | Database/artifact platform rather than document master | Accepted | DEC-005 and Product Principle 1 |
 | Stable identities, immutable revisions, typed links, baselines, audit, controlled documents | Accepted | Domain glossary and Product Principles 2-11 |
-| Review independence, quorum, signatures, comments, and separate artifact/baseline approval | Corrected/Open | The author selects the approval group and unanimous approval is required; approver-list mutation, independence, and approval ceremony remain OQ-004/OQ-005 |
+| Review independence, quorum, signatures, comments, and separate artifact/baseline approval | Corrected/Open | The author selects an ordered approval sequence and unanimous sequential approval is required; future approvers may be replaced, while a wrong completed approver forces cancellation/restart. Independence and approval ceremony remain OQ-004/OQ-005 |
 | Test procedure, execution, result, configuration, evidence, failure, and retest are distinct | Accepted | Glossary and workflow Sections 6-7 |
 | Interactive traceability and completeness analysis | Accepted | Features TR-003/TR-004 |
 | Full PR schema and lifecycle | Later | PR-001/PR-002; exact policy remains later work |

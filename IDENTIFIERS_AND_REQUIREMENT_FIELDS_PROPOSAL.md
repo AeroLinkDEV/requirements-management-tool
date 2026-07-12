@@ -146,13 +146,13 @@ The SCR author controls when drafting is complete enough to attempt submission. 
 
 - the enclosing SCR has complete Problem, Analysis, and Solution content;
 - all proposed requirement introductions, modifications, and retirements are identified;
-- the SCR author has selected every person whose approval is required;
+- the SCR author has selected and ordered every person whose approval is required;
 - required links and impact information are present or explicitly justified; and
 - the SCR package has no unresolved submission-validation errors.
 
 ### Required Before SCR Approval
 
-- every author-selected approver approves the exact submitted snapshot of the SCR revision;
+- every author-selected approver approves the exact submitted snapshot in the defined sequence;
 - every blocking review comment is dispositioned;
 - the proposed requirement revisions remain exactly those reviewed within the SCR;
 - required impact analysis is complete; and
