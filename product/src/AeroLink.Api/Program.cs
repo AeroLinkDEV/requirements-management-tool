@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Contracts;
 using AeroLink.Domain.Programs;
@@ -186,6 +187,66 @@ app.MapPost("/api/scrs/{id:guid}/request-changes", async (Guid id, RequestChange
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
+app.MapGet("/api/baselines", async (Guid projectId, Guid releaseId, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var items = await db.CandidateBaselines.AsNoTracking().Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId)
+        .OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision).Select(x => new { x.Id, x.BaseNumber, x.Revision, x.Name, state = x.State.ToString(), x.ContentHash, x.CreatedAt, x.FrozenAt, selectionCount = x.Selections.Count }).ToListAsync(ct);
+    return Results.Ok(items.Select(x => new { x.Id, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.Name, x.state, x.ContentHash, x.CreatedAt, x.FrozenAt, x.selectionCount }));
+});
+
+app.MapPost("/api/baselines", async (CreateBaselineRequest request, IBaselineRepository repository, CancellationToken ct) =>
+{
+    try
+    {
+        var baseline = new CandidateBaseline(request.BaseNumber, request.Revision, request.ProjectId, request.ReleaseId,
+            request.PredecessorBaselineId, request.Name, request.ActorId, DateTimeOffset.UtcNow);
+        await repository.AddAsync(baseline, ct); await repository.SaveAsync(ct);
+        return Results.Created($"/api/baselines/{baseline.Id}", ApiMap.Baseline(baseline));
+    }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapGet("/api/baselines/{id:guid}", async (Guid id, IBaselineRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
+    var scrIds = baseline.Selections.Select(x => x.ScrId).ToList();
+    var selected = await db.SystemChangeRequests.AsNoTracking().Where(x => scrIds.Contains(x.Id))
+        .Include(x => x.RequirementChanges).ToListAsync(ct);
+    return Results.Ok(ApiMap.BaselineDetail(baseline, selected));
+});
+
+app.MapGet("/api/baselines/{id:guid}/eligible-scrs", async (Guid id, IBaselineRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
+    var items = await db.SystemChangeRequests.AsNoTracking()
+        .Where(x => x.ProjectId == baseline.ProjectId && x.TargetReleaseId == baseline.ReleaseId && x.State == ScrState.Approved)
+        .OrderBy(x => x.BaseNumber).Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, x.Title, requirementCount = x.RequirementChanges.Count, x.UpdatedAt }).ToListAsync(ct);
+    return Results.Ok(items);
+});
+
+app.MapPost("/api/baselines/{id:guid}/selections", async (Guid id, BaselineSelectionRequest request, IBaselineRepository baselines, IScrRepository scrs, CancellationToken ct) =>
+{
+    var baseline = await baselines.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
+    var scr = await scrs.GetAsync(request.ScrId, ct); if (scr is null) return Results.NotFound();
+    try { baseline.Select(scr, request.ActorId, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapDelete("/api/baselines/{id:guid}/selections/{scrId:guid}", async (Guid id, Guid scrId, string actorId, IBaselineRepository baselines, IScrRepository scrs, CancellationToken ct) =>
+{
+    var baseline = await baselines.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
+    var scr = await scrs.GetAsync(scrId, ct); if (scr is null) return Results.NotFound();
+    try { baseline.Remove(scr, actorId, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.NoContent(); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/baselines/{id:guid}/freeze", async (Guid id, BaselineActorRequest request, IBaselineRepository repository, CancellationToken ct) =>
+{
+    var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
+    try { baseline.Freeze(request.ActorId, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
 app.MapGet("/api/dashboard", async (Guid? projectId, AeroLinkDbContext db, CancellationToken ct) =>
 {
     var source = db.SystemChangeRequests.AsNoTracking().Where(x => projectId == null || x.ProjectId == projectId);
@@ -211,6 +272,9 @@ record ApproverRequest(string UserId, string Name);
 record SubmitReviewRequest(string ActorId, long? ExpectedVersion, List<ApproverRequest> Approvers);
 record ActorRequest(string ActorId, long? ExpectedVersion);
 record RequestChangesRequest(string ActorId, long? ExpectedVersion, string Reason);
+record CreateBaselineRequest(string BaseNumber, int Revision, Guid ProjectId, Guid ReleaseId, Guid? PredecessorBaselineId, string Name, string ActorId);
+record BaselineSelectionRequest(Guid ScrId, string ActorId);
+record BaselineActorRequest(string ActorId);
 
 static class ApiMap
 {
@@ -228,6 +292,17 @@ static class ApiMap
         requirementChanges = x.RequirementChanges.Select(r => new { r.Id, r.DisplayNumber, level = r.Level.ToString(), kind = r.Kind.ToString(), r.Statement, r.Rationale, r.VerificationMethod }),
         reviewCycles = x.ReviewCycles.OrderBy(c => c.Sequence).Select(c => new { c.Id, c.Sequence, state = c.State.ToString(), c.SnapshotHash, c.StartedAt, c.CompletedAt, c.ClosureReason, steps = c.Steps.OrderBy(s => s.Position).Select(s => new { s.Position, s.ApproverId, s.ApproverName, state = s.State.ToString(), s.DecidedAt }) }),
         audit = x.AuditEvents.OrderByDescending(a => a.OccurredAt).Select(a => new { a.EventType, a.ActorId, a.Detail, a.OccurredAt })
+    };
+    public static object Baseline(CandidateBaseline x) => new { x.Id, x.DisplayNumber, x.Name, x.ProjectId, x.ReleaseId, state = x.State.ToString(), x.ContentHash, x.CreatedAt, x.FrozenAt, selectionCount = x.Selections.Count };
+    public static object BaselineDetail(CandidateBaseline x, IReadOnlyList<SystemChangeRequest> selected) => new
+    {
+        x.Id, x.DisplayNumber, x.Name, x.ProjectId, x.ReleaseId, state = x.State.ToString(), x.ContentHash, x.CreatedAt, x.FrozenAt,
+        selections = selected.OrderBy(scr => scr.DisplayNumber).Select(scr => new
+        {
+            scr.Id, scr.DisplayNumber, scr.Title,
+            requirementChanges = scr.RequirementChanges.OrderBy(r => r.DisplayNumber).Select(r => new { r.Id, r.DisplayNumber, level = r.Level.ToString(), kind = r.Kind.ToString(), r.Statement, r.VerificationMethod })
+        }),
+        events = x.Events.OrderByDescending(e => e.OccurredAt).Select(e => new { e.EventType, e.ActorId, e.Detail, e.OccurredAt })
     };
 }
 

@@ -18,6 +18,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<CandidateBaseline> CandidateBaselines => Set<CandidateBaseline>();
     public DbSet<BaselineScrSelection> BaselineSelections => Set<BaselineScrSelection>();
+    public DbSet<BaselineEvent> BaselineEvents => Set<BaselineEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -53,7 +54,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.Version).IsConcurrencyToken();
             b.Ignore(x => x.DisplayNumber); b.Ignore(x => x.ActiveReviewCycle);
-            b.HasIndex(x => new { x.BaseNumber, x.Revision }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.BaseNumber, x.Revision }).IsUnique();
             b.HasIndex(x => new { x.ProjectId, x.UpdatedAt });
             b.HasIndex(x => new { x.ProjectId, x.State });
             b.HasMany(x => x.RequirementChanges).WithOne().HasForeignKey(x => x.ScrId).OnDelete(DeleteBehavior.Cascade);
@@ -104,15 +105,27 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("candidate_baselines"); b.HasKey(x => x.Id);
             b.Property(x => x.BaseNumber).HasMaxLength(30).IsRequired();
             b.Property(x => x.Name).HasMaxLength(300).IsRequired();
-            b.Ignore(x => x.DisplayNumber); b.Ignore(x => x.AuditEvents);
-            b.HasIndex(x => new { x.BaseNumber, x.Revision }).IsUnique();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.ContentHash).HasMaxLength(64);
+            b.Ignore(x => x.DisplayNumber);
+            b.HasIndex(x => new { x.ProjectId, x.BaseNumber, x.Revision }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.State });
             b.HasMany(x => x.Selections).WithOne().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.Events).WithOne().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<BaselineScrSelection>(b =>
         {
             b.ToTable("baseline_scr_selections"); b.HasKey(x => x.Id);
             b.Property(x => x.ScrDisplayNumber).HasMaxLength(40).IsRequired();
             b.HasIndex(x => new { x.BaselineId, x.ScrId }).IsUnique();
+        });
+        modelBuilder.Entity<BaselineEvent>(b =>
+        {
+            b.ToTable("baseline_events"); b.HasKey(x => x.Id);
+            b.Property(x => x.EventType).HasMaxLength(100).IsRequired();
+            b.Property(x => x.ActorId).HasMaxLength(100).IsRequired();
+            b.Property(x => x.Detail).HasMaxLength(4000).IsRequired();
+            b.HasIndex(x => new { x.BaselineId, x.OccurredAt });
         });
     }
 
@@ -128,6 +141,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             foreach (var step in cycle.Entity.Steps) Entry(step).State = EntityState.Added;
         }
         foreach (var entry in ChangeTracker.Entries<BaselineScrSelection>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
+        foreach (var entry in ChangeTracker.Entries<BaselineEvent>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         foreach (var entry in ChangeTracker.Entries<SystemChangeRequest>())
         {
             if (entry.State == EntityState.Added) entry.Property(x => x.Version).CurrentValue = 1;

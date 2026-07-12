@@ -3,6 +3,7 @@ using System;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    partial class AeroLinkDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260712131316_AddCandidateBaselineAssembly")]
+    partial class AddCandidateBaselineAssembly
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -126,7 +129,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectId", "BaseNumber", "Revision")
+                    b.HasIndex("BaseNumber", "Revision")
                         .IsUnique();
 
                     b.HasIndex("ProjectId", "ReleaseId", "State");
@@ -326,12 +329,12 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("BaseNumber", "Revision")
+                        .IsUnique();
+
                     b.HasIndex("ProjectId", "State");
 
                     b.HasIndex("ProjectId", "UpdatedAt");
-
-                    b.HasIndex("ProjectId", "BaseNumber", "Revision")
-                        .IsUnique();
 
                     b.ToTable("system_change_requests", (string)null);
                 });

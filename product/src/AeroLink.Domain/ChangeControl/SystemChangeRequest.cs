@@ -175,6 +175,14 @@ public sealed class SystemChangeRequest
         Audit("SelectedForBaseline", actorId, $"Selected {DisplayNumber} for a candidate baseline.", now);
     }
 
+    public void UnmarkSelectedForBaseline(string actorId, DateTimeOffset now)
+    {
+        if (State != ScrState.SelectedForBaseline) throw new DomainException("The SCR is not selected for a baseline.");
+        State = ScrState.Approved;
+        UpdatedAt = now;
+        Audit("RemovedFromCandidateBaseline", actorId, $"Returned {DisplayNumber} to Approved eligibility.", now);
+    }
+
     private void ValidateReadyForReview()
     {
         if (string.IsNullOrWhiteSpace(Problem) || string.IsNullOrWhiteSpace(Analysis) || string.IsNullOrWhiteSpace(Solution))

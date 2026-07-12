@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import ScrEditor from "./ScrEditor";
 import ScrWorkspace from "./ScrWorkspace";
+import BaselineCenter from "./BaselineCenter";
 import "./App.css";
 import "./Onboarding.css";
 import "./DashboardInteractions.css";
@@ -45,7 +46,7 @@ function App() {
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
     [selectedScrId, setSelectedScrId] = useState(""),
-    [view, setView] = useState<"dashboard" | "createScr" | "scr">("dashboard");
+    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines">("dashboard");
   const loadWorkspaces = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/workspaces`),
@@ -196,6 +197,17 @@ function App() {
         onChanged={loadData}
       />
     );
+  if (view === "baselines" && project && release)
+    return (
+      <BaselineCenter
+        api={API}
+        projectId={project.project.id}
+        releaseId={release.id}
+        releaseVersion={release.version}
+        productName={project.project.softwareProduct}
+        onBack={() => setView("dashboard")}
+      />
+    );
   return (
     <div className="shell">
       <aside>
@@ -228,7 +240,7 @@ function App() {
             "⌘  Baselines",
             "↗  Traceability",
           ].map((x, i) => (
-            <button className={i === 0 ? "active" : ""} key={x}>
+            <button className={i === 0 ? "active" : ""} key={x} onClick={() => { if (x.includes("Baselines")) setView("baselines"); }}>
               {x}
             </button>
           ))}

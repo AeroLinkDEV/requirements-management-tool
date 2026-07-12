@@ -150,6 +150,33 @@ public sealed class SystemChangeRequestTests
         Assert.Equal(ScrState.SelectedForBaseline, approved.State);
     }
 
+    [Fact]
+    public void Candidate_baseline_can_remove_selection_before_freeze()
+    {
+        var approved = FullyApprove();
+        var baseline = new CandidateBaseline("BL-00000217", 1, ProjectId, ReleaseId, null,
+            "FMS 3.3 Candidate", "cm", Now);
+        baseline.Select(approved, "cm", Now);
+        baseline.Remove(approved, "cm", Now.AddMinutes(1));
+        Assert.Empty(baseline.Selections);
+        Assert.Equal(ScrState.Approved, approved.State);
+        Assert.Contains(baseline.Events, x => x.EventType == "ScrRemoved");
+    }
+
+    [Fact]
+    public void Frozen_baseline_has_deterministic_hash_and_is_immutable()
+    {
+        var approved = FullyApprove();
+        var baseline = new CandidateBaseline("BL-00000217", 1, ProjectId, ReleaseId, null,
+            "FMS 3.3 Candidate", "cm", Now);
+        baseline.Select(approved, "cm", Now);
+        baseline.Freeze("cm", Now.AddMinutes(1));
+        Assert.Equal(CandidateBaselineState.Frozen, baseline.State);
+        Assert.Equal(64, baseline.ContentHash!.Length);
+        Assert.Throws<DomainException>(() => baseline.Remove(approved, "cm", Now.AddMinutes(2)));
+        Assert.Contains(baseline.Events, x => x.EventType == "CandidateBaselineFrozen");
+    }
+
     private static SystemChangeRequest CreateDraft() =>
         new("SCR-00001049", 1, ProjectId, ReleaseId, "Introduce Round Robin",
             "Round Robin is not available.", "The existing sequence is linear.",

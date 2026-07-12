@@ -15,6 +15,8 @@ This directory contains the real application foundation. The visual showcase rem
 - author-configured ordered review sequences with frozen snapshot hashes
 - active-reviewer approval or change requests, same-revision Draft rework, resubmission, and unanimous approval
 - explicit record versions and stale-browser conflict protection on Draft and review actions
+- release-targeted candidate baseline creation with eligible Approved SCR discovery
+- exact SCR-revision selection and removal, derived requirement-impact manifest, persistent baseline events, and immutable SHA-256 freeze
 
 ## Run locally
 
