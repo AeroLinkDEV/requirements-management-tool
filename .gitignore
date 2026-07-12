@@ -1,0 +1,10 @@
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+~$*.docx
+*.tmp
+
+# Local scratch and generated review output
+.tmp/
+out/
+rendered/

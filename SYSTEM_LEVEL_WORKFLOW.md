@@ -1,0 +1,238 @@
+# System-Level Workflow
+
+This document defines the intended first product slice at behavior level. It is decision-complete enough for product validation, but it is not a technical design.
+
+## 1. Lifecycle Overview
+
+```text
+Current approved baseline
+        +
+selected approved SCRs for a target release
+        -> candidate requirement revisions and retirements
+        -> review and impact resolution
+        -> candidate baseline
+        -> baseline approval
+        -> approved immutable baseline
+        -> approved SYSRD and traceability outputs
+        -> executions of approved test procedures outside the platform
+        -> entered/imported results and evidence
+        -> verification review and release evidence
+```
+
+An SCR authorizes and explains proposed change. A baseline determines what is effective. A SYSRD presents the requirement contents of a baseline. These are related but distinct approvals.
+
+## 2. Roles
+
+The workflow assumes these conceptual roles; one person may hold multiple roles only where independence rules permit:
+
+- **Change Author:** drafts an SCR and its requirement change items.
+- **Requirement Author:** prepares proposed requirement revisions.
+- **Reviewer:** evaluates a specified revision and records comments and a decision.
+- **Approver:** provides the final approval decision when workflow criteria are satisfied.
+- **Configuration Manager:** assembles and controls candidate baselines and document releases.
+- **Verification Author:** authors test procedures.
+- **Test Contributor:** enters or imports externally produced execution data and evidence.
+- **Verification Reviewer:** reviews procedures, executions, outcomes, and evidence.
+- **Program Administrator:** configures authorized users, roles, and program-level policy.
+- **System Administrator:** operates the platform without authority to erase controlled history.
+
+Exact quorum and independence policies are configurable decisions to be resolved before implementation.
+
+## 3. SCR Lifecycle
+
+### Required SCR Content
+
+Each SCR has a globally unique, never-reused number and controlled revisions. At minimum it records:
+
+- title and summary;
+- problem, analysis, and proposed solution;
+- program and affected product/system;
+- proposed target release;
+- one or more requirement change items;
+- linked or referenced PRs where applicable;
+- author, ownership, dates, comments, dispositions, and approvals; and
+- impact-analysis status.
+
+### States and Transitions
+
+```text
+Draft -> Ready for Review -> In Review
+In Review -> Rework Required -> Draft
+In Review -> Rejected
+In Review -> Approved
+Approved -> Selected for Candidate Baseline
+Approved -> Deferred
+Selected -> Deferred (with controlled reason)
+```
+
+- Draft SCRs may be revised by authorized users and may miss an intended release without losing history.
+- Submission freezes the submitted revision for review. Rework creates a new reviewable revision rather than rewriting the reviewed snapshot.
+- Every review comment requiring action must be dispositioned before approval.
+- Rejection preserves the SCR and review history. A materially revised proposal proceeds as a new SCR revision or a replacement SCR according to policy.
+- Approval makes the proposed changes eligible for baseline selection; it does not itself change the effective baseline.
+- Deferral records who deferred the SCR, when, why, and any new target release.
+
+## 4. Requirement Change Behavior
+
+### Introduce
+
+An approved introduction allocates a new globally unique requirement identity. The proposed initial revision contains requirement content and required attributes, including verification method and derived status. It becomes effective only through baseline inclusion.
+
+### Modify
+
+A modification identifies the currently effective requirement revision and proposes a successor revision. The platform shows the difference and preserves both. Approval never overwrites the earlier revision.
+
+### Retire
+
+A retirement identifies the effective requirement and gives rationale. Once selected into an approved baseline, later effective views omit or mark the requirement as retired according to report policy. Historical baselines and records retain its prior content and complete change story.
+
+### Images and Figures
+
+A requirement revision may contain controlled images or figures. Their content, order, captions, integrity information, and relationship to the revision are versioned with the requirement so generated outputs are reproducible.
+
+## 5. Candidate Baseline and SYSRD Lifecycle
+
+1. A configuration manager chooses a current approved baseline as the predecessor.
+2. The manager selects approved SCR revisions targeted to the release.
+3. The platform deterministically applies their approved introductions, modifications, and retirements to construct candidate requirement contents.
+4. The platform blocks contradictory selected changes to the same requirement until they are ordered or resolved through an approved decision.
+5. Automated checks identify missing approvals, unresolved comments, suspect links, missing required attributes, identifier conflicts, and incomplete impact analysis.
+6. A candidate baseline records its predecessor, target release, exact SCR revisions, exact requirement revisions, exact trace-link revisions, check results, and assembler.
+7. A draft SYSRD may be generated at any time from the candidate. It must be visibly marked `DRAFT`, identify its candidate source, and never appear approved.
+8. Reviewers assess the candidate baseline and generated draft. Rework produces a revised candidate; rejected candidates remain historical.
+9. Approval freezes the exact baseline contents. It does not mutate the predecessor baseline.
+10. The approved SYSRD is generated from the approved baseline and records the document identifier and revision, source baseline, template revision, generator version, generation time, approval reference, and file hash.
+
+If an error is discovered after baseline approval, users create a controlled corrective SCR and successor baseline. Administrative editing of the released baseline is prohibited.
+
+## 6. Test Procedure Lifecycle
+
+The first slice is procedure-first. A separate test-case object is deferred until its distinct role is agreed.
+
+### Procedure Behavior
+
+- Each procedure has a globally unique identity and controlled revisions.
+- A procedure revision contains purpose, preconditions, configuration needs, ordered steps, expected outcomes, and applicable verification relationships.
+- A many-to-many relationship is supported: one procedure may verify several requirements, and one requirement may use several procedures.
+- Procedure revisions follow draft, review, rework/rejection, and approval behavior equivalent to other controlled artifacts.
+- Changing an approved procedure creates a new revision and makes affected verification links or evidence subject to reassessment.
+- Procedures may be grouped into test suites or campaigns; the detailed model remains open.
+
+## 7. Execution, Result, and Evidence Lifecycle
+
+Test execution occurs outside the platform initially. An authorized user or integration records the outcome afterward.
+
+Each execution records:
+
+- a unique execution identity;
+- exact procedure revision;
+- program, product/system, release or baseline applicability;
+- test environment, target configuration, equipment or suite, and relevant software/hardware identifiers;
+- executor identity and execution time;
+- step-level observations and outcomes when required;
+- overall result;
+- evidence attachments or controlled references;
+- anomalies and PR references where applicable;
+- data-entry/import provenance; and
+- verification review and approval state.
+
+Completed executions are immutable. A clerical correction uses a controlled amendment that preserves original and corrected values; a repeated run creates a new execution.
+
+### Outcome Rules
+
+- **Pass:** Recorded evidence supports that the procedure's expected outcomes were met.
+- **Fail:** One or more required outcomes were not met. The failure remains visible even after later success.
+- **Not Applicable:** The procedure or step is inapplicable under the recorded configuration and requires justification.
+- **Blocked / Not Run:** Candidate operational states, not satisfactory verification results. Their exact distinction and use must be resolved before implementation.
+
+A failed execution may link to one or more PRs or external PR references. A later retest links to the earlier execution, relevant correction/change, and its own evidence. Reporting may show the latest valid status but must preserve the full sequence.
+
+## 8. Traceability and Completeness
+
+At minimum, the first slice supports controlled links for:
+
+- SCR **INTRODUCES**, **MODIFIES**, or **RETIRES** requirement revision;
+- requirement revision **INCLUDED IN** baseline;
+- requirement revision **VERIFIED BY** test procedure revision;
+- test execution **EXECUTES** procedure revision;
+- result/evidence **RECORDED FOR** execution;
+- artifact **AFFECTED BY** or **ADDRESSES** PR reference; and
+- generated document **GENERATED FROM** baseline.
+
+The platform must answer interactively and in controlled reports:
+
+- which requirements have no approved verification procedure;
+- which approved procedures have no requirement relationship;
+- which applicable requirements lack a reviewed passing execution;
+- which failures lack an anomaly or PR disposition when policy requires one;
+- which links are suspect after change;
+- what exact contents and evidence support a release; and
+- who changed, reviewed, approved, selected, executed, imported, or generated each item.
+
+## 9. Paper Validation Scenarios
+
+These scenarios are acceptance tests for the documentation baseline.
+
+### Scenario 1: Introduce a Requirement
+
+- **Actor/Input:** Change author drafts an SCR with problem, analysis, solution, target release, and a new requirement change item.
+- **State change:** SCR and proposed requirement revision pass review and approval, then are selected into a candidate baseline.
+- **Output:** Successor approved baseline and SYSRD contain the new requirement.
+- **History:** SCR revisions, comments, dispositions, approvals, selection, baseline membership, document metadata, and audit events remain linked.
+
+### Scenario 2: Modify an Approved Requirement
+
+- **Actor/Input:** Author proposes a successor revision through an SCR against the currently effective revision.
+- **State change:** Approved successor is selected; affected verification links become suspect until reviewed.
+- **Output:** New baseline contains the successor revision; prior baseline still contains the old revision.
+- **History:** Difference, rationale, approvals, link reassessments, and both revisions remain retrievable.
+
+### Scenario 3: Retire a Requirement
+
+- **Actor/Input:** SCR identifies the effective requirement and retirement rationale.
+- **State change:** Approved retirement is selected into a successor baseline.
+- **Output:** Requirement is not effective in the successor SYSRD according to the chosen retirement presentation policy.
+- **History:** Identity, previous revisions, SCR, approvals, prior baselines, links, and audits remain intact.
+
+### Scenario 4: Defer an SCR
+
+- **Actor/Input:** Authorized user defers a draft, approved, or selected SCR from the intended release with rationale.
+- **State change:** SCR is removed from candidate selection and optionally assigned a later target release.
+- **Output:** Current candidate baseline is recalculated without its changes.
+- **History:** Original target, deferral decision, actor, time, rationale, and any later selection remain visible.
+
+### Scenario 5: Generate Draft and Approved SYSRDs
+
+- **Actor/Input:** Configuration manager selects a candidate or approved baseline.
+- **State change:** Generation creates a distinct immutable output record; it does not change requirements.
+- **Output:** Candidate output is visibly watermarked `DRAFT`; approved output contains controlled metadata and hash without a draft mark.
+- **History:** Exact source baseline, template, generator version, time, approval reference, and hash are recorded.
+
+### Scenario 6: Reuse a Test Procedure
+
+- **Actor/Input:** Verification author links one approved procedure revision to multiple approved requirement revisions.
+- **State change:** Each typed link is reviewed and controlled independently.
+- **Output:** Trace views show the procedure under every applicable requirement and all requirements under the procedure.
+- **History:** Link authorship, revision applicability, rationale, approvals, and later suspect transitions remain visible.
+
+### Scenario 7: Failure and Retest
+
+- **Actor/Input:** Contributor imports a failed external execution with configuration and evidence; later imports a retest after correction.
+- **State change:** First execution is completed and immutable; retest is a new linked execution.
+- **Output:** Current reporting may show the accepted retest outcome while also displaying the prior failure and its disposition.
+- **History:** Both executions, evidence, PR/change relationships, reviews, and audit events remain intact.
+
+### Scenario 8: Released Requirement Audit Story
+
+- **Actor/Input:** User selects a released requirement revision.
+- **State change:** None; this is a read-only trace and audit query.
+- **Output:** The platform shows predecessor/current revisions, originating SCR, reviews, approvals, baseline and SYSRD, procedures, executions, evidence, failures/retests, PR references, and release applicability.
+- **History:** Results are derived from exact controlled records, not reconstructed from an uncontrolled document.
+
+## 10. Baseline Correction and Recovery
+
+- Released baselines and generated approved documents are never edited in place.
+- A substantive content error uses an SCR and successor baseline.
+- A document-rendering defect with unchanged source data uses a new generated-document record and corrected template or generator revision; the defective output remains recorded and may be marked withdrawn.
+- A mistaken execution entry uses a controlled amendment only for clerical correction; a changed test outcome requires a new execution.
+- Recovery from backup must not create competing silent histories. Restored state and any reconciliation action are operationally logged and auditable.
