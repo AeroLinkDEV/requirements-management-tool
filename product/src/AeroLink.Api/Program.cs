@@ -5,9 +5,11 @@ using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddProblemDetails();
+builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173").AllowAnyHeader().AllowAnyMethod()));
@@ -89,6 +91,23 @@ app.MapPost("/api/scrs", async (CreateScrRequest request, IScrRepository reposit
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
+app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, IScrRepository repository, CancellationToken ct) =>
+{
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var scr = new SystemChangeRequest(request.BaseNumber, 0, request.ProjectId, request.TargetReleaseId,
+            request.Title, request.Problem, request.Analysis, request.Solution, request.AuthorId, now);
+        foreach (var change in request.RequirementChanges)
+            scr.AddRequirementChange(request.AuthorId, change.BaseNumber, change.Revision, change.Level, change.Kind,
+                change.Statement, change.Rationale, change.VerificationMethod, now);
+        await repository.AddAsync(scr, ct);
+        await repository.SaveAsync(ct);
+        return Results.Created($"/api/scrs/{scr.Id}", ApiMap.ScrDetail(scr));
+    }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
 app.MapPost("/api/scrs/{id:guid}/requirements", async (Guid id, RequirementChangeRequest request, IScrRepository repository, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
@@ -137,6 +156,8 @@ app.Run();
 public partial class Program { }
 
 record CreateScrRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId);
+record DraftRequirementRequest(string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
+record CreateScrDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, List<DraftRequirementRequest> RequirementChanges);
 record CreateWorkspaceRequest(string ProgramName, string ProgramCode, string ProjectName, string SoftwareProduct, string InitialRelease, bool InitialReleaseIsReleased);
 record RequirementChangeRequest(string ActorId, string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
 record ApproverRequest(string UserId, string Name);

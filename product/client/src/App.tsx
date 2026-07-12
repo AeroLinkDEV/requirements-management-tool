@@ -1,16 +1,350 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { FormEvent } from 'react'
-import './App.css'
-import './Onboarding.css'
-type Scr={id:string;displayNumber:string;title:string;state:string;authorId:string;requirementCount:number;updatedAt:string};type Metrics={totalScrs:number;draft:number;inReview:number;approved:number};type Release={id:string;version:string;isReleased:boolean};type Workspace={program:{id:string;name:string;code:string};projects:{project:{id:string;name:string;softwareProduct:string};releases:Release[]}[]}
-const API='http://127.0.0.1:5080'
-function App(){
- const [scrs,setScrs]=useState<Scr[]>([]),[metrics,setMetrics]=useState<Metrics>({totalScrs:0,draft:0,inReview:0,approved:0}),[workspaces,setWorkspaces]=useState<Workspace[]>([]),[activeId,setActiveId]=useState(''),[connected,setConnected]=useState(false),[error,setError]=useState(''),[saving,setSaving]=useState(false)
- const loadWorkspaces=useCallback(async()=>{try{const r=await fetch(`${API}/api/workspaces`),next=await r.json();setWorkspaces(next);setActiveId(current=>current||next[0]?.program.id||'');setConnected(true)}catch{setConnected(false)}},[])
- const loadData=useCallback(async()=>{const workspace=workspaces.find(x=>x.program.id===activeId),projectId=workspace?.projects[0]?.project.id;if(!projectId)return;try{const[a,b]=await Promise.all([fetch(`${API}/api/scrs?projectId=${projectId}`),fetch(`${API}/api/dashboard?projectId=${projectId}`)]);setScrs(await a.json());setMetrics(await b.json())}catch{setConnected(false)}},[activeId,workspaces])
- useEffect(()=>{loadWorkspaces()},[loadWorkspaces]);useEffect(()=>{loadData()},[loadData]);const load=loadData
- const createWorkspace=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();setSaving(true);setError('');const f=new FormData(e.currentTarget),body={...Object.fromEntries(f),initialReleaseIsReleased:f.has('initialReleaseIsReleased')};const r=await fetch(`${API}/api/workspaces`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok){setError((await r.json()).error||'Unable to create program.');setSaving(false);return}const created=await r.json();setActiveId(created.program.id);await loadWorkspaces();setSaving(false)}
- if(connected&&!workspaces.length)return <div className="onboarding"><div className="onboardBrand"><span>▲</span> AeroLink</div><div className="setup"><p className="step">GET STARTED · STEP 1 OF 1</p><h1>Create your first program</h1><p>Start with a clean, controlled workspace. Add more projects, releases, users, and imported baseline data later.</p><form onSubmit={createWorkspace}><label>Program name<input name="programName" placeholder="e.g. Navigation Systems" required/></label><label>Program code<input name="programCode" placeholder="e.g. NAV" maxLength={30} required/></label><label>Project name<input name="projectName" placeholder="e.g. Navigation Software" required/></label><label>Software product<input name="softwareProduct" placeholder="e.g. Integrated Navigation Software" required/></label><label>Initial release or baseline<input name="initialRelease" placeholder="e.g. 1.0" required/></label><label className="check"><input type="checkbox" name="initialReleaseIsReleased"/> This version is already released</label>{error&&<div className="formError">{error}</div>}<button disabled={saving}>{saving?'Creating workspace…':'Create program workspace →'}</button></form><small>No demonstration records are created. This becomes your real starting point.</small></div></div>
- const active=workspaces.find(x=>x.program.id===activeId)??workspaces[0],project=active?.projects[0],release=project?.releases.at(-1)
- return <div className="shell"><aside><div className="brand"><span>▲</span><b>AeroLink</b></div><div className="program"><small>ACTIVE PROGRAM</small><select value={activeId} onChange={e=>setActiveId(e.target.value)}>{workspaces.map(x=><option value={x.program.id} key={x.program.id}>{x.program.name}</option>)}</select><span>{project?.project.name} · {release?.version}</span></div><nav>{['▦  Command Center','◇  Change Requests','≡  Requirements','✓  Verification','⌘  Baselines','↗  Traceability'].map((x,i)=><button className={i===0?'active':''} key={x}>{x}</button>)}</nav><footer><div className="avatar">SE</div><div><b>Systems Engineer</b><small>Engineering</small></div></footer></aside><main><header><div><p className="eyebrow">{active?.program.code} / {project?.project.name} / {release?.version}</p><h1>Command Center</h1><p>Assurance status, release readiness, and work requiring attention.</p></div><div className={`connection ${connected?'ok':''}`}><i/> {connected?'Live data':'API offline'}</div></header><section className="release"><div><span className="tag">ACTIVE RELEASE</span><h2>{project?.project.softwareProduct} {release?.version}</h2><p>{release?.isReleased?'Released reference version':'Development release'}</p></div><div className="readiness"><b>0%</b><span>Release readiness</span><div><i style={{width:0}}/></div></div><button>Configure release →</button></section><section className="metrics">{[['Total SCRs',metrics.totalScrs,'#1d66f5'],['In draft',metrics.draft,'#a16a12'],['In review',metrics.inReview,'#7552d6'],['Approved',metrics.approved,'#16815f']].map(([l,v,c])=><article key={String(l)} style={{'--accent':c} as React.CSSProperties}><span>{l}</span><strong>{v}</strong><small>Current workspace</small></article>)}</section><section className="grid"><div className="panel work"><div className="panelhead"><div><h3>Change request flow</h3><p>Controlled changes targeting this release</p></div><button onClick={load}>Refresh</button></div>{scrs.length?scrs.map(x=><div className="row" key={x.id}><div className="scricon">SCR</div><div><b>{x.displayNumber} · {x.title}</b><p>{x.requirementCount} requirement changes · {x.authorId}</p></div><span className={`state ${x.state.toLowerCase()}`}>{x.state}</span><time>{new Date(x.updatedAt).toLocaleDateString()}</time></div>):<div className="empty"><b>Your controlled lifecycle starts here</b><p>No change requests exist in this new workspace yet.</p><button>Create first SCR →</button></div>}</div><div className="panel attention"><div className="panelhead"><div><h3>Workspace readiness</h3><p>Foundation for controlled development</p></div></div><div className="signal green"><b>Program workspace</b><strong>✓</strong><p>{active?.program.name} is configured</p></div><div className="signal blue"><b>Initial release</b><strong>✓</strong><p>{release?.version} establishes the starting context</p></div><div className="signal amber"><b>Next action</b><strong>1</strong><p>Create or import the first controlled artifact</p></div></div></section></main></div>
-}export default App
+import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
+import ScrEditor from "./ScrEditor";
+import "./App.css";
+import "./Onboarding.css";
+
+type Scr = {
+  id: string;
+  displayNumber: string;
+  title: string;
+  state: string;
+  authorId: string;
+  requirementCount: number;
+  updatedAt: string;
+};
+type Metrics = {
+  totalScrs: number;
+  draft: number;
+  inReview: number;
+  approved: number;
+};
+type Release = { id: string; version: string; isReleased: boolean };
+type Workspace = {
+  program: { id: string; name: string; code: string };
+  projects: {
+    project: { id: string; name: string; softwareProduct: string };
+    releases: Release[];
+  }[];
+};
+const API = "http://127.0.0.1:5080";
+
+function App() {
+  const [scrs, setScrs] = useState<Scr[]>([]),
+    [metrics, setMetrics] = useState<Metrics>({
+      totalScrs: 0,
+      draft: 0,
+      inReview: 0,
+      approved: 0,
+    }),
+    [workspaces, setWorkspaces] = useState<Workspace[]>([]),
+    [activeId, setActiveId] = useState(""),
+    [connected, setConnected] = useState(false),
+    [error, setError] = useState(""),
+    [saving, setSaving] = useState(false),
+    [view, setView] = useState<"dashboard" | "createScr">("dashboard");
+  const loadWorkspaces = useCallback(async () => {
+    try {
+      const response = await fetch(`${API}/api/workspaces`),
+        next = await response.json();
+      setWorkspaces(next);
+      setActiveId((current) => current || next[0]?.program.id || "");
+      setConnected(true);
+    } catch {
+      setConnected(false);
+    }
+  }, []);
+  const active =
+      workspaces.find((x) => x.program.id === activeId) ?? workspaces[0],
+    project = active?.projects[0],
+    release = project?.releases.at(-1);
+  const loadData = useCallback(async () => {
+    if (!project) return;
+    try {
+      const [a, b] = await Promise.all([
+        fetch(`${API}/api/scrs?projectId=${project.project.id}`),
+        fetch(`${API}/api/dashboard?projectId=${project.project.id}`),
+      ]);
+      setScrs(await a.json());
+      setMetrics(await b.json());
+    } catch {
+      setConnected(false);
+    }
+  }, [project]);
+  useEffect(() => {
+    loadWorkspaces();
+  }, [loadWorkspaces]);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+  const createWorkspace = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    const form = new FormData(e.currentTarget),
+      body = {
+        ...Object.fromEntries(form),
+        initialReleaseIsReleased: form.has("initialReleaseIsReleased"),
+      };
+    const response = await fetch(`${API}/api/workspaces`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      setError((await response.json()).error || "Unable to create program.");
+      setSaving(false);
+      return;
+    }
+    const created = await response.json();
+    setActiveId(created.program.id);
+    await loadWorkspaces();
+    setSaving(false);
+  };
+  if (connected && !workspaces.length)
+    return (
+      <div className="onboarding">
+        <div className="onboardBrand">
+          <span>▲</span> AeroLink
+        </div>
+        <div className="setup">
+          <p className="step">GET STARTED · STEP 1 OF 1</p>
+          <h1>Create your first program</h1>
+          <p>
+            Start with a clean, controlled workspace. Add more projects,
+            releases, users, and imported baseline data later.
+          </p>
+          <form onSubmit={createWorkspace}>
+            <label>
+              Program name
+              <input
+                name="programName"
+                placeholder="e.g. Navigation Systems"
+                required
+              />
+            </label>
+            <label>
+              Program code
+              <input
+                name="programCode"
+                placeholder="e.g. NAV"
+                maxLength={30}
+                required
+              />
+            </label>
+            <label>
+              Project name
+              <input
+                name="projectName"
+                placeholder="e.g. Navigation Software"
+                required
+              />
+            </label>
+            <label>
+              Software product
+              <input
+                name="softwareProduct"
+                placeholder="e.g. Integrated Navigation Software"
+                required
+              />
+            </label>
+            <label>
+              Initial release or baseline
+              <input name="initialRelease" placeholder="e.g. 1.0" required />
+            </label>
+            <label className="check">
+              <input type="checkbox" name="initialReleaseIsReleased" /> This
+              version is already released
+            </label>
+            {error && <div className="formError">{error}</div>}
+            <button disabled={saving}>
+              {saving ? "Creating workspace…" : "Create program workspace →"}
+            </button>
+          </form>
+          <small>
+            No demonstration records are created. This becomes your real
+            starting point.
+          </small>
+        </div>
+      </div>
+    );
+  if (view === "createScr" && project && release)
+    return (
+      <ScrEditor
+        api={API}
+        projectId={project.project.id}
+        releaseId={release.id}
+        releaseVersion={release.version}
+        onCancel={() => setView("dashboard")}
+        onSaved={async () => {
+          await loadData();
+          setView("dashboard");
+        }}
+      />
+    );
+  return (
+    <div className="shell">
+      <aside>
+        <div className="brand">
+          <span>▲</span>
+          <b>AeroLink</b>
+        </div>
+        <div className="program">
+          <small>ACTIVE PROGRAM</small>
+          <select
+            value={activeId}
+            onChange={(e) => setActiveId(e.target.value)}
+          >
+            {workspaces.map((x) => (
+              <option value={x.program.id} key={x.program.id}>
+                {x.program.name}
+              </option>
+            ))}
+          </select>
+          <span>
+            {project?.project.name} · {release?.version}
+          </span>
+        </div>
+        <nav>
+          {[
+            "▦  Command Center",
+            "◇  Change Requests",
+            "≡  Requirements",
+            "✓  Verification",
+            "⌘  Baselines",
+            "↗  Traceability",
+          ].map((x, i) => (
+            <button className={i === 0 ? "active" : ""} key={x}>
+              {x}
+            </button>
+          ))}
+        </nav>
+        <footer>
+          <div className="avatar">SE</div>
+          <div>
+            <b>Systems Engineer</b>
+            <small>Engineering</small>
+          </div>
+        </footer>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <p className="eyebrow">
+              {active?.program.code} / {project?.project.name} /{" "}
+              {release?.version}
+            </p>
+            <h1>Command Center</h1>
+            <p>
+              Assurance status, release readiness, and work requiring attention.
+            </p>
+          </div>
+          <div className={`connection ${connected ? "ok" : ""}`}>
+            <i /> {connected ? "Live data" : "API offline"}
+          </div>
+        </header>
+        <section className="release">
+          <div>
+            <span className="tag">ACTIVE RELEASE</span>
+            <h2>
+              {project?.project.softwareProduct} {release?.version}
+            </h2>
+            <p>
+              {release?.isReleased
+                ? "Released reference version"
+                : "Development release"}
+            </p>
+          </div>
+          <div className="readiness">
+            <b>0%</b>
+            <span>Release readiness</span>
+            <div>
+              <i style={{ width: 0 }} />
+            </div>
+          </div>
+          <button>Configure release →</button>
+        </section>
+        <section className="metrics">
+          {[
+            ["Total SCRs", metrics.totalScrs, "#1d66f5"],
+            ["In draft", metrics.draft, "#a16a12"],
+            ["In review", metrics.inReview, "#7552d6"],
+            ["Approved", metrics.approved, "#16815f"],
+          ].map(([label, value, color]) => (
+            <article
+              key={String(label)}
+              style={{ "--accent": color } as React.CSSProperties}
+            >
+              <span>{label}</span>
+              <strong>{value}</strong>
+              <small>Current workspace</small>
+            </article>
+          ))}
+        </section>
+        <section className="grid">
+          <div className="panel work">
+            <div className="panelhead">
+              <div>
+                <h3>Change request flow</h3>
+                <p>Controlled changes targeting this release</p>
+              </div>
+              <button onClick={() => setView("createScr")}>+ New SCR</button>
+            </div>
+            {scrs.length ? (
+              scrs.map((scr) => (
+                <div className="row" key={scr.id}>
+                  <div className="scricon">SCR</div>
+                  <div>
+                    <b>
+                      {scr.displayNumber} · {scr.title}
+                    </b>
+                    <p>
+                      {scr.requirementCount} requirement change
+                      {scr.requirementCount === 1 ? "" : "s"} · {scr.authorId}
+                    </p>
+                  </div>
+                  <span className={`state ${scr.state.toLowerCase()}`}>
+                    {scr.state}
+                  </span>
+                  <time>{new Date(scr.updatedAt).toLocaleDateString()}</time>
+                </div>
+              ))
+            ) : (
+              <div className="empty">
+                <b>Your controlled lifecycle starts here</b>
+                <p>No change requests exist in this new workspace yet.</p>
+                <button onClick={() => setView("createScr")}>
+                  Create first SCR →
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="panel attention">
+            <div className="panelhead">
+              <div>
+                <h3>Workspace readiness</h3>
+                <p>Foundation for controlled development</p>
+              </div>
+            </div>
+            <div className="signal green">
+              <b>Program workspace</b>
+              <strong>✓</strong>
+              <p>{active?.program.name} is configured</p>
+            </div>
+            <div className="signal blue">
+              <b>Initial release</b>
+              <strong>✓</strong>
+              <p>{release?.version} establishes the starting context</p>
+            </div>
+            <div className="signal amber">
+              <b>Next action</b>
+              <strong>1</strong>
+              <p>Create or import the first controlled artifact</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+export default App;

@@ -10,6 +10,7 @@ This directory contains the real application foundation. The visual showcase rem
 - same-revision return to Draft before first approval and next-revision control after approval
 - append-only audit events and candidate-baseline eligibility rules
 - live manager/engineer dashboard backed by persisted data
+- guided SCR Draft authoring with Problem, Analysis, Solution, and one or more proposed requirement changes
 
 ## Run locally
 
