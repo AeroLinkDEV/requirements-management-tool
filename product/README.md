@@ -25,7 +25,7 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Open `http://127.0.0.1:5173`. Local development uses SQLite and creates `aerolink-dev.db`. Set `Database:Provider` to `PostgreSql` and supply the `AeroLink` connection string when PostgreSQL is available.
+Open `http://127.0.0.1:5173`. Local development uses SQLite and creates `aerolink-dev.db`. A fresh database opens the guided New Program workflow; demonstration data is disabled by default. Set `DemoData:Enabled` to `true` only when the explicit FMS sample workspace is wanted. Set `Database:Provider` to `PostgreSql` and supply the `AeroLink` connection string when PostgreSQL is available.
 
 ## Verify
 

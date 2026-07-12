@@ -24,6 +24,8 @@ The first aggregate is `SystemChangeRequest`. Stable artifact identity (`SCR-000
 
 Repository interfaces are defined in the domain project and implemented in infrastructure. Provider choice is configuration-driven. `EnsureCreated` is acceptable during this early local phase; versioned EF migrations replace it before shared environments or production data.
 
+Fresh installations contain no assumed program. The onboarding transaction creates the Program, its first Project/software product, and its initial release together. FMS records are optional demo data controlled by configuration and are disabled by default.
+
 ## Security boundary
 
 Actor identifiers currently enter through development request bodies to exercise authorization rules. This is deliberately not production authentication. Before multi-user use, identity must come from an authenticated server-side principal, roles and program membership must be enforced, and audit events must use that trusted identity.
