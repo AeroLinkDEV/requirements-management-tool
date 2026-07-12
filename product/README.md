@@ -20,6 +20,9 @@ This directory contains the real application foundation. The visual showcase rem
 - searchable SCR history across every revision, state, target release, baseline, and software build
 - searchable software-requirement revision history with source-SCR provenance and lifecycle impact
 - immutable software-build records tied to one exact frozen baseline, with drill-down to included SCR and requirement revisions
+- stable requirement identities separated from immutable requirement revisions
+- deterministic baseline materialization that applies Introduce, Modify, and Retire changes over an exact predecessor baseline
+- generated SWRD views and effective-requirement SHA-256 manifests traceable to source SCRs and software builds
 
 ## Run locally
 

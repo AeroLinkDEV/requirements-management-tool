@@ -59,6 +59,8 @@ public sealed class CandidateBaseline
     public string? ContentHash { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? FrozenAt { get; private set; }
+    public DateTimeOffset? RequirementsMaterializedAt { get; private set; }
+    public string? RequirementsHash { get; private set; }
     public IReadOnlyCollection<BaselineScrSelection> Selections => _selections.AsReadOnly();
     public IReadOnlyCollection<BaselineEvent> Events => _events.AsReadOnly();
 
@@ -94,6 +96,15 @@ public sealed class CandidateBaseline
         State = CandidateBaselineState.Frozen;
         FrozenAt = now;
         Event("CandidateBaselineFrozen", actorId, $"Frozen {DisplayNumber} with {_selections.Count} exact SCR revisions and hash {ContentHash}.", now);
+    }
+
+    public void MarkRequirementsMaterialized(string actorId, string requirementsHash, int activeCount, DateTimeOffset now)
+    {
+        if (State != CandidateBaselineState.Frozen) throw new DomainException("Only a frozen baseline can be materialized.");
+        if (RequirementsMaterializedAt is not null) throw new DomainException("The requirement baseline is already materialized and immutable.");
+        if (string.IsNullOrWhiteSpace(requirementsHash) || requirementsHash.Length != 64) throw new DomainException("A valid requirement manifest hash is required.");
+        RequirementsHash = requirementsHash; RequirementsMaterializedAt = now;
+        Event("RequirementsMaterialized", actorId, $"Materialized {activeCount} effective requirement revisions with hash {requirementsHash}.", now);
     }
 
     private void EnsureDraft() { if (State != CandidateBaselineState.Draft) throw new DomainException("A frozen baseline is immutable."); }

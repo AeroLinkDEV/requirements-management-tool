@@ -20,6 +20,7 @@ public static class DependencyInjection
         services.AddScoped<IScrRepository, ScrRepository>();
         services.AddScoped<IProgramRepository, ProgramRepository>();
         services.AddScoped<IBaselineRepository, BaselineRepository>();
+        services.AddScoped<RequirementBaselineMaterializer>();
         return services;
     }
 }

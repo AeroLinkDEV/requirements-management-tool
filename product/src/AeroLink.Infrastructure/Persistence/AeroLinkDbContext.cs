@@ -2,6 +2,7 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Requirements;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -20,6 +21,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<CandidateBaseline> CandidateBaselines => Set<CandidateBaseline>();
     public DbSet<BaselineScrSelection> BaselineSelections => Set<BaselineScrSelection>();
     public DbSet<BaselineEvent> BaselineEvents => Set<BaselineEvent>();
+    public DbSet<RequirementArtifact> Requirements => Set<RequirementArtifact>();
+    public DbSet<RequirementRevision> RequirementRevisions => Set<RequirementRevision>();
+    public DbSet<BaselineRequirementSelection> BaselineRequirements => Set<BaselineRequirementSelection>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -122,6 +126,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Name).HasMaxLength(300).IsRequired();
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.ContentHash).HasMaxLength(64);
+            b.Property(x => x.RequirementsHash).HasMaxLength(64);
             b.Ignore(x => x.DisplayNumber);
             b.HasIndex(x => new { x.ProjectId, x.BaseNumber, x.Revision }).IsUnique();
             b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.State });
@@ -141,6 +146,36 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ActorId).HasMaxLength(100).IsRequired();
             b.Property(x => x.Detail).HasMaxLength(4000).IsRequired();
             b.HasIndex(x => new { x.BaselineId, x.OccurredAt });
+        });
+        modelBuilder.Entity<RequirementArtifact>(b =>
+        {
+            b.ToTable("requirements"); b.HasKey(x => x.Id);
+            b.Property(x => x.BaseNumber).HasMaxLength(30).IsRequired();
+            b.Property(x => x.Level).HasConversion<string>().HasMaxLength(30);
+            b.HasIndex(x => new { x.ProjectId, x.BaseNumber }).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<RequirementRevision>(b =>
+        {
+            b.ToTable("requirement_revisions"); b.HasKey(x => x.Id);
+            b.Property(x => x.Statement).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.Rationale).HasMaxLength(4000);
+            b.Property(x => x.VerificationMethod).HasMaxLength(100);
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.HasIndex(x => new { x.ArtifactId, x.Revision }).IsUnique();
+            b.HasIndex(x => x.SourceScrId); b.HasIndex(x => x.EffectiveBaselineId);
+            b.HasOne<RequirementArtifact>().WithMany().HasForeignKey(x => x.ArtifactId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.SourceScrId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.EffectiveBaselineId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<BaselineRequirementSelection>(b =>
+        {
+            b.ToTable("baseline_requirement_selections"); b.HasKey(x => x.Id);
+            b.HasIndex(x => new { x.BaselineId, x.ArtifactId }).IsUnique();
+            b.HasIndex(x => new { x.BaselineId, x.RevisionId }).IsUnique();
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<RequirementArtifact>().WithMany().HasForeignKey(x => x.ArtifactId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

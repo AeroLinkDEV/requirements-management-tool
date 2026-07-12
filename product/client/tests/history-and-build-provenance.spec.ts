@@ -13,6 +13,7 @@ test('searches full history and proves exact software build contents', async ({ 
   const baseline = await (await request.post('http://127.0.0.1:5080/api/baselines', { data: { baseNumber: 'SWBL-00000033', revision: 0, projectId: workspace.project.id, releaseId: workspace.release.id, name: 'FMS 3.3 exact manifest', actorId: 'cm' } })).json()
   await request.post(`http://127.0.0.1:5080/api/baselines/${baseline.id}/selections`, { data: { scrId: scr.id, actorId: 'cm' } })
   await request.post(`http://127.0.0.1:5080/api/baselines/${baseline.id}/freeze`, { data: { actorId: 'cm' } })
+  await request.post(`http://127.0.0.1:5080/api/baselines/${baseline.id}/materialize-requirements`, { data: { actorId: 'cm' } })
   const historyResponse = await request.get(`http://127.0.0.1:5080/api/history/scrs?projectId=${workspace.project.id}&page=1&pageSize=50`)
   const historyBody = await historyResponse.text(); expect(historyResponse.status(), historyBody).toBe(200); expect(JSON.parse(historyBody).totalCount).toBe(1)
 
