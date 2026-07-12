@@ -34,6 +34,8 @@ public sealed class ReleaseCampaign
     public void StartVerification(string actorId, DateTimeOffset now) { EnsureNotReleased(); State = ReleaseCampaignState.Verification; Event("VerificationStarted", actorId, "Started release verification campaign.", now); }
     public void SelectVerificationBuild(Guid softwareBuildId, string actorId, DateTimeOffset now)
     { EnsureNotReleased(); SoftwareBuildId = softwareBuildId; Event("VerificationBuildSelected", actorId, $"Selected software build {softwareBuildId} for release verification.", now); }
+    public void RecordExecutionProgress(string eventType, string detail, string actorId, DateTimeOffset now)
+    { EnsureNotReleased(); if (string.IsNullOrWhiteSpace(eventType) || string.IsNullOrWhiteSpace(detail)) throw new DomainException("Release progress type and detail are required."); Event(eventType.Trim(), actorId, detail.Trim(), now); }
     public void BeginReleaseReview(string actorId, IReadOnlyList<(string Id, string Name)> approvers, DateTimeOffset now)
     {
         EnsureNotReleased(); if (approvers.Count == 0) throw new DomainException("At least one release approver is required.");

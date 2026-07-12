@@ -34,6 +34,9 @@ This directory contains the real application foundation. The visual showcase rem
 - live 1.5-to-1.6 comparison covering effective and proposed requirement changes
 - deterministic, downloadable SYSRD, HLR SWRD, LLR SWRD, and three test-procedure documents in DOCX and PDF
 - formal atomic release that binds the approved baseline, selected build, controlled outputs, and release manifest hash
+- integrated release-execution workbench connecting change inputs, impact disposition, baseline materialization, build control, outputs, verification, and approval
+- predecessor-aware reconciliation that creates only target-baseline-valid versioned trace and coverage links while exposing genuinely new coverage gaps
+- exact JSON verification-manifest export and atomic bulk import of hundreds of build-specific results with shared checksum-protected campaign evidence
 
 ## Run locally
 

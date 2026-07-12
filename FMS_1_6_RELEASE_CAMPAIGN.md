@@ -37,6 +37,27 @@ The application generates downloadable DOCX and PDF outputs directly from author
 
 The database records remain authoritative. Downloaded files are controlled snapshots and do not become editable sources of truth.
 
+## Release Execution Workbench
+
+The Release Campaign page provides one governed workbench for progressing the campaign rather than merely reporting blockers:
+
+- all target SCR/SWCR inputs show their exact state, inclusion status, and unresolved impact count;
+- pending impacts may be dispositioned together for one exact change request with a required shared rationale;
+- the exact candidate baseline can be frozen and materialized only after change-control integration is complete;
+- trace and test-coverage links may be carried forward from the predecessor only when both requirement artifacts remain effective in the target baseline;
+- a release-candidate software build can be recorded and selected against the materialized baseline;
+- the six controlled outputs can be generated from the same exact configuration;
+- coverage gaps link directly to the Verification workspace for explicit procedure creation; and
+- a completed external verification manifest and its signed evidence package can be imported against the selected build.
+
+Carry-forward does not invent coverage for a new requirement. In the FMS 1.6 scenario, the new round-robin system requirement remains visibly uncovered until an engineer creates and approves an applicable procedure.
+
+## External Verification Manifest
+
+After a build is selected, the platform exports a JSON template containing every exact test-procedure revision required by the target baseline. Import is atomic and is rejected unless the completed manifest contains exactly one result for every required procedure, with no duplicates or unrelated procedures.
+
+Each row requires Pass, Fail, or Blocked, execution time, executor, configuration, and a human determination. One uploaded campaign evidence package is checksum-protected and linked to every immutable execution created by that import. Re-importing the same procedure/build combination creates explicit retest chains rather than overwriting history. Failed database imports remove the newly stored evidence file so an unreferenced payload is not silently retained.
+
 ## Evidence Integrity
 
 Uploaded evidence is stored outside the database payload with file metadata and a SHA-256 checksum persisted in the database. Evidence is linked to an exact immutable test execution, and both records must belong to the same project. File names are sanitized, storage paths are controlled by the server, and file size is bounded.

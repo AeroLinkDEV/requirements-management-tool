@@ -36,6 +36,7 @@ public sealed class EvidenceFileStore
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }
     public Stream OpenRead(string storageKey) => File.OpenRead(Resolve(storageKey));
+    public void Delete(string storageKey) { var path = Resolve(storageKey); if (File.Exists(path)) File.Delete(path); }
     private string Resolve(string storageKey)
     {
         var full = Path.GetFullPath(Path.Combine(_root, storageKey.Replace('/', Path.DirectorySeparatorChar))); var root = Path.GetFullPath(_root) + Path.DirectorySeparatorChar;

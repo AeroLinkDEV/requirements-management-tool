@@ -462,8 +462,9 @@ app.MapGet("/api/release-campaigns/{id:guid}", async (Guid id, AeroLinkDbContext
     var campaign = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
     var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == campaign.ReleaseId, ct); var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == campaign.BaselineId, ct);
     var impacts = await (from impact in db.ImpactDispositions.AsNoTracking().Where(x => x.CampaignId == id) join scr in db.SystemChangeRequests.AsNoTracking() on impact.ScrId equals scr.Id orderby scr.BaseNumber, impact.Kind select new { impact.Id, impact.ScrId, scr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, scr.Title, kind = impact.Kind.ToString(), impact.ArtifactReference, impact.Description, state = impact.State.ToString(), impact.Rationale, impact.DispositionedBy, impact.DispositionedAt }).ToListAsync(ct);
+    var changes = await db.SystemChangeRequests.AsNoTracking().Where(x => x.TargetReleaseId == campaign.ReleaseId).OrderBy(x => x.BaseNumber).Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, x.Title, type = x.Type.ToString(), state = x.State.ToString(), x.AuthorId, requirementCount = x.RequirementChanges.Count, included = db.BaselineSelections.Any(s => s.BaselineId == baseline.Id && s.ScrId == x.Id) }).ToListAsync(ct);
     return Results.Ok(new { campaign.Id, campaign.Name, state = campaign.State.ToString(), campaign.ProjectId, campaign.ReleaseId, release = release.Version, campaign.BaselineId, baseline = baseline.DisplayNumber, baselineState = baseline.State.ToString(), baseline.RequirementsHash, campaign.SoftwareBuildId, campaign.OwnerId, campaign.CreatedAt, campaign.ReleasedAt, campaign.ReleaseHash,
-        readiness = await readiness.CalculateAsync(id, ct), impacts, approvals = campaign.Approvals.OrderBy(x => x.Position).Select(x => new { x.Position, x.ApproverId, x.ApproverName, state = x.State.ToString(), x.ApprovedAt }), events = campaign.Events.OrderByDescending(x => x.OccurredAt).Select(x => new { x.EventType, x.ActorId, x.Detail, x.OccurredAt }) });
+        readiness = await readiness.CalculateAsync(id, ct), changes, impacts, approvals = campaign.Approvals.OrderBy(x => x.Position).Select(x => new { x.Position, x.ApproverId, x.ApproverName, state = x.State.ToString(), x.ApprovedAt }), events = campaign.Events.OrderByDescending(x => x.OccurredAt).Select(x => new { x.EventType, x.ActorId, x.Detail, x.OccurredAt }) });
 });
 
 app.MapPut("/api/impact-dispositions/{id:guid}", async (Guid id, DispositionImpactRequest request, AeroLinkDbContext db, CancellationToken ct) =>
@@ -472,6 +473,38 @@ app.MapPut("/api/impact-dispositions/{id:guid}", async (Guid id, DispositionImpa
     try { impact.Disposition(request.State, request.Rationale, request.ActorId, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
+
+app.MapPut("/api/release-campaigns/{id:guid}/impact-dispositions", async (Guid id, BulkDispositionImpactRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+    if (campaign.State == ReleaseCampaignState.Released) return Results.BadRequest(new { error = "A released campaign is immutable." });
+    var impacts = await db.ImpactDispositions.Where(x => x.CampaignId == id && x.State == ImpactDispositionState.Pending && (request.ScrId == null || x.ScrId == request.ScrId)).ToListAsync(ct);
+    if (impacts.Count == 0) return Results.BadRequest(new { error = "No pending impacts match this disposition." });
+    try { foreach (var impact in impacts) impact.Disposition(request.State, request.Rationale, request.ActorId, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.Ok(new { dispositioned = impacts.Count }); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/release-campaigns/{id:guid}/reconcile-lifecycle-links", async (Guid id, CampaignActorRequest request, ReleaseExecutionService execution, CancellationToken ct) =>
+{
+    try { return Results.Ok(await execution.ReconcileAsync(id, request.ActorId, DateTimeOffset.UtcNow, ct)); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapGet("/api/release-campaigns/{id:guid}/verification-template", async (Guid id, ReleaseExecutionService execution, CancellationToken ct) =>
+{
+    try { return Results.File(await execution.CreateVerificationTemplateAsync(id, ct), "application/json", "verification-manifest-template.json"); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/release-campaigns/{id:guid}/verification-package", async (Guid id, HttpRequest http, ReleaseExecutionService execution, CancellationToken ct) =>
+{
+    if (!http.HasFormContentType) return Results.BadRequest(new { error = "Use multipart form data with manifest and evidence files." });
+    var form = await http.ReadFormAsync(ct); var manifest = form.Files.GetFile("manifest"); var evidence = form.Files.GetFile("evidence"); var actorId = form["actorId"].ToString();
+    if (manifest is null || evidence is null || manifest.Length == 0 || evidence.Length == 0) return Results.BadRequest(new { error = "Both a completed JSON manifest and an evidence package are required." });
+    if (manifest.Length > 10 * 1024 * 1024) return Results.BadRequest(new { error = "Verification manifests are limited to 10 MB." });
+    try { await using var manifestStream = manifest.OpenReadStream(); await using var evidenceStream = evidence.OpenReadStream(); return Results.Ok(await execution.ImportVerificationAsync(id, manifestStream, evidenceStream, evidence.FileName, evidence.ContentType, actorId, DateTimeOffset.UtcNow, ct)); }
+    catch (Exception ex) when (ex is DomainException or InvalidOperationException) { return Results.BadRequest(new { error = ex.Message }); }
+}).DisableAntiforgery();
 
 app.MapPost("/api/release-campaigns/{id:guid}/verification-build", async (Guid id, SelectBuildRequest request, AeroLinkDbContext db, CancellationToken ct) =>
 {
@@ -680,6 +713,7 @@ record CreateBuildRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, strin
 record CreateTestProcedureRequest(Guid ProjectId, string BaseNumber, string Title, string OwnerId, string Objective, string Preconditions, string Steps, string ExpectedResult, List<Guid> RequirementRevisionIds, TestProcedureLevel Level = TestProcedureLevel.HighLevel);
 record RecordTestExecutionRequest(Guid ProjectId, Guid ProcedureRevisionId, Guid? SoftwareBuildId, Guid? RetestOfExecutionId, TestOutcome Outcome, string ExecutedBy, string Configuration, string Determination, string EvidenceReference, DateTimeOffset ExecutedAt);
 record DispositionImpactRequest(ImpactDispositionState State, string Rationale, string ActorId);
+record BulkDispositionImpactRequest(Guid? ScrId, ImpactDispositionState State, string Rationale, string ActorId);
 record SelectBuildRequest(Guid SoftwareBuildId, string ActorId);
 record CampaignActorRequest(string ActorId);
 record StartReleaseReviewRequest(string ActorId, List<ApproverRequest> Approvers);

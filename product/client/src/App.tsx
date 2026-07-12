@@ -236,7 +236,7 @@ function App() {
   if (view === "lifecycle" && project)
     return <LifecycleExplorer api={API} projectId={project.project.id} releases={project.releases} onBack={() => setView("dashboard")}/>;
   if(view==="release"&&project)
-    return <ReleaseCampaignCenter api={API} projectId={project.project.id} releases={project.releases} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}}/>;
+    return <ReleaseCampaignCenter api={API} projectId={project.project.id} releases={project.releases} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}} onOpenVerification={()=>setView("verification")} onOpenDocuments={()=>setView("lifecycle")}/>;
   return (
     <div className="shell">
       <aside>
