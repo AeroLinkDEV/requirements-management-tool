@@ -26,13 +26,19 @@ Repository interfaces are defined in the domain project and implemented in infra
 
 Fresh installations contain no assumed program. The onboarding transaction creates the Program, its first Project/software product, and its initial release together. FMS records are optional demo data controlled by configuration and are disabled by default.
 
+Enterprise authoring extends the existing requirement aggregate instead of replacing it. Stable artifacts and immutable requirement revisions remain authoritative; revision profiles add schema-bound rich content and classifications, specification nodes add reusable document placement, and comments/views/jobs preserve collaboration and high-volume operations as separate attributable records. Existing Projects are synchronized idempotently so the new workspace can be introduced without rewriting approved history.
+
+CSV/XLSX interchange is a two-step preview/commit workflow. Files are size- and expansion-limited, hashed, parsed into persisted validation results, and cannot create approved requirements directly. A successful commit creates a Draft SCR/SWCR containing the proposed requirement changes, preserving the established review and baseline authority boundary.
+
 ## Security boundary
 
 Identity now comes from a revocable authenticated server session. Passwords use salted PBKDF2 derivation, opaque session tokens are stored only as digests, material API actions derive the actor from the authenticated principal, Program memberships and roles constrain access, and SCR/release approvals require password-confirmed immutable electronic signatures. Production deployment still requires TLS, enterprise identity federation/provisioning, configurable policy enforcement, privileged-access governance, audit export, and independent security review as defined in [SECURITY_AND_IDENTITY_MODEL.md](../../SECURITY_AND_IDENTITY_MODEL.md).
 
 ## Next implementation increment
 
-1. Build the Enterprise Requirements Workspace defined in [ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md](../../ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md).
-2. Add configurable artifact schemas and specification/module hierarchies without weakening stable identity or revision rules.
-3. Add rich authoring, threaded review comments, advanced search/saved views, governed bulk operations, and visual redlines.
-4. Prove governed CSV/Excel onboarding and realistic 10,000-requirement interactive performance before ReqIF and product-line configuration work.
+Wave 1 now has an integrated production-shaped foundation: schemas, specification hierarchy, revision profiles, discovery, saved views, discussions, redlines, bulk jobs, and governed CSV/XLSX onboarding all operate against persisted data. The next increment completes the remaining Wave 1 acceptance depth:
+
+1. Add sanitized rich-text editing, attachments, tables/images, keyboard authoring, and optimistic concurrency for draft content.
+2. Expand discussions into threads, formal dispositions, watchers, assignments, due dates, and notification delivery.
+3. Add a structured query builder, configurable columns/grouping, shareable URLs, and a dedicated permission-aware search index.
+4. Add reusable import mappings, downloadable error workbooks, job history/retry, export, and measured 10,000-requirement performance before ReqIF and product-line configuration work.

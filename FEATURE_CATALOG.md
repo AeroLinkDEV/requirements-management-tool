@@ -2,6 +2,8 @@
 
 This catalog is the authoritative capability inventory. Feature identifiers are stable and must not be reused. Priority uses `Must`, `Should`, or `Could`; phase indicates intended sequencing rather than a committed schedule.
 
+Implementation status is tracked against acceptance outcomes, not feature titles. As of 2026-07-12, Wave 1 has an integrated foundation for EA-001, EA-002, EA-004, COL-001, SRCH-001, SRCH-002, BULK-001, COL-003, EXCH-001, and EXCH-002. Each remains partially complete until its full acceptance outcome is proven; see `ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md` for the precise checkpoint and remaining gate.
+
 ## Platform Foundations
 
 | ID | Capability | Rationale | Priority | Phase | Dependencies | Acceptance Outcome |

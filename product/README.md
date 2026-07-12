@@ -38,6 +38,12 @@ This directory contains the real application foundation. The visual showcase rem
 - predecessor-aware reconciliation that creates only target-baseline-valid versioned trace and coverage links while exposing genuinely new coverage gaps
 - exact JSON verification-manifest export and atomic bulk import of hundreds of build-specific results with shared checksum-protected campaign evidence
 - professional DOCX/PDF publication of SCRs, requirements, and test procedures with editorial covers, named approval provenance, document-control registers, revision history, and controlled-copy markings
+- enterprise requirements workspace spanning the complete System/HLR/LLR repository, with high-density table and document modes, structured specifications, paging, filters, and revision inspection
+- Program-configurable artifact-schema records and structured specification/section placement while stable requirement identity remains independent of document position
+- attributable requirement discussions with mentions, resolution/disposition state, exact-revision context, saved personal/shared views, and visual revision redlines
+- governed bulk classification and specification placement through previewed, attributable jobs rather than silent direct edits
+- checksum-recorded CSV/XLSX onboarding with row validation and a controlled commit boundary that creates a Draft SCR/SWCR instead of bypassing approval
+- provider-compatible PostgreSQL/SQLite persistence, versioned migration, and deterministic workspace synchronization for existing Programs
 
 ## Run locally
 

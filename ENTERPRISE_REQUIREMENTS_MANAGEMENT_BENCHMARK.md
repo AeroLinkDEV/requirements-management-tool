@@ -131,6 +131,8 @@ This is the recommended next massive implementation. It closes the daily-use gap
 
 ## Acceptance gate for Wave 1
 
+**Implementation checkpoint — 2026-07-12:** the first integrated Wave 1 foundation is implemented. It provides persisted Program schemas, structured System/HLR/LLR specifications, table/document discovery over 1,250 live FMS requirements, exact revision inspection and redlines, attributable comments and dispositions, saved views, governed bulk classification/placement jobs, and checksum-recorded CSV/XLSX preview that commits only through a Draft SCR/SWCR. This is a major usable foundation, not a claim that the full Wave 1 gate below is complete. Rich-text editing, full threaded collaboration/notifications, indexed structured query, reusable import mappings/error workbooks, optimistic concurrent draft editing, and the 10,000-requirement performance proof remain open.
+
 Wave 1 is complete only when a systems engineer can:
 
 1. Create a Program-specific requirement type and fields without code or a database migration.

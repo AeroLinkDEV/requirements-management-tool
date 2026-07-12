@@ -15,8 +15,8 @@ test('FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await expect(page.getByText('Total SCRs').locator('..').getByText('8')).toBeVisible()
 
   await page.getByRole('button', { name: /Requirements/ }).click()
-  await page.getByRole('button', { name: /Requirement History/ }).click()
-  await page.getByLabel('Search history').fill('LLR-00000700')
+  await expect(page.getByRole('heading', { name: 'Requirements Workspace' })).toBeVisible()
+  await page.getByLabel('Search requirements').fill('LLR-00000700')
   await expect(page.getByText(/LLR-00000700/).first()).toBeVisible()
   await page.getByRole('button', { name: /Command Center/ }).click()
   await page.getByRole('button', { name: /Traceability/ }).click()

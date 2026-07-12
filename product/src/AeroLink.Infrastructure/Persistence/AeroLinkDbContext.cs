@@ -46,6 +46,15 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<RoleDelegation> RoleDelegations => Set<RoleDelegation>();
     public DbSet<ElectronicSignature> ElectronicSignatures => Set<ElectronicSignature>();
     public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
+    public DbSet<ArtifactSchemaDefinition> ArtifactSchemas => Set<ArtifactSchemaDefinition>();
+    public DbSet<ArtifactFieldDefinition> ArtifactFieldDefinitions => Set<ArtifactFieldDefinition>();
+    public DbSet<RequirementSpecification> RequirementSpecifications => Set<RequirementSpecification>();
+    public DbSet<SpecificationNode> SpecificationNodes => Set<SpecificationNode>();
+    public DbSet<RequirementRevisionProfile> RequirementRevisionProfiles => Set<RequirementRevisionProfile>();
+    public DbSet<ArtifactComment> ArtifactComments => Set<ArtifactComment>();
+    public DbSet<SavedRequirementView> SavedRequirementViews => Set<SavedRequirementView>();
+    public DbSet<EnterpriseOperationJob> EnterpriseOperationJobs => Set<EnterpriseOperationJob>();
+    public DbSet<RequirementInterchangeJob> RequirementInterchangeJobs => Set<RequirementInterchangeJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -311,6 +320,42 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<SecurityAuditEvent>(b =>
         {
             b.ToTable("security_audit_events"); b.HasKey(x => x.Id); b.Property(x => x.EventType).HasMaxLength(100).IsRequired(); b.Property(x => x.ActorId).HasMaxLength(100).IsRequired(); b.Property(x => x.Target).HasMaxLength(300).IsRequired(); b.Property(x => x.Outcome).HasMaxLength(30).IsRequired(); b.Property(x => x.Detail).HasMaxLength(4000).IsRequired(); b.Property(x => x.IpAddress).HasMaxLength(100); b.HasIndex(x => x.OccurredAt); b.HasIndex(x => new { x.ActorId, x.OccurredAt });
+        });
+        modelBuilder.Entity<ArtifactSchemaDefinition>(b =>
+        {
+            b.ToTable("artifact_schema_definitions"); b.HasKey(x=>x.Id); b.Property(x=>x.Key).HasMaxLength(80).IsRequired(); b.Property(x=>x.Name).HasMaxLength(200).IsRequired(); b.Property(x=>x.AppliesTo).HasMaxLength(80).IsRequired(); b.Property(x=>x.Description).HasMaxLength(2000); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.Key}).IsUnique(); b.HasMany(x=>x.Fields).WithOne().HasForeignKey(x=>x.SchemaId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ArtifactFieldDefinition>(b =>
+        {
+            b.ToTable("artifact_field_definitions"); b.HasKey(x=>x.Id); b.Property(x=>x.Key).HasMaxLength(80).IsRequired(); b.Property(x=>x.Label).HasMaxLength(200).IsRequired(); b.Property(x=>x.Type).HasConversion<string>().HasMaxLength(40); b.Property(x=>x.OptionsJson).IsRequired(); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.SchemaId,x.Key}).IsUnique();
+        });
+        modelBuilder.Entity<RequirementSpecification>(b =>
+        {
+            b.ToTable("requirement_specifications"); b.HasKey(x=>x.Id); b.Property(x=>x.DocumentNumber).HasMaxLength(40).IsRequired(); b.Property(x=>x.Title).HasMaxLength(300).IsRequired(); b.Property(x=>x.Level).HasMaxLength(40).IsRequired(); b.Property(x=>x.Description).HasMaxLength(4000); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.DocumentNumber}).IsUnique(); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<SpecificationNode>(b =>
+        {
+            b.ToTable("specification_nodes"); b.HasKey(x=>x.Id); b.Property(x=>x.Type).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.Heading).HasMaxLength(500); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.SpecificationId,x.ParentId,x.Position}).IsUnique(); b.HasIndex(x=>x.RequirementArtifactId); b.HasOne<RequirementSpecification>().WithMany().HasForeignKey(x=>x.SpecificationId).OnDelete(DeleteBehavior.Cascade); b.HasOne<SpecificationNode>().WithMany().HasForeignKey(x=>x.ParentId).OnDelete(DeleteBehavior.Restrict); b.HasOne<RequirementArtifact>().WithMany().HasForeignKey(x=>x.RequirementArtifactId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<RequirementRevisionProfile>(b =>
+        {
+            b.ToTable("requirement_revision_profiles"); b.HasKey(x=>x.Id); b.Property(x=>x.RichText); b.Property(x=>x.AttributesJson).IsRequired(); b.Property(x=>x.TagsJson).IsRequired(); b.Property(x=>x.UpdatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>x.RevisionId).IsUnique(); b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x=>x.RevisionId).OnDelete(DeleteBehavior.Restrict); b.HasOne<ArtifactSchemaDefinition>().WithMany().HasForeignKey(x=>x.SchemaId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ArtifactComment>(b =>
+        {
+            b.ToTable("artifact_comments"); b.HasKey(x=>x.Id); b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired(); b.Property(x=>x.Body).HasMaxLength(8000).IsRequired(); b.Property(x=>x.MentionsJson).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.ResolvedBy).HasMaxLength(100); b.Property(x=>x.Disposition).HasMaxLength(4000); b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.CreatedAt}); b.HasOne<ArtifactComment>().WithMany().HasForeignKey(x=>x.ParentCommentId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<SavedRequirementView>(b =>
+        {
+            b.ToTable("saved_requirement_views"); b.HasKey(x=>x.Id); b.Property(x=>x.Name).HasMaxLength(200).IsRequired(); b.Property(x=>x.QueryJson).IsRequired(); b.Property(x=>x.ColumnsJson).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.OwnerId,x.Name}).IsUnique(); b.HasOne<UserAccount>().WithMany().HasForeignKey(x=>x.OwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<EnterpriseOperationJob>(b =>
+        {
+            b.ToTable("enterprise_operation_jobs"); b.HasKey(x=>x.Id); b.Property(x=>x.JobType).HasMaxLength(80).IsRequired(); b.Property(x=>x.RequestJson).IsRequired(); b.Property(x=>x.ResultJson).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt});
+        });
+        modelBuilder.Entity<RequirementInterchangeJob>(b =>
+        {
+            b.ToTable("requirement_interchange_jobs"); b.HasKey(x=>x.Id); b.Property(x=>x.FileName).HasMaxLength(260).IsRequired(); b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired(); b.Property(x=>x.MappingJson).IsRequired(); b.Property(x=>x.RowsJson).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt}); b.HasIndex(x=>new{x.ProjectId,x.Sha256});
         });
     }
 

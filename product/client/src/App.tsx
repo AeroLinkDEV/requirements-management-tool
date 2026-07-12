@@ -7,6 +7,7 @@ import HistoryExplorer from "./HistoryExplorer";
 import VerificationCenter from "./VerificationCenter";
 import LifecycleExplorer from "./LifecycleExplorer";
 import ReleaseCampaignCenter from "./ReleaseCampaignCenter";
+import RequirementsWorkspace from "./RequirementsWorkspace";
 import { AdministrationCenter, LoginPage, MyWorkCenter } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import "./App.css";
@@ -58,7 +59,7 @@ function App() {
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
     [selectedScrId, setSelectedScrId] = useState(""),
-    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "verification" | "lifecycle" | "release" | "mywork" | "admin">("dashboard");
+    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "requirements" | "verification" | "lifecycle" | "release" | "mywork" | "admin">("dashboard");
   useEffect(()=>{fetch(`${API}/api/auth/me`).then(async r=>setUser(r.ok?await r.json():null)).catch(()=>setUser(null))},[]);
   const loadWorkspaces = useCallback(async () => {
     try {
@@ -246,6 +247,7 @@ function App() {
         onOpenScr={(id) => { setSelectedScrId(id); setView("scr"); }}
       />
     );
+  if(view==="requirements"&&project)return <RequirementsWorkspace api={API} projectId={project.project.id} releases={project.releases} user={user} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}}/>;
   if (view === "verification" && project && release)
     return <VerificationCenter api={API} projectId={project.project.id} releaseId={release.id} onBack={() => setView("dashboard")}/>;
   if (view === "lifecycle" && project)
@@ -294,7 +296,8 @@ function App() {
               if (x.includes("Verification")) setView("verification");
               if (x.includes("Traceability") || x.includes("Documents")) setView("lifecycle");
               if (x.includes("Release Campaign")) setView("release");
-              if (x.includes("Change Requests") || x.includes("Requirements")) setView("history");
+              if (x.includes("Change Requests")) setView("history");
+              if (x.includes("Requirements")) setView("requirements");
             }}>
               {x}
             </button>

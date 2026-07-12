@@ -7,12 +7,14 @@ using AeroLink.Domain.Verification;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Requirements;
 using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Infrastructure;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddProblemDetails();
@@ -34,6 +36,7 @@ await using (var scope = app.Services.CreateAsyncScope())
     if (builder.Configuration.GetValue<bool>("DemoData:Enabled"))
         await scope.ServiceProvider.GetRequiredService<FmsShowcaseSeeder>().EnsureSeededAsync();
     await scope.ServiceProvider.GetRequiredService<IdentitySeeder>().EnsureSeededAsync();
+    await scope.ServiceProvider.GetRequiredService<EnterpriseWorkspaceSeeder>().EnsureAllAsync();
 }
 
 app.Use(async (context, next) =>
@@ -58,7 +61,7 @@ app.MapPost("/api/auth/login", async (LoginRequest request, HttpContext http, Id
 app.MapPost("/api/auth/logout", async (HttpContext http, IdentityService identity, CancellationToken ct) => { await identity.LogoutAsync(http.Request.Cookies[IdentityService.CookieName], http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct); http.Response.Cookies.Delete(IdentityService.CookieName); return Results.NoContent(); });
 app.MapGet("/api/auth/me", (HttpContext http) => Results.Ok(http.UserAccount()));
 
-app.MapPost("/api/showcase/seed", async (FmsShowcaseSeeder seeder, IdentitySeeder identities, CancellationToken ct) => { var result=await seeder.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); return Results.Ok(result); });
+app.MapPost("/api/showcase/seed", async (FmsShowcaseSeeder seeder, IdentitySeeder identities, EnterpriseWorkspaceSeeder workspace, CancellationToken ct) => { var result=await seeder.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); await workspace.EnsureAllAsync(ct); return Results.Ok(result); });
 
 app.MapGet("/api/programs", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
 {
@@ -790,6 +793,112 @@ app.MapPost("/api/delegations", async (CreateDelegationRequest request, HttpCont
 app.MapGet("/api/admin/security-audit", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) => http.UserAccount().IsAdministrator
     ? Results.Ok(await db.SecurityAuditEvents.AsNoTracking().OrderByDescending(x => x.OccurredAt).Take(1000).ToListAsync(ct)) : Results.Forbid());
 
+// Enterprise Requirements Workspace: configurable schemas, structured specifications,
+// collaboration, saved views, governed bulk operations, redlines, and onboarding.
+app.MapGet("/api/enterprise-requirements/workspace", async (Guid projectId, Guid? specificationId, string? search, string? level, string? verification, string? tag, int page, int pageSize,
+    HttpContext http, AeroLinkDbContext db, EnterpriseRequirementsService enterprise, CancellationToken ct) =>
+{
+    if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
+    await enterprise.SynchronizeProjectAsync(projectId,http.UserAccount().UserName,ct);page=Math.Max(1,page==0?1:page);pageSize=Math.Clamp(pageSize==0?100:pageSize,1,250);
+    var artifacts=db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId);
+    if(!string.IsNullOrWhiteSpace(level)&&Enum.TryParse<RequirementLevel>(level,true,out var parsedLevel))artifacts=artifacts.Where(x=>x.Level==parsedLevel);
+    if(specificationId is not null)artifacts=artifacts.Where(x=>db.SpecificationNodes.Any(n=>n.SpecificationId==specificationId&&n.RequirementArtifactId==x.Id));
+    var current=from artifact in artifacts
+                join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId
+                where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)
+                select new{artifact,revision};
+    if(!string.IsNullOrWhiteSpace(search)){var q=search.Trim().ToLower();current=current.Where(x=>x.artifact.BaseNumber.ToLower().Contains(q)||x.revision.Statement.ToLower().Contains(q)||x.revision.Rationale.ToLower().Contains(q));}
+    if(!string.IsNullOrWhiteSpace(verification)){var v=verification.Trim().ToLower();current=current.Where(x=>x.revision.VerificationMethod.ToLower()==v);}
+    if(!string.IsNullOrWhiteSpace(tag)){var t=tag.Trim().ToLower();current=current.Where(x=>db.RequirementRevisionProfiles.Any(p=>p.RevisionId==x.revision.Id&&p.TagsJson.ToLower().Contains(t)));}
+    var total=await current.CountAsync(ct);var rows=await current.OrderBy(x=>x.artifact.BaseNumber).Skip((page-1)*pageSize).Take(pageSize)
+        .Select(x=>new{x.artifact.Id,x.artifact.BaseNumber,level=x.artifact.Level.ToString(),revisionId=x.revision.Id,x.revision.Revision,x.revision.Statement,x.revision.Rationale,x.revision.VerificationMethod,state=x.revision.State.ToString(),x.revision.SourceScrId,x.revision.CreatedAt}).ToListAsync(ct);
+    var revisionIds=rows.Select(x=>x.revisionId).ToList();var profiles=await db.RequirementRevisionProfiles.AsNoTracking().Where(x=>revisionIds.Contains(x.RevisionId)).ToDictionaryAsync(x=>x.RevisionId,ct);
+    var commentCounts=await db.ArtifactComments.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.ArtifactType=="Requirement"&&rows.Select(r=>r.Id).Contains(x.ArtifactId)).GroupBy(x=>x.ArtifactId).Select(x=>new{x.Key,Count=x.Count(),Open=x.Count(c=>c.State==CollaborationState.Open)}).ToDictionaryAsync(x=>x.Key,ct);
+    var schemas=await db.ArtifactSchemas.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.IsActive).OrderBy(x=>x.Name).Select(x=>new{x.Id,x.Key,x.Name,x.AppliesTo,x.Description,x.Version,fields=x.Fields.OrderBy(f=>f.SortOrder).Select(f=>new{f.Id,f.Key,f.Label,type=f.Type.ToString(),f.IsRequired,f.SortOrder,f.OptionsJson})}).ToListAsync(ct);
+    var specificationRows=await db.RequirementSpecifications.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderBy(x=>x.Level).Select(x=>new{x.Id,x.DocumentNumber,x.Title,x.Level,x.Description,nodeCount=db.SpecificationNodes.Count(n=>n.SpecificationId==x.Id&&n.Type==SpecificationNodeType.Requirement)}).ToListAsync(ct);
+    var specificationIds=specificationRows.Select(x=>x.Id).ToList();var sectionRows=await db.SpecificationNodes.AsNoTracking().Where(n=>specificationIds.Contains(n.SpecificationId)&&n.Type==SpecificationNodeType.Section).OrderBy(n=>n.Position).Select(n=>new{n.Id,n.SpecificationId,n.Heading,n.Position,count=db.SpecificationNodes.Count(c=>c.ParentId==n.Id)}).ToListAsync(ct);
+    var specifications=specificationRows.Select(x=>new{x.Id,x.DocumentNumber,x.Title,x.Level,x.Description,x.nodeCount,sections=sectionRows.Where(s=>s.SpecificationId==x.Id).Select(s=>new{s.Id,s.Heading,s.Position,s.count})}).ToList();
+    var views=await db.SavedRequirementViews.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.OwnerId==http.UserAccount().Id||x.IsShared)).OrderBy(x=>x.Name).Select(x=>new{x.Id,x.Name,x.QueryJson,x.ColumnsJson,x.IsShared,owned=x.OwnerId==http.UserAccount().Id}).ToListAsync(ct);
+    return Results.Ok(new{page,pageSize,totalCount=total,totalPages=(int)Math.Ceiling(total/(double)pageSize),schemas,specifications,views,items=rows.Select(x=>{profiles.TryGetValue(x.revisionId,out var profile);commentCounts.TryGetValue(x.Id,out var comments);return new{x.Id,x.BaseNumber,displayNumber=$"{x.BaseNumber}.{x.Revision:D2}",x.level,x.revisionId,x.Revision,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceScrId,x.CreatedAt,richText=profile?.RichText??$"<p>{System.Net.WebUtility.HtmlEncode(x.Statement)}</p>",attributesJson=profile?.AttributesJson??"{}",tagsJson=profile?.TagsJson??"[]",commentCount=comments?.Count??0,openCommentCount=comments?.Open??0};})});
+});
+
+app.MapGet("/api/enterprise-requirements/{artifactId:guid}", async (Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
+{
+    var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();
+    if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();
+    var history=await (from r in db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId) join s in db.SystemChangeRequests.AsNoTracking() on r.SourceScrId equals s.Id orderby r.Revision descending select new{r.Id,r.Revision,displayNumber=artifact.BaseNumber+"."+(r.Revision<10?"0":"")+r.Revision,r.Statement,r.Rationale,r.VerificationMethod,state=r.State.ToString(),r.SourceScrId,sourceScr=s.BaseNumber+"."+(s.Revision<10?"0":"")+s.Revision,r.CreatedAt}).ToListAsync(ct);
+    var revisionIds=history.Select(x=>x.Id).ToList();var profiles=await db.RequirementRevisionProfiles.AsNoTracking().Where(x=>revisionIds.Contains(x.RevisionId)).ToListAsync(ct);
+    var placements=await (from n in db.SpecificationNodes.AsNoTracking().Where(x=>x.RequirementArtifactId==artifactId) join spec in db.RequirementSpecifications.AsNoTracking() on n.SpecificationId equals spec.Id join parent in db.SpecificationNodes.AsNoTracking() on n.ParentId equals parent.Id select new{spec.Id,spec.DocumentNumber,spec.Title,section=parent.Heading,n.Position}).ToListAsync(ct);
+    var traces=await db.RequirementTraces.AsNoTracking().CountAsync(x=>revisionIds.Contains(x.SourceRevisionId)||revisionIds.Contains(x.TargetRevisionId),ct);var tests=await db.TestCoverage.AsNoTracking().CountAsync(x=>revisionIds.Contains(x.RequirementRevisionId),ct);
+    return Results.Ok(new{artifact.Id,artifact.BaseNumber,level=artifact.Level.ToString(),history=history.Select(x=>new{x.Id,x.Revision,x.displayNumber,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceScrId,x.sourceScr,x.CreatedAt,richText=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.RichText,attributesJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.AttributesJson??"{}",tagsJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.TagsJson??"[]"}),placements,traceCount=traces,testCoverageCount=tests});
+});
+
+app.MapGet("/api/enterprise-requirements/{artifactId:guid}/redline",async(Guid artifactId,Guid fromRevisionId,Guid toRevisionId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    var projectId=await db.Requirements.Where(x=>x.Id==artifactId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(ct);if(projectId is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,projectId.Value,ct))return Results.Forbid();
+    var revisions=await db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId&&(x.Id==fromRevisionId||x.Id==toRevisionId)).ToListAsync(ct);if(revisions.Count!=2)return Results.BadRequest(new{error="Select two revisions of the same requirement."});var from=revisions.Single(x=>x.Id==fromRevisionId);var to=revisions.Single(x=>x.Id==toRevisionId);
+    return Results.Ok(new{from=from.Revision,to=to.Revision,statement=EnterpriseRequirementsService.Diff(from.Statement,to.Statement),rationale=EnterpriseRequirementsService.Diff(from.Rationale,to.Rationale),verificationChanged=from.VerificationMethod!=to.VerificationMethod,fromVerification=from.VerificationMethod,toVerification=to.VerificationMethod});
+});
+
+app.MapPost("/api/enterprise-requirements/schemas",async(CreateArtifactSchemaRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+{
+    if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.Administrator))return Results.Forbid();try{var schema=new ArtifactSchemaDefinition(request.ProjectId,request.Key,request.Name,request.AppliesTo,request.Description,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.ArtifactSchemas.Add(schema);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/schemas/{schema.Id}",new{schema.Id});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+});
+app.MapPost("/api/enterprise-requirements/schemas/{id:guid}/fields",async(Guid id,CreateSchemaFieldRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    var schema=await db.ArtifactSchemas.Include(x=>x.Fields).SingleOrDefaultAsync(x=>x.Id==id,ct);if(schema is null)return Results.NotFound();if(!http.UserAccount().IsAdministrator)return Results.Forbid();try{schema.AddField(request.Key,request.Label,request.Type,request.IsRequired,request.SortOrder,request.OptionsJson,http.UserAccount().UserName,DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+});
+app.MapPost("/api/enterprise-requirements/specifications",async(CreateSpecificationRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+{
+    if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();try{var spec=new RequirementSpecification(request.ProjectId,request.DocumentNumber,request.Title,request.Level,request.Description,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.RequirementSpecifications.Add(spec);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/specifications/{spec.Id}",new{spec.Id});}catch(Exception ex)when(ex is DomainException or ArgumentException){return Results.BadRequest(new{error=ex.Message});}
+});
+app.MapPost("/api/enterprise-requirements/specifications/{id:guid}/sections",async(Guid id,CreateSectionRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+{
+    var projectId=await db.RequirementSpecifications.Where(x=>x.Id==id).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(ct);if(projectId is null)return Results.NotFound();if(!await http.HasProjectRoleAsync(db,identity,projectId.Value,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();var node=new SpecificationNode(id,request.ParentId,request.Position,SpecificationNodeType.Section,request.Heading,null,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.SpecificationNodes.Add(node);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/specifications/{id}/sections/{node.Id}",new{node.Id});
+});
+
+app.MapGet("/api/enterprise-requirements/{artifactId:guid}/comments",async(Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    var projectId=await db.Requirements.Where(x=>x.Id==artifactId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(ct);if(projectId is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,projectId.Value,ct))return Results.Forbid();
+    var comments=await db.ArtifactComments.AsNoTracking().Where(x=>x.ArtifactId==artifactId&&x.ArtifactType=="Requirement").ToListAsync(ct);
+    return Results.Ok(comments.OrderBy(x=>x.CreatedAt).Select(x=>new{x.Id,x.ParentCommentId,x.Body,x.MentionsJson,state=x.State.ToString(),x.CreatedBy,x.CreatedAt,x.ResolvedBy,x.ResolvedAt,x.Disposition}));
+});
+app.MapPost("/api/enterprise-requirements/{artifactId:guid}/comments",async(Guid artifactId,CreateCommentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();if(request.RevisionId is not null&&!await db.RequirementRevisions.AnyAsync(x=>x.Id==request.RevisionId&&x.ArtifactId==artifactId,ct))return Results.BadRequest(new{error="The comment revision is not part of this requirement."});if(request.ParentCommentId is not null&&!await db.ArtifactComments.AnyAsync(x=>x.Id==request.ParentCommentId&&x.ArtifactId==artifactId,ct))return Results.BadRequest(new{error="The parent comment is not part of this requirement."});try{var comment=new ArtifactComment(artifact.ProjectId,"Requirement",artifactId,request.RevisionId,request.ParentCommentId,request.Body,JsonSerializer.Serialize(request.Mentions??[]),http.UserAccount().UserName,DateTimeOffset.UtcNow);db.ArtifactComments.Add(comment);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/{artifactId}/comments/{comment.Id}",new{comment.Id});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+});
+app.MapPost("/api/enterprise-requirements/comments/{id:guid}/resolve",async(Guid id,ResolveCommentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{var comment=await db.ArtifactComments.SingleOrDefaultAsync(x=>x.Id==id,ct);if(comment is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,comment.ProjectId,ct))return Results.Forbid();try{comment.Resolve(http.UserAccount().UserName,request.Disposition??"",DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}});
+
+app.MapPost("/api/enterprise-requirements/views",async(CreateSavedViewRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{if(!await http.HasProjectAccessAsync(db,request.ProjectId,ct))return Results.Forbid();var view=new SavedRequirementView(request.ProjectId,http.UserAccount().Id,request.Name,request.QueryJson,request.ColumnsJson,request.IsShared,DateTimeOffset.UtcNow);db.SavedRequirementViews.Add(view);try{await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/views/{view.Id}",new{view.Id});}catch(DbUpdateException){return Results.Conflict(new{error="A saved view with that name already exists."});}});
+app.MapDelete("/api/enterprise-requirements/views/{id:guid}",async(Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>{var view=await db.SavedRequirementViews.SingleOrDefaultAsync(x=>x.Id==id&&x.OwnerId==http.UserAccount().Id,ct);if(view is null)return Results.NotFound();db.Remove(view);await db.SaveChangesAsync(ct);return Results.NoContent();});
+
+app.MapPost("/api/enterprise-requirements/bulk/preview",async(BulkRequirementRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+{
+    if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();
+    if(request.SpecificationId is not null&&!await db.RequirementSpecifications.AnyAsync(x=>x.Id==request.SpecificationId&&x.ProjectId==request.ProjectId,ct))return Results.BadRequest(new{error="The target specification is not part of this Project."});
+    if(request.SectionId is not null&&!await db.SpecificationNodes.AnyAsync(x=>x.Id==request.SectionId&&x.SpecificationId==request.SpecificationId&&x.Type==SpecificationNodeType.Section,ct))return Results.BadRequest(new{error="The target section is not part of this specification."});
+    var valid=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==request.ProjectId&&request.ArtifactIds.Contains(x.Id)).Select(x=>x.Id).ToListAsync(ct);var payload=JsonSerializer.Serialize(new BulkJobPayload(valid,request.Tag,request.SpecificationId,request.SectionId));var job=new EnterpriseOperationJob(request.ProjectId,"RequirementBulkClassify",payload,valid.Count,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.EnterpriseOperationJobs.Add(job);await db.SaveChangesAsync(ct);return Results.Ok(new{job.Id,requested=request.ArtifactIds.Count,valid=valid.Count,rejected=request.ArtifactIds.Count-valid.Count,operation=$"Add tag '{request.Tag}'"+(request.SpecificationId is null?"":" and place in specification")});
+});
+app.MapPost("/api/enterprise-requirements/bulk/{id:guid}/commit",async(Guid id,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+{
+    var job=await db.EnterpriseOperationJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();if(job.State!=EnterpriseJobState.Preview)return Results.BadRequest(new{error="This bulk job is no longer awaiting commit."});var payload=JsonSerializer.Deserialize<BulkJobPayload>(job.RequestJson)!;var revisions=await db.RequirementRevisions.Where(x=>payload.ArtifactIds.Contains(x.ArtifactId)).OrderByDescending(x=>x.Revision).ToListAsync(ct);var current=revisions.GroupBy(x=>x.ArtifactId).Select(x=>x.First()).ToList();var revisionIds=current.Select(x=>x.Id).ToList();var profiles=await db.RequirementRevisionProfiles.Where(x=>revisionIds.Contains(x.RevisionId)).ToListAsync(ct);foreach(var profile in profiles)profile.AddTag(payload.Tag,http.UserAccount().UserName,DateTimeOffset.UtcNow);
+    if(payload.SpecificationId is not null){var parent=payload.SectionId;var existing=(await db.SpecificationNodes.Where(x=>x.SpecificationId==payload.SpecificationId&&x.RequirementArtifactId!=null).Select(x=>x.RequirementArtifactId!.Value).ToListAsync(ct)).ToHashSet();var position=await db.SpecificationNodes.Where(x=>x.SpecificationId==payload.SpecificationId&&x.ParentId==parent).Select(x=>(int?)x.Position).MaxAsync(ct)??0;foreach(var artifactId in payload.ArtifactIds.Where(x=>!existing.Contains(x)))db.SpecificationNodes.Add(new(payload.SpecificationId.Value,parent,++position,SpecificationNodeType.Requirement,"",artifactId,http.UserAccount().UserName,DateTimeOffset.UtcNow));}
+    job.Complete(profiles.Count,0,JsonSerializer.Serialize(new{tagged=profiles.Count,placed=payload.SpecificationId is not null}),DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.Ok(new{job.Id,state=job.State.ToString(),job.SucceededCount,job.ResultJson});
+});
+
+app.MapPost("/api/enterprise-requirements/import/preview",async(Guid projectId,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+{
+    if(!await http.HasProjectRoleAsync(db,identity,projectId,ct,ProgramRole.Engineer))return Results.Forbid();if(!http.Request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data with a CSV or XLSX file."});var form=await http.Request.ReadFormAsync(ct);var file=form.Files.GetFile("file");if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty CSV or XLSX file."});if(file.Length>25*1024*1024)return Results.BadRequest(new{error="Import files are limited to 25 MB."});if(!file.FileName.EndsWith(".csv",StringComparison.OrdinalIgnoreCase)&&!file.FileName.EndsWith(".xlsx",StringComparison.OrdinalIgnoreCase))return Results.BadRequest(new{error="Only CSV and XLSX files are supported."});
+    await using var stream=file.OpenReadStream();using var memory=new MemoryStream();await stream.CopyToAsync(memory,ct);var bytes=memory.ToArray();memory.Position=0;IReadOnlyList<InterchangeRequirementRow> parsed;try{parsed=EnterpriseRequirementsService.ParseImport(memory,file.FileName);}catch(Exception ex){return Results.BadRequest(new{error=$"The workbook could not be read: {ex.Message}"});}
+    var existing=(await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId).Select(x=>x.BaseNumber).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);var duplicates=parsed.GroupBy(x=>x.Identifier,StringComparer.OrdinalIgnoreCase).Where(x=>x.Count()>1).Select(x=>x.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);var rows=parsed.Select(x=>{var errors=x.Errors.ToList();if(existing.Contains(x.Identifier))errors.Add("Identifier already exists in this Project; use an SCR modification workflow.");if(duplicates.Contains(x.Identifier))errors.Add("Identifier is duplicated in this import.");return x with{Valid=errors.Count==0,Errors=errors};}).ToList();var job=new RequirementInterchangeJob(projectId,file.FileName,EnterpriseRequirementsService.Hash(bytes),"{\"mode\":\"standard-columns\"}",JsonSerializer.Serialize(rows),rows.Count(x=>x.Valid),rows.Count(x=>!x.Valid),http.UserAccount().UserName,DateTimeOffset.UtcNow);db.RequirementInterchangeJobs.Add(job);await db.SaveChangesAsync(ct);return Results.Ok(new{job.Id,job.FileName,job.Sha256,total=rows.Count,job.ValidRows,job.InvalidRows,rows=rows.Take(200)});
+}).DisableAntiforgery();
+app.MapPost("/api/enterprise-requirements/import/{id:guid}/commit",async(Guid id,CommitImportRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+{
+    var job=await db.RequirementInterchangeJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(job.InvalidRows>0)return Results.BadRequest(new{error="Resolve every invalid row before committing this import."});if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer))return Results.Forbid();var rows=JsonSerializer.Deserialize<List<InterchangeRequirementRow>>(job.RowsJson)??[];try{var now=DateTimeOffset.UtcNow;var scr=new SystemChangeRequest(request.BaseNumber,0,job.ProjectId,request.TargetReleaseId,request.Title,request.Problem,request.Analysis,request.Solution,http.UserAccount().UserName,now,request.Type);foreach(var row in rows){EnterpriseRequirementsService.TryLevel(row.Level,out var reqLevel);scr.AddRequirementChange(http.UserAccount().UserName,row.Identifier,0,reqLevel,RequirementChangeKind.Introduce,row.Statement,row.Rationale,row.VerificationMethod,now);}db.SystemChangeRequests.Add(scr);job.Commit(scr.Id,now);await db.SaveChangesAsync(ct);return Results.Created($"/api/scrs/{scr.Id}",new{scr.Id,scr.DisplayNumber,imported=rows.Count});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+});
+
 app.MapGet("/api/verification-coverage", async (Guid projectId, Guid? baselineId, Guid? buildId, AeroLinkDbContext db, CancellationToken ct) =>
 {
     if (buildId is not null) baselineId = await db.SoftwareBuilds.Where(x => x.Id == buildId && x.ProjectId == projectId).Select(x => (Guid?)x.BaselineId).SingleOrDefaultAsync(ct);
@@ -840,6 +949,16 @@ record CreateUserRequest(string UserName, string DisplayName, string Email, stri
 record GrantRoleRequest(Guid ProgramId, ProgramRole Role);
 record SetAccountStateRequest(bool Enabled);
 record CreateDelegationRequest(Guid ProgramId, Guid DelegatorUserId, Guid DelegateUserId, ProgramRole Role, DateTimeOffset StartsAt, DateTimeOffset EndsAt, string Reason);
+record CreateArtifactSchemaRequest(Guid ProjectId,string Key,string Name,string AppliesTo,string Description);
+record CreateSchemaFieldRequest(string Key,string Label,SchemaFieldType Type,bool IsRequired,int SortOrder,string OptionsJson);
+record CreateSpecificationRequest(Guid ProjectId,string DocumentNumber,string Title,string Level,string Description);
+record CreateSectionRequest(Guid? ParentId,int Position,string Heading);
+record CreateCommentRequest(Guid? RevisionId,Guid? ParentCommentId,string Body,List<string>? Mentions);
+record ResolveCommentRequest(string? Disposition);
+record CreateSavedViewRequest(Guid ProjectId,string Name,string QueryJson,string ColumnsJson,bool IsShared);
+record BulkRequirementRequest(Guid ProjectId,List<Guid> ArtifactIds,string Tag,Guid? SpecificationId,Guid? SectionId);
+record BulkJobPayload(List<Guid> ArtifactIds,string Tag,Guid? SpecificationId,Guid? SectionId);
+record CommitImportRequest(Guid TargetReleaseId,string BaseNumber,string Title,string Problem,string Analysis,string Solution,ChangeRequestType Type=ChangeRequestType.Software);
 
 static class IdentityHttpExtensions
 {
@@ -850,6 +969,12 @@ static class IdentityHttpExtensions
         var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct); if (programId is null) return false;
         foreach (var role in roles) if (await identity.HasRoleAsync(context.UserAccount(), programId.Value, role, DateTimeOffset.UtcNow, ct)) return true;
         return false;
+    }
+    public static async Task<bool> HasProjectAccessAsync(this HttpContext context, AeroLinkDbContext db, Guid projectId, CancellationToken ct)
+    {
+        var actor=context.UserAccount();if(actor.IsAdministrator)return true;
+        var programId=await db.Projects.Where(x=>x.Id==projectId).Select(x=>(Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
+        return programId is not null&&actor.Programs.Any(x=>x.ProgramId==programId.Value);
     }
 }
 
