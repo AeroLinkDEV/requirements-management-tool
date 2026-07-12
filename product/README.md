@@ -23,6 +23,9 @@ This directory contains the real application foundation. The visual showcase rem
 - stable requirement identities separated from immutable requirement revisions
 - deterministic baseline materialization that applies Introduce, Modify, and Retire changes over an exact predecessor baseline
 - generated SWRD views and effective-requirement SHA-256 manifests traceable to source SCRs and software builds
+- reusable, revision-controlled test procedures with many-to-many links to exact requirement revisions
+- externally executed Pass, Fail, and Blocked results with configuration, human determination, and evidence references
+- immutable retest chains and release/build-specific coverage and verified-status dashboards
 
 ## Run locally
 

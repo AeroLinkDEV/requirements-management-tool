@@ -3,6 +3,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -24,6 +25,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<RequirementArtifact> Requirements => Set<RequirementArtifact>();
     public DbSet<RequirementRevision> RequirementRevisions => Set<RequirementRevision>();
     public DbSet<BaselineRequirementSelection> BaselineRequirements => Set<BaselineRequirementSelection>();
+    public DbSet<TestProcedure> TestProcedures => Set<TestProcedure>();
+    public DbSet<TestProcedureRevision> TestProcedureRevisions => Set<TestProcedureRevision>();
+    public DbSet<TestRequirementCoverage> TestCoverage => Set<TestRequirementCoverage>();
+    public DbSet<TestExecution> TestExecutions => Set<TestExecution>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -176,6 +181,39 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<RequirementArtifact>().WithMany().HasForeignKey(x => x.ArtifactId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TestProcedure>(b =>
+        {
+            b.ToTable("test_procedures"); b.HasKey(x => x.Id); b.Property(x => x.BaseNumber).HasMaxLength(30).IsRequired();
+            b.Property(x => x.Title).HasMaxLength(300).IsRequired(); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.BaseNumber }).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TestProcedureRevision>(b =>
+        {
+            b.ToTable("test_procedure_revisions"); b.HasKey(x => x.Id); b.Property(x => x.Objective).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.Preconditions).HasMaxLength(8000); b.Property(x => x.Steps).HasMaxLength(16000).IsRequired();
+            b.Property(x => x.ExpectedResult).HasMaxLength(8000).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired(); b.HasIndex(x => new { x.ProcedureId, x.Revision }).IsUnique();
+            b.HasOne<TestProcedure>().WithMany().HasForeignKey(x => x.ProcedureId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TestRequirementCoverage>(b =>
+        {
+            b.ToTable("test_requirement_coverage"); b.HasKey(x => x.Id);
+            b.HasIndex(x => new { x.ProcedureRevisionId, x.RequirementRevisionId }).IsUnique(); b.HasIndex(x => x.RequirementRevisionId);
+            b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.RequirementRevisionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TestExecution>(b =>
+        {
+            b.ToTable("test_executions"); b.HasKey(x => x.Id); b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.ExecutedBy).HasMaxLength(100).IsRequired(); b.Property(x => x.Configuration).HasMaxLength(4000);
+            b.Property(x => x.Determination).HasMaxLength(8000).IsRequired(); b.Property(x => x.EvidenceReference).HasMaxLength(2000);
+            b.HasIndex(x => new { x.ProjectId, x.ExecutedAt }); b.HasIndex(x => x.ProcedureRevisionId); b.HasIndex(x => x.SoftwareBuildId);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareBuild>().WithMany().HasForeignKey(x => x.SoftwareBuildId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestExecution>().WithMany().HasForeignKey(x => x.RetestOfExecutionId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

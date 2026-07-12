@@ -4,6 +4,7 @@ import ScrEditor from "./ScrEditor";
 import ScrWorkspace from "./ScrWorkspace";
 import BaselineCenter from "./BaselineCenter";
 import HistoryExplorer from "./HistoryExplorer";
+import VerificationCenter from "./VerificationCenter";
 import "./App.css";
 import "./Onboarding.css";
 import "./DashboardInteractions.css";
@@ -47,7 +48,7 @@ function App() {
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
     [selectedScrId, setSelectedScrId] = useState(""),
-    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history">("dashboard");
+    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "verification">("dashboard");
   const loadWorkspaces = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/workspaces`),
@@ -219,6 +220,8 @@ function App() {
         onOpenScr={(id) => { setSelectedScrId(id); setView("scr"); }}
       />
     );
+  if (view === "verification" && project && release)
+    return <VerificationCenter api={API} projectId={project.project.id} releaseId={release.id} onBack={() => setView("dashboard")}/>;
   return (
     <div className="shell">
       <aside>
@@ -253,6 +256,7 @@ function App() {
           ].map((x, i) => (
             <button className={i === 0 ? "active" : ""} key={x} onClick={() => {
               if (x.includes("Baselines")) setView("baselines");
+              if (x.includes("Verification")) setView("verification");
               if (x.includes("Change Requests") || x.includes("Requirements") || x.includes("Traceability")) setView("history");
             }}>
               {x}
