@@ -6,6 +6,7 @@ using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Releases;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -22,7 +23,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
     public async Task<FmsShowcaseSummary> EnsureSeededAsync(CancellationToken ct = default)
     {
         var existing = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == ProgramCode, ct);
-        if (existing is not null) return await SummarizeAsync(existing.Id, ct);
+        if (existing is not null) { await EnsureReleaseCampaignAsync(existing.Id, ct); return await SummarizeAsync(existing.Id, ct); }
 
         var start = new DateTimeOffset(2024, 1, 8, 14, 0, 0, TimeSpan.Zero);
         var program = new ProgramRecord("Flight Management System Live Program", ProgramCode);
@@ -94,7 +95,27 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var baseline16 = new CandidateBaseline("SWBL-00000016", 0, project.Id, release16.Id, baseline15.Id, "FMS 1.6 Working Candidate", "cm.fms", start.AddDays(310));
         foreach (var request in activeRequests.Where(x => x.State == ScrState.Approved).Take(2)) baseline16.Select(request, "cm.fms", start.AddDays(311));
         db.CandidateBaselines.Add(baseline16); await db.SaveChangesAsync(ct);
+        await EnsureReleaseCampaignAsync(program.Id, ct);
         return await SummarizeAsync(program.Id, ct);
+    }
+
+    private async Task EnsureReleaseCampaignAsync(Guid programId, CancellationToken ct)
+    {
+        var project = await db.Projects.SingleAsync(x => x.ProgramId == programId, ct); var release = await db.Releases.SingleAsync(x => x.ProjectId == project.Id && x.Version == "1.6", ct);
+        if (await db.ReleaseCampaigns.AnyAsync(x => x.ReleaseId == release.Id, ct)) return;
+        var baseline = await db.CandidateBaselines.SingleAsync(x => x.ReleaseId == release.Id, ct); var now = new DateTimeOffset(2024, 11, 15, 14, 0, 0, TimeSpan.Zero);
+        var campaign = new ReleaseCampaign(project.Id, release.Id, baseline.Id, "FMS 1.6 Release Campaign", "release.manager", now); campaign.StartVerification("release.manager", now.AddMinutes(1));
+        db.ReleaseCampaigns.Add(campaign); var requests = await db.SystemChangeRequests.Include(x => x.RequirementChanges).Where(x => x.TargetReleaseId == release.Id).OrderBy(x => x.BaseNumber).ToListAsync(ct);
+        foreach (var request in requests)
+        {
+            var dispositions = request.RequirementChanges.Select(change => new ChangeImpactDisposition(campaign.Id, request.Id, ImpactKind.Requirement, change.DisplayNumber, $"Confirm the proposed {change.Kind} requirement revision is complete and correctly allocated.")).ToList();
+            dispositions.Add(new(campaign.Id, request.Id, ImpactKind.Traceability, request.DisplayNumber, "Update and review all upstream and downstream trace links affected by this change."));
+            dispositions.Add(new(campaign.Id, request.Id, ImpactKind.Verification, request.DisplayNumber, "Update test coverage and execute the required verification on the selected 1.6 build."));
+            dispositions.Add(new(campaign.Id, request.Id, ImpactKind.Document, request.DisplayNumber, "Regenerate every controlled output affected by this change."));
+            if (request.State == ScrState.SelectedForBaseline) foreach (var item in dispositions) item.Disposition(ImpactDispositionState.Addressed, "Completed during approved change integration; final release verification remains governed by campaign gates.", "release.manager", now.AddDays(1));
+            db.ImpactDispositions.AddRange(dispositions);
+        }
+        await db.SaveChangesAsync(ct);
     }
 
     private static SystemChangeRequest BuildHistoricalRequest(string number, ChangeRequestType type, RequirementLevel level, int count, int offset, Guid projectId, Guid releaseId, DateTimeOffset now, string label)

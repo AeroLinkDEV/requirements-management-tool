@@ -29,6 +29,11 @@ This directory contains the real application foundation. The visual showcase rem
 - reusable, revision-controlled test procedures with many-to-many links to exact requirement revisions
 - externally executed Pass, Fail, and Blocked results with configuration, human determination, and evidence references
 - immutable retest chains and release/build-specific coverage and verified-status dashboards
+- governed FMS 1.6 release campaign with nine computed readiness gates, explicit impact dispositions, build selection, and ordered release approval
+- checksum-protected evidence upload, download, and exact test-execution linkage with cross-project isolation
+- live 1.5-to-1.6 comparison covering effective and proposed requirement changes
+- deterministic, downloadable SYSRD, HLR SWRD, LLR SWRD, and three test-procedure documents in DOCX and PDF
+- formal atomic release that binds the approved baseline, selected build, controlled outputs, and release manifest hash
 
 ## Run locally
 

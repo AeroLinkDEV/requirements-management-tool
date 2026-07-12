@@ -31,6 +31,7 @@ The [AeroLink product application](product/README.md) is separate from the origi
 | [Design vision and dashboards](DESIGN_VISION_AND_DASHBOARDS.md) | North-star mockups, role-aware dashboards, trusted metrics, and showcase direction |
 | [FMS 3.3 showcase story](SHOWCASE_STORY_FMS_3_3.md) | Canonical fictional data and walkthrough for the interactive concept |
 | [FMS live showcase dataset](FMS_LIVE_SHOWCASE_DATASET.md) | Deterministic released 1.5 lifecycle baseline and active 1.6 development program |
+| [FMS 1.6 release campaign](FMS_1_6_RELEASE_CAMPAIGN.md) | Governed change, verification, evidence, readiness, review, and release workflow |
 | [Identifiers and requirement fields proposal](IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md) | Proposed numbering, revision display, and mandatory-field policy |
 | [System-level workflow](SYSTEM_LEVEL_WORKFLOW.md) | Decision-complete first-slice behavior and paper scenarios |
 | [Feature catalog](FEATURE_CATALOG.md) | Stable, phased capability inventory |

@@ -5,7 +5,7 @@ using AeroLink.Domain.Common;
 
 namespace AeroLink.Domain.Baselines;
 
-public enum CandidateBaselineState { Draft, Frozen }
+public enum CandidateBaselineState { Draft, Frozen, Released }
 
 public sealed class BaselineScrSelection
 {
@@ -105,6 +105,12 @@ public sealed class CandidateBaseline
         if (string.IsNullOrWhiteSpace(requirementsHash) || requirementsHash.Length != 64) throw new DomainException("A valid requirement manifest hash is required.");
         RequirementsHash = requirementsHash; RequirementsMaterializedAt = now;
         Event("RequirementsMaterialized", actorId, $"Materialized {activeCount} effective requirement revisions with hash {requirementsHash}.", now);
+    }
+
+    public void MarkReleased(string actorId, DateTimeOffset now)
+    {
+        if (State != CandidateBaselineState.Frozen || RequirementsMaterializedAt is null) throw new DomainException("Only a frozen, materialized baseline can be released.");
+        State = CandidateBaselineState.Released; Event("BaselineReleased", actorId, $"Released immutable baseline {DisplayNumber}.", now);
     }
 
     private void EnsureDraft() { if (State != CandidateBaselineState.Draft) throw new DomainException("A frozen baseline is immutable."); }

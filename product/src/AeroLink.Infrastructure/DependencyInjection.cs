@@ -22,6 +22,9 @@ public static class DependencyInjection
         services.AddScoped<IBaselineRepository, BaselineRepository>();
         services.AddScoped<RequirementBaselineMaterializer>();
         services.AddScoped<FmsShowcaseSeeder>();
+        services.AddSingleton<EvidenceFileStore>();
+        services.AddScoped<ReleaseReadinessService>();
+        services.AddScoped<ControlledOutputGenerator>();
         return services;
     }
 }

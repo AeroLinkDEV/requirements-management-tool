@@ -5,6 +5,7 @@ using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Releases;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -32,6 +33,12 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<TestExecution> TestExecutions => Set<TestExecution>();
     public DbSet<RequirementTraceLink> RequirementTraces => Set<RequirementTraceLink>();
     public DbSet<ControlledDocument> ControlledDocuments => Set<ControlledDocument>();
+    public DbSet<ReleaseCampaign> ReleaseCampaigns => Set<ReleaseCampaign>();
+    public DbSet<ReleaseApproval> ReleaseApprovals => Set<ReleaseApproval>();
+    public DbSet<ReleaseCampaignEvent> ReleaseCampaignEvents => Set<ReleaseCampaignEvent>();
+    public DbSet<ChangeImpactDisposition> ImpactDispositions => Set<ChangeImpactDisposition>();
+    public DbSet<EvidenceRecord> EvidenceRecords => Set<EvidenceRecord>();
+    public DbSet<TestExecutionEvidence> TestExecutionEvidence => Set<TestExecutionEvidence>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -239,6 +246,38 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<ReleaseCampaign>(b =>
+        {
+            b.ToTable("release_campaigns"); b.HasKey(x => x.Id); b.Property(x => x.Name).HasMaxLength(300).IsRequired(); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.ReleaseHash).HasMaxLength(64); b.HasIndex(x => new { x.ProjectId, x.ReleaseId }).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict); b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict); b.HasOne<SoftwareBuild>().WithMany().HasForeignKey(x => x.SoftwareBuildId).OnDelete(DeleteBehavior.Restrict);
+            b.HasMany(x => x.Approvals).WithOne().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Restrict); b.HasMany(x => x.Events).WithOne().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ReleaseApproval>(b =>
+        {
+            b.ToTable("release_approvals"); b.HasKey(x => x.Id); b.Property(x => x.ApproverId).HasMaxLength(100).IsRequired(); b.Property(x => x.ApproverName).HasMaxLength(200).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.HasIndex(x => new { x.CampaignId, x.Position }).IsUnique();
+        });
+        modelBuilder.Entity<ReleaseCampaignEvent>(b =>
+        {
+            b.ToTable("release_campaign_events"); b.HasKey(x => x.Id); b.Property(x => x.EventType).HasMaxLength(100).IsRequired(); b.Property(x => x.ActorId).HasMaxLength(100).IsRequired(); b.Property(x => x.Detail).HasMaxLength(4000).IsRequired(); b.HasIndex(x => new { x.CampaignId, x.OccurredAt });
+        });
+        modelBuilder.Entity<ChangeImpactDisposition>(b =>
+        {
+            b.ToTable("change_impact_dispositions"); b.HasKey(x => x.Id); b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(30); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.ArtifactReference).HasMaxLength(100).IsRequired(); b.Property(x => x.Description).HasMaxLength(2000).IsRequired(); b.Property(x => x.Rationale).HasMaxLength(2000); b.Property(x => x.DispositionedBy).HasMaxLength(100);
+            b.HasIndex(x => new { x.CampaignId, x.ScrId, x.Kind, x.ArtifactReference }).IsUnique(); b.HasOne<ReleaseCampaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Restrict); b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ScrId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<EvidenceRecord>(b =>
+        {
+            b.ToTable("evidence_records"); b.HasKey(x => x.Id); b.Property(x => x.OriginalFileName).HasMaxLength(260).IsRequired(); b.Property(x => x.ContentType).HasMaxLength(200); b.Property(x => x.Sha256).HasMaxLength(64).IsRequired(); b.Property(x => x.StorageKey).HasMaxLength(500).IsRequired(); b.Property(x => x.UploadedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.Sha256 }); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TestExecutionEvidence>(b =>
+        {
+            b.ToTable("test_execution_evidence"); b.HasKey(x => x.Id); b.HasIndex(x => new { x.TestExecutionId, x.EvidenceId }).IsUnique();
+            b.HasOne<TestExecution>().WithMany().HasForeignKey(x => x.TestExecutionId).OnDelete(DeleteBehavior.Restrict); b.HasOne<EvidenceRecord>().WithMany().HasForeignKey(x => x.EvidenceId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
@@ -254,6 +293,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         }
         foreach (var entry in ChangeTracker.Entries<BaselineScrSelection>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         foreach (var entry in ChangeTracker.Entries<BaselineEvent>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
+        foreach (var entry in ChangeTracker.Entries<ReleaseCampaignEvent>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         foreach (var entry in ChangeTracker.Entries<SystemChangeRequest>())
         {
             if (entry.State == EntityState.Added) entry.Property(x => x.Version).CurrentValue = 1;

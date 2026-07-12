@@ -6,6 +6,7 @@ import BaselineCenter from "./BaselineCenter";
 import HistoryExplorer from "./HistoryExplorer";
 import VerificationCenter from "./VerificationCenter";
 import LifecycleExplorer from "./LifecycleExplorer";
+import ReleaseCampaignCenter from "./ReleaseCampaignCenter";
 import "./App.css";
 import "./Onboarding.css";
 import "./DashboardInteractions.css";
@@ -27,6 +28,7 @@ type Metrics = {
   approved: number;
 };
 type Overview = {systemRequirements:number;highLevelRequirements:number;lowLevelRequirements:number;historicalScrs:number;historicalSwcrs:number;activeRequests:number;traceLinks:number;testProcedures:number;testExecutions:number;controlledDocuments:number;softwareBuilds:number};
+type CampaignSummary={id:string;releaseId:string;state:string;readiness:{percent:number;readyForRelease:boolean}}
 type Release = { id: string; version: string; isReleased: boolean };
 type Workspace = {
   program: { id: string; name: string; code: string };
@@ -46,13 +48,14 @@ function App() {
       approved: 0,
     }),
     [overview,setOverview]=useState<Overview>(),
+    [campaigns,setCampaigns]=useState<CampaignSummary[]>([]),
     [workspaces, setWorkspaces] = useState<Workspace[]>([]),
     [activeId, setActiveId] = useState(""),
     [connected, setConnected] = useState(false),
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
     [selectedScrId, setSelectedScrId] = useState(""),
-    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "verification" | "lifecycle">("dashboard");
+    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "verification" | "lifecycle" | "release">("dashboard");
   const loadWorkspaces = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/workspaces`),
@@ -71,15 +74,17 @@ function App() {
   const loadData = useCallback(async () => {
     if (!project) return;
     try {
-      const [a, b, c] = await Promise.all([
+      const [a, b, c, d] = await Promise.all([
         fetch(`${API}/api/scrs?projectId=${project.project.id}&releaseId=${release?.id ?? ''}`),
         fetch(`${API}/api/dashboard?projectId=${project.project.id}&releaseId=${release?.id ?? ''}`),
         fetch(`${API}/api/showcase/overview?projectId=${project.project.id}`),
+        fetch(`${API}/api/release-campaigns?projectId=${project.project.id}`),
       ]);
       const page = await a.json();
       setScrs(Array.isArray(page.items) ? page.items : []);
       setMetrics(await b.json());
       if(c.ok)setOverview(await c.json());
+      if(d.ok)setCampaigns(await d.json());
     } catch {
       setConnected(false);
     }
@@ -230,6 +235,8 @@ function App() {
     return <VerificationCenter api={API} projectId={project.project.id} releaseId={release.id} onBack={() => setView("dashboard")}/>;
   if (view === "lifecycle" && project)
     return <LifecycleExplorer api={API} projectId={project.project.id} releases={project.releases} onBack={() => setView("dashboard")}/>;
+  if(view==="release"&&project)
+    return <ReleaseCampaignCenter api={API} projectId={project.project.id} releases={project.releases} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}}/>;
   return (
     <div className="shell">
       <aside>
@@ -262,11 +269,13 @@ function App() {
             "⌘  Baselines",
             "↗  Traceability",
             "▤  Documents",
+            "◆  Release Campaign",
           ].map((x, i) => (
             <button className={i === 0 ? "active" : ""} key={x} onClick={() => {
               if (x.includes("Baselines")) setView("baselines");
               if (x.includes("Verification")) setView("verification");
               if (x.includes("Traceability") || x.includes("Documents")) setView("lifecycle");
+              if (x.includes("Release Campaign")) setView("release");
               if (x.includes("Change Requests") || x.includes("Requirements")) setView("history");
             }}>
               {x}
@@ -310,13 +319,13 @@ function App() {
             </p>
           </div>
           <div className="readiness">
-            <b>0%</b>
+            <b>{campaigns.find(x=>x.releaseId===release?.id)?.readiness.percent??0}%</b>
             <span>Release readiness</span>
             <div>
-              <i style={{ width: 0 }} />
+              <i style={{ width: `${campaigns.find(x=>x.releaseId===release?.id)?.readiness.percent??0}%` }} />
             </div>
           </div>
-          <button>Configure release →</button>
+          <button onClick={()=>setView("release")}>Configure release →</button>
         </section>
         <section className="metrics">
           {[

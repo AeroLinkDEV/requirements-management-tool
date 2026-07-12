@@ -1,0 +1,44 @@
+using AeroLink.Domain.Baselines;
+using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Releases;
+using AeroLink.Domain.Verification;
+using Microsoft.EntityFrameworkCore;
+
+namespace AeroLink.Infrastructure.Persistence;
+
+public sealed record ReadinessGate(string Code, string Name, bool Complete, int Completed, int Total, string Detail, string Action);
+public sealed record ReleaseReadiness(int Percent, bool ReadyForRelease, IReadOnlyList<ReadinessGate> Gates);
+
+public sealed class ReleaseReadinessService(AeroLinkDbContext db)
+{
+    public async Task<ReleaseReadiness> CalculateAsync(Guid campaignId, CancellationToken ct)
+    {
+        var campaign = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).SingleAsync(x => x.Id == campaignId, ct);
+        var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == campaign.BaselineId, ct);
+        var requests = await db.SystemChangeRequests.AsNoTracking().Where(x => x.TargetReleaseId == campaign.ReleaseId && x.State != ScrState.Deferred).ToListAsync(ct);
+        var impacts = await db.ImpactDispositions.AsNoTracking().Where(x => x.CampaignId == campaignId).ToListAsync(ct);
+        var members = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct); var revisionIds = members.Select(x => x.RevisionId).ToList();
+        var derivedIds = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id where artifact.Level != RequirementLevel.System select member.RevisionId).ToListAsync(ct);
+        var tracedDerivedIds = await db.RequirementTraces.AsNoTracking().Where(x => derivedIds.Contains(x.SourceRevisionId)).Select(x => x.SourceRevisionId).Distinct().ToListAsync(ct);
+        var coverage = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct); var coveredIds = coverage.Select(x => x.RequirementRevisionId).Distinct().ToHashSet();
+        var procedureIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList(); var executions = await db.TestExecutions.AsNoTracking().Where(x => procedureIds.Contains(x.ProcedureRevisionId) && (campaign.SoftwareBuildId == null || x.SoftwareBuildId == campaign.SoftwareBuildId)).ToListAsync(ct);
+        var latestRuns = executions.GroupBy(x => x.ProcedureRevisionId).Select(x => x.OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).First()).ToList();
+        var runIds = latestRuns.Select(x => x.Id).ToList(); var evidenceRunIds = await db.TestExecutionEvidence.AsNoTracking().Where(x => runIds.Contains(x.TestExecutionId)).Select(x => x.TestExecutionId).Distinct().ToListAsync(ct);
+        var docs = await db.ControlledDocuments.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
+        var integrated = requests.Count(x => x.State == ScrState.SelectedForBaseline); var disposed = impacts.Count(x => x.State != ImpactDispositionState.Pending);
+        var gates = new List<ReadinessGate>
+        {
+            new("change_control","Change requests integrated",requests.Count > 0 && integrated == requests.Count,integrated,requests.Count,$"{requests.Count-integrated} non-deferred SCR/SWCR records remain outside the candidate baseline.","Approve and select every included change, or formally defer it."),
+            new("impact_disposition","Impact analysis dispositioned",impacts.Count > 0 && disposed == impacts.Count,disposed,impacts.Count,$"{impacts.Count-disposed} impact findings remain pending.","Disposition requirement, trace, verification, and document impacts."),
+            new("baseline","Requirement baseline materialized",baseline.State is CandidateBaselineState.Frozen or CandidateBaselineState.Released && baseline.RequirementsMaterializedAt is not null,baseline.RequirementsMaterializedAt is null?0:1,1,"The release needs an exact frozen and materialized requirement set.","Freeze the candidate and materialize its requirements."),
+            new("traceability","Trace network complete",members.Count > 0 && tracedDerivedIds.Count == derivedIds.Count,tracedDerivedIds.Count,derivedIds.Count,"Every derived HLR/LLR must retain an exact parent link.","Resolve orphan and suspect trace links."),
+            new("coverage","Requirement coverage complete",members.Count > 0 && coveredIds.Count == members.Count,coveredIds.Count,members.Count,$"{members.Count-coveredIds.Count} effective requirement revisions have no procedure link.","Add version-aware test coverage."),
+            new("verification","Required verification passed",procedureIds.Count > 0 && latestRuns.Count == procedureIds.Count && latestRuns.All(x=>x.Outcome==TestOutcome.Pass),latestRuns.Count(x=>x.Outcome==TestOutcome.Pass),procedureIds.Count,$"{procedureIds.Count-latestRuns.Count(x=>x.Outcome==TestOutcome.Pass)} required procedures lack a latest Pass.","Execute tests, resolve failures, and record retests."),
+            new("evidence","Evidence uploaded and checksummed",latestRuns.Count > 0 && evidenceRunIds.Count == latestRuns.Count,evidenceRunIds.Count,latestRuns.Count,$"{latestRuns.Count-evidenceRunIds.Count} latest results lack uploaded evidence.","Upload evidence files for every latest required result."),
+            new("documents","Controlled outputs generated",docs.Select(x=>x.Type).Distinct().Count()>=6,docs.Select(x=>x.Type).Distinct().Count(),6,"The release package requires six controlled document types.","Generate SYSRD, both SWRDs, and three test-procedure documents."),
+            new("release_approval","Release approval complete",campaign.Approvals.Count>0 && campaign.Approvals.All(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count==0?3:campaign.Approvals.Count,"Ordered release approval must be unanimous.","Start release review and collect every approval.")
+        };
+        var percent = (int)Math.Round(gates.Average(x => x.Total == 0 ? (x.Complete ? 100 : 0) : Math.Min(100, x.Completed * 100d / x.Total)));
+        return new(percent, gates.All(x => x.Complete), gates);
+    }
+}

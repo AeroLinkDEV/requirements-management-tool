@@ -5,6 +5,9 @@ using AeroLink.Domain.Contracts;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Verification;
 using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Releases;
+using System.Security.Cryptography;
+using System.Text;
 using AeroLink.Infrastructure;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -425,6 +428,136 @@ app.MapGet("/api/documents", async (Guid projectId, AeroLinkDbContext db, Cancel
     return Results.Ok(rows.Select(x => new { x.Id, x.type, displayNumber = x.DocumentNumber + "." + x.Revision.ToString("D2"), x.Title, x.ContentHash, x.ArtifactCount, x.GeneratedAt, x.release, x.baselineId, x.baseline }));
 });
 
+app.MapGet("/api/documents/{id:guid}/download", async (Guid id, string? format, ControlledOutputGenerator generator, CancellationToken ct) =>
+{
+    var output = await generator.GenerateAsync(id, format ?? "docx", ct); return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
+});
+
+app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, GenerateDocumentsRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (baseline is null) return Results.NotFound(); if (baseline.RequirementsMaterializedAt is null) return Results.BadRequest(new { error = "Materialize the requirement baseline before generating controlled outputs." });
+    var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == baseline.ReleaseId, ct); var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == baseline.ProjectId, ct);
+    var requirementCounts = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id group artifact by artifact.Level into g select new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+    var testCounts = await db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == project.Id).GroupBy(x => x.Level).Select(x => new { x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+    var suffix = release.Version.Replace(".", ""); var specs = new[] {
+        (ControlledDocumentType.Sysrd,$"SYSRD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} System Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.System)),
+        (ControlledDocumentType.SwrdHighLevel,$"HLRD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} High-Level Software Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.HighLevel)),
+        (ControlledDocumentType.SwrdLowLevel,$"LLRD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} Low-Level Software Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.LowLevel)),
+        (ControlledDocumentType.SystemTestProcedures,$"SYSTD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} System Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.System)),
+        (ControlledDocumentType.HighLevelTestProcedures,$"HLRTD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} HLR Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.HighLevel)),
+        (ControlledDocumentType.LowLevelTestProcedures,$"LLRTD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} LLR Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.LowLevel)) };
+    var existing = await db.ControlledDocuments.Where(x => x.BaselineId == id).ToListAsync(ct); foreach (var spec in specs.Where(s => existing.All(x => x.Type != s.Item1))) { var content = $"{baseline.RequirementsHash}|{spec.Item1}|{spec.Item4}|{request.ActorId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant(); db.ControlledDocuments.Add(new ControlledDocument(project.Id, release.Id, baseline.Id, spec.Item1, spec.Item2, spec.Item3, 0, hash, spec.Item4, DateTimeOffset.UtcNow)); }
+    await db.SaveChangesAsync(ct); return Results.Ok(new { generated = await db.ControlledDocuments.CountAsync(x => x.BaselineId == id, ct) });
+});
+
+app.MapGet("/api/release-campaigns", async (Guid projectId, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
+{
+    var campaigns = (await db.ReleaseCampaigns.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct)).OrderByDescending(x => x.CreatedAt).ToList(); var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToDictionaryAsync(x => x.Id, ct);
+    var output = new List<object>(); foreach (var campaign in campaigns) { var status = await readiness.CalculateAsync(campaign.Id, ct); output.Add(new { campaign.Id, campaign.Name, state = campaign.State.ToString(), campaign.ReleaseId, release = releases[campaign.ReleaseId].Version, campaign.BaselineId, campaign.SoftwareBuildId, campaign.OwnerId, campaign.CreatedAt, campaign.ReleasedAt, campaign.ReleaseHash, readiness = status }); }
+    return Results.Ok(output);
+});
+
+app.MapGet("/api/release-campaigns/{id:guid}", async (Guid id, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
+{
+    var campaign = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+    var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == campaign.ReleaseId, ct); var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == campaign.BaselineId, ct);
+    var impacts = await (from impact in db.ImpactDispositions.AsNoTracking().Where(x => x.CampaignId == id) join scr in db.SystemChangeRequests.AsNoTracking() on impact.ScrId equals scr.Id orderby scr.BaseNumber, impact.Kind select new { impact.Id, impact.ScrId, scr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, scr.Title, kind = impact.Kind.ToString(), impact.ArtifactReference, impact.Description, state = impact.State.ToString(), impact.Rationale, impact.DispositionedBy, impact.DispositionedAt }).ToListAsync(ct);
+    return Results.Ok(new { campaign.Id, campaign.Name, state = campaign.State.ToString(), campaign.ProjectId, campaign.ReleaseId, release = release.Version, campaign.BaselineId, baseline = baseline.DisplayNumber, baselineState = baseline.State.ToString(), baseline.RequirementsHash, campaign.SoftwareBuildId, campaign.OwnerId, campaign.CreatedAt, campaign.ReleasedAt, campaign.ReleaseHash,
+        readiness = await readiness.CalculateAsync(id, ct), impacts, approvals = campaign.Approvals.OrderBy(x => x.Position).Select(x => new { x.Position, x.ApproverId, x.ApproverName, state = x.State.ToString(), x.ApprovedAt }), events = campaign.Events.OrderByDescending(x => x.OccurredAt).Select(x => new { x.EventType, x.ActorId, x.Detail, x.OccurredAt }) });
+});
+
+app.MapPut("/api/impact-dispositions/{id:guid}", async (Guid id, DispositionImpactRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var impact = await db.ImpactDispositions.SingleOrDefaultAsync(x => x.Id == id, ct); if (impact is null) return Results.NotFound();
+    try { impact.Disposition(request.State, request.Rationale, request.ActorId, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/release-campaigns/{id:guid}/verification-build", async (Guid id, SelectBuildRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+    if (!await db.SoftwareBuilds.AnyAsync(x => x.Id == request.SoftwareBuildId && x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId, ct)) return Results.BadRequest(new { error = "Select a software build from this campaign release." });
+    try { campaign.SelectVerificationBuild(request.SoftwareBuildId, request.ActorId, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/release-campaigns/{id:guid}/review", async (Guid id, StartReleaseReviewRequest request, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
+{
+    var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound(); var status = await readiness.CalculateAsync(id, ct);
+    var blockers = status.Gates.Where(x => x.Code != "release_approval" && !x.Complete).Select(x => x.Name).ToList(); if (blockers.Count > 0) return Results.BadRequest(new { error = "Resolve readiness gates before release review.", blockers });
+    try { campaign.BeginReleaseReview(request.ActorId, request.Approvers.Select(x => (x.UserId, x.Name)).ToList(), DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/release-campaigns/{id:guid}/approve", async (Guid id, CampaignActorRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+    try { var complete = campaign.Approve(request.ActorId, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.Ok(new { complete }); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/release-campaigns/{id:guid}/release", async (Guid id, CompleteReleaseRequest request, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
+{
+    await using var transaction = await db.Database.BeginTransactionAsync(ct); var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+    var status = await readiness.CalculateAsync(id, ct); if (!status.ReadyForRelease) return Results.BadRequest(new { error = "Every release-readiness gate must be complete.", blockers = status.Gates.Where(x => !x.Complete).Select(x => x.Name) });
+    if (campaign.SoftwareBuildId is null) return Results.BadRequest(new { error = "Select the verified release build." });
+    var baseline = await db.CandidateBaselines.Include(x => x.Events).SingleAsync(x => x.Id == campaign.BaselineId, ct); var release = await db.Releases.SingleAsync(x => x.Id == campaign.ReleaseId, ct); var build = await db.SoftwareBuilds.SingleAsync(x => x.Id == campaign.SoftwareBuildId, ct);
+    var documents = await db.ControlledDocuments.AsNoTracking().Where(x => x.BaselineId == baseline.Id).OrderBy(x => x.Type).Select(x => x.ContentHash).ToListAsync(ct); var manifest = string.Join("|", baseline.ContentHash, baseline.RequirementsHash, build.BuildNumber, string.Join(";", documents)); var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
+    try { campaign.Release(build.Id, hash, request.ActorId, DateTimeOffset.UtcNow); baseline.MarkReleased(request.ActorId, DateTimeOffset.UtcNow); release.MarkReleased(DateTimeOffset.UtcNow); build.MarkReleased(DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.Ok(new { release = release.Version, build.BuildNumber, releaseHash = hash }); }
+    catch (Exception ex) when (ex is DomainException or InvalidOperationException) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/evidence", async (HttpRequest http, AeroLinkDbContext db, EvidenceFileStore store, CancellationToken ct) =>
+{
+    if (!http.HasFormContentType) return Results.BadRequest(new { error = "Use multipart form data." }); var form = await http.ReadFormAsync(ct); var file = form.Files.GetFile("file");
+    if (file is null || file.Length == 0) return Results.BadRequest(new { error = "Select a non-empty evidence file." }); if (!Guid.TryParse(form["projectId"], out var projectId) || !await db.Projects.AnyAsync(x => x.Id == projectId, ct)) return Results.BadRequest(new { error = "A valid project is required." }); var uploadedBy = form["uploadedBy"].ToString();
+    try { await using var stream = file.OpenReadStream(); var stored = await store.StoreAsync(stream, file.FileName, file.ContentType, ct); var evidence = new EvidenceRecord(projectId, stored.OriginalFileName, stored.ContentType, stored.Size, stored.Sha256, stored.StorageKey, uploadedBy, DateTimeOffset.UtcNow); db.EvidenceRecords.Add(evidence); await db.SaveChangesAsync(ct); return Results.Created($"/api/evidence/{evidence.Id}", new { evidence.Id, evidence.OriginalFileName, evidence.ContentType, evidence.Size, evidence.Sha256, evidence.UploadedBy, evidence.UploadedAt }); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+}).DisableAntiforgery();
+
+app.MapPost("/api/test-executions/{executionId:guid}/evidence/{evidenceId:guid}", async (Guid executionId, Guid evidenceId, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var executionProject = await db.TestExecutions.AsNoTracking().Where(x => x.Id == executionId).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+    var evidenceProject = await db.EvidenceRecords.AsNoTracking().Where(x => x.Id == evidenceId).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+    if (executionProject is null || evidenceProject is null) return Results.NotFound();
+    if (executionProject != evidenceProject) return Results.BadRequest(new { error = "Evidence and execution must belong to the same project." });
+    if (await db.TestExecutionEvidence.AnyAsync(x => x.TestExecutionId == executionId && x.EvidenceId == evidenceId, ct)) return Results.Conflict(new { error = "Evidence is already linked." }); db.TestExecutionEvidence.Add(new TestExecutionEvidence(executionId, evidenceId)); await db.SaveChangesAsync(ct); return Results.NoContent();
+});
+
+app.MapGet("/api/evidence/{id:guid}", async (Guid id, AeroLinkDbContext db, EvidenceFileStore store, CancellationToken ct) =>
+{
+    var evidence = await db.EvidenceRecords.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); return evidence is null ? Results.NotFound() : Results.File(store.OpenRead(evidence.StorageKey), evidence.ContentType, evidence.OriginalFileName, enableRangeProcessing: true);
+});
+
+app.MapPost("/api/trace-links", async (CreateTraceLinkRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var revisions = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x => x.Id == request.SourceRevisionId || x.Id == request.TargetRevisionId)
+                           join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                           select new { revision.Id, artifact.ProjectId }).ToListAsync(ct);
+    if (revisions.Count != 2) return Results.BadRequest(new { error = "Both exact requirement revisions must exist." });
+    if (revisions.Any(x => x.ProjectId != request.ProjectId)) return Results.BadRequest(new { error = "Both revisions must belong to the selected project." });
+    try { var link = new RequirementTraceLink(request.ProjectId, request.SourceRevisionId, request.TargetRevisionId, request.Type, request.Rationale, DateTimeOffset.UtcNow); db.RequirementTraces.Add(link); await db.SaveChangesAsync(ct); return Results.Created($"/api/trace-links/{link.Id}", new { link.Id }); }
+    catch (Exception ex) when (ex is DomainException or DbUpdateException) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapDelete("/api/trace-links/{id:guid}", async (Guid id, AeroLinkDbContext db, CancellationToken ct) =>
+{ var link = await db.RequirementTraces.SingleOrDefaultAsync(x => x.Id == id, ct); if (link is null) return Results.NotFound(); db.RequirementTraces.Remove(link); await db.SaveChangesAsync(ct); return Results.NoContent(); });
+
+app.MapGet("/api/release-comparison", async (Guid projectId, Guid fromReleaseId, Guid toReleaseId, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId && (x.Id == fromReleaseId || x.Id == toReleaseId)).ToListAsync(ct); if (releases.Count != 2) return Results.BadRequest(new { error = "Select two releases from the same project." });
+    var baselines = await db.CandidateBaselines.AsNoTracking().Where(x => x.ProjectId == projectId && (x.ReleaseId == fromReleaseId || x.ReleaseId == toReleaseId)).ToListAsync(ct); var fromBaseline = baselines.Where(x => x.ReleaseId == fromReleaseId).OrderByDescending(x => x.FrozenAt).FirstOrDefault(); var toBaseline = baselines.Where(x => x.ReleaseId == toReleaseId).OrderByDescending(x => x.FrozenAt).FirstOrDefault();
+    async Task<Dictionary<string, (int Revision, string Statement, string Level)>> Set(Guid? baselineId) { if (baselineId is null) return []; var rows = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id select new { artifact.BaseNumber, revision.Revision, revision.Statement, Level = artifact.Level.ToString() }).ToListAsync(ct); return rows.ToDictionary(x => x.BaseNumber, x => (x.Revision, x.Statement, x.Level)); }
+    var effectiveAvailable = toBaseline?.RequirementsMaterializedAt is not null;
+    var from = effectiveAvailable ? await Set(fromBaseline?.Id) : []; var to = effectiveAvailable ? await Set(toBaseline?.Id) : []; var keys = from.Keys.Union(to.Keys).OrderBy(x => x).ToList();
+    var effective = keys.Select(key => { var hasFrom = from.TryGetValue(key, out var a); var hasTo = to.TryGetValue(key, out var b); var kind = !hasFrom ? "Added" : !hasTo ? "Retired" : a.Revision != b.Revision || a.Statement != b.Statement ? "Modified" : "Unchanged"; return new { baseNumber = key, kind, fromRevision = hasFrom ? a.Revision : (int?)null, toRevision = hasTo ? b.Revision : (int?)null, level = hasTo ? b.Level : a.Level }; }).ToList();
+    var requests = await db.SystemChangeRequests.AsNoTracking().Where(x => x.TargetReleaseId == toReleaseId).Include(x => x.RequirementChanges).OrderBy(x => x.BaseNumber).ToListAsync(ct);
+    var proposed = requests.SelectMany(scr => scr.RequirementChanges.Select(change => new { scrId = scr.Id, scr = scr.DisplayNumber, scr.Title, state = scr.State.ToString(), type = scr.Type.ToString(), change.DisplayNumber, level = change.Level.ToString(), kind = change.Kind.ToString(), change.Statement })).ToList();
+    return Results.Ok(new { fromRelease = releases.Single(x => x.Id == fromReleaseId).Version, toRelease = releases.Single(x => x.Id == toReleaseId).Version,
+        fromBaseline = fromBaseline?.DisplayNumber, toBaseline = toBaseline?.DisplayNumber, toMaterialized = effectiveAvailable,
+        summary = new { added = effective.Count(x => x.kind == "Added"), modified = effective.Count(x => x.kind == "Modified"), retired = effective.Count(x => x.kind == "Retired"), unchanged = effective.Count(x => x.kind == "Unchanged"), proposed = proposed.Count }, effective, proposed });
+});
+
 app.MapGet("/api/traceability", async (Guid projectId, Guid? baselineId, string? search, int page, int pageSize, AeroLinkDbContext db, CancellationToken ct) =>
 {
     page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
@@ -505,8 +638,9 @@ app.MapGet("/api/test-executions", async (Guid projectId, Guid? buildId, AeroLin
                       select new { execution.Id, procedureRevisionId = revision.Id, displayNumber = procedure.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
                           procedure.Title, outcome = execution.Outcome.ToString(), execution.ExecutedBy, execution.Configuration, execution.Determination,
                           execution.EvidenceReference, execution.ExecutedAt, execution.RecordedAt, execution.SoftwareBuildId, execution.RetestOfExecutionId };
-    var rows = await (db.Database.IsSqlite() ? rowsQuery.OrderByDescending(x => x.Id) : rowsQuery.OrderByDescending(x => x.ExecutedAt)).ToListAsync(ct);
-    return Results.Ok(rows);
+    var rows = await (db.Database.IsSqlite() ? rowsQuery.OrderByDescending(x => x.Id) : rowsQuery.OrderByDescending(x => x.ExecutedAt)).ToListAsync(ct); var rowIds = rows.Select(x => x.Id).ToList();
+    var evidence = await (from link in db.TestExecutionEvidence.AsNoTracking().Where(x => rowIds.Contains(x.TestExecutionId)) join item in db.EvidenceRecords.AsNoTracking() on link.EvidenceId equals item.Id select new { link.TestExecutionId, item.Id, item.OriginalFileName, item.Size, item.Sha256, item.UploadedAt }).ToListAsync(ct);
+    return Results.Ok(rows.Select(x => new { x.Id, x.procedureRevisionId, x.displayNumber, x.Title, x.outcome, x.ExecutedBy, x.Configuration, x.Determination, x.EvidenceReference, x.ExecutedAt, x.RecordedAt, x.SoftwareBuildId, x.RetestOfExecutionId, evidence = evidence.Where(e => e.TestExecutionId == x.Id).Select(e => new { e.Id, e.OriginalFileName, e.Size, e.Sha256, e.UploadedAt }) }));
 });
 
 app.MapGet("/api/verification-coverage", async (Guid projectId, Guid? baselineId, Guid? buildId, AeroLinkDbContext db, CancellationToken ct) =>
@@ -545,6 +679,13 @@ record BaselineActorRequest(string ActorId);
 record CreateBuildRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, string BuildNumber, string Description, string RecordedBy);
 record CreateTestProcedureRequest(Guid ProjectId, string BaseNumber, string Title, string OwnerId, string Objective, string Preconditions, string Steps, string ExpectedResult, List<Guid> RequirementRevisionIds, TestProcedureLevel Level = TestProcedureLevel.HighLevel);
 record RecordTestExecutionRequest(Guid ProjectId, Guid ProcedureRevisionId, Guid? SoftwareBuildId, Guid? RetestOfExecutionId, TestOutcome Outcome, string ExecutedBy, string Configuration, string Determination, string EvidenceReference, DateTimeOffset ExecutedAt);
+record DispositionImpactRequest(ImpactDispositionState State, string Rationale, string ActorId);
+record SelectBuildRequest(Guid SoftwareBuildId, string ActorId);
+record CampaignActorRequest(string ActorId);
+record StartReleaseReviewRequest(string ActorId, List<ApproverRequest> Approvers);
+record CompleteReleaseRequest(string ActorId);
+record CreateTraceLinkRequest(Guid ProjectId, Guid SourceRevisionId, Guid TargetRevisionId, RequirementTraceType Type, string Rationale);
+record GenerateDocumentsRequest(string ActorId);
 
 static class ApiMap
 {

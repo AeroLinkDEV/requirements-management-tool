@@ -54,6 +54,8 @@ public sealed class SoftwareRelease
     public Guid ProjectId { get; private set; }
     public string Version { get; private set; } = string.Empty;
     public bool IsReleased { get; private set; }
+    public DateTimeOffset? ReleasedAt { get; private set; }
+    public void MarkReleased(DateTimeOffset now) { if (IsReleased) throw new InvalidOperationException("The software release is already released."); IsReleased = true; ReleasedAt = now; }
 }
 
 public enum SoftwareBuildState { Recorded, Released }
