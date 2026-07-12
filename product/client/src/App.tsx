@@ -203,12 +203,19 @@ function App() {
     );
   if (view === "scr" && selectedScrId)
     return (
-      <ScrWorkspace
-        api={API}
-        scrId={selectedScrId}
-        onBack={() => setView("dashboard")}
-        onChanged={loadData}
-      />
+      <>
+        <div className="scrPublicationTools">
+          <span>Professional controlled publication</span>
+          <a href={`${API}/api/scrs/${selectedScrId}/download?format=docx`}>Download DOCX</a>
+          <a href={`${API}/api/scrs/${selectedScrId}/download?format=pdf`}>Download PDF</a>
+        </div>
+        <ScrWorkspace
+          api={API}
+          scrId={selectedScrId}
+          onBack={() => setView("dashboard")}
+          onChanged={loadData}
+        />
+      </>
     );
   if (view === "baselines" && project && release)
     return (

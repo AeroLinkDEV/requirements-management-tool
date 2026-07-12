@@ -93,6 +93,11 @@ app.MapGet("/api/scrs/{id:guid}", async (Guid id, IScrRepository repository, Can
     return scr is null ? Results.NotFound() : Results.Ok(ApiMap.ScrDetail(scr));
 });
 
+app.MapGet("/api/scrs/{id:guid}/download", async (Guid id, string? format, ChangeRequestOutputGenerator generator, CancellationToken ct) =>
+{
+    var output = await generator.GenerateAsync(id, format ?? "docx", ct); return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
+});
+
 app.MapPut("/api/scrs/{id:guid}/draft", async (Guid id, UpdateScrDraftRequest request, IScrRepository repository, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();

@@ -37,6 +37,7 @@ This directory contains the real application foundation. The visual showcase rem
 - integrated release-execution workbench connecting change inputs, impact disposition, baseline materialization, build control, outputs, verification, and approval
 - predecessor-aware reconciliation that creates only target-baseline-valid versioned trace and coverage links while exposing genuinely new coverage gaps
 - exact JSON verification-manifest export and atomic bulk import of hundreds of build-specific results with shared checksum-protected campaign evidence
+- professional DOCX/PDF publication of SCRs, requirements, and test procedures with editorial covers, named approval provenance, document-control registers, revision history, and controlled-copy markings
 
 ## Run locally
 

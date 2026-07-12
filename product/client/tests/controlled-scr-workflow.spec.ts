@@ -18,6 +18,8 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByRole('button', { name: 'Save SCR Draft' }).click()
 
   await expect(page.getByRole('heading', { name: 'Introduce controlled browser workflow' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Download DOCX' })).toHaveAttribute('href', /\/api\/scrs\/.+\/download\?format=docx/)
+  await expect(page.getByRole('link', { name: 'Download PDF' })).toHaveAttribute('href', /\/api\/scrs\/.+\/download\?format=pdf/)
   await page.getByRole('button', { name: 'Edit Draft' }).click()
   await page.getByLabel('Title').fill('Introduce controlled approval workflow')
   await page.getByRole('button', { name: 'Save Draft' }).click()

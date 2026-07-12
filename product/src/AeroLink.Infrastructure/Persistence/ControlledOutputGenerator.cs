@@ -16,22 +16,45 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db)
     public async Task<GeneratedOutput?> GenerateAsync(Guid documentId, string format, CancellationToken ct)
     {
         var document = await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == documentId, ct); if (document is null) return null;
-        var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == document.ProjectId, ct); var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == document.ReleaseId, ct); var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == document.BaselineId, ct);
-        var rows = document.Type switch
+        var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == document.ProjectId, ct); var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct); var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == document.ReleaseId, ct); var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == document.BaselineId, ct);
+        var records = document.Type switch
         {
-            ControlledDocumentType.Sysrd => await RequirementRows(document.BaselineId, RequirementLevel.System, ct),
-            ControlledDocumentType.SwrdHighLevel => await RequirementRows(document.BaselineId, RequirementLevel.HighLevel, ct),
-            ControlledDocumentType.SwrdLowLevel => await RequirementRows(document.BaselineId, RequirementLevel.LowLevel, ct),
-            ControlledDocumentType.SystemTestProcedures => await ProcedureRows(document.ProjectId, TestProcedureLevel.System, ct),
-            ControlledDocumentType.HighLevelTestProcedures => await ProcedureRows(document.ProjectId, TestProcedureLevel.HighLevel, ct),
-            _ => await ProcedureRows(document.ProjectId, TestProcedureLevel.LowLevel, ct)
+            ControlledDocumentType.Sysrd => await RequirementPublicationRows(document.BaselineId, RequirementLevel.System, ct),
+            ControlledDocumentType.SwrdHighLevel => await RequirementPublicationRows(document.BaselineId, RequirementLevel.HighLevel, ct),
+            ControlledDocumentType.SwrdLowLevel => await RequirementPublicationRows(document.BaselineId, RequirementLevel.LowLevel, ct),
+            ControlledDocumentType.SystemTestProcedures => await ProcedurePublicationRows(document.ProjectId, TestProcedureLevel.System, ct),
+            ControlledDocumentType.HighLevelTestProcedures => await ProcedurePublicationRows(document.ProjectId, TestProcedureLevel.HighLevel, ct),
+            _ => await ProcedurePublicationRows(document.ProjectId, TestProcedureLevel.LowLevel, ct)
         };
-        var title = document.Title; var metadata = new[] { ("Document", $"{document.DocumentNumber}.{document.Revision:D2}"), ("Release", release.Version), ("Baseline", baseline.DisplayNumber), ("Content hash", document.ContentHash), ("Controlled records", rows.Count.ToString("N0")), ("Generated", document.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'")) };
-        var stem = $"{document.DocumentNumber}.{document.Revision:D2}_{release.Version}";
-        return format.Equals("pdf", StringComparison.OrdinalIgnoreCase)
-            ? new(BuildPdf(title, project.SoftwareProduct, metadata, rows), "application/pdf", stem + ".pdf")
-            : new(BuildDocx(title, project.SoftwareProduct, metadata, rows, document.ContentHash), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", stem + ".docx");
+        var approvals = await ApprovalBasis(document.BaselineId, document.ReleaseId, document.GeneratedAt, ct); var createdBy = (await db.BaselineEvents.AsNoTracking().Where(x => x.BaselineId == baseline.Id && x.EventType == "CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x => x.OccurredAt).Select(x => x.ActorId).FirstOrDefault() ?? "configuration.manager";
+        var status = release.IsReleased ? "Approved and Released" : "Controlled Draft"; var type = DocumentTypeName(document.Type);
+        var publication = new ProfessionalPublication(project.SoftwareProduct, program.Name + " (" + program.Code + ")", project.Name, type, document.Title,
+            $"Authoritative {type.ToLowerInvariant()} for {project.SoftwareProduct}", document.DocumentNumber, document.Revision.ToString("D2"), status, release.Version, baseline.DisplayNumber, createdBy, document.GeneratedAt, document.ContentHash,
+            new[] { ("Controlled records", records.Count.ToString("N0")), ("Baseline content hash", baseline.ContentHash ?? "Not frozen"), ("Requirement manifest hash", baseline.RequirementsHash ?? "Not materialized"), ("Approval basis", "Named approvers from exact approved change requests and completed release approvals recorded by generation time") }, approvals,
+            new[] { (document.Revision.ToString("D2"), status, document.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd"), createdBy) }, new[] { new PublicationSection("Controlled Records", $"This section contains {records.Count:N0} exact, revision-controlled records rendered from baseline {baseline.DisplayNumber}.", records) });
+        return ProfessionalPublicationRenderer.Render(publication, format, $"{document.DocumentNumber}.{document.Revision:D2}_{release.Version}");
     }
+
+    private async Task<List<PublicationRecord>> RequirementPublicationRows(Guid baselineId, RequirementLevel level, CancellationToken ct)
+    {
+        var rows = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId) join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceScrId equals scr.Id orderby artifact.BaseNumber select new { artifact.BaseNumber, revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, Scr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision }).ToListAsync(ct);
+        return rows.Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), level.ToString(), "", x.Statement, new[] { ("Rationale", x.Rationale), ("Verification method", x.VerificationMethod), ("Source change request", x.Scr) })).ToList();
+    }
+    private async Task<List<PublicationRecord>> ProcedurePublicationRows(Guid projectId, TestProcedureLevel level, CancellationToken ct)
+    {
+        var rows = await (from procedure in db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == level) join revision in db.TestProcedureRevisions.AsNoTracking() on procedure.Id equals revision.ProcedureId orderby procedure.BaseNumber select new { procedure.BaseNumber, procedure.Title, revision.Revision, revision.State, revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult, revision.AuthorId }).ToListAsync(ct);
+        return rows.Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), level + " Test Procedure", x.Title, x.Objective, new[] { ("State", x.State.ToString()), ("Author / owner", x.AuthorId), ("Preconditions", x.Preconditions), ("Procedure steps", x.Steps), ("Expected result", x.ExpectedResult) })).ToList();
+    }
+    private async Task<List<PublicationApproval>> ApprovalBasis(Guid baselineId, Guid releaseId, DateTimeOffset generatedAt, CancellationToken ct)
+    {
+        var scrIds = await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == baselineId).Select(x => x.ScrId).ToListAsync(ct);
+        var cycles = (await db.ReviewCycles.AsNoTracking().Include(x => x.Steps).Where(x => scrIds.Contains(x.ScrId) && x.State == ReviewCycleState.Approved).ToListAsync(ct)).Where(x => x.CompletedAt <= generatedAt).ToList();
+        var approvals = cycles.SelectMany(x => x.Steps.Where(s => s.State == ApprovalStepState.Approved && s.DecidedAt <= generatedAt).Select(s => new PublicationApproval("Change Authority", s.ApproverName, s.ApproverId, "Approved", s.DecidedAt))).ToList();
+        var campaigns = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
+        approvals.AddRange(campaigns.SelectMany(x => x.Approvals.Where(a => a.State == AeroLink.Domain.Releases.ReleaseApprovalState.Approved && a.ApprovedAt <= generatedAt).Select(a => new PublicationApproval("Release Authority", a.ApproverName, a.ApproverId, "Approved", a.ApprovedAt))));
+        return approvals.GroupBy(x => new { x.Role, x.UserId }).Select(x => x.OrderByDescending(a => a.DecidedAt).First()).OrderBy(x => x.Role).ThenBy(x => x.Name).ToList();
+    }
+    private static string DocumentTypeName(ControlledDocumentType type) => type switch { ControlledDocumentType.Sysrd => "System Requirements Document", ControlledDocumentType.SwrdHighLevel => "High-Level Software Requirements Document", ControlledDocumentType.SwrdLowLevel => "Low-Level Software Requirements Document", ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document", ControlledDocumentType.HighLevelTestProcedures => "High-Level Test Procedure Document", _ => "Low-Level Test Procedure Document" };
 
     private async Task<List<OutputRow>> RequirementRows(Guid baselineId, RequirementLevel level, CancellationToken ct) => await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
         join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id

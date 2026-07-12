@@ -24,7 +24,17 @@ public sealed class ReleaseCampaignPersistenceTests
             var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default); Assert.False(readiness.ReadyForRelease); Assert.Contains(readiness.Gates, x => x.Code == "change_control" && x.Completed == 2 && x.Total == 7);
             var documentId = await db.ControlledDocuments.Where(x => x.BaselineId == summary.ReleasedBaselineId).Select(x => x.Id).FirstAsync(); var generator = new ControlledOutputGenerator(db);
             var docx = await generator.GenerateAsync(documentId, "docx", default); var pdf = await generator.GenerateAsync(documentId, "pdf", default); Assert.NotNull(docx); Assert.NotNull(pdf); Assert.StartsWith("%PDF-1.4", System.Text.Encoding.ASCII.GetString(pdf!.Content, 0, 8));
-            using (var archive = new ZipArchive(new MemoryStream(docx!.Content), ZipArchiveMode.Read)) Assert.NotNull(archive.GetEntry("word/document.xml"));
+            using (var archive = new ZipArchive(new MemoryStream(docx!.Content), ZipArchiveMode.Read))
+            {
+                var part = archive.GetEntry("word/document.xml"); Assert.NotNull(part); using var reader = new StreamReader(part!.Open()); var xml = await reader.ReadToEndAsync();
+                Assert.Contains("Document Control", xml); Assert.Contains("Approval Register", xml); Assert.Contains("Development Assurance Reviewer", xml); Assert.Contains("Manifest SHA-256", xml);
+            }
+            var historicalScr = await db.SystemChangeRequests.Where(x => x.ProjectId == summary.ProjectId && x.TargetReleaseId != summary.ActiveReleaseId).Select(x => x.Id).FirstAsync();
+            var scrOutput = await new ChangeRequestOutputGenerator(db).GenerateAsync(historicalScr, "docx", default); Assert.NotNull(scrOutput);
+            using (var archive = new ZipArchive(new MemoryStream(scrOutput!.Content), ZipArchiveMode.Read)) { using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()); var xml = await reader.ReadToEndAsync(); Assert.Contains("APPROVALS RECORDED FOR THIS PUBLICATION", xml); Assert.Contains("Change Request Definition", xml); Assert.Contains("Audit History", xml); }
+            var procedureDocumentId = await db.ControlledDocuments.Where(x => x.BaselineId == summary.ReleasedBaselineId && x.Type == AeroLink.Domain.Traceability.ControlledDocumentType.SystemTestProcedures).Select(x => x.Id).SingleAsync();
+            var procedureOutput = await generator.GenerateAsync(procedureDocumentId, "docx", default); Assert.NotNull(procedureOutput);
+            using (var archive = new ZipArchive(new MemoryStream(procedureOutput!.Content), ZipArchiveMode.Read)) { using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()); var xml = await reader.ReadToEndAsync(); Assert.Contains("System Test Procedure Document", xml); Assert.Contains("Procedure steps", xml); Assert.Contains("Expected result", xml); Assert.Contains("Approval Register", xml); }
             var store = new EvidenceFileStore(evidenceRoot);
             var stored = await store.StoreAsync(new MemoryStream("evidence payload"u8.ToArray()), "run.json", "application/json", default); Assert.Equal(64, stored.Sha256.Length); await using var opened = store.OpenRead(stored.StorageKey); Assert.Equal(stored.Size, opened.Length);
         }

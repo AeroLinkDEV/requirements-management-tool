@@ -25,6 +25,7 @@ public static class DependencyInjection
         services.AddSingleton<EvidenceFileStore>();
         services.AddScoped<ReleaseReadinessService>();
         services.AddScoped<ControlledOutputGenerator>();
+        services.AddScoped<ChangeRequestOutputGenerator>();
         services.AddScoped<ReleaseExecutionService>();
         return services;
     }
