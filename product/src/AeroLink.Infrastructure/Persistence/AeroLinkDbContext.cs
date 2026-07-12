@@ -11,6 +11,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ProgramRecord> Programs => Set<ProgramRecord>();
     public DbSet<ProjectRecord> Projects => Set<ProjectRecord>();
     public DbSet<SoftwareRelease> Releases => Set<SoftwareRelease>();
+    public DbSet<SoftwareBuild> SoftwareBuilds => Set<SoftwareBuild>();
     public DbSet<SystemChangeRequest> SystemChangeRequests => Set<SystemChangeRequest>();
     public DbSet<RequirementChange> RequirementChanges => Set<RequirementChange>();
     public DbSet<ReviewCycle> ReviewCycles => Set<ReviewCycle>();
@@ -41,6 +42,20 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("software_releases"); b.HasKey(x => x.Id);
             b.Property(x => x.Version).HasMaxLength(40).IsRequired();
             b.HasIndex(x => new { x.ProjectId, x.Version }).IsUnique();
+        });
+        modelBuilder.Entity<SoftwareBuild>(b =>
+        {
+            b.ToTable("software_builds"); b.HasKey(x => x.Id);
+            b.Property(x => x.BuildNumber).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Description).HasMaxLength(2000);
+            b.Property(x => x.RecordedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.HasIndex(x => new { x.ProjectId, x.BuildNumber }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.RecordedAt });
+            b.HasIndex(x => x.BaselineId);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<SystemChangeRequest>(b =>
         {

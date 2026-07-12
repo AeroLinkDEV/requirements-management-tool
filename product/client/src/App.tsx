@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import ScrEditor from "./ScrEditor";
 import ScrWorkspace from "./ScrWorkspace";
 import BaselineCenter from "./BaselineCenter";
+import HistoryExplorer from "./HistoryExplorer";
 import "./App.css";
 import "./Onboarding.css";
 import "./DashboardInteractions.css";
@@ -46,7 +47,7 @@ function App() {
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
     [selectedScrId, setSelectedScrId] = useState(""),
-    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines">("dashboard");
+    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history">("dashboard");
   const loadWorkspaces = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/workspaces`),
@@ -208,6 +209,16 @@ function App() {
         onBack={() => setView("dashboard")}
       />
     );
+  if (view === "history" && project)
+    return (
+      <HistoryExplorer
+        api={API}
+        projectId={project.project.id}
+        releases={project.releases}
+        onBack={() => setView("dashboard")}
+        onOpenScr={(id) => { setSelectedScrId(id); setView("scr"); }}
+      />
+    );
   return (
     <div className="shell">
       <aside>
@@ -240,7 +251,10 @@ function App() {
             "⌘  Baselines",
             "↗  Traceability",
           ].map((x, i) => (
-            <button className={i === 0 ? "active" : ""} key={x} onClick={() => { if (x.includes("Baselines")) setView("baselines"); }}>
+            <button className={i === 0 ? "active" : ""} key={x} onClick={() => {
+              if (x.includes("Baselines")) setView("baselines");
+              if (x.includes("Change Requests") || x.includes("Requirements") || x.includes("Traceability")) setView("history");
+            }}>
               {x}
             </button>
           ))}

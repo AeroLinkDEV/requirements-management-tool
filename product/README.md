@@ -17,6 +17,9 @@ This directory contains the real application foundation. The visual showcase rem
 - explicit record versions and stale-browser conflict protection on Draft and review actions
 - release-targeted candidate baseline creation with eligible Approved SCR discovery
 - exact SCR-revision selection and removal, derived requirement-impact manifest, persistent baseline events, and immutable SHA-256 freeze
+- searchable SCR history across every revision, state, target release, baseline, and software build
+- searchable software-requirement revision history with source-SCR provenance and lifecycle impact
+- immutable software-build records tied to one exact frozen baseline, with drill-down to included SCR and requirement revisions
 
 ## Run locally
 

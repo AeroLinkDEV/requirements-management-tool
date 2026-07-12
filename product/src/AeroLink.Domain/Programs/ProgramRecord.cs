@@ -55,3 +55,32 @@ public sealed class SoftwareRelease
     public string Version { get; private set; } = string.Empty;
     public bool IsReleased { get; private set; }
 }
+
+public enum SoftwareBuildState { Recorded, Released }
+
+/// <summary>A software build is an immutable provenance record for one exact frozen baseline.</summary>
+public sealed class SoftwareBuild
+{
+    private SoftwareBuild() { }
+    public SoftwareBuild(Guid projectId, Guid releaseId, Guid baselineId, string buildNumber,
+        string description, string recordedBy, DateTimeOffset recordedAt)
+    {
+        if (projectId == Guid.Empty || releaseId == Guid.Empty || baselineId == Guid.Empty)
+            throw new ArgumentException("Project, release, and frozen baseline are required.");
+        if (string.IsNullOrWhiteSpace(buildNumber)) throw new ArgumentException("A build number is required.");
+        Id = Guid.NewGuid(); ProjectId = projectId; ReleaseId = releaseId; BaselineId = baselineId;
+        BuildNumber = buildNumber.Trim(); Description = description.Trim(); RecordedBy = recordedBy.Trim();
+        RecordedAt = recordedAt; State = SoftwareBuildState.Recorded;
+    }
+    public Guid Id { get; private set; }
+    public Guid ProjectId { get; private set; }
+    public Guid ReleaseId { get; private set; }
+    public Guid BaselineId { get; private set; }
+    public string BuildNumber { get; private set; } = string.Empty;
+    public string Description { get; private set; } = string.Empty;
+    public string RecordedBy { get; private set; } = string.Empty;
+    public DateTimeOffset RecordedAt { get; private set; }
+    public SoftwareBuildState State { get; private set; }
+    public DateTimeOffset? ReleasedAt { get; private set; }
+    public void MarkReleased(DateTimeOffset now) { State = SoftwareBuildState.Released; ReleasedAt = now; }
+}
