@@ -65,7 +65,8 @@ function App() {
         fetch(`${API}/api/scrs?projectId=${project.project.id}`),
         fetch(`${API}/api/dashboard?projectId=${project.project.id}`),
       ]);
-      setScrs(await a.json());
+      const page = await a.json();
+      setScrs(page.items);
       setMetrics(await b.json());
     } catch {
       setConnected(false);

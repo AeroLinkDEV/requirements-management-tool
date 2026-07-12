@@ -46,6 +46,7 @@ public sealed class SystemChangeRequest
     public ScrState State { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
+    public long Version { get; private set; } = 1;
     public IReadOnlyCollection<RequirementChange> RequirementChanges => _requirementChanges.AsReadOnly();
     public IReadOnlyCollection<ReviewCycle> ReviewCycles => _reviewCycles.AsReadOnly();
     public IReadOnlyCollection<AuditEvent> AuditEvents => _auditEvents.AsReadOnly();

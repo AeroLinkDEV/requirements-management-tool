@@ -9,6 +9,7 @@ using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
@@ -21,7 +22,8 @@ app.UseCors();
 await using (var scope = app.Services.CreateAsyncScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-    await db.Database.EnsureCreatedAsync();
+    if (db.Database.IsNpgsql()) await db.Database.MigrateAsync();
+    else await db.Database.EnsureCreatedAsync();
     if (builder.Configuration.GetValue<bool>("DemoData:Enabled")) await SeedData.EnsureSeededAsync(db);
 }
 
@@ -70,13 +72,35 @@ app.MapGet("/api/context", async (AeroLinkDbContext db, CancellationToken ct) =>
     releases = await db.Releases.AsNoTracking().OrderBy(x => x.Version).ToListAsync(ct)
 }));
 
-app.MapGet("/api/scrs", async (Guid? projectId, IScrRepository repository, CancellationToken ct) =>
-    Results.Ok((await repository.ListAsync(ct)).Where(x => projectId is null || x.ProjectId == projectId).Select(ApiMap.ScrSummary)));
+app.MapGet("/api/scrs", async (Guid projectId, int page, int pageSize, string? search, ScrState? state, IScrRepository repository, CancellationToken ct) =>
+{
+    var result = await repository.QueryAsync(new ScrQuery(projectId, page == 0 ? 1 : page, pageSize == 0 ? 50 : pageSize, search, state), ct);
+    return Results.Ok(new { result.Page, result.PageSize, result.TotalCount, result.TotalPages, items = result.Items.Select(ApiMap.ScrSummary) });
+});
 
 app.MapGet("/api/scrs/{id:guid}", async (Guid id, IScrRepository repository, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct);
     return scr is null ? Results.NotFound() : Results.Ok(ApiMap.ScrDetail(scr));
+});
+
+app.MapGet("/api/requirement-changes", async (Guid projectId, int page, int pageSize, string? search, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    page = Math.Max(1, page == 0 ? 1 : page);
+    pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
+    var source = db.RequirementChanges.AsNoTracking()
+        .Where(x => db.SystemChangeRequests.Any(scr => scr.Id == x.ScrId && scr.ProjectId == projectId));
+    if (!string.IsNullOrWhiteSpace(search))
+    {
+        var term = search.Trim();
+        source = source.Where(x => EF.Functions.ILike(x.BaseNumber, $"%{term}%") || EF.Functions.ILike(x.Statement, $"%{term}%"));
+    }
+    var totalCount = await source.CountAsync(ct);
+    var items = await source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
+        .Skip((page - 1) * pageSize).Take(pageSize)
+        .Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + x.Revision, level = x.Level.ToString(), kind = x.Kind.ToString(), x.Statement, x.VerificationMethod, x.ScrId })
+        .ToListAsync(ct);
+    return Results.Ok(new { page, pageSize, totalCount, totalPages = (int)Math.Ceiling(totalCount / (double)pageSize), items });
 });
 
 app.MapPost("/api/scrs", async (CreateScrRequest request, IScrRepository repository, CancellationToken ct) =>
@@ -147,8 +171,13 @@ app.MapPost("/api/scrs/{id:guid}/request-changes", async (Guid id, RequestChange
 
 app.MapGet("/api/dashboard", async (Guid? projectId, AeroLinkDbContext db, CancellationToken ct) =>
 {
-    var scrs = await db.SystemChangeRequests.AsNoTracking().Where(x => projectId == null || x.ProjectId == projectId).ToListAsync(ct);
-    return Results.Ok(new { totalScrs = scrs.Count, draft = scrs.Count(x => x.State == ScrState.Draft), inReview = scrs.Count(x => x.State == ScrState.InReview), approved = scrs.Count(x => x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline) });
+    var source = db.SystemChangeRequests.AsNoTracking().Where(x => projectId == null || x.ProjectId == projectId);
+    return Results.Ok(new {
+        totalScrs = await source.CountAsync(ct),
+        draft = await source.CountAsync(x => x.State == ScrState.Draft, ct),
+        inReview = await source.CountAsync(x => x.State == ScrState.InReview, ct),
+        approved = await source.CountAsync(x => x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline, ct)
+    });
 });
 
 app.Run();
@@ -173,10 +202,10 @@ static class ApiMap
         project = new { project.Id, project.Name, project.SoftwareProduct },
         release = new { release.Id, release.Version, release.IsReleased }
     };
-    public static object ScrSummary(SystemChangeRequest x) => new { x.Id, x.DisplayNumber, x.Title, state = x.State.ToString(), x.AuthorId, x.TargetReleaseId, requirementCount = x.RequirementChanges.Count, x.UpdatedAt };
+    public static object ScrSummary(ScrListItem x) => new { x.Id, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.Title, state = x.State.ToString(), x.AuthorId, x.TargetReleaseId, x.RequirementCount, x.UpdatedAt };
     public static object ScrDetail(SystemChangeRequest x) => new
     {
-        x.Id, x.BaseNumber, x.Revision, x.DisplayNumber, x.ProjectId, x.TargetReleaseId, x.Title, x.Problem, x.Analysis, x.Solution, x.AuthorId,
+        x.Id, x.BaseNumber, x.Revision, x.DisplayNumber, x.ProjectId, x.TargetReleaseId, x.Title, x.Problem, x.Analysis, x.Solution, x.AuthorId, x.Version,
         state = x.State.ToString(), x.CreatedAt, x.UpdatedAt,
         requirementChanges = x.RequirementChanges.Select(r => new { r.Id, r.DisplayNumber, level = r.Level.ToString(), kind = r.Kind.ToString(), r.Statement, r.Rationale, r.VerificationMethod }),
         reviewCycles = x.ReviewCycles.OrderBy(c => c.Sequence).Select(c => new { c.Id, c.Sequence, state = c.State.ToString(), c.SnapshotHash, c.StartedAt, c.CompletedAt, c.ClosureReason, steps = c.Steps.OrderBy(s => s.Position).Select(s => new { s.Position, s.ApproverId, s.ApproverName, state = s.State.ToString(), s.DecidedAt }) }),

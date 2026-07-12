@@ -51,8 +51,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Solution).HasMaxLength(8000).IsRequired();
             b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired();
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Version).IsConcurrencyToken();
             b.Ignore(x => x.DisplayNumber); b.Ignore(x => x.ActiveReviewCycle);
             b.HasIndex(x => new { x.BaseNumber, x.Revision }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.UpdatedAt });
+            b.HasIndex(x => new { x.ProjectId, x.State });
             b.HasMany(x => x.RequirementChanges).WithOne().HasForeignKey(x => x.ScrId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.ReviewCycles).WithOne().HasForeignKey(x => x.ScrId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.AuditEvents).WithOne().HasForeignKey(x => x.AggregateId).OnDelete(DeleteBehavior.Cascade);
@@ -68,6 +71,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.VerificationMethod).HasMaxLength(100);
             b.Ignore(x => x.DisplayNumber);
             b.HasIndex(x => new { x.ScrId, x.BaseNumber, x.Revision }).IsUnique();
+            b.HasIndex(x => x.BaseNumber);
         });
         modelBuilder.Entity<ReviewCycle>(b =>
         {
@@ -110,5 +114,26 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ScrDisplayNumber).HasMaxLength(40).IsRequired();
             b.HasIndex(x => new { x.BaselineId, x.ScrId }).IsUnique();
         });
+    }
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        // Aggregate children use application-assigned GUIDs. EF interprets newly discovered
+        // children with set keys as existing unless their append-only state is made explicit.
+        foreach (var entry in ChangeTracker.Entries<AuditEvent>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
+        foreach (var entry in ChangeTracker.Entries<RequirementChange>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
+        foreach (var cycle in ChangeTracker.Entries<ReviewCycle>().Where(x => x.State == EntityState.Modified && x.Entity.CompletedAt is null && x.Entity.Steps.All(s => s.State != ApprovalStepState.Approved)))
+        {
+            cycle.State = EntityState.Added;
+            foreach (var step in cycle.Entity.Steps) Entry(step).State = EntityState.Added;
+        }
+        foreach (var entry in ChangeTracker.Entries<BaselineScrSelection>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
+        foreach (var entry in ChangeTracker.Entries<SystemChangeRequest>())
+        {
+            if (entry.State == EntityState.Added) entry.Property(x => x.Version).CurrentValue = 1;
+            if (entry.State == EntityState.Modified)
+                entry.Property(x => x.Version).CurrentValue = entry.Property(x => x.Version).OriginalValue + 1;
+        }
+        return await base.SaveChangesAsync(cancellationToken);
     }
 }

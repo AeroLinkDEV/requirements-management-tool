@@ -8,8 +8,24 @@ namespace AeroLink.Infrastructure.Persistence;
 
 public sealed class ScrRepository(AeroLinkDbContext db) : IScrRepository
 {
-    public async Task<IReadOnlyList<SystemChangeRequest>> ListAsync(CancellationToken cancellationToken) =>
-        await db.SystemChangeRequests.AsNoTracking().OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision).ToListAsync(cancellationToken);
+    public async Task<PagedResult<ScrListItem>> QueryAsync(ScrQuery query, CancellationToken cancellationToken)
+    {
+        var page = Math.Max(1, query.Page);
+        var pageSize = Math.Clamp(query.PageSize, 1, 200);
+        var source = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == query.ProjectId);
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            var search = query.Search.Trim();
+            source = source.Where(x => EF.Functions.ILike(x.BaseNumber, $"%{search}%") || EF.Functions.ILike(x.Title, $"%{search}%"));
+        }
+        if (query.State is not null) source = source.Where(x => x.State == query.State);
+        var total = await source.CountAsync(cancellationToken);
+        var items = await source.OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.BaseNumber)
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(x => new ScrListItem(x.Id, x.BaseNumber, x.Revision, x.Title, x.State, x.AuthorId,
+                x.TargetReleaseId, x.RequirementChanges.Count, x.UpdatedAt)).ToListAsync(cancellationToken);
+        return new PagedResult<ScrListItem>(items, page, pageSize, total);
+    }
 
     public Task<SystemChangeRequest?> GetAsync(Guid id, CancellationToken cancellationToken) =>
         db.SystemChangeRequests

@@ -17,3 +17,4 @@ rendered/
 *.db
 *.db-shm
 *.db-wal
+product/.local/
