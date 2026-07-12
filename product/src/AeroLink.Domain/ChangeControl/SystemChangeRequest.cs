@@ -67,6 +67,28 @@ public sealed class SystemChangeRequest
         return change;
     }
 
+    public void UpdateDraft(string actorId, string title, string problem, string analysis, string solution,
+        IReadOnlyList<RequirementChangeDraft> changes, DateTimeOffset now)
+    {
+        EnsureAuthor(actorId);
+        EnsureDraft();
+        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("An SCR title is required.");
+        Title = title.Trim();
+        Problem = problem.Trim();
+        Analysis = analysis.Trim();
+        Solution = solution.Trim();
+        _requirementChanges.Clear();
+        foreach (var item in changes)
+        {
+            if (string.IsNullOrWhiteSpace(item.Statement) && item.Kind != RequirementChangeKind.Retire)
+                throw new DomainException("A requirement statement is required unless the requirement is being retired.");
+            _requirementChanges.Add(new RequirementChange(Id, item.BaseNumber, item.Revision, item.Level, item.Kind,
+                item.Statement, item.Rationale, item.VerificationMethod));
+        }
+        UpdatedAt = now;
+        Audit("ScrDraftUpdated", actorId, $"Updated {DisplayNumber} Draft with {changes.Count} proposed requirement changes.", now);
+    }
+
     public ReviewCycle SubmitForReview(string actorId, IReadOnlyList<ApproverSelection> approvers, DateTimeOffset now)
     {
         EnsureAuthor(actorId);

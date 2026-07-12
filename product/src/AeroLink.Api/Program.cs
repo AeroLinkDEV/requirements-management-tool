@@ -13,7 +13,7 @@ builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
-    policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173").AllowAnyHeader().AllowAnyMethod()));
+    policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:5174").AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
 app.UseExceptionHandler();
@@ -84,6 +84,20 @@ app.MapGet("/api/scrs/{id:guid}", async (Guid id, IScrRepository repository, Can
     return scr is null ? Results.NotFound() : Results.Ok(ApiMap.ScrDetail(scr));
 });
 
+app.MapPut("/api/scrs/{id:guid}/draft", async (Guid id, UpdateScrDraftRequest request, IScrRepository repository, CancellationToken ct) =>
+{
+    var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+    if (scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before saving.", code = "stale_version" });
+    try
+    {
+        scr.UpdateDraft(request.ActorId, request.Title, request.Problem, request.Analysis, request.Solution,
+            request.RequirementChanges.Select(x => new RequirementChangeDraft(x.BaseNumber, x.Revision, x.Level, x.Kind, x.Statement, x.Rationale, x.VerificationMethod)).ToList(), DateTimeOffset.UtcNow);
+        await repository.SaveAsync(ct);
+        return Results.Ok(ApiMap.ScrDetail(scr));
+    }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
 app.MapGet("/api/requirement-changes", async (Guid projectId, int page, int pageSize, string? search, AeroLinkDbContext db, CancellationToken ct) =>
 {
     page = Math.Max(1, page == 0 ? 1 : page);
@@ -147,6 +161,7 @@ app.MapPost("/api/scrs/{id:guid}/requirements", async (Guid id, RequirementChang
 app.MapPost("/api/scrs/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, IScrRepository repository, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+    if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before submitting.", code = "stale_version" });
     try
     {
         scr.SubmitForReview(request.ActorId, request.Approvers.Select(x => new ApproverSelection(x.UserId, x.Name)).ToList(), DateTimeOffset.UtcNow);
@@ -158,6 +173,7 @@ app.MapPost("/api/scrs/{id:guid}/submit", async (Guid id, SubmitReviewRequest re
 app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, ActorRequest request, IScrRepository repository, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+    if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
     try { scr.ApproveActiveStage(request.ActorId, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
@@ -165,6 +181,7 @@ app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, ActorRequest request,
 app.MapPost("/api/scrs/{id:guid}/request-changes", async (Guid id, RequestChangesRequest request, IScrRepository repository, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+    if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
     try { scr.RequestChanges(request.ActorId, request.Reason, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
@@ -187,12 +204,13 @@ public partial class Program { }
 record CreateScrRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId);
 record DraftRequirementRequest(string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
 record CreateScrDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, List<DraftRequirementRequest> RequirementChanges);
+record UpdateScrDraftRequest(long ExpectedVersion, string ActorId, string Title, string Problem, string Analysis, string Solution, List<DraftRequirementRequest> RequirementChanges);
 record CreateWorkspaceRequest(string ProgramName, string ProgramCode, string ProjectName, string SoftwareProduct, string InitialRelease, bool InitialReleaseIsReleased);
 record RequirementChangeRequest(string ActorId, string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
 record ApproverRequest(string UserId, string Name);
-record SubmitReviewRequest(string ActorId, List<ApproverRequest> Approvers);
-record ActorRequest(string ActorId);
-record RequestChangesRequest(string ActorId, string Reason);
+record SubmitReviewRequest(string ActorId, long? ExpectedVersion, List<ApproverRequest> Approvers);
+record ActorRequest(string ActorId, long? ExpectedVersion);
+record RequestChangesRequest(string ActorId, long? ExpectedVersion, string Reason);
 
 static class ApiMap
 {

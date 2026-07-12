@@ -17,7 +17,7 @@ type Props = {
   releaseId: string;
   releaseVersion: string;
   onCancel: () => void;
-  onSaved: () => void;
+  onSaved: (scrId: string) => void;
 };
 const blank = (): RequirementDraft => ({
   baseNumber: "SWR-00000001",
@@ -75,7 +75,8 @@ export default function ScrEditor({
       setSaving(false);
       return;
     }
-    onSaved();
+    const created = await response.json();
+    onSaved(created.id);
   };
   return (
     <main className="editorPage">

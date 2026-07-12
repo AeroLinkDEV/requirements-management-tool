@@ -11,6 +11,10 @@ This directory contains the real application foundation. The visual showcase rem
 - append-only audit events and candidate-baseline eligibility rules
 - live manager/engineer dashboard backed by persisted data
 - guided SCR Draft authoring with Problem, Analysis, Solution, and one or more proposed requirement changes
+- SCR workspace with safe Draft editing, requirement replacement, control status, and append-only audit history
+- author-configured ordered review sequences with frozen snapshot hashes
+- active-reviewer approval or change requests, same-revision Draft rework, resubmission, and unanimous approval
+- explicit record versions and stale-browser conflict protection on Draft and review actions
 
 ## Run locally
 

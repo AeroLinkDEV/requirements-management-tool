@@ -5,6 +5,9 @@ namespace AeroLink.Domain.ChangeControl;
 public enum RequirementLevel { System, HighLevel }
 public enum RequirementChangeKind { Introduce, Modify, Retire }
 
+public sealed record RequirementChangeDraft(string BaseNumber, int Revision, RequirementLevel Level,
+    RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
+
 public sealed class RequirementChange
 {
     private RequirementChange() { }

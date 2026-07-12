@@ -31,6 +31,32 @@ public sealed class SystemChangeRequestTests
     }
 
     [Fact]
+    public void Author_can_replace_draft_content_without_changing_revision()
+    {
+        var scr = CreateDraftWithRequirement();
+        scr.UpdateDraft("author", "Updated Round Robin", "Updated problem", "Updated analysis", "Updated solution",
+        [
+            new RequirementChangeDraft("SYSR-00002375", 2, RequirementLevel.System, RequirementChangeKind.Modify,
+                "The FMS shall sequence Round Robin waypoints deterministically.", "Clarified behavior.", "Test"),
+            new RequirementChangeDraft("SWR-00002376", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce,
+                "The software shall expose the selected sequence.", "New HLR.", "Test")
+        ], Now.AddMinutes(1));
+
+        Assert.Equal(1, scr.Revision);
+        Assert.Equal("Updated Round Robin", scr.Title);
+        Assert.Equal(2, scr.RequirementChanges.Count);
+        Assert.Contains(scr.AuditEvents, x => x.EventType == "ScrDraftUpdated");
+    }
+
+    [Fact]
+    public void Draft_content_cannot_change_during_review()
+    {
+        var scr = CreateDraftWithRequirement();
+        scr.SubmitForReview("author", Approvers(), Now);
+        Assert.Throws<DomainException>(() => scr.UpdateDraft("author", "Changed", "P", "A", "S", [], Now));
+    }
+
+    [Fact]
     public void Approval_proceeds_in_author_selected_order()
     {
         var scr = CreateDraftWithRequirement();

@@ -20,7 +20,10 @@ public sealed class ScrRepository(AeroLinkDbContext db) : IScrRepository
         }
         if (query.State is not null) source = source.Where(x => x.State == query.State);
         var total = await source.CountAsync(cancellationToken);
-        var items = await source.OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.BaseNumber)
+        var ordered = db.Database.IsSqlite()
+            ? source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
+            : source.OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.BaseNumber);
+        var items = await ordered
             .Skip((page - 1) * pageSize).Take(pageSize)
             .Select(x => new ScrListItem(x.Id, x.BaseNumber, x.Revision, x.Title, x.State, x.AuthorId,
                 x.TargetReleaseId, x.RequirementChanges.Count, x.UpdatedAt)).ToListAsync(cancellationToken);

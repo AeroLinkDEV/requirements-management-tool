@@ -61,24 +61,25 @@ public sealed class ReviewCycle
     public DateTimeOffset? CompletedAt { get; private set; }
     public string? ClosureReason { get; private set; }
     public IReadOnlyCollection<ApprovalStep> Steps => _steps.AsReadOnly();
-    public int ActivePosition => _steps.FindIndex(x => x.State == ApprovalStepState.Active);
+    public int ActivePosition => _steps.SingleOrDefault(x => x.State == ApprovalStepState.Active)?.Position ?? -1;
 
     internal bool Approve(string actorId, DateTimeOffset now)
     {
         EnsureActive();
         var position = ActivePosition;
-        if (position < 0 || !string.Equals(_steps[position].ApproverId, actorId, StringComparison.OrdinalIgnoreCase))
+        var active = _steps.SingleOrDefault(x => x.Position == position);
+        if (active is null || !string.Equals(active.ApproverId, actorId, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("Only the active approver can approve this review stage.");
 
-        _steps[position].Approve(now);
-        if (position == _steps.Count - 1)
+        active.Approve(now);
+        if (position == _steps.Max(x => x.Position))
         {
             State = ReviewCycleState.Approved;
             CompletedAt = now;
             return true;
         }
 
-        _steps[position + 1].Activate();
+        _steps.Single(x => x.Position == position + 1).Activate();
         return false;
     }
 

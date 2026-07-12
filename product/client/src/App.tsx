@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import ScrEditor from "./ScrEditor";
+import ScrWorkspace from "./ScrWorkspace";
 import "./App.css";
 import "./Onboarding.css";
+import "./DashboardInteractions.css";
 
 type Scr = {
   id: string;
@@ -42,7 +44,8 @@ function App() {
     [connected, setConnected] = useState(false),
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
-    [view, setView] = useState<"dashboard" | "createScr">("dashboard");
+    [selectedScrId, setSelectedScrId] = useState(""),
+    [view, setView] = useState<"dashboard" | "createScr" | "scr">("dashboard");
   const loadWorkspaces = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/workspaces`),
@@ -66,7 +69,7 @@ function App() {
         fetch(`${API}/api/dashboard?projectId=${project.project.id}`),
       ]);
       const page = await a.json();
-      setScrs(page.items);
+      setScrs(Array.isArray(page.items) ? page.items : []);
       setMetrics(await b.json());
     } catch {
       setConnected(false);
@@ -177,10 +180,20 @@ function App() {
         releaseId={release.id}
         releaseVersion={release.version}
         onCancel={() => setView("dashboard")}
-        onSaved={async () => {
+        onSaved={async (scrId) => {
           await loadData();
-          setView("dashboard");
+          setSelectedScrId(scrId);
+          setView("scr");
         }}
+      />
+    );
+  if (view === "scr" && selectedScrId)
+    return (
+      <ScrWorkspace
+        api={API}
+        scrId={selectedScrId}
+        onBack={() => setView("dashboard")}
+        onChanged={loadData}
       />
     );
   return (
@@ -293,7 +306,7 @@ function App() {
             </div>
             {scrs.length ? (
               scrs.map((scr) => (
-                <div className="row" key={scr.id}>
+                <div className="row" key={scr.id} role="button" tabIndex={0} onClick={() => { setSelectedScrId(scr.id); setView("scr"); }} onKeyDown={(event) => { if (event.key === "Enter") { setSelectedScrId(scr.id); setView("scr"); } }}>
                   <div className="scricon">SCR</div>
                   <div>
                     <b>
