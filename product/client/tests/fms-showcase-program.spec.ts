@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test'
+import { login } from './auth'
 
 test('FMS 1.5 released baseline supports active 1.6 work and full lifecycle exploration', async ({ page, request }) => {
   test.setTimeout(60_000)
   const seed = await request.post('http://127.0.0.1:5080/api/showcase/seed', { timeout: 45_000 })
   expect(seed.ok(), await seed.text()).toBeTruthy()
-  await page.goto('/')
+  await login(page)
   await page.locator('.program select').selectOption({ label: 'Flight Management System Live Program' })
   await expect(page.getByText('FMS Product Development · 1.6')).toBeVisible()
   await expect(page.getByText('Complete FMS lifecycle inventory')).toBeVisible()

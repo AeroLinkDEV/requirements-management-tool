@@ -6,6 +6,7 @@ using AeroLink.Domain.Programs;
 using AeroLink.Domain.Verification;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Identity;
 using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Infrastructure;
@@ -19,7 +20,7 @@ builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
-    policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:5174").AllowAnyHeader().AllowAnyMethod()));
+    policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:5174").AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
 var app = builder.Build();
 app.UseExceptionHandler();
@@ -32,17 +33,42 @@ await using (var scope = app.Services.CreateAsyncScope())
     else await db.Database.EnsureCreatedAsync();
     if (builder.Configuration.GetValue<bool>("DemoData:Enabled"))
         await scope.ServiceProvider.GetRequiredService<FmsShowcaseSeeder>().EnsureSeededAsync();
+    await scope.ServiceProvider.GetRequiredService<IdentitySeeder>().EnsureSeededAsync();
 }
+
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? "";
+    if (path == "/health" || path == "/api/auth/login" || path.StartsWith("/api/showcase/seed") || !path.StartsWith("/api/")) { await next(); return; }
+    var identity = context.RequestServices.GetRequiredService<IdentityService>();
+    var user = await identity.ResolveAsync(context.Request.Cookies[IdentityService.CookieName], DateTimeOffset.UtcNow, context.RequestAborted);
+    if (user is null) { context.Response.StatusCode = StatusCodes.Status401Unauthorized; await context.Response.WriteAsJsonAsync(new { error = "Authentication required.", code = "authentication_required" }); return; }
+    context.Items["AeroLink.User"] = user; await next();
+});
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "AeroLink API" }));
 
-app.MapPost("/api/showcase/seed", async (FmsShowcaseSeeder seeder, CancellationToken ct) => Results.Ok(await seeder.EnsureSeededAsync(ct)));
-
-app.MapGet("/api/programs", async (AeroLinkDbContext db, CancellationToken ct) =>
-    Results.Ok(await db.Programs.AsNoTracking().Select(p => new { p.Id, p.Name, p.Code }).ToListAsync(ct)));
-
-app.MapPost("/api/workspaces", async (CreateWorkspaceRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+app.MapPost("/api/auth/login", async (LoginRequest request, HttpContext http, IdentityService identity, CancellationToken ct) =>
 {
+    var result = await identity.LoginAsync(request.UserName, request.Password, http.Connection.RemoteIpAddress?.ToString() ?? "local", http.Request.Headers.UserAgent.ToString(), DateTimeOffset.UtcNow, ct);
+    if (result is null) return Results.Json(new { error = "The username or password is incorrect." }, statusCode: 401);
+    http.Response.Cookies.Append(IdentityService.CookieName, result.Token, new CookieOptions { HttpOnly = true, Secure = false, SameSite = SameSiteMode.Lax, Expires = result.ExpiresAt, Path = "/" });
+    return Results.Ok(result.User);
+});
+app.MapPost("/api/auth/logout", async (HttpContext http, IdentityService identity, CancellationToken ct) => { await identity.LogoutAsync(http.Request.Cookies[IdentityService.CookieName], http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct); http.Response.Cookies.Delete(IdentityService.CookieName); return Results.NoContent(); });
+app.MapGet("/api/auth/me", (HttpContext http) => Results.Ok(http.UserAccount()));
+
+app.MapPost("/api/showcase/seed", async (FmsShowcaseSeeder seeder, IdentitySeeder identities, CancellationToken ct) => { var result=await seeder.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); return Results.Ok(result); });
+
+app.MapGet("/api/programs", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var actor=http.UserAccount(); var allowed=actor.IsAdministrator?null:actor.Programs.Select(x=>x.ProgramId).ToHashSet();
+    return Results.Ok(await db.Programs.AsNoTracking().Where(p=>allowed==null||allowed.Contains(p.Id)).Select(p => new { p.Id, p.Name, p.Code }).ToListAsync(ct));
+});
+
+app.MapPost("/api/workspaces", async (CreateWorkspaceRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    if(!http.UserAccount().IsAdministrator)return Results.Forbid();
     if (await db.Programs.AnyAsync(x => x.Code == request.ProgramCode.Trim().ToUpper(), ct))
         return Results.Conflict(new { error = "A program with that code already exists." });
     try
@@ -51,15 +77,17 @@ app.MapPost("/api/workspaces", async (CreateWorkspaceRequest request, AeroLinkDb
         var project = new ProjectRecord(program.Id, request.ProjectName, request.SoftwareProduct);
         var release = new SoftwareRelease(project.Id, request.InitialRelease, request.InitialReleaseIsReleased);
         db.AddRange(program, project, release);
+        var actor = http.UserAccount(); db.ProgramMemberships.Add(new ProgramMembership(actor.Id, program.Id, ProgramRole.Administrator, actor.UserName, DateTimeOffset.UtcNow));
         await db.SaveChangesAsync(ct);
         return Results.Created($"/api/programs/{program.Id}", ApiMap.Workspace(program, project, release));
     }
     catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapGet("/api/workspaces", async (AeroLinkDbContext db, CancellationToken ct) =>
+app.MapGet("/api/workspaces", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
 {
-    var programs = await db.Programs.AsNoTracking().ToListAsync(ct);
+    var actor=http.UserAccount(); var allowed=actor.IsAdministrator?null:actor.Programs.Select(x=>x.ProgramId).ToHashSet();
+    var programs = await db.Programs.AsNoTracking().Where(x=>allowed==null||allowed.Contains(x.Id)).ToListAsync(ct);
     var projects = await db.Projects.AsNoTracking().ToListAsync(ct);
     var releases = await db.Releases.AsNoTracking().ToListAsync(ct);
     return Results.Ok(programs.Select(program => new
@@ -74,12 +102,11 @@ app.MapGet("/api/workspaces", async (AeroLinkDbContext db, CancellationToken ct)
     }));
 });
 
-app.MapGet("/api/context", async (AeroLinkDbContext db, CancellationToken ct) => Results.Ok(new
+app.MapGet("/api/context", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) => { var actor=http.UserAccount(); var allowed=actor.IsAdministrator?null:actor.Programs.Select(x=>x.ProgramId).ToHashSet(); var programs=await db.Programs.AsNoTracking().Where(x=>allowed==null||allowed.Contains(x.Id)).ToListAsync(ct); var programIds=programs.Select(x=>x.Id).ToList(); var projects=await db.Projects.AsNoTracking().Where(x=>programIds.Contains(x.ProgramId)).ToListAsync(ct); return Results.Ok(new
 {
-    programs = await db.Programs.AsNoTracking().ToListAsync(ct),
-    projects = await db.Projects.AsNoTracking().ToListAsync(ct),
-    releases = await db.Releases.AsNoTracking().OrderBy(x => x.Version).ToListAsync(ct)
-}));
+    programs, projects,
+    releases = await db.Releases.AsNoTracking().Where(x=>projects.Select(p=>p.Id).Contains(x.ProjectId)).OrderBy(x => x.Version).ToListAsync(ct)
+}); });
 
 app.MapGet("/api/scrs", async (Guid projectId, Guid? releaseId, int? page, int? pageSize, string? search, ScrState? state, IScrRepository repository, CancellationToken ct) =>
 {
@@ -98,13 +125,13 @@ app.MapGet("/api/scrs/{id:guid}/download", async (Guid id, string? format, Chang
     var output = await generator.GenerateAsync(id, format ?? "docx", ct); return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
 });
 
-app.MapPut("/api/scrs/{id:guid}/draft", async (Guid id, UpdateScrDraftRequest request, IScrRepository repository, CancellationToken ct) =>
+app.MapPut("/api/scrs/{id:guid}/draft", async (Guid id, UpdateScrDraftRequest request, HttpContext http, IScrRepository repository, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
     if (scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before saving.", code = "stale_version" });
     try
     {
-        scr.UpdateDraft(request.ActorId, request.Title, request.Problem, request.Analysis, request.Solution,
+        scr.UpdateDraft(http.UserAccount().UserName, request.Title, request.Problem, request.Analysis, request.Solution,
             request.RequirementChanges.Select(x => new RequirementChangeDraft(x.BaseNumber, x.Revision, x.Level, x.Kind, x.Statement, x.Rationale, x.VerificationMethod)).ToList(), DateTimeOffset.UtcNow);
         await repository.SaveAsync(ct);
         return Results.Ok(ApiMap.ScrDetail(scr));
@@ -186,7 +213,7 @@ app.MapGet("/api/builds", async (Guid projectId, string? search, AeroLinkDbConte
     return Results.Ok(items);
 });
 
-app.MapPost("/api/builds", async (CreateBuildRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+app.MapPost("/api/builds", async (CreateBuildRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
 {
     var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.BaselineId, ct);
     if (baseline is null) return Results.NotFound();
@@ -194,7 +221,7 @@ app.MapPost("/api/builds", async (CreateBuildRequest request, AeroLinkDbContext 
     if (baseline.RequirementsMaterializedAt is null) return Results.BadRequest(new { error = "Materialize the authoritative requirement baseline before recording a software build." });
     if (baseline.ProjectId != request.ProjectId || baseline.ReleaseId != request.ReleaseId) return Results.BadRequest(new { error = "Build, release, and baseline must belong to the same project context." });
     if (await db.SoftwareBuilds.AnyAsync(x => x.ProjectId == request.ProjectId && x.BuildNumber == request.BuildNumber.Trim(), ct)) return Results.Conflict(new { error = "That build number already exists in this project." });
-    try { var build = new SoftwareBuild(request.ProjectId, request.ReleaseId, request.BaselineId, request.BuildNumber, request.Description, request.RecordedBy, DateTimeOffset.UtcNow);
+    try { var build = new SoftwareBuild(request.ProjectId, request.ReleaseId, request.BaselineId, request.BuildNumber, request.Description, http.UserAccount().UserName, DateTimeOffset.UtcNow);
         db.SoftwareBuilds.Add(build); await db.SaveChangesAsync(ct); return Results.Created($"/api/builds/{build.Id}", new { build.Id, build.BuildNumber }); }
     catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
@@ -215,27 +242,29 @@ app.MapGet("/api/builds/{id:guid}", async (Guid id, AeroLinkDbContext db, Cancel
         effectiveRequirements, scrs = scrs.Select(x => new { x.Id, x.DisplayNumber, x.Title, state = x.State.ToString(), requirements = x.RequirementChanges.OrderBy(r => r.BaseNumber).ThenByDescending(r => r.Revision).Select(r => new { r.Id, r.DisplayNumber, level = r.Level.ToString(), kind = r.Kind.ToString(), r.Statement }) }) });
 });
 
-app.MapPost("/api/scrs", async (CreateScrRequest request, IScrRepository repository, CancellationToken ct) =>
+app.MapPost("/api/scrs", async (CreateScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
+    if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
     try
     {
         var scr = new SystemChangeRequest(request.BaseNumber, 0, request.ProjectId, request.TargetReleaseId,
-            request.Title, request.Problem, request.Analysis, request.Solution, request.AuthorId, DateTimeOffset.UtcNow, request.Type);
+            request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, DateTimeOffset.UtcNow, request.Type);
         await repository.AddAsync(scr, ct); await repository.SaveAsync(ct);
         return Results.Created($"/api/scrs/{scr.Id}", ApiMap.ScrDetail(scr));
     }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, IScrRepository repository, CancellationToken ct) =>
+app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
+    if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
     try
     {
         var now = DateTimeOffset.UtcNow;
         var scr = new SystemChangeRequest(request.BaseNumber, 0, request.ProjectId, request.TargetReleaseId,
-            request.Title, request.Problem, request.Analysis, request.Solution, request.AuthorId, now, request.Type);
+            request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, now, request.Type);
         foreach (var change in request.RequirementChanges)
-            scr.AddRequirementChange(request.AuthorId, change.BaseNumber, change.Revision, change.Level, change.Kind,
+            scr.AddRequirementChange(http.UserAccount().UserName, change.BaseNumber, change.Revision, change.Level, change.Kind,
                 change.Statement, change.Rationale, change.VerificationMethod, now);
         await repository.AddAsync(scr, ct);
         await repository.SaveAsync(ct);
@@ -244,43 +273,50 @@ app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, IScrReposit
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/scrs/{id:guid}/requirements", async (Guid id, RequirementChangeRequest request, IScrRepository repository, CancellationToken ct) =>
+app.MapPost("/api/scrs/{id:guid}/requirements", async (Guid id, RequirementChangeRequest request, HttpContext http, IScrRepository repository, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
     try
     {
-        scr.AddRequirementChange(request.ActorId, request.BaseNumber, request.Revision, request.Level, request.Kind,
+        scr.AddRequirementChange(http.UserAccount().UserName, request.BaseNumber, request.Revision, request.Level, request.Kind,
             request.Statement, request.Rationale, request.VerificationMethod, DateTimeOffset.UtcNow);
         await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
     }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/scrs/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, IScrRepository repository, CancellationToken ct) =>
+app.MapPost("/api/scrs/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
     if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before submitting.", code = "stale_version" });
     try
     {
-        scr.SubmitForReview(request.ActorId, request.Approvers.Select(x => new ApproverSelection(x.UserId, x.Name)).ToList(), DateTimeOffset.UtcNow);
+        var actor = http.UserAccount();
+        if (scr.AuthorId != actor.UserName && !actor.IsAdministrator) return Results.Forbid();
+        var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.UserName, x.DisplayName }).ToListAsync(ct);
+        if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every approver must be an active AeroLink user." });
+        scr.SubmitForReview(actor.UserName, known.Select(x => new ApproverSelection(x.UserName, x.DisplayName)).ToList(), DateTimeOffset.UtcNow);
         await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
     }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, ActorRequest request, IScrRepository repository, CancellationToken ct) =>
+app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
     if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
-    try { scr.ApproveActiveStage(request.ActorId, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
+    var actor = http.UserAccount(); if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+    var programId = await db.Projects.Where(x => x.Id == scr.ProjectId).Join(db.Programs, x => x.ProgramId, x => x.Id, (_, p) => p.Id).SingleAsync(ct);
+    if (!await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct)) return Results.Forbid();
+    try { var now = DateTimeOffset.UtcNow; var snapshotHash = scr.ActiveReviewCycle?.SnapshotHash ?? ""; scr.ApproveActiveStage(actor.UserName, now); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "SCR", scr.Id, scr.DisplayNumber, "Approve", request.Meaning, snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now)); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/scrs/{id:guid}/request-changes", async (Guid id, RequestChangesRequest request, IScrRepository repository, CancellationToken ct) =>
+app.MapPost("/api/scrs/{id:guid}/request-changes", async (Guid id, RequestChangesRequest request, HttpContext http, IScrRepository repository, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
     if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
-    try { scr.RequestChanges(request.ActorId, request.Reason, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
+    try { scr.RequestChanges(http.UserAccount().UserName, request.Reason, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
@@ -291,12 +327,13 @@ app.MapGet("/api/baselines", async (Guid projectId, Guid releaseId, AeroLinkDbCo
     return Results.Ok(items.Select(x => new { x.Id, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.Name, x.state, x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, x.selectionCount }));
 });
 
-app.MapPost("/api/baselines", async (CreateBaselineRequest request, IBaselineRepository repository, CancellationToken ct) =>
+app.MapPost("/api/baselines", async (CreateBaselineRequest request, HttpContext http, IBaselineRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
+    if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
     try
     {
         var baseline = new CandidateBaseline(request.BaseNumber, request.Revision, request.ProjectId, request.ReleaseId,
-            request.PredecessorBaselineId, request.Name, request.ActorId, DateTimeOffset.UtcNow);
+            request.PredecessorBaselineId, request.Name, http.UserAccount().UserName, DateTimeOffset.UtcNow);
         await repository.AddAsync(baseline, ct); await repository.SaveAsync(ct);
         return Results.Created($"/api/baselines/{baseline.Id}", ApiMap.Baseline(baseline));
     }
@@ -321,32 +358,35 @@ app.MapGet("/api/baselines/{id:guid}/eligible-scrs", async (Guid id, IBaselineRe
     return Results.Ok(items);
 });
 
-app.MapPost("/api/baselines/{id:guid}/selections", async (Guid id, BaselineSelectionRequest request, IBaselineRepository baselines, IScrRepository scrs, CancellationToken ct) =>
+app.MapPost("/api/baselines/{id:guid}/selections", async (Guid id, BaselineSelectionRequest request, HttpContext http, IBaselineRepository baselines, IScrRepository scrs, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
     var baseline = await baselines.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
+    if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
     var scr = await scrs.GetAsync(request.ScrId, ct); if (scr is null) return Results.NotFound();
-    try { baseline.Select(scr, request.ActorId, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
+    try { baseline.Select(scr, http.UserAccount().UserName, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapDelete("/api/baselines/{id:guid}/selections/{scrId:guid}", async (Guid id, Guid scrId, string actorId, IBaselineRepository baselines, IScrRepository scrs, CancellationToken ct) =>
+app.MapDelete("/api/baselines/{id:guid}/selections/{scrId:guid}", async (Guid id, Guid scrId, HttpContext http, IBaselineRepository baselines, IScrRepository scrs, CancellationToken ct) =>
 {
     var baseline = await baselines.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
     var scr = await scrs.GetAsync(scrId, ct); if (scr is null) return Results.NotFound();
-    try { baseline.Remove(scr, actorId, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.NoContent(); }
+    try { baseline.Remove(scr, http.UserAccount().UserName, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.NoContent(); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/baselines/{id:guid}/freeze", async (Guid id, BaselineActorRequest request, IBaselineRepository repository, CancellationToken ct) =>
+app.MapPost("/api/baselines/{id:guid}/freeze", async (Guid id, BaselineActorRequest request, HttpContext http, IBaselineRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
     var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
-    try { baseline.Freeze(request.ActorId, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
+    if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+    try { baseline.Freeze(http.UserAccount().UserName, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/baselines/{id:guid}/materialize-requirements", async (Guid id, BaselineActorRequest request, RequirementBaselineMaterializer materializer, CancellationToken ct) =>
+app.MapPost("/api/baselines/{id:guid}/materialize-requirements", async (Guid id, BaselineActorRequest request, HttpContext http, RequirementBaselineMaterializer materializer, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
-    try { return Results.Ok(await materializer.MaterializeAsync(id, request.ActorId, DateTimeOffset.UtcNow, ct)); }
+    var projectId=await db.CandidateBaselines.Where(x=>x.Id==id).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if(projectId is null)return Results.NotFound(); if(!await http.HasProjectRoleAsync(db,identity,projectId.Value,ct,ProgramRole.ConfigurationManager))return Results.Forbid();
+    try { return Results.Ok(await materializer.MaterializeAsync(id, http.UserAccount().UserName, DateTimeOffset.UtcNow, ct)); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
@@ -438,9 +478,10 @@ app.MapGet("/api/documents/{id:guid}/download", async (Guid id, string? format, 
     var output = await generator.GenerateAsync(id, format ?? "docx", ct); return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
 });
 
-app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, GenerateDocumentsRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, GenerateDocumentsRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
     var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (baseline is null) return Results.NotFound(); if (baseline.RequirementsMaterializedAt is null) return Results.BadRequest(new { error = "Materialize the requirement baseline before generating controlled outputs." });
+    if(!await http.HasProjectRoleAsync(db,identity,baseline.ProjectId,ct,ProgramRole.ConfigurationManager))return Results.Forbid();
     var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == baseline.ReleaseId, ct); var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == baseline.ProjectId, ct);
     var requirementCounts = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id group artifact by artifact.Level into g select new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
     var testCounts = await db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == project.Id).GroupBy(x => x.Level).Select(x => new { x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
@@ -451,7 +492,7 @@ app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, Gener
         (ControlledDocumentType.SystemTestProcedures,$"SYSTD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} System Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.System)),
         (ControlledDocumentType.HighLevelTestProcedures,$"HLRTD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} HLR Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.HighLevel)),
         (ControlledDocumentType.LowLevelTestProcedures,$"LLRTD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} LLR Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.LowLevel)) };
-    var existing = await db.ControlledDocuments.Where(x => x.BaselineId == id).ToListAsync(ct); foreach (var spec in specs.Where(s => existing.All(x => x.Type != s.Item1))) { var content = $"{baseline.RequirementsHash}|{spec.Item1}|{spec.Item4}|{request.ActorId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant(); db.ControlledDocuments.Add(new ControlledDocument(project.Id, release.Id, baseline.Id, spec.Item1, spec.Item2, spec.Item3, 0, hash, spec.Item4, DateTimeOffset.UtcNow)); }
+    var existing = await db.ControlledDocuments.Where(x => x.BaselineId == id).ToListAsync(ct); foreach (var spec in specs.Where(s => existing.All(x => x.Type != s.Item1))) { var content = $"{baseline.RequirementsHash}|{spec.Item1}|{spec.Item4}|{http.UserAccount().UserName}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant(); db.ControlledDocuments.Add(new ControlledDocument(project.Id, release.Id, baseline.Id, spec.Item1, spec.Item2, spec.Item3, 0, hash, spec.Item4, DateTimeOffset.UtcNow)); }
     await db.SaveChangesAsync(ct); return Results.Ok(new { generated = await db.ControlledDocuments.CountAsync(x => x.BaselineId == id, ct) });
 });
 
@@ -472,26 +513,26 @@ app.MapGet("/api/release-campaigns/{id:guid}", async (Guid id, AeroLinkDbContext
         readiness = await readiness.CalculateAsync(id, ct), changes, impacts, approvals = campaign.Approvals.OrderBy(x => x.Position).Select(x => new { x.Position, x.ApproverId, x.ApproverName, state = x.State.ToString(), x.ApprovedAt }), events = campaign.Events.OrderByDescending(x => x.OccurredAt).Select(x => new { x.EventType, x.ActorId, x.Detail, x.OccurredAt }) });
 });
 
-app.MapPut("/api/impact-dispositions/{id:guid}", async (Guid id, DispositionImpactRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+app.MapPut("/api/impact-dispositions/{id:guid}", async (Guid id, DispositionImpactRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
 {
     var impact = await db.ImpactDispositions.SingleOrDefaultAsync(x => x.Id == id, ct); if (impact is null) return Results.NotFound();
-    try { impact.Disposition(request.State, request.Rationale, request.ActorId, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
+    try { impact.Disposition(request.State, request.Rationale, http.UserAccount().UserName, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPut("/api/release-campaigns/{id:guid}/impact-dispositions", async (Guid id, BulkDispositionImpactRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+app.MapPut("/api/release-campaigns/{id:guid}/impact-dispositions", async (Guid id, BulkDispositionImpactRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
 {
     var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
     if (campaign.State == ReleaseCampaignState.Released) return Results.BadRequest(new { error = "A released campaign is immutable." });
     var impacts = await db.ImpactDispositions.Where(x => x.CampaignId == id && x.State == ImpactDispositionState.Pending && (request.ScrId == null || x.ScrId == request.ScrId)).ToListAsync(ct);
     if (impacts.Count == 0) return Results.BadRequest(new { error = "No pending impacts match this disposition." });
-    try { foreach (var impact in impacts) impact.Disposition(request.State, request.Rationale, request.ActorId, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.Ok(new { dispositioned = impacts.Count }); }
+    try { foreach (var impact in impacts) impact.Disposition(request.State, request.Rationale, http.UserAccount().UserName, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.Ok(new { dispositioned = impacts.Count }); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/release-campaigns/{id:guid}/reconcile-lifecycle-links", async (Guid id, CampaignActorRequest request, ReleaseExecutionService execution, CancellationToken ct) =>
+app.MapPost("/api/release-campaigns/{id:guid}/reconcile-lifecycle-links", async (Guid id, CampaignActorRequest request, HttpContext http, ReleaseExecutionService execution, CancellationToken ct) =>
 {
-    try { return Results.Ok(await execution.ReconcileAsync(id, request.ActorId, DateTimeOffset.UtcNow, ct)); }
+    try { return Results.Ok(await execution.ReconcileAsync(id, http.UserAccount().UserName, DateTimeOffset.UtcNow, ct)); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
@@ -504,51 +545,53 @@ app.MapGet("/api/release-campaigns/{id:guid}/verification-template", async (Guid
 app.MapPost("/api/release-campaigns/{id:guid}/verification-package", async (Guid id, HttpRequest http, ReleaseExecutionService execution, CancellationToken ct) =>
 {
     if (!http.HasFormContentType) return Results.BadRequest(new { error = "Use multipart form data with manifest and evidence files." });
-    var form = await http.ReadFormAsync(ct); var manifest = form.Files.GetFile("manifest"); var evidence = form.Files.GetFile("evidence"); var actorId = form["actorId"].ToString();
+    var form = await http.ReadFormAsync(ct); var manifest = form.Files.GetFile("manifest"); var evidence = form.Files.GetFile("evidence"); var actorId = http.HttpContext.UserAccount().UserName;
     if (manifest is null || evidence is null || manifest.Length == 0 || evidence.Length == 0) return Results.BadRequest(new { error = "Both a completed JSON manifest and an evidence package are required." });
     if (manifest.Length > 10 * 1024 * 1024) return Results.BadRequest(new { error = "Verification manifests are limited to 10 MB." });
     try { await using var manifestStream = manifest.OpenReadStream(); await using var evidenceStream = evidence.OpenReadStream(); return Results.Ok(await execution.ImportVerificationAsync(id, manifestStream, evidenceStream, evidence.FileName, evidence.ContentType, actorId, DateTimeOffset.UtcNow, ct)); }
     catch (Exception ex) when (ex is DomainException or InvalidOperationException) { return Results.BadRequest(new { error = ex.Message }); }
 }).DisableAntiforgery();
 
-app.MapPost("/api/release-campaigns/{id:guid}/verification-build", async (Guid id, SelectBuildRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+app.MapPost("/api/release-campaigns/{id:guid}/verification-build", async (Guid id, SelectBuildRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
 {
     var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
     if (!await db.SoftwareBuilds.AnyAsync(x => x.Id == request.SoftwareBuildId && x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId, ct)) return Results.BadRequest(new { error = "Select a software build from this campaign release." });
-    try { campaign.SelectVerificationBuild(request.SoftwareBuildId, request.ActorId, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
+    try { campaign.SelectVerificationBuild(request.SoftwareBuildId, http.UserAccount().UserName, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/release-campaigns/{id:guid}/review", async (Guid id, StartReleaseReviewRequest request, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
+app.MapPost("/api/release-campaigns/{id:guid}/review", async (Guid id, StartReleaseReviewRequest request, HttpContext http, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
 {
     var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound(); var status = await readiness.CalculateAsync(id, ct);
     var blockers = status.Gates.Where(x => x.Code != "release_approval" && !x.Complete).Select(x => x.Name).ToList(); if (blockers.Count > 0) return Results.BadRequest(new { error = "Resolve readiness gates before release review.", blockers });
-    try { campaign.BeginReleaseReview(request.ActorId, request.Approvers.Select(x => (x.UserId, x.Name)).ToList(), DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
+    try { var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.UserName, x.DisplayName }).ToListAsync(ct); if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every release approver must be an active AeroLink user." }); campaign.BeginReleaseReview(http.UserAccount().UserName, known.Select(x => (x.UserName, x.DisplayName)).ToList(), DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/release-campaigns/{id:guid}/approve", async (Guid id, CampaignActorRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+app.MapPost("/api/release-campaigns/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
     var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
-    try { var complete = campaign.Approve(request.ActorId, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.Ok(new { complete }); }
+    var actor = http.UserAccount(); if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+    var programId = await db.Projects.Where(x => x.Id == campaign.ProjectId).Select(x => x.ProgramId).SingleAsync(ct); if (!await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct)) return Results.Forbid();
+    try { var now = DateTimeOffset.UtcNow; var contentHash = campaign.ReleaseHash ?? $"campaign:{campaign.Id}:{campaign.State}"; var complete = campaign.Approve(actor.UserName, now); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ReleaseCampaign", campaign.Id, campaign.Name, "ApproveRelease", request.Meaning, contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now)); await db.SaveChangesAsync(ct); return Results.Ok(new { complete }); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/release-campaigns/{id:guid}/release", async (Guid id, CompleteReleaseRequest request, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
+app.MapPost("/api/release-campaigns/{id:guid}/release", async (Guid id, CompleteReleaseRequest request, HttpContext http, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
 {
     await using var transaction = await db.Database.BeginTransactionAsync(ct); var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
     var status = await readiness.CalculateAsync(id, ct); if (!status.ReadyForRelease) return Results.BadRequest(new { error = "Every release-readiness gate must be complete.", blockers = status.Gates.Where(x => !x.Complete).Select(x => x.Name) });
     if (campaign.SoftwareBuildId is null) return Results.BadRequest(new { error = "Select the verified release build." });
     var baseline = await db.CandidateBaselines.Include(x => x.Events).SingleAsync(x => x.Id == campaign.BaselineId, ct); var release = await db.Releases.SingleAsync(x => x.Id == campaign.ReleaseId, ct); var build = await db.SoftwareBuilds.SingleAsync(x => x.Id == campaign.SoftwareBuildId, ct);
     var documents = await db.ControlledDocuments.AsNoTracking().Where(x => x.BaselineId == baseline.Id).OrderBy(x => x.Type).Select(x => x.ContentHash).ToListAsync(ct); var manifest = string.Join("|", baseline.ContentHash, baseline.RequirementsHash, build.BuildNumber, string.Join(";", documents)); var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
-    try { campaign.Release(build.Id, hash, request.ActorId, DateTimeOffset.UtcNow); baseline.MarkReleased(request.ActorId, DateTimeOffset.UtcNow); release.MarkReleased(DateTimeOffset.UtcNow); build.MarkReleased(DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.Ok(new { release = release.Version, build.BuildNumber, releaseHash = hash }); }
+    try { var actor = http.UserAccount().UserName; campaign.Release(build.Id, hash, actor, DateTimeOffset.UtcNow); baseline.MarkReleased(actor, DateTimeOffset.UtcNow); release.MarkReleased(DateTimeOffset.UtcNow); build.MarkReleased(DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.Ok(new { release = release.Version, build.BuildNumber, releaseHash = hash }); }
     catch (Exception ex) when (ex is DomainException or InvalidOperationException) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
 app.MapPost("/api/evidence", async (HttpRequest http, AeroLinkDbContext db, EvidenceFileStore store, CancellationToken ct) =>
 {
     if (!http.HasFormContentType) return Results.BadRequest(new { error = "Use multipart form data." }); var form = await http.ReadFormAsync(ct); var file = form.Files.GetFile("file");
-    if (file is null || file.Length == 0) return Results.BadRequest(new { error = "Select a non-empty evidence file." }); if (!Guid.TryParse(form["projectId"], out var projectId) || !await db.Projects.AnyAsync(x => x.Id == projectId, ct)) return Results.BadRequest(new { error = "A valid project is required." }); var uploadedBy = form["uploadedBy"].ToString();
+    if (file is null || file.Length == 0) return Results.BadRequest(new { error = "Select a non-empty evidence file." }); if (!Guid.TryParse(form["projectId"], out var projectId) || !await db.Projects.AnyAsync(x => x.Id == projectId, ct)) return Results.BadRequest(new { error = "A valid project is required." }); var uploadedBy = http.HttpContext.UserAccount().UserName;
     try { await using var stream = file.OpenReadStream(); var stored = await store.StoreAsync(stream, file.FileName, file.ContentType, ct); var evidence = new EvidenceRecord(projectId, stored.OriginalFileName, stored.ContentType, stored.Size, stored.Sha256, stored.StorageKey, uploadedBy, DateTimeOffset.UtcNow); db.EvidenceRecords.Add(evidence); await db.SaveChangesAsync(ct); return Results.Created($"/api/evidence/{evidence.Id}", new { evidence.Id, evidence.OriginalFileName, evidence.ContentType, evidence.Size, evidence.Sha256, evidence.UploadedBy, evidence.UploadedAt }); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 }).DisableAntiforgery();
@@ -643,27 +686,29 @@ app.MapGet("/api/test-procedures", async (Guid projectId, string? search, AeroLi
             requirementCount = latest is null ? 0 : coverage.Count(c => c.ProcedureRevisionId == latest.Id), lastOutcome = lastRun?.Outcome.ToString(), lastExecutedAt = lastRun?.ExecutedAt }; }));
 });
 
-app.MapPost("/api/test-procedures", async (CreateTestProcedureRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+app.MapPost("/api/test-procedures", async (CreateTestProcedureRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
+    if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.TestEngineer))return Results.Forbid();
     if (await db.TestProcedures.AnyAsync(x => x.ProjectId == request.ProjectId && x.BaseNumber == request.BaseNumber.Trim().ToUpper(), ct)) return Results.Conflict(new { error = "That test procedure identifier already exists." });
     var requirementIds = request.RequirementRevisionIds.Distinct().ToList();
     if (await db.RequirementRevisions.CountAsync(x => requirementIds.Contains(x.Id), ct) != requirementIds.Count) return Results.BadRequest(new { error = "Every coverage link must reference an authoritative requirement revision." });
-    try { var procedure = new TestProcedure(request.ProjectId, request.BaseNumber, request.Title, request.OwnerId, DateTimeOffset.UtcNow, request.Level);
-        var revision = new TestProcedureRevision(procedure.Id, 0, request.Objective, request.Preconditions, request.Steps, request.ExpectedResult, TestProcedureState.Approved, request.OwnerId, DateTimeOffset.UtcNow);
+    try { var actor = http.UserAccount().UserName; var procedure = new TestProcedure(request.ProjectId, request.BaseNumber, request.Title, actor, DateTimeOffset.UtcNow, request.Level);
+        var revision = new TestProcedureRevision(procedure.Id, 0, request.Objective, request.Preconditions, request.Steps, request.ExpectedResult, TestProcedureState.Approved, actor, DateTimeOffset.UtcNow);
         db.AddRange(procedure, revision); db.TestCoverage.AddRange(requirementIds.Select(id => new TestRequirementCoverage(revision.Id, id))); await db.SaveChangesAsync(ct);
         return Results.Created($"/api/test-procedures/{procedure.Id}", new { procedure.Id, revisionId = revision.Id, displayNumber = procedure.BaseNumber + ".00" }); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/test-executions", async (RecordTestExecutionRequest request, AeroLinkDbContext db, CancellationToken ct) =>
+app.MapPost("/api/test-executions", async (RecordTestExecutionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
+    if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.TestEngineer))return Results.Forbid();
     var revision = await db.TestProcedureRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ProcedureRevisionId, ct); if (revision is null) return Results.NotFound();
     if (revision.State != TestProcedureState.Approved) return Results.BadRequest(new { error = "Only an approved test procedure revision can be executed." });
     var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.Id == revision.ProcedureId, ct); if (procedure.ProjectId != request.ProjectId) return Results.BadRequest(new { error = "The test procedure belongs to a different project." });
     if (request.SoftwareBuildId is not null && !await db.SoftwareBuilds.AnyAsync(x => x.Id == request.SoftwareBuildId && x.ProjectId == request.ProjectId, ct)) return Results.BadRequest(new { error = "The software build belongs to a different project." });
     if (request.RetestOfExecutionId is not null && !await db.TestExecutions.AnyAsync(x => x.Id == request.RetestOfExecutionId && x.ProcedureRevisionId == request.ProcedureRevisionId, ct)) return Results.BadRequest(new { error = "A retest must reference an earlier execution of the same procedure revision." });
     try { var execution = new TestExecution(request.ProjectId, request.ProcedureRevisionId, request.SoftwareBuildId, request.RetestOfExecutionId,
-        request.Outcome, request.ExecutedBy, request.Configuration, request.Determination, request.EvidenceReference, request.ExecutedAt, DateTimeOffset.UtcNow);
+        request.Outcome, http.UserAccount().UserName, request.Configuration, request.Determination, request.EvidenceReference, request.ExecutedAt, DateTimeOffset.UtcNow);
         db.TestExecutions.Add(execution); await db.SaveChangesAsync(ct); return Results.Created($"/api/test-executions/{execution.Id}", new { execution.Id, outcome = execution.Outcome.ToString() }); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
@@ -680,6 +725,70 @@ app.MapGet("/api/test-executions", async (Guid projectId, Guid? buildId, AeroLin
     var evidence = await (from link in db.TestExecutionEvidence.AsNoTracking().Where(x => rowIds.Contains(x.TestExecutionId)) join item in db.EvidenceRecords.AsNoTracking() on link.EvidenceId equals item.Id select new { link.TestExecutionId, item.Id, item.OriginalFileName, item.Size, item.Sha256, item.UploadedAt }).ToListAsync(ct);
     return Results.Ok(rows.Select(x => new { x.Id, x.procedureRevisionId, x.displayNumber, x.Title, x.outcome, x.ExecutedBy, x.Configuration, x.Determination, x.EvidenceReference, x.ExecutedAt, x.RecordedAt, x.SoftwareBuildId, x.RetestOfExecutionId, evidence = evidence.Where(e => e.TestExecutionId == x.Id).Select(e => new { e.Id, e.OriginalFileName, e.Size, e.Sha256, e.UploadedAt }) }));
 });
+
+app.MapGet("/api/directory", async (Guid programId, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var members = await (from membership in db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == programId)
+                         join user in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active) on membership.UserId equals user.Id
+                         select new { user.Id, user.UserName, user.DisplayName, user.Email, role = membership.Role.ToString() }).ToListAsync(ct);
+    return Results.Ok(members.GroupBy(x => new { x.Id, x.UserName, x.DisplayName, x.Email }).Select(x => new { x.Key.Id, x.Key.UserName, x.Key.DisplayName, x.Key.Email, roles = x.Select(r => r.role).Order().ToList() }).OrderBy(x => x.DisplayName));
+});
+
+app.MapGet("/api/my-work", async (Guid? projectId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
+    var activeScrSteps = await (from step in db.ApprovalSteps.AsNoTracking().Where(x => x.ApproverId == actor.UserName && x.State == ApprovalStepState.Active)
+                                join cycle in db.ReviewCycles.AsNoTracking() on step.ReviewCycleId equals cycle.Id
+                                join scr in db.SystemChangeRequests.AsNoTracking() on cycle.ScrId equals scr.Id
+                                where projectId == null || scr.ProjectId == projectId
+                                orderby cycle.StartedAt select new { id = scr.Id, type = "SCR approval", artifact = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, title = scr.Title, priority = "High", dueAt = cycle.StartedAt.AddDays(5), ageDays = (int)(now - cycle.StartedAt).TotalDays, route = "scr" }).ToListAsync(ct);
+    var releaseSteps = await (from step in db.ReleaseApprovals.AsNoTracking().Where(x => x.ApproverId == actor.UserName && x.State == ReleaseApprovalState.Active)
+                              join campaign in db.ReleaseCampaigns.AsNoTracking() on step.CampaignId equals campaign.Id
+                              where projectId == null || campaign.ProjectId == projectId
+                              orderby campaign.CreatedAt select new { id = campaign.Id, type = "Release approval", artifact = campaign.Name, title = "Authorize the controlled release package", priority = "Critical", dueAt = campaign.CreatedAt.AddDays(10), ageDays = (int)(now - campaign.CreatedAt).TotalDays, route = "release" }).ToListAsync(ct);
+    var authoredDrafts = await db.SystemChangeRequests.AsNoTracking().Where(x => x.AuthorId == actor.UserName && x.State == ScrState.Draft && (projectId == null || x.ProjectId == projectId)).OrderByDescending(x => x.UpdatedAt)
+        .Select(x => new { id = x.Id, type = "Draft to complete", artifact = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, title = x.Title, priority = "Normal", dueAt = x.UpdatedAt.AddDays(10), ageDays = (int)(now - x.UpdatedAt).TotalDays, route = "scr" }).ToListAsync(ct);
+    var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).ToList();
+    return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now), drafts = authoredDrafts.Count }, tasks });
+});
+
+app.MapGet("/api/signatures", async (Guid? artifactId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var query = db.ElectronicSignatures.AsNoTracking().AsQueryable(); if (artifactId is not null) query = query.Where(x => x.ArtifactId == artifactId);
+    return Results.Ok(await query.OrderByDescending(x => x.SignedAt).Take(500).Select(x => new { x.Id, x.ArtifactType, x.ArtifactId, x.ArtifactRevision, x.Action, x.Meaning, x.ContentHash, x.UserName, x.DisplayName, x.SignedAt }).ToListAsync(ct));
+});
+
+app.MapGet("/api/admin/users", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    if (!http.UserAccount().IsAdministrator) return Results.Forbid();
+    var users = await db.UserAccounts.AsNoTracking().OrderBy(x => x.DisplayName).ToListAsync(ct); var memberships = await db.ProgramMemberships.AsNoTracking().ToListAsync(ct);
+    return Results.Ok(users.Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, state = x.State.ToString(), x.LastLoginAt, x.CreatedAt, memberships = memberships.Where(m => m.UserId == x.Id).Select(m => new { m.ProgramId, role = m.Role.ToString() }) }));
+});
+app.MapPost("/api/admin/users", async (CreateUserRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid(); var userName = request.UserName.Trim().ToLowerInvariant(); if (await db.UserAccounts.AnyAsync(x => x.UserName == userName, ct)) return Results.Conflict(new { error = "Username already exists." });
+    try { var user = new UserAccount(userName, request.DisplayName, request.Email, IdentityService.HashPassword(request.TemporaryPassword), DateTimeOffset.UtcNow); db.UserAccounts.Add(user); db.SecurityAuditEvents.Add(new("AccountCreated", actor.UserName, userName, "Success", $"Created account for {request.DisplayName}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct); return Results.Created($"/api/admin/users/{user.Id}", new { user.Id, user.UserName, user.DisplayName }); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+app.MapPost("/api/admin/users/{id:guid}/memberships", async (Guid id, GrantRoleRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid(); if (!await db.UserAccounts.AnyAsync(x => x.Id == id, ct) || !await db.Programs.AnyAsync(x => x.Id == request.ProgramId, ct)) return Results.NotFound();
+    if (!await db.ProgramMemberships.AnyAsync(x => x.UserId == id && x.ProgramId == request.ProgramId && x.Role == request.Role, ct)) db.ProgramMemberships.Add(new(id, request.ProgramId, request.Role, actor.UserName, DateTimeOffset.UtcNow));
+    db.SecurityAuditEvents.Add(new("RoleGranted", actor.UserName, id.ToString(), "Success", $"Granted {request.Role} for program {request.ProgramId}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct); return Results.NoContent();
+});
+app.MapPost("/api/admin/users/{id:guid}/state", async (Guid id, SetAccountStateRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid(); var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (user is null) return Results.NotFound(); if (user.Id == actor.Id && !request.Enabled) return Results.BadRequest(new { error = "You cannot disable your own active account." });
+    if (request.Enabled) user.Enable(); else user.Disable(DateTimeOffset.UtcNow); db.SecurityAuditEvents.Add(new(request.Enabled ? "AccountEnabled" : "AccountDisabled", actor.UserName, user.UserName, "Success", $"Account state set to {(request.Enabled ? "Active" : "Disabled")}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct); return Results.NoContent();
+});
+app.MapPost("/api/delegations", async (CreateDelegationRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var actor = http.UserAccount(); if (request.DelegatorUserId != actor.Id && !actor.IsAdministrator) return Results.Forbid(); if (request.DelegatorUserId == request.DelegateUserId) return Results.BadRequest(new { error = "A person cannot delegate a role to themselves." });
+    try { var delegation = new RoleDelegation(request.ProgramId, request.DelegatorUserId, request.DelegateUserId, request.Role, request.StartsAt, request.EndsAt, request.Reason, actor.UserName, DateTimeOffset.UtcNow); db.RoleDelegations.Add(delegation); db.SecurityAuditEvents.Add(new("DelegationCreated", actor.UserName, request.DelegateUserId.ToString(), "Success", $"Delegated {request.Role} through {request.EndsAt:u}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct); return Results.Created($"/api/delegations/{delegation.Id}", new { delegation.Id }); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+app.MapGet("/api/admin/security-audit", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) => http.UserAccount().IsAdministrator
+    ? Results.Ok(await db.SecurityAuditEvents.AsNoTracking().OrderByDescending(x => x.OccurredAt).Take(1000).ToListAsync(ct)) : Results.Forbid());
 
 app.MapGet("/api/verification-coverage", async (Guid projectId, Guid? baselineId, Guid? buildId, AeroLinkDbContext db, CancellationToken ct) =>
 {
@@ -701,6 +810,7 @@ app.Run();
 
 public partial class Program { }
 
+record LoginRequest(string UserName, string Password);
 record CreateScrRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, ChangeRequestType Type = ChangeRequestType.System);
 record DraftRequirementRequest(string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
 record CreateScrDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, List<DraftRequirementRequest> RequirementChanges, ChangeRequestType Type = ChangeRequestType.System);
@@ -710,6 +820,7 @@ record RequirementChangeRequest(string ActorId, string BaseNumber, int Revision,
 record ApproverRequest(string UserId, string Name);
 record SubmitReviewRequest(string ActorId, long? ExpectedVersion, List<ApproverRequest> Approvers);
 record ActorRequest(string ActorId, long? ExpectedVersion);
+record SignatureRequest(string Password, string Meaning, long? ExpectedVersion);
 record RequestChangesRequest(string ActorId, long? ExpectedVersion, string Reason);
 record CreateBaselineRequest(string BaseNumber, int Revision, Guid ProjectId, Guid ReleaseId, Guid? PredecessorBaselineId, string Name, string ActorId);
 record BaselineSelectionRequest(Guid ScrId, string ActorId);
@@ -725,6 +836,22 @@ record StartReleaseReviewRequest(string ActorId, List<ApproverRequest> Approvers
 record CompleteReleaseRequest(string ActorId);
 record CreateTraceLinkRequest(Guid ProjectId, Guid SourceRevisionId, Guid TargetRevisionId, RequirementTraceType Type, string Rationale);
 record GenerateDocumentsRequest(string ActorId);
+record CreateUserRequest(string UserName, string DisplayName, string Email, string TemporaryPassword);
+record GrantRoleRequest(Guid ProgramId, ProgramRole Role);
+record SetAccountStateRequest(bool Enabled);
+record CreateDelegationRequest(Guid ProgramId, Guid DelegatorUserId, Guid DelegateUserId, ProgramRole Role, DateTimeOffset StartsAt, DateTimeOffset EndsAt, string Reason);
+
+static class IdentityHttpExtensions
+{
+    public static AuthenticatedUser UserAccount(this HttpContext context) => context.Items.TryGetValue("AeroLink.User", out var value) && value is AuthenticatedUser user
+        ? user : throw new InvalidOperationException("Authenticated user context is unavailable.");
+    public static async Task<bool> HasProjectRoleAsync(this HttpContext context, AeroLinkDbContext db, IdentityService identity, Guid projectId, CancellationToken ct, params ProgramRole[] roles)
+    {
+        var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct); if (programId is null) return false;
+        foreach (var role in roles) if (await identity.HasRoleAsync(context.UserAccount(), programId.Value, role, DateTimeOffset.UtcNow, ct)) return true;
+        return false;
+    }
+}
 
 static class ApiMap
 {

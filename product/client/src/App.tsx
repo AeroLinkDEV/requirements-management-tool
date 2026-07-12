@@ -7,6 +7,8 @@ import HistoryExplorer from "./HistoryExplorer";
 import VerificationCenter from "./VerificationCenter";
 import LifecycleExplorer from "./LifecycleExplorer";
 import ReleaseCampaignCenter from "./ReleaseCampaignCenter";
+import { AdministrationCenter, LoginPage, MyWorkCenter } from "./IdentityCenter";
+import type { AuthUser } from "./IdentityCenter";
 import "./App.css";
 import "./Onboarding.css";
 import "./DashboardInteractions.css";
@@ -40,6 +42,7 @@ type Workspace = {
 const API = "http://127.0.0.1:5080";
 
 function App() {
+  const [user,setUser]=useState<AuthUser|null|undefined>(undefined);
   const [scrs, setScrs] = useState<Scr[]>([]),
     [metrics, setMetrics] = useState<Metrics>({
       totalScrs: 0,
@@ -55,7 +58,8 @@ function App() {
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
     [selectedScrId, setSelectedScrId] = useState(""),
-    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "verification" | "lifecycle" | "release">("dashboard");
+    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "verification" | "lifecycle" | "release" | "mywork" | "admin">("dashboard");
+  useEffect(()=>{fetch(`${API}/api/auth/me`).then(async r=>setUser(r.ok?await r.json():null)).catch(()=>setUser(null))},[]);
   const loadWorkspaces = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/workspaces`),
@@ -90,8 +94,9 @@ function App() {
     }
   }, [project, release]);
   useEffect(() => {
+    if(!user)return;
     loadWorkspaces();
-  }, [loadWorkspaces]);
+  }, [loadWorkspaces,user]);
   useEffect(() => {
     loadData();
   }, [loadData]);
@@ -119,6 +124,8 @@ function App() {
     await loadWorkspaces();
     setSaving(false);
   };
+  if(user===undefined)return <div className="appBoot">Establishing secure session…</div>;
+  if(user===null)return <LoginPage api={API} onLogin={setUser}/>;
   if (connected && !workspaces.length)
     return (
       <div className="onboarding">
@@ -212,6 +219,7 @@ function App() {
         <ScrWorkspace
           api={API}
           scrId={selectedScrId}
+          user={user}
           onBack={() => setView("dashboard")}
           onChanged={loadData}
         />
@@ -243,7 +251,9 @@ function App() {
   if (view === "lifecycle" && project)
     return <LifecycleExplorer api={API} projectId={project.project.id} releases={project.releases} onBack={() => setView("dashboard")}/>;
   if(view==="release"&&project)
-    return <ReleaseCampaignCenter api={API} projectId={project.project.id} releases={project.releases} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}} onOpenVerification={()=>setView("verification")} onOpenDocuments={()=>setView("lifecycle")}/>;
+    return <ReleaseCampaignCenter api={API} projectId={project.project.id} releases={project.releases} user={user} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}} onOpenVerification={()=>setView("verification")} onOpenDocuments={()=>setView("lifecycle")}/>;
+  if(view==="mywork"&&project)return <MyWorkCenter api={API} projectId={project.project.id} user={user} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}} onOpenRelease={()=>setView("release")}/>;
+  if(view==="admin"&&active)return <AdministrationCenter api={API} programId={active.program.id} onBack={()=>setView("dashboard")}/>;
   return (
     <div className="shell">
       <aside>
@@ -268,6 +278,7 @@ function App() {
           </span>
         </div>
         <nav>
+          <button onClick={()=>setView("mywork")}>◎&nbsp; My Work</button>
           {[
             "▦  Command Center",
             "◇  Change Requests",
@@ -288,13 +299,15 @@ function App() {
               {x}
             </button>
           ))}
+          {user.isAdministrator&&<button onClick={()=>setView("admin")}>⚙&nbsp; Administration</button>}
         </nav>
         <footer>
-          <div className="avatar">SE</div>
+          <div className="avatar">{user.displayName.split(' ').map(x=>x[0]).join('').slice(0,2)}</div>
           <div>
-            <b>Systems Engineer</b>
-            <small>Engineering</small>
+            <b>{user.displayName}</b>
+            <small>{user.userName}</small>
           </div>
+          <button className="signOut" onClick={async()=>{await fetch(`${API}/api/auth/logout`,{method:'POST'});setUser(null)}}>Sign out</button>
         </footer>
       </aside>
       <main>

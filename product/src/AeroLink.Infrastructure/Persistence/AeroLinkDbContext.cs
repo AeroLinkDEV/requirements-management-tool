@@ -6,6 +6,7 @@ using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -39,6 +40,12 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ChangeImpactDisposition> ImpactDispositions => Set<ChangeImpactDisposition>();
     public DbSet<EvidenceRecord> EvidenceRecords => Set<EvidenceRecord>();
     public DbSet<TestExecutionEvidence> TestExecutionEvidence => Set<TestExecutionEvidence>();
+    public DbSet<UserAccount> UserAccounts => Set<UserAccount>();
+    public DbSet<ProgramMembership> ProgramMemberships => Set<ProgramMembership>();
+    public DbSet<UserSession> UserSessions => Set<UserSession>();
+    public DbSet<RoleDelegation> RoleDelegations => Set<RoleDelegation>();
+    public DbSet<ElectronicSignature> ElectronicSignatures => Set<ElectronicSignature>();
+    public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -277,6 +284,33 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("test_execution_evidence"); b.HasKey(x => x.Id); b.HasIndex(x => new { x.TestExecutionId, x.EvidenceId }).IsUnique();
             b.HasOne<TestExecution>().WithMany().HasForeignKey(x => x.TestExecutionId).OnDelete(DeleteBehavior.Restrict); b.HasOne<EvidenceRecord>().WithMany().HasForeignKey(x => x.EvidenceId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<UserAccount>(b =>
+        {
+            b.ToTable("user_accounts"); b.HasKey(x => x.Id); b.Property(x => x.UserName).HasMaxLength(100).IsRequired(); b.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Email).HasMaxLength(320); b.Property(x => x.PasswordHash).HasMaxLength(500).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.HasIndex(x => x.UserName).IsUnique(); b.HasIndex(x => x.Email);
+        });
+        modelBuilder.Entity<ProgramMembership>(b =>
+        {
+            b.ToTable("program_memberships"); b.HasKey(x => x.Id); b.Property(x => x.Role).HasConversion<string>().HasMaxLength(40); b.Property(x => x.GrantedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x => new { x.UserId, x.ProgramId, x.Role }).IsUnique();
+            b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict); b.HasOne<ProgramRecord>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<UserSession>(b =>
+        {
+            b.ToTable("user_sessions"); b.HasKey(x => x.Id); b.Property(x => x.TokenHash).HasMaxLength(64).IsRequired(); b.Property(x => x.IpAddress).HasMaxLength(100); b.Property(x => x.UserAgent).HasMaxLength(500); b.HasIndex(x => x.TokenHash).IsUnique(); b.HasIndex(x => new { x.UserId, x.ExpiresAt });
+            b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<RoleDelegation>(b =>
+        {
+            b.ToTable("role_delegations"); b.HasKey(x => x.Id); b.Property(x => x.Role).HasConversion<string>().HasMaxLength(40); b.Property(x => x.Reason).HasMaxLength(2000).IsRequired(); b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x => new { x.ProgramId, x.DelegateUserId, x.EndsAt });
+        });
+        modelBuilder.Entity<ElectronicSignature>(b =>
+        {
+            b.ToTable("electronic_signatures"); b.HasKey(x => x.Id); b.Property(x => x.UserName).HasMaxLength(100).IsRequired(); b.Property(x => x.DisplayName).HasMaxLength(200).IsRequired(); b.Property(x => x.ArtifactType).HasMaxLength(60).IsRequired(); b.Property(x => x.ArtifactRevision).HasMaxLength(80).IsRequired(); b.Property(x => x.Action).HasMaxLength(80).IsRequired(); b.Property(x => x.Meaning).HasMaxLength(1000).IsRequired(); b.Property(x => x.ContentHash).HasMaxLength(64).IsRequired(); b.Property(x => x.IpAddress).HasMaxLength(100); b.HasIndex(x => new { x.ArtifactType, x.ArtifactId, x.SignedAt }); b.HasIndex(x => new { x.UserId, x.SignedAt });
+        });
+        modelBuilder.Entity<SecurityAuditEvent>(b =>
+        {
+            b.ToTable("security_audit_events"); b.HasKey(x => x.Id); b.Property(x => x.EventType).HasMaxLength(100).IsRequired(); b.Property(x => x.ActorId).HasMaxLength(100).IsRequired(); b.Property(x => x.Target).HasMaxLength(300).IsRequired(); b.Property(x => x.Outcome).HasMaxLength(30).IsRequired(); b.Property(x => x.Detail).HasMaxLength(4000).IsRequired(); b.Property(x => x.IpAddress).HasMaxLength(100); b.HasIndex(x => x.OccurredAt); b.HasIndex(x => new { x.ActorId, x.OccurredAt });
         });
     }
 

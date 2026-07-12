@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
+import { apiLogin, login } from './auth'
 
 test('searches full history and proves exact software build contents', async ({ page, request }) => {
+  await apiLogin(request)
   const workspaceResponse = await request.post('http://127.0.0.1:5080/api/workspaces', { data: {
     programName: 'History Program', programCode: 'HIST', projectName: 'FMS Software', softwareProduct: 'Flight Management Software', initialRelease: '3.3', initialReleaseIsReleased: false,
   } }); expect(workspaceResponse.ok()).toBeTruthy(); const workspace = await workspaceResponse.json()
@@ -8,8 +10,8 @@ test('searches full history and proves exact software build contents', async ({ 
     baseNumber: 'SCR-00000042', projectId: workspace.project.id, targetReleaseId: workspace.release.id, title: 'Introduce round robin routing', problem: 'Routing is unavailable', analysis: 'A new function is required', solution: 'Implement round robin routing', authorId: 'author',
     requirementChanges: [{ baseNumber: 'SWR-00002375', revision: 4, level: 'HighLevel', kind: 'Introduce', statement: 'The software shall provide round robin routing.', rationale: 'New function', verificationMethod: 'Test' }],
   } }); expect(scrResponse.ok()).toBeTruthy(); const scr = await scrResponse.json()
-  await request.post(`http://127.0.0.1:5080/api/scrs/${scr.id}/submit`, { data: { actorId: 'author', approvers: [{ userId: 'reviewer', name: 'Reviewer' }] } })
-  await request.post(`http://127.0.0.1:5080/api/scrs/${scr.id}/approve`, { data: { actorId: 'reviewer' } })
+  await request.post(`http://127.0.0.1:5080/api/scrs/${scr.id}/submit`, { data: { approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }] } })
+  await request.post(`http://127.0.0.1:5080/api/scrs/${scr.id}/approve`, { data: { password: 'AeroLink!2026', meaning: 'Approved for test baseline assembly.' } })
   const baseline = await (await request.post('http://127.0.0.1:5080/api/baselines', { data: { baseNumber: 'SWBL-00000033', revision: 0, projectId: workspace.project.id, releaseId: workspace.release.id, name: 'FMS 3.3 exact manifest', actorId: 'cm' } })).json()
   await request.post(`http://127.0.0.1:5080/api/baselines/${baseline.id}/selections`, { data: { scrId: scr.id, actorId: 'cm' } })
   await request.post(`http://127.0.0.1:5080/api/baselines/${baseline.id}/freeze`, { data: { actorId: 'cm' } })
@@ -17,7 +19,7 @@ test('searches full history and proves exact software build contents', async ({ 
   const historyResponse = await request.get(`http://127.0.0.1:5080/api/history/scrs?projectId=${workspace.project.id}&page=1&pageSize=50`)
   const historyBody = await historyResponse.text(); expect(historyResponse.status(), historyBody).toBe(200); expect(JSON.parse(historyBody).totalCount).toBe(1)
 
-  await page.goto('/')
+  await login(page)
   await page.locator('.program select').selectOption({ label: 'History Program' })
   await page.getByRole('button', { name: /Change Requests/ }).click()
   await expect(page.getByRole('heading', { name: 'Artifact & Build Explorer' })).toBeVisible()

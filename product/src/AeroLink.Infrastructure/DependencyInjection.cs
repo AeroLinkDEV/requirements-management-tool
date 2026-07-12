@@ -27,6 +27,8 @@ public static class DependencyInjection
         services.AddScoped<ControlledOutputGenerator>();
         services.AddScoped<ChangeRequestOutputGenerator>();
         services.AddScoped<ReleaseExecutionService>();
+        services.AddScoped<IdentityService>();
+        services.AddScoped<IdentitySeeder>();
         return services;
     }
 }

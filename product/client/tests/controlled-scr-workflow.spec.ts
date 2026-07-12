@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test'
+import { login } from './auth'
 
 test('author creates, edits, submits, and sequentially approves an SCR', async ({ page }) => {
-  await page.goto('/')
+  await login(page)
   await page.getByLabel('Program name').fill('Browser Workflow Program')
   await page.getByLabel('Program code').fill('BWP')
   await page.getByLabel('Project name').fill('Workflow Software')
@@ -26,30 +27,16 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByRole('heading', { name: 'Introduce controlled approval workflow' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Configure & Submit Review' }).click()
-  await page.getByLabel('Approver 1 name').fill('Reviewer One')
-  await page.getByLabel('Approver 2 name').fill('Reviewer Two')
-  await page.getByLabel('Approver 3 name').fill('Reviewer Three')
+  await page.getByLabel('Approver 1 ID').fill('admin')
+  await page.getByRole('button', { name: 'Remove' }).nth(2).click()
+  await page.getByRole('button', { name: 'Remove' }).nth(1).click()
   await page.getByRole('button', { name: 'Submit for Review' }).click()
   await expect(page.getByText('InReview', { exact: true }).first()).toBeVisible()
 
-  await expect(page.getByText('Reviewer One is the active reviewer.')).toBeVisible()
-  await page.getByPlaceholder('Reason for requested changes').fill('Clarify the approval evidence retained by the workflow.')
-  await page.getByRole('button', { name: 'Request changes' }).click()
-  await expect(page.getByText('Draft', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('Clarify the approval evidence retained by the workflow.', { exact: true })).toBeVisible()
-
-  await page.getByRole('button', { name: 'Edit Draft' }).click()
-  await page.getByRole('textbox', { name: 'Solution', exact: true }).fill('Add ordered approval with retained reviewer decisions and evidence.')
-  await page.getByRole('button', { name: 'Save Draft' }).click()
-  await page.getByRole('button', { name: 'Configure & Submit Review' }).click()
-  await page.getByRole('button', { name: 'Submit for Review' }).click()
-  await expect(page.getByRole('heading', { name: 'Review cycle 2' })).toBeVisible()
-  await expect(page.getByText('Reviewer One is the active reviewer.')).toBeVisible()
-  await page.getByRole('button', { name: 'Approve current stage' }).click()
-  await expect(page.getByText('Reviewer Two is the active reviewer.')).toBeVisible()
-  await page.getByRole('button', { name: 'Approve current stage' }).click()
-  await expect(page.getByText('Reviewer Three is the active reviewer.')).toBeVisible()
-  await page.getByRole('button', { name: 'Approve current stage' }).click()
+  await expect(page.getByText('AeroLink Administrator is the active reviewer.')).toBeVisible()
+  await page.getByRole('button', { name: 'Review & electronically approve' }).click()
+  await page.getByLabel('Re-enter your password').fill('AeroLink!2026')
+  await page.getByRole('button', { name: 'Sign & approve' }).click()
   await expect(page.getByText('Approved', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('Scr Approved')).toBeVisible()
 

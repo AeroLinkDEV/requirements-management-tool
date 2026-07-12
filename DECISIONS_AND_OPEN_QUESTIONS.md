@@ -231,6 +231,27 @@ Future entries use:
 - **Rationale:** Sequential review reflects the actual process, permits practical correction of future assignments, and prevents an invalid completed approval from contributing to final approval.
 - **Consequences:** Every substitution and cancellation is audited. Cancelled decisions remain historical but do not count. Restart uses the same submitted snapshot when content is unchanged; content changes follow the applicable Draft/revision rules.
 
+### DEC-028 - Material Actions Use Authenticated Server Identity
+
+- **Date:** 2026-07-12
+- **Status:** Accepted
+- **Decision:** The API derives the actor for material lifecycle actions from a revocable authenticated session. Client-supplied actor identifiers are not authoritative.
+- **Rationale:** Authorship, review, baseline assembly, verification, and release evidence cannot be trustworthy if the browser can impersonate another username.
+
+### DEC-029 - Approvals Require Credential Confirmation and Immutable Signature Evidence
+
+- **Date:** 2026-07-12
+- **Status:** Accepted
+- **Decision:** SCR and release approvals require password re-entry, assigned-stage identity, Program Approver authority, an explicit signature meaning, and an immutable signature record tied to the controlled snapshot hash.
+- **Rationale:** A visible approval button is insufficient evidence of intent, identity, and exact approved content.
+
+### DEC-030 - Disabled Identities Remain Historically Resolvable
+
+- **Date:** 2026-07-12
+- **Status:** Accepted
+- **Decision:** Accounts are disabled or locked rather than deleted. Existing artifact attribution, review decisions, and signatures retain username and display-name snapshots.
+- **Rationale:** Personnel changes must not damage the audit trail.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
@@ -256,7 +277,6 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 | OQ-002 | Should numeric sequences be global across all artifact types or unique within each prefix? The accepted base/suffix format is documented in [IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md](IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md). | Affects identifier generation and external references | Product/configuration stakeholders before data design |
 | OQ-003 | Which proposed requirement-change fields must be complete before an SCR can be submitted, and which existing FMS fields must be preserved or program-configurable? | Controls SCR package validation, import, review, and generated documents | Requirements stakeholders before Phase 1 |
 | OQ-004 | Which independence or organizational policy constraints, if any, may prevent the author from selecting a particular approver? | Controls review integrity while preserving accepted author authority and sequential replacement behavior | Quality/configuration/product stakeholders before Phase 2 design |
-| OQ-005 | What constitutes an electronic approval, and is password re-entry or another signature ceremony required? | Affects identity, audit evidence, usability, and policy | Security/quality stakeholders before Phase 2 |
 | OQ-006 | What are the allowed verification methods, and can one requirement require multiple methods? | Affects completeness logic and document output | Verification stakeholders before Phase 1 completion |
 | OQ-007 | Are test case and test suite separate first-slice artifacts, or is procedure plus execution configuration sufficient? | Avoids redundant objects and unclear trace semantics | Verification stakeholders before Phase 3 design |
 | OQ-008 | What detailed transition, amendment, and release-gate rules apply to the accepted Pass, Fail, Not Applicable, Blocked, and Not Run meanings? | Prevents misleading traceability and release status | Verification/quality stakeholders before Phase 3 |
