@@ -65,7 +65,7 @@ The stable identity and revision identity must remain separate even if a display
 
 **System Requirement**: A stable controlled requirement identity at system level. It may contain formatted text, attributes, rationale, verification method, derived status, applicability, and controlled images or figures.
 
-**System Requirement Revision**: The exact requirement content and metadata proposed, reviewed, approved, or baselined at a point in time.
+**System Requirement Revision**: The exact requirement content and metadata proposed within an SCR, authorized through approval of that SCR revision, or made effective through baseline inclusion. It does not have an independent review/approval workflow.
 
 **High-Level Requirement (HLR)**: A software requirement that describes software behavior at a high level and normally traces upward to one or more system requirements unless justified as derived.
 
@@ -107,11 +107,11 @@ The abbreviation `SRD` is not used on its own because it is ambiguous.
 
 **Workflow State**: The current lifecycle state of a revision or controlled process. State transitions are constrained and audited.
 
-**Review**: A controlled evaluation of a specific artifact revision or candidate baseline by named reviewers. It contains assignments, comments, dispositions, outcomes, and timestamps.
+**Review**: A controlled evaluation of a specific SCR, document, procedure, execution/result record, or candidate baseline revision by named reviewers. Requirement changes are reviewed as contents of the SCR rather than as independent review artifacts. A review contains assignments, comments, dispositions, outcomes, and timestamps.
 
 **Review Comment**: A versioned finding or question anchored to the reviewed revision. It must be dispositioned before approval when the workflow requires it.
 
-**Approval**: An attributable decision that a specific revision or candidate baseline satisfies its defined approval criteria. Approval does not automatically include the item in a release baseline.
+**Approval**: An attributable unanimous decision by every assigned required reviewer that a specific SCR, document, procedure, execution/result record, or candidate baseline revision satisfies its defined approval criteria. Approval of an SCR authorizes its contained requirement changes but does not automatically include those revisions in a release baseline.
 
 **Electronic Approval Record**: Evidence of the approver identity, decision, time, reviewed revision, and applicable meaning. The authentication and signature policy remains to be defined.
 

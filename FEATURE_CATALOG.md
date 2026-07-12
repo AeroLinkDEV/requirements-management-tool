@@ -33,11 +33,11 @@ This catalog is the authoritative capability inventory. Feature identifiers are 
 | ID | Capability | Rationale | Priority | Phase | Dependencies | Acceptance Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
 | SR-001 | System requirement records | Establish authoritative structured requirements | Must | 1 | PF-001, PF-005-PF-008 | Users create system requirements with required content, attributes, and images |
-| SR-002 | Requirement revisions | Preserve changes without changing stable identity | Must | 1 | SR-001, PF-006 | Users can compare and retrieve every revision of a requirement |
+| SR-002 | Requirement revisions | Preserve changes without changing stable identity | Must | 1 | SR-001, PF-006 | Users can compare and retrieve every revision and identify the SCR that authorized each change |
 | SR-003 | Requirement retirement | Remove future applicability without erasing history | Must | 2 | SR-002, SCR-001 | Approved retirement affects successor baselines only |
 | SR-004 | Verification method and derived status | Support planning and completeness checks | Must | 1 | SR-001 | Each applicable requirement records controlled verification and derived information |
 | SCR-001 | SCR records and revisions | Explain and control system requirement change | Must | 2 | PF-005-PF-008, SR-001 | One SCR revision can propose multiple introductions, modifications, and retirements |
-| SCR-002 | SCR review and approval | Prevent uncontrolled changes | Must | 2 | SCR-001, WF-001 | Comments, dispositions, rework, rejection, and approval are fully attributable |
+| SCR-002 | Complete-package SCR review and approval | Prevent uncontrolled requirement changes | Must | 2 | SCR-001, WF-001 | Reviewers approve or reject the exact SCR revision containing Problem, Analysis, Solution, and all proposed requirement changes |
 | SCR-003 | Target release and deferral | Control which approved changes enter a release | Must | 2 | SCR-001, BL-001 | SCRs can be targeted, selected, deferred, and retargeted with retained rationale |
 | SCR-004 | Impact analysis | Expose affected links and evidence before change approval | Must | 2 | TR-001, SCR-001 | Reviewers see affected artifacts and unresolved suspect links before approval |
 
@@ -74,7 +74,7 @@ This catalog is the authoritative capability inventory. Feature identifiers are 
 
 | ID | Capability | Rationale | Priority | Phase | Dependencies | Acceptance Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
-| SW-001 | HLR and LLR management | Extend controlled requirements down the software V | Must | 4 | Proven system-level model | HLRs/LLRs support identity, revisions, derived status, review, baseline, and upward trace |
+| SW-001 | HLR and LLR management | Extend controlled requirements down the software V | Must | 4 | Proven system-level model | HLRs/LLRs support identity, revisions, derived status, SCR-package review, baseline inclusion, and upward trace |
 | SW-002 | SWCR and SWRD lifecycle | Control software change and document generation | Must | 4 | SW-001, reusable SCR/baseline framework | Approved SWCRs produce exact software baselines and controlled SWRDs |
 | SW-003 | Software verification artifacts | Verify HLRs, LLRs, integration, and robustness behavior | Must | 4 | SW-001, reusable verification framework | Software requirements trace to reviewed procedures, executions, results, and evidence |
 | PR-001 | Full PR lifecycle | Control investigation, disposition, resolution, and closure | Should | 5 | PF foundations, TR-001 | PR state, classification, effects, resolution, verification, and closure are attributable |

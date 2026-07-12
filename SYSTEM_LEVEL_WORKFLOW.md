@@ -26,7 +26,7 @@ An SCR authorizes and explains proposed change. A baseline determines what is ef
 The workflow assumes these conceptual roles; one person may hold multiple roles only where independence rules permit:
 
 - **Change Author:** drafts an SCR and its requirement change items.
-- **Requirement Author:** prepares proposed requirement revisions.
+- **SCR Author:** prepares the Problem, Analysis, Solution, and all proposed requirement introductions, modifications, and retirements within the SCR package.
 - **Reviewer:** evaluates a specified revision and records comments and a decision.
 - **Approver:** provides the final approval decision when workflow criteria are satisfied.
 - **Configuration Manager:** assembles and controls candidate baselines and document releases.
@@ -36,7 +36,7 @@ The workflow assumes these conceptual roles; one person may hold multiple roles 
 - **Program Administrator:** configures authorized users, roles, and program-level policy.
 - **System Administrator:** operates the platform without authority to erase controlled history.
 
-For the initial product behavior, approval is unanimous among the reviewers assigned as required: every required reviewer must approve the same artifact revision. Any required reviewer rejection or request for changes prevents approval. Independence rules and the approval-authentication ceremony remain to be defined.
+For the initial product behavior, approval is unanimous among the reviewers assigned as required: every required reviewer must approve the same SCR or document revision. Requirements contained in an SCR are not reviewed or approved independently. Any required reviewer rejection or request for changes prevents approval. Independence rules and the approval-authentication ceremony remain to be defined.
 
 ## 3. SCR Lifecycle
 
@@ -66,6 +66,7 @@ Selected -> Deferred (with controlled reason)
 ```
 
 - Draft SCRs may be revised by authorized users and may miss an intended release without losing history.
+- The SCR author decides when the complete package is technically ready to submit. Submission validation checks that required Problem, Analysis, Solution, requirement-change, reviewer, link, and impact information is present; it does not replace the author’s engineering judgment.
 - Submission freezes the submitted revision for review. Rework creates a new reviewable revision rather than rewriting the reviewed snapshot.
 - Every review comment requiring action must be dispositioned before approval.
 - Approval requires every assigned required reviewer to approve the same submitted revision; approval of an earlier revision does not carry forward after rework.
@@ -77,15 +78,15 @@ Selected -> Deferred (with controlled reason)
 
 ### Introduce
 
-An approved introduction allocates a new globally unique requirement identity. The proposed initial revision contains requirement content and required attributes, including verification method and derived status. It becomes effective only through baseline inclusion.
+An SCR introduction allocates a new globally unique requirement identity. The proposed initial revision contains requirement content and required attributes, including verification method and derived status. It is reviewed as part of the SCR package, authorized when that exact SCR revision is unanimously approved, and becomes effective only through baseline inclusion.
 
 ### Modify
 
-A modification identifies the currently effective requirement revision and proposes a successor revision. The platform shows the difference and preserves both. Approval never overwrites the earlier revision.
+A modification identifies the currently effective requirement revision and proposes a successor revision inside the SCR. The platform shows the difference and preserves both. SCR approval never overwrites the earlier revision.
 
 ### Retire
 
-A retirement identifies the effective requirement and gives rationale. Once selected into an approved baseline, later effective views omit or mark the requirement as retired according to report policy. Historical baselines and records retain its prior content and complete change story.
+A retirement identifies the effective requirement and gives rationale inside the SCR. Once the approved SCR is selected into an approved baseline, the successor SYSRD omits the retired requirement from its effective body. Historical baselines and records retain its prior content and complete change story.
 
 ### Images and Figures
 
@@ -180,7 +181,7 @@ These scenarios are acceptance tests for the documentation baseline.
 ### Scenario 1: Introduce a Requirement
 
 - **Actor/Input:** Change author drafts an SCR with problem, analysis, solution, target release, and a new requirement change item.
-- **State change:** SCR and proposed requirement revision pass review and approval, then are selected into a candidate baseline.
+- **State change:** The complete SCR revision, including the proposed requirement introduction, passes unanimous review and approval, then is selected into a candidate baseline.
 - **Output:** Successor approved baseline and SYSRD contain the new requirement.
 - **History:** SCR revisions, comments, dispositions, approvals, selection, baseline membership, document metadata, and audit events remain linked.
 
@@ -214,7 +215,7 @@ These scenarios are acceptance tests for the documentation baseline.
 
 ### Scenario 6: Reuse a Test Procedure
 
-- **Actor/Input:** Verification author links one approved procedure revision to multiple approved requirement revisions.
+- **Actor/Input:** Verification author links one approved procedure revision to multiple requirement revisions authorized through approved SCRs and included in the applicable baseline.
 - **State change:** Each typed link is reviewed and controlled independently.
 - **Output:** Trace views show the procedure under every applicable requirement and all requirements under the procedure.
 - **History:** Link authorship, revision applicability, rationale, approvals, and later suspect transitions remain visible.

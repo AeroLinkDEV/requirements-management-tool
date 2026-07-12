@@ -74,7 +74,7 @@ Exit evidence:
 
 - paper scenarios 1-5 pass as end-to-end product tests;
 - a prior baseline remains unchanged after successor approval;
-- an approved requirement is not confused with baseline inclusion; and
+- a requirement revision authorized through an approved SCR is not confused with baseline inclusion; and
 - document output can be explained and reproduced from exact controlled inputs.
 
 ## Phase 3: System Verification and Traceability

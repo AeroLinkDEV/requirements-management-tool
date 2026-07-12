@@ -42,15 +42,17 @@ The showcase will demonstrate that this SCR:
 - is explicitly selected for the Version 3.3 candidate baseline; and
 - contributes its exact approved artifact revisions to the released Version 3.3 baseline.
 
-Proposed fictional requirements:
+Proposed fictional system requirements and their allocated software HLRs:
 
-| Requirement | Purpose | Verification |
-| --- | --- | --- |
-| SYSR-00002375 | Provide selectable Round Robin route sequencing | Functional test |
-| SYSR-00002376 | Advance to the next eligible waypoint after the configured trigger | Functional and robustness test |
-| SYSR-00002377 | Skip ineligible or unavailable waypoints without corrupting sequence state | Robustness test |
-| SYSR-00002378 | Display current Round Robin state and selected waypoint to the crew | Functional test |
-| SYSR-00002379 | Preserve or restore defined sequence state across applicable mode transitions | Functional and recovery test |
+| System Requirement Revision | Allocated HLR Revisions | Purpose | Verification |
+| --- | --- | --- | --- |
+| `SYSR-00002375.01` | `HLR-00003142.01`, `HLR-00003143.01` | Provide selectable Round Robin route sequencing | Functional test |
+| `SYSR-00002376.01` | `HLR-00003144.01` | Advance to the next eligible waypoint after the configured trigger | Functional and robustness test |
+| `SYSR-00002377.01` | `HLR-00003145.01`, `HLR-00003146.01` | Skip ineligible or unavailable waypoints without corrupting sequence state | Robustness test |
+| `SYSR-00002378.01` | `HLR-00003147.01` | Display current Round Robin state and selected waypoint to the crew | Functional test |
+| `SYSR-00002379.01` | `HLR-00003148.01`, `HLR-00003149.01` | Preserve or restore defined sequence state across applicable mode transitions | Functional and recovery test |
+
+The showcase demonstrates both levels: the system requirement expresses the externally meaningful FMS behavior, while linked HLRs allocate and refine that behavior for the software implementation. Both sets of proposed revisions are contained in and reviewed through the SCR; neither requirement type has an independent approval workflow.
 
 Proposed fictional verification artifacts:
 
@@ -59,7 +61,7 @@ Proposed fictional verification artifacts:
 - `TP-00004503` — Mode transition and state recovery test
 - `TP-00004504` — Display and crew-feedback test
 
-During review, a revision to `SYSR-00002376` makes one verification link suspect. The System Engineer resolves the impact by updating and reapproving the affected test procedure before baseline readiness becomes complete.
+During SCR review, a revision to `SYSR-00002376.01` and its allocated `HLR-00003144.01` makes one verification link suspect. The System Engineer resolves the impact by updating and reapproving the affected test procedure before baseline readiness becomes complete.
 
 ### SCR-0001050: Resolve Four FMS Problem Reports
 
@@ -98,7 +100,7 @@ As the presenter resolves the simulated story, the dashboard updates to show tha
 
 The System Engineer dashboard prioritizes:
 
-- assigned SCR and requirement reviews;
+- assigned SCR reviews and the requirement changes contained within them;
 - the Round Robin requirement revision requiring review;
 - the suspect link and affected procedure;
 - the uncovered requirement associated with `PR-00002844`;
@@ -109,7 +111,7 @@ The System Engineer dashboard prioritizes:
 
 1. Open the manager dashboard scoped to FMS Version 3.3.
 2. Explain the two-SCR release package and visible blocking items.
-3. Open `SCR-0001049`, compare a Round Robin requirement revision, and inspect reviewers.
+3. Open `SCR-0001049.01`, compare the contained system-requirement and HLR revisions, and inspect reviewers of the complete SCR package.
 4. Show the affected procedures and suspect link caused by the revision.
 5. Switch to the System Engineer dashboard and open the assigned impact-review action.
 6. Resolve the simulated link/procedure review and show the dashboard status update.

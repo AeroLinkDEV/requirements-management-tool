@@ -17,7 +17,7 @@ Disposition values:
 | --- | --- | --- |
 | Web tool covering much of the system/software development-assurance V | Corrected | [PROJECT_VISION.md](PROJECT_VISION.md): lifecycle-data platform with explicit exclusions and no “complete lifecycle” claim |
 | Capture and change system requirements; generate revised system requirements document | First slice | [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md), Sections 3-5 |
-| Human review and approval of requirements and documents | First slice | [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md), Sections 2-5 |
+| Human review and approval of requirements and documents | Corrected/First slice | Requirement changes are reviewed within the complete SCR package; controlled documents have their own review/approval workflow |
 | HLRs linked to system requirements; derived requirements; software requirements document | Later | [SCOPE_AND_BOUNDARIES.md](SCOPE_AND_BOUNDARIES.md), Later Product Capabilities; features SW-001/SW-002 |
 | LLRs linked to HLRs or derived | Later | Feature SW-001 |
 | System requirements linked to one or more system tests | First slice | Features ST-001/ST-002 and workflow Sections 6-8 |

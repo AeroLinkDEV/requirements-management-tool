@@ -1,16 +1,16 @@
 # Identifiers and Requirement Fields Proposal
 
-This proposal answers two product-definition questions: how controlled items should be numbered and what “mandatory requirement fields” means. It is a review proposal, not yet an accepted decision.
+This document records the accepted requirement identifier/revision display and proposes the remaining mandatory-field policy.
 
 ## Identifier Proposal
 
 ### Principle
 
-Every controlled artifact receives one stable, globally unique identifier. Revisions are separate records and are never encoded as if they were new artifact identities.
+Every controlled artifact receives one stable, globally unique base identifier. Revisions remain separate records internally, while the user-facing revision is appended to the base identifier.
 
 ### Display Format
 
-Use:
+Use a stable base identifier:
 
 ```text
 <TYPE>-<8 digit global sequence>
@@ -43,29 +43,32 @@ Recommended type prefixes:
 | Review | `REVW` |
 | Generated Document | document-type-specific prefix |
 
-The sequence is globally unique within the installation, not restarted for each program or artifact type. The type prefix improves recognition; the global sequence prevents two projects from creating confusingly identical numbers.
+The sequence is globally unique within the installation and is not restarted for each program. Whether separate artifact types share one numeric sequence or maintain separate per-prefix sequences remains open. The complete identifier must never be reused.
 
 The system also maintains an internal machine identifier that is never shown as the business identifier. Users and documents cite the stable display identifier.
 
-### Revision Format
+### Accepted Revision Display
 
-Show revisions separately:
+Append a dot and a minimum two-digit revision suffix when identifying a specific revision:
 
 ```text
-SYSR-00002375 • Revision 4
-SCR-00001049 • Revision 2
-TP-00004502 • Revision 6
+SYSR-00002375.04
+SCR-00001049.02
+TP-00004502.06
 ```
 
-Use positive whole-number revisions for controlled artifact content:
+The stable requirement identity remains `SYSR-00002375`; `SYSR-00002375.04` means revision 4 of that same requirement. Internally, identity and revision remain separate fields.
+
+Use positive whole-number revisions for controlled artifact content and render values below 10 with a leading zero:
 
 - Draft work begins as `Revision 1`.
 - Rework or an approved change creates the next revision number.
 - Revision numbers are never reused or renumbered.
 - The application may show draft iterations internally, but a reviewed snapshot remains immutable.
-- The same artifact identifier remains stable across all revisions.
+- The same base artifact identifier remains stable across all revisions.
+- Revisions above 99 expand naturally, such as `.100`; revision numbers are not limited to two digits.
 
-Avoid forms such as `SYSR000000001.001` as the primary identifier because they encourage users and integrations to treat each revision as a different requirement.
+Interfaces, links, documents, imports, and exports must distinguish the stable base ID from the revision-qualified display value even though users commonly cite the combined form.
 
 ### Release and Document Naming
 
@@ -103,7 +106,7 @@ The exact document-number convention may follow existing organizational policy.
 
 ## What “Mandatory Requirement Fields” Means
 
-A mandatory field is information the system refuses to omit when a requirement reaches a defined lifecycle state. Not every field must be mandatory while drafting.
+A mandatory field is information required for the SCR author to submit the complete SCR package for review. Requirements do not enter an independent review/approval workflow; their proposed revisions are reviewed as part of the SCR.
 
 There are three useful categories:
 
@@ -111,7 +114,7 @@ There are three useful categories:
 2. **Program-mandatory fields:** Required by a particular program or process, configured through controlled administration.
 3. **Optional fields:** Available when useful but not required for approval.
 
-Requirements may become progressively stricter by state. A Draft can be incomplete; Ready for Review and Approved must satisfy stronger rules.
+The SCR author controls when drafting is complete enough to attempt submission. The system should then validate the SCR package and clearly identify missing required information, while the author remains responsible for deciding that the technical content is ready.
 
 ## Proposed Platform-Mandatory Fields
 
@@ -125,7 +128,7 @@ Requirements may become progressively stricter by state. A Draft can be incomple
 - last modified by and modified time; and
 - complete audit history.
 
-### Required Before Review
+### Required in a Requirement Change Item Before SCR Submission
 
 - requirement statement;
 - short title or summary;
@@ -140,17 +143,23 @@ Requirements may become progressively stricter by state. A Draft can be incomple
 
 ### Required Before Approval
 
-- all required review assignments;
-- all required review decisions;
-- disposition of every blocking review comment;
-- valid required upward/downward relationships or an approved justification;
-- completed impact analysis;
-- no unresolved validation errors; and
-- approval record for the exact revision.
+- the enclosing SCR has complete Problem, Analysis, and Solution content;
+- all proposed requirement introductions, modifications, and retirements are identified;
+- required SCR reviewers are assigned;
+- required links and impact information are present or explicitly justified; and
+- the SCR package has no unresolved submission-validation errors.
+
+### Required Before SCR Approval
+
+- every required reviewer approves the exact SCR revision;
+- every blocking review comment is dispositioned;
+- the proposed requirement revisions remain exactly those reviewed within the SCR;
+- required impact analysis is complete; and
+- the approval record identifies the exact SCR revision and complete change package.
 
 ### Required Before Baseline Inclusion
 
-- approved revision state;
+- requirement revision authorized by an approved SCR;
 - applicability to the candidate release/configuration;
 - resolved selection conflicts;
 - acceptable trace/suspect status according to the baseline policy; and
@@ -184,14 +193,12 @@ These may be mandatory for some projects but should not be hard-coded as univers
 - An approved revision cannot be edited in place.
 - A new revision must identify the SCR or other approved change authority.
 - Derived requirements require explicit rationale and the applicable review path.
-- An artifact cannot enter review with unresolved required-field errors.
-- An artifact cannot be approved until every required reviewer approves the exact revision.
-- Approval does not automatically include the requirement in a baseline.
+- An SCR cannot enter review with unresolved package-level required-field errors.
+- Requirements are not approved independently; every required reviewer approves the exact SCR revision containing the requirement changes.
+- SCR approval authorizes its proposed requirement revisions but does not automatically include them in a baseline.
 
 ## Decisions Requested
 
-1. Accept or adjust the `<TYPE>-<8 digit sequence>` format.
-2. Confirm whether sequences must be globally unique across all artifact types or unique within each prefix.
-3. Confirm whole-number artifact revisions or identify an existing revision convention that must be preserved.
-4. Confirm the proposed platform-mandatory requirement fields.
-5. Identify fields that every current FMS requirement already contains and must preserve during import.
+1. Confirm whether numeric sequences must be global across all artifact types or unique within each prefix.
+2. Confirm the proposed platform-mandatory requirement fields.
+3. Identify fields that every current FMS requirement already contains and must preserve during import.

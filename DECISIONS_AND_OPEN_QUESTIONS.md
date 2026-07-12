@@ -174,6 +174,30 @@ Future entries use:
 - **Rationale:** This reflects a realistic software-oriented program and exercises change, requirements, verification coverage, problem reports, baselines, dashboards, and traceability in one story.
 - **Consequences:** [SHOWCASE_STORY_FMS_3_3.md](SHOWCASE_STORY_FMS_3_3.md) is the canonical fictional dataset and walkthrough. The second-change interpretation remains an assumption until confirmed.
 
+### DEC-021 - Requirements Are Reviewed Through the SCR
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** Requirements do not enter an independent review/approval workflow. Reviewers evaluate and unanimously approve the exact SCR revision containing Problem, Analysis, Solution, and all proposed requirement introductions, modifications, and retirements.
+- **Rationale:** The SCR is the controlled change package and provides the context required to judge its requirement changes together.
+- **Consequences:** The SCR author decides when the package is ready to submit; submission validation checks completeness. Requirement revisions authorized by an approved SCR do not become effective until explicitly selected into a baseline.
+
+### DEC-022 - Revision Is Appended to the Stable Requirement ID
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** Use a stable requirement identifier such as `SYSR-00002375` and display revision 4 as `SYSR-00002375.04`.
+- **Rationale:** The combined display is familiar and concise while the system can still maintain identity and revision separately.
+- **Consequences:** Revision suffixes use a minimum of two digits and expand beyond two digits when necessary. Interfaces and integrations must distinguish base identity from the revision-qualified value.
+
+### DEC-023 - Showcase Demonstrates System Requirements and HLRs
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** The FMS Version 3.3 Round Robin showcase includes system requirements allocated to software HLRs.
+- **Rationale:** Current programs are software-oriented, but the full change story must demonstrate the relationship between externally meaningful system behavior and software requirements.
+- **Consequences:** Both system and HLR revisions appear inside the SCR package and trace through verification and the Version 3.3 baseline. This showcase breadth does not by itself redefine the production implementation sequence.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
@@ -189,15 +213,15 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 - **ASM-009:** GitHub will eventually become the shared remote source of truth, but no repository details are assumed.
 - **ASM-010:** Dashboard values are computed only from records the current user is authorized to know exist.
 - **ASM-011:** The first interactive showcase uses deterministic fictional data and simulated state changes rather than a production backend.
-- **ASM-012:** The user’s “second PR which incorporates 4 PR bug fixes” means a second SCR linked to four PRs.
+- **ASM-012:** Confirmed: the second Version 3.3 change package is an SCR linked to four PRs.
 
 ## Open Questions Required Before Phase 1 Technical Planning
 
 | ID | Question | Why It Matters | Decision Owner / Timing |
 | --- | --- | --- | --- |
 | OQ-001 | Which optional product/system/configuration layers are needed beyond the accepted `Program -> Project -> Software Product -> Software Release` default? | Determines applicability and baseline scope for programs that do not fit the software-oriented default | Product owner before domain/data design |
-| OQ-002 | Should the project accept the identifier and whole-number revision convention proposed in [IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md](IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md), and should the numeric sequence be global across types or per prefix? | Affects migration, usability, external references, and never-reuse rules | Product/configuration stakeholders before data design |
-| OQ-003 | Which proposed platform-mandatory requirement fields should be accepted, and which existing FMS fields must be preserved or made program-configurable? | Controls validation, import, review, and SYSRD content | Requirements stakeholders before Phase 1 |
+| OQ-002 | Should numeric sequences be global across all artifact types or unique within each prefix? The accepted base/suffix format is documented in [IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md](IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md). | Affects identifier generation and external references | Product/configuration stakeholders before data design |
+| OQ-003 | Which proposed requirement-change fields must be complete before an SCR can be submitted, and which existing FMS fields must be preserved or program-configurable? | Controls SCR package validation, import, review, and generated documents | Requirements stakeholders before Phase 1 |
 | OQ-004 | Which workflow states, reviewer roles, and independence constraints are mandatory versus configurable beyond unanimous required-reviewer approval? | Controls the review/approval engine and authorization model | Quality/configuration/product stakeholders before Phase 2 design |
 | OQ-005 | What constitutes an electronic approval, and is password re-entry or another signature ceremony required? | Affects identity, audit evidence, usability, and policy | Security/quality stakeholders before Phase 2 |
 | OQ-006 | What are the allowed verification methods, and can one requirement require multiple methods? | Affects completeness logic and document output | Verification stakeholders before Phase 1 completion |
