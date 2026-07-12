@@ -2,7 +2,7 @@
 
 This repository is the documentation-first foundation for a future secure, on-premises platform that manages controlled aerospace system and software lifecycle data.
 
-The project is currently in **Phase 0: product definition and domain validation**. Markdown planning documents are the deliverable. Application code, technical architecture, database design, and user-interface design are intentionally deferred until this documentation reaches an agreed baseline.
+The product definition reached its initial working baseline and implementation has begun. The repository now contains both the preserved documentation foundation and an early production-oriented application skeleton.
 
 ## First Product Slice
 
@@ -15,6 +15,10 @@ This slice is intended to prove controlled change, immutable history, exact base
 ## Interactive Showcase
 
 The local [AeroLink FMS 3.3 showcase](showcase/README.md) implements the Phase 0.5 fictional walkthrough defined in [SHOWCASE_STORY_FMS_3_3.md](SHOWCASE_STORY_FMS_3_3.md). It is an interactive design-validation prototype, not production software.
+
+## Real Product
+
+The [AeroLink product application](product/README.md) is separate from the showcase. It currently provides an ASP.NET Core API, executable domain rules, SQLite local development storage with a PostgreSQL production path, automated domain tests, and a React dashboard connected to live API data.
 
 ## Authoritative Documents
 

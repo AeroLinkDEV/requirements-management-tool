@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AeroLink.Api/AeroLink.Api.csproj" />
+    <Project Path="src/AeroLink.Domain/AeroLink.Domain.csproj" />
+    <Project Path="src/AeroLink.Infrastructure/AeroLink.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj" />
+  </Folder>
+</Solution>

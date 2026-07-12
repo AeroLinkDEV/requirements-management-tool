@@ -8,3 +8,12 @@ Thumbs.db
 .tmp/
 out/
 rendered/
+
+# Product build and local runtime output
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+*.db
+*.db-shm
+*.db-wal
