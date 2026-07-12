@@ -107,11 +107,13 @@ The abbreviation `SRD` is not used on its own because it is ambiguous.
 
 **Workflow State**: The current lifecycle state of a revision or controlled process. State transitions are constrained and audited.
 
-**Review**: A controlled evaluation of a specific SCR, document, procedure, execution/result record, or candidate baseline revision by named reviewers. Requirement changes are reviewed as contents of the SCR rather than as independent review artifacts. A review contains assignments, comments, dispositions, outcomes, and timestamps.
+**Review**: A controlled evaluation of a submitted snapshot of a specific SCR, document, procedure, execution/result record, or candidate baseline revision by named reviewers. Requirement changes are reviewed as contents of the SCR rather than as independent review artifacts. A review cycle contains its submitted snapshot, author-selected approval group, comments, dispositions, outcomes, and timestamps. Multiple review cycles may occur for the same not-yet-approved SCR revision.
 
 **Review Comment**: A versioned finding or question anchored to the reviewed revision. It must be dispositioned before approval when the workflow requires it.
 
-**Approval**: An attributable unanimous decision by every assigned required reviewer that a specific SCR, document, procedure, execution/result record, or candidate baseline revision satisfies its defined approval criteria. Approval of an SCR authorizes its contained requirement changes but does not automatically include those revisions in a release baseline.
+**Approval**: An attributable unanimous decision by every approver selected by the artifact author that a specific submitted snapshot of an SCR, document, procedure, execution/result record, or candidate baseline revision satisfies its defined approval criteria. Approval of an SCR authorizes its contained requirement changes but does not automatically include those revisions in a release baseline.
+
+**Review Cycle**: One submission of an artifact revision to a selected approval group. A requested change closes the current cycle and returns an unapproved SCR to Draft at the same revision number. Resubmission creates a new cycle with a new immutable submitted snapshot.
 
 **Electronic Approval Record**: Evidence of the approver identity, decision, time, reviewed revision, and applicable meaning. The authentication and signature policy remains to be defined.
 

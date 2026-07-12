@@ -37,8 +37,8 @@ The showcase will demonstrate that this SCR:
 - introduces several new controlled requirements;
 - affects existing interface or navigation behavior where appropriate;
 - creates or revises verification procedures;
-- is reviewed by all assigned reviewers;
-- becomes approved only when every required reviewer approves the same SCR revision;
+- has its approval group selected by the SCR author;
+- becomes approved only when every selected approver approves the same submitted SCR snapshot;
 - is explicitly selected for the Version 3.3 candidate baseline; and
 - contributes its exact approved artifact revisions to the released Version 3.3 baseline.
 
@@ -111,7 +111,7 @@ The System Engineer dashboard prioritizes:
 
 1. Open the manager dashboard scoped to FMS Version 3.3.
 2. Explain the two-SCR release package and visible blocking items.
-3. Open `SCR-0001049.01`, compare the contained system-requirement and HLR revisions, and inspect reviewers of the complete SCR package.
+3. Open `SCR-0001049.01`, compare the contained system-requirement and HLR revisions, and inspect the author-selected approvers and review-cycle history of the complete SCR package.
 4. Show the affected procedures and suspect link caused by the revision.
 5. Switch to the System Engineer dashboard and open the assigned impact-review action.
 6. Resolve the simulated link/procedure review and show the dashboard status update.
@@ -127,7 +127,7 @@ The System Engineer dashboard prioritizes:
 - A manager can understand Version 3.3 progress and blocking issues without interpreting a static trace matrix.
 - A System Engineer can identify and navigate directly to assigned reviews, suspect links, verification gaps, and failed/blocked evidence.
 - Every dashboard value drills into the exact fictional records that produce it.
-- Approval visibly requires every assigned reviewer to approve the same artifact revision.
+- Approval visibly requires every author-selected approver to approve the same submitted snapshot.
 - Version 3.2 remains unchanged while Version 3.3 contains exact selected successor revisions.
 - A retired requirement, if demonstrated later, does not appear in the effective Version 3.3 SYSRD but remains in Version 3.2 history and the audit/change story.
 - Blocked is not shown as a verification success or failure; it signals that a valid verification conclusion could not be reached.

@@ -145,10 +145,11 @@ Future entries use:
 ### DEC-017 - Approval Requires Every Required Reviewer
 
 - **Date:** 2026-07-11
-- **Status:** Accepted
+- **Status:** Superseded by DEC-024, DEC-025, and DEC-026
 - **Decision:** An artifact revision is approved only when every reviewer assigned as required approves that exact revision.
 - **Rationale:** Approval represents agreement of the complete required review group, not a majority or partial quorum.
-- **Consequences:** Rejection or requested changes block approval; rework creates a new submitted revision and earlier reviewer approvals do not silently carry forward.
+- **Original consequence (superseded):** Rejection or requested changes block approval; the earlier model assumed rework created a new submitted revision. DEC-024 replaces that assumption with same-revision review cycles before first approval.
+- **Superseded by:** DEC-024 clarifies same-revision pre-approval rework, DEC-025 governs post-approval revision changes, and DEC-026 establishes author-selected approvers.
 
 ### DEC-018 - Retired Requirements Are Omitted from the Effective Document
 
@@ -198,6 +199,30 @@ Future entries use:
 - **Rationale:** Current programs are software-oriented, but the full change story must demonstrate the relationship between externally meaningful system behavior and software requirements.
 - **Consequences:** Both system and HLR revisions appear inside the SCR package and trace through verification and the Version 3.3 baseline. This showcase breadth does not by itself redefine the production implementation sequence.
 
+### DEC-024 - Pre-Approval Rework Keeps the SCR Revision
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** When an SCR has never been approved and an approver requests a change, it returns to Draft at the same revision number. Resubmission creates a new review cycle, not a new SCR revision.
+- **Rationale:** The revision has not yet achieved an approved controlled state, so ordinary review rework belongs to the original revision.
+- **Consequences:** Every review-cycle submission, comment, decision, and snapshot remains historical. Earlier approvals do not carry into the resubmitted cycle.
+
+### DEC-025 - Post-Approval SCR Change Creates the Next Revision
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** Any change to an approved SCR creates the next SCR revision, even when the associated SYSRD/SWRD or release baseline has not yet been approved or released.
+- **Rationale:** The approved SCR revision is a completed controlled record and cannot be edited in place.
+- **Consequences:** The new revision begins in Draft, receives an author-selected approval group, and requires unanimous fresh approval. The earlier approved revision remains visible and may be superseded for release selection.
+
+### DEC-026 - SCR Author Selects the Approval Group
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** The SCR author has authority to select the people whose approval is required for that SCR review cycle.
+- **Rationale:** The author determines the appropriate approval participants for the content and affected disciplines.
+- **Consequences:** Approval requires every selected approver. The selected group and any changes to it are audited; constraints on changing the group after submission remain to be defined.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
@@ -206,7 +231,7 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 - **ASM-002:** Artifact numbers are globally unique across programs; exact prefixes, digit lengths, and revision display syntax are configurable or decided later.
 - **ASM-003:** The first slice supports multiple programs even if initial validation uses one reference program.
 - **ASM-004:** Requirements may include controlled images/figures as part of revisioned content.
-- **ASM-005:** Exact review roles and independence rules vary by organization/program and require controlled configuration; unanimous approval by all assigned required reviewers is fixed initial behavior.
+- **ASM-005:** Exact review roles and independence rules vary by organization/program; the SCR author selects the approval group and unanimous approval by that group is fixed initial behavior.
 - **ASM-006:** PR references may point to an external system until full PR management exists.
 - **ASM-007:** The initial platform records Pass, Fail, Blocked, Not Run, and Not Applicable using the meanings in [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md); detailed step/result transition rules still require validation.
 - **ASM-008:** Source Word files remain unmodified in the repository root during the initial consolidation.
@@ -222,7 +247,7 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 | OQ-001 | Which optional product/system/configuration layers are needed beyond the accepted `Program -> Project -> Software Product -> Software Release` default? | Determines applicability and baseline scope for programs that do not fit the software-oriented default | Product owner before domain/data design |
 | OQ-002 | Should numeric sequences be global across all artifact types or unique within each prefix? The accepted base/suffix format is documented in [IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md](IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md). | Affects identifier generation and external references | Product/configuration stakeholders before data design |
 | OQ-003 | Which proposed requirement-change fields must be complete before an SCR can be submitted, and which existing FMS fields must be preserved or program-configurable? | Controls SCR package validation, import, review, and generated documents | Requirements stakeholders before Phase 1 |
-| OQ-004 | Which workflow states, reviewer roles, and independence constraints are mandatory versus configurable beyond unanimous required-reviewer approval? | Controls the review/approval engine and authorization model | Quality/configuration/product stakeholders before Phase 2 design |
+| OQ-004 | May an SCR author add or remove selected approvers after a review cycle has started, and what restart/audit behavior applies? Which independence constraints override author selection? | Controls review integrity while preserving author authority | Quality/configuration/product stakeholders before Phase 2 design |
 | OQ-005 | What constitutes an electronic approval, and is password re-entry or another signature ceremony required? | Affects identity, audit evidence, usability, and policy | Security/quality stakeholders before Phase 2 |
 | OQ-006 | What are the allowed verification methods, and can one requirement require multiple methods? | Affects completeness logic and document output | Verification stakeholders before Phase 1 completion |
 | OQ-007 | Are test case and test suite separate first-slice artifacts, or is procedure plus execution configuration sufficient? | Avoids redundant objects and unclear trace semantics | Verification stakeholders before Phase 3 design |

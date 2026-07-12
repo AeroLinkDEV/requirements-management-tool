@@ -37,7 +37,7 @@ This catalog is the authoritative capability inventory. Feature identifiers are 
 | SR-003 | Requirement retirement | Remove future applicability without erasing history | Must | 2 | SR-002, SCR-001 | Approved retirement affects successor baselines only |
 | SR-004 | Verification method and derived status | Support planning and completeness checks | Must | 1 | SR-001 | Each applicable requirement records controlled verification and derived information |
 | SCR-001 | SCR records and revisions | Explain and control system requirement change | Must | 2 | PF-005-PF-008, SR-001 | One SCR revision can propose multiple introductions, modifications, and retirements |
-| SCR-002 | Complete-package SCR review and approval | Prevent uncontrolled requirement changes | Must | 2 | SCR-001, WF-001 | Reviewers approve or reject the exact SCR revision containing Problem, Analysis, Solution, and all proposed requirement changes |
+| SCR-002 | Complete-package SCR review and approval | Prevent uncontrolled requirement changes | Must | 2 | SCR-001, WF-001 | Author-selected approvers unanimously approve or reject the submitted snapshot containing Problem, Analysis, Solution, and all proposed requirement changes |
 | SCR-003 | Target release and deferral | Control which approved changes enter a release | Must | 2 | SCR-001, BL-001 | SCRs can be targeted, selected, deferred, and retargeted with retained rationale |
 | SCR-004 | Impact analysis | Expose affected links and evidence before change approval | Must | 2 | TR-001, SCR-001 | Reviewers see affected artifacts and unresolved suspect links before approval |
 
@@ -45,8 +45,8 @@ This catalog is the authoritative capability inventory. Feature identifiers are 
 
 | ID | Capability | Rationale | Priority | Phase | Dependencies | Acceptance Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
-| WF-001 | Review workflows | Produce controlled review evidence | Must | 2 | PF-002, PF-003, PF-006 | Named reviewers can comment, disposition, reject, request rework, and approve exact revisions |
-| WF-002 | Approval policy | Enforce unanimous required-reviewer approval and independence | Must | 2 | WF-001 | Approval is blocked unless every assigned required reviewer approves the exact revision and comment/independence rules are met |
+| WF-001 | Review cycles | Produce controlled review evidence without unnecessary pre-approval revisions | Must | 2 | PF-002, PF-003, PF-006 | Each submission retains its snapshot, selected approvers, comments and decisions; pre-approval rework returns the same revision to Draft |
+| WF-002 | Approval policy | Enforce unanimous author-selected approval and independence | Must | 2 | WF-001 | Approval is blocked unless every approver selected by the artifact author approves the same submitted snapshot and comment/independence rules are met |
 | BL-001 | Releases and candidate baselines | Assemble controlled successor configurations | Must | 2 | SR-002, SCR-002 | A candidate records predecessor and exact selected revisions |
 | BL-002 | Immutable approved baselines | Preserve exact released content | Must | 2 | BL-001, WF-002 | Approved baseline contents cannot be edited; correction creates a successor |
 | BL-003 | Baseline comparison | Explain changes between releases | Must | 2 | BL-002 | Users see introduced, modified, retired, and unchanged artifacts between baselines |

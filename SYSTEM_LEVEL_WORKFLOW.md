@@ -36,7 +36,7 @@ The workflow assumes these conceptual roles; one person may hold multiple roles 
 - **Program Administrator:** configures authorized users, roles, and program-level policy.
 - **System Administrator:** operates the platform without authority to erase controlled history.
 
-For the initial product behavior, approval is unanimous among the reviewers assigned as required: every required reviewer must approve the same SCR or document revision. Requirements contained in an SCR are not reviewed or approved independently. Any required reviewer rejection or request for changes prevents approval. Independence rules and the approval-authentication ceremony remain to be defined.
+For the initial product behavior, the SCR author selects the people required to approve the SCR. Approval is unanimous among that author-selected approval group: every selected approver must approve the same SCR revision and submitted content. Requirements contained in an SCR are not reviewed or approved independently. Any selected approver rejection or request for changes prevents approval. Independence rules and the approval-authentication ceremony remain to be defined.
 
 ## 3. SCR Lifecycle
 
@@ -67,9 +67,11 @@ Selected -> Deferred (with controlled reason)
 
 - Draft SCRs may be revised by authorized users and may miss an intended release without losing history.
 - The SCR author decides when the complete package is technically ready to submit. Submission validation checks that required Problem, Analysis, Solution, requirement-change, reviewer, link, and impact information is present; it does not replace the author’s engineering judgment.
-- Submission freezes the submitted revision for review. Rework creates a new reviewable revision rather than rewriting the reviewed snapshot.
+- Submission creates an immutable review-cycle snapshot of the current SCR revision.
+- If the SCR has never been approved and an approver requests changes, the SCR returns to Draft **without increasing its revision number**. The review cycle, comments, decisions, and submitted snapshot remain historical; the author edits the same business revision and resubmits it for a new review cycle.
+- If an already approved SCR requires any content change, the approved revision remains immutable and the SCR advances to its next revision. The author selects the approval group for the new revision, and every selected approver must approve again.
 - Every review comment requiring action must be dispositioned before approval.
-- Approval requires every assigned required reviewer to approve the same submitted revision; approval of an earlier revision does not carry forward after rework.
+- Approval requires every author-selected approver to approve the same submitted revision and review-cycle snapshot. Approval decisions from an earlier review cycle do not carry into a resubmission after requested changes, even when the SCR revision number remains unchanged.
 - Rejection preserves the SCR and review history. A materially revised proposal proceeds as a new SCR revision or a replacement SCR according to policy.
 - Approval makes the proposed changes eligible for baseline selection; it does not itself change the effective baseline.
 - Deferral records who deferred the SCR, when, why, and any new target release.

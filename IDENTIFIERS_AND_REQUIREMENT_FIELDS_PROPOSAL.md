@@ -62,9 +62,10 @@ The stable requirement identity remains `SYSR-00002375`; `SYSR-00002375.04` mean
 Use positive whole-number revisions for controlled artifact content and render values below 10 with a leading zero:
 
 - Draft work begins as `Revision 1`.
-- Rework or an approved change creates the next revision number.
+- Requested changes before the SCR has ever been approved keep the same SCR revision number and create a new review cycle after resubmission.
+- Any content change after SCR approval creates the next SCR revision number.
 - Revision numbers are never reused or renumbered.
-- The application may show draft iterations internally, but a reviewed snapshot remains immutable.
+- The application retains every submitted review-cycle snapshot even when the unapproved SCR returns to Draft and is edited at the same revision number.
 - The same base artifact identifier remains stable across all revisions.
 - Revisions above 99 expand naturally, such as `.100`; revision numbers are not limited to two digits.
 
@@ -145,13 +146,13 @@ The SCR author controls when drafting is complete enough to attempt submission. 
 
 - the enclosing SCR has complete Problem, Analysis, and Solution content;
 - all proposed requirement introductions, modifications, and retirements are identified;
-- required SCR reviewers are assigned;
+- the SCR author has selected every person whose approval is required;
 - required links and impact information are present or explicitly justified; and
 - the SCR package has no unresolved submission-validation errors.
 
 ### Required Before SCR Approval
 
-- every required reviewer approves the exact SCR revision;
+- every author-selected approver approves the exact submitted snapshot of the SCR revision;
 - every blocking review comment is dispositioned;
 - the proposed requirement revisions remain exactly those reviewed within the SCR;
 - required impact analysis is complete; and
@@ -194,7 +195,7 @@ These may be mandatory for some projects but should not be hard-coded as univers
 - A new revision must identify the SCR or other approved change authority.
 - Derived requirements require explicit rationale and the applicable review path.
 - An SCR cannot enter review with unresolved package-level required-field errors.
-- Requirements are not approved independently; every required reviewer approves the exact SCR revision containing the requirement changes.
+- Requirements are not approved independently; every author-selected approver approves the exact submitted snapshot of the SCR revision containing the requirement changes.
 - SCR approval authorizes its proposed requirement revisions but does not automatically include them in a baseline.
 
 ## Decisions Requested
