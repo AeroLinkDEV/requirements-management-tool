@@ -16,6 +16,18 @@ This catalog is the authoritative capability inventory. Feature identifiers are 
 | PF-008 | Controlled attachments | Retain images and evidence with provenance and integrity | Must | 1 | PF-005-PF-007 | Authorized users attach, retrieve, version, and integrity-check files |
 | PF-009 | Search and navigation | Make controlled records usable at organizational scale | Should | 1 | PF-001, PF-005 | Users find permitted artifacts by identifier, content, type, state, and release |
 
+## Dashboards and Decision Support
+
+| ID | Capability | Rationale | Priority | Phase | Dependencies | Acceptance Outcome |
+| --- | --- | --- | --- | --- | --- | --- |
+| DASH-001 | Role-aware dashboard framework | Give each user relevant progress, risk, and work without creating competing sources of truth | Must | 1-3 | PF-001-PF-003, PF-007 | Managers, engineers, CM/quality, and administrators receive authorized views derived from the same controlled records |
+| DASH-002 | Manager release-readiness dashboard | Make progress, bottlenecks, completeness, and risk understandable at program/release level | Must | 2-3 | BL-001, WF-001, TR-001 | Managers see scoped readiness and can drill into every contributing or blocking record |
+| DASH-003 | Engineer work dashboard | Turn assignments, change impact, suspect links, and verification gaps into actionable work | Must | 2-3 | WF-001, SCR-001, TR-002 | Engineers can navigate directly from their dashboard to the exact artifact and required action |
+| DASH-004 | Configuration and quality dashboard | Surface baseline, approval, document, audit, and integrity exceptions | Should | 2-3 | BL-001, DOC-001, PF-007 | Authorized users can identify and investigate every blocking control exception |
+| DASH-005 | Trusted metric contracts | Prevent unexplained or misleading summary indicators | Must | 1-3 | PF-007, domain-specific features | Every important metric exposes definition, scope, freshness, source records, owner, authorization behavior, and drill-down |
+| DASH-006 | Shareable filtered views and controlled exports | Preserve context when dashboard evidence is discussed or reported | Should | 3 | DASH-001-DASH-005 | Shared/exported views identify scope, filters, time, and provisional/final state without exposing unauthorized data |
+| SHOW-001 | Interactive concept showcase | Validate desirability and workflows before production architecture | Must | 0.5 | Approved Phase 0 baseline, design vision | Stakeholders can navigate the complete fictional dashboard-to-trace story with no production claims |
+
 ## System Requirements and Change
 
 | ID | Capability | Rationale | Priority | Phase | Dependencies | Acceptance Outcome |

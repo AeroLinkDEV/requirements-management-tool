@@ -102,6 +102,30 @@ Future entries use:
 - **Rationale:** Local history can begin immediately, while repository ownership/name/visibility are not yet specified.
 - **Consequences:** No remote, commit, or push is implied by this documentation implementation.
 
+### DEC-012 - AeroLink Mockups Are the North-Star Experience
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** Preserve the AeroLink dashboard, SCR review, traceability, and test-evidence mockups as guiding visual and interaction inspiration, subject to validation and refinement rather than pixel-for-pixel implementation.
+- **Rationale:** The concepts make the intended controlled lifecycle experience tangible and establish a coherent, modern product direction for managers and engineers.
+- **Consequences:** Future UX work should retain the calm mission-control character, visible state/provenance, actionable drill-downs, and role-aware information priorities defined in [DESIGN_VISION_AND_DASHBOARDS.md](DESIGN_VISION_AND_DASHBOARDS.md).
+
+### DEC-013 - Dashboards Are a Core Capability
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** Role-aware manager, engineer, configuration/quality, and administrator dashboards are first-class product capabilities, not optional reporting added after core workflows.
+- **Rationale:** Users need immediate understanding of progress, readiness, gaps, risk, assignments, and required action across controlled lifecycle data.
+- **Consequences:** Dashboard needs influence the underlying domain events, metric definitions, authorization, audit, performance, and drill-down behavior from the beginning. Every important metric requires a trusted metric contract.
+
+### DEC-014 - Interactive Showcase Before Production Implementation
+
+- **Date:** 2026-07-11
+- **Status:** Accepted
+- **Decision:** After the documentation baseline, create a static-data interactive web showcase of the end-to-end experience before production application architecture and implementation.
+- **Rationale:** A realistic show-and-tell experience will validate desirability, terminology, information architecture, dashboard priorities, and workflow comprehension at far lower cost than production code.
+- **Consequences:** The showcase must be labeled as a concept and must not imply production authentication, workflow enforcement, audit integrity, compliance, data persistence, integration, or deployment readiness.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
@@ -115,6 +139,8 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 - **ASM-007:** The initial platform records at least Pass, Fail, and Not Applicable; additional operational states require precise definitions.
 - **ASM-008:** Source Word files remain unmodified in the repository root during the initial consolidation.
 - **ASM-009:** GitHub will eventually become the shared remote source of truth, but no repository details are assumed.
+- **ASM-010:** Dashboard values are computed only from records the current user is authorized to know exist.
+- **ASM-011:** The first interactive showcase uses deterministic fictional data and simulated state changes rather than a production backend.
 
 ## Open Questions Required Before Phase 1 Technical Planning
 
@@ -135,6 +161,9 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 | OQ-013 | What legacy SYSRD structure and import quality should the first migration workflow support? | Import was requested but depends heavily on source format and validation needs | Product owner after sample documents are available |
 | OQ-014 | What production data volumes, response-time targets, availability, RPO, and RTO are required? | Converts quality ambitions into testable architecture constraints | Operations/product owner before production architecture |
 | OQ-015 | What GitHub organization/repository name, visibility, branch policy, and contributor workflow should be used? | Required before publishing the local repository | Repository owner before remote setup |
+| OQ-016 | Which manager, engineer, configuration/quality, and administrator personas and decisions must each dashboard support? | Determines dashboard information priority and avoids generic one-size-fits-all views | Product owner and representative users before showcase build |
+| OQ-017 | What exact definitions, thresholds, applicability rules, and owners govern the initial dashboard measures? | Prevents misleading readiness and completeness indicators | Product/process owners before showcase validation |
+| OQ-018 | Which representative fictional program, release, requirements, SCRs, tests, results, and user roles should form the showcase story? | Creates coherent reusable prototype data and presentation flow | Product owner before showcase build |
 
 ## Open Questions for Later Phases
 

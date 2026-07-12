@@ -20,6 +20,7 @@ This slice is intended to prove controlled change, immutable history, exact base
 | [Scope and boundaries](SCOPE_AND_BOUNDARIES.md) | Current, future, and excluded capabilities |
 | [Domain model and glossary](DOMAIN_MODEL_AND_GLOSSARY.md) | Shared vocabulary and lifecycle concepts |
 | [Product principles](PRODUCT_PRINCIPLES.md) | Non-negotiable behavioral rules |
+| [Design vision and dashboards](DESIGN_VISION_AND_DASHBOARDS.md) | North-star mockups, role-aware dashboards, trusted metrics, and showcase direction |
 | [System-level workflow](SYSTEM_LEVEL_WORKFLOW.md) | Decision-complete first-slice behavior and paper scenarios |
 | [Feature catalog](FEATURE_CATALOG.md) | Stable, phased capability inventory |
 | [Release roadmap](RELEASE_ROADMAP.md) | Incremental delivery strategy and exit criteria |

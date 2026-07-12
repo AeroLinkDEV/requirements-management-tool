@@ -21,6 +21,25 @@ Exit criteria:
 - the first-slice workflow has unambiguous actors, inputs, transitions, outputs, and retained history; and
 - stakeholders approve the documentation baseline.
 
+## Phase 0.5: Interactive Concept Showcase
+
+**Goal:** Validate the information architecture, terminology, dashboard measures, and end-to-end experience before production technical design.
+
+Capabilities:
+
+- a polished static-data web experience based on [DESIGN_VISION_AND_DASHBOARDS.md](DESIGN_VISION_AND_DASHBOARDS.md);
+- manager and engineer dashboard modes;
+- a coherent dashboard -> SCR -> requirement revision -> impact -> baseline -> test evidence -> traceability story;
+- simulated filters, drill-downs, review states, evidence, and provenance; and
+- explicit concept labeling with no production security, integrity, compliance, or architecture claim.
+
+Exit evidence:
+
+- representative managers and engineers can understand current status and next actions;
+- every displayed metric has an agreed meaning and drill-down expectation;
+- the showcase reveals and records terminology, workflow, navigation, and information-priority issues; and
+- stakeholders decide whether to proceed to Phase 1 technical discovery and implementation planning.
+
 ## Phase 1: Platform Skeleton and System-Requirement Control
 
 **Goal:** Prove secure controlled artifacts and revision history without attempting the full workflow.
