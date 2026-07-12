@@ -22,18 +22,17 @@ The first aggregate is `SystemChangeRequest`. Stable artifact identity (`SCR-000
 
 ## Persistence
 
-Repository interfaces are defined in the domain project and implemented in infrastructure. Provider choice is configuration-driven. `EnsureCreated` is acceptable during this early local phase; versioned EF migrations replace it before shared environments or production data.
+Repository interfaces are defined in the domain project and implemented in infrastructure. Provider choice is configuration-driven. PostgreSQL uses versioned EF migrations at application startup; SQLite remains isolated to tests and disposable local scenarios.
 
 Fresh installations contain no assumed program. The onboarding transaction creates the Program, its first Project/software product, and its initial release together. FMS records are optional demo data controlled by configuration and are disabled by default.
 
 ## Security boundary
 
-Actor identifiers currently enter through development request bodies to exercise authorization rules. This is deliberately not production authentication. Before multi-user use, identity must come from an authenticated server-side principal, roles and program membership must be enforced, and audit events must use that trusted identity.
+Identity now comes from a revocable authenticated server session. Passwords use salted PBKDF2 derivation, opaque session tokens are stored only as digests, material API actions derive the actor from the authenticated principal, Program memberships and roles constrain access, and SCR/release approvals require password-confirmed immutable electronic signatures. Production deployment still requires TLS, enterprise identity federation/provisioning, configurable policy enforcement, privileged-access governance, audit export, and independent security review as defined in [SECURITY_AND_IDENTITY_MODEL.md](../../SECURITY_AND_IDENTITY_MODEL.md).
 
 ## Next implementation increment
 
-1. Add API integration tests around persistence and workflows.
-2. Add authenticated identity and role/program authorization design.
-3. Build SCR authoring and ordered review screens against the API.
-4. Add EF migrations and a local PostgreSQL development option.
-5. Implement candidate-baseline assembly from approved SCR revisions.
+1. Build the Enterprise Requirements Workspace defined in [ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md](../../ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md).
+2. Add configurable artifact schemas and specification/module hierarchies without weakening stable identity or revision rules.
+3. Add rich authoring, threaded review comments, advanced search/saved views, governed bulk operations, and visual redlines.
+4. Prove governed CSV/Excel onboarding and realistic 10,000-requirement interactive performance before ReqIF and product-line configuration work.

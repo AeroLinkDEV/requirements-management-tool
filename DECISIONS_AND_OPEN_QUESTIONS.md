@@ -252,6 +252,22 @@ Future entries use:
 - **Decision:** Accounts are disabled or locked rather than deleted. Existing artifact attribution, review decisions, and signatures retain username and display-name snapshots.
 - **Rationale:** Personnel changes must not damage the audit trail.
 
+### DEC-031 - Enterprise Parity Is Required for Core Requirements Engineering
+
+- **Date:** 2026-07-12
+- **Status:** Accepted
+- **Decision:** AeroLink will meet enterprise expectations for configurable requirements authoring, collaboration, search, bulk operations, interchange, traceability, configuration/reuse, reporting, security, and operations while retaining its aerospace assurance controls.
+- **Rationale:** Controlled approvals and baselines alone are not enough; engineers must be able to perform high-volume daily requirements work as efficiently as they can in established platforms.
+- **Consequences:** The capability benchmark and stable features in [ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md](ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md) and [FEATURE_CATALOG.md](FEATURE_CATALOG.md) govern enterprise-parity planning.
+
+### DEC-032 - Enterprise Requirements Workspace Is the Next Major Slice
+
+- **Date:** 2026-07-12
+- **Status:** Accepted
+- **Decision:** The next massive implementation will focus on configurable artifact schemas, specification/module hierarchy, rich authoring, collaboration, universal search, saved views, governed bulk operations, visual redlines, and previewed CSV/Excel onboarding.
+- **Rationale:** This is the largest current competitive gap and provides the data/configuration model required by ReqIF, reporting, product-line reuse, and integrations.
+- **Consequences:** ReqIF/OSLC, streams/variants, enterprise federation, and risk/compliance follow as explicit waves rather than being mixed into the first authoring slice.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

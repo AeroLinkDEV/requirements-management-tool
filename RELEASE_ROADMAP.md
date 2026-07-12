@@ -103,6 +103,18 @@ Exit evidence:
 
 Before implementation, refine derived-requirement workflows, allocation/refinement semantics, verification independence, and software-specific document structures.
 
+## Enterprise Maturity Program
+
+The market benchmark in [ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md](ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md) establishes a maturity program that cuts across the original domain phases:
+
+1. **Enterprise Requirements Workspace:** configurable schemas, specification/module authoring, rich content, collaboration, universal search, saved views, bulk operations, redlines, and governed CSV/Excel onboarding.
+2. **Open Digital Thread:** ReqIF 1.2, supported REST APIs, webhooks, OSLC RM, service identities, and monitored integrations.
+3. **Product-Line Configuration and Reuse:** components, streams, change sets, controlled merge, governed libraries, synchronized reuse, variants, and composite configurations.
+4. **Enterprise Operations and Identity Federation:** OIDC/SAML, SCIM, backup/restore, observability, retention, audit export, secure upgrades, and performance qualification.
+5. **Risk, Compliance, and Portfolio Intelligence:** configurable risk/hazard/compliance artifacts and cross-program intelligence after subject-matter validation.
+
+The Enterprise Requirements Workspace is the next recommended massive implementation. It turns the existing assurance-control core into a high-throughput daily engineering environment and establishes the model needed for later interchange, reuse, configuration, and reporting.
+
 ## Phase 5: PR Management and Integrations
 
 **Goal:** Add the full PR lifecycle, PR-driven impact analysis, broader configuration/release functions, enterprise identity, and selected external references or integrations.
