@@ -48,7 +48,8 @@ public sealed class IdentityService(AeroLinkDbContext db)
     public async Task<bool> HasRoleAsync(AuthenticatedUser user, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)
     {
         if (user.IsAdministrator) return true; if (user.Programs.Any(x => x.ProgramId == programId && x.Roles.Contains(role.ToString()))) return true;
-        return await db.RoleDelegations.AnyAsync(x => x.ProgramId == programId && x.DelegateUserId == user.Id && x.Role == role && x.RevokedAt == null && x.StartsAt <= now && x.EndsAt > now, ct);
+        var delegations = await db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == programId && x.DelegateUserId == user.Id && x.Role == role && x.RevokedAt == null).ToListAsync(ct);
+        return delegations.Any(x => x.StartsAt <= now && x.EndsAt > now);
     }
     private async Task<AuthenticatedUser> MapAsync(UserAccount user, DateTimeOffset now, CancellationToken ct)
     {

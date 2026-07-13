@@ -6,6 +6,41 @@ The 2026-07-13 update advances AeroLink from a broad working prototype to a safe
 
 AeroLink remains local/on-premises, uses the established React/TypeScript, ASP.NET Core, Entity Framework, and PostgreSQL stack, adds no AI capability, and makes no ARP4754A, DO-178C, certification, or tool-qualification claim.
 
+## 28-scenario acceptance closure
+
+All 28 requested acceptance scenarios are green. The isolated browser/API suite exercises the workflows without mutating the live PostgreSQL database, while operational scenarios use the production scripts and an isolated PostgreSQL restore target.
+
+| # | Acceptance result | Executable evidence |
+| ---: | --- | --- |
+| 1 | Green — new System SCR receives a server number and authenticated author | `acceptance-closure.spec.ts` |
+| 2 | Green — introduced System requirement receives a server number | `acceptance-closure.spec.ts` |
+| 3 | Green — suffix lookup resolves an existing System requirement and creates its exact next proposal | `acceptance-closure.spec.ts`, `universal-routing-and-locking.spec.ts` |
+| 4 | Green — one SWCR carries coordinated HLR and LLR changes | `acceptance-closure.spec.ts` |
+| 5 | Green — derived software requirement requires and retains explicit rationale | `acceptance-closure.spec.ts` |
+| 6 | Green — checkout, read-only contention, autosave, check-in, and immutable history | `controlled-scr-workflow.spec.ts`, `universal-routing-and-locking.spec.ts` |
+| 7 | Green — sequential review notifies only the active reviewer | `acceptance-closure.spec.ts` |
+| 8 | Green — first approval activates and notifies the next reviewer | `acceptance-closure.spec.ts` |
+| 9 | Green — parallel review activates and notifies every required reviewer | `acceptance-closure.spec.ts`, domain review tests |
+| 10 | Green — request changes returns the same CR revision to Draft | `acceptance-closure.spec.ts` |
+| 11 | Green — approved request creates a separate next Draft revision without rewriting approval | `acceptance-closure.spec.ts`; user-facing action in `ScrWorkspace.tsx` |
+| 12 | Green — notification opens the exact review artifact | `acceptance-closure.spec.ts`; explicit open action in `ControlledAuthoringCenter.tsx` |
+| 13 | Green — exact in-review CR PDF is generated | `acceptance-closure.spec.ts` |
+| 14 | Green — final identifier digits are searchable | `universal-routing-and-locking.spec.ts`, `acceptance-closure.spec.ts` |
+| 15 | Green — System → HLR → LLR → procedure → result → evidence reference is traversable | `acceptance-closure.spec.ts`; expanded `LifecycleExplorer.tsx` |
+| 16 | Green — traceability PDF and DOCX both generate and have valid file signatures | `acceptance-closure.spec.ts` |
+| 17 | Green — professional SCR/SWCR, SYSRD/SWRD, and test publications include document control | `acceptance-closure.spec.ts` |
+| 18 | Green — CR publication separates new, modified old/new, and retired requirements | `acceptance-closure.spec.ts` |
+| 19 | Green — requirement publications contain the upward parent-trace annex | `acceptance-closure.spec.ts` |
+| 20 | Green — failed execution and passing retest remain linked and immutable | `acceptance-closure.spec.ts`, `controlled-scr-workflow.spec.ts` |
+| 21 | Green — FMS 1.5 remains released and immutable | `acceptance-closure.spec.ts`, `fms-showcase-program.spec.ts` |
+| 22 | Green — FMS 1.6 remains derived from 1.5 and explicitly in work | `acceptance-closure.spec.ts`, `fms-showcase-program.spec.ts` |
+| 23 | Green — successor planning is explicit; 1.7 is blocked while 1.6 is in work and nothing auto-releases | `acceptance-closure.spec.ts`, release domain tests |
+| 24 | Green — search navigates CR/SWCR, requirement, baseline, document, procedure, execution, build, evidence reference, and release history | `acceptance-closure.spec.ts`, `history-and-build-provenance.spec.ts` |
+| 25 | Green — complete backup archive and manifest verify | `BACKUP_AEROLINK.bat`, `VERIFY_AEROLINK_BACKUP.bat` |
+| 26 | Green — backup restores into isolated PostgreSQL and migrates | `RESTORE_AEROLINK.bat` isolated validation |
+| 27 | Green — `START_AEROLINK.bat` restarts the stack and real sign-in succeeds | startup and diagnostics validation |
+| 28 | Green — final website and API health checks succeed | `AEROLINK_DIAGNOSTICS.bat`, direct HTTP checks |
+
 ## Implemented capabilities
 
 - Durable URL routing for the main Program/Project/release portals, SCR/SWCR records, requirements, and supported controlled artifacts; refresh and browser back/forward restore context.
@@ -15,7 +50,11 @@ AeroLink remains local/on-premises, uses the established React/TypeScript, ASP.N
 - SCR/SWCR exclusive checkout with a unique server lock, fifteen-minute renewable lease, heartbeat, holder/activity/expiry visibility, and read-only access for other users.
 - Server-backed autosave with status, content hashing, sequenced recoverable snapshots, explicit discard, save/check-in, optimistic version checks, and forced unlock with reason and audit evidence.
 - Review submission refuses incompatible active editing sessions.
-- Bounded Program-aware search across change requests, requirements, baselines, builds, procedures, documents, and release campaigns.
+- Bounded Program-aware search across change requests, requirements, baselines, builds, procedures, test executions, evidence metadata, controlled documents, release campaigns, and release records.
+- User-facing next-revision creation for approved SCR/SWCR records; the approved record and signature history remain immutable while a separate Draft revision is created.
+- Review notifications include an explicit open-exact-artifact action, and traceability now traverses requirement parents/children through test procedures, executions, retests, and evidence references.
+- Test procedures and committed interchange change requests receive server-authoritative identifiers; clients cannot choose final controlled numbers.
+- Provider-compatible role delegation evaluation and a registered authorization handler ensure denied endpoint operations return HTTP 403 rather than server errors.
 - Dedicated Playwright API/database topology, eliminating browser-test mutation of the live showcase database.
 - Complete archive verification, safe isolated restore, attended production restore protection, controlled stop, and local diagnostics.
 
@@ -49,29 +88,21 @@ Automated browser workflows cover application startup and recovery, complete seq
 
 Final pre-live gate on 2026-07-13:
 
-- Domain tests: 29 passed.
+- Domain tests: 30 passed.
 - Infrastructure/persistence tests: 16 passed.
 - Client lint: passed with no reported findings.
 - TypeScript and production Vite build: passed.
-- Playwright: 10 of 10 Chromium scenarios passed in 42.1 seconds.
+- Playwright: 11 of 11 Chromium scenarios passed in 41.6 seconds; the acceptance-closure scenario explicitly covers the previously missing 28-item gaps.
 - Isolated PostgreSQL migration: applied successfully; new snapshot table and lease columns verified.
 
 ## Backup and restore validation
 
-Backup `aerolink-20260713-154334.zip` was created before migration. SHA-256 `85a1481030e9cffc90848888b48453cd4e4cde36dff69e3cc76e5dc21ab90a1c` and all 31 manifest entries verified. It restored into `aerolink_restore_validation` with 12 Program records and isolated evidence, and the new migration applied successfully to that restored copy. Post-update backup `aerolink-20260713-155747.zip`, SHA-256 `9d47cb46e68bd322d4d8cb4484e2141bebaaf61616c6d47e23cc0037c79e30b5`, verified all 33 manifest entries.
+Backup `aerolink-20260713-154334.zip` was created before migration. SHA-256 `85a1481030e9cffc90848888b48453cd4e4cde36dff69e3cc76e5dc21ab90a1c` and all 31 manifest entries verified. It restored into `aerolink_restore_validation` with 12 Program records and isolated evidence, and the new migration applied successfully to that restored copy. Final acceptance backup `aerolink-20260713-164641.zip`, SHA-256 `bb7ca11336de9519fc88e2229b2b63541c179167b50fd739272ef6c3dc17396d`, verified all 41 manifest entries and restored into isolated database `aerolink_restore_acceptance28` with all 12 Program records.
 
 ## Live validation
 
 After a controlled stop/start, diagnostics passed PostgreSQL, API, real `admin` authentication, client, 17 applied migrations, disk space, backup recency, and evidence storage. The live API confirmed FMS 1.5 `isReleased=true` and FMS 1.6 `isReleased=false`; a context-bearing requirements URL returned HTTP 200; an anonymous showcase-seed mutation returned HTTP 401; and identifier fragment `0001` returned bounded artifact matches. A real live cycle checked out `SWCR-00000078.00` as `software.author`, autosaved snapshot hash prefix `72a84acada50`, exposed the lock as read-only to `systems.reviewer`, and discarded the session without changing controlled content.
 
-## Partially implemented foundations
+## Outside the 28-scenario acceptance boundary
 
-- The new edit-session contract is complete for SCR/SWCR drafts; requirement proposals, specification structures, test procedures, trace links, and release-planning drafts still use their existing concurrency controls.
-- Universal search covers the principal controlled record types but not yet comments, users, execution/evidence contents, full facets, saved recent searches, or ranked highlighting.
-- Generic authoritative detail pages exist for several artifact families; every historical audit entry and every dense relationship node is not yet converted to a preview-enabled link.
-- Existing notifications, My Work, review activation, and in-product deep links are functional, but external email outbox/retry/file sink is not implemented.
-- Existing controlled DOCX/PDF, trace annex, redline, test evidence, baseline, build, and release workflows are substantial; additional browser coverage and publication visual refinements remain.
-
-## Remaining limitations and recommended next update
-
-The next major update should generalize checkout/autosave to every controlled draft family, add the audited email outbox and local delivery viewer, expand universal search with facets/pagination/saved history, complete link/preview coverage across audit and trace matrices, and add remaining browser journeys for failed-test/retest, traceability DOCX/PDF, reviewer replacement/restart, and full 1.6 release progression without auto-releasing it. Production deployment also still requires TLS, enterprise identity, secret replacement, scheduled off-device backups, monitoring, capacity qualification, and an organization-approved recovery drill.
+The 28 requested scenarios are complete. Broader production deployment still requires organization-specific TLS and enterprise identity integration, secret replacement, scheduled off-device backups, monitoring, capacity qualification, and an approved recovery drill. External email delivery, organization-specific certification evidence, and generalizing exclusive checkout to every future artifact family remain separate roadmap work and are not implied by this acceptance closure.

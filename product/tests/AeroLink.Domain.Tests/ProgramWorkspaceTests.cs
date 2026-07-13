@@ -5,6 +5,17 @@ namespace AeroLink.Domain.Tests;
 public sealed class ProgramWorkspaceTests
 {
     [Fact]
+    public void Successor_planning_occurs_only_after_an_explicit_release_decision()
+    {
+        var projectId = Guid.NewGuid(); var now = DateTimeOffset.UtcNow;
+        var release16 = new SoftwareRelease(projectId, "1.6", false);
+        Assert.False(release16.IsReleased);
+        release16.MarkReleased(now);
+        var release17 = new SoftwareRelease(projectId, "1.7", false, release16.Id);
+        Assert.True(release16.IsReleased); Assert.Equal(release16.Id, release17.PredecessorReleaseId); Assert.False(release17.IsReleased);
+    }
+
+    [Fact]
     public void Workspace_records_preserve_program_project_and_release_relationships()
     {
         var program = new ProgramRecord("Navigation Systems", "nav");

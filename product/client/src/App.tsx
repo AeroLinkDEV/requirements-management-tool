@@ -313,6 +313,7 @@ function App() {
           user={user}
           onBack={() => navigate("dashboard")}
           onChanged={loadData}
+          onOpenScr={(id) => navigate("scr", discipline, id)}
         />
       </>
     );

@@ -20,9 +20,9 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await expect(
     page.getByText("Complete FMS lifecycle inventory"),
   ).toBeVisible();
-  await expect(page.getByText("1,100")).toBeVisible();
-  await expect(page.getByText("515")).toBeVisible();
-  await expect(page.getByText("520")).toBeVisible();
+  await expect(page.getByText("1,100", { exact: true })).toBeVisible();
+  await expect(page.getByText("515", { exact: true })).toBeVisible();
+  await expect(page.getByText("520", { exact: true })).toBeVisible();
   await expect(
     page.getByText("Total SCRs").locator("..").locator("strong"),
   ).toBeVisible();
