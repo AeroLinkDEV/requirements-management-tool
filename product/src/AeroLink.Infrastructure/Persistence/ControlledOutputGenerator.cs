@@ -13,6 +13,19 @@ internal sealed record OutputRow(string Number, string Level, string Text, strin
 
 public sealed class ControlledOutputGenerator(AeroLinkDbContext db)
 {
+    public async Task<GeneratedOutput?> GenerateTraceabilityAsync(Guid baselineId,string format,CancellationToken ct)
+    {
+        var baseline=await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==baselineId,ct);if(baseline is null||baseline.RequirementsMaterializedAt is null)return null;
+        var project=await db.Projects.AsNoTracking().SingleAsync(x=>x.Id==baseline.ProjectId,ct);var program=await db.Programs.AsNoTracking().SingleAsync(x=>x.Id==project.ProgramId,ct);var release=await db.Releases.AsNoTracking().SingleAsync(x=>x.Id==baseline.ReleaseId,ct);
+        var requirements=await(from member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==baselineId) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id orderby artifact.Level,artifact.BaseNumber select new{revision.Id,display=artifact.BaseNumber+"."+revision.Revision.ToString("D2"),level=artifact.Level.ToString(),revision.Statement}).ToListAsync(ct);
+        var ids=requirements.Select(x=>x.Id).ToList();var links=await db.RequirementTraces.AsNoTracking().Where(x=>ids.Contains(x.SourceRevisionId)||ids.Contains(x.TargetRevisionId)).ToListAsync(ct);var byId=requirements.ToDictionary(x=>x.Id);
+        var coverage=await(from link in db.TestCoverage.AsNoTracking().Where(x=>ids.Contains(x.RequirementRevisionId)) join revision in db.TestProcedureRevisions.AsNoTracking() on link.ProcedureRevisionId equals revision.Id join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id select new{link.RequirementRevisionId,display=procedure.BaseNumber+"."+revision.Revision.ToString("D2"),procedure.Title}).ToListAsync(ct);
+        var records=requirements.Select(req=>{var parents=links.Where(x=>x.SourceRevisionId==req.Id&&byId.ContainsKey(x.TargetRevisionId)).Select(x=>byId[x.TargetRevisionId].display).ToList();var children=links.Where(x=>x.TargetRevisionId==req.Id&&byId.ContainsKey(x.SourceRevisionId)).Select(x=>byId[x.SourceRevisionId].display).ToList();var tests=coverage.Where(x=>x.RequirementRevisionId==req.Id).Select(x=>$"{x.display} - {x.Title}").ToList();return new PublicationRecord(req.display,req.level,"Full lifecycle linkage",req.Statement,new[]{("Parent requirement revisions",parents.Count==0?"Top-level / none":string.Join("; ",parents)),("Child requirement revisions",children.Count==0?"Leaf-level / none":string.Join("; ",children)),("Verification procedure revisions",tests.Count==0?"Coverage gap - none recorded":string.Join("; ",tests))});}).ToList();
+        var approvals=await ApprovalBasis(baselineId,release.Id,DateTimeOffset.UtcNow,ct);var hash=baseline.RequirementsHash??baseline.ContentHash??new string('0',64);var status=release.IsReleased?"Approved and Released":"Controlled Draft";
+        var publication=new ProfessionalPublication(project.SoftwareProduct,program.Name+" ("+program.Code+")",project.Name,"Lifecycle Traceability Report",$"{project.SoftwareProduct} Full Traceability Evidence",$"Readable upward, downward, change-authority, and verification linkage for baseline {baseline.DisplayNumber}","TRACE-"+release.Version.Replace(".",""),"00",status,release.Version,baseline.DisplayNumber,"configuration.manager",DateTimeOffset.UtcNow,hash,new[]{("Requirements",records.Count.ToString("N0")),("Trace links",links.Count.ToString("N0")),("Verification links",coverage.Count.ToString("N0")),("Requirement manifest hash",hash)},approvals,new[]{("00",status,DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd"),"configuration.manager")},new[]{new PublicationSection("Complete Requirement Linkage","Each row identifies one exact baseline requirement revision and all of its upward, downward, and verification relationships.",records)});
+        return ProfessionalPublicationRenderer.Render(publication,format,$"TRACEABILITY_{release.Version}_{baseline.DisplayNumber}");
+    }
+
     public async Task<GeneratedOutput?> GenerateAsync(Guid documentId, string format, CancellationToken ct)
     {
         var document = await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == documentId, ct); if (document is null) return null;
@@ -28,10 +41,17 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db)
         };
         var approvals = await ApprovalBasis(document.BaselineId, document.ReleaseId, document.GeneratedAt, ct); var createdBy = (await db.BaselineEvents.AsNoTracking().Where(x => x.BaselineId == baseline.Id && x.EventType == "CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x => x.OccurredAt).Select(x => x.ActorId).FirstOrDefault() ?? "configuration.manager";
         var status = release.IsReleased ? "Approved and Released" : "Controlled Draft"; var type = DocumentTypeName(document.Type);
+        var sections = new List<PublicationSection> { new("Controlled Records", $"This section contains {records.Count:N0} exact, revision-controlled records rendered from baseline {baseline.DisplayNumber}.", records) };
+        if (document.Type is ControlledDocumentType.Sysrd or ControlledDocumentType.SwrdHighLevel or ControlledDocumentType.SwrdLowLevel)
+        {
+            var level = document.Type == ControlledDocumentType.Sysrd ? RequirementLevel.System : document.Type == ControlledDocumentType.SwrdHighLevel ? RequirementLevel.HighLevel : RequirementLevel.LowLevel;
+            var traces = await TraceAnnexRows(document.BaselineId, level, ct);
+            sections.Add(new("Annex A - Upward Requirement Traceability", "This annex identifies the exact parent requirement revision(s) for every published requirement. Top-level System requirements are explicitly identified.", traces));
+        }
         var publication = new ProfessionalPublication(project.SoftwareProduct, program.Name + " (" + program.Code + ")", project.Name, type, document.Title,
             $"Authoritative {type.ToLowerInvariant()} for {project.SoftwareProduct}", document.DocumentNumber, document.Revision.ToString("D2"), status, release.Version, baseline.DisplayNumber, createdBy, document.GeneratedAt, document.ContentHash,
             new[] { ("Controlled records", records.Count.ToString("N0")), ("Baseline content hash", baseline.ContentHash ?? "Not frozen"), ("Requirement manifest hash", baseline.RequirementsHash ?? "Not materialized"), ("Approval basis", "Named approvers from exact approved change requests and completed release approvals recorded by generation time") }, approvals,
-            new[] { (document.Revision.ToString("D2"), status, document.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd"), createdBy) }, new[] { new PublicationSection("Controlled Records", $"This section contains {records.Count:N0} exact, revision-controlled records rendered from baseline {baseline.DisplayNumber}.", records) });
+            new[] { (document.Revision.ToString("D2"), status, document.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd"), createdBy) }, sections);
         return ProfessionalPublicationRenderer.Render(publication, format, $"{document.DocumentNumber}.{document.Revision:D2}_{release.Version}");
     }
 
@@ -39,6 +59,13 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db)
     {
         var rows = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId) join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceScrId equals scr.Id orderby artifact.BaseNumber select new { artifact.BaseNumber, revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, Scr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision }).ToListAsync(ct);
         return rows.Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), level.ToString(), "", x.Statement, new[] { ("Rationale", x.Rationale), ("Verification method", x.VerificationMethod), ("Source change request", x.Scr) })).ToList();
+    }
+    private async Task<List<PublicationRecord>> TraceAnnexRows(Guid baselineId, RequirementLevel level, CancellationToken ct)
+    {
+        var sources=await(from member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==baselineId) join artifact in db.Requirements.AsNoTracking().Where(x=>x.Level==level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id orderby artifact.BaseNumber select new{revision.Id,display=artifact.BaseNumber+"."+revision.Revision.ToString("D2")}).ToListAsync(ct);
+        var sourceIds=sources.Select(x=>x.Id).ToList();var links=await db.RequirementTraces.AsNoTracking().Where(x=>sourceIds.Contains(x.SourceRevisionId)).ToListAsync(ct);var targetIds=links.Select(x=>x.TargetRevisionId).Distinct().ToList();
+        var targets=await(from revision in db.RequirementRevisions.AsNoTracking().Where(x=>targetIds.Contains(x.Id)) join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id select new{revision.Id,display=artifact.BaseNumber+"."+revision.Revision.ToString("D2"),level=artifact.Level.ToString()}).ToDictionaryAsync(x=>x.Id,ct);
+        return sources.Select(source=>{var parents=links.Where(x=>x.SourceRevisionId==source.Id).Select(x=>targets.TryGetValue(x.TargetRevisionId,out var target)?$"{target.display} ({target.level}, {x.Type})":x.TargetRevisionId.ToString()).ToList();return new PublicationRecord(source.display,level.ToString(),"Parent trace",parents.Count==0?(level==RequirementLevel.System?"Top-level System requirement - no upward requirement parent applies.":"No parent trace recorded."):string.Join("; ",parents),new[]{("Parent count",parents.Count.ToString())});}).ToList();
     }
     private async Task<List<PublicationRecord>> ProcedurePublicationRows(Guid projectId, TestProcedureLevel level, CancellationToken ct)
     {

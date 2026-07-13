@@ -43,7 +43,7 @@ Recommended type prefixes:
 | Review | `REVW` |
 | Generated Document | document-type-specific prefix |
 
-The sequence is globally unique within the installation and is not restarted for each program. Whether separate artifact types share one numeric sequence or maintain separate per-prefix sequences remains open. The complete identifier must never be reused.
+The sequence is globally unique within the installation and is not restarted for each program. As accepted in DEC-036, each prefix maintains its own installation-wide sequence. The complete identifier must never be reused. The server assigns identifiers atomically; users cannot type or override authoritative numbers.
 
 The system also maintains an internal machine identifier that is never shown as the business identifier. Users and documents cite the stable display identifier.
 
@@ -198,8 +198,7 @@ These may be mandatory for some projects but should not be hard-coded as univers
 - Requirements are not approved independently; every author-selected approver approves the exact submitted snapshot of the SCR revision containing the requirement changes.
 - SCR approval authorizes its proposed requirement revisions but does not automatically include them in a baseline.
 
-## Decisions Requested
+## Remaining Decisions Requested
 
-1. Confirm whether numeric sequences must be global across all artifact types or unique within each prefix.
-2. Confirm the proposed platform-mandatory requirement fields.
-3. Identify fields that every current FMS requirement already contains and must preserve during import.
+1. Confirm the proposed platform-mandatory requirement fields beyond the now-accepted generated identifier, revision, authenticated author, and software-derived indicator.
+2. Identify fields that every current FMS requirement already contains and must preserve during import.

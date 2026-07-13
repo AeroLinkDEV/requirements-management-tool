@@ -16,11 +16,11 @@ test("enterprise workspace supports discovery, collaboration, saved views, bulk 
   await page
     .locator(".program > select:not(.releaseSelector)")
     .selectOption({ label: "Flight Management System Live Program" });
-  await page.getByRole("button", { name: /Requirements/ }).click();
+  await page.getByRole("button", { name: "System Requirements" }).click();
   await expect(
     page.getByRole("heading", { name: "Requirements Workspace" }),
   ).toBeVisible();
-  await expect(page.getByText("1,250 requirements")).toBeVisible();
+  await expect(page.getByText("150 requirements")).toBeVisible();
   await page.getByLabel("Search requirements").fill("SYSR-00000150");
   await expect(page.getByText(/SYSR-00000150\.\d{2}/)).toBeVisible();
   await page.getByText(/SYSR-00000150\.\d{2}/).click();

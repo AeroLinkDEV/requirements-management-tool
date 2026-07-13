@@ -10,6 +10,8 @@ Release evolution is user-controlled: authorized users plan an in-work successor
 
 After a reboot—or whenever the local site is unavailable—double-click [`START_AEROLINK.bat`](START_AEROLINK.bat) in the repository root. It starts or verifies PostgreSQL, the API, and the website; waits for the authentication endpoint; opens `http://127.0.0.1:5173`; and writes diagnostic logs under `product/.local/logs/`. It is safe to run again while AeroLink is already running.
 
+Run [`BACKUP_AEROLINK.bat`](BACKUP_AEROLINK.bat) manually or through Windows Task Scheduler for a complete local backup. It captures PostgreSQL, controlled evidence, and runtime configuration into an integrity-manifested archive under `product/.local/backups/`, with 30-day retention by default. Production IT must copy these archives to protected storage and periodically prove restore.
+
 ## First Product Slice
 
 The first usable vertical slice is system-level:

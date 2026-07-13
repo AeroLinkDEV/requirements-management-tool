@@ -26,14 +26,14 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
     page.getByText("Total SCRs").locator("..").locator("strong"),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: /Requirements/ }).click();
+  await page.getByRole("button", { name: "HLR & LLR Requirements" }).click();
   await expect(
     page.getByRole("heading", { name: "Requirements Workspace" }),
   ).toBeVisible();
   await page.getByLabel("Search requirements").fill("LLR-00000700");
   await expect(page.getByText(/LLR-00000700/).first()).toBeVisible();
-  await page.getByRole("button", { name: /Command Center/ }).click();
-  await page.getByRole("button", { name: /Traceability/ }).click();
+  await page.getByRole("button", { name: /Command Center/ }).first().click();
+  await page.getByRole("button", { name: "SWRD & Traceability" }).click();
   await expect(
     page.getByRole("heading", { name: "Traceability & Documents" }),
   ).toBeVisible();
@@ -42,8 +42,8 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await expect(page.getByText("SYSRD-00000015.00")).toBeVisible();
   await expect(page.getByText("HLRD-00000015.00")).toBeVisible();
   await expect(page.getByText("LLRD-00000015.00")).toBeVisible();
-  await page.getByRole("button", { name: /Command Center/ }).click();
-  await page.getByRole("button", { name: /Release Campaign/ }).click();
+  await page.getByRole("button", { name: /Command Center/ }).first().click();
+  await page.getByRole("button", { name: "Release Campaign" }).click();
   await expect(
     page.getByRole("heading", { name: "FMS 1.6 Release Campaign" }),
   ).toBeVisible();

@@ -36,8 +36,11 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
                 schema.AddField("rationale","Rationale",SchemaFieldType.LongText,false,20,"[]",actor,now);
                 schema.AddField("criticality","Criticality",SchemaFieldType.Enumeration,false,30,"[\"Normal\",\"Safety Significant\",\"Mission Critical\"]",actor,now);
                 schema.AddField("owner","Owner",SchemaFieldType.User,false,40,"[]",actor,now);
+                if(item.Level!=RequirementLevel.System) schema.AddField("derived","Derived Requirement",SchemaFieldType.Boolean,false,50,"[]",actor,now);
                 db.ArtifactSchemas.Add(schema);schemas.Add(schema);
             }
+            else if(item.Level!=RequirementLevel.System&&schema.Fields.All(x=>x.Key!="derived"))
+                schema.AddField("derived","Derived Requirement",SchemaFieldType.Boolean,false,50,"[]",actor,now);
         }
         await db.SaveChangesAsync(ct);
         var specs=await db.RequirementSpecifications.Where(x=>x.ProjectId==projectId).ToListAsync(ct);
@@ -61,7 +64,7 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
             if(!current.TryGetValue(artifact.Id,out var revision))continue;var definition=Defaults.Single(x=>x.Level==artifact.Level);var schema=schemas.Single(x=>x.Key==definition.SchemaKey);
             if(!profiled.Contains(revision.Id))
             {
-                var attributes=JsonSerializer.Serialize(new{rationale=revision.Rationale,verification_method=revision.VerificationMethod,criticality=artifact.BaseNumber.EndsWith("5")?"Safety Significant":"Normal",owner=artifact.Level==RequirementLevel.System?"systems.author":"software.author"});
+                var attributes=JsonSerializer.Serialize(new{rationale=revision.Rationale,verification_method=revision.VerificationMethod,criticality=artifact.BaseNumber.EndsWith("5")?"Safety Significant":"Normal",owner=artifact.Level==RequirementLevel.System?"systems.author":"software.author",derived=artifact.Level!=RequirementLevel.System});
                 db.RequirementRevisionProfiles.Add(new(revision.Id,schema.Id,$"<p>{SecurityElement.Escape(revision.Statement)}</p>",attributes,"[]",actor,now));
             }
             if(!placed.Contains(artifact.Id))

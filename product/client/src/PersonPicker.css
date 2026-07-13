@@ -1,0 +1,11 @@
+.personPicker { position: relative; min-width: 0; }
+.personPicker > input { width: 100%; }
+.personPicker > small { position: absolute; right: 10px; top: 33px; color: #7c8b9d; font-size: 8px; }
+.personSuggestions { position: absolute; left: 0; right: 0; top: 44px; z-index: 30; padding: 5px; max-height: 340px; overflow: auto; border: 1px solid #cbd7e3; border-radius: 11px; background: white; box-shadow: 0 18px 40px #142b4c30; }
+.personSuggestions button { width: 100%; display: grid; grid-template-columns: 30px 1fr auto; gap: 9px; align-items: center; border: 0; border-bottom: 1px solid #eef1f4; background: white; color: #304158; text-align: left; padding: 9px; }
+.personSuggestions button:hover { background: #edf8f6; }
+.personSuggestions i { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: #dff3ef; color: #21776c; font-style: normal; font-size: 9px; font-weight: 800; }
+.personSuggestions span { display: flex; flex-direction: column; min-width: 0; }
+.personSuggestions b { font-size: 11px; }
+.personSuggestions small { color: #748397; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.personSuggestions em { color: #65768b; font-size: 8px; font-style: normal; }

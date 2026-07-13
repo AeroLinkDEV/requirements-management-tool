@@ -21,6 +21,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db)
         if (baseline.RequirementsMaterializedAt is not null) throw new DomainException("The requirement baseline is already materialized and immutable.");
 
         var artifacts = await db.Requirements.Where(x => x.ProjectId == baseline.ProjectId).ToListAsync(ct);
+        var schemas = await db.ArtifactSchemas.AsNoTracking().Where(x=>x.ProjectId==baseline.ProjectId&&x.IsActive).ToDictionaryAsync(x=>x.AppliesTo,ct);
         var artifactByBase = artifacts.ToDictionary(x => x.BaseNumber, StringComparer.OrdinalIgnoreCase);
         var revisions = await db.RequirementRevisions.Where(x => artifacts.Select(a => a.Id).Contains(x.ArtifactId)).ToListAsync(ct);
         var current = new Dictionary<Guid, RequirementRevision>();
@@ -50,6 +51,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db)
                 db.Requirements.Add(artifact); artifactByBase.Add(artifact.BaseNumber, artifact);
                 var revision = CreateRevision(artifact, change, pair.scr.Id, baseline.Id, now, RequirementRevisionState.Active);
                 db.RequirementRevisions.Add(revision); revisions.Add(revision); current[artifact.Id] = revision; created++;
+                AddProfile(revision,change,schemas,actorId,now);
                 continue;
             }
 
@@ -59,6 +61,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db)
             var state = change.Kind == RequirementChangeKind.Retire ? RequirementRevisionState.Retired : RequirementRevisionState.Active;
             var next = CreateRevision(existing, change, pair.scr.Id, baseline.Id, now, state);
             db.RequirementRevisions.Add(next); revisions.Add(next); created++;
+            AddProfile(next,change,schemas,actorId,now);
             if (state == RequirementRevisionState.Retired) current.Remove(existing.Id); else current[existing.Id] = next;
         }
 
@@ -76,4 +79,9 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db)
     private static RequirementRevision CreateRevision(RequirementArtifact artifact, RequirementChange change, Guid scrId,
         Guid baselineId, DateTimeOffset now, RequirementRevisionState state) =>
         new(artifact.Id, change.Revision, change.Statement, change.Rationale, change.VerificationMethod, state, scrId, baselineId, now);
+
+    private void AddProfile(RequirementRevision revision,RequirementChange change,IReadOnlyDictionary<string,ArtifactSchemaDefinition> schemas,string actor,DateTimeOffset now)
+    {
+        if(schemas.TryGetValue(change.Level.ToString(),out var schema))db.RequirementRevisionProfiles.Add(new(revision.Id,schema.Id,string.IsNullOrWhiteSpace(change.RichText)?change.Statement:change.RichText,change.AttributesJson,"[]",actor,now));
+    }
 }

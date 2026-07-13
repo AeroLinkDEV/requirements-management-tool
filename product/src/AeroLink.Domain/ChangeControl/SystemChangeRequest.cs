@@ -96,16 +96,16 @@ public sealed class SystemChangeRequest
         Audit("ScrDraftUpdated", actorId, $"Updated {DisplayNumber} Draft with {changes.Count} proposed requirement changes.", now);
     }
 
-    public ReviewCycle SubmitForReview(string actorId, IReadOnlyList<ApproverSelection> approvers, DateTimeOffset now)
+    public ReviewCycle SubmitForReview(string actorId, IReadOnlyList<ApproverSelection> approvers, DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential)
     {
         EnsureAuthor(actorId);
         EnsureDraft();
         ValidateReadyForReview();
-        var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(), approvers, now);
+        var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(), approvers, now, mode);
         _reviewCycles.Add(cycle);
         State = ScrState.InReview;
         UpdatedAt = now;
-        Audit("ReviewStarted", actorId, $"Started review cycle {cycle.Sequence} with {approvers.Count} ordered approvers.", now);
+        Audit("ReviewStarted", actorId, $"Started {mode.ToString().ToLowerInvariant()} review cycle {cycle.Sequence} with {approvers.Count} approvers.", now);
         return cycle;
     }
 
@@ -127,8 +127,8 @@ public sealed class SystemChangeRequest
     {
         EnsureInReview();
         var cycle = ActiveReviewCycle!;
-        var active = cycle.Steps.Single(x => x.State == ApprovalStepState.Active);
-        if (!string.Equals(active.ApproverId, actorId, StringComparison.OrdinalIgnoreCase))
+        var active = cycle.Steps.SingleOrDefault(x => x.State == ApprovalStepState.Active && string.Equals(x.ApproverId, actorId, StringComparison.OrdinalIgnoreCase));
+        if (active is null)
             throw new DomainException("Only the active approver can request changes.");
         cycle.RequestChanges(reason, now);
         State = ScrState.Draft;
@@ -154,7 +154,7 @@ public sealed class SystemChangeRequest
         EnsureInReview();
         var prior = ActiveReviewCycle!;
         prior.Cancel(reason, now);
-        var replacement = new ReviewCycle(Id, _reviewCycles.Count + 1, prior.SnapshotHash, correctedApprovers, now);
+        var replacement = new ReviewCycle(Id, _reviewCycles.Count + 1, prior.SnapshotHash, correctedApprovers, now, prior.Mode);
         _reviewCycles.Add(replacement);
         UpdatedAt = now;
         Audit("ReviewCancelledAndRestarted", actorId,

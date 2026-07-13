@@ -17,6 +17,9 @@ Implementation status is tracked against acceptance outcomes, not feature titles
 | PF-007 | Append-only audit history | Prove who did what and when | Must | 1 | PF-002, PF-006 | Every material action produces a queryable audit event |
 | PF-008 | Controlled attachments | Retain images and evidence with provenance and integrity | Must | 1 | PF-005-PF-007 | Authorized users attach, retrieve, version, and integrity-check files |
 | PF-009 | Search and navigation | Make controlled records usable at organizational scale | Should | 1 | PF-001, PF-005 | Users find permitted artifacts by identifier, content, type, state, and release |
+| PF-010 | Persistent discipline workspaces | Keep daily Systems, Software, System Test, and Software Test work continuously reachable | Must | 1 | PF-001-PF-003, PF-009 | Main navigation remains visible on every authenticated page and preserves Program/release context while applying discipline scope |
+| PF-011 | Server-generated artifact numbering | Prevent collisions and user-selected identities | Must | 1 | PF-005, PF-007 | SCR, SWCR, and requirement identifiers are assigned atomically by installation-wide per-prefix sequences and never reused |
+| PF-012 | Searchable people directory controls | Make large review and ownership lists usable | Must | 1 | PF-002-PF-004 | Typing any part of a name, username, title, or role returns permitted active people immediately |
 
 ## Enterprise Authoring and Collaboration
 
@@ -32,6 +35,7 @@ Implementation status is tracked against acceptance outcomes, not feature titles
 | SRCH-002 | Structured query and saved views | Turn large repositories into reusable engineering worklists | Must | Enterprise Wave 1 | SRCH-001, EA-001 | Users build field/link/history queries, select columns/grouping/sorting, save personal or shared views, and share stable filtered URLs |
 | BULK-001 | Governed bulk operations | Make large-scale maintenance efficient without weakening control | Must | Enterprise Wave 1 | EA-001, SRCH-002, PF-007 | Bulk edit, classify, move, link, and assign provide preview, permission/validation results, atomic commit, concurrency checks, and one auditable job result |
 | COL-003 | Visual revision and relationship redlines | Make review of complex changes fast and unambiguous | Must | Enterprise Wave 1 | PF-006, TR-001, EA-003 | Reviewers see field, rich-text, attachment, placement, and relationship changes between exact revisions and baselines |
+| COL-004 | Controlled check-out and auto-save | Protect active authorship without hiding work | Must | Enterprise Wave 1 | PF-002, PF-007, EA-004 | One accountable editor holds a renewable checkout, drafts auto-save server-side, others retain read-only access, and abandoned locks are recoverable with audit evidence |
 
 ## Interchange, APIs, and Integrations
 
@@ -88,6 +92,7 @@ Implementation status is tracked against acceptance outcomes, not feature titles
 | WF-001 | Sequential review cycles | Produce controlled review evidence without unnecessary pre-approval revisions | Must | 2 | PF-002, PF-003, PF-006 | Each submission retains its snapshot, ordered approvers, comments and decisions; review advances one person at a time and pre-approval rework returns the same revision to Draft |
 | WF-002 | Approval policy | Enforce unanimous author-selected approval and independence | Must | 2 | WF-001 | Approval is blocked unless every approver in the author-selected sequence approves the same submitted snapshot and comment/independence rules are met |
 | WF-003 | Controlled approver substitution and restart | Correct future assignments without invalidating completed work, while rejecting wrong completed approvals | Must | 2 | WF-001, WF-002, PF-007 | The author may replace only not-yet-reached approvers; a wrong completed approver cancels the cycle and restarts review with complete audit history |
+| WF-004 | Parallel review cycles | Support coordinated independent review when serial ordering is unnecessary | Must | 2 | WF-001, WF-002, COL-002 | The author selects parallel mode, every reviewer is activated and notified together, and unanimous approval of one exact snapshot is still required |
 | BL-001 | Releases and candidate baselines | Assemble controlled successor configurations | Must | 2 | SR-002, SCR-002 | A candidate records predecessor and exact selected revisions |
 | BL-002 | Immutable approved baselines | Preserve exact released content | Must | 2 | BL-001, WF-002 | Approved baseline contents cannot be edited; correction creates a successor |
 | BL-003 | Baseline comparison | Explain changes between releases | Must | 2 | BL-002 | Users see introduced, modified, retired, and unchanged artifacts between baselines |
@@ -110,6 +115,8 @@ Implementation status is tracked against acceptance outcomes, not feature titles
 | TR-003 | Completeness and anomaly checks | Detect missing or invalid lifecycle evidence | Must | 3 | ST-002, ST-005, TR-001 | Users can identify unverified, unpassed, orphaned, failed, and suspect chains |
 | TR-004 | Interactive impact and trace views | Answer lifecycle questions without a static matrix | Must | 3 | TR-001-TR-003 | Users navigate full upward/downward chains and release contents |
 | DOC-004 | System test and traceability outputs | Produce controlled review and release evidence | Must | 3 | ST-001-ST-006, TR-003 | Generated documents identify exact source baseline and evidence records |
+| DOC-005 | Traceability annexes and change redlines | Make generated lifecycle outputs reviewable without separate reconstruction | Must | 2-4 | DOC-001-DOC-004, TR-001, COL-003 | Requirement documents contain upward-trace annexes and CR documents visibly group introduced, modified old/new, and retired requirements |
+| TR-005 | Interactive release lineage tree | Explain predecessor, branch, baseline, build, and release progression | Must | 2-4 | BL-001-BL-003 | Users navigate a clickable tree from released predecessors through in-work successors, candidate baselines, builds, and selected change packages |
 
 ## Later Software and PR Capabilities
 

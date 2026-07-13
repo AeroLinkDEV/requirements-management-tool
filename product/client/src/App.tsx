@@ -20,6 +20,7 @@ import "./App.css";
 import "./Onboarding.css";
 import "./DashboardInteractions.css";
 import "./Showcase.css";
+import "./PortalNavigation.css";
 
 type Scr = {
   id: string;
@@ -63,7 +64,27 @@ type Workspace = {
     releases: Release[];
   }[];
 };
+type View =
+  | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
+  | "verification" | "lifecycle" | "release" | "planning" | "mywork" | "admin" | "enterprise";
+type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 const API = "http://127.0.0.1:5080";
+
+function AppNavigation({ user, workspaces, activeId, selectedReleaseId, view, discipline, onProgram, onRelease, onNavigate, onDiscipline, onSignOut }:{
+  user:AuthUser;workspaces:Workspace[];activeId:string;selectedReleaseId:string;view:View;discipline:Discipline;
+  onProgram:(id:string)=>void;onRelease:(id:string)=>void;onNavigate:(view:View)=>void;onDiscipline:(value:Discipline)=>void;onSignOut:()=>void;
+}) {
+  const active=workspaces.find(x=>x.program.id===activeId)??workspaces[0],project=active?.projects[0],release=project?.releases.find(x=>x.id===selectedReleaseId)??project?.releases.at(-1);
+  const go=(target:View,area?:Discipline)=>{if(area)onDiscipline(area);onNavigate(target)};
+  const item=(label:string,target:View,icon:string,area?:Discipline)=> <button className={view===target&&(!area||discipline===area)?"active":""} onClick={()=>go(target,area)}><i>{icon}</i>{label}</button>;
+  return <aside className="appNavigation"><div className="brand"><span>▲</span><b>AeroLink</b></div><div className="program"><small>ACTIVE PROGRAM</small><select value={activeId} onChange={event=>onProgram(event.target.value)}>{workspaces.map(x=><option value={x.program.id} key={x.program.id}>{x.program.name}</option>)}</select><span>{project?.project.name}</span><select className="releaseSelector" value={release?.id??""} onChange={event=>onRelease(event.target.value)} aria-label="Active release">{project?.releases.map(item=><option value={item.id} key={item.id}>{item.version} · {item.isReleased?"Released":"In work"}</option>)}</select></div>
+    <nav className="primaryNavigation"><div className="navGroup"><small>PERSONAL</small>{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
+      <div className="navGroup"><small>SYSTEMS</small>{item("New System SCR","createSystemScr","+")}{item("System Change Requests","history","◇","system")}{item("System Requirements","requirements","≡","system")}{item("System Verification","verification","✓","systemTest")}{item("SYSRD & Traceability","lifecycle","↗","system")}</div>
+      <div className="navGroup"><small>SOFTWARE</small>{item("New Software SWCR","createSoftwareChange","+")}{item("Software Change Requests","history","◇","software")}{item("HLR & LLR Requirements","requirements","≡","software")}{item("Software Verification","verification","✓","softwareTest")}{item("SWRD & Traceability","lifecycle","↗","software")}</div>
+      <div className="navGroup"><small>RELEASE & ASSURANCE</small>{item("Release Planning","planning","⑂")}{item("Baselines","baselines","⌘")}{item("Release Campaign","release","◆")}{item("Enterprise Control","enterprise","◈")}</div>
+      {user.isAdministrator&&<div className="navGroup"><small>ADMINISTRATION</small>{item("People & Authority","admin","⚙")}</div>}
+    </nav><footer><div className="avatar">{user.displayName.split(" ").map(x=>x[0]).join("").slice(0,2)}</div><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button></footer></aside>;
+}
 
 function App() {
   const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
@@ -83,21 +104,8 @@ function App() {
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
     [selectedScrId, setSelectedScrId] = useState(""),
-    [view, setView] = useState<
-      | "dashboard"
-      | "createScr"
-      | "scr"
-      | "baselines"
-      | "history"
-      | "requirements"
-      | "verification"
-      | "lifecycle"
-      | "release"
-      | "planning"
-      | "mywork"
-      | "admin"
-      | "enterprise"
-    >(() =>
+    [discipline,setDiscipline]=useState<Discipline>("system"),
+    [view, setView] = useState<View>(() =>
       new URLSearchParams(location.search).has("enterpriseView")
         ? "requirements"
         : "dashboard",
@@ -252,13 +260,18 @@ function App() {
         </div>
       </div>
     );
-  if (view === "createScr" && project && release)
-    return (
+  const navigate=(target:View)=>setView(target);
+  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} onProgram={setActiveId} onRelease={setSelectedReleaseId} onNavigate={navigate} onDiscipline={setDiscipline} onSignOut={async()=>{await fetch(`${API}/api/auth/logout`,{method:"POST"});setUser(null)}}/>;
+  const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{content}</div></div>;
+  if ((view === "createSystemScr" || view === "createSoftwareChange") && project && release)
+    return inShell(
       <ScrEditor
         api={API}
         projectId={project.project.id}
         releaseId={release.id}
         releaseVersion={release.version}
+        scope={view === "createSystemScr" ? "System" : "Software"}
+        user={user}
         onCancel={() => setView("dashboard")}
         onSaved={async (scrId) => {
           await loadData();
@@ -268,7 +281,7 @@ function App() {
       />
     );
   if (view === "scr" && selectedScrId)
-    return (
+    return inShell(
       <>
         <div className="scrPublicationTools">
           <span>Professional controlled publication</span>
@@ -289,7 +302,7 @@ function App() {
       </>
     );
   if (view === "baselines" && project && release)
-    return (
+    return inShell(
       <BaselineCenter
         api={API}
         projectId={project.project.id}
@@ -300,11 +313,12 @@ function App() {
       />
     );
   if (view === "history" && project)
-    return (
+    return inShell(
       <HistoryExplorer
         api={API}
         projectId={project.project.id}
         releases={project.releases}
+        scope={discipline === "software" ? "Software" : "System"}
         onBack={() => setView("dashboard")}
         onOpenScr={(id) => {
           setSelectedScrId(id);
@@ -313,12 +327,13 @@ function App() {
       />
     );
   if (view === "requirements" && project)
-    return (
+    return inShell(
       <RequirementsWorkspace
         api={API}
         projectId={project.project.id}
         releases={project.releases}
         user={user}
+        scope={discipline === "software" ? "Software" : "System"}
         initialViewId={
           new URLSearchParams(location.search).get("enterpriseView") ||
           undefined
@@ -331,16 +346,17 @@ function App() {
       />
     );
   if (view === "verification" && project && release)
-    return (
+    return inShell(
       <VerificationCenter
         api={API}
         projectId={project.project.id}
         releaseId={release.id}
+        scope={discipline === "softwareTest" ? "Software" : "System"}
         onBack={() => setView("dashboard")}
       />
     );
   if (view === "lifecycle" && project)
-    return (
+    return inShell(
       <LifecycleExplorer
         api={API}
         projectId={project.project.id}
@@ -349,7 +365,7 @@ function App() {
       />
     );
   if (view === "release" && project)
-    return (
+    return inShell(
       <ReleaseCampaignCenter
         api={API}
         projectId={project.project.id}
@@ -366,7 +382,7 @@ function App() {
       />
     );
   if (view === "planning" && project && release)
-    return (
+    return inShell(
       <ReleasePlanningCenter
         api={API}
         projectId={project.project.id}
@@ -380,7 +396,7 @@ function App() {
       />
     );
   if (view === "mywork" && project)
-    return (
+    return inShell(
       <MyWorkCenter
         api={API}
         projectId={project.project.id}
@@ -394,7 +410,7 @@ function App() {
       />
     );
   if (view === "admin" && active)
-    return (
+    return inShell(
       <AdministrationCenter
         api={API}
         programId={active.program.id}
@@ -402,7 +418,7 @@ function App() {
       />
     );
   if (view === "enterprise" && project)
-    return (
+    return inShell(
       <EnterpriseControlCenter
         api={API}
         projectId={project.project.id}
@@ -411,100 +427,7 @@ function App() {
     );
   return (
     <div className="shell">
-      <aside>
-        <div className="brand">
-          <span>▲</span>
-          <b>AeroLink</b>
-        </div>
-        <div className="program">
-          <small>ACTIVE PROGRAM</small>
-          <select
-            value={activeId}
-            onChange={(e) => setActiveId(e.target.value)}
-          >
-            {workspaces.map((x) => (
-              <option value={x.program.id} key={x.program.id}>
-                {x.program.name}
-              </option>
-            ))}
-          </select>
-          <span>{project?.project.name}</span>
-          <select
-            className="releaseSelector"
-            value={release?.id ?? ""}
-            onChange={(event) => setSelectedReleaseId(event.target.value)}
-            aria-label="Active release"
-          >
-            {project?.releases.map((item) => (
-              <option value={item.id} key={item.id}>
-                {item.version} · {item.isReleased ? "Released" : "In work"}
-              </option>
-            ))}
-          </select>
-        </div>
-        <nav>
-          <button onClick={() => setView("mywork")}>◎&nbsp; My Work</button>
-          <button onClick={() => setView("enterprise")}>
-            ◆&nbsp; Enterprise Control
-          </button>
-          <button onClick={() => setView("planning")}>
-            ↗&nbsp; Release Planning
-          </button>
-          {[
-            "▦  Command Center",
-            "◇  Change Requests",
-            "≡  Requirements",
-            "✓  Verification",
-            "⌘  Baselines",
-            "↗  Traceability",
-            "▤  Documents",
-            "◆  Release Campaign",
-          ].map((x, i) => (
-            <button
-              className={i === 0 ? "active" : ""}
-              key={x}
-              onClick={() => {
-                if (x.includes("Baselines")) setView("baselines");
-                if (x.includes("Verification")) setView("verification");
-                if (x.includes("Traceability") || x.includes("Documents"))
-                  setView("lifecycle");
-                if (x.includes("Release Campaign")) setView("release");
-                if (x.includes("Change Requests")) setView("history");
-                if (x.includes("Requirements")) setView("requirements");
-              }}
-            >
-              {x}
-            </button>
-          ))}
-          {user.isAdministrator && (
-            <button onClick={() => setView("admin")}>
-              ⚙&nbsp; Administration
-            </button>
-          )}
-        </nav>
-        <footer>
-          <div className="avatar">
-            {user.displayName
-              .split(" ")
-              .map((x) => x[0])
-              .join("")
-              .slice(0, 2)}
-          </div>
-          <div>
-            <b>{user.displayName}</b>
-            <small>{user.userName}</small>
-          </div>
-          <button
-            className="signOut"
-            onClick={async () => {
-              await fetch(`${API}/api/auth/logout`, { method: "POST" });
-              setUser(null);
-            }}
-          >
-            Sign out
-          </button>
-        </footer>
-      </aside>
+      {navigation}
       <main>
         <header>
           <div>
@@ -611,7 +534,7 @@ function App() {
                   Search released changes
                 </button>
               ) : (
-                <button onClick={() => setView("createScr")}>+ New SCR</button>
+                <button onClick={() => setView("createSystemScr")}>+ New System SCR</button>
               )}
             </div>
             {scrs.length ? (
@@ -652,7 +575,7 @@ function App() {
               <div className="empty">
                 <b>Your controlled lifecycle starts here</b>
                 <p>No change requests exist in this new workspace yet.</p>
-                <button onClick={() => setView("createScr")}>
+                <button onClick={() => setView("createSystemScr")}>
                   Create first SCR →
                 </button>
               </div>

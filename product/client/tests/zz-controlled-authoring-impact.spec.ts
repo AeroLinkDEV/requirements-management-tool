@@ -15,7 +15,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await page
     .locator(".program > select:not(.releaseSelector)")
     .selectOption({ label: "Flight Management System Live Program" });
-  await page.getByRole("button", { name: /Requirements/ }).click();
+  await page.getByRole("button", { name: "System Requirements" }).click();
   await expect(
     page.getByRole("heading", { name: "Requirements Workspace" }),
   ).toBeVisible();

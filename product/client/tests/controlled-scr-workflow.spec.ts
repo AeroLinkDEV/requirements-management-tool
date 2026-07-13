@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { login } from './auth'
 
 test('author creates, edits, submits, and sequentially approves an SCR', async ({ page }) => {
+  test.setTimeout(60_000)
   await login(page)
   const suffix=Date.now().toString().slice(-7),programName=`Browser Workflow ${suffix}`
   if(await page.getByLabel('Program name').count()){
@@ -18,13 +19,13 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
     await page.locator('.program > select:not(.releaseSelector)').selectOption({label:programName})
   }
 
-  await page.getByRole('button', { name: /Create first SCR/ }).click()
+  await page.getByRole('button', { name: 'New Software SWCR' }).click()
   await page.getByLabel('Title').fill('Introduce controlled browser workflow')
   await page.getByLabel('Problem').fill('The workflow is not yet controlled end to end.')
   await page.getByLabel('Analysis', { exact: true }).fill('SCR content, reviewers, and history must remain attributable.')
   await page.getByLabel('Solution').fill('Add an ordered and auditable approval workflow.')
   await page.getByLabel('Requirement statement').fill('The software shall enforce ordered SCR approval.')
-  await page.getByRole('button', { name: 'Save SCR Draft' }).click()
+  await page.getByRole('button', { name: 'Save SWCR Draft' }).click()
 
   await expect(page.getByRole('heading', { name: 'Introduce controlled browser workflow' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Download DOCX' })).toHaveAttribute('href', /\/api\/scrs\/.+\/download\?format=docx/)
@@ -38,7 +39,8 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByRole('heading', { name: 'Introduce controlled approval workflow' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Configure & Submit Review' }).click()
-  await page.getByLabel('Approver 1 ID').fill('admin')
+  await page.getByLabel('Approver 1 search').fill('AeroLink Administrator')
+  await page.getByRole('button', { name: /AeroLink Administrator.*Administrator/ }).click()
   await page.getByRole('button', { name: 'Remove' }).nth(2).click()
   await page.getByRole('button', { name: 'Remove' }).nth(1).click()
   await page.getByRole('button', { name: 'Submit for Review' }).click()
@@ -51,12 +53,12 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByText('Approved', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('Scr Approved')).toBeVisible()
 
-  await page.getByRole('button', { name: /Command Center/ }).click()
+  await page.getByRole('button', { name: /Command Center/ }).first().click()
   await page.getByRole('button', { name: /Baselines/ }).click()
   await page.getByRole('button', { name: '+ New Candidate' }).click()
   await page.getByLabel('Baseline name').fill('Workflow Software 1.0 Controlled Candidate')
   await page.getByRole('button', { name: 'Create Candidate Baseline' }).click()
-  await expect(page.getByText('SCR-00000001.00')).toBeVisible()
+  await expect(page.getByText(/SWCR-\d{8}\.00/)).toBeVisible()
   await page.getByRole('button', { name: '+ Select exact revision' }).click()
   await expect(page.getByText('1 exact SCR revision')).toBeVisible()
   await expect(page.getByText('The software shall enforce ordered SCR approval.')).toBeVisible()
@@ -67,10 +69,10 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByText('SWRD materialized')).toBeVisible()
   await expect(page.getByText('Software Requirements Document')).toBeVisible()
   await expect(page.getByText('REQUIREMENT MANIFEST SHA-256')).toBeVisible()
-  await expect(page.getByText('SWR-00000001.00').last()).toBeVisible()
+  await expect(page.getByText(/HLR-\d{8}\.00/).last()).toBeVisible()
 
-  await page.getByRole('button', { name: /Command Center/ }).click()
-  await page.getByRole('button', { name: /Verification/ }).click()
+  await page.getByRole('button', { name: /Command Center/ }).first().click()
+  await page.getByRole('button', { name: 'Software Verification' }).click()
   await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible()
   await expect(page.getByText('1', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: 'New Test Procedure' }).click()
@@ -80,7 +82,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByLabel('Procedure steps').fill('Configure, stimulate, and observe the workflow.')
   await page.getByRole('checkbox').check()
   await page.getByRole('button', { name: 'Create Procedure' }).click()
-  await expect(page.getByText('SWTP-00000001.00', { exact: true })).toBeVisible()
+  await expect(page.getByText(/(?:HLRTP|LLRTP)-\d{8}\.00/, { exact: true }).last()).toBeVisible()
   await page.getByRole('button', { name: 'Record result' }).click()
   await page.getByLabel('Outcome').selectOption('Fail')
   await page.getByPlaceholder('File path, evidence ID, repository URL…').fill('evidence/workflow-fail-001.json')

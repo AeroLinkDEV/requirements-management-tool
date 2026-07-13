@@ -81,16 +81,36 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
         ("test.author", "Verification Author", "test.author@aerolink.local", [ProgramRole.TestEngineer]),
         ("test.engineer", "Verification Engineer", "test.engineer@aerolink.local", [ProgramRole.TestEngineer])
     ];
+    private static readonly string[] FirstNames = ["Avery","Blake","Cameron","Casey","Devon","Emerson","Finley","Harper","Jordan","Kai","Logan","Morgan","Parker","Quinn","Reese","Riley","Rowan","Sage","Sawyer","Taylor","Alex","Jamie","Robin"];
+    private static readonly string[] LastNames = ["Anderson","Bennett","Campbell","Chen","Clarke","Dubois","Evans","Foster","Garcia","Gupta","Harris","Ibrahim","Johnson","Kim","Lewis","Martin","Nguyen","Patel","Robinson","Wilson"];
     public async Task EnsureSeededAsync(CancellationToken ct = default)
     {
         var now = DateTimeOffset.UtcNow; var programs = await db.Programs.AsNoTracking().Select(x => x.Id).ToListAsync(ct);
-        foreach (var person in People)
+        var demoPasswordHash = IdentityService.HashPassword(DemoPassword);
+        foreach (var person in People.Concat(GeneratedPeople()))
         {
             var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.UserName == person.User, ct);
-            if (user is null) { user = new(person.User, person.Name, person.Email, IdentityService.HashPassword(DemoPassword), now); db.UserAccounts.Add(user); await db.SaveChangesAsync(ct); }
+            if (user is null) { user = new(person.User, person.Name, person.Email, demoPasswordHash, now); db.UserAccounts.Add(user); await db.SaveChangesAsync(ct); }
             foreach (var program in programs) foreach (var role in person.Roles)
                 if (!await db.ProgramMemberships.AnyAsync(x => x.UserId == user.Id && x.ProgramId == program && x.Role == role, ct)) db.ProgramMemberships.Add(new(user.Id, program, role, "system.bootstrap", now));
         }
         await db.SaveChangesAsync(ct);
+    }
+
+    private static IEnumerable<(string User, string Name, string Email, ProgramRole[] Roles)> GeneratedPeople()
+    {
+        for (var index = 0; index < 184; index++)
+        {
+            var name = $"{FirstNames[index % FirstNames.Length]} {LastNames[(index * 7) % LastNames.Length]}";
+            string group; ProgramRole[] roles;
+            if (index < 42) { group = "system.engineer"; roles = [ProgramRole.Engineer]; }
+            else if (index < 104) { group = "software.engineer"; roles = [ProgramRole.Engineer]; }
+            else if (index < 138) { group = "verification.engineer"; roles = [ProgramRole.TestEngineer]; }
+            else if (index < 160) { group = index % 2 == 0 ? "systems.lead" : "software.lead"; roles = [ProgramRole.Reviewer, ProgramRole.Approver]; }
+            else if (index < 174) { group = "engineering.manager"; roles = [ProgramRole.ProgramManager, ProgramRole.Approver]; }
+            else { group = "configuration.specialist"; roles = [ProgramRole.ConfigurationManager]; }
+            var sequence = index + 1; var user = $"{group}.{sequence:D3}";
+            yield return (user, name, $"{user}@aerolink.local", roles);
+        }
     }
 }

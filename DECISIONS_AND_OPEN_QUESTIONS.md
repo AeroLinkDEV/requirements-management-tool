@@ -290,6 +290,66 @@ Future entries use:
 - **Rationale:** Enterprise usability and operability require durable supporting state, while change authority must remain unambiguous and approved history immutable.
 - **Consequences:** Attachments retain every superseded version and digest; jobs retain idempotency and outcomes; concurrent work retains base/local/remote content; saved links reapply current permissions; and integrity checkpoints describe an observed repository state rather than certifying the product.
 
+### DEC-035 - Persistent Role-Oriented Workspaces
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+- **Decision:** Authenticated users retain the main navigation at all times. AeroLink presents distinct Systems, Software, System Test, and Software Test workspaces over the same authoritative lifecycle repository.
+- **Rationale:** Most engineers spend nearly all their time within one discipline and should not repeatedly return to a generic dashboard to reach daily work.
+- **Consequences:** Navigation preserves Program and release context, highlights the active workspace, and filters change requests, requirements, specifications, tests, and documents by discipline without duplicating records.
+
+### DEC-036 - Server-Assigned Identity, Authorship, and Revisions
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+- **Decision:** The server assigns the next never-reused identifier for every new SCR, SWCR, and requirement; derives the author from the authenticated session; and assigns the next requirement revision when an existing requirement is modified or retired.
+- **Rationale:** User-entered identifiers, authors, and revision counters invite collision, impersonation, and inconsistent history.
+- **Consequences:** Interfaces may preview the reserved format but cannot authoritatively choose these values. Requirement modification begins by searching and selecting an existing controlled requirement. Sequences are installation-wide and independent per artifact prefix.
+
+### DEC-037 - Separate System and Software Change Creation
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+- **Decision:** System SCR creation accepts only System requirement changes. Software SWCR creation is a separate route and accepts only HLR and LLR changes, including an explicit derived-requirement classification.
+- **Rationale:** Mixing both disciplines in one form obscures ownership, validation, review context, and document consequences.
+
+### DEC-038 - Sequential or Parallel Review Activation
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+- **Decision:** The author explicitly chooses sequential or parallel review for each submitted snapshot. Sequential review activates and notifies only the next reviewer; parallel review activates and notifies all selected reviewers together. Unanimous approval remains required.
+- **Rationale:** Notification and My Work queues must represent actual decision authority, not merely membership in a future review stage.
+- **Consequences:** Every activated reviewer receives an in-product deep link; external email is delivered through a later organization integration. Review pages expose an immediate controlled PDF of the exact in-review artifact.
+
+### DEC-039 - Controlled Check-Out with Recoverable Auto-Save
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+- **Decision:** Editable controlled artifacts use an attributable check-out/edit session with renewable ownership, server-side draft auto-save, explicit check-in, administrative recovery, and read-only visibility to everyone else.
+- **Rationale:** Silent concurrent overwrite is unacceptable, while abandoned locks must not stop Program work.
+- **Consequences:** Browser-local recovery may supplement but never replace server-side draft state. The existing edit-session and merge-conflict foundation will be generalized from requirements to SCR/SWCR and document authoring.
+
+### DEC-040 - Trace-Rich Publications and Release Lineage
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+- **Decision:** Requirement publications end with readable upward-trace annexes; change-request publications separate introductions, modifications with old/new redlines, and retirements; and release history includes an interactive clickable predecessor/branch tree.
+- **Rationale:** Reviewers and managers must understand both content and lifecycle context without manually reconstructing relationships.
+
+### DEC-041 - Operational Backup Is a Product Requirement
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+- **Decision:** AeroLink supports complete, integrity-checked backup and tested restore of the database, controlled file store, configuration, and required provenance. The production target is at least one IT-managed backup every 24 hours.
+- **Rationale:** A lifecycle system is trustworthy only if its authoritative records and evidence can be recovered together.
+
+### DEC-042 - FMS Demonstration Narrative and Fictional Directory
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+- **Decision:** The demonstration repository presents FMS 1.5 as fully released with approved historical change and document evidence, and FMS 1.6 as its active successor. It includes 200 deterministic fictional personnel with realistic engineering titles and searchable selection controls.
+- **Rationale:** A populated, internally consistent working Program communicates the product more credibly than disconnected sample screens.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

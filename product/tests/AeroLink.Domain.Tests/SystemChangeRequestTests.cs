@@ -74,6 +74,24 @@ public sealed class SystemChangeRequestTests
     }
 
     [Fact]
+    public void Parallel_review_activates_every_reviewer_and_completes_after_all_approve()
+    {
+        var scr = CreateDraftWithRequirement();
+        var cycle = scr.SubmitForReview("author", Approvers(), Now, ReviewMode.Parallel);
+
+        Assert.Equal(ReviewMode.Parallel, cycle.Mode);
+        Assert.All(cycle.Steps, step => Assert.Equal(ApprovalStepState.Active, step.State));
+
+        scr.ApproveActiveStage("verification", Now.AddMinutes(1));
+        scr.ApproveActiveStage("systems", Now.AddMinutes(2));
+        Assert.Equal(ScrState.InReview, scr.State);
+
+        scr.ApproveActiveStage("software", Now.AddMinutes(3));
+        Assert.Equal(ScrState.Approved, scr.State);
+        Assert.All(cycle.Steps, step => Assert.Equal(ApprovalStepState.Approved, step.State));
+    }
+
+    [Fact]
     public void Requested_change_returns_same_revision_to_draft_and_preserves_cycle()
     {
         var scr = CreateDraftWithRequirement();

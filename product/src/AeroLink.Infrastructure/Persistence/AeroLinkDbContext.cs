@@ -143,6 +143,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("review_cycles"); b.HasKey(x => x.Id);
             b.Property(x => x.SnapshotHash).HasMaxLength(64).IsRequired();
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Mode).HasConversion<string>().HasMaxLength(20);
             b.Property(x => x.ClosureReason).HasMaxLength(2000);
             b.Ignore(x => x.ActivePosition);
             b.HasIndex(x => new { x.ScrId, x.Sequence }).IsUnique();
@@ -410,6 +411,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         // children with set keys as existing unless their append-only state is made explicit.
         foreach (var entry in ChangeTracker.Entries<AuditEvent>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         foreach (var entry in ChangeTracker.Entries<RequirementChange>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
+        foreach (var entry in ChangeTracker.Entries<ArtifactFieldDefinition>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         foreach (var cycle in ChangeTracker.Entries<ReviewCycle>().Where(x => x.State == EntityState.Modified && x.Entity.CompletedAt is null && x.Entity.Steps.All(s => s.State != ApprovalStepState.Approved)))
         {
             cycle.State = EntityState.Added;
