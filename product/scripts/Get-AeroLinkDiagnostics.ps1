@@ -1,0 +1,13 @@
+[CmdletBinding()]
+param([switch]$Json,[string]$UserName='admin',[string]$Password='AeroLink!2026')
+$ErrorActionPreference='Continue';$productRoot=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path;$bin=Join-Path $productRoot '.local\postgresql\pgsql\bin';$checks=@()
+function Add-Check($name,$healthy,$detail){$script:checks+=[pscustomobject]@{Name=$name;Healthy=[bool]$healthy;Detail=$detail}}
+& (Join-Path $bin 'pg_isready.exe') -h 127.0.0.1 -p 54329 -U postgres -d aerolink *> $null;Add-Check 'PostgreSQL' ($LASTEXITCODE -eq 0) '127.0.0.1:54329 / aerolink'
+try{$response=Invoke-RestMethod http://127.0.0.1:5080/health -TimeoutSec 3;Add-Check 'API' ($response.status -eq 'healthy') 'http://127.0.0.1:5080/health'}catch{Add-Check 'API' $false $_.Exception.Message}
+try{$body=@{userName=$UserName;password=$Password}|ConvertTo-Json;$session=Invoke-RestMethod http://127.0.0.1:5080/api/auth/login -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 5;Add-Check 'Authentication' ([bool]$session.id -and $session.userName -eq $UserName) "Authenticated local diagnostic identity $UserName"}catch{Add-Check 'Authentication' $false $_.Exception.Message}
+try{$response=Invoke-WebRequest http://127.0.0.1:5173 -UseBasicParsing -TimeoutSec 3;Add-Check 'Client' ($response.StatusCode -eq 200) 'http://127.0.0.1:5173'}catch{Add-Check 'Client' $false $_.Exception.Message}
+$migrationCount=& (Join-Path $bin 'psql.exe') -h 127.0.0.1 -p 54329 -U postgres -d aerolink -tAc 'SELECT COUNT(*) FROM \"__EFMigrationsHistory\"' 2>$null;Add-Check 'Migrations' ($LASTEXITCODE -eq 0 -and [int]$migrationCount -gt 0) "$migrationCount applied migration(s)"
+$drive=Get-PSDrive -Name ([IO.Path]::GetPathRoot($productRoot).Substring(0,1));Add-Check 'Disk space' ($drive.Free -gt 5GB) ("{0:N1} GB free" -f ($drive.Free/1GB))
+$latest=Get-ChildItem (Join-Path $productRoot '.local\backups') -Filter 'aerolink-*.zip' -File -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending|Select-Object -First 1;Add-Check 'Backup recency' ($latest -and $latest.LastWriteTime -gt (Get-Date).AddDays(-1)) $(if($latest){$latest.FullName}else{'No backup found'})
+$evidence=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AeroLink\evidence';Add-Check 'Evidence storage' (Test-Path $evidence) $evidence
+$result=[pscustomobject]@{GeneratedAt=(Get-Date).ToUniversalTime().ToString('o');Healthy=-not($checks.Healthy -contains $false);Checks=$checks};if($Json){$result|ConvertTo-Json -Depth 4}else{$checks|Format-Table -AutoSize;if($result.Healthy){Write-Host 'AeroLink diagnostics passed.' -ForegroundColor Green}else{Write-Host 'One or more AeroLink diagnostics need attention.' -ForegroundColor Yellow}}

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { login } from './auth'
+import { apiBase, login } from './auth'
 
 test('author creates, edits, submits, and sequentially approves an SCR', async ({ page }) => {
   test.setTimeout(60_000)
@@ -13,13 +13,13 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
     await page.getByLabel('Initial release or baseline').fill('1.0')
     await page.getByRole('button', { name: /Create program workspace/ }).click()
   }else{
-    const created=await page.request.post('http://127.0.0.1:5080/api/workspaces',{data:{programName,programCode:`BW${suffix}`,projectName:'Workflow Software',softwareProduct:'Workflow Management Software',initialRelease:'1.0',initialReleaseIsReleased:false}})
+    const created=await page.request.post(`${apiBase}/api/workspaces`,{data:{programName,programCode:`BW${suffix}`,projectName:'Workflow Software',softwareProduct:'Workflow Management Software',initialRelease:'1.0',initialReleaseIsReleased:false}})
     expect(created.ok(),await created.text()).toBeTruthy()
     await page.reload()
     await page.locator('.program > select:not(.releaseSelector)').selectOption({label:programName})
   }
 
-  await page.getByRole('button', { name: 'New Software SWCR' }).click()
+  await page.getByRole('link', { name: 'New Software SWCR' }).click()
   await page.getByLabel('Title').fill('Introduce controlled browser workflow')
   await page.getByLabel('Problem').fill('The workflow is not yet controlled end to end.')
   await page.getByLabel('Analysis', { exact: true }).fill('SCR content, reviewers, and history must remain attributable.')
@@ -30,12 +30,12 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByRole('heading', { name: 'Introduce controlled browser workflow' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Download DOCX' })).toHaveAttribute('href', /\/api\/scrs\/.+\/download\?format=docx/)
   await expect(page.getByRole('link', { name: 'Download PDF' })).toHaveAttribute('href', /\/api\/scrs\/.+\/download\?format=pdf/)
-  await page.getByRole('button', { name: 'Edit Draft' }).click()
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
   await page.getByLabel('Title').fill('Introduce controlled approval workflow')
   const impactDispositions=page.locator('.editorColumns aside select')
   expect(await impactDispositions.count()).toBe(5)
   for(let i=0;i<5;i++)await impactDispositions.nth(i).selectOption('Not Affected')
-  await page.getByRole('button', { name: 'Save Draft' }).click()
+  await page.getByRole('button', { name: 'Save & check in' }).click()
   await expect(page.getByRole('heading', { name: 'Introduce controlled approval workflow' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Configure & Submit Review' }).click()
@@ -53,8 +53,8 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByText('Approved', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('Scr Approved')).toBeVisible()
 
-  await page.getByRole('button', { name: /Command Center/ }).first().click()
-  await page.getByRole('button', { name: /Baselines/ }).click()
+  await page.getByRole('link', { name: /Command Center/ }).first().click()
+  await page.getByRole('link', { name: /Baselines/ }).click()
   await page.getByRole('button', { name: '+ New Candidate' }).click()
   await page.getByLabel('Baseline name').fill('Workflow Software 1.0 Controlled Candidate')
   await page.getByRole('button', { name: 'Create Candidate Baseline' }).click()
@@ -71,8 +71,8 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByText('REQUIREMENT MANIFEST SHA-256')).toBeVisible()
   await expect(page.getByText(/HLR-\d{8}\.00/).last()).toBeVisible()
 
-  await page.getByRole('button', { name: /Command Center/ }).first().click()
-  await page.getByRole('button', { name: 'Software Verification' }).click()
+  await page.getByRole('link', { name: /Command Center/ }).first().click()
+  await page.getByRole('link', { name: 'Software Verification' }).click()
   await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible()
   await expect(page.getByText('1', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: 'New Test Procedure' }).click()

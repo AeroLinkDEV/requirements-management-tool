@@ -61,6 +61,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<RequirementImportMapping> RequirementImportMappings => Set<RequirementImportMapping>();
     public DbSet<ControlledAttachment> ControlledAttachments => Set<ControlledAttachment>();
     public DbSet<ArtifactEditSession> ArtifactEditSessions => Set<ArtifactEditSession>();
+    public DbSet<ArtifactDraftSnapshot> ArtifactDraftSnapshots => Set<ArtifactDraftSnapshot>();
     public DbSet<ArtifactMergeConflict> ArtifactMergeConflicts => Set<ArtifactMergeConflict>();
     public DbSet<EnterpriseIntegrityCheckpoint> EnterpriseIntegrityCheckpoints => Set<EnterpriseIntegrityCheckpoint>();
 
@@ -393,7 +394,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<ArtifactEditSession>(b =>
         {
-            b.ToTable("artifact_edit_sessions");b.HasKey(x=>x.Id);b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired();b.Property(x=>x.BaseSnapshotHash).HasMaxLength(64).IsRequired();b.Property(x=>x.DraftJson).IsRequired();b.Property(x=>x.UserName).HasMaxLength(100).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.Version).IsConcurrencyToken();b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.State});b.HasIndex(x=>new{x.UserName,x.UpdatedAt});
+            b.ToTable("artifact_edit_sessions");b.HasKey(x=>x.Id);b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired();b.Property(x=>x.BaseSnapshotHash).HasMaxLength(64).IsRequired();b.Property(x=>x.DraftJson).IsRequired();b.Property(x=>x.UserName).HasMaxLength(100).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.LockKey).HasMaxLength(100);b.Property(x=>x.ClosedBy).HasMaxLength(100);b.Property(x=>x.ClosedReason).HasMaxLength(2000);b.Property(x=>x.Version).IsConcurrencyToken();b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.State});b.HasIndex(x=>new{x.UserName,x.UpdatedAt});b.HasIndex(x=>x.LockKey).IsUnique();
+        });
+        modelBuilder.Entity<ArtifactDraftSnapshot>(b=>
+        {
+            b.ToTable("artifact_draft_snapshots");b.HasKey(x=>x.Id);b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired();b.Property(x=>x.DraftJson).IsRequired();b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.RestoredBy).HasMaxLength(100);b.HasIndex(x=>new{x.SessionId,x.Sequence}).IsUnique();b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.CreatedAt});b.HasOne<ArtifactEditSession>().WithMany().HasForeignKey(x=>x.SessionId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ArtifactMergeConflict>(b =>
         {

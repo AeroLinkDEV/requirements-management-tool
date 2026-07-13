@@ -4,6 +4,8 @@ This directory contains the real application foundation. The visual showcase rem
 
 ## Current vertical slice
 
+The 2026-07-13 enterprise control increment adds durable URL routing and context restoration, a keyboard command palette, Program-aware universal artifact search, authoritative artifact detail links, SCR/SWCR exclusive checkout, renewable leases, server autosave snapshots, read-only observers, check-in/discard, forced-unlock auditing, authentication throttling, Program-scope enforcement, isolated browser-test infrastructure, and verified backup/restore operations.
+
 - optional deterministic FMS live program with a released 1.5 baseline and active 1.6 development release
 - 150 system requirements, 400 HLRs, 700 LLRs, 105 historical SCR/SWCR records, 1,100 typed traces, 515 procedures, 520 executions, and six controlled outputs
 
@@ -77,6 +79,8 @@ npm.cmd run dev
 ```
 
 Open `http://127.0.0.1:5173`. Local development uses PostgreSQL on port `54329`; application startup applies versioned migrations. A fresh database opens the guided New Program workflow, and demonstration data is disabled by default. SQLite remains available for isolated tests. Set `DemoData:Enabled` to `true` only when the explicit FMS sample workspace is wanted.
+
+Local demonstration identities include `admin`, `systems.author`, `software.author`, `systems.reviewer`, and `release.manager`; their local-only password is `AeroLink!2026`. These credentials are intentionally non-production and must be replaced before any operational deployment. See [Operations and recovery](docs/OPERATIONS.md).
 
 ## Verify
 

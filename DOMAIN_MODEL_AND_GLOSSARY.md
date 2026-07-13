@@ -105,6 +105,14 @@ The abbreviation `SRD` is not used on its own because it is ambiguous.
 
 ## Review and Control Terms
 
+**Artifact Edit Session**: An attributable, server-side lease granting one user exclusive write authority over one configured draft artifact while all other authorized users retain read-only access. The session records checkout, activity, expiry, closure, version, and administrative recovery details.
+
+**Draft Snapshot**: An immutable server-retained autosave payload for an edit session, identified by sequence, content hash, actor, and time. A snapshot is recovery evidence and does not approve, baseline, or release its draft content.
+
+**Check-In**: The atomic operation that validates the expected artifact and session versions, applies the controlled draft changes, closes the edit session, and records attribution. **Discard** closes the session without applying its autosaved content.
+
+**Forced Unlock**: A configuration-manager or administrator action that closes another user's active lease. It requires a reason and produces both lifecycle and security audit evidence.
+
 **Workflow State**: The current lifecycle state of a revision or controlled process. State transitions are constrained and audited.
 
 **Review**: A controlled evaluation of a submitted snapshot of a specific SCR, document, procedure, execution/result record, or candidate baseline revision by named reviewers. Requirement changes are reviewed as contents of the SCR rather than as independent review artifacts. An SCR review cycle contains its submitted snapshot, author-selected ordered approval sequence, comments, dispositions, outcomes, and timestamps. Multiple review cycles may occur for the same not-yet-approved SCR revision.
@@ -122,6 +130,10 @@ The abbreviation `SRD` is not used on its own because it is ambiguous.
 **Electronic Approval Record**: Evidence of the approver identity, decision, time, reviewed revision, and applicable meaning. The authentication and signature policy remains to be defined.
 
 **Generated Document**: A file produced from a named baseline, template revision, and generator version, with identifiable approval state and integrity hash.
+
+**Artifact Deep Link**: A durable, context-bearing URL for an authoritative page or record. It is permission checked on every request and remains usable after refresh or authentication.
+
+**Universal Search**: A bounded, Program-scoped discovery operation over supported lifecycle record types. Identifier fragments, including suffix fragments, resolve to deep links without revealing unauthorized Programs.
 
 ## Traceability and Problem Terms
 

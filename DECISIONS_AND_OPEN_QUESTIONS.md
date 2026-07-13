@@ -350,6 +350,30 @@ Future entries use:
 - **Decision:** The demonstration repository presents FMS 1.5 as fully released with approved historical change and document evidence, and FMS 1.6 as its active successor. It includes 200 deterministic fictional personnel with realistic engineering titles and searchable selection controls.
 - **Rationale:** A populated, internally consistent working Program communicates the product more credibly than disconnected sample screens.
 
+### DEC-043 - Durable URLs Are the Artifact Navigation Contract
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+- **Decision:** Authenticated page and artifact identity is represented in the browser URL. Navigation, search results, breadcrumbs, copy-link actions, refresh, and browser back/forward all use that same contract while restoring Program, Project, and release context.
+- **Rationale:** Controlled records must be referenceable in review, audit, notification, and multi-tab work without relying on transient component state.
+- **Consequences:** Unsupported or missing identities render an explicit not-found view; inaccessible Program data returns a forbidden response and is not disclosed by search.
+
+### DEC-044 - Exclusive Editing Is a Renewable Server Lease
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+- **Decision:** An exclusive checkout is a server-enforced, uniquely indexed lease with a fifteen-minute inactivity expiry, heartbeat renewal, version-checked autosave snapshots, explicit check-in/discard, and privileged forced unlock with a mandatory reason.
+- **Rationale:** A durable lease prevents silent concurrent overwrite while allowing abandoned work to recover without hiding the artifact from readers.
+- **Consequences:** Review submission is rejected while an incompatible lease is active. Approved/frozen content is never made editable through autosave. The first complete vertical implementation applies to SCR and SWCR drafts; other controlled draft types will adopt the same domain contract incrementally.
+
+### DEC-045 - Recovery Is Proved Outside the Authoritative Database First
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+- **Decision:** Backup verification checks the archive sidecar, safe entry paths, manifest paths, sizes, and SHA-256 values. Automated restore exercises target only explicitly named validation databases and isolated evidence storage. Production restore requires a separate elevated switch and exact confirmation phrase and creates a pre-restore backup.
+- **Rationale:** Recovery tooling is valuable only when testable without risking the authoritative PostgreSQL database or evidence store.
+- **Consequences:** Production recovery is an attended operator action. A successful archive check alone does not replace periodic isolated restore drills and post-restore health validation.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

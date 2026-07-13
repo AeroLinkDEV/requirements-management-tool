@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login } from "./auth";
+import { apiBase, apiLogin, login } from "./auth";
 
 test("engineer analyzes impact and creates a rich controlled requirement proposal", async ({
   page,
@@ -7,7 +7,8 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
 }) => {
   test.setTimeout(75_000);
   const assignmentTitle = `Disposition requirement 150 verification impact ${Date.now()}`;
-  const seed = await request.post("http://127.0.0.1:5080/api/showcase/seed", {
+  await apiLogin(request);
+  const seed = await request.post(`${apiBase}/api/showcase/seed`, {
     timeout: 45_000,
   });
   expect(seed.ok(), await seed.text()).toBeTruthy();
@@ -15,7 +16,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await page
     .locator(".program > select:not(.releaseSelector)")
     .selectOption({ label: "Flight Management System Live Program" });
-  await page.getByRole("button", { name: "System Requirements" }).click();
+  await page.getByRole("link", { name: "System Requirements" }).click();
   await expect(
     page.getByRole("heading", { name: "Requirements Workspace" }),
   ).toBeVisible();
@@ -69,7 +70,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await expect(
     page.getByRole("heading", { name: "Change case" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Edit Draft" }).click();
+  await page.getByRole("button", { name: "Check out & edit" }).click();
   await expect(
     page.getByRole("heading", { name: "Controlled requirement authoring" }),
   ).toBeVisible();
@@ -82,7 +83,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   expect(await dispositions.count()).toBe(5);
   for (let i = 0; i < 5; i++)
     await dispositions.nth(i).selectOption("Affected");
-  await page.getByRole("button", { name: "Save Draft" }).click();
+  await page.getByRole("button", { name: "Save & check in" }).click();
   await expect(page.getByText("Requirement impact")).toBeVisible();
   await expect(page.getByText(/Record version/)).toBeVisible();
 });

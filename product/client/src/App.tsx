@@ -10,6 +10,10 @@ import ReleaseCampaignCenter from "./ReleaseCampaignCenter";
 import ReleasePlanningCenter from "./ReleasePlanningCenter";
 import RequirementsWorkspace from "./RequirementsWorkspace";
 import EnterpriseControlCenter from "./EnterpriseControlCenter";
+import CommandPalette from "./CommandPalette";
+import ArtifactRecordPage from "./ArtifactRecordPage";
+import { readRoute, routePath } from "./routing";
+import type { AppRoute, Discipline, RouteContext, View } from "./routing";
 import {
   AdministrationCenter,
   LoginPage,
@@ -64,30 +68,27 @@ type Workspace = {
     releases: Release[];
   }[];
 };
-type View =
-  | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "lifecycle" | "release" | "planning" | "mywork" | "admin" | "enterprise";
-type Discipline = "system" | "software" | "systemTest" | "softwareTest";
-const API = "http://127.0.0.1:5080";
+const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:5080";
 
-function AppNavigation({ user, workspaces, activeId, selectedReleaseId, view, discipline, onProgram, onRelease, onNavigate, onDiscipline, onSignOut }:{
-  user:AuthUser;workspaces:Workspace[];activeId:string;selectedReleaseId:string;view:View;discipline:Discipline;
-  onProgram:(id:string)=>void;onRelease:(id:string)=>void;onNavigate:(view:View)=>void;onDiscipline:(value:Discipline)=>void;onSignOut:()=>void;
+function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, context, onProgram, onProject, onRelease, onNavigate, onSearch, onSignOut }:{
+  user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;
+  onProgram:(id:string)=>void;onProject:(id:string)=>void;onRelease:(id:string)=>void;onNavigate:(view:View,discipline?:Discipline)=>void;onSearch:()=>void;onSignOut:()=>void;
 }) {
-  const active=workspaces.find(x=>x.program.id===activeId)??workspaces[0],project=active?.projects[0],release=project?.releases.find(x=>x.id===selectedReleaseId)??project?.releases.at(-1);
-  const go=(target:View,area?:Discipline)=>{if(area)onDiscipline(area);onNavigate(target)};
-  const item=(label:string,target:View,icon:string,area?:Discipline)=> <button className={view===target&&(!area||discipline===area)?"active":""} onClick={()=>go(target,area)}><i>{icon}</i>{label}</button>;
-  return <aside className="appNavigation"><div className="brand"><span>▲</span><b>AeroLink</b></div><div className="program"><small>ACTIVE PROGRAM</small><select value={activeId} onChange={event=>onProgram(event.target.value)}>{workspaces.map(x=><option value={x.program.id} key={x.program.id}>{x.program.name}</option>)}</select><span>{project?.project.name}</span><select className="releaseSelector" value={release?.id??""} onChange={event=>onRelease(event.target.value)} aria-label="Active release">{project?.releases.map(item=><option value={item.id} key={item.id}>{item.version} · {item.isReleased?"Released":"In work"}</option>)}</select></div>
-    <nav className="primaryNavigation"><div className="navGroup"><small>PERSONAL</small>{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
-      <div className="navGroup"><small>SYSTEMS</small>{item("New System SCR","createSystemScr","+")}{item("System Change Requests","history","◇","system")}{item("System Requirements","requirements","≡","system")}{item("System Verification","verification","✓","systemTest")}{item("SYSRD & Traceability","lifecycle","↗","system")}</div>
-      <div className="navGroup"><small>SOFTWARE</small>{item("New Software SWCR","createSoftwareChange","+")}{item("Software Change Requests","history","◇","software")}{item("HLR & LLR Requirements","requirements","≡","software")}{item("Software Verification","verification","✓","softwareTest")}{item("SWRD & Traceability","lifecycle","↗","software")}</div>
-      <div className="navGroup"><small>RELEASE & ASSURANCE</small>{item("Release Planning","planning","⑂")}{item("Baselines","baselines","⌘")}{item("Release Campaign","release","◆")}{item("Enterprise Control","enterprise","◈")}</div>
-      {user.isAdministrator&&<div className="navGroup"><small>ADMINISTRATION</small>{item("People & Authority","admin","⚙")}</div>}
+  const active=workspaces.find(x=>x.program.id===activeId)??workspaces[0],project=active?.projects.find(x=>x.project.id===selectedProjectId)??active?.projects[0],release=project?.releases.find(x=>x.id===selectedReleaseId)??project?.releases.at(-1);
+  const item=(label:string,target:View,icon:string,area:Discipline="system")=> <a href={context?routePath(context,target,area):"#"} className={view===target&&discipline===area?"active":""} onClick={event=>{event.preventDefault();onNavigate(target,area)}}><i>{icon}</i>{label}</a>;
+  return <aside className="appNavigation"><div className="brand"><span>▲</span><b>AeroLink</b></div><button className="quickSearch" onClick={onSearch}><span>⌕</span> Search &amp; navigate <kbd>Ctrl K</kbd></button><div className="program"><small>ACTIVE CONTEXT</small><select value={activeId} onChange={event=>onProgram(event.target.value)} aria-label="Active program">{workspaces.map(x=><option value={x.program.id} key={x.program.id}>{x.program.name}</option>)}</select>{active?.projects.length>1?<select value={project?.project.id??""} onChange={event=>onProject(event.target.value)} aria-label="Active project">{active.projects.map(x=><option value={x.project.id} key={x.project.id}>{x.project.name}</option>)}</select>:<span>{project?.project.name}</span>}<select className="releaseSelector" value={release?.id??""} onChange={event=>onRelease(event.target.value)} aria-label="Active release">{project?.releases.map(item=><option value={item.id} key={item.id}>{item.version} · {item.isReleased?"Released":"In work"}</option>)}</select></div>
+    <nav className="primaryNavigation"><details className="navGroup" open><summary>MY WORK</summary>{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</details>
+      <details className="navGroup" open><summary>SYSTEMS ENGINEERING</summary>{item("New System SCR","createSystemScr","+")}{item("System Change Requests","history","◇","system")}{item("System Requirements","requirements","≡","system")}</details>
+      <details className="navGroup" open><summary>SOFTWARE ENGINEERING</summary>{item("New Software SWCR","createSoftwareChange","+")}{item("Software Change Requests","history","◇","software")}{item("HLR & LLR Requirements","requirements","≡","software")}</details>
+      <details className="navGroup" open><summary>VERIFICATION</summary>{item("System Verification","verification","✓","systemTest")}{item("Software Verification","verification","✓","softwareTest")}{item("Traceability & Outputs","lifecycle","↗","system")}</details>
+      <details className="navGroup" open><summary>RELEASE & CONFIGURATION</summary>{item("Release Planning","planning","⑂")}{item("Baselines","baselines","⌘")}{item("Release Campaign","release","◆")}{item("Enterprise Control","enterprise","◈")}</details>
+      {user.isAdministrator&&<details className="navGroup" open><summary>ENTERPRISE ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}</details>}
     </nav><footer><div className="avatar">{user.displayName.split(" ").map(x=>x[0]).join("").slice(0,2)}</div><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button></footer></aside>;
 }
 
 function App() {
   const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
+  const [initialRoute] = useState<AppRoute>(() => readRoute());
   const [scrs, setScrs] = useState<Scr[]>([]),
     [metrics, setMetrics] = useState<Metrics>({
       totalScrs: 0,
@@ -98,18 +99,18 @@ function App() {
     [overview, setOverview] = useState<Overview>(),
     [campaigns, setCampaigns] = useState<CampaignSummary[]>([]),
     [workspaces, setWorkspaces] = useState<Workspace[]>([]),
-    [activeId, setActiveId] = useState(""),
-    [selectedReleaseId, setSelectedReleaseId] = useState(""),
+    [activeId, setActiveId] = useState(initialRoute.programId ?? ""),
+    [selectedProjectId, setSelectedProjectId] = useState(initialRoute.projectId ?? ""),
+    [selectedReleaseId, setSelectedReleaseId] = useState(initialRoute.releaseId ?? ""),
     [connected, setConnected] = useState(false),
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
-    [selectedScrId, setSelectedScrId] = useState(""),
-    [discipline,setDiscipline]=useState<Discipline>("system"),
-    [view, setView] = useState<View>(() =>
-      new URLSearchParams(location.search).has("enterpriseView")
-        ? "requirements"
-        : "dashboard",
-    );
+    [selectedScrId, setSelectedScrId] = useState(initialRoute.view === "scr" ? initialRoute.artifactId ?? "" : ""),
+    [selectedArtifactId,setSelectedArtifactId]=useState(initialRoute.artifactId ?? ""),
+    [selectedArtifactKind,setSelectedArtifactKind]=useState(initialRoute.artifactKind ?? ""),
+    [paletteOpen,setPaletteOpen]=useState(false),
+    [discipline,setDiscipline]=useState<Discipline>(initialRoute.discipline),
+    [view, setView] = useState<View>(initialRoute.view);
   useEffect(() => {
     fetch(`${API}/api/auth/me`)
       .then(async (r) => setUser(r.ok ? await r.json() : null))
@@ -118,17 +119,20 @@ function App() {
   const loadWorkspaces = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/workspaces`),
-        next = await response.json();
+        next = await response.json() as Workspace[];
       setWorkspaces(next);
-      setActiveId((current) => current || next[0]?.program.id || "");
+      const program=next.find(x=>x.program.id===initialRoute.programId)??next[0],project=program?.projects.find(x=>x.project.id===initialRoute.projectId)??program?.projects[0],release=project?.releases.find(x=>x.id===initialRoute.releaseId)??[...(project?.releases??[])].reverse().find(x=>!x.isReleased)??project?.releases.at(-1);
+      setActiveId((current) => next.some(x=>x.program.id===current)?current:program?.program.id||"");
+      setSelectedProjectId((current)=>program?.projects.some(x=>x.project.id===current)?current:project?.project.id||"");
+      setSelectedReleaseId((current)=>project?.releases.some(x=>x.id===current)?current:release?.id||"");
       setConnected(true);
     } catch {
       setConnected(false);
     }
-  }, []);
+  }, [initialRoute]);
   const active =
       workspaces.find((x) => x.program.id === activeId) ?? workspaces[0],
-    project = active?.projects[0],
+    project = active?.projects.find(x=>x.project.id===selectedProjectId)??active?.projects[0],
     release =
       project?.releases.find((x) => x.id === selectedReleaseId) ??
       [...(project?.releases ?? [])].reverse().find((x) => !x.isReleased) ??
@@ -137,6 +141,8 @@ function App() {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
+  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
+  useEffect(()=>{const handler=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape")setPaletteOpen(false)};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[]);
   const loadData = useCallback(async () => {
     if (!project) return;
     try {
@@ -260,9 +266,19 @@ function App() {
         </div>
       </div>
     );
-  const navigate=(target:View)=>setView(target);
-  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} onProgram={setActiveId} onRelease={setSelectedReleaseId} onNavigate={navigate} onDiscipline={setDiscipline} onSignOut={async()=>{await fetch(`${API}/api/auth/logout`,{method:"POST"});setUser(null)}}/>;
-  const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{content}</div></div>;
+  const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
+  const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false)=>{setView(target);setDiscipline(area);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");if(context){const path=routePath(context,target,area,artifactId,artifactKind);history[replace?"replaceState":"pushState"]({},"",path)}};
+  const changeProgram=(id:string)=>{const next=workspaces.find(x=>x.program.id===id),nextProject=next?.projects[0],nextRelease=[...(nextProject?.releases??[])].reverse().find(x=>!x.isReleased)??nextProject?.releases.at(-1);if(!nextProject||!nextRelease)return;setActiveId(id);setSelectedProjectId(nextProject.project.id);setSelectedReleaseId(nextRelease.id);const nextContext={programId:id,projectId:nextProject.project.id,releaseId:nextRelease.id};history.pushState({},"",routePath(nextContext,view,discipline,selectedArtifactId,selectedArtifactKind))};
+  const changeProject=(id:string)=>{const next=active?.projects.find(x=>x.project.id===id),nextRelease=[...(next?.releases??[])].reverse().find(x=>!x.isReleased)??next?.releases.at(-1);if(!next||!nextRelease)return;setSelectedProjectId(id);setSelectedReleaseId(nextRelease.id);history.pushState({},"",routePath({programId:active!.program.id,projectId:id,releaseId:nextRelease.id},view,discipline,selectedArtifactId,selectedArtifactKind))};
+  const changeRelease=(id:string)=>{setSelectedReleaseId(id);if(active&&project)history.pushState({},"",routePath({programId:active.program.id,projectId:project.project.id,releaseId:id},view,discipline,selectedArtifactId,selectedArtifactKind))};
+  if(context&&location.pathname==="/")history.replaceState({},"",routePath(context,"dashboard"));
+  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} context={context} onProgram={changeProgram} onProject={changeProject} onRelease={changeRelease} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onSignOut={async()=>{await fetch(`${API}/api/auth/logout`,{method:"POST"});setUser(null)}}/>;
+  const labels:Record<View,string>={dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements",verification:"Verification",lifecycle:"Traceability",release:"Release Campaign",planning:"Release Planning",mywork:"My Work",admin:"Administration",enterprise:"Enterprise Control",artifact:"Artifact",notFound:"Not Found"};
+  const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span>{active?.program.name}</span><b>›</b><span>{project?.project.name}</span><b>›</b><span>{release?.version}</span><b>›</b><strong>{labels[view]}</strong></nav><button onClick={async()=>navigator.clipboard.writeText(location.href)}>Copy link</button></div>;
+  const palette=context?<CommandPalette api={API} context={context} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
+  const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{contextBar}{content}</div>{palette}</div>;
+  if(view==="notFound")return inShell(<main className="artifactState"><div><span>?</span><h1>Page not found</h1><p>This AeroLink route is not recognized. Use quick navigation to find an authorized workspace or artifact.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
+  if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} onBack={()=>navigate("dashboard")} onOpen={(kind,id)=>{if(kind==="change-request")navigate("scr","system",id);else if(kind==="requirement")navigate("requirements","system",id);else navigate("artifact","system",id,kind)}}/>);
   if ((view === "createSystemScr" || view === "createSoftwareChange") && project && release)
     return inShell(
       <ScrEditor
@@ -272,11 +288,10 @@ function App() {
         releaseVersion={release.version}
         scope={view === "createSystemScr" ? "System" : "Software"}
         user={user}
-        onCancel={() => setView("dashboard")}
+        onCancel={() => navigate("dashboard")}
         onSaved={async (scrId) => {
           await loadData();
-          setSelectedScrId(scrId);
-          setView("scr");
+          navigate("scr",view === "createSoftwareChange" ? "software" : "system",scrId);
         }}
       />
     );
@@ -296,7 +311,7 @@ function App() {
           api={API}
           scrId={selectedScrId}
           user={user}
-          onBack={() => setView("dashboard")}
+          onBack={() => navigate("dashboard")}
           onChanged={loadData}
         />
       </>
@@ -309,7 +324,7 @@ function App() {
         releaseId={release.id}
         releaseVersion={release.version}
         productName={project.project.softwareProduct}
-        onBack={() => setView("dashboard")}
+        onBack={() => navigate("dashboard")}
       />
     );
   if (view === "history" && project)
@@ -319,11 +334,8 @@ function App() {
         projectId={project.project.id}
         releases={project.releases}
         scope={discipline === "software" ? "Software" : "System"}
-        onBack={() => setView("dashboard")}
-        onOpenScr={(id) => {
-          setSelectedScrId(id);
-          setView("scr");
-        }}
+        onBack={() => navigate("dashboard")}
+        onOpenScr={(id) => navigate("scr",discipline,id)}
       />
     );
   if (view === "requirements" && project)
@@ -334,15 +346,11 @@ function App() {
         releases={project.releases}
         user={user}
         scope={discipline === "software" ? "Software" : "System"}
-        initialViewId={
-          new URLSearchParams(location.search).get("enterpriseView") ||
-          undefined
-        }
-        onBack={() => setView("dashboard")}
-        onOpenScr={(id) => {
-          setSelectedScrId(id);
-          setView("scr");
-        }}
+        initialViewId={initialRoute.savedViewId}
+        initialArtifactId={view === "requirements" ? selectedArtifactId || undefined : undefined}
+        onBack={() => navigate("dashboard")}
+        onOpenScr={(id) => navigate("scr",discipline,id)}
+        onOpenRequirement={(id) => navigate("requirements",discipline,id)}
       />
     );
   if (view === "verification" && project && release)
@@ -352,7 +360,7 @@ function App() {
         projectId={project.project.id}
         releaseId={release.id}
         scope={discipline === "softwareTest" ? "Software" : "System"}
-        onBack={() => setView("dashboard")}
+        onBack={() => navigate("dashboard")}
       />
     );
   if (view === "lifecycle" && project)
@@ -361,7 +369,7 @@ function App() {
         api={API}
         projectId={project.project.id}
         releases={project.releases}
-        onBack={() => setView("dashboard")}
+        onBack={() => navigate("dashboard")}
       />
     );
   if (view === "release" && project)
@@ -372,13 +380,10 @@ function App() {
         activeReleaseId={release?.id ?? ""}
         releases={project.releases}
         user={user}
-        onBack={() => setView("dashboard")}
-        onOpenScr={(id) => {
-          setSelectedScrId(id);
-          setView("scr");
-        }}
-        onOpenVerification={() => setView("verification")}
-        onOpenDocuments={() => setView("lifecycle")}
+        onBack={() => navigate("dashboard")}
+        onOpenScr={(id) => navigate("scr",discipline,id)}
+        onOpenVerification={() => navigate("verification",discipline === "software" ? "softwareTest" : "systemTest")}
+        onOpenDocuments={() => navigate("lifecycle")}
       />
     );
   if (view === "planning" && project && release)
@@ -388,10 +393,10 @@ function App() {
         projectId={project.project.id}
         productName={project.project.softwareProduct}
         activeReleaseId={release.id}
-        onBack={() => setView("dashboard")}
-        onSelectRelease={setSelectedReleaseId}
-        onOpenBaselines={() => setView("baselines")}
-        onOpenCampaign={() => setView("release")}
+        onBack={() => navigate("dashboard")}
+        onSelectRelease={changeRelease}
+        onOpenBaselines={() => navigate("baselines")}
+        onOpenCampaign={() => navigate("release")}
         onChanged={loadWorkspaces}
       />
     );
@@ -401,12 +406,9 @@ function App() {
         api={API}
         projectId={project.project.id}
         user={user}
-        onBack={() => setView("dashboard")}
-        onOpenScr={(id) => {
-          setSelectedScrId(id);
-          setView("scr");
-        }}
-        onOpenRelease={() => setView("release")}
+        onBack={() => navigate("dashboard")}
+        onOpenScr={(id) => navigate("scr",discipline,id)}
+        onOpenRelease={() => navigate("release")}
       />
     );
   if (view === "admin" && active)
@@ -414,7 +416,7 @@ function App() {
       <AdministrationCenter
         api={API}
         programId={active.program.id}
-        onBack={() => setView("dashboard")}
+        onBack={() => navigate("dashboard")}
       />
     );
   if (view === "enterprise" && project)
@@ -422,7 +424,7 @@ function App() {
       <EnterpriseControlCenter
         api={API}
         projectId={project.project.id}
-        onBack={() => setView("dashboard")}
+        onBack={() => navigate("dashboard")}
       />
     );
   return (
@@ -473,7 +475,7 @@ function App() {
           </div>
           <button
             onClick={() =>
-              setView(release?.isReleased ? "planning" : "release")
+              navigate(release?.isReleased ? "planning" : "release")
             }
           >
             {release?.isReleased
@@ -530,11 +532,11 @@ function App() {
                 <p>Controlled changes targeting this release</p>
               </div>
               {release?.isReleased ? (
-                <button onClick={() => setView("history")}>
+                <button onClick={() => navigate("history",discipline)}>
                   Search released changes
                 </button>
               ) : (
-                <button onClick={() => setView("createSystemScr")}>+ New System SCR</button>
+                <button onClick={() => navigate("createSystemScr")}>+ New System SCR</button>
               )}
             </div>
             {scrs.length ? (
@@ -544,14 +546,10 @@ function App() {
                   key={scr.id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => {
-                    setSelectedScrId(scr.id);
-                    setView("scr");
-                  }}
+                  onClick={() => navigate("scr",discipline,scr.id)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
-                      setSelectedScrId(scr.id);
-                      setView("scr");
+                      navigate("scr",discipline,scr.id);
                     }
                   }}
                 >
@@ -575,7 +573,7 @@ function App() {
               <div className="empty">
                 <b>Your controlled lifecycle starts here</b>
                 <p>No change requests exist in this new workspace yet.</p>
-                <button onClick={() => setView("createSystemScr")}>
+                <button onClick={() => navigate("createSystemScr")}>
                   Create first SCR →
                 </button>
               </div>

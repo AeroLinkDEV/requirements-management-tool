@@ -122,3 +122,9 @@ Quality will be demonstrated with known reference projects and adverse scenarios
 - reconstruction of an old release after later changes.
 
 No certification report or compliance decision may depend on uncontrolled AI output.
+
+## Executable Release Gate
+
+Mutation-oriented browser tests use a dedicated API port and disposable SQLite database; they never reuse the live PostgreSQL API. A release candidate must pass the domain and persistence tests, client lint, production build, complete Playwright suite, safe migration against a restored PostgreSQL copy, live migration, authenticated live smoke test, and Git diff review.
+
+Operational recovery is exercised in layers: archive/manifest verification, isolated database and evidence restore, migration of the restored copy, then attended production recovery only when required. Restore scripts must constrain target names and paths, and they must never select the authoritative database through a default test invocation.

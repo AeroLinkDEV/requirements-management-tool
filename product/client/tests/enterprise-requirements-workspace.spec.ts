@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login } from "./auth";
+import { apiBase, apiLogin, login } from "./auth";
 
 test("enterprise workspace supports discovery, collaboration, saved views, bulk governance, and import preview", async ({
   page,
@@ -8,7 +8,8 @@ test("enterprise workspace supports discovery, collaboration, saved views, bulk 
   test.setTimeout(60_000);
   const viewName = `System requirement 150 review ${Date.now()}`;
   const commentText = `Please confirm coverage with @test.engineer before baseline ${Date.now()}.`;
-  const seed = await request.post("http://127.0.0.1:5080/api/showcase/seed", {
+  await apiLogin(request);
+  const seed = await request.post(`${apiBase}/api/showcase/seed`, {
     timeout: 45_000,
   });
   expect(seed.ok(), await seed.text()).toBeTruthy();
@@ -16,7 +17,7 @@ test("enterprise workspace supports discovery, collaboration, saved views, bulk 
   await page
     .locator(".program > select:not(.releaseSelector)")
     .selectOption({ label: "Flight Management System Live Program" });
-  await page.getByRole("button", { name: "System Requirements" }).click();
+  await page.getByRole("link", { name: "System Requirements" }).click();
   await expect(
     page.getByRole("heading", { name: "Requirements Workspace" }),
   ).toBeVisible();

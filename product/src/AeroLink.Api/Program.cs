@@ -17,18 +17,22 @@ using System.Text.Json.Serialization;
 using System.Text.Json;
 using System.Diagnostics;
 using System.Data;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
+builder.Services.AddRateLimiter(options=>options.AddFixedWindowLimiter("authentication",limiter=>{limiter.PermitLimit=30;limiter.Window=TimeSpan.FromMinutes(1);limiter.QueueLimit=0;limiter.AutoReplenishment=true;}));
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:5174").AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
 var app = builder.Build();
 app.UseExceptionHandler();
 app.UseCors();
+app.UseRateLimiter();
 
 await using (var scope = app.Services.CreateAsyncScope())
 {
@@ -44,11 +48,17 @@ await using (var scope = app.Services.CreateAsyncScope())
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? "";
-    if (path == "/health" || path == "/api/auth/login" || path.StartsWith("/api/showcase/seed") || !path.StartsWith("/api/")) { await next(); return; }
+    if (path == "/health" || path == "/api/auth/login" || !path.StartsWith("/api/")) { await next(); return; }
     var identity = context.RequestServices.GetRequiredService<IdentityService>();
     var user = await identity.ResolveAsync(context.Request.Cookies[IdentityService.CookieName], DateTimeOffset.UtcNow, context.RequestAborted);
     if (user is null) { context.Response.StatusCode = StatusCodes.Status401Unauthorized; await context.Response.WriteAsJsonAsync(new { error = "Authentication required.", code = "authentication_required" }); return; }
-    context.Items["AeroLink.User"] = user; await next();
+    context.Items["AeroLink.User"] = user;
+    var db=context.RequestServices.GetRequiredService<AeroLinkDbContext>();Guid? scopedProjectId=null;
+    if(context.Request.Query.TryGetValue("projectId",out var rawProject)&&Guid.TryParse(rawProject.FirstOrDefault(),out var queryProject))scopedProjectId=queryProject;
+    var segments=path.Split('/',StringSplitOptions.RemoveEmptyEntries);if(scopedProjectId is null&&segments.Length>=3&&Guid.TryParse(segments[2],out var resourceId))
+    {scopedProjectId=segments[1] switch{"scrs"=>await db.SystemChangeRequests.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"baselines"=>await db.CandidateBaselines.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"builds"=>await db.SoftwareBuilds.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"release-campaigns"=>await db.ReleaseCampaigns.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"evidence"=>await db.EvidenceRecords.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),_=>null};}
+    if(scopedProjectId is not null&&!user.IsAdministrator){var programId=await db.Projects.Where(x=>x.Id==scopedProjectId).Select(x=>(Guid?)x.ProgramId).SingleOrDefaultAsync(context.RequestAborted);if(programId is not null&&!user.Programs.Any(x=>x.ProgramId==programId)){context.Response.StatusCode=StatusCodes.Status403Forbidden;await context.Response.WriteAsJsonAsync(new{error="You are not authorized for this Program.",code="program_scope_forbidden"});return;}}
+    await next();
 });
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "AeroLink API" }));
@@ -59,11 +69,11 @@ app.MapPost("/api/auth/login", async (LoginRequest request, HttpContext http, Id
     if (result is null) return Results.Json(new { error = "The username or password is incorrect." }, statusCode: 401);
     http.Response.Cookies.Append(IdentityService.CookieName, result.Token, new CookieOptions { HttpOnly = true, Secure = false, SameSite = SameSiteMode.Lax, Expires = result.ExpiresAt, Path = "/" });
     return Results.Ok(result.User);
-});
+}).RequireRateLimiting("authentication");
 app.MapPost("/api/auth/logout", async (HttpContext http, IdentityService identity, CancellationToken ct) => { await identity.LogoutAsync(http.Request.Cookies[IdentityService.CookieName], http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct); http.Response.Cookies.Delete(IdentityService.CookieName); return Results.NoContent(); });
 app.MapGet("/api/auth/me", (HttpContext http) => Results.Ok(http.UserAccount()));
 
-app.MapPost("/api/showcase/seed", async (FmsShowcaseSeeder seeder, IdentitySeeder identities, EnterpriseWorkspaceSeeder workspace, CancellationToken ct) => { var result=await seeder.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); await workspace.EnsureAllAsync(ct); return Results.Ok(result); });
+app.MapPost("/api/showcase/seed", async (HttpContext http,FmsShowcaseSeeder seeder, IdentitySeeder identities, EnterpriseWorkspaceSeeder workspace, CancellationToken ct) => {if(!http.UserAccount().IsAdministrator)return Results.Forbid();var result=await seeder.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); await workspace.EnsureAllAsync(ct); return Results.Ok(result); });
 
 app.MapGet("/api/programs", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
 {
@@ -206,14 +216,17 @@ app.MapGet("/api/scrs/{id:guid}/download", async (Guid id, string? format, Chang
     var output = await generator.GenerateAsync(id, format ?? "docx", ct); return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
 });
 
-app.MapPut("/api/scrs/{id:guid}/draft", async (Guid id, UpdateScrDraftRequest request, HttpContext http, IScrRepository repository, CancellationToken ct) =>
+app.MapPut("/api/scrs/{id:guid}/draft", async (Guid id, UpdateScrDraftRequest request, HttpContext http, IScrRepository repository,AeroLinkDbContext db, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
     if (scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before saving.", code = "stale_version" });
+    if(request.EditSessionId is null||request.EditSessionVersion is null)return Results.Conflict(new{error="Check out this Draft before saving controlled changes.",code="checkout_required"});
+    var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==request.EditSessionId&&x.ArtifactId==id&&x.ArtifactType=="SCR"&&x.IsExclusive,ct);if(session is null||session.UserName!=http.UserAccount().UserName)return Results.Conflict(new{error="The controlled edit session is missing or belongs to another user.",code="checkout_required"});
     try
     {
-        scr.UpdateDraft(http.UserAccount().UserName, request.Title, request.Problem, request.Analysis, request.Solution,
-            request.RequirementChanges.Select(x => new RequirementChangeDraft(x.BaseNumber, x.Revision, x.Level, x.Kind, x.Statement, x.Rationale, x.VerificationMethod,x.RichText,x.AttributesJson,x.ImpactDispositionJson)).ToList(), DateTimeOffset.UtcNow);
+        var now=DateTimeOffset.UtcNow;scr.UpdateDraft(http.UserAccount().UserName, request.Title, request.Problem, request.Analysis, request.Solution,
+            request.RequirementChanges.Select(x => new RequirementChangeDraft(x.BaseNumber, x.Revision, x.Level, x.Kind, x.Statement, x.Rationale, x.VerificationMethod,x.RichText,x.AttributesJson,x.ImpactDispositionJson)).ToList(), now);
+        session.Close(EditSessionState.Committed,request.EditSessionVersion.Value,now,http.UserAccount().UserName,"Saved and checked in.");
         await repository.SaveAsync(ct);
         return Results.Ok(ApiMap.ScrDetail(scr));
     }
@@ -403,6 +416,7 @@ app.MapPost("/api/scrs/{id:guid}/submit", async (Guid id, SubmitReviewRequest re
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
     if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before submitting.", code = "stale_version" });
+    var now=DateTimeOffset.UtcNow;var editSessions=await db.ArtifactEditSessions.Where(x=>x.ArtifactId==id&&x.ArtifactType=="SCR"&&x.IsExclusive&&x.State==EditSessionState.Active).ToListAsync(ct);foreach(var expired in editSessions.Where(x=>x.ExpiresAt<=now))expired.Expire(now);if(db.ChangeTracker.HasChanges())await db.SaveChangesAsync(ct);var activeEdit=editSessions.FirstOrDefault(x=>x.State==EditSessionState.Active);if(activeEdit is not null)return Results.Conflict(new{error=$"Review cannot begin while {activeEdit.UserName} has the Draft checked out.",code="active_edit_session",activeEdit.ExpiresAt});
     try
     {
         var actor = http.UserAccount();
@@ -411,7 +425,6 @@ app.MapPost("/api/scrs/{id:guid}/submit", async (Guid id, SubmitReviewRequest re
         if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every approver must be an active AeroLink user." });
         var directory = known.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
         var selections = request.Approvers.Select(x => new ApproverSelection(directory[x.UserId].UserName, directory[x.UserId].DisplayName)).ToList();
-        var now = DateTimeOffset.UtcNow;
         var cycle = scr.SubmitForReview(actor.UserName, selections, now, request.Mode);
         foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
             db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"scr:{scr.Id}", scr.Id, now));
@@ -1197,6 +1210,62 @@ app.MapPost("/api/enterprise-hardening/jobs/{id:guid}/retry",async(Guid id,HttpC
 app.MapPost("/api/enterprise-hardening/jobs/{id:guid}/cancel",async(Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>{var job=await db.EnterpriseOperationJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,job.ProjectId,ct))return Results.Forbid();try{job.Cancel(DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}});
 app.MapGet("/api/enterprise-hardening/jobs/{id:guid}/download",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>{var job=await db.EnterpriseOperationJobs.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,job.ProjectId,ct))return Results.Forbid();if(job.State!=EnterpriseJobState.Completed)return Results.BadRequest(new{error="The output is not complete."});using var result=JsonDocument.Parse(job.ResultJson);if(!result.RootElement.TryGetProperty("StorageKey",out var storage)&&!result.RootElement.TryGetProperty("storageKey",out storage))return Results.BadRequest(new{error="This job has no downloadable output."});var fileName=result.RootElement.TryGetProperty("OriginalFileName",out var name)||result.RootElement.TryGetProperty("originalFileName",out name)?name.GetString():$"aerolink-export-{id:N}.csv";return Results.File(store.OpenRead(storage.GetString()!),"text/csv",fileName,enableRangeProcessing:true);});
 
+// Bounded, Program-scoped universal search. Results are identifiers plus stable IDs;
+// the client owns the durable URL so every result can be opened in a new tab.
+app.MapGet("/api/search",async(Guid projectId,string query,int? limit,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
+    var q=(query??string.Empty).Trim().ToLowerInvariant();if(q.Length<2)return Results.Ok(new{query,items=Array.Empty<SearchResultDto>()});var take=Math.Clamp(limit??30,1,50);var items=new List<SearchResultDto>();
+    items.AddRange(await db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.BaseNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"change-request",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),x.Type==ChangeRequestType.Software?"software":"system",x.UpdatedAt)).ToListAsync(ct));
+    var requirementRows=await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)&&(artifact.BaseNumber.ToLower().Contains(q)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q)) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct);
+    items.AddRange(requirementRows.Select(x=>new SearchResultDto(x.Id,"requirement",$"{x.BaseNumber}.{x.Revision:D2}",x.Statement,x.State.ToString(),x.Level==RequirementLevel.System?"system":"software",x.CreatedAt)));
+    items.AddRange(await db.CandidateBaselines.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.BaseNumber.ToLower().Contains(q)||x.Name.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"baseline",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
+    items.AddRange(await db.SoftwareBuilds.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.BuildNumber.ToLower().Contains(q)||x.Description.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"build",x.BuildNumber,x.Description,x.State.ToString(),"software",x.RecordedAt)).ToListAsync(ct));
+    items.AddRange(await db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.BaseNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"test-procedure",x.BaseNumber,x.Title,"Controlled",x.Level==TestProcedureLevel.System?"system":"software",x.CreatedAt)).ToListAsync(ct));
+    items.AddRange(await db.ControlledDocuments.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.DocumentNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"document",x.DocumentNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,"Generated",x.Type==ControlledDocumentType.Sysrd?"system":"software",x.GeneratedAt)).ToListAsync(ct));
+    items.AddRange(await db.ReleaseCampaigns.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.Name.ToLower().Contains(q)).Take(take).Select(x=>new SearchResultDto(x.Id,"release-campaign",x.Name,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
+    var ordered=items.OrderByDescending(x=>x.Identifier.ToLowerInvariant().Contains(q)).ThenByDescending(x=>x.UpdatedAt).ThenBy(x=>x.Identifier).Take(take).ToList();return Results.Ok(new{query,items=ordered});
+});
+
+app.MapGet("/api/artifacts/{kind}/{id:guid}",async(string kind,Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    static Dictionary<string,object?> Details(params (string Key,object? Value)[] values)=>values.ToDictionary(x=>x.Key,x=>x.Value);
+    var normalized=kind.Trim().ToLowerInvariant();
+    if(normalized=="baseline")
+    {var item=await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var members=await db.BaselineRequirements.CountAsync(x=>x.BaselineId==id,ct);var changes=await db.BaselineSelections.CountAsync(x=>x.BaselineId==id,ct);var related=(await db.SoftwareBuilds.AsNoTracking().Where(x=>x.BaselineId==id).Select(x=>new RelatedArtifactDto("build",x.Id,x.BuildNumber,x.Description)).ToListAsync(ct));return Results.Ok(new{kind=normalized,item.Id,identifier=item.DisplayNumber,title=item.Name,state=item.State.ToString(),subtitle="Exact candidate baseline manifest",updatedAt=item.FrozenAt??item.CreatedAt,details=Details(("releaseId",item.ReleaseId),("requirementRevisions",members),("selectedChangeRequests",changes),("contentHash",item.ContentHash),("requirementsHash",item.RequirementsHash),("createdAt",item.CreatedAt)),related});}
+    if(normalized=="build")
+    {var item=await db.SoftwareBuilds.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var baseline=await db.CandidateBaselines.AsNoTracking().SingleAsync(x=>x.Id==item.BaselineId,ct);var related=new[]{new RelatedArtifactDto("baseline",baseline.Id,baseline.DisplayNumber,baseline.Name)};return Results.Ok(new{kind=normalized,item.Id,identifier=item.BuildNumber,title=item.Description,state=item.State.ToString(),subtitle="Immutable software build provenance",updatedAt=item.ReleasedAt??item.RecordedAt,details=Details(("releaseId",item.ReleaseId),("baseline",baseline.DisplayNumber),("recordedBy",item.RecordedBy),("recordedAt",item.RecordedAt),("releasedAt",item.ReleasedAt)),related});}
+    if(normalized=="document")
+    {var item=await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var baseline=await db.CandidateBaselines.AsNoTracking().SingleAsync(x=>x.Id==item.BaselineId,ct);var related=new[]{new RelatedArtifactDto("baseline",baseline.Id,baseline.DisplayNumber,baseline.Name)};return Results.Ok(new{kind=normalized,item.Id,identifier=$"{item.DocumentNumber}.{item.Revision:D2}",title=item.Title,state="Generated",subtitle=$"{item.Type} controlled output",updatedAt=item.GeneratedAt,details=Details(("baseline",baseline.DisplayNumber),("artifactCount",item.ArtifactCount),("contentHash",item.ContentHash),("generatedAt",item.GeneratedAt)),related});}
+    if(normalized=="test-procedure")
+    {var item=await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var revisions=await db.TestProcedureRevisions.AsNoTracking().Where(x=>x.ProcedureId==id).OrderByDescending(x=>x.Revision).ToListAsync(ct);var latest=revisions.FirstOrDefault();var coverage=latest is null?0:await db.TestCoverage.CountAsync(x=>x.ProcedureRevisionId==latest.Id,ct);return Results.Ok(new{kind=normalized,item.Id,identifier=latest is null?item.BaseNumber:$"{item.BaseNumber}.{latest.Revision:D2}",title=item.Title,state=latest?.State.ToString()??"Draft",subtitle=$"{item.Level} verification procedure",updatedAt=latest?.CreatedAt??item.CreatedAt,details=Details(("owner",item.OwnerId),("revisionCount",revisions.Count),("coveredRequirements",coverage),("objective",latest?.Objective),("expectedResult",latest?.ExpectedResult)),related=Array.Empty<RelatedArtifactDto>()});}
+    if(normalized=="release-campaign")
+    {var item=await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var baseline=await db.CandidateBaselines.AsNoTracking().SingleAsync(x=>x.Id==item.BaselineId,ct);var related=new[]{new RelatedArtifactDto("baseline",baseline.Id,baseline.DisplayNumber,baseline.Name)};return Results.Ok(new{kind=normalized,item.Id,identifier=item.Name,title=item.Name,state=item.State.ToString(),subtitle="Governed release readiness and approval campaign",updatedAt=item.ReleasedAt??item.CreatedAt,details=Details(("releaseId",item.ReleaseId),("baseline",baseline.DisplayNumber),("verificationBuildId",item.SoftwareBuildId),("releaseHash",item.ReleaseHash)),related});}
+    return Results.NotFound();
+});
+
+// Exclusive controlled editing for SCR/SWCR Drafts. The pre-existing enterprise
+// merge endpoints remain available for artifacts configured for optimistic editing.
+app.MapGet("/api/edit-sessions/status",async(string artifactType,Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    if(!artifactType.Equals("SCR",StringComparison.OrdinalIgnoreCase))return Results.BadRequest(new{error="This controlled editor currently supports SCR and SWCR Drafts."});var scr=await db.SystemChangeRequests.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(scr is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,scr.ProjectId,ct))return Results.Forbid();var now=DateTimeOffset.UtcNow;var sessions=await db.ArtifactEditSessions.Where(x=>x.ArtifactId==artifactId&&x.ArtifactType=="SCR"&&x.IsExclusive&&x.State==EditSessionState.Active).ToListAsync(ct);foreach(var expired in sessions.Where(x=>x.ExpiresAt<=now))expired.Expire(now);if(db.ChangeTracker.HasChanges())await db.SaveChangesAsync(ct);var active=sessions.FirstOrDefault(x=>x.State==EditSessionState.Active);return Results.Ok(active is null?new{editable=scr.State==ScrState.Draft,locked=false}:new{editable=scr.State==ScrState.Draft,locked=true,sessionId=active.Id,holder=active.UserName,openedAt=active.OpenedAt,lastActivityAt=active.UpdatedAt,expiresAt=active.ExpiresAt,mine=active.UserName==http.UserAccount().UserName});
+});
+app.MapPost("/api/edit-sessions/checkout",async(CheckoutEditSessionRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    if(!request.ArtifactType.Equals("SCR",StringComparison.OrdinalIgnoreCase))return Results.BadRequest(new{error="This controlled editor currently supports SCR and SWCR Drafts."});var scr=await db.SystemChangeRequests.Include(x=>x.RequirementChanges).SingleOrDefaultAsync(x=>x.Id==request.ArtifactId,ct);if(scr is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,scr.ProjectId,ct))return Results.Forbid();var actor=http.UserAccount();if(scr.State!=ScrState.Draft)return Results.Conflict(new{error="Approved, frozen, or in-review change requests cannot be checked out for editing."});if(scr.AuthorId!=actor.UserName&&!actor.IsAdministrator)return Results.Forbid();var now=DateTimeOffset.UtcNow;var sessions=await db.ArtifactEditSessions.Where(x=>x.ArtifactId==scr.Id&&x.ArtifactType=="SCR"&&x.IsExclusive&&x.State==EditSessionState.Active).ToListAsync(ct);foreach(var expired in sessions.Where(x=>x.ExpiresAt<=now))expired.Expire(now);await db.SaveChangesAsync(ct);var active=sessions.FirstOrDefault(x=>x.State==EditSessionState.Active);if(active is not null){if(active.UserName==actor.UserName){var latest=await db.ArtifactDraftSnapshots.AsNoTracking().Where(x=>x.SessionId==active.Id).OrderByDescending(x=>x.Sequence).FirstOrDefaultAsync(ct);return Results.Ok(EditSessionMap(active,latest?.DraftJson??active.DraftJson,true));}return Results.Conflict(new{error=$"{active.UserName} has this artifact checked out.",code="exclusive_lock",holder=active.UserName,active.OpenedAt,lastActivityAt=active.UpdatedAt,active.ExpiresAt,readOnly=true});}
+    var draft=ControlledScrDraft(scr);var hash=EnterpriseRequirementsService.Hash(Encoding.UTF8.GetBytes(draft));var session=new ArtifactEditSession(scr.ProjectId,"SCR",scr.Id,null,hash,draft,actor.UserName,now,true,request.LeaseMinutes??15);db.ArtifactEditSessions.Add(session);db.ArtifactDraftSnapshots.Add(new(scr.ProjectId,session.Id,"SCR",scr.Id,1,draft,hash,actor.UserName,now));db.AuditEvents.Add(new(scr.Id,"ArtifactCheckedOut",actor.UserName,$"Checked out {scr.DisplayNumber} until {session.ExpiresAt:O}.",now));try{await db.SaveChangesAsync(ct);}catch(DbUpdateException){return Results.Conflict(new{error="Another user obtained the edit lock first. Refresh to see the current holder.",code="exclusive_lock"});}return Results.Created($"/api/edit-sessions/{session.Id}",EditSessionMap(session,draft,false));
+});
+app.MapPut("/api/edit-sessions/{id:guid}/autosave",async(Guid id,AutosaveEditSessionRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    if(Encoding.UTF8.GetByteCount(request.DraftJson)>2_000_000)return Results.BadRequest(new{error="The recoverable draft exceeds the 2 MB controlled autosave limit."});try{using var parsed=JsonDocument.Parse(request.DraftJson);if(parsed.RootElement.ValueKind!=JsonValueKind.Object)return Results.BadRequest(new{error="The autosave payload must be a JSON object."});}catch(JsonException){return Results.BadRequest(new{error="The autosave payload is not valid JSON."});}var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==id&&x.IsExclusive,ct);if(session is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct)||session.UserName!=http.UserAccount().UserName)return Results.Forbid();try{var now=DateTimeOffset.UtcNow;session.Save(request.DraftJson,request.ExpectedVersion,now,request.LeaseMinutes??15);var hash=EnterpriseRequirementsService.Hash(Encoding.UTF8.GetBytes(request.DraftJson));db.ArtifactDraftSnapshots.Add(new(session.ProjectId,session.Id,session.ArtifactType,session.ArtifactId,session.Version,request.DraftJson,hash,http.UserAccount().UserName,now));await db.SaveChangesAsync(ct);return Results.Ok(new{session.Id,session.Version,session.UpdatedAt,session.ExpiresAt,status="Saved",hash});}catch(DomainException ex){return Results.Conflict(new{error=ex.Message,code="edit_session_conflict"});}
+});
+app.MapPost("/api/edit-sessions/{id:guid}/heartbeat",async(Guid id,HeartbeatEditSessionRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==id&&x.IsExclusive,ct);if(session is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct)||session.UserName!=http.UserAccount().UserName)return Results.Forbid();try{session.Heartbeat(request.ExpectedVersion,DateTimeOffset.UtcNow,request.LeaseMinutes??15);await db.SaveChangesAsync(ct);return Results.Ok(new{session.Id,session.Version,session.UpdatedAt,session.ExpiresAt});}catch(DomainException ex){return Results.Conflict(new{error=ex.Message});}});
+app.MapPost("/api/edit-sessions/{id:guid}/discard",async(Guid id,CloseEditSessionRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==id&&x.IsExclusive,ct);if(session is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct)||session.UserName!=http.UserAccount().UserName)return Results.Forbid();try{var now=DateTimeOffset.UtcNow;session.Close(EditSessionState.Abandoned,request.ExpectedVersion,now,http.UserAccount().UserName,string.IsNullOrWhiteSpace(request.Reason)?"Draft checkout discarded.":request.Reason);db.AuditEvents.Add(new(session.ArtifactId,"EditSessionDiscarded",http.UserAccount().UserName,session.ClosedReason??"Draft checkout discarded.",now));await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.Conflict(new{error=ex.Message});}});
+app.MapPost("/api/edit-sessions/{id:guid}/force-unlock",async(Guid id,ForceUnlockEditSessionRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+{var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==id&&x.IsExclusive,ct);if(session is null)return Results.NotFound();var actor=http.UserAccount();if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct))return Results.Forbid();if(!actor.IsAdministrator&&!await http.HasProjectRoleAsync(db,identity,session.ProjectId,ct,ProgramRole.ConfigurationManager))return Results.Forbid();try{var now=DateTimeOffset.UtcNow;session.ForceUnlock(actor.UserName,request.Reason,now);db.AuditEvents.Add(new(session.ArtifactId,"EditSessionForceUnlocked",actor.UserName,$"Force-unlocked {session.ArtifactType} held by {session.UserName}. Reason: {request.Reason}",now));db.SecurityAuditEvents.Add(new("ForcedUnlock",actor.UserName,$"{session.ArtifactType}:{session.ArtifactId}","Success",request.Reason,http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}});
+
 app.MapPost("/api/enterprise-hardening/edit-sessions",async(OpenEditSessionRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
 {
     var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==request.ArtifactId&&x.ProjectId==request.ProjectId,ct);if(artifact is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,request.ProjectId,ct))return Results.Forbid();var latest=await db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifact.Id).OrderByDescending(x=>x.Revision).FirstAsync(ct);var snapshot=JsonSerializer.Serialize(new{latest.Statement,latest.Rationale,latest.VerificationMethod});var hash=EnterpriseRequirementsService.Hash(Encoding.UTF8.GetBytes(snapshot));var session=new ArtifactEditSession(request.ProjectId,"Requirement",artifact.Id,latest.Id,hash,snapshot,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.ArtifactEditSessions.Add(session);await db.SaveChangesAsync(ct);var competing=await db.ArtifactEditSessions.AsNoTracking().Where(x=>x.ArtifactId==artifact.Id&&x.Id!=session.Id&&x.State==EditSessionState.Active).Select(x=>new{x.Id,x.UserName,x.UpdatedAt,x.Version}).ToListAsync(ct);return Results.Created($"/api/enterprise-hardening/edit-sessions/{session.Id}",new{session.Id,session.Version,session.BaseSnapshotHash,session.DraftJson,competing});
@@ -1230,6 +1299,9 @@ app.MapGet("/api/verification-coverage", async (Guid projectId, Guid? baselineId
     return Results.Ok(new { baselineId, buildId, total = items.Count, covered = items.Count(x => x.covered), verified = items.Count(x => x.verified), uncovered = items.Count(x => !x.covered), items });
 });
 
+static string ControlledScrDraft(SystemChangeRequest scr)=>JsonSerializer.Serialize(new{scrVersion=scr.Version,title=scr.Title,problem=scr.Problem,analysis=scr.Analysis,solution=scr.Solution,requirementChanges=scr.RequirementChanges.Select(x=>new{baseNumber=x.BaseNumber,revision=x.Revision,level=x.Level.ToString(),kind=x.Kind.ToString(),statement=x.Statement,rationale=x.Rationale,verificationMethod=x.VerificationMethod,richText=x.RichText,attributesJson=x.AttributesJson,impactDispositionJson=x.ImpactDispositionJson})});
+static object EditSessionMap(ArtifactEditSession session,string draftJson,bool resumed)=>new{session.Id,session.ArtifactType,session.ArtifactId,session.Version,session.UserName,session.OpenedAt,lastActivityAt=session.UpdatedAt,session.ExpiresAt,session.BaseSnapshotHash,draftJson,resumed,readOnly=false,status="Saved"};
+
 app.Run();
 
 public partial class Program { }
@@ -1238,7 +1310,7 @@ record LoginRequest(string UserName, string Password);
 record CreateScrRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, ChangeRequestType Type = ChangeRequestType.System);
 record DraftRequirementRequest(string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod,string RichText="",string AttributesJson="{}",string ImpactDispositionJson="{}",bool IsDerived=false);
 record CreateScrDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, List<DraftRequirementRequest> RequirementChanges, ChangeRequestType Type = ChangeRequestType.System);
-record UpdateScrDraftRequest(long ExpectedVersion, string ActorId, string Title, string Problem, string Analysis, string Solution, List<DraftRequirementRequest> RequirementChanges);
+record UpdateScrDraftRequest(long ExpectedVersion, string ActorId, string Title, string Problem, string Analysis, string Solution, List<DraftRequirementRequest> RequirementChanges,Guid? EditSessionId=null,long? EditSessionVersion=null);
 record CreateWorkspaceRequest(string ProgramName, string ProgramCode, string ProjectName, string SoftwareProduct, string InitialRelease, bool InitialReleaseIsReleased);
 record CreateReleaseRequest(Guid ProjectId, string Version, Guid? PredecessorReleaseId);
 record RetargetScrRequest(Guid TargetReleaseId, string Reason);
@@ -1285,8 +1357,15 @@ record CreateEnterpriseJobRequest(Guid ProjectId,string JobType,string RequestJs
 record OpenEditSessionRequest(Guid ProjectId,Guid ArtifactId);
 record SaveEditSessionRequest(long ExpectedVersion,string DraftJson);
 record ResolveMergeConflictRequest(string ResolutionJson);
+record CheckoutEditSessionRequest(string ArtifactType,Guid ArtifactId,int? LeaseMinutes=null);
+record AutosaveEditSessionRequest(long ExpectedVersion,string DraftJson,int? LeaseMinutes=null);
+record HeartbeatEditSessionRequest(long ExpectedVersion,int? LeaseMinutes=null);
+record CloseEditSessionRequest(long ExpectedVersion,string? Reason=null);
+record ForceUnlockEditSessionRequest(string Reason);
 record CreateIntegrityCheckpointRequest(Guid ProjectId);
 record PerformanceSample(string Name,long TargetMs,long P95Ms,bool Passed,List<long> Timings);
+record SearchResultDto(Guid Id,string Kind,string Identifier,string Title,string State,string Discipline,DateTimeOffset? UpdatedAt);
+record RelatedArtifactDto(string Kind,Guid Id,string Identifier,string Title);
 
 static class IdentityHttpExtensions
 {

@@ -3,7 +3,7 @@ using AeroLink.Domain.Common;
 namespace AeroLink.Domain.Requirements;
 
 public enum ControlledAttachmentState { Active, Superseded, Withdrawn }
-public enum EditSessionState { Active, Committed, Abandoned, Conflict }
+public enum EditSessionState { Active, Committed, Abandoned, Conflict, Expired, ForceUnlocked }
 public enum IntegrityCheckpointState { Healthy, Attention, Failed }
 
 public sealed class ControlledAttachment
@@ -47,8 +47,8 @@ public sealed class ControlledAttachment
 public sealed class ArtifactEditSession
 {
     private ArtifactEditSession() { }
-    public ArtifactEditSession(Guid projectId, string artifactType, Guid artifactId, Guid? revisionId, string baseSnapshotHash, string draftJson, string actor, DateTimeOffset now)
-    { Id = Guid.NewGuid(); ProjectId = projectId; ArtifactType = artifactType.Trim(); ArtifactId = artifactId; RevisionId = revisionId; BaseSnapshotHash = baseSnapshotHash; DraftJson = draftJson; UserName = actor.ToLowerInvariant(); State = EditSessionState.Active; OpenedAt = now; UpdatedAt = now; Version = 1; }
+    public ArtifactEditSession(Guid projectId, string artifactType, Guid artifactId, Guid? revisionId, string baseSnapshotHash, string draftJson, string actor, DateTimeOffset now, bool exclusive=false, int leaseMinutes=15)
+    { if(leaseMinutes is < 2 or > 120)throw new DomainException("Edit-session leases must be between 2 and 120 minutes.");Id = Guid.NewGuid(); ProjectId = projectId; ArtifactType = artifactType.Trim(); ArtifactId = artifactId; RevisionId = revisionId; BaseSnapshotHash = baseSnapshotHash; DraftJson = draftJson; UserName = actor.ToLowerInvariant(); State = EditSessionState.Active; OpenedAt = now; UpdatedAt = now; ExpiresAt=now.AddMinutes(leaseMinutes);IsExclusive=exclusive;LockKey=exclusive?$"{ArtifactType.ToLowerInvariant()}:{artifactId:N}":null;Version = 1; }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public string ArtifactType { get; private set; } = "";
@@ -60,11 +60,39 @@ public sealed class ArtifactEditSession
     public EditSessionState State { get; private set; }
     public DateTimeOffset OpenedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
+    public DateTimeOffset ExpiresAt { get; private set; }
     public DateTimeOffset? ClosedAt { get; private set; }
+    public bool IsExclusive { get; private set; }
+    public string? LockKey { get; private set; }
+    public string? ClosedBy { get; private set; }
+    public string? ClosedReason { get; private set; }
     public long Version { get; private set; }
-    public void Save(string draftJson, long expectedVersion, DateTimeOffset now) { EnsureActive(expectedVersion); DraftJson = draftJson; UpdatedAt = now; Version++; }
-    public void Close(EditSessionState state, long expectedVersion, DateTimeOffset now) { EnsureActive(expectedVersion); State = state; UpdatedAt = now; ClosedAt = now; Version++; }
-    private void EnsureActive(long expectedVersion) { if (Version != expectedVersion) throw new DomainException("The editing session changed; refresh before merging."); if (State != EditSessionState.Active) throw new DomainException("This editing session is no longer active."); }
+    public void Save(string draftJson, long expectedVersion, DateTimeOffset now,int leaseMinutes=15) { EnsureActive(expectedVersion,now); DraftJson = draftJson; UpdatedAt = now;ExpiresAt=now.AddMinutes(leaseMinutes); Version++; }
+    public void Heartbeat(long expectedVersion,DateTimeOffset now,int leaseMinutes=15){EnsureActive(expectedVersion,now);UpdatedAt=now;ExpiresAt=now.AddMinutes(leaseMinutes);Version++;}
+    public void Close(EditSessionState state, long expectedVersion, DateTimeOffset now,string? actor=null,string? reason=null) { EnsureActive(expectedVersion,now); State = state; UpdatedAt = now; ClosedAt = now;ClosedBy=actor;ClosedReason=reason?.Trim();LockKey=null; Version++; }
+    public void Expire(DateTimeOffset now){if(State!=EditSessionState.Active||ExpiresAt>now)return;State=EditSessionState.Expired;UpdatedAt=now;ClosedAt=now;ClosedReason="Inactive lock lease expired.";LockKey=null;Version++;}
+    public void ForceUnlock(string actor,string reason,DateTimeOffset now){if(State!=EditSessionState.Active)throw new DomainException("Only an active edit session can be force-unlocked.");if(string.IsNullOrWhiteSpace(reason))throw new DomainException("A forced-unlock reason is required.");State=EditSessionState.ForceUnlocked;UpdatedAt=now;ClosedAt=now;ClosedBy=actor;ClosedReason=reason.Trim();LockKey=null;Version++;}
+    private void EnsureActive(long expectedVersion,DateTimeOffset now) { if (Version != expectedVersion) throw new DomainException("The editing session changed; refresh before continuing."); if (State != EditSessionState.Active) throw new DomainException("This editing session is no longer active.");if(ExpiresAt<=now)throw new DomainException("This editing session expired because it was inactive."); }
+}
+
+public sealed class ArtifactDraftSnapshot
+{
+    private ArtifactDraftSnapshot() { }
+    public ArtifactDraftSnapshot(Guid projectId,Guid sessionId,string artifactType,Guid artifactId,long sequence,string draftJson,string sha256,string actor,DateTimeOffset now)
+    {if(sequence<1)throw new DomainException("Draft snapshot sequence must be positive.");Id=Guid.NewGuid();ProjectId=projectId;SessionId=sessionId;ArtifactType=artifactType.Trim();ArtifactId=artifactId;Sequence=sequence;DraftJson=draftJson;Sha256=sha256.ToLowerInvariant();CreatedBy=actor.ToLowerInvariant();CreatedAt=now;}
+    public Guid Id { get; private set; }
+    public Guid ProjectId { get; private set; }
+    public Guid SessionId { get; private set; }
+    public string ArtifactType { get; private set; }="";
+    public Guid ArtifactId { get; private set; }
+    public long Sequence { get; private set; }
+    public string DraftJson { get; private set; }="{}";
+    public string Sha256 { get; private set; }="";
+    public string CreatedBy { get; private set; }="";
+    public DateTimeOffset CreatedAt { get; private set; }
+    public string? RestoredBy { get; private set; }
+    public DateTimeOffset? RestoredAt { get; private set; }
+    public void RecordRestore(string actor,DateTimeOffset now){RestoredBy=actor;RestoredAt=now;}
 }
 
 public sealed class ArtifactMergeConflict

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login } from "./auth";
+import { apiBase, apiLogin, login } from "./auth";
 
 test("enterprise control proves content, queries, jobs, concurrency, redlines, and qualification", async ({
   page,
@@ -7,7 +7,8 @@ test("enterprise control proves content, queries, jobs, concurrency, redlines, a
 }) => {
   test.setTimeout(120_000);
   const documentLabel = `FMS controlled interface note ${Date.now()}`;
-  const seed = await request.post("http://127.0.0.1:5080/api/showcase/seed", {
+  await apiLogin(request);
+  const seed = await request.post(`${apiBase}/api/showcase/seed`, {
     timeout: 60_000,
   });
   expect(seed.ok(), await seed.text()).toBeTruthy();
@@ -15,7 +16,7 @@ test("enterprise control proves content, queries, jobs, concurrency, redlines, a
   await page
     .locator(".program > select:not(.releaseSelector)")
     .selectOption({ label: "Flight Management System Live Program" });
-  await page.getByRole("button", { name: /Enterprise Control/ }).click();
+  await page.getByRole("link", { name: /Enterprise Control/ }).click();
   await expect(
     page.getByRole("heading", { name: "Enterprise Control" }),
   ).toBeVisible();

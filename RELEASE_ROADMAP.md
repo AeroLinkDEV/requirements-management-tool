@@ -105,6 +105,12 @@ Before implementation, refine derived-requirement workflows, allocation/refineme
 
 ## Enterprise Maturity Program
 
+### 2026-07-13 enterprise control increment delivered
+
+The current application now includes a complete first vertical increment for durable routing and SCR/SWCR exclusive editing: context-preserving artifact URLs, browser navigation, breadcrumbs, quick navigation, bounded Program-aware search, renewable checkout, server autosave snapshots, read-only observers, check-in/discard, forced unlock auditing, and review/checkout incompatibility enforcement. The same increment adds authentication rate limiting, broad Program-scope request enforcement, isolated browser-test topology, verified backup integrity, isolated PostgreSQL restore tooling, diagnostics, and controlled stop/start operations.
+
+The next increment should extend the proven edit-session contract to requirement proposals, specification structures, test procedures, trace links, and release-planning drafts; complete email outbox delivery; broaden universal search facets and pagination; and add browser journeys for the remaining controlled document, verification/retest, and release-approval paths.
+
 The market benchmark in [ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md](ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md) establishes a maturity program that cuts across the original domain phases:
 
 1. **Enterprise Requirements Workspace:** configurable schemas, specification/module authoring, rich content, collaboration, universal search, saved views, bulk operations, redlines, and governed CSV/Excel onboarding.

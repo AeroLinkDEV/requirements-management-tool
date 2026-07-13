@@ -1,8 +1,8 @@
 # Aerospace Development Assurance Platform
 
-This repository is the documentation-first foundation for a future secure, on-premises platform that manages controlled aerospace system and software lifecycle data.
+This repository contains the working, local/on-premises AeroLink Aerospace Development Assurance Platform and its authoritative product-definition records. AeroLink manages controlled system and software requirements, change, review, traceability, verification evidence, immutable baselines, builds, documents, and release campaigns without claiming certification or tool qualification.
 
-The product definition reached its initial working baseline and implementation has begun. The repository now contains both the preserved documentation foundation and an early production-oriented application skeleton.
+The production-oriented application uses React/TypeScript, ASP.NET Core, Entity Framework, and PostgreSQL. Its FMS workspace retains released version 1.5 as immutable history and version 1.6 as an explicitly user-controlled in-work successor.
 
 Release evolution is user-controlled: authorized users plan an in-work successor (for example 1.6), approve the exact SCR/SWCR revisions they intend to include, assemble a candidate over an exact materialized predecessor baseline, complete verification and release approvals, and only then release it. The tool never auto-creates or auto-approves 1.6, 1.7, or later product baselines.
 
@@ -11,6 +11,8 @@ Release evolution is user-controlled: authorized users plan an in-work successor
 After a reboot—or whenever the local site is unavailable—double-click [`START_AEROLINK.bat`](START_AEROLINK.bat) in the repository root. It starts or verifies PostgreSQL, the API, and the website; waits for the authentication endpoint; opens `http://127.0.0.1:5173`; and writes diagnostic logs under `product/.local/logs/`. It is safe to run again while AeroLink is already running.
 
 Run [`BACKUP_AEROLINK.bat`](BACKUP_AEROLINK.bat) manually or through Windows Task Scheduler for a complete local backup. It captures PostgreSQL, controlled evidence, and runtime configuration into an integrity-manifested archive under `product/.local/backups/`, with 30-day retention by default. Production IT must copy these archives to protected storage and periodically prove restore.
+
+Operational shortcuts are also provided for [stopping AeroLink](STOP_AEROLINK.bat), [diagnostics](AEROLINK_DIAGNOSTICS.bat), [backup verification](VERIFY_AEROLINK_BACKUP.bat), and isolated [restore validation](RESTORE_AEROLINK.bat). The safety model and production recovery procedure are documented in [Operations and recovery](product/docs/OPERATIONS.md).
 
 ## First Product Slice
 
@@ -47,6 +49,8 @@ The [AeroLink product application](product/README.md) is separate from the origi
 | [System-level workflow](SYSTEM_LEVEL_WORKFLOW.md) | Decision-complete first-slice behavior and paper scenarios |
 | [Feature catalog](FEATURE_CATALOG.md) | Stable, phased capability inventory |
 | [Release roadmap](RELEASE_ROADMAP.md) | Incremental delivery strategy and exit criteria |
+| [Massive enterprise update report](MASSIVE_ENTERPRISE_UPDATE_REPORT.md) | Implemented scope, validation evidence, limitations, and next update |
+| [Operations and recovery](product/docs/OPERATIONS.md) | Startup, stop, diagnostics, backup verification, isolated restore, and production recovery |
 | [Quality attributes](QUALITY_ATTRIBUTES.md) | Security, integrity, operations, and production targets |
 | [Decisions and open questions](DECISIONS_AND_OPEN_QUESTIONS.md) | Accepted decisions, assumptions, and unresolved choices |
 | [Source material traceability](SOURCE_MATERIAL_TRACEABILITY.md) | Disposition of the original Word and Markdown inputs |
