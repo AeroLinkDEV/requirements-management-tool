@@ -6,6 +6,10 @@ The product definition reached its initial working baseline and implementation h
 
 Release evolution is user-controlled: authorized users plan an in-work successor (for example 1.6), approve the exact SCR/SWCR revisions they intend to include, assemble a candidate over an exact materialized predecessor baseline, complete verification and release approvals, and only then release it. The tool never auto-creates or auto-approves 1.6, 1.7, or later product baselines.
 
+## One-click local startup
+
+After a reboot—or whenever the local site is unavailable—double-click [`START_AEROLINK.bat`](START_AEROLINK.bat) in the repository root. It starts or verifies PostgreSQL, the API, and the website; waits for the authentication endpoint; opens `http://127.0.0.1:5173`; and writes diagnostic logs under `product/.local/logs/`. It is safe to run again while AeroLink is already running.
+
 ## First Product Slice
 
 The first usable vertical slice is system-level:
