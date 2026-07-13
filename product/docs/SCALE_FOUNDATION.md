@@ -43,8 +43,9 @@ $env:AEROLINK_SCALE_CONNECTION='Host=127.0.0.1;Port=54329;Database=aerolink_scal
 Enterprise Requirements Workspace qualification:
 
 ```powershell
-& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- workspace --profile small --reset
+& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- workspace --profile medium --reset
 & "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- benchmark
+& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- load --users 150 --iterations 8
 ```
 
 The `--reset` safeguard works only when the connection string names an `aerolink_scale` database.
@@ -94,10 +95,25 @@ Warm-query p95 observations over five samples:
 
 This proves the persistence/query shape at 10,000 requirements on one local workstation. It does not yet prove 150 concurrent browser users, cold-cache behavior, attachment throughput, deep trace expansion, or production network/identity overhead.
 
+## 50,000-requirement and 150-client result
+
+Run on July 12, 2026 using local PostgreSQL 18.4 and deterministic seed 4754:
+
+- 50,000 stable Requirement artifacts, immutable active revisions, exact baseline memberships, revision profiles, and specification placements
+- deterministic materialization and synchronization: 24.7 seconds
+- enterprise workspace page of 100: 150 ms warm p95 against a 500 ms target
+- structured System/Test filter: 10 ms warm p95
+- specification-tree aggregation: 14 ms warm p95
+- 150 simultaneous database clients, eight mixed operations per client: 1,200 operations with zero failures
+- 401.8 operations/second; 16 ms p50, 1,265 ms p95, and 2,461 ms p99
+- the 150-client p95 passed the 2,000 ms engineering gate
+
+The load command mixes paging, verification aggregation, specification-tree queries, and identifier search using separate pooled database contexts. It demonstrates persistence/query concurrency on this workstation; it is not yet a claim of 150 simultaneous rendered browser sessions or a production service-level guarantee.
+
 ## Next scale gates
 
 - Add a deep and realistically distributed trace/coverage network to the 10,000-requirement qualification dataset.
-- Add 150-user mixed-workload testing.
+- Add 150-browser/API-session mixed-workload testing on production-like application topology.
 - Test cold-cache behavior and realistic search terms.
 - Test backups, restores, evidence storage, and failure recovery.
 - Record query plans and detect regressions in continuous integration.

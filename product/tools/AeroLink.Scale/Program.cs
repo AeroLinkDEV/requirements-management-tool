@@ -18,7 +18,8 @@ await using var db = new AeroLinkDbContext(options);
 if (command == "generate") await Generate();
 else if (command == "workspace") await GenerateWorkspace();
 else if (command == "benchmark") await Benchmark();
-else Console.WriteLine("Usage: dotnet run -- generate|workspace|benchmark [--profile smoke|small|medium] [--reset]");
+else if (command == "load") await ConcurrentLoad();
+else Console.WriteLine("Usage: dotnet run -- generate|workspace|benchmark|load [--profile smoke|small|medium] [--reset] [--users 150] [--iterations 8]");
 
 string? Option(string name) { var index = Array.IndexOf(args, name); return index >= 0 && index + 1 < args.Length ? args[index + 1] : null; }
 
@@ -93,4 +94,34 @@ async Task GenerateWorkspace()
     var scr=new SystemChangeRequest("SCR-00000001",0,project.Id,release.Id,"Establish enterprise-scale qualification baseline","A repeatable large repository is required.","Generate mixed-level immutable requirements and exact baseline membership.","Establish the controlled qualification dataset.","scale.author",now);scr.AddRequirementChange("scale.author","SYSR-00000001",0,RequirementLevel.System,RequirementChangeKind.Introduce,"The qualification FMS shall support enterprise-scale repository validation.","Scale authority.","Test",now);var approvers=new[]{new ApproverSelection("scale.reviewer","Scale Reviewer")};scr.SubmitForReview("scale.author",approvers,now.AddMinutes(1));scr.ApproveActiveStage("scale.reviewer",now.AddMinutes(2));var baseline=new CandidateBaseline("SYSBL-00000001",0,project.Id,release.Id,null,"10,000-requirement qualification baseline","scale.cm",now);baseline.Select(scr,"scale.cm",now.AddMinutes(3));baseline.Freeze("scale.cm",now.AddMinutes(4));var manifest=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"enterprise-workspace:{requirementCount}:4754"))).ToLowerInvariant();baseline.MarkRequirementsMaterialized("scale.cm",manifest,requirementCount,now.AddMinutes(5));db.AddRange(scr,baseline);await db.SaveChangesAsync();
     var sw=Stopwatch.StartNew();var counters=new Dictionary<RequirementLevel,int>{{RequirementLevel.System,0},{RequirementLevel.HighLevel,0},{RequirementLevel.LowLevel,0}};for(var i=1;i<=requirementCount;i++){var level=i<=requirementCount*15/100?RequirementLevel.System:i<=requirementCount*50/100?RequirementLevel.HighLevel:RequirementLevel.LowLevel;var number=++counters[level];var prefix=level switch{RequirementLevel.System=>"SYSR",RequirementLevel.HighLevel=>"HLR",_=>"LLR"};var artifact=new RequirementArtifact(project.Id,$"{prefix}-{number:D8}",level,now.AddSeconds(i));var revision=new RequirementRevision(artifact.Id,0,$"The qualification FMS shall provide deterministic {level} capability {number:D8} at enterprise scale.","Generated using deterministic qualification seed 4754.",(i%4) switch{0=>"Analysis",1=>"Test",2=>"Inspection",_=>"Demonstration"},RequirementRevisionState.Active,scr.Id,baseline.Id,now.AddSeconds(i));db.AddRange(artifact,revision,new BaselineRequirementSelection(baseline.Id,artifact.Id,revision.Id));if(i%500==0){await db.SaveChangesAsync();db.ChangeTracker.Clear();Console.WriteLine($"Materialized {i:N0}/{requirementCount:N0} requirements...");}}
     await db.SaveChangesAsync();await new EnterpriseRequirementsService(db).SynchronizeProjectAsync(project.Id,"scale.workspace");sw.Stop();Console.WriteLine($"Generated a mixed-level {requirementCount:N0}-requirement Enterprise Requirements Workspace in {sw.Elapsed.TotalSeconds:N1}s using deterministic seed 4754.");
+}
+
+async Task ConcurrentLoad()
+{
+    await db.Database.MigrateAsync();
+    var projectId=await db.Projects.Select(x=>x.Id).FirstAsync();
+    var users=int.TryParse(Option("--users"),out var u)?Math.Clamp(u,1,500):150;
+    var iterations=int.TryParse(Option("--iterations"),out var i)?Math.Clamp(i,1,100):8;
+    var samples=new System.Collections.Concurrent.ConcurrentBag<long>();var failures=new System.Collections.Concurrent.ConcurrentBag<string>();
+    var total=Stopwatch.StartNew();
+    await Task.WhenAll(Enumerable.Range(0,users).Select(async worker=>
+    {
+        try
+        {
+            await using var workerDb=new AeroLinkDbContext(new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options);
+            for(var turn=0;turn<iterations;turn++)
+            {
+                var sw=Stopwatch.StartNew();var mode=(worker+turn)%4;
+                if(mode==0)_=await workerDb.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderBy(x=>x.BaseNumber).Skip((worker*37)%1000).Take(100).Select(x=>new{x.Id,x.BaseNumber,x.Level}).ToListAsync();
+                else if(mode==1)_=await workerDb.RequirementRevisions.AsNoTracking().Where(x=>workerDb.Requirements.Any(a=>a.Id==x.ArtifactId&&a.ProjectId==projectId)&&x.VerificationMethod=="Test").CountAsync();
+                else if(mode==2)_=await workerDb.RequirementSpecifications.AsNoTracking().Where(x=>x.ProjectId==projectId).Select(x=>new{x.Id,count=workerDb.SpecificationNodes.Count(n=>n.SpecificationId==x.Id)}).ToListAsync();
+                else _=await workerDb.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.BaseNumber.Contains($"{(worker%100)+1:D4}")).Take(25).ToListAsync();
+                sw.Stop();samples.Add(sw.ElapsedMilliseconds);
+            }
+        }
+        catch(Exception ex){failures.Add(ex.GetType().Name+": "+ex.Message);}
+    }));
+    total.Stop();var ordered=samples.Order().ToArray();long Percentile(double p)=>ordered.Length==0?0:ordered[Math.Min(ordered.Length-1,(int)Math.Ceiling(ordered.Length*p)-1)];
+    var result=new{users,iterations,operations=ordered.Length,failures=failures.Count,totalSeconds=Math.Round(total.Elapsed.TotalSeconds,2),throughputPerSecond=total.Elapsed.TotalSeconds==0?0:Math.Round(ordered.Length/total.Elapsed.TotalSeconds,1),p50Ms=Percentile(.50),p95Ms=Percentile(.95),p99Ms=Percentile(.99),targetP95Ms=2000,passed=failures.IsEmpty&&Percentile(.95)<=2000};
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(result,new System.Text.Json.JsonSerializerOptions{WriteIndented=true}));if(!result.passed)Environment.ExitCode=1;
 }

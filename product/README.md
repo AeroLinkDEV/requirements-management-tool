@@ -50,7 +50,13 @@ This directory contains the real application foundation. The visual showcase rem
 - requirement watchers, threaded notifications, accountable assignments, due/overdue work queues, completion concurrency, and a combined engineering operations center
 - advanced permission-scoped requirement filters for lifecycle state, owner, source SCR/SWCR, open discussions, verification, tag, specification, and deterministic sorting
 - reusable import-mapping records, persistent interchange-job history, and downloadable CSV error reports
-- isolated PostgreSQL qualification workspace generator with 10,000 mixed-level Requirement/Revision records and measured enterprise workspace benchmarks
+- versioned controlled attachment vault with exact-revision association, protected storage, SHA-256 integrity verification, provenance, retrieval, supersession, and immutable history
+- comprehensive visual redlines spanning statement, rationale, rich content, Program attributes, verification method, and exact-revision attachment changes
+- visual structured-query builder with personal/shared permission-aware worklists and stable URLs that reopen the saved view
+- durable background export/integrity jobs with idempotency, progress, attempts, retry/cancel state, attributable outcomes, and downloadable controlled CSV output
+- multi-session edit detection with optimistic versions, retained base/local/remote content, explicit three-way resolution, and no silent overwrite
+- operator-facing Enterprise Control dashboard with repository, file-storage, job, editor, conflict, performance, and integrity-checkpoint signals
+- isolated PostgreSQL qualification workspace generator with 50,000 mixed-level Requirement/Revision records, measured enterprise workspace benchmarks, and a 150-client mixed-load gate
 
 ## Run locally
 

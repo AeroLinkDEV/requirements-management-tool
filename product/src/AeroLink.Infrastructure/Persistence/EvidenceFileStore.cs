@@ -36,6 +36,14 @@ public sealed class EvidenceFileStore
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }
     public Stream OpenRead(string storageKey) => File.OpenRead(Resolve(storageKey));
+    public bool Exists(string storageKey) => File.Exists(Resolve(storageKey));
+    public async Task<string> ComputeSha256Async(string storageKey, CancellationToken ct)
+    {
+        await using var stream = File.OpenRead(Resolve(storageKey));
+        using var sha = SHA256.Create();
+        var hash = await sha.ComputeHashAsync(stream, ct);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
     public void Delete(string storageKey) { var path = Resolve(storageKey); if (File.Exists(path)) File.Delete(path); }
     private string Resolve(string storageKey)
     {

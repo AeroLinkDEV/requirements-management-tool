@@ -59,6 +59,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ArtifactAssignment> ArtifactAssignments => Set<ArtifactAssignment>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<RequirementImportMapping> RequirementImportMappings => Set<RequirementImportMapping>();
+    public DbSet<ControlledAttachment> ControlledAttachments => Set<ControlledAttachment>();
+    public DbSet<ArtifactEditSession> ArtifactEditSessions => Set<ArtifactEditSession>();
+    public DbSet<ArtifactMergeConflict> ArtifactMergeConflicts => Set<ArtifactMergeConflict>();
+    public DbSet<EnterpriseIntegrityCheckpoint> EnterpriseIntegrityCheckpoints => Set<EnterpriseIntegrityCheckpoint>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -358,7 +362,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<EnterpriseOperationJob>(b =>
         {
-            b.ToTable("enterprise_operation_jobs"); b.HasKey(x=>x.Id); b.Property(x=>x.JobType).HasMaxLength(80).IsRequired(); b.Property(x=>x.RequestJson).IsRequired(); b.Property(x=>x.ResultJson).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt});
+            b.ToTable("enterprise_operation_jobs"); b.HasKey(x=>x.Id); b.Property(x=>x.JobType).HasMaxLength(80).IsRequired(); b.Property(x=>x.RequestJson).IsRequired(); b.Property(x=>x.ResultJson).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.IdempotencyKey).HasMaxLength(120).IsRequired();b.Property(x=>x.LastError).HasMaxLength(4000);b.HasIndex(x=>new{x.ProjectId,x.CreatedAt});b.HasIndex(x=>new{x.ProjectId,x.IdempotencyKey}).IsUnique();
         });
         modelBuilder.Entity<RequirementInterchangeJob>(b =>
         {
@@ -379,6 +383,22 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<RequirementImportMapping>(b =>
         {
             b.ToTable("requirement_import_mappings");b.HasKey(x=>x.Id);b.Property(x=>x.Name).HasMaxLength(200).IsRequired();b.Property(x=>x.MappingJson).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.Name}).IsUnique();
+        });
+        modelBuilder.Entity<ControlledAttachment>(b =>
+        {
+            b.ToTable("controlled_attachments");b.HasKey(x=>x.Id);b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired();b.Property(x=>x.Label).HasMaxLength(300).IsRequired();b.Property(x=>x.Description).HasMaxLength(4000);b.Property(x=>x.OriginalFileName).HasMaxLength(260).IsRequired();b.Property(x=>x.ContentType).HasMaxLength(200).IsRequired();b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired();b.Property(x=>x.StorageKey).HasMaxLength(500).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.UploadedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.State});b.HasIndex(x=>new{x.LogicalId,x.Version}).IsUnique();b.HasIndex(x=>new{x.ProjectId,x.Sha256});b.HasOne<ControlledAttachment>().WithMany().HasForeignKey(x=>x.SupersedesId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ArtifactEditSession>(b =>
+        {
+            b.ToTable("artifact_edit_sessions");b.HasKey(x=>x.Id);b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired();b.Property(x=>x.BaseSnapshotHash).HasMaxLength(64).IsRequired();b.Property(x=>x.DraftJson).IsRequired();b.Property(x=>x.UserName).HasMaxLength(100).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.Version).IsConcurrencyToken();b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.State});b.HasIndex(x=>new{x.UserName,x.UpdatedAt});
+        });
+        modelBuilder.Entity<ArtifactMergeConflict>(b =>
+        {
+            b.ToTable("artifact_merge_conflicts");b.HasKey(x=>x.Id);b.Property(x=>x.BaseJson).IsRequired();b.Property(x=>x.LocalJson).IsRequired();b.Property(x=>x.RemoteJson).IsRequired();b.Property(x=>x.ResolutionJson);b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.ResolvedBy).HasMaxLength(100);b.HasIndex(x=>new{x.ProjectId,x.ArtifactId,x.ResolvedAt});
+        });
+        modelBuilder.Entity<EnterpriseIntegrityCheckpoint>(b =>
+        {
+            b.ToTable("enterprise_integrity_checkpoints");b.HasKey(x=>x.Id);b.Property(x=>x.ManifestHash).HasMaxLength(64).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.Detail).HasMaxLength(4000);b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.CreatedAt});
         });
     }
 

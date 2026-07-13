@@ -8,6 +8,7 @@ import VerificationCenter from "./VerificationCenter";
 import LifecycleExplorer from "./LifecycleExplorer";
 import ReleaseCampaignCenter from "./ReleaseCampaignCenter";
 import RequirementsWorkspace from "./RequirementsWorkspace";
+import EnterpriseControlCenter from "./EnterpriseControlCenter";
 import { AdministrationCenter, LoginPage, MyWorkCenter } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import "./App.css";
@@ -59,7 +60,7 @@ function App() {
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
     [selectedScrId, setSelectedScrId] = useState(""),
-    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "requirements" | "verification" | "lifecycle" | "release" | "mywork" | "admin">("dashboard");
+    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "requirements" | "verification" | "lifecycle" | "release" | "mywork" | "admin" | "enterprise">(()=>new URLSearchParams(location.search).has('enterpriseView')?'requirements':'dashboard');
   useEffect(()=>{fetch(`${API}/api/auth/me`).then(async r=>setUser(r.ok?await r.json():null)).catch(()=>setUser(null))},[]);
   const loadWorkspaces = useCallback(async () => {
     try {
@@ -247,7 +248,7 @@ function App() {
         onOpenScr={(id) => { setSelectedScrId(id); setView("scr"); }}
       />
     );
-  if(view==="requirements"&&project)return <RequirementsWorkspace api={API} projectId={project.project.id} releases={project.releases} user={user} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}}/>;
+  if(view==="requirements"&&project)return <RequirementsWorkspace api={API} projectId={project.project.id} releases={project.releases} user={user} initialViewId={new URLSearchParams(location.search).get('enterpriseView')||undefined} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}}/>;
   if (view === "verification" && project && release)
     return <VerificationCenter api={API} projectId={project.project.id} releaseId={release.id} onBack={() => setView("dashboard")}/>;
   if (view === "lifecycle" && project)
@@ -256,6 +257,7 @@ function App() {
     return <ReleaseCampaignCenter api={API} projectId={project.project.id} releases={project.releases} user={user} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}} onOpenVerification={()=>setView("verification")} onOpenDocuments={()=>setView("lifecycle")}/>;
   if(view==="mywork"&&project)return <MyWorkCenter api={API} projectId={project.project.id} user={user} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}} onOpenRelease={()=>setView("release")}/>;
   if(view==="admin"&&active)return <AdministrationCenter api={API} programId={active.program.id} onBack={()=>setView("dashboard")}/>;
+  if(view==="enterprise"&&project)return <EnterpriseControlCenter api={API} projectId={project.project.id} onBack={()=>setView("dashboard")}/>;
   return (
     <div className="shell">
       <aside>
@@ -281,6 +283,7 @@ function App() {
         </div>
         <nav>
           <button onClick={()=>setView("mywork")}>◎&nbsp; My Work</button>
+          <button onClick={()=>setView("enterprise")}>◆&nbsp; Enterprise Control</button>
           {[
             "▦  Command Center",
             "◇  Change Requests",

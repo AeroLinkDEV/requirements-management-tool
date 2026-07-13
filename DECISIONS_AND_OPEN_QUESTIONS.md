@@ -276,6 +276,14 @@ Future entries use:
 - **Rationale:** Enterprise-speed authoring must not create a second approval path or weaken the accepted change-authority model.
 - **Consequences:** Rich proposal content, Program fields, relationship impact, assignments, and dispositions are included in the exact SCR/SWCR review snapshot and audit story.
 
+### DEC-034 - Enterprise Control Records Surround but Do Not Replace Lifecycle Authority
+
+- **Date:** 2026-07-12
+- **Status:** Accepted
+- **Decision:** Controlled files, saved queries, background jobs, editing sessions, merge conflicts, and integrity checkpoints are attributable Project-scoped control records around authoritative artifacts. They do not independently approve, baseline, or release lifecycle content.
+- **Rationale:** Enterprise usability and operability require durable supporting state, while change authority must remain unambiguous and approved history immutable.
+- **Consequences:** Attachments retain every superseded version and digest; jobs retain idempotency and outcomes; concurrent work retains base/local/remote content; saved links reapply current permissions; and integrity checkpoints describe an observed repository state rather than certifying the product.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

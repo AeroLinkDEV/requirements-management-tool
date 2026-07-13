@@ -134,8 +134,8 @@ public sealed class SavedRequirementView
 public sealed class EnterpriseOperationJob
 {
     private EnterpriseOperationJob() { }
-    public EnterpriseOperationJob(Guid projectId,string jobType,string requestJson,int itemCount,string actor,DateTimeOffset now)
-    { Id=Guid.NewGuid();ProjectId=projectId;JobType=jobType;RequestJson=requestJson;State=EnterpriseJobState.Preview;ItemCount=itemCount;CreatedBy=actor;CreatedAt=now; }
+    public EnterpriseOperationJob(Guid projectId,string jobType,string requestJson,int itemCount,string actor,DateTimeOffset now,string? idempotencyKey=null)
+    { Id=Guid.NewGuid();ProjectId=projectId;JobType=jobType;RequestJson=requestJson;State=EnterpriseJobState.Preview;ItemCount=itemCount;CreatedBy=actor;CreatedAt=now;UpdatedAt=now;IdempotencyKey=string.IsNullOrWhiteSpace(idempotencyKey)?Guid.NewGuid().ToString("N"):idempotencyKey.Trim(); }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public string JobType { get; private set; }="";
@@ -147,8 +147,19 @@ public sealed class EnterpriseOperationJob
     public string ResultJson { get; private set; }="{}";
     public string CreatedBy { get; private set; }="";
     public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
-    public void Complete(int succeeded,int failed,string result,DateTimeOffset now){State=failed==0?EnterpriseJobState.Completed:EnterpriseJobState.Failed;SucceededCount=succeeded;FailedCount=failed;ResultJson=result;CompletedAt=now;}
+    public DateTimeOffset? StartedAt { get; private set; }
+    public string IdempotencyKey { get; private set; }="";
+    public int Attempt { get; private set; }
+    public int ProgressPercent { get; private set; }
+    public string? LastError { get; private set; }
+    public void Start(DateTimeOffset now){if(State is not (EnterpriseJobState.Preview or EnterpriseJobState.Failed))throw new DomainException("Only previewed or failed jobs can start.");State=EnterpriseJobState.Running;StartedAt=now;UpdatedAt=now;Attempt++;LastError=null;}
+    public void ReportProgress(int percent,DateTimeOffset now){if(State!=EnterpriseJobState.Running)throw new DomainException("Only running jobs report progress.");ProgressPercent=Math.Clamp(percent,0,99);UpdatedAt=now;}
+    public void Complete(int succeeded,int failed,string result,DateTimeOffset now){State=failed==0?EnterpriseJobState.Completed:EnterpriseJobState.Failed;SucceededCount=succeeded;FailedCount=failed;ResultJson=result;ProgressPercent=100;CompletedAt=now;UpdatedAt=now;LastError=failed==0?null:$"{failed} item(s) failed.";}
+    public void Fail(string error,DateTimeOffset now){State=EnterpriseJobState.Failed;LastError=error.Trim();UpdatedAt=now;CompletedAt=now;}
+    public void Retry(DateTimeOffset now){if(State!=EnterpriseJobState.Failed)throw new DomainException("Only failed jobs can be retried.");State=EnterpriseJobState.Preview;ProgressPercent=0;CompletedAt=null;UpdatedAt=now;LastError=null;}
+    public void Cancel(DateTimeOffset now){if(State is EnterpriseJobState.Completed or EnterpriseJobState.Cancelled)throw new DomainException("This job is already final.");State=EnterpriseJobState.Cancelled;UpdatedAt=now;CompletedAt=now;}
 }
 
 public sealed class RequirementInterchangeJob

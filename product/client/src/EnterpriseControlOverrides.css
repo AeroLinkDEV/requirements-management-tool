@@ -1,0 +1,18 @@
+.enterpriseTabs {
+  flex-direction: row !important;
+  align-items: flex-end !important;
+}
+
+.enterpriseTabs button {
+  width: auto !important;
+}
+
+.jobTable a {
+  border: 1px solid #c9d6de;
+  background: white;
+  color: #315b76;
+  border-radius: 5px;
+  padding: 5px 7px;
+  font-size: 8px;
+  text-decoration: none;
+}

@@ -23,6 +23,7 @@ public static class DependencyInjection
         services.AddScoped<RequirementBaselineMaterializer>();
         services.AddScoped<FmsShowcaseSeeder>();
         services.AddSingleton<EvidenceFileStore>();
+        services.AddHostedService<EnterpriseJobWorker>();
         services.AddScoped<ReleaseReadinessService>();
         services.AddScoped<ControlledOutputGenerator>();
         services.AddScoped<ChangeRequestOutputGenerator>();
