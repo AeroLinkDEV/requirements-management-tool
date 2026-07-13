@@ -197,6 +197,23 @@ export default function ReleaseCampaignCenter({
     await load();
   };
   const activeApproval = detail?.approvals.find((x) => x.state === "Active");
+  const renderGate = (gate: Gate) => (
+    <article className={gate.complete ? "complete" : "blocked"} key={gate.code}>
+      <div><span>{gate.complete ? "✓" : "!"}</span><b>{gate.name}</b></div>
+      <strong>{gate.completed}/{gate.total}</strong>
+      <p>{gate.complete ? "Gate complete." : gate.detail}</p>
+      <small>{gate.complete ? "Configuration evidence is current." : gate.action}</small>
+    </article>
+  );
+  const renderImpact = (item: Impact) => (
+    <article key={item.id}>
+      <div><span role="button" tabIndex={0} onClick={() => onOpenScr(item.scrId)}>{item.scr}</span><i className={item.state.toLowerCase()}>{item.state}</i></div>
+      <b>{item.kind} · {item.artifactReference}</b>
+      <p>{item.description}</p>
+      {item.rationale && <small>{item.rationale}</small>}
+      {item.state === "Pending" && <button onClick={() => setImpact(item)}>Disposition impact</button>}
+    </article>
+  );
   return (
     <main className="campaignPage">
       <header>
@@ -266,36 +283,14 @@ export default function ReleaseCampaignCenter({
               </button>
             )}
           </section>
-          <section className="gateGrid">
-            {detail.readiness.gates.map((g) => (
-              <article
-                className={g.complete ? "complete" : "blocked"}
-                key={g.code}
-              >
-                <div>
-                  <span>{g.complete ? "✓" : "!"}</span>
-                  <b>{g.name}</b>
-                </div>
-                <strong>
-                  {g.completed}/{g.total}
-                </strong>
-                <p>{g.complete ? "Gate complete." : g.detail}</p>
-                <small>
-                  {g.complete ? "Configuration evidence is current." : g.action}
-                </small>
-              </article>
-            ))}
+          <section className="readinessFocus">
+            <div className="sectionHeading"><div><p className="eyebrow">RELEASE DECISION</p><h2>{detail.readiness.readyForRelease?"All release gates are complete":"Resolve the remaining release blockers"}</h2></div><b>{detail.readiness.gates.filter(x=>!x.complete).length} blocking</b></div>
+            {detail.readiness.gates.some(x=>!x.complete)
+              ? <section className="gateGrid">{detail.readiness.gates.filter(x=>!x.complete).map(renderGate)}</section>
+              : <div className="allGatesClear"><b>✓ Ready for release authority</b><span>All configuration evidence is current.</span></div>}
+            <details className="completedGates"><summary>{detail.readiness.gates.filter(x=>x.complete).length} completed gates <span>Review evidence</span></summary><section className="gateGrid">{detail.readiness.gates.filter(x=>x.complete).map(renderGate)}</section></details>
           </section>
-          <ReleaseExecutionWorkbench
-            api={api}
-            detail={detail}
-            builds={builds}
-            onRefresh={load}
-            onError={setError}
-            onOpenScr={onOpenScr}
-            onOpenVerification={onOpenVerification}
-            onOpenDocuments={onOpenDocuments}
-          />
+          <details className="campaignDisclosure"><summary><div><b>Release execution workbench</b><span>Drive controlled blockers to authoritative evidence</span></div><em>Open workbench</em></summary><ReleaseExecutionWorkbench api={api} detail={detail} builds={builds} onRefresh={load} onError={setError} onOpenScr={onOpenScr} onOpenVerification={onOpenVerification} onOpenDocuments={onOpenDocuments}/></details>
           <div className="campaignGrid">
             <section className="campaignCard impacts">
               <div className="campaignTitle">
@@ -311,30 +306,8 @@ export default function ReleaseCampaignCenter({
                   pending
                 </b>
               </div>
-              {detail.impacts.map((x) => (
-                <article key={x.id}>
-                  <div>
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => onOpenScr(x.scrId)}
-                    >
-                      {x.scr}
-                    </span>
-                    <i className={x.state.toLowerCase()}>{x.state}</i>
-                  </div>
-                  <b>
-                    {x.kind} · {x.artifactReference}
-                  </b>
-                  <p>{x.description}</p>
-                  {x.rationale && <small>{x.rationale}</small>}
-                  {x.state === "Pending" && (
-                    <button onClick={() => setImpact(x)}>
-                      Disposition impact
-                    </button>
-                  )}
-                </article>
-              ))}
+              {detail.impacts.filter(x=>x.state==="Pending").map(renderImpact)}
+              {!!detail.impacts.filter(x=>x.state!=="Pending").length&&<details className="closedImpacts"><summary>{detail.impacts.filter(x=>x.state!=="Pending").length} completed dispositions <span>Show history</span></summary><div>{detail.impacts.filter(x=>x.state!=="Pending").map(renderImpact)}</div></details>}
             </section>
             <aside>
               <section className="campaignCard">
@@ -419,30 +392,11 @@ export default function ReleaseCampaignCenter({
                     </div>
                   ))}
               </section>
-              <section className="campaignCard">
-                <div className="campaignTitle">
-                  <div>
-                    <h2>Campaign history</h2>
-                    <p>Append-only release events</p>
-                  </div>
-                </div>
-                {detail.events.map((x, i) => (
-                  <div className="campaignEvent" key={i}>
-                    <i />
-                    <div>
-                      <b>{x.eventType.replace(/([A-Z])/g, " $1").trim()}</b>
-                      <p>{x.detail}</p>
-                      <small>
-                        {x.actorId} · {new Date(x.occurredAt).toLocaleString()}
-                      </small>
-                    </div>
-                  </div>
-                ))}
-              </section>
+              <details className="campaignCard campaignHistory"><summary><div><b>Campaign history</b><span>Append-only release events</span></div><em>{detail.events.length}</em></summary><div>{detail.events.map((x, i) => <div className="campaignEvent" key={i}><i/><div><b>{x.eventType.replace(/([A-Z])/g, " $1").trim()}</b><p>{x.detail}</p><small>{x.actorId} · {new Date(x.occurredAt).toLocaleString()}</small></div></div>)}</div></details>
             </aside>
           </div>
           {comparison && (
-            <section className="campaignCard comparison">
+            <details className="campaignDisclosure comparisonDisclosure"><summary><div><b>Compare FMS {comparison.fromRelease} → {comparison.toRelease}</b><span>Requirement and proposed-change differences</span></div><em>Open comparison</em></summary><section className="campaignCard comparison">
               <div className="campaignTitle">
                 <div>
                   <h2>
@@ -478,7 +432,7 @@ export default function ReleaseCampaignCenter({
                   </small>
                 </article>
               ))}
-            </section>
+            </section></details>
           )}
         </>
       )}

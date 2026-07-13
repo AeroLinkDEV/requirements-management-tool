@@ -25,6 +25,7 @@ import "./Onboarding.css";
 import "./DashboardInteractions.css";
 import "./Showcase.css";
 import "./PortalNavigation.css";
+import "./ShowcaseRefresh.css";
 
 type Scr = {
   id: string;
@@ -74,16 +75,39 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;
   onProgram:(id:string)=>void;onProject:(id:string)=>void;onRelease:(id:string)=>void;onNavigate:(view:View,discipline?:Discipline)=>void;onSearch:()=>void;onSignOut:()=>void;
 }) {
-  const active=workspaces.find(x=>x.program.id===activeId)??workspaces[0],project=active?.projects.find(x=>x.project.id===selectedProjectId)??active?.projects[0],release=project?.releases.find(x=>x.id===selectedReleaseId)??project?.releases.at(-1);
-  const item=(label:string,target:View,icon:string,area:Discipline="system")=> <a href={context?routePath(context,target,area):"#"} className={view===target&&discipline===area?"active":""} onClick={event=>{event.preventDefault();onNavigate(target,area)}}><i>{icon}</i>{label}</a>;
-  return <aside className="appNavigation"><div className="brand"><span>▲</span><b>AeroLink</b></div><button className="quickSearch" onClick={onSearch}><span>⌕</span> Search &amp; navigate <kbd>Ctrl K</kbd></button><div className="program"><small>ACTIVE CONTEXT</small><select value={activeId} onChange={event=>onProgram(event.target.value)} aria-label="Active program">{workspaces.map(x=><option value={x.program.id} key={x.program.id}>{x.program.name}</option>)}</select>{active?.projects.length>1?<select value={project?.project.id??""} onChange={event=>onProject(event.target.value)} aria-label="Active project">{active.projects.map(x=><option value={x.project.id} key={x.project.id}>{x.project.name}</option>)}</select>:<span>{project?.project.name}</span>}<select className="releaseSelector" value={release?.id??""} onChange={event=>onRelease(event.target.value)} aria-label="Active release">{project?.releases.map(item=><option value={item.id} key={item.id}>{item.version} · {item.isReleased?"Released":"In work"}</option>)}</select></div>
-    <nav className="primaryNavigation"><details className="navGroup" open><summary>MY WORK</summary>{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</details>
-      <details className="navGroup" open><summary>SYSTEMS ENGINEERING</summary>{item("New System SCR","createSystemScr","+")}{item("System Change Requests","history","◇","system")}{item("System Requirements","requirements","≡","system")}</details>
-      <details className="navGroup" open><summary>SOFTWARE ENGINEERING</summary>{item("New Software SWCR","createSoftwareChange","+")}{item("Software Change Requests","history","◇","software")}{item("HLR & LLR Requirements","requirements","≡","software")}</details>
-      <details className="navGroup" open><summary>VERIFICATION</summary>{item("System Verification","verification","✓","systemTest")}{item("Software Verification","verification","✓","softwareTest")}{item("Traceability & Outputs","lifecycle","↗","system")}</details>
-      <details className="navGroup" open><summary>RELEASE & CONFIGURATION</summary>{item("Release Planning","planning","⑂")}{item("Baselines","baselines","⌘")}{item("Release Campaign","release","◆")}{item("Enterprise Control","enterprise","◈")}</details>
-      {user.isAdministrator&&<details className="navGroup" open><summary>ENTERPRISE ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}</details>}
-    </nav><footer><div className="avatar">{user.displayName.split(" ").map(x=>x[0]).join("").slice(0,2)}</div><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button></footer></aside>;
+  const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
+  const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
+  const release = project?.releases.find(x => x.id === selectedReleaseId) ?? project?.releases.at(-1);
+  const item = (label:string,target:View,icon:string,area:Discipline="system") => (
+    <a href={context ? routePath(context,target,area) : "#"} className={view===target&&discipline===area?"active":""} onClick={event=>{event.preventDefault();onNavigate(target,area)}}>
+      <i aria-hidden="true">{icon}</i><span>{label}</span>
+    </a>
+  );
+  const engineeringView = ["createSystemScr","createSoftwareChange","history","requirements","scr"].includes(view);
+  const releaseView = ["planning","baselines","release","enterprise"].includes(view);
+  return (
+    <aside className="appNavigation">
+      <div className="brand"><span aria-hidden="true">▲</span><b>AeroLink</b></div>
+      <button className="quickSearch" onClick={onSearch}><span aria-hidden="true">⌕</span> Search &amp; navigate <kbd>Ctrl K</kbd></button>
+      <div className="program">
+        <small>ACTIVE CONTEXT</small>
+        <select value={activeId} onChange={event=>onProgram(event.target.value)} aria-label="Active program">{workspaces.map(x=><option value={x.program.id} key={x.program.id}>{x.program.name}</option>)}</select>
+        {active?.projects.length>1
+          ? <select value={project?.project.id??""} onChange={event=>onProject(event.target.value)} aria-label="Active project">{active.projects.map(x=><option value={x.project.id} key={x.project.id}>{x.project.name}</option>)}</select>
+          : <span title={project?.project.name}>{project?.project.name}</span>}
+        <select className="releaseSelector" value={release?.id??""} onChange={event=>onRelease(event.target.value)} aria-label="Active release">{project?.releases.map(item=><option value={item.id} key={item.id}>{item.version} · {item.isReleased?"Released":"In work"}</option>)}</select>
+      </div>
+      <nav className="primaryNavigation" aria-label="Primary navigation">
+        <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
+        <details className="navGroup" open={engineeringView&&discipline!=="software"}><summary>SYSTEMS ENGINEERING</summary>{item("New System SCR","createSystemScr","+")}{item("System Change Requests","history","◇","system")}{item("System Requirements","requirements","≡","system")}</details>
+        <details className="navGroup" open={engineeringView&&discipline==="software"}><summary>SOFTWARE ENGINEERING</summary>{item("New Software SWCR","createSoftwareChange","+")}{item("Software Change Requests","history","◇","software")}{item("HLR & LLR Requirements","requirements","≡","software")}</details>
+        <details className="navGroup" open={view==="verification"||view==="lifecycle"}><summary>VERIFICATION</summary>{item("System Verification","verification","✓","systemTest")}{item("Software Verification","verification","✓","softwareTest")}{item("Traceability & Outputs","lifecycle","↗","system")}</details>
+        <details className="navGroup" open={releaseView}><summary>RELEASE & CONFIGURATION</summary>{item("Release Planning","planning","⑂")}{item("Baselines","baselines","⌘")}{item("Release Campaign","release","◆")}{item("Enterprise Control","enterprise","◈")}</details>
+        {user.isAdministrator&&<details className="navGroup" open={view==="admin"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}</details>}
+      </nav>
+      <footer><div className="avatar">{user.displayName.split(" ").map(x=>x[0]).join("").slice(0,2)}</div><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button></footer>
+    </aside>
+  );
 }
 
 function App() {
@@ -274,7 +298,7 @@ function App() {
   if(context&&location.pathname==="/")history.replaceState({},"",routePath(context,"dashboard"));
   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} context={context} onProgram={changeProgram} onProject={changeProject} onRelease={changeRelease} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onSignOut={async()=>{await fetch(`${API}/api/auth/logout`,{method:"POST"});setUser(null)}}/>;
   const labels:Record<View,string>={dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements",verification:"Verification",lifecycle:"Traceability",release:"Release Campaign",planning:"Release Planning",mywork:"My Work",admin:"Administration",enterprise:"Enterprise Control",artifact:"Artifact",notFound:"Not Found"};
-  const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span>{active?.program.name}</span><b>›</b><span>{project?.project.name}</span><b>›</b><span>{release?.version}</span><b>›</b><strong>{labels[view]}</strong></nav><button onClick={async()=>navigator.clipboard.writeText(location.href)}>Copy link</button></div>;
+  const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b><span>{release?.version}</span><b aria-hidden="true">›</b><strong>{labels[view]}</strong></nav><div className="contextActions"><span className="contextReleaseState">{release?.isReleased?"Released":"In work"}</span><button aria-label="Copy link to this page" onClick={async()=>navigator.clipboard.writeText(location.href)}>Copy link</button></div></div>;
   const palette=context?<CommandPalette api={API} context={context} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
   const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{contextBar}{content}</div>{palette}</div>;
   if(view==="notFound")return inShell(<main className="artifactState"><div><span>?</span><h1>Page not found</h1><p>This AeroLink route is not recognized. Use quick navigation to find an authorized workspace or artifact.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
@@ -428,10 +452,11 @@ function App() {
         onBack={() => navigate("dashboard")}
       />
     );
+  const activeCampaign=campaigns.find(x=>x.releaseId===release?.id);
   return (
     <div className="shell">
       {navigation}
-      <main>
+      <main className="commandCenterPage">
         <header>
           <div>
             <p className="eyebrow">
@@ -461,15 +486,14 @@ function App() {
           </div>
           <div className="readiness">
             <b>
-              {campaigns.find((x) => x.releaseId === release?.id)?.readiness
-                .percent ?? 0}
+              {activeCampaign?.readiness.percent ?? 0}
               %
             </b>
             <span>Release readiness</span>
             <div>
               <i
                 style={{
-                  width: `${campaigns.find((x) => x.releaseId === release?.id)?.readiness.percent ?? 0}%`,
+                  width: `${activeCampaign?.readiness.percent ?? 0}%`,
                 }}
               />
             </div>
@@ -541,7 +565,7 @@ function App() {
               )}
             </div>
             {scrs.length ? (
-              scrs.map((scr) => (
+              scrs.slice(0,5).map((scr) => (
                 <div
                   className="row"
                   key={scr.id}
@@ -579,32 +603,20 @@ function App() {
                 </button>
               </div>
             )}
+            {scrs.length>5&&<div className="panelFooter"><span>Showing the 5 most recent of {scrs.length} change requests</span><button onClick={()=>navigate("history",discipline)}>View complete history →</button></div>}
           </div>
           <div className="panel attention">
             <div className="panelhead">
               <div>
-                <h3>Workspace readiness</h3>
-                <p>Foundation for controlled development</p>
+                <h3>{metrics.totalScrs?"Release attention":"Workspace readiness"}</h3>
+                <p>{metrics.totalScrs?"The decisions and work that need focus now":"Foundation for controlled development"}</p>
               </div>
             </div>
-            <div className="signal green">
-              <b>Program workspace</b>
-              <strong>✓</strong>
-              <p>{active?.program.name} is configured</p>
-            </div>
-            <div className="signal blue">
-              <b>Initial release</b>
-              <strong>✓</strong>
-              <p>{release?.version} establishes the starting context</p>
-            </div>
-            <div className="signal amber">
-              <b>Next action</b>
-              <strong>1</strong>
-              <p>Create or import the first controlled artifact</p>
-            </div>
+            {metrics.totalScrs?<><div className={metrics.inReview?"signal amber":"signal green"}><b>Awaiting review decisions</b><strong>{metrics.inReview}</strong><p>{metrics.inReview?"Controlled changes are waiting for assigned reviewers":"No change requests are waiting for review"}</p></div><div className={metrics.draft?"signal blue":"signal green"}><b>Draft change packages</b><strong>{metrics.draft}</strong><p>{metrics.draft?"Authors still have controlled work in progress":"No draft change packages remain"}</p></div><div className={activeCampaign?.readiness.readyForRelease?"signal green":"signal amber"}><b>Release readiness</b><strong>{activeCampaign?.readiness.percent??0}%</strong><p>{activeCampaign?.readiness.readyForRelease?"All release gates are complete":"Open the release campaign to resolve remaining blockers"}</p></div></>:<><div className="signal green"><b>Program workspace</b><strong>✓</strong><p>{active?.program.name} is configured</p></div><div className="signal blue"><b>Initial release</b><strong>✓</strong><p>{release?.version} establishes the starting context</p></div><div className="signal amber"><b>Next action</b><strong>1</strong><p>Create or import the first controlled artifact</p></div></>}
           </div>
         </section>
       </main>
+      {palette}
     </div>
   );
 }

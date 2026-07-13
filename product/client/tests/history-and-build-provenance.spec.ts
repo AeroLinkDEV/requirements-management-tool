@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login } from './auth'
+import { apiBase, apiLogin, login, openNavigationGroup } from './auth'
 
 test('searches full history and proves exact software build contents', async ({ page, request }) => {
   await apiLogin(request)
@@ -22,19 +22,20 @@ test('searches full history and proves exact software build contents', async ({ 
 
   await login(page)
   await page.locator('.program > select:not(.releaseSelector)').selectOption({ label: programName })
+  await openNavigationGroup(page,'SOFTWARE ENGINEERING')
   await page.getByRole('link', { name: 'Software Change Requests' }).click()
-  await expect(page.getByRole('heading', { name: 'Artifact & Build Explorer' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Software Change Requests' })).toBeVisible()
   await page.getByLabel('Search history').fill('round robin')
   await expect(page.getByText(scr.displayNumber)).toBeVisible()
   await page.getByRole('button', { name: /Requirement History/ }).click()
   await expect(page.getByText(scr.requirementChanges[0].displayNumber)).toBeVisible()
   await page.getByLabel('Search history').fill('')
 
+  await page.getByRole('button', { name: /Software Builds/ }).click()
   await page.getByRole('button', { name: 'Record Software Build' }).click()
   await page.getByPlaceholder('e.g. FMS-3.3.0-rc1').fill('FMS-3.3.0-rc1')
   await page.getByLabel('Frozen baseline').selectOption(baseline.id)
   await page.getByRole('button', { name: 'Record Build', exact: true }).click()
-  await page.getByRole('button', { name: /Software Builds/ }).click()
   await page.getByRole('button', { name: /FMS-3.3.0-rc1/ }).click()
   await expect(page.getByText(scr.displayNumber)).toBeVisible()
   await expect(page.getByText(new RegExp(`${scr.requirementChanges[0].displayNumber}.*Introduce`))).toBeVisible()

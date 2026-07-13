@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiBase, apiLogin, login } from "./auth";
+import { apiBase, apiLogin, login, openNavigationGroup } from "./auth";
 
 test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle exploration", async ({
   page,
@@ -27,6 +27,7 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
     page.getByText("Total SCRs").locator("..").locator("strong"),
   ).toBeVisible();
 
+  await openNavigationGroup(page,"SOFTWARE ENGINEERING");
   await page.getByRole("link", { name: "HLR & LLR Requirements" }).click();
   await expect(
     page.getByRole("heading", { name: "Requirements Workspace" }),
@@ -34,6 +35,7 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await page.getByLabel("Search requirements").fill("LLR-00000700");
   await expect(page.getByText(/LLR-00000700/).first()).toBeVisible();
   await page.getByRole("link", { name: /Command Center/ }).first().click();
+  await openNavigationGroup(page,"VERIFICATION");
   await page.getByRole("link", { name: "Traceability & Outputs" }).click();
   await expect(
     page.getByRole("heading", { name: "Traceability & Documents" }),
@@ -44,15 +46,16 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await expect(page.getByText("HLRD-00000015.00")).toBeVisible();
   await expect(page.getByText("LLRD-00000015.00")).toBeVisible();
   await page.getByRole("link", { name: /Command Center/ }).first().click();
+  await openNavigationGroup(page,"RELEASE & CONFIGURATION");
   await page.getByRole("link", { name: "Release Campaign" }).click();
   await expect(
     page.getByRole("heading", { name: "FMS 1.6 Release Campaign" }),
   ).toBeVisible();
   await expect(page.getByText("release gates complete")).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Drive every blocker to evidence" }),
-  ).toBeVisible();
+  await page.getByText("Release execution workbench", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Drive every blocker to evidence" })).toBeVisible();
   expect(await page.locator(".executionPanel.changes article").count()).toBeGreaterThanOrEqual(8);
+  await page.getByText(/Compare FMS 1.5/).click();
   await expect(
     page.getByRole("heading", { name: "FMS 1.5 → 1.6" }),
   ).toBeVisible();

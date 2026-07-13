@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login } from './auth'
+import { apiBase, apiLogin, login, openNavigationGroup } from './auth'
 
 test('deep links survive refresh, universal search resolves fragments, and checkout is read-only to another user',async({page,browser,request})=>{
  test.setTimeout(90_000)
@@ -7,6 +7,7 @@ test('deep links survive refresh, universal search resolves fragments, and check
  const seed=await request.post(`${apiBase}/api/showcase/seed`,{timeout:60_000});expect(seed.ok(),await seed.text()).toBeTruthy()
  await login(page)
  await page.locator('.program > select:not(.releaseSelector)').selectOption({label:'Flight Management System Live Program'})
+ await openNavigationGroup(page,'SYSTEMS ENGINEERING')
  await page.getByRole('link',{name:'System Requirements'}).click()
  await page.getByLabel('Search requirements').fill('0150')
  const requirement=page.getByText(/SYSR-00000150\.\d{2}/).first();await expect(requirement).toBeVisible();await requirement.click()
@@ -16,7 +17,8 @@ test('deep links survive refresh, universal search resolves fragments, and check
  await page.keyboard.press('Escape')
 
  await page.getByRole('link',{name:/Command Center/}).click()
- await page.getByRole('button',{name:/SWCR-00000078\.00/}).click()
+ await page.getByRole('button',{name:/Search & navigate/}).click();await page.getByPlaceholder(/Search pages, SCRs/).fill('SWCR-00000078')
+ await page.getByRole('dialog').getByRole('link',{name:/SWCR-00000078\.00/}).click()
  await page.getByRole('button',{name:'Check out & edit'}).click()
  await page.getByLabel('Title').fill(`Autosaved controlled checkout ${Date.now()}`)
  await page.waitForTimeout(3200);await expect(page.locator('.autosaveState')).toContainText('Saved')

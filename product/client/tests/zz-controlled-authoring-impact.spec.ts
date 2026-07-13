@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiBase, apiLogin, login } from "./auth";
+import { apiBase, apiLogin, login, openNavigationGroup } from "./auth";
 
 test("engineer analyzes impact and creates a rich controlled requirement proposal", async ({
   page,
@@ -16,10 +16,12 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await page
     .locator(".program > select:not(.releaseSelector)")
     .selectOption({ label: "Flight Management System Live Program" });
+  await openNavigationGroup(page,"SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "System Requirements" }).click();
   await expect(
     page.getByRole("heading", { name: "Requirements Workspace" }),
   ).toBeVisible();
+  await page.getByText("Workspace tools", { exact: true }).click();
   await page.getByRole("button", { name: /My work/ }).click();
   await expect(
     page.getByRole("heading", { name: "Engineering Work Center" }),

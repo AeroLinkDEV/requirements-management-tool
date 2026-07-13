@@ -13,3 +13,7 @@ export async function apiLogin(request:APIRequestContext,userName='admin'){
   const response=await request.post(`${apiBase}/api/auth/login`,{data:{userName,password:'AeroLink!2026'}})
   expect(response.ok(),await response.text()).toBeTruthy()
 }
+export async function openNavigationGroup(page:Page,name:string){
+  const group=page.locator('.navGroup').filter({has:page.locator('summary').filter({hasText:name})})
+  if(await group.getAttribute('open')===null)await group.locator('summary').click()
+}

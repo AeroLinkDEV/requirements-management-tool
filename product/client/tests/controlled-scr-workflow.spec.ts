@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, login } from './auth'
+import { apiBase, login, openNavigationGroup } from './auth'
 
 test('author creates, edits, submits, and sequentially approves an SCR', async ({ page }) => {
   test.setTimeout(60_000)
@@ -19,6 +19,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
     await page.locator('.program > select:not(.releaseSelector)').selectOption({label:programName})
   }
 
+  await openNavigationGroup(page,'SOFTWARE ENGINEERING')
   await page.getByRole('link', { name: 'New Software SWCR' }).click()
   await page.getByLabel('Title').fill('Introduce controlled browser workflow')
   await page.getByLabel('Problem').fill('The workflow is not yet controlled end to end.')
@@ -54,6 +55,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByText('Scr Approved')).toBeVisible()
 
   await page.getByRole('link', { name: /Command Center/ }).first().click()
+  await openNavigationGroup(page,'RELEASE & CONFIGURATION')
   await page.getByRole('link', { name: /Baselines/ }).click()
   await page.getByRole('button', { name: '+ New Candidate' }).click()
   await page.getByLabel('Baseline name').fill('Workflow Software 1.0 Controlled Candidate')
@@ -72,6 +74,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByText(/HLR-\d{8}\.00/).last()).toBeVisible()
 
   await page.getByRole('link', { name: /Command Center/ }).first().click()
+  await openNavigationGroup(page,'VERIFICATION')
   await page.getByRole('link', { name: 'Software Verification' }).click()
   await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible()
   await expect(page.getByText('1', { exact: true }).first()).toBeVisible()
@@ -83,6 +86,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByRole('checkbox').check()
   await page.getByRole('button', { name: 'Create Procedure' }).click()
   await expect(page.getByText(/(?:HLRTP|LLRTP)-\d{8}\.00/, { exact: true }).last()).toBeVisible()
+  await page.getByRole('button', { name: /Test procedures/ }).click()
   await page.getByRole('button', { name: 'Record result' }).click()
   await page.getByLabel('Outcome').selectOption('Fail')
   await page.getByPlaceholder('File path, evidence ID, repository URL…').fill('evidence/workflow-fail-001.json')
@@ -94,5 +98,6 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByPlaceholder('File path, evidence ID, repository URL…').fill('evidence/workflow-pass-002.json')
   await page.getByPlaceholder('Why this run passed, failed, or was blocked').fill('All ordered approval stages activated correctly after correction.')
   await page.getByRole('button', { name: 'Record immutable result' }).click()
+  await page.getByRole('button', { name: /Requirement coverage/ }).click()
   await expect(page.getByText('Verified', { exact: true })).toBeVisible()
 })

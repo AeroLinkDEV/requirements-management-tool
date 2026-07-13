@@ -50,6 +50,7 @@ The [AeroLink product application](product/README.md) is separate from the origi
 | [Feature catalog](FEATURE_CATALOG.md) | Stable, phased capability inventory |
 | [Release roadmap](RELEASE_ROADMAP.md) | Incremental delivery strategy and exit criteria |
 | [Massive enterprise update report](MASSIVE_ENTERPRISE_UPDATE_REPORT.md) | Implemented scope, validation evidence, limitations, and next update |
+| [Showcase and usability refresh](SHOWCASE_USABILITY_REFRESH_REPORT.md) | Readable design system, simplified shell, progressive disclosure, critical-surface redesign, and visual validation evidence |
 | [Operations and recovery](product/docs/OPERATIONS.md) | Startup, stop, diagnostics, backup verification, isolated restore, and production recovery |
 | [Quality attributes](QUALITY_ATTRIBUTES.md) | Security, integrity, operations, and production targets |
 | [Decisions and open questions](DECISIONS_AND_OPEN_QUESTIONS.md) | Accepted decisions, assumptions, and unresolved choices |

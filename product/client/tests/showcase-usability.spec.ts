@@ -1,0 +1,64 @@
+import { expect, test } from '@playwright/test'
+import { apiBase, apiLogin, login, openNavigationGroup } from './auth'
+
+test('showcase-critical surfaces are readable, focused, and progressively disclosed',async({page,request})=>{
+  test.setTimeout(90_000)
+  await page.setViewportSize({width:1440,height:900})
+  await apiLogin(request)
+  const seed=await request.post(`${apiBase}/api/showcase/seed`,{timeout:45_000})
+  expect(seed.ok(),await seed.text()).toBeTruthy()
+  await login(page)
+  await page.locator('.program > select:not(.releaseSelector)').selectOption({label:'Flight Management System Live Program'})
+
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()
+  await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
+  await expect(page.getByText('Release attention')).toBeVisible()
+
+  await openNavigationGroup(page,'SYSTEMS ENGINEERING')
+  await page.getByRole('link',{name:'System Change Requests'}).click()
+  await expect(page.getByRole('heading',{name:'System Change Requests'})).toBeVisible()
+  const context=await page.locator('.contextBar').evaluate(element=>{
+    const box=element.getBoundingClientRect()
+    const nav=element.querySelector('nav')!
+    return{height:box.height,direction:getComputedStyle(nav).flexDirection}
+  })
+  expect(context.height).toBeLessThanOrEqual(50)
+  expect(context.direction).toBe('row')
+  const tinyText=await page.locator('.historyPage').evaluate(root=>[...root.querySelectorAll('p,span,small,button,input,select,label,time,summary,a,b,i,code,dt,dd')]
+    .filter(element=>{const box=element.getBoundingClientRect();return box.width>0&&box.height>0&&(element.textContent||'').trim().length>0&&Number(getComputedStyle(element).fontSize.replace('px',''))<12})
+    .map(element=>({text:(element.textContent||'').trim().slice(0,40),size:getComputedStyle(element).fontSize})))
+  expect(tinyText).toEqual([])
+  await expect(page.getByRole('button',{name:'Record Software Build'})).toBeHidden()
+  await page.getByRole('button',{name:/Software Builds/}).click()
+  await expect(page.getByRole('button',{name:'Record Software Build'})).toBeVisible()
+
+  await page.getByRole('link',{name:/Command Center/}).click()
+  await openNavigationGroup(page,'SYSTEMS ENGINEERING')
+  await page.getByRole('link',{name:'System Requirements'}).click()
+  await expect(page.getByRole('button',{name:'☆ Save view'})).toBeHidden()
+  await page.getByText('Workspace tools',{exact:true}).click()
+  await expect(page.getByRole('button',{name:'☆ Save view'})).toBeVisible()
+  await expect(page.getByRole('button',{name:'Table view'})).toBeVisible()
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()
+
+  await page.getByRole('link',{name:/Command Center/}).click()
+  await openNavigationGroup(page,'VERIFICATION')
+  await page.getByRole('link',{name:'Traceability & Outputs'}).click()
+  await expect(page.getByText('1,250 requirements')).toBeVisible()
+  const traceDetails=page.locator('details.traceDetails')
+  expect(await traceDetails.count()).toBeGreaterThan(0)
+  await expect(traceDetails.first()).not.toHaveAttribute('open','')
+
+  await page.getByRole('link',{name:'System Verification'}).click()
+  await expect(page.getByRole('heading',{name:'Requirement coverage'})).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Test procedures'})).toBeHidden()
+  await page.getByRole('button',{name:/Test procedures/}).click()
+  await expect(page.getByRole('heading',{name:'Test procedures'})).toBeVisible()
+
+  await openNavigationGroup(page,'RELEASE & CONFIGURATION')
+  await page.getByRole('link',{name:'Release Campaign'}).click()
+  await expect(page.locator('.completedGates')).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Drive every blocker to evidence'})).toBeHidden()
+  await page.getByText('Release execution workbench',{exact:true}).click()
+  await expect(page.getByRole('heading',{name:'Drive every blocker to evidence'})).toBeVisible()
+})

@@ -1,2 +1,48 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700&display=swap');
-:root{font-family:'DM Sans',sans-serif;color:#172033;background:#f4f6fa;font-synthesis:none}*{box-sizing:border-box}body{margin:0;min-width:1100px}button{font:inherit}
+
+:root {
+  font-family: 'DM Sans', sans-serif;
+  color: #172033;
+  background: #f4f6fa;
+  font-synthesis: none;
+  --font-display: 'Manrope', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-body: 15px;
+  --text-control: 14px;
+  --text-title: 32px;
+  --navy-950: #08162b;
+  --navy-900: #0c1b34;
+  --navy-800: #142b49;
+  --ink-900: #142139;
+  --ink-700: #42526a;
+  --ink-500: #6f7d91;
+  --line: #dce3eb;
+  --surface: #ffffff;
+  --surface-subtle: #f6f8fb;
+  --canvas: #f3f6f9;
+  --teal-700: #176f68;
+  --teal-600: #23877d;
+  --teal-100: #dff3ee;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-soft: 0 10px 30px rgba(17, 35, 58, .08);
+}
+
+* { box-sizing: border-box; }
+html { font-size: 16px; background: var(--canvas); }
+body { margin: 0; min-width: 960px; font-size: var(--text-body); line-height: 1.5; }
+button, input, select, textarea { font: inherit; }
+button, a, summary, select { cursor: pointer; }
+button, input, select, textarea { min-height: 40px; }
+button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid rgba(35, 135, 125, .28);
+  outline-offset: 2px;
+}
+button:disabled { cursor: not-allowed; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}

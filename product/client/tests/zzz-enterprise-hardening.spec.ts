@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiBase, apiLogin, login } from "./auth";
+import { apiBase, apiLogin, login, openNavigationGroup } from "./auth";
 
 test("enterprise control proves content, queries, jobs, concurrency, redlines, and qualification", async ({
   page,
@@ -16,6 +16,7 @@ test("enterprise control proves content, queries, jobs, concurrency, redlines, a
   await page
     .locator(".program > select:not(.releaseSelector)")
     .selectOption({ label: "Flight Management System Live Program" });
+  await openNavigationGroup(page,"RELEASE & CONFIGURATION");
   await page.getByRole("link", { name: /Enterprise Control/ }).click();
   await expect(
     page.getByRole("heading", { name: "Enterprise Control" }),
