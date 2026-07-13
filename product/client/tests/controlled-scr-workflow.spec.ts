@@ -3,12 +3,20 @@ import { login } from './auth'
 
 test('author creates, edits, submits, and sequentially approves an SCR', async ({ page }) => {
   await login(page)
-  await page.getByLabel('Program name').fill('Browser Workflow Program')
-  await page.getByLabel('Program code').fill('BWP')
-  await page.getByLabel('Project name').fill('Workflow Software')
-  await page.getByLabel('Software product').fill('Workflow Management Software')
-  await page.getByLabel('Initial release or baseline').fill('1.0')
-  await page.getByRole('button', { name: /Create program workspace/ }).click()
+  const suffix=Date.now().toString().slice(-7),programName=`Browser Workflow ${suffix}`
+  if(await page.getByLabel('Program name').count()){
+    await page.getByLabel('Program name').fill(programName)
+    await page.getByLabel('Program code').fill(`BW${suffix}`)
+    await page.getByLabel('Project name').fill('Workflow Software')
+    await page.getByLabel('Software product').fill('Workflow Management Software')
+    await page.getByLabel('Initial release or baseline').fill('1.0')
+    await page.getByRole('button', { name: /Create program workspace/ }).click()
+  }else{
+    const created=await page.request.post('http://127.0.0.1:5080/api/workspaces',{data:{programName,programCode:`BW${suffix}`,projectName:'Workflow Software',softwareProduct:'Workflow Management Software',initialRelease:'1.0',initialReleaseIsReleased:false}})
+    expect(created.ok(),await created.text()).toBeTruthy()
+    await page.reload()
+    await page.locator('.program > select:not(.releaseSelector)').selectOption({label:programName})
+  }
 
   await page.getByRole('button', { name: /Create first SCR/ }).click()
   await page.getByLabel('Title').fill('Introduce controlled browser workflow')

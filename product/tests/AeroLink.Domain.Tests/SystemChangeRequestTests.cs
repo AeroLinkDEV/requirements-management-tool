@@ -177,6 +177,19 @@ public sealed class SystemChangeRequestTests
         Assert.Contains(baseline.Events, x => x.EventType == "CandidateBaselineFrozen");
     }
 
+    [Fact]
+    public void Author_can_move_uncommitted_change_to_a_future_release_with_audit_history()
+    {
+        var scr = CreateDraftWithRequirement();
+        var nextRelease = Guid.NewGuid();
+
+        scr.Retarget("author", nextRelease, "Deferred from 1.6 to the 1.7 planning window.", Now.AddMinutes(1));
+
+        Assert.Equal(nextRelease, scr.TargetReleaseId);
+        Assert.Contains(scr.AuditEvents, x => x.EventType == "TargetReleaseChanged" && x.Detail.Contains("1.7"));
+        Assert.Throws<DomainException>(() => scr.Retarget("someone.else", Guid.NewGuid(), "Unauthorized move.", Now.AddMinutes(2)));
+    }
+
     private static SystemChangeRequest CreateDraft() =>
         new("SCR-00001049", 1, ProjectId, ReleaseId, "Introduce Round Robin",
             "Round Robin is not available.", "The existing sequence is linear.",

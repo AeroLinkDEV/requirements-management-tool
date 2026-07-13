@@ -14,6 +14,12 @@ Future entries use:
 
 ## Accepted Decisions
 
+### D-029 — Successor releases and baselines are explicitly user-controlled
+
+- **Decision:** Authorized users may create repeated in-work product versions from a released predecessor. They—not seed logic or background automation—select and approve changes, assemble the exact successor candidate, complete release gates, and explicitly release it.
+- **Rationale:** Product evolution from 1.5 to 1.6, 1.7, and beyond must be useful as a real configuration-management workflow and must preserve accountable human release authority.
+- **Constraint:** A successor candidate must identify an exact materialized predecessor baseline whenever prior product data exists. Released baselines remain immutable.
+
 ### DEC-001 - Markdown in Git Is Authoritative
 
 - **Date:** 2026-07-11

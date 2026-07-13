@@ -101,7 +101,7 @@ app.MapGet("/api/workspaces", async (HttpContext http, AeroLinkDbContext db, Can
         {
             project = new { project.Id, project.Name, project.SoftwareProduct },
             releases = releases.Where(x => x.ProjectId == project.Id).OrderBy(x => x.Version)
-                .Select(x => new { x.Id, x.Version, x.IsReleased })
+                .Select(x => new { x.Id, x.Version, x.IsReleased, x.PredecessorReleaseId })
         })
     }));
 });
@@ -111,6 +111,46 @@ app.MapGet("/api/context", async (HttpContext http, AeroLinkDbContext db, Cancel
     programs, projects,
     releases = await db.Releases.AsNoTracking().Where(x=>projects.Select(p=>p.Id).Contains(x.ProjectId)).OrderBy(x => x.Version).ToListAsync(ct)
 }); });
+
+app.MapGet("/api/release-planning", async (Guid projectId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+    var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
+    var baselines = await db.CandidateBaselines.AsNoTracking().Where(x => x.ProjectId == projectId)
+        .Select(x => new { x.Id, x.ReleaseId, x.PredecessorBaselineId, x.DisplayNumber, x.Name, state = x.State.ToString(), x.RequirementsMaterializedAt, selectionCount = x.Selections.Count }).ToListAsync(ct);
+    var campaigns = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.ProjectId == projectId)
+        .Select(x => new { x.Id, x.ReleaseId, x.BaselineId, state = x.State.ToString(), x.Name }).ToListAsync(ct);
+    var changes = await db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId)
+        .GroupBy(x => new { x.TargetReleaseId, x.State }).Select(x => new { releaseId = x.Key.TargetReleaseId, state = x.Key.State.ToString(), count = x.Count() }).ToListAsync(ct);
+    return Results.Ok(new { releases = releases.Select(x => new { x.Id, x.Version, x.IsReleased, x.ReleasedAt, x.PredecessorReleaseId }), baselines, campaigns, changes });
+});
+
+app.MapPost("/api/releases", async (CreateReleaseRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+{
+    if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+    var version = request.Version.Trim();
+    if (string.IsNullOrWhiteSpace(version)) return Results.BadRequest(new { error = "A release version is required." });
+    var current = await db.Releases.AsNoTracking().FirstOrDefaultAsync(x => x.ProjectId == request.ProjectId && !x.IsReleased, ct);
+    if (current is not null) return Results.Conflict(new { error = $"Release {current.Version} is still in work. Release or formally close it before planning its successor." });
+    if (await db.Releases.AnyAsync(x => x.ProjectId == request.ProjectId && x.Version.ToLower() == version.ToLower(), ct)) return Results.Conflict(new { error = $"Release {version} already exists in this project." });
+    if (request.PredecessorReleaseId is not null)
+    {
+        var predecessor = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.PredecessorReleaseId && x.ProjectId == request.ProjectId, ct);
+        if (predecessor is null) return Results.BadRequest(new { error = "The predecessor release does not belong to this project." });
+        if (!predecessor.IsReleased) return Results.BadRequest(new { error = "A successor release can only branch from a released product version." });
+    }
+    var release = new SoftwareRelease(request.ProjectId, version, false, request.PredecessorReleaseId); db.Releases.Add(release);
+    var actor = http.UserAccount(); db.SecurityAuditEvents.Add(new SecurityAuditEvent("ReleaseCreated", actor.UserName, $"Release:{release.Id}", "Success", $"Created in-work release {version} from predecessor {request.PredecessorReleaseId?.ToString() ?? "none"}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow));
+    await db.SaveChangesAsync(ct); return Results.Created($"/api/releases/{release.Id}", new { release.Id, release.Version, release.IsReleased, request.PredecessorReleaseId });
+});
+
+app.MapPost("/api/scrs/{id:guid}/retarget", async (Guid id, RetargetScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+    if (!await db.Releases.AnyAsync(x => x.Id == request.TargetReleaseId && x.ProjectId == scr.ProjectId && !x.IsReleased, ct)) return Results.BadRequest(new { error = "Choose an unreleased target release in this project." });
+    try { scr.Retarget(http.UserAccount().UserName, request.TargetReleaseId, request.Reason, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
 
 app.MapGet("/api/scrs", async (Guid projectId, Guid? releaseId, int? page, int? pageSize, string? search, ScrState? state, IScrRepository repository, CancellationToken ct) =>
 {
@@ -331,11 +371,28 @@ app.MapGet("/api/baselines", async (Guid projectId, Guid releaseId, AeroLinkDbCo
     return Results.Ok(items.Select(x => new { x.Id, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.Name, x.state, x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, x.selectionCount }));
 });
 
+app.MapGet("/api/baselines/predecessors", async (Guid projectId, Guid releaseId, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var items = await (from baseline in db.CandidateBaselines.AsNoTracking()
+                       join release in db.Releases.AsNoTracking() on baseline.ReleaseId equals release.Id
+                       where baseline.ProjectId == projectId && baseline.ReleaseId != releaseId && baseline.RequirementsMaterializedAt != null
+                       orderby release.IsReleased descending, release.Version descending, baseline.FrozenAt descending
+                       select new { baseline.Id, baseline.DisplayNumber, baseline.Name, baseline.ReleaseId, release = release.Version, release.IsReleased, baseline.RequirementsHash, requirementCount = db.BaselineRequirements.Count(x => x.BaselineId == baseline.Id) }).ToListAsync(ct);
+    return Results.Ok(items);
+});
+
 app.MapPost("/api/baselines", async (CreateBaselineRequest request, HttpContext http, IBaselineRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
     if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
     try
     {
+        if (!await db.Releases.AnyAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId && !x.IsReleased, ct))
+            return Results.BadRequest(new { error = "Candidate baselines can only be created for an unreleased version in this project." });
+        var priorProductExists = await db.CandidateBaselines.AnyAsync(x => x.ProjectId == request.ProjectId && x.ReleaseId != request.ReleaseId && x.RequirementsMaterializedAt != null, ct);
+        if (priorProductExists && request.PredecessorBaselineId is null)
+            return Results.BadRequest(new { error = "Select the exact predecessor product baseline that this candidate inherits." });
+        if (request.PredecessorBaselineId is not null && !await db.CandidateBaselines.AnyAsync(x => x.Id == request.PredecessorBaselineId && x.ProjectId == request.ProjectId && x.ReleaseId != request.ReleaseId && x.RequirementsMaterializedAt != null, ct))
+            return Results.BadRequest(new { error = "The predecessor must be a materialized baseline from this project." });
         var baseline = new CandidateBaseline(request.BaseNumber, request.Revision, request.ProjectId, request.ReleaseId,
             request.PredecessorBaselineId, request.Name, http.UserAccount().UserName, DateTimeOffset.UtcNow);
         await repository.AddAsync(baseline, ct); await repository.SaveAsync(ct);
@@ -505,6 +562,32 @@ app.MapGet("/api/release-campaigns", async (Guid projectId, AeroLinkDbContext db
     var campaigns = (await db.ReleaseCampaigns.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct)).OrderByDescending(x => x.CreatedAt).ToList(); var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToDictionaryAsync(x => x.Id, ct);
     var output = new List<object>(); foreach (var campaign in campaigns) { var status = await readiness.CalculateAsync(campaign.Id, ct); output.Add(new { campaign.Id, campaign.Name, state = campaign.State.ToString(), campaign.ReleaseId, release = releases[campaign.ReleaseId].Version, campaign.BaselineId, campaign.SoftwareBuildId, campaign.OwnerId, campaign.CreatedAt, campaign.ReleasedAt, campaign.ReleaseHash, readiness = status }); }
     return Results.Ok(output);
+});
+
+app.MapPost("/api/release-campaigns", async (CreateReleaseCampaignRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+{
+    if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+    if (await db.ReleaseCampaigns.AnyAsync(x => x.ProjectId == request.ProjectId && x.ReleaseId == request.ReleaseId, ct)) return Results.Conflict(new { error = "This release already has a campaign." });
+    var release = await db.Releases.SingleOrDefaultAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId && !x.IsReleased, ct);
+    var baseline = await db.CandidateBaselines.SingleOrDefaultAsync(x => x.Id == request.BaselineId && x.ProjectId == request.ProjectId && x.ReleaseId == request.ReleaseId, ct);
+    if (release is null || baseline is null) return Results.BadRequest(new { error = "Choose an unreleased version and one of its candidate baselines." });
+    try
+    {
+        var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
+        var campaign = new ReleaseCampaign(request.ProjectId, request.ReleaseId, request.BaselineId, request.Name, actor.UserName, now); db.ReleaseCampaigns.Add(campaign);
+        var changes = await db.SystemChangeRequests.Where(x => x.TargetReleaseId == request.ReleaseId).ToListAsync(ct);
+        foreach (var change in changes) foreach (var kind in Enum.GetValues<ImpactKind>())
+            db.ImpactDispositions.Add(new ChangeImpactDisposition(campaign.Id, change.Id, kind, change.DisplayNumber, $"Disposition {kind.ToString().ToLowerInvariant()} impact for {change.DisplayNumber}."));
+        await db.SaveChangesAsync(ct); return Results.Created($"/api/release-campaigns/{campaign.Id}", new { campaign.Id, campaign.ReleaseId, campaign.BaselineId, campaign.Name, state = campaign.State.ToString() });
+    }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/release-campaigns/{id:guid}/start-verification", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var campaign = await db.ReleaseCampaigns.SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+    try { campaign.StartVerification(http.UserAccount().UserName, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
 app.MapGet("/api/release-campaigns/{id:guid}", async (Guid id, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
@@ -1068,6 +1151,8 @@ record DraftRequirementRequest(string BaseNumber, int Revision, RequirementLevel
 record CreateScrDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, List<DraftRequirementRequest> RequirementChanges, ChangeRequestType Type = ChangeRequestType.System);
 record UpdateScrDraftRequest(long ExpectedVersion, string ActorId, string Title, string Problem, string Analysis, string Solution, List<DraftRequirementRequest> RequirementChanges);
 record CreateWorkspaceRequest(string ProgramName, string ProgramCode, string ProjectName, string SoftwareProduct, string InitialRelease, bool InitialReleaseIsReleased);
+record CreateReleaseRequest(Guid ProjectId, string Version, Guid? PredecessorReleaseId);
+record RetargetScrRequest(Guid TargetReleaseId, string Reason);
 record RequirementChangeRequest(string ActorId, string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
 record ApproverRequest(string UserId, string Name);
 record SubmitReviewRequest(string ActorId, long? ExpectedVersion, List<ApproverRequest> Approvers);
@@ -1075,6 +1160,7 @@ record ActorRequest(string ActorId, long? ExpectedVersion);
 record SignatureRequest(string Password, string Meaning, long? ExpectedVersion);
 record RequestChangesRequest(string ActorId, long? ExpectedVersion, string Reason);
 record CreateBaselineRequest(string BaseNumber, int Revision, Guid ProjectId, Guid ReleaseId, Guid? PredecessorBaselineId, string Name, string ActorId);
+record CreateReleaseCampaignRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, string Name);
 record BaselineSelectionRequest(Guid ScrId, string ActorId);
 record BaselineActorRequest(string ActorId);
 record CreateBuildRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, string BuildNumber, string Description, string RecordedBy);
@@ -1148,10 +1234,10 @@ static class ApiMap
         reviewCycles = x.ReviewCycles.OrderBy(c => c.Sequence).Select(c => new { c.Id, c.Sequence, state = c.State.ToString(), c.SnapshotHash, c.StartedAt, c.CompletedAt, c.ClosureReason, steps = c.Steps.OrderBy(s => s.Position).Select(s => new { s.Position, s.ApproverId, s.ApproverName, state = s.State.ToString(), s.DecidedAt }) }),
         audit = x.AuditEvents.OrderByDescending(a => a.OccurredAt).Select(a => new { a.EventType, a.ActorId, a.Detail, a.OccurredAt })
     };
-    public static object Baseline(CandidateBaseline x) => new { x.Id, x.DisplayNumber, x.Name, x.ProjectId, x.ReleaseId, state = x.State.ToString(), x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, selectionCount = x.Selections.Count };
+    public static object Baseline(CandidateBaseline x) => new { x.Id, x.DisplayNumber, x.Name, x.ProjectId, x.ReleaseId, x.PredecessorBaselineId, state = x.State.ToString(), x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, selectionCount = x.Selections.Count };
     public static object BaselineDetail(CandidateBaseline x, IReadOnlyList<SystemChangeRequest> selected) => new
     {
-        x.Id, x.DisplayNumber, x.Name, x.ProjectId, x.ReleaseId, state = x.State.ToString(), x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt,
+        x.Id, x.DisplayNumber, x.Name, x.ProjectId, x.ReleaseId, x.PredecessorBaselineId, state = x.State.ToString(), x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt,
         selections = selected.OrderBy(scr => scr.DisplayNumber).Select(scr => new
         {
             scr.Id, scr.DisplayNumber, scr.Title,

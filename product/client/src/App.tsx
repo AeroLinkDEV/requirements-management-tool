@@ -7,9 +7,14 @@ import HistoryExplorer from "./HistoryExplorer";
 import VerificationCenter from "./VerificationCenter";
 import LifecycleExplorer from "./LifecycleExplorer";
 import ReleaseCampaignCenter from "./ReleaseCampaignCenter";
+import ReleasePlanningCenter from "./ReleasePlanningCenter";
 import RequirementsWorkspace from "./RequirementsWorkspace";
 import EnterpriseControlCenter from "./EnterpriseControlCenter";
-import { AdministrationCenter, LoginPage, MyWorkCenter } from "./IdentityCenter";
+import {
+  AdministrationCenter,
+  LoginPage,
+  MyWorkCenter,
+} from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import "./App.css";
 import "./Onboarding.css";
@@ -31,8 +36,25 @@ type Metrics = {
   inReview: number;
   approved: number;
 };
-type Overview = {systemRequirements:number;highLevelRequirements:number;lowLevelRequirements:number;historicalScrs:number;historicalSwcrs:number;activeRequests:number;traceLinks:number;testProcedures:number;testExecutions:number;controlledDocuments:number;softwareBuilds:number};
-type CampaignSummary={id:string;releaseId:string;state:string;readiness:{percent:number;readyForRelease:boolean}}
+type Overview = {
+  systemRequirements: number;
+  highLevelRequirements: number;
+  lowLevelRequirements: number;
+  historicalScrs: number;
+  historicalSwcrs: number;
+  activeRequests: number;
+  traceLinks: number;
+  testProcedures: number;
+  testExecutions: number;
+  controlledDocuments: number;
+  softwareBuilds: number;
+};
+type CampaignSummary = {
+  id: string;
+  releaseId: string;
+  state: string;
+  readiness: { percent: number; readyForRelease: boolean };
+};
 type Release = { id: string; version: string; isReleased: boolean };
 type Workspace = {
   program: { id: string; name: string; code: string };
@@ -44,7 +66,7 @@ type Workspace = {
 const API = "http://127.0.0.1:5080";
 
 function App() {
-  const [user,setUser]=useState<AuthUser|null|undefined>(undefined);
+  const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
   const [scrs, setScrs] = useState<Scr[]>([]),
     [metrics, setMetrics] = useState<Metrics>({
       totalScrs: 0,
@@ -52,16 +74,39 @@ function App() {
       inReview: 0,
       approved: 0,
     }),
-    [overview,setOverview]=useState<Overview>(),
-    [campaigns,setCampaigns]=useState<CampaignSummary[]>([]),
+    [overview, setOverview] = useState<Overview>(),
+    [campaigns, setCampaigns] = useState<CampaignSummary[]>([]),
     [workspaces, setWorkspaces] = useState<Workspace[]>([]),
     [activeId, setActiveId] = useState(""),
+    [selectedReleaseId, setSelectedReleaseId] = useState(""),
     [connected, setConnected] = useState(false),
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
     [selectedScrId, setSelectedScrId] = useState(""),
-    [view, setView] = useState<"dashboard" | "createScr" | "scr" | "baselines" | "history" | "requirements" | "verification" | "lifecycle" | "release" | "mywork" | "admin" | "enterprise">(()=>new URLSearchParams(location.search).has('enterpriseView')?'requirements':'dashboard');
-  useEffect(()=>{fetch(`${API}/api/auth/me`).then(async r=>setUser(r.ok?await r.json():null)).catch(()=>setUser(null))},[]);
+    [view, setView] = useState<
+      | "dashboard"
+      | "createScr"
+      | "scr"
+      | "baselines"
+      | "history"
+      | "requirements"
+      | "verification"
+      | "lifecycle"
+      | "release"
+      | "planning"
+      | "mywork"
+      | "admin"
+      | "enterprise"
+    >(() =>
+      new URLSearchParams(location.search).has("enterpriseView")
+        ? "requirements"
+        : "dashboard",
+    );
+  useEffect(() => {
+    fetch(`${API}/api/auth/me`)
+      .then(async (r) => setUser(r.ok ? await r.json() : null))
+      .catch(() => setUser(null));
+  }, []);
   const loadWorkspaces = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/workspaces`),
@@ -76,29 +121,40 @@ function App() {
   const active =
       workspaces.find((x) => x.program.id === activeId) ?? workspaces[0],
     project = active?.projects[0],
-    release = project?.releases.at(-1);
+    release =
+      project?.releases.find((x) => x.id === selectedReleaseId) ??
+      [...(project?.releases ?? [])].reverse().find((x) => !x.isReleased) ??
+      project?.releases.at(-1);
+  useEffect(() => {
+    if (release && release.id !== selectedReleaseId)
+      setSelectedReleaseId(release.id);
+  }, [release, selectedReleaseId]);
   const loadData = useCallback(async () => {
     if (!project) return;
     try {
       const [a, b, c, d] = await Promise.all([
-        fetch(`${API}/api/scrs?projectId=${project.project.id}&releaseId=${release?.id ?? ''}`),
-        fetch(`${API}/api/dashboard?projectId=${project.project.id}&releaseId=${release?.id ?? ''}`),
+        fetch(
+          `${API}/api/scrs?projectId=${project.project.id}&releaseId=${release?.id ?? ""}`,
+        ),
+        fetch(
+          `${API}/api/dashboard?projectId=${project.project.id}&releaseId=${release?.id ?? ""}`,
+        ),
         fetch(`${API}/api/showcase/overview?projectId=${project.project.id}`),
         fetch(`${API}/api/release-campaigns?projectId=${project.project.id}`),
       ]);
       const page = await a.json();
       setScrs(Array.isArray(page.items) ? page.items : []);
       setMetrics(await b.json());
-      if(c.ok)setOverview(await c.json());
-      if(d.ok)setCampaigns(await d.json());
+      if (c.ok) setOverview(await c.json());
+      if (d.ok) setCampaigns(await d.json());
     } catch {
       setConnected(false);
     }
   }, [project, release]);
   useEffect(() => {
-    if(!user)return;
+    if (!user) return;
     loadWorkspaces();
-  }, [loadWorkspaces,user]);
+  }, [loadWorkspaces, user]);
   useEffect(() => {
     loadData();
   }, [loadData]);
@@ -126,8 +182,9 @@ function App() {
     await loadWorkspaces();
     setSaving(false);
   };
-  if(user===undefined)return <div className="appBoot">Establishing secure session…</div>;
-  if(user===null)return <LoginPage api={API} onLogin={setUser}/>;
+  if (user === undefined)
+    return <div className="appBoot">Establishing secure session…</div>;
+  if (user === null) return <LoginPage api={API} onLogin={setUser} />;
   if (connected && !workspaces.length)
     return (
       <div className="onboarding">
@@ -215,8 +272,12 @@ function App() {
       <>
         <div className="scrPublicationTools">
           <span>Professional controlled publication</span>
-          <a href={`${API}/api/scrs/${selectedScrId}/download?format=docx`}>Download DOCX</a>
-          <a href={`${API}/api/scrs/${selectedScrId}/download?format=pdf`}>Download PDF</a>
+          <a href={`${API}/api/scrs/${selectedScrId}/download?format=docx`}>
+            Download DOCX
+          </a>
+          <a href={`${API}/api/scrs/${selectedScrId}/download?format=pdf`}>
+            Download PDF
+          </a>
         </div>
         <ScrWorkspace
           api={API}
@@ -245,19 +306,109 @@ function App() {
         projectId={project.project.id}
         releases={project.releases}
         onBack={() => setView("dashboard")}
-        onOpenScr={(id) => { setSelectedScrId(id); setView("scr"); }}
+        onOpenScr={(id) => {
+          setSelectedScrId(id);
+          setView("scr");
+        }}
       />
     );
-  if(view==="requirements"&&project)return <RequirementsWorkspace api={API} projectId={project.project.id} releases={project.releases} user={user} initialViewId={new URLSearchParams(location.search).get('enterpriseView')||undefined} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}}/>;
+  if (view === "requirements" && project)
+    return (
+      <RequirementsWorkspace
+        api={API}
+        projectId={project.project.id}
+        releases={project.releases}
+        user={user}
+        initialViewId={
+          new URLSearchParams(location.search).get("enterpriseView") ||
+          undefined
+        }
+        onBack={() => setView("dashboard")}
+        onOpenScr={(id) => {
+          setSelectedScrId(id);
+          setView("scr");
+        }}
+      />
+    );
   if (view === "verification" && project && release)
-    return <VerificationCenter api={API} projectId={project.project.id} releaseId={release.id} onBack={() => setView("dashboard")}/>;
+    return (
+      <VerificationCenter
+        api={API}
+        projectId={project.project.id}
+        releaseId={release.id}
+        onBack={() => setView("dashboard")}
+      />
+    );
   if (view === "lifecycle" && project)
-    return <LifecycleExplorer api={API} projectId={project.project.id} releases={project.releases} onBack={() => setView("dashboard")}/>;
-  if(view==="release"&&project)
-    return <ReleaseCampaignCenter api={API} projectId={project.project.id} releases={project.releases} user={user} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}} onOpenVerification={()=>setView("verification")} onOpenDocuments={()=>setView("lifecycle")}/>;
-  if(view==="mywork"&&project)return <MyWorkCenter api={API} projectId={project.project.id} user={user} onBack={()=>setView("dashboard")} onOpenScr={(id)=>{setSelectedScrId(id);setView("scr")}} onOpenRelease={()=>setView("release")}/>;
-  if(view==="admin"&&active)return <AdministrationCenter api={API} programId={active.program.id} onBack={()=>setView("dashboard")}/>;
-  if(view==="enterprise"&&project)return <EnterpriseControlCenter api={API} projectId={project.project.id} onBack={()=>setView("dashboard")}/>;
+    return (
+      <LifecycleExplorer
+        api={API}
+        projectId={project.project.id}
+        releases={project.releases}
+        onBack={() => setView("dashboard")}
+      />
+    );
+  if (view === "release" && project)
+    return (
+      <ReleaseCampaignCenter
+        api={API}
+        projectId={project.project.id}
+        activeReleaseId={release?.id ?? ""}
+        releases={project.releases}
+        user={user}
+        onBack={() => setView("dashboard")}
+        onOpenScr={(id) => {
+          setSelectedScrId(id);
+          setView("scr");
+        }}
+        onOpenVerification={() => setView("verification")}
+        onOpenDocuments={() => setView("lifecycle")}
+      />
+    );
+  if (view === "planning" && project && release)
+    return (
+      <ReleasePlanningCenter
+        api={API}
+        projectId={project.project.id}
+        productName={project.project.softwareProduct}
+        activeReleaseId={release.id}
+        onBack={() => setView("dashboard")}
+        onSelectRelease={setSelectedReleaseId}
+        onOpenBaselines={() => setView("baselines")}
+        onOpenCampaign={() => setView("release")}
+        onChanged={loadWorkspaces}
+      />
+    );
+  if (view === "mywork" && project)
+    return (
+      <MyWorkCenter
+        api={API}
+        projectId={project.project.id}
+        user={user}
+        onBack={() => setView("dashboard")}
+        onOpenScr={(id) => {
+          setSelectedScrId(id);
+          setView("scr");
+        }}
+        onOpenRelease={() => setView("release")}
+      />
+    );
+  if (view === "admin" && active)
+    return (
+      <AdministrationCenter
+        api={API}
+        programId={active.program.id}
+        onBack={() => setView("dashboard")}
+      />
+    );
+  if (view === "enterprise" && project)
+    return (
+      <EnterpriseControlCenter
+        api={API}
+        projectId={project.project.id}
+        onBack={() => setView("dashboard")}
+      />
+    );
   return (
     <div className="shell">
       <aside>
@@ -277,13 +428,28 @@ function App() {
               </option>
             ))}
           </select>
-          <span>
-            {project?.project.name} · {release?.version}
-          </span>
+          <span>{project?.project.name}</span>
+          <select
+            className="releaseSelector"
+            value={release?.id ?? ""}
+            onChange={(event) => setSelectedReleaseId(event.target.value)}
+            aria-label="Active release"
+          >
+            {project?.releases.map((item) => (
+              <option value={item.id} key={item.id}>
+                {item.version} · {item.isReleased ? "Released" : "In work"}
+              </option>
+            ))}
+          </select>
         </div>
         <nav>
-          <button onClick={()=>setView("mywork")}>◎&nbsp; My Work</button>
-          <button onClick={()=>setView("enterprise")}>◆&nbsp; Enterprise Control</button>
+          <button onClick={() => setView("mywork")}>◎&nbsp; My Work</button>
+          <button onClick={() => setView("enterprise")}>
+            ◆&nbsp; Enterprise Control
+          </button>
+          <button onClick={() => setView("planning")}>
+            ↗&nbsp; Release Planning
+          </button>
           {[
             "▦  Command Center",
             "◇  Change Requests",
@@ -294,26 +460,49 @@ function App() {
             "▤  Documents",
             "◆  Release Campaign",
           ].map((x, i) => (
-            <button className={i === 0 ? "active" : ""} key={x} onClick={() => {
-              if (x.includes("Baselines")) setView("baselines");
-              if (x.includes("Verification")) setView("verification");
-              if (x.includes("Traceability") || x.includes("Documents")) setView("lifecycle");
-              if (x.includes("Release Campaign")) setView("release");
-              if (x.includes("Change Requests")) setView("history");
-              if (x.includes("Requirements")) setView("requirements");
-            }}>
+            <button
+              className={i === 0 ? "active" : ""}
+              key={x}
+              onClick={() => {
+                if (x.includes("Baselines")) setView("baselines");
+                if (x.includes("Verification")) setView("verification");
+                if (x.includes("Traceability") || x.includes("Documents"))
+                  setView("lifecycle");
+                if (x.includes("Release Campaign")) setView("release");
+                if (x.includes("Change Requests")) setView("history");
+                if (x.includes("Requirements")) setView("requirements");
+              }}
+            >
               {x}
             </button>
           ))}
-          {user.isAdministrator&&<button onClick={()=>setView("admin")}>⚙&nbsp; Administration</button>}
+          {user.isAdministrator && (
+            <button onClick={() => setView("admin")}>
+              ⚙&nbsp; Administration
+            </button>
+          )}
         </nav>
         <footer>
-          <div className="avatar">{user.displayName.split(' ').map(x=>x[0]).join('').slice(0,2)}</div>
+          <div className="avatar">
+            {user.displayName
+              .split(" ")
+              .map((x) => x[0])
+              .join("")
+              .slice(0, 2)}
+          </div>
           <div>
             <b>{user.displayName}</b>
             <small>{user.userName}</small>
           </div>
-          <button className="signOut" onClick={async()=>{await fetch(`${API}/api/auth/logout`,{method:'POST'});setUser(null)}}>Sign out</button>
+          <button
+            className="signOut"
+            onClick={async () => {
+              await fetch(`${API}/api/auth/logout`, { method: "POST" });
+              setUser(null);
+            }}
+          >
+            Sign out
+          </button>
         </footer>
       </aside>
       <main>
@@ -345,13 +534,29 @@ function App() {
             </p>
           </div>
           <div className="readiness">
-            <b>{campaigns.find(x=>x.releaseId===release?.id)?.readiness.percent??0}%</b>
+            <b>
+              {campaigns.find((x) => x.releaseId === release?.id)?.readiness
+                .percent ?? 0}
+              %
+            </b>
             <span>Release readiness</span>
             <div>
-              <i style={{ width: `${campaigns.find(x=>x.releaseId===release?.id)?.readiness.percent??0}%` }} />
+              <i
+                style={{
+                  width: `${campaigns.find((x) => x.releaseId === release?.id)?.readiness.percent ?? 0}%`,
+                }}
+              />
             </div>
           </div>
-          <button onClick={()=>setView("release")}>Configure release →</button>
+          <button
+            onClick={() =>
+              setView(release?.isReleased ? "planning" : "release")
+            }
+          >
+            {release?.isReleased
+              ? "View product line →"
+              : "Configure release →"}
+          </button>
         </section>
         <section className="metrics">
           {[
@@ -370,7 +575,30 @@ function App() {
             </article>
           ))}
         </section>
-        {overview&&overview.systemRequirements>0&&<section className="programInventory"><div><p className="eyebrow">RELEASED 1.5 PRODUCT BASELINE</p><h3>Complete FMS lifecycle inventory</h3><span>Active release 1.6 inherits this controlled foundation.</span></div>{[["System requirements",overview.systemRequirements],["HLR",overview.highLevelRequirements],["LLR",overview.lowLevelRequirements],["Trace links",overview.traceLinks],["Test procedures",overview.testProcedures],["Test executions",overview.testExecutions]].map(([label,value])=><article key={String(label)}><b>{Number(value).toLocaleString()}</b><small>{label}</small></article>)}</section>}
+        {overview && overview.systemRequirements > 0 && (
+          <section className="programInventory">
+            <div>
+              <p className="eyebrow">RELEASED 1.5 PRODUCT BASELINE</p>
+              <h3>Complete FMS lifecycle inventory</h3>
+              <span>
+                Active release 1.6 inherits this controlled foundation.
+              </span>
+            </div>
+            {[
+              ["System requirements", overview.systemRequirements],
+              ["HLR", overview.highLevelRequirements],
+              ["LLR", overview.lowLevelRequirements],
+              ["Trace links", overview.traceLinks],
+              ["Test procedures", overview.testProcedures],
+              ["Test executions", overview.testExecutions],
+            ].map(([label, value]) => (
+              <article key={String(label)}>
+                <b>{Number(value).toLocaleString()}</b>
+                <small>{label}</small>
+              </article>
+            ))}
+          </section>
+        )}
         <section className="grid">
           <div className="panel work">
             <div className="panelhead">
@@ -378,11 +606,32 @@ function App() {
                 <h3>Change request flow</h3>
                 <p>Controlled changes targeting this release</p>
               </div>
-              <button onClick={() => setView("createScr")}>+ New SCR</button>
+              {release?.isReleased ? (
+                <button onClick={() => setView("history")}>
+                  Search released changes
+                </button>
+              ) : (
+                <button onClick={() => setView("createScr")}>+ New SCR</button>
+              )}
             </div>
             {scrs.length ? (
               scrs.map((scr) => (
-                <div className="row" key={scr.id} role="button" tabIndex={0} onClick={() => { setSelectedScrId(scr.id); setView("scr"); }} onKeyDown={(event) => { if (event.key === "Enter") { setSelectedScrId(scr.id); setView("scr"); } }}>
+                <div
+                  className="row"
+                  key={scr.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    setSelectedScrId(scr.id);
+                    setView("scr");
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      setSelectedScrId(scr.id);
+                      setView("scr");
+                    }
+                  }}
+                >
                   <div className="scricon">SCR</div>
                   <div>
                     <b>

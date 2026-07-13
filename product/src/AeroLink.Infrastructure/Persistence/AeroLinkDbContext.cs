@@ -85,6 +85,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("software_releases"); b.HasKey(x => x.Id);
             b.Property(x => x.Version).HasMaxLength(40).IsRequired();
             b.HasIndex(x => new { x.ProjectId, x.Version }).IsUnique();
+            b.HasIndex(x => x.PredecessorReleaseId);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.PredecessorReleaseId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<SoftwareBuild>(b =>
         {

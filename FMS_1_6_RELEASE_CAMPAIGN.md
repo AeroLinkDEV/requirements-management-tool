@@ -1,5 +1,11 @@
 # FMS 1.6 Release Campaign
 
+## Repeatable user-controlled release progression
+
+The seeded 1.5 baseline is the immutable starting product configuration. Version 1.6 is an editable target workspace, not a preordained release. Users must approve the intended SCR/SWCR revisions, select those exact revisions into a candidate inheriting the materialized 1.5 baseline, freeze and materialize it, close release evidence and impact gates, collect unanimous electronic release approval, and explicitly issue the release.
+
+After 1.6 is released, the same product workflow can plan 1.7 from the released predecessor, then 1.8 and later versions. Creating a release creates only an empty in-work planning context; it never creates, approves, or releases a baseline automatically.
+
 ## Purpose
 
 The live FMS workspace is no longer only a static 1.5 data demonstration. It includes a governed 1.6 release campaign that exposes the work required to transform selected approved change requests into a trustworthy released software configuration.

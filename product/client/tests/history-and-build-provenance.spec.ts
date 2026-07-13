@@ -3,8 +3,9 @@ import { apiLogin, login } from './auth'
 
 test('searches full history and proves exact software build contents', async ({ page, request }) => {
   await apiLogin(request)
+  const suffix=Date.now().toString().slice(-7),programName=`History Program ${suffix}`
   const workspaceResponse = await request.post('http://127.0.0.1:5080/api/workspaces', { data: {
-    programName: 'History Program', programCode: 'HIST', projectName: 'FMS Software', softwareProduct: 'Flight Management Software', initialRelease: '3.3', initialReleaseIsReleased: false,
+    programName, programCode: `HI${suffix}`, projectName: 'FMS Software', softwareProduct: 'Flight Management Software', initialRelease: '3.3', initialReleaseIsReleased: false,
   } }); expect(workspaceResponse.ok()).toBeTruthy(); const workspace = await workspaceResponse.json()
   const scrResponse = await request.post('http://127.0.0.1:5080/api/scr-drafts', { data: {
     baseNumber: 'SCR-00000042', projectId: workspace.project.id, targetReleaseId: workspace.release.id, title: 'Introduce round robin routing', problem: 'Routing is unavailable', analysis: 'A new function is required', solution: 'Implement round robin routing', authorId: 'author',
@@ -20,7 +21,7 @@ test('searches full history and proves exact software build contents', async ({ 
   const historyBody = await historyResponse.text(); expect(historyResponse.status(), historyBody).toBe(200); expect(JSON.parse(historyBody).totalCount).toBe(1)
 
   await login(page)
-  await page.locator('.program select').selectOption({ label: 'History Program' })
+  await page.locator('.program > select:not(.releaseSelector)').selectOption({ label: programName })
   await page.getByRole('button', { name: /Change Requests/ }).click()
   await expect(page.getByRole('heading', { name: 'Artifact & Build Explorer' })).toBeVisible()
   await page.getByLabel('Search history').fill('round robin')

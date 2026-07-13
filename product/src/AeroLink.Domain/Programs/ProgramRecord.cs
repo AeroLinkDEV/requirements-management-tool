@@ -40,7 +40,7 @@ public sealed class ProjectRecord
 public sealed class SoftwareRelease
 {
     private SoftwareRelease() { }
-    public SoftwareRelease(Guid projectId, string version, bool isReleased)
+    public SoftwareRelease(Guid projectId, string version, bool isReleased, Guid? predecessorReleaseId = null)
     {
         if (projectId == Guid.Empty) throw new ArgumentException("Project is required.", nameof(projectId));
         if (string.IsNullOrWhiteSpace(version)) throw new ArgumentException("Release version is required.", nameof(version));
@@ -48,11 +48,13 @@ public sealed class SoftwareRelease
         ProjectId = projectId;
         Version = version.Trim();
         IsReleased = isReleased;
+        PredecessorReleaseId = predecessorReleaseId;
     }
 
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public string Version { get; private set; } = string.Empty;
+    public Guid? PredecessorReleaseId { get; private set; }
     public bool IsReleased { get; private set; }
     public DateTimeOffset? ReleasedAt { get; private set; }
     public void MarkReleased(DateTimeOffset now) { if (IsReleased) throw new InvalidOperationException("The software release is already released."); IsReleased = true; ReleasedAt = now; }

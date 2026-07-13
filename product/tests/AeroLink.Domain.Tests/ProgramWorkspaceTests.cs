@@ -16,6 +16,17 @@ public sealed class ProgramWorkspaceTests
         Assert.True(release.IsReleased);
     }
 
+    [Fact]
+    public void Successor_release_retains_explicit_product_lineage()
+    {
+        var projectId = Guid.NewGuid();
+        var released = new SoftwareRelease(projectId, "1.5", true);
+        var successor = new SoftwareRelease(projectId, "1.6", false, released.Id);
+
+        Assert.Equal(released.Id, successor.PredecessorReleaseId);
+        Assert.False(successor.IsReleased);
+    }
+
     [Theory]
     [InlineData("", "NAV")]
     [InlineData("Navigation Systems", "")]

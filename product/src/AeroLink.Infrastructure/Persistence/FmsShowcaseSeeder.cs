@@ -28,7 +28,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var start = new DateTimeOffset(2024, 1, 8, 14, 0, 0, TimeSpan.Zero);
         var program = new ProgramRecord("Flight Management System Live Program", ProgramCode);
         var project = new ProjectRecord(program.Id, "FMS Product Development", "Flight Management System");
-        var release15 = new SoftwareRelease(project.Id, "1.5", true); var release16 = new SoftwareRelease(project.Id, "1.6", false);
+        var release15 = new SoftwareRelease(project.Id, "1.5", true); var release16 = new SoftwareRelease(project.Id, "1.6", false, release15.Id);
         db.AddRange(program, project, release15, release16); await db.SaveChangesAsync(ct);
 
         var historical = new List<SystemChangeRequest>();

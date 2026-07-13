@@ -198,6 +198,20 @@ public sealed class SystemChangeRequest
         State = ScrState.Deferred; UpdatedAt = now; Audit("ChangeRequestDeferred", actorId, reason.Trim(), now);
     }
 
+    public void Retarget(string actorId, Guid targetReleaseId, string reason, DateTimeOffset now)
+    {
+        EnsureAuthor(actorId);
+        if (State is not (ScrState.Draft or ScrState.Approved or ScrState.Deferred))
+            throw new DomainException("Only a Draft, Approved, or Deferred change request can move to another release.");
+        if (targetReleaseId == Guid.Empty || targetReleaseId == TargetReleaseId)
+            throw new DomainException("Choose a different target release.");
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A retarget rationale is required.");
+        var prior = TargetReleaseId;
+        TargetReleaseId = targetReleaseId;
+        UpdatedAt = now;
+        Audit("TargetReleaseChanged", actorId, $"Moved {DisplayNumber} from release {prior} to {targetReleaseId}: {reason.Trim()}", now);
+    }
+
     private void ValidateReadyForReview()
     {
         if (string.IsNullOrWhiteSpace(Problem) || string.IsNullOrWhiteSpace(Analysis) || string.IsNullOrWhiteSpace(Solution))

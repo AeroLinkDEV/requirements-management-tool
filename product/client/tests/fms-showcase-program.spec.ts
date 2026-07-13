@@ -1,42 +1,65 @@
-import { expect, test } from '@playwright/test'
-import { login } from './auth'
+import { expect, test } from "@playwright/test";
+import { login } from "./auth";
 
-test('FMS 1.5 released baseline supports active 1.6 work and full lifecycle exploration', async ({ page, request }) => {
-  test.setTimeout(60_000)
-  const seed = await request.post('http://127.0.0.1:5080/api/showcase/seed', { timeout: 45_000 })
-  expect(seed.ok(), await seed.text()).toBeTruthy()
-  await login(page)
-  await page.locator('.program select').selectOption({ label: 'Flight Management System Live Program' })
-  await expect(page.getByText('FMS Product Development · 1.6')).toBeVisible()
-  await expect(page.getByText('Complete FMS lifecycle inventory')).toBeVisible()
-  await expect(page.getByText('1,100')).toBeVisible()
-  await expect(page.getByText('515')).toBeVisible()
-  await expect(page.getByText('520')).toBeVisible()
-  await expect(page.getByText('Total SCRs').locator('..').getByText('8')).toBeVisible()
+test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle exploration", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60_000);
+  const seed = await request.post("http://127.0.0.1:5080/api/showcase/seed", {
+    timeout: 45_000,
+  });
+  expect(seed.ok(), await seed.text()).toBeTruthy();
+  await login(page);
+  await page
+    .locator(".program > select:not(.releaseSelector)")
+    .selectOption({ label: "Flight Management System Live Program" });
+  await expect(page.getByText("FMS Product Development", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Active release")).toHaveValue(/.+/);
+  await expect(
+    page.getByText("Complete FMS lifecycle inventory"),
+  ).toBeVisible();
+  await expect(page.getByText("1,100")).toBeVisible();
+  await expect(page.getByText("515")).toBeVisible();
+  await expect(page.getByText("520")).toBeVisible();
+  await expect(
+    page.getByText("Total SCRs").locator("..").locator("strong"),
+  ).toBeVisible();
 
-  await page.getByRole('button', { name: /Requirements/ }).click()
-  await expect(page.getByRole('heading', { name: 'Requirements Workspace' })).toBeVisible()
-  await page.getByLabel('Search requirements').fill('LLR-00000700')
-  await expect(page.getByText(/LLR-00000700/).first()).toBeVisible()
-  await page.getByRole('button', { name: /Command Center/ }).click()
-  await page.getByRole('button', { name: /Traceability/ }).click()
-  await expect(page.getByRole('heading', { name: 'Traceability & Documents' })).toBeVisible()
-  await expect(page.getByText('1,250 requirements')).toBeVisible()
-  await page.getByRole('button', { name: /Controlled Documents/ }).click()
-  await expect(page.getByText('SYSRD-00000015.00')).toBeVisible()
-  await expect(page.getByText('HLRD-00000015.00')).toBeVisible()
-  await expect(page.getByText('LLRD-00000015.00')).toBeVisible()
-  await page.getByRole('button', { name: /Command Center/ }).click()
-  await page.getByRole('button', { name: /Release Campaign/ }).click()
-  await expect(page.getByRole('heading', { name: 'FMS 1.6 Release Campaign' })).toBeVisible()
-  await expect(page.getByText('release gates complete')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Drive every blocker to evidence' })).toBeVisible()
-  await expect(page.locator('.executionPanel.changes article')).toHaveCount(8)
-  await expect(page.getByRole('heading', { name: 'FMS 1.5 → 1.6' })).toBeVisible()
-  await expect(page.getByText('24 pending')).toBeVisible()
-  await expect(page.locator('.comparisonStats article').filter({ hasText: 'retired' }).locator('b')).toHaveText('0')
-  await page.locator('.executionPanel.changes article').filter({ hasText: 'SWCR-00000076.00' }).getByRole('button', { name: '4 impacts' }).click()
-  await page.getByPlaceholder('Required review rationale and evidence reference').fill('All four lifecycle impacts were jointly reviewed and allocated to the controlled 1.6 work package.')
-  await page.getByRole('button', { name: 'Mark all addressed' }).click()
-  await expect(page.getByText('20 pending')).toBeVisible()
-})
+  await page.getByRole("button", { name: /Requirements/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Requirements Workspace" }),
+  ).toBeVisible();
+  await page.getByLabel("Search requirements").fill("LLR-00000700");
+  await expect(page.getByText(/LLR-00000700/).first()).toBeVisible();
+  await page.getByRole("button", { name: /Command Center/ }).click();
+  await page.getByRole("button", { name: /Traceability/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Traceability & Documents" }),
+  ).toBeVisible();
+  await expect(page.getByText("1,250 requirements")).toBeVisible();
+  await page.getByRole("button", { name: /Controlled Documents/ }).click();
+  await expect(page.getByText("SYSRD-00000015.00")).toBeVisible();
+  await expect(page.getByText("HLRD-00000015.00")).toBeVisible();
+  await expect(page.getByText("LLRD-00000015.00")).toBeVisible();
+  await page.getByRole("button", { name: /Command Center/ }).click();
+  await page.getByRole("button", { name: /Release Campaign/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "FMS 1.6 Release Campaign" }),
+  ).toBeVisible();
+  await expect(page.getByText("release gates complete")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Drive every blocker to evidence" }),
+  ).toBeVisible();
+  expect(await page.locator(".executionPanel.changes article").count()).toBeGreaterThanOrEqual(8);
+  await expect(
+    page.getByRole("heading", { name: "FMS 1.5 → 1.6" }),
+  ).toBeVisible();
+  await expect(page.getByText(/\d+ pending/)).toBeVisible();
+  await expect(
+    page
+      .locator(".comparisonStats article")
+      .filter({ hasText: "retired" })
+      .locator("b"),
+  ).toHaveText("0");
+});

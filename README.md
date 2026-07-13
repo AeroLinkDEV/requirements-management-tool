@@ -4,6 +4,8 @@ This repository is the documentation-first foundation for a future secure, on-pr
 
 The product definition reached its initial working baseline and implementation has begun. The repository now contains both the preserved documentation foundation and an early production-oriented application skeleton.
 
+Release evolution is user-controlled: authorized users plan an in-work successor (for example 1.6), approve the exact SCR/SWCR revisions they intend to include, assemble a candidate over an exact materialized predecessor baseline, complete verification and release approvals, and only then release it. The tool never auto-creates or auto-approves 1.6, 1.7, or later product baselines.
+
 ## First Product Slice
 
 The first usable vertical slice is system-level:
