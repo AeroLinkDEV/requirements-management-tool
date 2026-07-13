@@ -44,6 +44,13 @@ This directory contains the real application foundation. The visual showcase rem
 - governed bulk classification and specification placement through previewed, attributable jobs rather than silent direct edits
 - checksum-recorded CSV/XLSX onboarding with row validation and a controlled commit boundary that creates a Draft SCR/SWCR instead of bypassing approval
 - provider-compatible PostgreSQL/SQLite persistence, versioned migration, and deterministic workspace synchronization for existing Programs
+- direct “analyze impact and propose change” workflow from an approved requirement into its proposed next revision inside a Draft SCR/SWCR; no parallel requirement-approval path
+- controlled structured-text authoring with lists, tables, aerospace symbols, exact references, Program fields, safe preview, and five mandatory impact-disposition categories included in the review snapshot hash
+- relationship-aware impact intelligence spanning parent/child requirements, verification procedures, baselines, builds, documents, active change packages, comments, and assigned follow-up
+- requirement watchers, threaded notifications, accountable assignments, due/overdue work queues, completion concurrency, and a combined engineering operations center
+- advanced permission-scoped requirement filters for lifecycle state, owner, source SCR/SWCR, open discussions, verification, tag, specification, and deterministic sorting
+- reusable import-mapping records, persistent interchange-job history, and downloadable CSV error reports
+- isolated PostgreSQL qualification workspace generator with 10,000 mixed-level Requirement/Revision records and measured enterprise workspace benchmarks
 
 ## Run locally
 

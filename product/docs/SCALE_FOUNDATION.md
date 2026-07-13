@@ -30,11 +30,20 @@ SCRs carry a numeric optimistic-concurrency version. Every changed SCR advances 
 | `small` | 1,000 | 5,000 |
 | `medium` | 10,000 | 50,000 |
 
+The separate `workspace` command generates materialized Requirement artifacts, immutable revisions, baseline membership, Program schemas, structured System/HLR/LLR specifications, revision profiles, and specification placements. Its `small` profile is the Wave 1 qualification dataset with 10,000 requirements; `smoke` produces 1,000 and `medium` produces 50,000. This database is intentionally separate from the 1,250-requirement FMS showcase.
+
 Example:
 
 ```powershell
 $env:AEROLINK_SCALE_CONNECTION='Host=127.0.0.1;Port=54329;Database=aerolink_scale;Username=postgres'
 & "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- generate --profile medium --reset
+& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- benchmark
+```
+
+Enterprise Requirements Workspace qualification:
+
+```powershell
+& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- workspace --profile small --reset
 & "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- benchmark
 ```
 
@@ -64,9 +73,30 @@ Warm-query p95 observations over five samples:
 
 These are local engineering observations, not production guarantees. They exclude browser rendering, network latency, authentication, concurrent users, file evidence, complete trace networks, and controlled-document generation. Results must be repeated as those capabilities are added.
 
+## First 10,000-requirement workspace result
+
+Run on July 12, 2026 using local PostgreSQL 18.4 and deterministic seed 4754:
+
+- 10,000 stable Requirement artifacts and immutable active revisions
+- 1,500 System requirements, 3,500 HLRs, and 5,000 LLRs
+- exact membership in one frozen materialized baseline
+- three Program schemas, three specifications, revision profiles, and 10,000 specification placements
+- deterministic materialization and workspace synchronization: 7.5 seconds
+
+Warm-query p95 observations over five samples:
+
+| Operation | Target | Observed p95 |
+| --- | ---: | ---: |
+| Exact current requirement revision | 300 ms | <1 ms |
+| Enterprise workspace page of 100 | 500 ms | 21 ms |
+| Structured System/Test filter | 500 ms | 6 ms |
+| Specification-tree aggregation | 500 ms | 2 ms |
+
+This proves the persistence/query shape at 10,000 requirements on one local workstation. It does not yet prove 150 concurrent browser users, cold-cache behavior, attachment throughput, deep trace expansion, or production network/identity overhead.
+
 ## Next scale gates
 
-- Add actual Requirement/Revision and Trace Link aggregates when those modules are implemented; current counts represent requirement changes proposed inside SCRs.
+- Add a deep and realistically distributed trace/coverage network to the 10,000-requirement qualification dataset.
 - Add 150-user mixed-workload testing.
 - Test cold-cache behavior and realistic search terms.
 - Test backups, restores, evidence storage, and failure recovery.

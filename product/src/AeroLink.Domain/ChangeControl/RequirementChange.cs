@@ -6,14 +6,16 @@ public enum RequirementLevel { System, HighLevel, LowLevel }
 public enum RequirementChangeKind { Introduce, Modify, Retire }
 
 public sealed record RequirementChangeDraft(string BaseNumber, int Revision, RequirementLevel Level,
-    RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
+    RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod,
+    string RichText = "", string AttributesJson = "{}", string ImpactDispositionJson = "{}");
 
 public sealed class RequirementChange
 {
     private RequirementChange() { }
 
     internal RequirementChange(Guid scrId, string baseNumber, int revision, RequirementLevel level,
-        RequirementChangeKind kind, string statement, string rationale, string verificationMethod)
+        RequirementChangeKind kind, string statement, string rationale, string verificationMethod,
+        string richText = "", string attributesJson = "{}", string impactDispositionJson = "{}")
     {
         Id = Guid.NewGuid();
         ScrId = scrId;
@@ -24,6 +26,9 @@ public sealed class RequirementChange
         Statement = statement.Trim();
         Rationale = rationale.Trim();
         VerificationMethod = verificationMethod.Trim();
+        RichText = string.IsNullOrWhiteSpace(richText) ? statement.Trim() : richText.Trim();
+        AttributesJson = string.IsNullOrWhiteSpace(attributesJson) ? "{}" : attributesJson;
+        ImpactDispositionJson = string.IsNullOrWhiteSpace(impactDispositionJson) ? "{}" : impactDispositionJson;
     }
 
     public Guid Id { get; private set; }
@@ -36,4 +41,7 @@ public sealed class RequirementChange
     public string Statement { get; private set; } = string.Empty;
     public string Rationale { get; private set; } = string.Empty;
     public string VerificationMethod { get; private set; } = string.Empty;
+    public string RichText { get; private set; } = string.Empty;
+    public string AttributesJson { get; private set; } = "{}";
+    public string ImpactDispositionJson { get; private set; } = "{}";
 }

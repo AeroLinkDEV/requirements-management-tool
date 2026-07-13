@@ -2,7 +2,7 @@
 
 This catalog is the authoritative capability inventory. Feature identifiers are stable and must not be reused. Priority uses `Must`, `Should`, or `Could`; phase indicates intended sequencing rather than a committed schedule.
 
-Implementation status is tracked against acceptance outcomes, not feature titles. As of 2026-07-12, Wave 1 has an integrated foundation for EA-001, EA-002, EA-004, COL-001, SRCH-001, SRCH-002, BULK-001, COL-003, EXCH-001, and EXCH-002. Each remains partially complete until its full acceptance outcome is proven; see `ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md` for the precise checkpoint and remaining gate.
+Implementation status is tracked against acceptance outcomes, not feature titles. As of 2026-07-12, Wave 1 has integrated foundations for EA-001 through EA-004, COL-001 through COL-003, SRCH-001, SRCH-002, BULK-001, EXCH-001, and EXCH-002. Controlled authoring now remains inside Draft SCR/SWCR authority; relationship-aware impact analysis, structured content, Program fields, mandatory dispositions, watchers, assignments, notifications, advanced filters, import mappings/error reports, and the 10,000-requirement PostgreSQL qualification gate are implemented. Each feature remains partially complete where its full acceptance outcome still calls for images/attachments, query-builder/shareable-URL polish, retryable background export, or concurrent-editor merge assistance.
 
 ## Platform Foundations
 

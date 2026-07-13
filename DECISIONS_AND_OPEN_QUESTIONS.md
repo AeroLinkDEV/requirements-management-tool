@@ -268,6 +268,14 @@ Future entries use:
 - **Rationale:** This is the largest current competitive gap and provides the data/configuration model required by ReqIF, reporting, product-line reuse, and integrations.
 - **Consequences:** ReqIF/OSLC, streams/variants, enterprise federation, and risk/compliance follow as explicit waves rather than being mixed into the first authoring slice.
 
+### DEC-033 - Requirement Authoring Remains Subordinate to SCR/SWCR Authority
+
+- **Date:** 2026-07-12
+- **Status:** Accepted
+- **Decision:** An engineer may discover an approved requirement, analyze its lifecycle impact, and author a proposed next revision in the Enterprise Requirements Workspace, but the proposal must belong to a Draft SCR/SWCR. Only the complete change package is reviewed and approved; approved requirement revisions remain immutable and new effective revisions arise only through baseline materialization.
+- **Rationale:** Enterprise-speed authoring must not create a second approval path or weaken the accepted change-authority model.
+- **Consequences:** Rich proposal content, Program fields, relationship impact, assignments, and dispositions are included in the exact SCR/SWCR review snapshot and audit story.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

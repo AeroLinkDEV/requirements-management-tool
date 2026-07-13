@@ -55,6 +55,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<SavedRequirementView> SavedRequirementViews => Set<SavedRequirementView>();
     public DbSet<EnterpriseOperationJob> EnterpriseOperationJobs => Set<EnterpriseOperationJob>();
     public DbSet<RequirementInterchangeJob> RequirementInterchangeJobs => Set<RequirementInterchangeJob>();
+    public DbSet<ArtifactWatch> ArtifactWatches => Set<ArtifactWatch>();
+    public DbSet<ArtifactAssignment> ArtifactAssignments => Set<ArtifactAssignment>();
+    public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
+    public DbSet<RequirementImportMapping> RequirementImportMappings => Set<RequirementImportMapping>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -121,6 +125,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Statement).HasMaxLength(8000).IsRequired();
             b.Property(x => x.Rationale).HasMaxLength(4000);
             b.Property(x => x.VerificationMethod).HasMaxLength(100);
+            b.Property(x => x.RichText).HasMaxLength(32000);
+            b.Property(x => x.AttributesJson).IsRequired();
+            b.Property(x => x.ImpactDispositionJson).IsRequired();
             b.Ignore(x => x.DisplayNumber);
             b.HasIndex(x => new { x.ScrId, x.BaseNumber, x.Revision }).IsUnique();
             b.HasIndex(x => x.BaseNumber);
@@ -356,6 +363,22 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<RequirementInterchangeJob>(b =>
         {
             b.ToTable("requirement_interchange_jobs"); b.HasKey(x=>x.Id); b.Property(x=>x.FileName).HasMaxLength(260).IsRequired(); b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired(); b.Property(x=>x.MappingJson).IsRequired(); b.Property(x=>x.RowsJson).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt}); b.HasIndex(x=>new{x.ProjectId,x.Sha256});
+        });
+        modelBuilder.Entity<ArtifactWatch>(b =>
+        {
+            b.ToTable("artifact_watches");b.HasKey(x=>x.Id);b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired();b.Property(x=>x.UserName).HasMaxLength(100).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.UserName}).IsUnique();
+        });
+        modelBuilder.Entity<ArtifactAssignment>(b =>
+        {
+            b.ToTable("artifact_assignments");b.HasKey(x=>x.Id);b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired();b.Property(x=>x.AssignedTo).HasMaxLength(100).IsRequired();b.Property(x=>x.Title).HasMaxLength(300).IsRequired();b.Property(x=>x.Description).HasMaxLength(4000);b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.CompletedBy).HasMaxLength(100);b.Property(x=>x.Version).IsConcurrencyToken();b.HasIndex(x=>new{x.ProjectId,x.AssignedTo,x.State,x.DueAt});b.HasIndex(x=>new{x.ArtifactType,x.ArtifactId});b.HasOne<ArtifactComment>().WithMany().HasForeignKey(x=>x.CommentId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<UserNotification>(b =>
+        {
+            b.ToTable("user_notifications");b.HasKey(x=>x.Id);b.Property(x=>x.Recipient).HasMaxLength(100).IsRequired();b.Property(x=>x.Type).HasMaxLength(60).IsRequired();b.Property(x=>x.Title).HasMaxLength(300).IsRequired();b.Property(x=>x.Detail).HasMaxLength(2000);b.Property(x=>x.Route).HasMaxLength(300);b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.HasIndex(x=>new{x.Recipient,x.State,x.CreatedAt});b.HasIndex(x=>x.ProjectId);
+        });
+        modelBuilder.Entity<RequirementImportMapping>(b =>
+        {
+            b.ToTable("requirement_import_mappings");b.HasKey(x=>x.Id);b.Property(x=>x.Name).HasMaxLength(200).IsRequired();b.Property(x=>x.MappingJson).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.Name}).IsUnique();
         });
     }
 

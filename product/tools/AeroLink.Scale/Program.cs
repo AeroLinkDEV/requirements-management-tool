@@ -3,7 +3,10 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Domain.Requirements;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
 
 var command = args.FirstOrDefault()?.ToLowerInvariant() ?? "help";
 var profile = Option("--profile") ?? "small";
@@ -13,8 +16,9 @@ var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connect
 await using var db = new AeroLinkDbContext(options);
 
 if (command == "generate") await Generate();
+else if (command == "workspace") await GenerateWorkspace();
 else if (command == "benchmark") await Benchmark();
-else Console.WriteLine("Usage: dotnet run -- generate|benchmark [--profile smoke|small|medium] [--reset]");
+else Console.WriteLine("Usage: dotnet run -- generate|workspace|benchmark [--profile smoke|small|medium] [--reset]");
 
 string? Option(string name) { var index = Array.IndexOf(args, name); return index >= 0 && index + 1 < args.Length ? args[index + 1] : null; }
 
@@ -72,8 +76,21 @@ async Task Benchmark()
     var results = new List<object>();
     await Measure("dashboard_aggregates", 2_000, async () => { var q=db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==projectId); _=await q.GroupBy(_=>1).Select(g=>new { Total=g.Count(), Draft=g.Count(x=>x.State==ScrState.Draft), Review=g.Count(x=>x.State==ScrState.InReview)}).SingleAsync(); });
     await Measure("scr_page_50", 500, async () => { _=await db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderByDescending(x=>x.UpdatedAt).Take(50).Select(x=>new{x.Id,x.Title,x.State}).ToListAsync(); });
-    await Measure("exact_requirement", 300, async () => { _=await db.RequirementChanges.AsNoTracking().Where(x=>x.BaseNumber=="SWR-00002375").Select(x=>new{x.Id,x.Statement}).FirstOrDefaultAsync(); });
-    await Measure("requirement_page_50", 500, async () => { _=await db.RequirementChanges.AsNoTracking().OrderBy(x=>x.BaseNumber).Take(50).Select(x=>new{x.Id,x.BaseNumber,x.Statement}).ToListAsync(); });
+    await Measure("exact_requirement", 300, async () => { _=await (from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.BaseNumber=="HLR-00002375") join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId orderby revision.Revision descending select new{artifact.Id,artifact.BaseNumber,revision.Statement}).FirstOrDefaultAsync(); });
+    await Measure("enterprise_page_100", 500, async () => { _=await (from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision) orderby artifact.BaseNumber select new{artifact.Id,artifact.BaseNumber,revision.Statement}).Take(100).ToListAsync(); });
+    await Measure("structured_system_test_filter", 500, async () => { _=await (from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.Level==RequirementLevel.System) join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId where revision.VerificationMethod=="Test" select artifact.Id).CountAsync(); });
+    await Measure("specification_tree", 500, async () => { _=await db.SpecificationNodes.AsNoTracking().Where(x=>db.RequirementSpecifications.Any(s=>s.Id==x.SpecificationId&&s.ProjectId==projectId)).GroupBy(x=>x.SpecificationId).Select(x=>new{x.Key,Count=x.Count()}).ToListAsync(); });
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(results, new System.Text.Json.JsonSerializerOptions{WriteIndented=true}));
     async Task Measure(string name, int targetMs, Func<Task> operation) { await operation(); var samples=new List<long>(); for(var i=0;i<5;i++){var sw=Stopwatch.StartNew();await operation();sw.Stop();samples.Add(sw.ElapsedMilliseconds);}var p95=samples.Order().ElementAt(4);results.Add(new{name,targetMs,p95Ms=p95,passed=p95<=targetMs,samples});if(p95>targetMs)Environment.ExitCode=1; }
+}
+
+async Task GenerateWorkspace()
+{
+    var requirementCount=profile switch{"smoke"=>1_000,"medium"=>50_000,_=>10_000};
+    if(args.Contains("--reset")){if(!connection.Contains("aerolink_scale",StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("--reset is allowed only for the dedicated aerolink_scale database.");await db.Database.EnsureDeletedAsync();}
+    await db.Database.MigrateAsync();if(await db.Programs.AnyAsync())throw new InvalidOperationException("Scale database already contains data. Use --reset for the dedicated aerolink_scale database.");
+    var now=new DateTimeOffset(2026,1,1,12,0,0,TimeSpan.Zero);var program=new ProgramRecord("AeroLink Enterprise Qualification Program","QUAL");var project=new ProjectRecord(program.Id,"Enterprise FMS Qualification","Qualification Flight Management System");var release=new SoftwareRelease(project.Id,"10.0",false);db.AddRange(program,project,release);await db.SaveChangesAsync();
+    var scr=new SystemChangeRequest("SCR-00000001",0,project.Id,release.Id,"Establish enterprise-scale qualification baseline","A repeatable large repository is required.","Generate mixed-level immutable requirements and exact baseline membership.","Establish the controlled qualification dataset.","scale.author",now);scr.AddRequirementChange("scale.author","SYSR-00000001",0,RequirementLevel.System,RequirementChangeKind.Introduce,"The qualification FMS shall support enterprise-scale repository validation.","Scale authority.","Test",now);var approvers=new[]{new ApproverSelection("scale.reviewer","Scale Reviewer")};scr.SubmitForReview("scale.author",approvers,now.AddMinutes(1));scr.ApproveActiveStage("scale.reviewer",now.AddMinutes(2));var baseline=new CandidateBaseline("SYSBL-00000001",0,project.Id,release.Id,null,"10,000-requirement qualification baseline","scale.cm",now);baseline.Select(scr,"scale.cm",now.AddMinutes(3));baseline.Freeze("scale.cm",now.AddMinutes(4));var manifest=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"enterprise-workspace:{requirementCount}:4754"))).ToLowerInvariant();baseline.MarkRequirementsMaterialized("scale.cm",manifest,requirementCount,now.AddMinutes(5));db.AddRange(scr,baseline);await db.SaveChangesAsync();
+    var sw=Stopwatch.StartNew();var counters=new Dictionary<RequirementLevel,int>{{RequirementLevel.System,0},{RequirementLevel.HighLevel,0},{RequirementLevel.LowLevel,0}};for(var i=1;i<=requirementCount;i++){var level=i<=requirementCount*15/100?RequirementLevel.System:i<=requirementCount*50/100?RequirementLevel.HighLevel:RequirementLevel.LowLevel;var number=++counters[level];var prefix=level switch{RequirementLevel.System=>"SYSR",RequirementLevel.HighLevel=>"HLR",_=>"LLR"};var artifact=new RequirementArtifact(project.Id,$"{prefix}-{number:D8}",level,now.AddSeconds(i));var revision=new RequirementRevision(artifact.Id,0,$"The qualification FMS shall provide deterministic {level} capability {number:D8} at enterprise scale.","Generated using deterministic qualification seed 4754.",(i%4) switch{0=>"Analysis",1=>"Test",2=>"Inspection",_=>"Demonstration"},RequirementRevisionState.Active,scr.Id,baseline.Id,now.AddSeconds(i));db.AddRange(artifact,revision,new BaselineRequirementSelection(baseline.Id,artifact.Id,revision.Id));if(i%500==0){await db.SaveChangesAsync();db.ChangeTracker.Clear();Console.WriteLine($"Materialized {i:N0}/{requirementCount:N0} requirements...");}}
+    await db.SaveChangesAsync();await new EnterpriseRequirementsService(db).SynchronizeProjectAsync(project.Id,"scale.workspace");sw.Stop();Console.WriteLine($"Generated a mixed-level {requirementCount:N0}-requirement Enterprise Requirements Workspace in {sw.Elapsed.TotalSeconds:N1}s using deterministic seed 4754.");
 }

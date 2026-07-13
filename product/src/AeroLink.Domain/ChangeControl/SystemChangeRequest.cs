@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using AeroLink.Domain.Common;
 
 namespace AeroLink.Domain.ChangeControl;
@@ -58,13 +59,15 @@ public sealed class SystemChangeRequest
 
     public RequirementChange AddRequirementChange(string actorId, string baseNumber, int revision,
         RequirementLevel level, RequirementChangeKind kind, string statement, string rationale,
-        string verificationMethod, DateTimeOffset now)
+        string verificationMethod, DateTimeOffset now, string richText = "", string attributesJson = "{}",
+        string impactDispositionJson = "{}")
     {
         EnsureAuthor(actorId);
         EnsureDraft();
         if (string.IsNullOrWhiteSpace(statement) && kind != RequirementChangeKind.Retire)
             throw new DomainException("A requirement statement is required.");
-        var change = new RequirementChange(Id, baseNumber, revision, level, kind, statement, rationale, verificationMethod);
+        var change = new RequirementChange(Id, baseNumber, revision, level, kind, statement, rationale, verificationMethod,
+            richText, attributesJson, impactDispositionJson);
         _requirementChanges.Add(change);
         UpdatedAt = now;
         Audit("RequirementChangeAdded", actorId, $"Added {change.Kind} {change.DisplayNumber}.", now);
@@ -87,7 +90,7 @@ public sealed class SystemChangeRequest
             if (string.IsNullOrWhiteSpace(item.Statement) && item.Kind != RequirementChangeKind.Retire)
                 throw new DomainException("A requirement statement is required unless the requirement is being retired.");
             _requirementChanges.Add(new RequirementChange(Id, item.BaseNumber, item.Revision, item.Level, item.Kind,
-                item.Statement, item.Rationale, item.VerificationMethod));
+                item.Statement, item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson));
         }
         UpdatedAt = now;
         Audit("ScrDraftUpdated", actorId, $"Updated {DisplayNumber} Draft with {changes.Count} proposed requirement changes.", now);
@@ -167,7 +170,7 @@ public sealed class SystemChangeRequest
             Title, Problem, Analysis, Solution, AuthorId, now, Type);
         foreach (var item in _requirementChanges)
             next.AddRequirementChange(actorId, item.BaseNumber, item.Revision, item.Level, item.Kind,
-                item.Statement, item.Rationale, item.VerificationMethod, now);
+                item.Statement, item.Rationale, item.VerificationMethod, now, item.RichText, item.AttributesJson, item.ImpactDispositionJson);
         return next;
     }
 
@@ -201,13 +204,20 @@ public sealed class SystemChangeRequest
             throw new DomainException("Problem, Analysis, and Solution are required before review.");
         if (_requirementChanges.Count == 0)
             throw new DomainException("At least one requirement change is required before review.");
+        var requiredImpacts=new[]{"trace","verification","documents","baseline","collaboration"};
+        foreach(var change in _requirementChanges)
+        {
+            if(change.ImpactDispositionJson=="{}")continue;
+            Dictionary<string,string> dispositions;try{dispositions=JsonSerializer.Deserialize<Dictionary<string,string>>(change.ImpactDispositionJson)??[];}catch(JsonException){throw new DomainException($"{change.DisplayNumber} contains invalid impact dispositions.");}
+            if(requiredImpacts.Any(key=>!dispositions.TryGetValue(key,out var value)||string.IsNullOrWhiteSpace(value)||value.Equals("Pending",StringComparison.OrdinalIgnoreCase)))throw new DomainException($"Complete every impact disposition for {change.DisplayNumber} before review.");
+        }
     }
 
     private string ComputeSnapshotHash()
     {
         var content = string.Join("|", DisplayNumber, Title, Problem, Analysis, Solution,
             string.Join(";", _requirementChanges.OrderBy(x => x.DisplayNumber).Select(x =>
-                $"{x.DisplayNumber}:{x.Level}:{x.Kind}:{x.Statement}:{x.Rationale}:{x.VerificationMethod}")));
+                $"{x.DisplayNumber}:{x.Level}:{x.Kind}:{x.Statement}:{x.Rationale}:{x.VerificationMethod}:{x.RichText}:{x.AttributesJson}:{x.ImpactDispositionJson}")));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
     }
 

@@ -25,4 +25,11 @@ public sealed class EnterpriseRequirementsWorkspaceTests
         Assert.Equal(2,rows.Count);Assert.True(rows[0].Valid);Assert.False(rows[1].Valid);Assert.True(rows[1].Errors.Count>=3);
         var diff=EnterpriseRequirementsService.Diff("The FMS shall navigate.","The FMS shall safely navigate.");Assert.Contains(diff,x=>x.Kind=="added"&&x.Text.Contains("safely"));
     }
+
+    [Fact]
+    public async Task Collaboration_and_reusable_mapping_records_round_trip_through_persistence()
+    {
+        var options=new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;await using var db=new AeroLinkDbContext(options);await db.Database.OpenConnectionAsync();await db.Database.EnsureCreatedAsync();var projectId=Guid.NewGuid();var artifactId=Guid.NewGuid();var now=DateTimeOffset.UtcNow;db.ArtifactWatches.Add(new(projectId,"Requirement",artifactId,"systems.author","systems.author",now));db.ArtifactAssignments.Add(new(projectId,"Requirement",artifactId,null,"test.engineer","Add missing coverage","Create an additional procedure.",now.AddDays(2),"systems.author",now));db.UserNotifications.Add(new(projectId,"test.engineer","RequirementAssignment","Add missing coverage","Assigned by systems.author.",$"requirement:{artifactId}",artifactId,now));db.RequirementImportMappings.Add(new(projectId,"Supplier standard columns","{\"identifier\":\"Requirement ID\"}","admin",now));await db.SaveChangesAsync();
+        Assert.Single(await db.ArtifactWatches.ToListAsync());Assert.Single(await db.ArtifactAssignments.Where(x=>x.AssignedTo=="test.engineer").ToListAsync());Assert.Single(await db.UserNotifications.Where(x=>x.State==NotificationState.Unread).ToListAsync());Assert.Equal(1,(await db.RequirementImportMappings.SingleAsync()).Version);
+    }
 }

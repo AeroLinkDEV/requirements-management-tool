@@ -23,6 +23,9 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByRole('link', { name: 'Download PDF' })).toHaveAttribute('href', /\/api\/scrs\/.+\/download\?format=pdf/)
   await page.getByRole('button', { name: 'Edit Draft' }).click()
   await page.getByLabel('Title').fill('Introduce controlled approval workflow')
+  const impactDispositions=page.locator('.editorColumns aside select')
+  expect(await impactDispositions.count()).toBe(5)
+  for(let i=0;i<5;i++)await impactDispositions.nth(i).selectOption('Not Affected')
   await page.getByRole('button', { name: 'Save Draft' }).click()
   await expect(page.getByRole('heading', { name: 'Introduce controlled approval workflow' })).toBeVisible()
 

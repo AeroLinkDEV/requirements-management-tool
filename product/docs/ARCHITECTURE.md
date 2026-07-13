@@ -36,9 +36,6 @@ Identity now comes from a revocable authenticated server session. Passwords use 
 
 ## Next implementation increment
 
-Wave 1 now has an integrated production-shaped foundation: schemas, specification hierarchy, revision profiles, discovery, saved views, discussions, redlines, bulk jobs, and governed CSV/XLSX onboarding all operate against persisted data. The next increment completes the remaining Wave 1 acceptance depth:
+The controlled-authoring release now connects approved requirement discovery to relationship-aware impact analysis and proposed next revisions inside Draft SCR/SWCR aggregates. Rich structured content, Program fields, impact dispositions, watchers, assignments, notifications, advanced queries, import mappings, error reports, and measured 10,000-requirement PostgreSQL behavior share the existing identity, authorization, audit, and concurrency boundaries.
 
-1. Add sanitized rich-text editing, attachments, tables/images, keyboard authoring, and optimistic concurrency for draft content.
-2. Expand discussions into threads, formal dispositions, watchers, assignments, due dates, and notification delivery.
-3. Add a structured query builder, configurable columns/grouping, shareable URLs, and a dedicated permission-aware search index.
-4. Add reusable import mappings, downloadable error workbooks, job history/retry, export, and measured 10,000-requirement performance before ReqIF and product-line configuration work.
+The remaining Wave 1 increment should add controlled inline images/attachments, field-level redlines for structured proposal data, shareable URL/query-builder polish, background import/export retry and idempotency, and multi-session concurrent-editor/merge qualification. ReqIF and event/webhook work remains Wave 2 and must not precede those control-depth gates.
