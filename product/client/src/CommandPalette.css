@@ -1,1 +1,77 @@
-.paletteBackdrop{position:fixed;inset:0;background:rgba(5,14,30,.68);backdrop-filter:blur(5px);z-index:1000;display:flex;justify-content:center;align-items:flex-start;padding-top:10vh}.commandPalette{width:min(760px,calc(100vw - 32px));max-height:76vh;background:#fff;border-radius:18px;box-shadow:0 30px 90px rgba(0,0,0,.38);overflow:hidden;display:flex;flex-direction:column}.commandPalette>header{display:flex;align-items:center;gap:14px;padding:17px 20px;border-bottom:1px solid #dfe5ef}.commandPalette>header span{font-size:25px;color:#197b72}.commandPalette input{border:0!important;outline:0;flex:1;font-size:16px;background:transparent!important}.commandPalette kbd{font:10px/1.6 ui-monospace,monospace;color:#637089;background:#f0f3f8;border:1px solid #d9e0ea;border-radius:5px;padding:1px 6px}.paletteResults{overflow:auto;padding:10px}.paletteGroup>small{display:block;color:#7a8799;font-size:9px;font-weight:800;letter-spacing:1.3px;padding:10px}.paletteGroup a{display:flex;align-items:center;gap:12px;color:#13203a;text-decoration:none;padding:10px 12px;border-radius:10px}.paletteGroup a:hover,.paletteGroup a:focus-visible{background:#edf7f6;outline:2px solid #4eaaa1}.paletteGroup a>i{width:32px;height:32px;border-radius:8px;background:#e8eef7;display:grid;place-items:center;font-style:normal;color:#3d5f86}.paletteGroup a>i.kind{font-size:9px;font-weight:900;background:#dff2ef;color:#176e66}.paletteGroup a div{display:flex;flex-direction:column;min-width:0}.paletteGroup a b{font-size:12px}.paletteGroup a span{font-size:11px;color:#69778c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.paletteGroup a em{margin-left:auto;font-size:9px;font-style:normal;text-transform:uppercase;color:#65758b}.paletteGroup p{padding:15px;color:#778499;font-size:12px}.commandPalette>footer{display:flex;justify-content:space-between;padding:10px 18px;background:#f6f8fb;color:#6d798b;font-size:9px}.commandPalette>footer kbd{margin-right:3px}.artifactState{min-height:100vh;display:grid;place-items:center;background:#f3f6fa}.artifactState>div{text-align:center;max-width:480px}.artifactState span{display:grid;place-items:center;margin:auto;width:64px;height:64px;border-radius:18px;background:#e7edf5;color:#53657c;font-size:30px}.artifactState h1{margin:18px 0 8px}.artifactState p{color:#6a778b;line-height:1.6}.artifactState button,.artifactActions button{border:1px solid #cbd5e2;background:#fff;border-radius:8px;padding:10px 14px}.artifactRecord{padding:35px 46px;max-width:1280px!important;margin:auto}.artifactRecord>header{display:flex;justify-content:space-between;gap:25px}.artifactRecord h1{font-size:38px;margin:7px 0}.artifactActions{display:flex;align-items:center;gap:10px}.artifactHero{display:grid;grid-template-columns:1fr 1fr;gap:1px;margin:28px 0;background:#d9e2ec;border:1px solid #d9e2ec;border-radius:12px;overflow:hidden}.artifactHero>div{background:#fff;padding:22px;display:flex;flex-direction:column;gap:7px}.artifactHero small{font-size:9px;letter-spacing:1px;color:#6d7b8e}.artifactHero b{font-size:18px}.artifactHero span{color:#68758a;font-size:11px}.artifactDetails,.artifactRelated{background:#fff;border:1px solid #dde4ed;border-radius:12px;padding:22px;margin-top:18px}.artifactDetails h2,.artifactRelated h2{font-size:15px;margin:0 0 17px}.artifactDetails dl{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#e1e7ef}.artifactDetails dl div{background:#fff;padding:12px}.artifactDetails dt{font-size:9px;text-transform:uppercase;color:#748197}.artifactDetails dd{margin:5px 0 0;font-size:12px;word-break:break-word}.artifactRelated>button{width:100%;display:flex;align-items:center;gap:12px;border:0;border-top:1px solid #e4e9f0;background:#fff;padding:12px;text-align:left}.artifactRelated>button i{width:30px;height:30px;display:grid;place-items:center;background:#e6f3f1;border-radius:7px;font-style:normal;font-size:9px;color:#176c64}.artifactRelated>button span{display:flex;flex-direction:column}.artifactRelated>button small{color:#748096}.artifactRelated>button em{margin-left:auto;font-style:normal;color:#237e75;font-size:11px}@media(max-width:800px){.artifactRecord{padding:24px 18px}.artifactRecord>header{flex-direction:column}.artifactHero,.artifactDetails dl{grid-template-columns:1fr}.commandPalette>footer{display:none}}
+.paletteBackdrop { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: flex-start; justify-content: center; padding-top: 7vh; background: rgba(5,14,30,.7); backdrop-filter: blur(6px); animation: paletteVeil .16s ease both; }
+.commandPalette { width: min(940px,calc(100vw - 34px)); max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #ffffff2b; border-radius: 18px; background: white; box-shadow: 0 35px 110px rgba(0,0,0,.45); animation: paletteIn .2s cubic-bezier(.2,.72,.25,1) both; }
+.commandPalette > header { display: flex; align-items: center; gap: 14px; min-height: 66px; padding: 13px 19px; border-bottom: 1px solid #dfe5ed; background: white; }
+.commandPalette > header > span { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; background: #e4f3f0; color: #197b72; font-size: 24px; }
+.commandPalette input { flex: 1; min-width: 0; border: 0 !important; outline: 0; background: transparent !important; color: #15243b; font-size: 17px; }
+.commandPalette kbd { min-height: 0; font: 11px/1.55 ui-monospace,monospace; color: #637089; background: #f0f3f8; border: 1px solid #d9e0ea; border-radius: 5px; padding: 1px 6px; }
+.paletteWorkspace { min-height: 0; display: grid; grid-template-columns: minmax(0,1fr) 300px; }
+.paletteResults { min-height: 330px; max-height: 62vh; overflow: auto; padding: 10px; background: white; }
+.paletteGroup > small { display: block; padding: 11px 10px 7px; color: #7a8799; font-size: 10px; font-weight: 800; letter-spacing: 1.2px; }
+.paletteGroup a { position: relative; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 11px; border: 1px solid transparent; border-radius: 10px; color: #13203a; text-decoration: none; }
+.paletteGroup a:hover, .paletteGroup a:focus-visible, .paletteGroup a[data-active="true"] { border-color: #cce3df; outline: 0; background: #edf7f6; }
+.paletteGroup a[data-active="true"]::after { content: '↵'; position: absolute; right: 11px; color: #3c847c; font-size: 15px; }
+.paletteGroup a > i { flex: 0 0 auto; width: 37px; height: 37px; display: grid; place-items: center; border-radius: 9px; background: #e8eef7; color: #3d5f86; font-style: normal; font-weight: 800; }
+.paletteGroup a > i.kind { background: #dff2ef; color: #176e66; font-size: 10px; }
+.paletteGroup a > div { display: flex; flex-direction: column; min-width: 0; padding-right: 28px; }
+.paletteGroup a b { font-size: 13px; }
+.paletteGroup a span { overflow: hidden; color: #69778c; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.paletteGroup a em { margin-left: auto; margin-right: 23px; border-radius: 12px; background: #e8eef3; color: #65758b; padding: 3px 7px; font-size: 10px; font-style: normal; font-weight: 700; text-transform: uppercase; }
+.paletteZero { min-height: 175px; display: grid; place-content: center; justify-items: center; padding: 25px; color: #778499; text-align: center; }
+.paletteZero > span { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 11px; background: #edf2f5; color: #577086; font-size: 22px; }
+.paletteZero b { margin-top: 11px; color: #26364c; font-size: 14px; }
+.paletteZero p { max-width: 390px; margin: 4px 0 0; font-size: 12px; line-height: 1.5; }
+.palettePreview { min-width: 0; padding: 27px 23px; border-left: 1px solid #dce4eb; background: radial-gradient(circle at 100% 0,#d9efeb 0,transparent 34%),linear-gradient(160deg,#f7fafb,#edf3f6); }
+.previewIcon { width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid #bdd8d3; border-radius: 14px; background: rgba(255,255,255,.85); color: #1b756c; font: 800 16px var(--font-display); box-shadow: 0 8px 25px rgba(26,69,77,.08); }
+.palettePreview > p:first-of-type { margin: 19px 0 5px; color: #5b847e; font-size: 10px; font-weight: 800; letter-spacing: .11em; }
+.palettePreview h2 { margin: 0; color: #17263c; font: 700 20px/1.2 var(--font-display); }
+.previewState { display: inline-block; margin-top: 9px; border-radius: 13px; background: #dff1ec; color: #246b5d; padding: 4px 8px; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.palettePreview .previewDetail { margin: 15px 0; color: #65758a; font-size: 13px; line-height: 1.55; }
+.palettePreview dl { margin: 18px 0 0; border-top: 1px solid #d6e1e6; }
+.palettePreview dl > div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #dbe4e8; font-size: 11px; }
+.palettePreview dt { color: #788797; }
+.palettePreview dd { margin: 0; color: #33475a; font-weight: 700; text-align: right; text-transform: capitalize; }
+.palettePreview footer { display: flex; align-items: center; gap: 7px; margin-top: 20px; color: #647588; font-size: 11px; }
+.commandPalette > footer { display: flex; justify-content: space-between; align-items: center; min-height: 42px; padding: 8px 18px; border-top: 1px solid #dce4eb; background: #f6f8fb; color: #6d798b; font-size: 10px; }
+.commandPalette > footer kbd { margin-right: 3px; }
+@keyframes paletteVeil { from { opacity: 0; } }
+@keyframes paletteIn { from { opacity: .7; transform: translateY(-8px) scale(.992); } }
+
+.artifactState { min-height: 100vh; display: grid; place-items: center; background: #f3f6fa; }
+.artifactState > div { max-width: 480px; text-align: center; }
+.artifactState span { width: 64px; height: 64px; display: grid; place-items: center; margin: auto; border-radius: 18px; background: #e7edf5; color: #53657c; font-size: 30px; }
+.artifactState h1 { margin: 18px 0 8px; }
+.artifactState p { color: #6a778b; line-height: 1.6; }
+.artifactState button, .artifactActions button { border: 1px solid #cbd5e2; border-radius: 8px; background: #fff; padding: 10px 14px; }
+.artifactRecord { max-width: 1280px !important; margin: auto; padding: 35px 46px; }
+.artifactRecord > header { display: flex; justify-content: space-between; gap: 25px; }
+.artifactRecord h1 { margin: 7px 0; font-size: 38px; }
+.artifactActions { display: flex; align-items: center; gap: 10px; }
+.artifactHero { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; overflow: hidden; margin: 28px 0; border: 1px solid #d9e2ec; border-radius: 12px; background: #d9e2ec; }
+.artifactHero > div { display: flex; flex-direction: column; gap: 7px; padding: 22px; background: #fff; }
+.artifactHero small { color: #6d7b8e; font-size: 11px; letter-spacing: 1px; }
+.artifactHero b { font-size: 18px; }
+.artifactHero span { color: #68758a; font-size: 12px; }
+.artifactDetails, .artifactRelated { margin-top: 18px; padding: 22px; border: 1px solid #dde4ed; border-radius: 12px; background: #fff; }
+.artifactDetails h2, .artifactRelated h2 { margin: 0 0 17px; font-size: 15px; }
+.artifactDetails dl { display: grid; grid-template-columns: repeat(3,1fr); gap: 1px; background: #e1e7ef; }
+.artifactDetails dl div { padding: 12px; background: #fff; }
+.artifactDetails dt { color: #748197; font-size: 11px; text-transform: uppercase; }
+.artifactDetails dd { margin: 5px 0 0; font-size: 13px; word-break: break-word; }
+.artifactRelated > button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px; border: 0; border-top: 1px solid #e4e9f0; background: #fff; text-align: left; }
+.artifactRelated > button i { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 7px; background: #e6f3f1; color: #176c64; font-size: 10px; font-style: normal; }
+.artifactRelated > button span { display: flex; flex-direction: column; }
+.artifactRelated > button small { color: #748096; }
+.artifactRelated > button em { margin-left: auto; color: #237e75; font-size: 11px; font-style: normal; }
+
+@media (max-width: 820px) {
+  .paletteWorkspace { grid-template-columns: 1fr; }
+  .palettePreview { display: none; }
+  .commandPalette > footer { display: none; }
+  .artifactRecord { padding: 24px 18px; }
+  .artifactRecord > header { flex-direction: column; }
+  .artifactHero, .artifactDetails dl { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .paletteBackdrop, .commandPalette { animation: none; }
+}
