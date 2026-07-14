@@ -16,7 +16,7 @@ test("enterprise control proves content, queries, jobs, concurrency, redlines, a
   await page
     .locator(".program > select:not(.releaseSelector)")
     .selectOption({ label: "Flight Management System Live Program" });
-  await openNavigationGroup(page,"RELEASE & CONFIGURATION");
+  await openNavigationGroup(page,"ADMINISTRATION");
   await page.getByRole("link", { name: /Enterprise Control/ }).click();
   await expect(
     page.getByRole("heading", { name: "Enterprise Control" }),

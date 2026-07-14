@@ -20,7 +20,7 @@ test("enterprise workspace supports discovery, collaboration, saved views, bulk 
   await openNavigationGroup(page,"SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "System Requirements" }).click();
   await expect(
-    page.getByRole("heading", { name: "Requirements Workspace" }),
+    page.getByRole("heading", { name: "System Requirements" }),
   ).toBeVisible();
   await expect(page.getByText("150 requirements")).toBeVisible();
   await page.getByLabel("Search requirements").fill("SYSR-00000150");

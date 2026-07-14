@@ -13,7 +13,7 @@ import EnterpriseControlCenter from "./EnterpriseControlCenter";
 import CommandPalette from "./CommandPalette";
 import ArtifactRecordPage from "./ArtifactRecordPage";
 import { readRoute, routePath } from "./routing";
-import type { AppRoute, Discipline, RouteContext, View } from "./routing";
+import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
 import {
   AdministrationCenter,
   LoginPage,
@@ -78,13 +78,16 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
   const release = project?.releases.find(x => x.id === selectedReleaseId) ?? project?.releases.at(-1);
-  const item = (label:string,target:View,icon:string,area:Discipline="system") => (
-    <a href={context ? routePath(context,target,area) : "#"} className={view===target&&discipline===area?"active":""} onClick={event=>{event.preventDefault();onNavigate(target,area)}}>
+  const item = (label:string,target:View,icon:string,area:Discipline="system",accessibleLabel=label) => (
+    <a href={context ? routePath(context,target,area) : "#"} className={view===target&&discipline===area?"active":""} aria-label={accessibleLabel} aria-current={view===target&&discipline===area?"page":undefined} onClick={event=>{event.preventDefault();onNavigate(target,area)}}>
       <i aria-hidden="true">{icon}</i><span>{label}</span>
     </a>
   );
   const engineeringView = ["createSystemScr","createSoftwareChange","history","requirements","scr"].includes(view);
   const releaseView = ["planning","baselines","release","enterprise"].includes(view);
+  const engineeringScope:Discipline = discipline==="software" ? "software" : "system";
+  const verificationScope:Discipline = discipline==="softwareTest"||discipline==="software" ? "softwareTest" : "systemTest";
+  const newChangeView:View = engineeringScope==="software" ? "createSoftwareChange" : "createSystemScr";
   return (
     <aside className="appNavigation">
       <div className="brand"><span aria-hidden="true">▲</span><b>AeroLink</b></div>
@@ -99,11 +102,10 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       </div>
       <nav className="primaryNavigation" aria-label="Primary navigation">
         <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
-        <details className="navGroup" open={engineeringView&&discipline!=="software"}><summary>SYSTEMS ENGINEERING</summary>{item("New System SCR","createSystemScr","+")}{item("System Change Requests","history","◇","system")}{item("System Requirements","requirements","≡","system")}</details>
-        <details className="navGroup" open={engineeringView&&discipline==="software"}><summary>SOFTWARE ENGINEERING</summary>{item("New Software SWCR","createSoftwareChange","+")}{item("Software Change Requests","history","◇","software")}{item("HLR & LLR Requirements","requirements","≡","software")}</details>
-        <details className="navGroup" open={view==="verification"||view==="lifecycle"}><summary>VERIFICATION</summary>{item("System Verification","verification","✓","systemTest")}{item("Software Verification","verification","✓","softwareTest")}{item("Traceability & Outputs","lifecycle","↗","system")}</details>
-        <details className="navGroup" open={releaseView}><summary>RELEASE & CONFIGURATION</summary>{item("Release Planning","planning","⑂")}{item("Baselines","baselines","⌘")}{item("Release Campaign","release","◆")}{item("Enterprise Control","enterprise","◈")}</details>
-        {user.isAdministrator&&<details className="navGroup" open={view==="admin"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}</details>}
+        <details className="navGroup" open={engineeringView}><summary>ENGINEERING</summary><div className="navScopeSwitch" role="group" aria-label="Engineering scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements","requirements","≡",engineeringScope,engineeringScope==="software"?"HLR & LLR Requirements":"System Requirements")}{item("New Change Request",newChangeView,"+",engineeringScope,engineeringScope==="software"?"New Software SWCR":"New System SCR")}</details>
+        <details className="navGroup" open={view==="verification"||view==="lifecycle"}><summary>ASSURANCE</summary><div className="navScopeSwitch" role="group" aria-label="Assurance scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{item("Verification","verification","✓",verificationScope,verificationScope==="softwareTest"?"Software Verification":"System Verification")}{item("Traceability & Outputs","lifecycle","↗","system")}</details>
+        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Product Versions","planning","⑂","system","Product Versions / Release Planning")}{item("Baselines","baselines","⌘")}{item("Release Readiness","release","◆","system","Release Readiness / Release Campaign")}</details>
+        {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
       </nav>
       <footer><div className="avatar">{user.displayName.split(" ").map(x=>x[0]).join("").slice(0,2)}</div><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button></footer>
     </aside>
@@ -133,6 +135,8 @@ function App() {
     [selectedArtifactId,setSelectedArtifactId]=useState(initialRoute.artifactId ?? ""),
     [selectedArtifactKind,setSelectedArtifactKind]=useState(initialRoute.artifactKind ?? ""),
     [paletteOpen,setPaletteOpen]=useState(false),
+    [historyStateIntent,setHistoryStateIntent]=useState<HistoryStateIntent|undefined>(initialRoute.historyStateIntent),
+    [historyTypeIntent,setHistoryTypeIntent]=useState<HistoryTypeIntent|undefined>(initialRoute.historyTypeIntent),
     [discipline,setDiscipline]=useState<Discipline>(initialRoute.discipline),
     [view, setView] = useState<View>(initialRoute.view);
   useEffect(() => {
@@ -165,7 +169,7 @@ function App() {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
-  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
+  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape")setPaletteOpen(false)};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[]);
   const loadData = useCallback(async () => {
     if (!project) return;
@@ -291,14 +295,16 @@ function App() {
       </div>
     );
   const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
-  const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false)=>{setView(target);setDiscipline(area);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");if(context){const path=routePath(context,target,area,artifactId,artifactKind);history[replace?"replaceState":"pushState"]({},"",path)}};
-  const changeProgram=(id:string)=>{const next=workspaces.find(x=>x.program.id===id),nextProject=next?.projects[0],nextRelease=[...(nextProject?.releases??[])].reverse().find(x=>!x.isReleased)??nextProject?.releases.at(-1);if(!nextProject||!nextRelease)return;setActiveId(id);setSelectedProjectId(nextProject.project.id);setSelectedReleaseId(nextRelease.id);const nextContext={programId:id,projectId:nextProject.project.id,releaseId:nextRelease.id};history.pushState({},"",routePath(nextContext,view,discipline,selectedArtifactId,selectedArtifactKind))};
-  const changeProject=(id:string)=>{const next=active?.projects.find(x=>x.project.id===id),nextRelease=[...(next?.releases??[])].reverse().find(x=>!x.isReleased)??next?.releases.at(-1);if(!next||!nextRelease)return;setSelectedProjectId(id);setSelectedReleaseId(nextRelease.id);history.pushState({},"",routePath({programId:active!.program.id,projectId:id,releaseId:nextRelease.id},view,discipline,selectedArtifactId,selectedArtifactKind))};
-  const changeRelease=(id:string)=>{setSelectedReleaseId(id);if(active&&project)history.pushState({},"",routePath({programId:active.program.id,projectId:project.project.id,releaseId:id},view,discipline,selectedArtifactId,selectedArtifactKind))};
+  const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");if(context){const path=routePath(context,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+  const changeProgram=(id:string)=>{const next=workspaces.find(x=>x.program.id===id),nextProject=next?.projects[0],nextRelease=[...(nextProject?.releases??[])].reverse().find(x=>!x.isReleased)??nextProject?.releases.at(-1);if(!nextProject||!nextRelease)return;setActiveId(id);setSelectedProjectId(nextProject.project.id);setSelectedReleaseId(nextRelease.id);const nextContext={programId:id,projectId:nextProject.project.id,releaseId:nextRelease.id};history.pushState({},"",routePath(nextContext,view,discipline,selectedArtifactId,selectedArtifactKind,view==="history"?historyStateIntent:undefined,view==="history"?historyTypeIntent:undefined))};
+  const changeProject=(id:string)=>{const next=active?.projects.find(x=>x.project.id===id),nextRelease=[...(next?.releases??[])].reverse().find(x=>!x.isReleased)??next?.releases.at(-1);if(!next||!nextRelease)return;setSelectedProjectId(id);setSelectedReleaseId(nextRelease.id);history.pushState({},"",routePath({programId:active!.program.id,projectId:id,releaseId:nextRelease.id},view,discipline,selectedArtifactId,selectedArtifactKind,view==="history"?historyStateIntent:undefined,view==="history"?historyTypeIntent:undefined))};
+  const changeRelease=(id:string)=>{setSelectedReleaseId(id);if(active&&project)history.pushState({},"",routePath({programId:active.program.id,projectId:project.project.id,releaseId:id},view,discipline,selectedArtifactId,selectedArtifactKind,view==="history"?historyStateIntent:undefined,view==="history"?historyTypeIntent:undefined))};
   if(context&&location.pathname==="/")history.replaceState({},"",routePath(context,"dashboard"));
   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} context={context} onProgram={changeProgram} onProject={changeProject} onRelease={changeRelease} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onSignOut={async()=>{await fetch(`${API}/api/auth/logout`,{method:"POST"});setUser(null)}}/>;
-  const labels:Record<View,string>={dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements",verification:"Verification",lifecycle:"Traceability",release:"Release Campaign",planning:"Release Planning",mywork:"My Work",admin:"Administration",enterprise:"Enterprise Control",artifact:"Artifact",notFound:"Not Found"};
-  const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b><span>{release?.version}</span><b aria-hidden="true">›</b><strong>{labels[view]}</strong></nav><div className="contextActions"><span className="contextReleaseState">{release?.isReleased?"Released":"In work"}</span><button aria-label="Copy link to this page" onClick={async()=>navigator.clipboard.writeText(location.href)}>Copy link</button></div></div>;
+  const labels:Record<View,string>={dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements",verification:"Verification",lifecycle:"Traceability",release:"Release Readiness",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",artifact:"Artifact",notFound:"Not Found"};
+  const scopedLabel=view==="history"?`${historyTypeIntent==="All"?"All":discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
+  const scopeSwitch=view==="history"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={historyTypeIntent==="All"} onClick={()=>navigate("history",discipline,undefined,undefined,false,historyStateIntent,"All")}>All</button><button aria-pressed={historyTypeIntent!=="All"&&discipline!=="software"} onClick={()=>navigate("history","system",undefined,undefined,false,historyStateIntent,"System")}>System</button><button aria-pressed={historyTypeIntent!=="All"&&discipline==="software"} onClick={()=>navigate("history","software",undefined,undefined,false,historyStateIntent,"Software")}>Software</button></div>:view==="requirements"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={discipline!=="software"} onClick={()=>navigate(view,"system")}>System</button><button aria-pressed={discipline==="software"} onClick={()=>navigate(view,"software")}>Software</button></div>:view==="verification"?<div className="contextScopeSwitch" role="group" aria-label="Verification scope"><button aria-pressed={discipline!=="softwareTest"} onClick={()=>navigate("verification","systemTest")}>System</button><button aria-pressed={discipline==="softwareTest"} onClick={()=>navigate("verification","softwareTest")}>Software</button></div>:null;
+  const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b><span>{release?.version}</span><b aria-hidden="true">›</b><strong>{scopedLabel}</strong></nav><div className="contextActions">{scopeSwitch}<span className="contextReleaseState">{release?.isReleased?"Released":"In work"}</span><button aria-label="Copy link to this page" onClick={async()=>navigator.clipboard.writeText(location.href)}>Copy link</button></div></div>;
   const palette=context?<CommandPalette api={API} context={context} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
   const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{contextBar}{content}</div>{palette}</div>;
   if(view==="notFound")return inShell(<main className="artifactState"><div><span>?</span><h1>Page not found</h1><p>This AeroLink route is not recognized. Use quick navigation to find an authorized workspace or artifact.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
@@ -358,7 +364,14 @@ function App() {
         api={API}
         projectId={project.project.id}
         releases={project.releases}
-        scope={discipline === "software" ? "Software" : "System"}
+        activeReleaseId={release?.id??""}
+        scope={historyTypeIntent??(discipline === "software" ? "Software" : "System")}
+        initialStateIntent={historyStateIntent}
+        onStateIntentChange={(stateIntent)=>{
+          setHistoryStateIntent(stateIntent);
+          if(context)history.replaceState({},"",routePath(context,"history",discipline,undefined,undefined,stateIntent,historyTypeIntent));
+        }}
+        onTypeIntentChange={(typeIntent)=>navigate("history",typeIntent==="Software"?"software":typeIntent==="System"?"system":discipline,undefined,undefined,true,historyStateIntent,typeIntent)}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}
       />
@@ -373,6 +386,7 @@ function App() {
         scope={discipline === "software" ? "Software" : "System"}
         initialViewId={initialRoute.savedViewId}
         initialArtifactId={view === "requirements" ? selectedArtifactId || undefined : undefined}
+        onScopeChange={(nextScope) => navigate("requirements",nextScope==="Software"?"software":"system")}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}
         onOpenRequirement={(id) => navigate("requirements",discipline,id)}
@@ -382,9 +396,11 @@ function App() {
     return inShell(
       <VerificationCenter
         api={API}
+        programId={active?.program.id ?? ""}
         projectId={project.project.id}
         releaseId={release.id}
         scope={discipline === "softwareTest" ? "Software" : "System"}
+        user={user}
         onBack={() => navigate("dashboard")}
       />
     );
@@ -394,6 +410,7 @@ function App() {
         api={API}
         projectId={project.project.id}
         releases={project.releases}
+        activeReleaseId={release?.id??""}
         onBack={() => navigate("dashboard")}
       />
     );
@@ -407,6 +424,7 @@ function App() {
         user={user}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}
+        onOpenPlanning={() => navigate("planning")}
         onOpenVerification={() => navigate("verification",discipline === "software" ? "softwareTest" : "systemTest")}
         onOpenDocuments={() => navigate("lifecycle")}
       />
@@ -453,6 +471,21 @@ function App() {
       />
     );
   const activeCampaign=campaigns.find(x=>x.releaseId===release?.id);
+  const dashboardScope:Discipline=discipline==="software"?"software":"system";
+  const referenceRelease=[...(project?.releases??[])].reverse().find(x=>x.isReleased);
+  const releaseAction=release?.isReleased
+    ? {label:"View product versions →",target:"planning" as View}
+    : !activeCampaign
+      ? {label:"Set up release readiness →",target:"planning" as View}
+      : activeCampaign.readiness.readyForRelease
+        ? {label:"Review release package →",target:"release" as View}
+        : {label:"Resolve release blockers →",target:"release" as View};
+  const dashboardMetrics:{label:string;value:number;color:string;accessibleLabel:string;stateIntent?:HistoryStateIntent}[]=[
+    {label:"Total changes",value:metrics.totalScrs,color:"#1d66f5",accessibleLabel:"All controlled changes"},
+    {label:"In draft",value:metrics.draft,color:"#a16a12",accessibleLabel:"Draft changes",stateIntent:"Draft"},
+    {label:"In review",value:metrics.inReview,color:"#7552d6",accessibleLabel:"Changes awaiting review",stateIntent:"InReview"},
+    {label:"Approved / selected",value:metrics.approved,color:"#16815f",accessibleLabel:"Approved and baseline-selected changes",stateIntent:"ApprovedOrSelected"},
+  ];
   return (
     <div className="shell">
       {navigation}
@@ -498,40 +531,30 @@ function App() {
               />
             </div>
           </div>
-          <button
-            onClick={() =>
-              navigate(release?.isReleased ? "planning" : "release")
-            }
-          >
-            {release?.isReleased
-              ? "View product line →"
-              : "Configure release →"}
-          </button>
+          <button onClick={() => navigate(releaseAction.target)}>{releaseAction.label}</button>
         </section>
         <section className="metrics">
-          {[
-            ["Total SCRs", metrics.totalScrs, "#1d66f5"],
-            ["In draft", metrics.draft, "#a16a12"],
-            ["In review", metrics.inReview, "#7552d6"],
-            ["Approved", metrics.approved, "#16815f"],
-          ].map(([label, value, color]) => (
-            <article
-              key={String(label)}
+          {dashboardMetrics.map(({label,value,color,accessibleLabel,stateIntent}) => (
+            <button
+              key={label}
+              type="button"
+              aria-label={`Open ${accessibleLabel}`}
+              onClick={()=>navigate("history",dashboardScope,undefined,undefined,false,stateIntent,"All")}
               style={{ "--accent": color } as React.CSSProperties}
             >
               <span>{label}</span>
               <strong>{value}</strong>
-              <small>Current workspace</small>
-            </article>
+              <small>Open matching records →</small>
+            </button>
           ))}
         </section>
         {overview && overview.systemRequirements > 0 && (
           <section className="programInventory">
             <div>
-              <p className="eyebrow">RELEASED 1.5 PRODUCT BASELINE</p>
-              <h3>Complete FMS lifecycle inventory</h3>
+              <p className="eyebrow">{referenceRelease?`RELEASED ${referenceRelease.version} PRODUCT BASELINE`:"CONTROLLED PRODUCT FOUNDATION"}</p>
+              <h3>Complete {project?.project.softwareProduct??"product"} lifecycle inventory</h3>
               <span>
-                Active release 1.6 inherits this controlled foundation.
+                {release?.isReleased?`Release ${release.version} is the selected controlled context.`:`Release ${release?.version??"in work"} inherits this controlled foundation.`}
               </span>
             </div>
             {[
@@ -557,11 +580,11 @@ function App() {
                 <p>Controlled changes targeting this release</p>
               </div>
               {release?.isReleased ? (
-                <button onClick={() => navigate("history",discipline)}>
+                <button onClick={() => navigate("history",dashboardScope)}>
                   Search released changes
                 </button>
               ) : (
-                <button onClick={() => navigate("createSystemScr")}>+ New System SCR</button>
+                <button onClick={() => navigate(dashboardScope==="software"?"createSoftwareChange":"createSystemScr",dashboardScope)}>+ New {dashboardScope==="software"?"Software SWCR":"System SCR"}</button>
               )}
             </div>
             {scrs.length ? (
@@ -571,10 +594,10 @@ function App() {
                   key={scr.id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => navigate("scr",discipline,scr.id)}
+                  onClick={() => navigate("scr",dashboardScope,scr.id)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
-                      navigate("scr",discipline,scr.id);
+                      navigate("scr",dashboardScope,scr.id);
                     }
                   }}
                 >
@@ -603,7 +626,7 @@ function App() {
                 </button>
               </div>
             )}
-            {scrs.length>5&&<div className="panelFooter"><span>Showing the 5 most recent of {scrs.length} change requests</span><button onClick={()=>navigate("history",discipline)}>View complete history →</button></div>}
+            {scrs.length>5&&<div className="panelFooter"><span>Showing the 5 most recent of {scrs.length} change requests</span><button onClick={()=>navigate("history",dashboardScope)}>View complete history →</button></div>}
           </div>
           <div className="panel attention">
             <div className="panelhead">
@@ -612,7 +635,7 @@ function App() {
                 <p>{metrics.totalScrs?"The decisions and work that need focus now":"Foundation for controlled development"}</p>
               </div>
             </div>
-            {metrics.totalScrs?<><div className={metrics.inReview?"signal amber":"signal green"}><b>Awaiting review decisions</b><strong>{metrics.inReview}</strong><p>{metrics.inReview?"Controlled changes are waiting for assigned reviewers":"No change requests are waiting for review"}</p></div><div className={metrics.draft?"signal blue":"signal green"}><b>Draft change packages</b><strong>{metrics.draft}</strong><p>{metrics.draft?"Authors still have controlled work in progress":"No draft change packages remain"}</p></div><div className={activeCampaign?.readiness.readyForRelease?"signal green":"signal amber"}><b>Release readiness</b><strong>{activeCampaign?.readiness.percent??0}%</strong><p>{activeCampaign?.readiness.readyForRelease?"All release gates are complete":"Open the release campaign to resolve remaining blockers"}</p></div></>:<><div className="signal green"><b>Program workspace</b><strong>✓</strong><p>{active?.program.name} is configured</p></div><div className="signal blue"><b>Initial release</b><strong>✓</strong><p>{release?.version} establishes the starting context</p></div><div className="signal amber"><b>Next action</b><strong>1</strong><p>Create or import the first controlled artifact</p></div></>}
+            {metrics.totalScrs?<><button className={metrics.inReview?"signal amber":"signal green"} onClick={()=>navigate(metrics.inReview?"mywork":"history",dashboardScope,undefined,undefined,false,metrics.inReview?undefined:"InReview",metrics.inReview?undefined:"All")}><b>Awaiting review decisions</b><strong>{metrics.inReview}</strong><p>{metrics.inReview?"Open the accountable review queue":"No change requests are waiting for review"}</p></button><button className={metrics.draft?"signal blue":"signal green"} onClick={()=>navigate("history",dashboardScope,undefined,undefined,false,"Draft","All")}><b>Draft change packages</b><strong>{metrics.draft}</strong><p>{metrics.draft?"Open controlled work in progress":"No draft change packages remain"}</p></button><button className={activeCampaign?.readiness.readyForRelease?"signal green":"signal amber"} onClick={()=>navigate(activeCampaign?"release":"planning")}><b>Release readiness</b><strong>{activeCampaign?.readiness.percent??0}%</strong><p>{activeCampaign?.readiness.readyForRelease?"Review the complete release package":"Open the next release-readiness action"}</p></button></>:<><div className="signal green"><b>Program workspace</b><strong>✓</strong><p>{active?.program.name} is configured</p></div><div className="signal blue"><b>Initial release</b><strong>✓</strong><p>{release?.version} establishes the starting context</p></div><button className="signal amber" onClick={()=>navigate(dashboardScope==="software"?"createSoftwareChange":"createSystemScr",dashboardScope)}><b>Next action</b><strong>1</strong><p>Create the first controlled change request →</p></button></>}
           </div>
         </section>
       </main>

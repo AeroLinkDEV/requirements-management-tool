@@ -19,7 +19,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await openNavigationGroup(page,"SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "System Requirements" }).click();
   await expect(
-    page.getByRole("heading", { name: "Requirements Workspace" }),
+    page.getByRole("heading", { name: "System Requirements" }),
   ).toBeVisible();
   await page.getByText("Workspace tools", { exact: true }).click();
   await page.getByRole("button", { name: /My work/ }).click();

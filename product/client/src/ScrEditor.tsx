@@ -1,32 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import type { AuthUser } from "./IdentityCenter";
+import ControlledRequirementEditor from "./ControlledRequirementEditor";
+import type {
+  ControlledRequirementDraft,
+  RequirementKind,
+  RequirementLevel,
+} from "./ControlledRequirementEditor";
 import "./ScrEditor.css";
 import "./ScrEditorEnhancements.css";
 
 type ChangeScope = "System" | "Software";
-type RequirementLevel = "System" | "HighLevel" | "LowLevel";
-type RequirementKind = "Introduce" | "Modify" | "Retire";
-type RequirementDraft = {
-  baseNumber: string;
-  revision: number;
-  level: RequirementLevel;
-  kind: RequirementKind;
-  statement: string;
-  rationale: string;
-  verificationMethod: string;
-  isDerived: boolean;
-};
-type ExistingRequirement = RequirementDraft & {
-  id: string;
-  displayNumber: string;
-  nextRevision: number;
-  state: string;
-};
-type Context = {
+type AuthoringContext = {
+  type: ChangeScope;
   changeRequestNumber: string;
   author: { userName: string; displayName: string };
-  requirementNumbers: Record<string, string>;
+  requirementNumbers: Partial<Record<"SYSR" | "HLR" | "LLR", string>>;
 };
 type Props = {
   api: string;
@@ -43,112 +32,423 @@ type SavedDraft = {
   problem: string;
   analysis: string;
   solution: string;
-  changes: RequirementDraft[];
+  changes: ControlledRequirementDraft[];
 };
 
+const pendingImpact = JSON.stringify({
+  trace: "Pending",
+  verification: "Pending",
+  documents: "Pending",
+  baseline: "Pending",
+  collaboration: "Pending",
+});
+const impactKeys = [
+  "trace",
+  "verification",
+  "documents",
+  "baseline",
+  "collaboration",
+] as const;
 const prefixFor = (level: RequirementLevel) =>
   level === "System" ? "SYSR" : level === "HighLevel" ? "HLR" : "LLR";
 const addToIdentifier = (identifier: string | undefined, offset: number) => {
-  if (!identifier) return "Assigned when saved";
-  const [prefix, raw] = identifier.split("-");
-  return `${prefix}-${(Number(raw) + offset).toString().padStart(8, "0")}`;
+  if (!identifier) return "";
+  const match = identifier.match(/^([A-Z]+)-(\d+)$/);
+  if (!match) return identifier;
+  return `${match[1]}-${(Number(match[2]) + offset).toString().padStart(8, "0")}`;
 };
+const parseObject = (value: string | undefined): Record<string, unknown> => {
+  try {
+    return JSON.parse(value || "{}") as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+};
+const impactsComplete = (item: ControlledRequirementDraft) => {
+  const values = parseObject(item.impactDispositionJson);
+  return impactKeys.every((key) => values[key] && values[key] !== "Pending");
+};
+const createProposal = (
+  level: RequirementLevel,
+  kind: RequirementKind,
+  baseNumber = "",
+): ControlledRequirementDraft => ({
+  baseNumber,
+  revision: 0,
+  level,
+  kind,
+  statement: "",
+  rationale: "",
+  verificationMethod: "Test",
+  richText: "",
+  attributesJson: JSON.stringify({ criticality: "Normal", owner: "" }),
+  impactDispositionJson: pendingImpact,
+  isDerived: false,
+});
+const normalizeProposal = (
+  value: Partial<ControlledRequirementDraft>,
+  fallbackLevel: RequirementLevel,
+): ControlledRequirementDraft => ({
+  ...createProposal(fallbackLevel, value.kind || "Introduce"),
+  ...value,
+  baseNumber: value.baseNumber === "Assigned when saved" ? "" : value.baseNumber || "",
+  level: value.level || fallbackLevel,
+  richText: value.richText || value.statement || "",
+  attributesJson: value.attributesJson || JSON.stringify({ criticality: "Normal", owner: "" }),
+  impactDispositionJson:
+    value.impactDispositionJson && value.impactDispositionJson !== "{}"
+      ? value.impactDispositionJson
+      : pendingImpact,
+});
 
-export default function ScrEditor({ api, projectId, releaseId, releaseVersion, scope, user, onCancel, onSaved }: Props) {
+export default function ScrEditor({
+  api,
+  projectId,
+  releaseId,
+  releaseVersion,
+  scope,
+  user,
+  onCancel,
+  onSaved,
+}: Props) {
+  const abbreviation = scope === "System" ? "SCR" : "SWCR";
+  const defaultLevel: RequirementLevel = scope === "System" ? "System" : "HighLevel";
   const storageKey = `aerolink:new-${scope.toLowerCase()}-change:${projectId}:${releaseId}`;
   const restored = useMemo<SavedDraft | undefined>(() => {
-    try { return JSON.parse(localStorage.getItem(storageKey) || "") as SavedDraft; } catch { return undefined; }
-  }, [storageKey]);
-  const defaultLevel: RequirementLevel = scope === "System" ? "System" : "HighLevel";
-  const fresh = (level = defaultLevel): RequirementDraft => ({ baseNumber: "", revision: 0, level, kind: "Introduce", statement: "", rationale: "", verificationMethod: "Test", isDerived: false });
-  const [context, setContext] = useState<Context>();
-  const [title, setTitle] = useState(restored?.title || ""), [problem, setProblem] = useState(restored?.problem || ""), [analysis, setAnalysis] = useState(restored?.analysis || ""), [solution, setSolution] = useState(restored?.solution || "");
-  const [changes, setChanges] = useState<RequirementDraft[]>(restored?.changes?.length ? restored.changes : [fresh()]);
-  const [searches, setSearches] = useState<Record<number, string>>({}), [results, setResults] = useState<Record<number, ExistingRequirement[]>>({});
-  const [saving, setSaving] = useState(false), [error, setError] = useState(""), [savedAt, setSavedAt] = useState<Date>();
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || "") as SavedDraft;
+      return {
+        ...saved,
+        changes: (saved.changes || []).map((item) => normalizeProposal(item, defaultLevel)),
+      };
+    } catch {
+      return undefined;
+    }
+  }, [defaultLevel, storageKey]);
+  const [context, setContext] = useState<AuthoringContext>();
+  const [title, setTitle] = useState(restored?.title || "");
+  const [problem, setProblem] = useState(restored?.problem || "");
+  const [analysis, setAnalysis] = useState(restored?.analysis || "");
+  const [solution, setSolution] = useState(restored?.solution || "");
+  const [changes, setChanges] = useState<ControlledRequirementDraft[]>(
+    restored?.changes?.length
+      ? restored.changes
+      : [createProposal(defaultLevel, "Introduce")],
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [savedAt, setSavedAt] = useState<Date>();
 
   useEffect(() => {
-    fetch(`${api}/api/authoring/context?projectId=${projectId}&type=${scope}`).then(async response => {
-      if (!response.ok) throw new Error((await response.json()).error || "Authoring context unavailable.");
-      setContext(await response.json());
-    }).catch(reason => setError(reason.message));
+    let cancelled = false;
+    fetch(`${api}/api/authoring/context?projectId=${projectId}&type=${scope}`)
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error || "Authoring context unavailable.");
+        }
+        return response.json() as Promise<AuthoringContext>;
+      })
+      .then((value) => {
+        if (!cancelled) setContext(value);
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled)
+          setError(reason instanceof Error ? reason.message : "Authoring context unavailable.");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [api, projectId, scope]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      localStorage.setItem(storageKey, JSON.stringify({ title, problem, analysis, solution, changes } satisfies SavedDraft));
-      setSavedAt(new Date());
-    }, 450);
-    return () => clearTimeout(timer);
-  }, [storageKey, title, problem, analysis, solution, changes]);
+    if (!context) return;
+    setChanges((items) => {
+      const used: Record<string, number> = {};
+      return items.map((item) => {
+        if (item.kind !== "Introduce") return item;
+        const prefix = prefixFor(item.level);
+        const offset = used[prefix] || 0;
+        used[prefix] = offset + 1;
+        return item.baseNumber
+          ? item
+          : { ...item, baseNumber: addToIdentifier(context.requirementNumbers[prefix], offset) };
+      });
+    });
+  }, [context]);
 
   useEffect(() => {
-    const timers = Object.entries(searches).map(([rawIndex, query]) => setTimeout(async () => {
-      const index = Number(rawIndex);
-      if (query.trim().length < 2) { setResults(current => ({ ...current, [index]: [] })); return; }
-      const response = await fetch(`${api}/api/authoring/requirements?projectId=${projectId}&scope=${scope}&search=${encodeURIComponent(query)}&limit=8`);
-      if (response.ok) { const rows:ExistingRequirement[]=await response.json(); setResults(current => ({ ...current, [index]: rows })); }
-    }, 180));
-    return () => timers.forEach(clearTimeout);
-  }, [api, projectId, scope, searches]);
+    const timer = window.setTimeout(() => {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({ title, problem, analysis, solution, changes } satisfies SavedDraft),
+      );
+      setSavedAt(new Date());
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [analysis, changes, problem, solution, storageKey, title]);
 
-  const previewNumber = (change: RequirementDraft, index: number) => {
-    if (change.kind !== "Introduce") return change.baseNumber || "Select an existing requirement";
-    const prefix = prefixFor(change.level);
-    const earlier = changes.slice(0, index).filter(item => item.kind === "Introduce" && prefixFor(item.level) === prefix).length;
-    return addToIdentifier(context?.requirementNumbers[prefix], earlier);
+  const nextIdentifier = (level: RequirementLevel) => {
+    const prefix = prefixFor(level);
+    const count = changes.filter(
+      (item) => item.kind === "Introduce" && prefixFor(item.level) === prefix,
+    ).length;
+    return addToIdentifier(context?.requirementNumbers[prefix], count);
   };
-  const update = <K extends keyof RequirementDraft>(index: number, field: K, value: RequirementDraft[K]) => setChanges(items => items.map((item, position) => position === index ? { ...item, [field]: value } : item));
-  const selectExisting = (index: number, item: ExistingRequirement) => {
-    setChanges(current => current.map((change, position) => position === index ? { ...change, baseNumber: item.baseNumber, revision: item.nextRevision, level: item.level, statement: change.kind === "Retire" ? "" : item.statement, rationale: item.rationale, verificationMethod: item.verificationMethod } : change));
-    setSearches(current => ({ ...current, [index]: item.baseNumber }));
-    setResults(current => ({ ...current, [index]: [] }));
-  };
-  const changeKind = (index: number, kind: RequirementKind) => {
-    setChanges(current => current.map((item, position) => position === index ? { ...item, kind, baseNumber: "", revision: 0, statement: kind === "Retire" ? "" : item.statement } : item));
-    setSearches(current => ({ ...current, [index]: "" }));
-  };
-  const changeLevel = (index: number, level: RequirementLevel) => {
-    setChanges(current => current.map((item, position) => position === index ? { ...item, level, baseNumber: item.kind === "Introduce" ? "" : item.baseNumber, revision: item.kind === "Introduce" ? 0 : item.revision } : item));
-  };
+  const addProposal = (kind: RequirementKind, level: RequirementLevel) =>
+    setChanges((items) => [
+      ...items,
+      createProposal(level, kind, kind === "Introduce" ? nextIdentifier(level) : ""),
+    ]);
+  const updateProposal = (
+    index: number,
+    key: keyof ControlledRequirementDraft,
+    value: string | number | boolean,
+  ) =>
+    setChanges((items) =>
+      items.map((item, position) => {
+        if (position !== index) return item;
+        const next = { ...item, [key]: value } as ControlledRequirementDraft;
+        if (key === "statement" && (!item.richText || item.richText === item.statement)) {
+          next.richText = String(value);
+        }
+        return next;
+      }),
+    );
+
+  const caseComplete = [title, problem, analysis, solution].every((value) => value.trim());
+  const proposalsComplete =
+    changes.length > 0 &&
+    changes.every(
+      (item) =>
+        item.baseNumber &&
+        (item.kind === "Retire" || item.statement.trim()) &&
+        (!(item.isDerived ?? parseObject(item.attributesJson).derived === true) ||
+          item.rationale.trim()),
+    );
+  const impactCount = changes.filter(impactsComplete).length;
+  const reviewReady = caseComplete && proposalsComplete && impactCount === changes.length;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setSaving(true); setError("");
-    if (changes.some(item => item.kind !== "Introduce" && !item.baseNumber)) { setError("Select an existing controlled requirement for every modification or retirement."); setSaving(false); return; }
-    const response = await fetch(`${api}/api/scr-drafts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, targetReleaseId: releaseId, title, problem, analysis, solution, type: scope, requirementChanges: changes.map((item, index) => ({ ...item, baseNumber: item.kind === "Introduce" ? previewNumber(item, index) : item.baseNumber })) }) });
-    if (!response.ok) { setError((await response.json()).error || `Unable to save the ${scope === "System" ? "SCR" : "SWCR"} draft.`); setSaving(false); return; }
-    const created = await response.json(); localStorage.removeItem(storageKey); onSaved(created.id);
+    event.preventDefault();
+    if (!caseComplete || !proposalsComplete) {
+      setError("Complete the change case and every requirement proposal before saving this Draft.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch(`${api}/api/scr-drafts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          targetReleaseId: releaseId,
+          title,
+          problem,
+          analysis,
+          solution,
+          type: scope,
+          requirementChanges: changes,
+        }),
+      });
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
+        throw new Error(body.error || `Unable to save the ${abbreviation} Draft.`);
+      }
+      const created = (await response.json()) as { id: string };
+      localStorage.removeItem(storageKey);
+      onSaved(created.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : `Unable to save the ${abbreviation} Draft.`);
+      setSaving(false);
+    }
   };
 
-  const abbreviation = scope === "System" ? "SCR" : "SWCR";
-  return <main className="editorPage">
-    <header className="editorHeader"><div><button className="back" onClick={onCancel}>← Command Center</button><p className="eyebrow">{scope.toUpperCase()} CHANGE CONTROL / NEW {abbreviation}</p><h1>Create {scope} Change Request</h1><p>{scope === "System" ? "Propose controlled System requirement changes for complete-package review." : "Propose controlled HLR and LLR changes in a dedicated Software workflow."}</p></div><div className="editorStatus"><span className="draftPill">DRAFT</span><small>{savedAt ? `Recovery copy saved ${savedAt.toLocaleTimeString()}` : "Auto-save ready"}</small></div></header>
-    <form className="editorForm" onSubmit={submit}>
-      <section className="editorCard"><div className="sectionTitle"><span>01</span><div><h2>Change request identity</h2><p>Server-assigned identity and authenticated ownership</p></div></div><div className="fields three">
-        <label>{abbreviation} number<input value={context?.changeRequestNumber || "Calculating next number…"} readOnly/><small>Final number is assigned atomically when saved.</small></label>
-        <label>Target release<input value={releaseVersion} readOnly/></label>
-        <label>Author<input value={`${context?.author.displayName || user.displayName} (${context?.author.userName || user.userName})`} readOnly/><small>Derived from your authenticated session.</small></label>
-        <label className="wide">Title<input value={title} onChange={event => setTitle(event.target.value)} placeholder="Concise description of the proposed change" required/></label>
-      </div></section>
-      <section className="editorCard"><div className="sectionTitle"><span>02</span><div><h2>Problem, analysis, and solution</h2><p>The complete case for change is reviewed as one exact snapshot</p></div></div><div className="pas">
-        <label><b>Problem</b><textarea value={problem} onChange={event => setProblem(event.target.value)} placeholder="What operational, product, or assurance need exists?" required/></label>
-        <label><b>Analysis</b><textarea value={analysis} onChange={event => setAnalysis(event.target.value)} placeholder="What is affected and what alternatives were considered?" required/></label>
-        <label><b>Solution</b><textarea value={solution} onChange={event => setSolution(event.target.value)} placeholder="What controlled change is proposed?" required/></label>
-      </div></section>
-      <section className="editorCard"><div className="sectionTitle"><span>03</span><div><h2>Proposed {scope} requirement changes</h2><p>New identities and next revisions are generated automatically</p></div><button type="button" className="secondary" onClick={() => setChanges(items => [...items, fresh()])}>+ Add requirement</button></div>
-        {changes.map((change, index) => <div className="requirement" key={index}><div className="requirementHead"><b>Requirement change {index + 1}</b>{changes.length > 1 && <button type="button" onClick={() => setChanges(items => items.filter((_, position) => position !== index))}>Remove</button>}</div><div className="fields reqgrid">
-          <label>Change type<select value={change.kind} onChange={event => changeKind(index, event.target.value as RequirementKind)}><option value="Introduce">Introduce new</option><option value="Modify">Modify existing</option><option value="Retire">Retire existing</option></select></label>
-          {scope === "Software" && <label>Software level<select value={change.level} onChange={event => changeLevel(index, event.target.value as RequirementLevel)}><option value="HighLevel">HLR</option><option value="LowLevel">LLR</option></select></label>}
-          {change.kind === "Introduce" ? <label>Generated requirement number<input value={previewNumber(change, index)} readOnly/></label> : <label className="requirementLookup">Find requirement<input aria-label={`Find requirement ${index + 1}`} value={searches[index] || ""} onChange={event => setSearches(current => ({ ...current, [index]: event.target.value }))} placeholder="Type any part, e.g. 6832" autoComplete="off"/>{(results[index]?.length || 0) > 0 && <div className="lookupResults">{results[index].map(item => <button type="button" key={item.id} onClick={() => selectExisting(index, item)}><b>{item.displayNumber}</b><span>{item.level === "HighLevel" ? "HLR" : item.level === "LowLevel" ? "LLR" : "System"} · {item.state}</span><small>{item.statement}</small></button>)}</div>}</label>}
-          <label>Proposed revision<input value={change.kind === "Introduce" ? "00" : change.baseNumber ? change.revision.toString().padStart(2, "0") : "Select requirement"} readOnly/></label>
-          {scope === "Software" && <label className="derivedField"><span>Classification</span><button type="button" className={change.isDerived ? "derived active" : "derived"} onClick={() => update(index, "isDerived", !change.isDerived)}><i>{change.isDerived ? "✓" : "○"}</i><b>Derived software requirement</b><small>Not directly allocated from a higher-level requirement</small></button></label>}
-          <label className="wide">Requirement statement<textarea value={change.statement} onChange={event => update(index, "statement", event.target.value)} readOnly={change.kind === "Retire"} placeholder={change.kind === "Retire" ? "Retirement retains the prior statement in immutable history." : "The controlled requirement statement"} required={change.kind !== "Retire"}/></label>
-          <label className="half">Rationale<textarea value={change.rationale} onChange={event => update(index, "rationale", event.target.value)}/></label>
-          <label className="half">Verification method<select value={change.verificationMethod} onChange={event => update(index, "verificationMethod", event.target.value)}><option>Test</option><option>Analysis</option><option>Inspection</option><option>Demonstration</option></select></label>
-        </div></div>)}
-      </section>
-      {error && <div className="formError">{error}</div>}
-      <footer className="editorActions"><p>Auto-save protects this browser recovery copy. Saving creates an attributable server-side Draft; it does not start review.</p><div><button type="button" className="secondary" onClick={onCancel}>Cancel</button><button disabled={saving || !context}>{saving ? "Saving Draft…" : `Save ${abbreviation} Draft`}</button></div></footer>
-    </form>
-  </main>;
+  return (
+    <main className="editorPage">
+      <header className="editorHeader">
+        <div>
+          <button className="back" type="button" onClick={onCancel}>
+            ← Command Center
+          </button>
+          <p className="eyebrow">{scope.toUpperCase()} CHANGE CONTROL / NEW {abbreviation}</p>
+          <h1>Create {scope} Change Request</h1>
+          <p>
+            Build the case, define controlled requirement changes, and close impact decisions before review.
+          </p>
+        </div>
+        <div className="editorStatus">
+          <span className="draftPill">DRAFT</span>
+          <small>
+            {savedAt ? `Recovery copy saved ${savedAt.toLocaleTimeString()}` : "Browser recovery ready"}
+          </small>
+        </div>
+      </header>
+
+      <nav className="authoringStages" aria-label="Change authoring progress">
+        <a href="#change-case" className={caseComplete ? "complete" : "active"}>
+          <span>1</span><b>Change case</b><small>{caseComplete ? "Complete" : "In progress"}</small>
+        </a>
+        <a href="#requirement-changes" className={proposalsComplete ? "complete" : caseComplete ? "active" : ""}>
+          <span>2</span><b>Requirement changes</b><small>{proposalsComplete ? "Complete" : `${changes.length} proposal${changes.length === 1 ? "" : "s"}`}</small>
+        </a>
+        <a href="#impact-readiness" className={reviewReady ? "complete" : proposalsComplete ? "active" : ""}>
+          <span>3</span><b>Impact & readiness</b><small>{reviewReady ? "Review ready" : `${impactCount}/${changes.length} impacts closed`}</small>
+        </a>
+      </nav>
+
+      <form className="editorForm" onSubmit={submit}>
+        <section className="editorCard authoringStage" id="change-case">
+          <div className="sectionTitle">
+            <span>01</span>
+            <div>
+              <h2>Change case</h2>
+              <p>Identity, ownership, and the complete engineering reason for change</p>
+            </div>
+            <i className={caseComplete ? "stageState complete" : "stageState"}>
+              {caseComplete ? "Complete" : "Required"}
+            </i>
+          </div>
+          <div className="fields three identityFields">
+            <label>
+              {abbreviation} number
+              <input value={context?.changeRequestNumber || "Calculating next number…"} readOnly />
+              <small>Previewed here; assigned atomically by the server on save.</small>
+            </label>
+            <label>
+              Target release
+              <input value={releaseVersion} readOnly />
+            </label>
+            <label>
+              Author
+              <input
+                value={`${context?.author.displayName || user.displayName} (${context?.author.userName || user.userName})`}
+                readOnly
+              />
+              <small>Derived from the authenticated session.</small>
+            </label>
+            <label className="wide">
+              Title
+              <input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="A concise, decision-ready description"
+                required
+              />
+            </label>
+          </div>
+          <div className="pas">
+            <label>
+              <b>Problem</b>
+              <textarea value={problem} onChange={(event) => setProblem(event.target.value)} placeholder="What need, defect, or risk exists?" required />
+            </label>
+            <label>
+              <b>Analysis</b>
+              <textarea value={analysis} onChange={(event) => setAnalysis(event.target.value)} placeholder="What is affected and what alternatives were considered?" required />
+            </label>
+            <label>
+              <b>Solution</b>
+              <textarea value={solution} onChange={(event) => setSolution(event.target.value)} placeholder="What controlled outcome is proposed?" required />
+            </label>
+          </div>
+        </section>
+
+        <section className="editorCard authoringStage" id="requirement-changes">
+          <div className="sectionTitle proposalSectionTitle">
+            <span>02</span>
+            <div>
+              <h2>Requirement changes</h2>
+              <p>Each proposal receives an authoritative identifier, level, revision, and change type</p>
+            </div>
+            <i className={proposalsComplete ? "stageState complete" : "stageState"}>
+              {proposalsComplete ? "Complete" : "Needs content"}
+            </i>
+          </div>
+          <div className="proposalActions" aria-label="Add requirement proposal">
+            <span>Add a focused proposal:</span>
+            {scope === "System" ? (
+              <>
+                <button type="button" onClick={() => addProposal("Introduce", "System")}>+ Introduce System requirement</button>
+                <button type="button" onClick={() => addProposal("Modify", "System")}>Modify existing</button>
+                <button type="button" onClick={() => addProposal("Retire", "System")}>Retire existing</button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => addProposal("Introduce", "HighLevel")}>+ Introduce HLR</button>
+                <button type="button" onClick={() => addProposal("Introduce", "LowLevel")}>+ Introduce LLR</button>
+                <button type="button" onClick={() => addProposal("Modify", "HighLevel")}>Modify existing</button>
+                <button type="button" onClick={() => addProposal("Retire", "HighLevel")}>Retire existing</button>
+              </>
+            )}
+          </div>
+          <div className="proposalStack">
+            {changes.map((change, index) => (
+              <ControlledRequirementEditor
+                api={api}
+                projectId={projectId}
+                scope={scope}
+                item={change}
+                index={index}
+                key={`${index}-${change.kind}`}
+                identityLocked={Boolean(change.baseNumber)}
+                onChange={(key, value) => updateProposal(index, key, value)}
+                onRemove={() => setChanges((items) => items.filter((_, position) => position !== index))}
+              />
+            ))}
+          </div>
+          {!changes.length && (
+            <div className="emptyProposals">
+              <b>No requirement proposals yet</b>
+              <p>Add the smallest controlled set needed to deliver this change.</p>
+            </div>
+          )}
+        </section>
+
+        <section className="editorCard readinessStage" id="impact-readiness">
+          <div className="sectionTitle">
+            <span>03</span>
+            <div>
+              <h2>Impact & review readiness</h2>
+              <p>A Draft may be saved now; every impact decision must be explicit before review</p>
+            </div>
+            <i className={reviewReady ? "stageState complete" : "stageState"}>
+              {reviewReady ? "Review ready" : "Draft only"}
+            </i>
+          </div>
+          <div className="readinessGrid">
+            <article className={caseComplete ? "complete" : ""}>
+              <span>{caseComplete ? "✓" : "1"}</span><div><b>Change case</b><p>{caseComplete ? "Decision context is complete." : "Complete title, problem, analysis, and solution."}</p></div>
+            </article>
+            <article className={proposalsComplete ? "complete" : ""}>
+              <span>{proposalsComplete ? "✓" : "2"}</span><div><b>Requirement proposals</b><p>{proposalsComplete ? `${changes.length} controlled proposal${changes.length === 1 ? " is" : "s are"} complete.` : "Select identities and complete required proposal content."}</p></div>
+            </article>
+            <article className={impactCount === changes.length && changes.length ? "complete" : ""}>
+              <span>{impactCount === changes.length && changes.length ? "✓" : "3"}</span><div><b>Lifecycle impact</b><p>{impactCount}/{changes.length} proposals have all five decisions closed.</p></div>
+            </article>
+          </div>
+          <div className={reviewReady ? "nextAction ready" : "nextAction"}>
+            <div>
+              <b>{reviewReady ? "Ready for controlled check-in" : "Next action"}</b>
+              <p>{reviewReady ? "Save this Draft, confirm the checked-in snapshot, then assign review authority." : !caseComplete ? "Finish the change case before creating the Draft." : !proposalsComplete ? "Complete each requirement proposal." : "Close the remaining impact decisions in the proposal cards above."}</p>
+            </div>
+            <span>{reviewReady ? "REVIEW READY" : "DRAFT PATH"}</span>
+          </div>
+        </section>
+
+        {error && <div className="formError" role="alert">{error}</div>}
+        <footer className="editorActions">
+          <p>
+            Saving creates an attributable server-side Draft. Review begins only after check-in and reviewer selection.
+          </p>
+          <div>
+            <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
+            <button disabled={saving || !context || !caseComplete || !proposalsComplete}>
+              {saving ? "Saving Draft…" : `Save ${abbreviation} Draft`}
+            </button>
+          </div>
+        </footer>
+      </form>
+    </main>
+  );
 }

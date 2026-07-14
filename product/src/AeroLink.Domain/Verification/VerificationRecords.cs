@@ -48,6 +48,14 @@ public sealed class TestProcedureRevision
     public TestProcedureState State { get; private set; }
     public string AuthorId { get; private set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; private set; }
+
+    public void Approve(string approverId)
+    {
+        if (State != TestProcedureState.Draft) throw new DomainException("Only a Draft test procedure revision can be approved.");
+        if (string.Equals(AuthorId, approverId?.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("A test procedure author cannot approve their own revision.");
+        State = TestProcedureState.Approved;
+    }
 }
 
 public sealed class TestRequirementCoverage

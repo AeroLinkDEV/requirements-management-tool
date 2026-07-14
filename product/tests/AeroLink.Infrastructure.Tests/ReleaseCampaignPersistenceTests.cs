@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Verification;
@@ -35,6 +36,12 @@ public sealed class ReleaseCampaignPersistenceTests
             var procedureDocumentId = await db.ControlledDocuments.Where(x => x.BaselineId == summary.ReleasedBaselineId && x.Type == AeroLink.Domain.Traceability.ControlledDocumentType.SystemTestProcedures).Select(x => x.Id).SingleAsync();
             var procedureOutput = await generator.GenerateAsync(procedureDocumentId, "docx", default); Assert.NotNull(procedureOutput);
             using (var archive = new ZipArchive(new MemoryStream(procedureOutput!.Content), ZipArchiveMode.Read)) { using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()); var xml = await reader.ReadToEndAsync(); Assert.Contains("System Test Procedure Document", xml); Assert.Contains("Procedure steps", xml); Assert.Contains("Expected result", xml); Assert.Contains("Approval Register", xml); }
+            var generatedAt = await db.ControlledDocuments.Where(x => x.Id == procedureDocumentId).Select(x => x.GeneratedAt).SingleAsync();
+            var laterProcedure = new TestProcedure(summary.ProjectId, "SYSTP-00000999", "Future procedure excluded from the historical publication", "test.author", generatedAt.AddMinutes(1), TestProcedureLevel.System);
+            var laterRevision = new TestProcedureRevision(laterProcedure.Id, 0, "Verify later behavior.", "Later configuration.", "Execute later behavior.", "Later result is observed.", TestProcedureState.Approved, "test.author", generatedAt.AddMinutes(1));
+            db.AddRange(laterProcedure, laterRevision); await db.SaveChangesAsync();
+            var regenerated = await generator.GenerateAsync(procedureDocumentId, "docx", default); Assert.NotNull(regenerated);
+            Assert.Equal(procedureOutput.Content, regenerated!.Content);
             var store = new EvidenceFileStore(evidenceRoot);
             var stored = await store.StoreAsync(new MemoryStream("evidence payload"u8.ToArray()), "run.json", "application/json", default); Assert.Equal(64, stored.Sha256.Length); await using var opened = store.OpenRead(stored.StorageKey); Assert.Equal(stored.Size, opened.Length);
         }
@@ -76,6 +83,20 @@ public sealed class ReleaseCampaignPersistenceTests
             await using var manifest = new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(completed)); await using var evidence = new MemoryStream("signed verification campaign evidence"u8.ToArray());
             var imported = await service.ImportVerificationAsync(campaign.Id, manifest, evidence, "FMS-1.6-RC1-verification.zip", "application/zip", "test.lead", now, default);
             Assert.Equal(516, imported.ExecutionsRecorded); Assert.Equal(516, imported.Passed); Assert.Equal(516, await db.TestExecutionEvidence.CountAsync(x => x.EvidenceId == imported.EvidenceId));
+
+            var initialManifestHash = await service.ComputeReviewManifestHashAsync(campaign.Id, default);
+            Assert.Equal(64, initialManifestHash.Length); Assert.Equal(initialManifestHash, await service.ComputeReviewManifestHashAsync(campaign.Id, default));
+            var pendingImpact = await db.ImpactDispositions.FirstAsync(x => x.CampaignId == campaign.Id && x.State == ImpactDispositionState.Pending);
+            pendingImpact.Disposition(ImpactDispositionState.Addressed, "Disposition changes are part of the signed release package.", "assurance.test", now.AddMinutes(1)); await db.SaveChangesAsync();
+            var changedManifestHash = await service.ComputeReviewManifestHashAsync(campaign.Id, default); Assert.NotEqual(initialManifestHash, changedManifestHash);
+
+            campaign.BeginReleaseReview("release.manager", [("release.reviewer", "Release Reviewer")], changedManifestHash, now.AddMinutes(2));
+            db.ReleaseApprovals.AddRange(campaign.Approvals); await db.SaveChangesAsync();
+            var frozenReconciliation = await Assert.ThrowsAsync<DomainException>(() => service.ReconcileAsync(campaign.Id, "assurance.test", now.AddMinutes(3), default));
+            Assert.Contains("frozen", frozenReconciliation.Message, StringComparison.OrdinalIgnoreCase);
+            await using var blockedManifest = new MemoryStream(); await using var blockedEvidence = new MemoryStream();
+            var frozenImport = await Assert.ThrowsAsync<DomainException>(() => service.ImportVerificationAsync(campaign.Id, blockedManifest, blockedEvidence, "blocked.zip", "application/zip", "test.lead", now.AddMinutes(3), default));
+            Assert.Contains("frozen", frozenImport.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally { File.Delete(path); if (Directory.Exists(evidenceRoot)) Directory.Delete(evidenceRoot, true); }
     }

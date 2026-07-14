@@ -4,6 +4,28 @@ export type View =
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
+export type HistoryStateIntent =
+  | "Draft"
+  | "InReview"
+  | "Approved"
+  | "SelectedForBaseline"
+  | "ApprovedOrSelected";
+
+export type HistoryTypeIntent = "System" | "Software" | "All";
+
+const historyStateIntents: readonly HistoryStateIntent[] = [
+  "Draft",
+  "InReview",
+  "Approved",
+  "SelectedForBaseline",
+  "ApprovedOrSelected",
+];
+
+const historyStateIntent = (value: string | null): HistoryStateIntent | undefined =>
+  historyStateIntents.includes(value as HistoryStateIntent)
+    ? (value as HistoryStateIntent)
+    : undefined;
+
 export type AppRoute = {
   view: View;
   discipline: Discipline;
@@ -13,6 +35,8 @@ export type AppRoute = {
   artifactId?: string;
   artifactKind?: string;
   savedViewId?: string;
+  historyStateIntent?: HistoryStateIntent;
+  historyTypeIntent?: HistoryTypeIntent;
 };
 
 const decoded = (value: string | undefined) => value ? decodeURIComponent(value) : undefined;
@@ -29,8 +53,8 @@ export function readRoute(): AppRoute {
   const path = tail.join("/");
   if (!path || path === "command-center") return { ...base, view: "dashboard", discipline: "system" };
   if (path === "my-work") return { ...base, view: "mywork", discipline: "system" };
-  if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system" };
-  if (path === "software/change-requests") return { ...base, view: "history", discipline: "software" };
+  if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "System" };
+  if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
   if (path === "systems/change-requests/new") return { ...base, view: "createSystemScr", discipline: "system" };
   if (path === "software/change-requests/new") return { ...base, view: "createSoftwareChange", discipline: "software" };
   if (tail[0] === "change-requests" && tail[1]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[1]) };
@@ -51,15 +75,22 @@ export function readRoute(): AppRoute {
 
 export type RouteContext = { programId: string; projectId: string; releaseId: string };
 
-export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string) {
+export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
+  const historyPath = (scope: "systems" | "software") => {
+    const path = `${root}/${scope}/change-requests`;
+    const query = new URLSearchParams();
+    if (stateIntent) query.set("state", stateIntent);
+    if (typeIntent === "All") query.set("type", "All");
+    return query.size ? `${path}?${query}` : path;
+  };
   switch (view) {
     case "dashboard": return `${root}/command-center`;
     case "mywork": return `${root}/my-work`;
     case "createSystemScr": return `${root}/systems/change-requests/new`;
     case "createSoftwareChange": return `${root}/software/change-requests/new`;
     case "scr": return `${root}/change-requests/${artifactId}`;
-    case "history": return `${root}/${discipline === "software" ? "software" : "systems"}/change-requests`;
+    case "history": return historyPath(discipline === "software" ? "software" : "systems");
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
     case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification`;
     case "lifecycle": return `${root}/traceability`;

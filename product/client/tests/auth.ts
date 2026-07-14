@@ -14,6 +14,17 @@ export async function apiLogin(request:APIRequestContext,userName='admin'){
   expect(response.ok(),await response.text()).toBeTruthy()
 }
 export async function openNavigationGroup(page:Page,name:string){
-  const group=page.locator('.navGroup').filter({has:page.locator('summary').filter({hasText:name})})
+  const currentName:{[key:string]:string}={
+    'SYSTEMS ENGINEERING':'ENGINEERING',
+    'SOFTWARE ENGINEERING':'ENGINEERING',
+    'VERIFICATION':'ASSURANCE',
+    'RELEASE & CONFIGURATION':'RELEASE',
+  }
+  const group=page.locator('.navGroup').filter({has:page.locator('summary').filter({hasText:currentName[name]??name})})
   if(await group.getAttribute('open')===null)await group.locator('summary').click()
+  const engineeringScope=name==='SOFTWARE ENGINEERING'?'Software':name==='SYSTEMS ENGINEERING'?'System':''
+  if(engineeringScope){
+    const scopeButton=group.getByRole('group',{name:'Engineering scope'}).getByRole('button',{name:engineeringScope})
+    if(await scopeButton.getAttribute('aria-pressed')!=='true')await scopeButton.click()
+  }
 }

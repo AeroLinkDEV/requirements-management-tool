@@ -37,4 +37,33 @@ public sealed class IdentityPersistenceTests
         for (var i=0;i<8;i++) Assert.Null(await identity.LoginAsync(user.UserName, "incorrect-password", "local", "test", DateTimeOffset.UtcNow, default));
         Assert.Equal(AccountState.Locked, (await db.UserAccounts.AsNoTracking().SingleAsync()).State);
     }
+
+    [Fact]
+    public async Task Program_administrator_remains_scoped_and_role_checks_are_exact()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        await using var db = new AeroLinkDbContext(options); await db.Database.OpenConnectionAsync(); await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow; var program = new ProgramRecord("Scoped Program", "SCP");
+        var scopedAdministrator = new UserAccount("program.admin", "Program Administrator", "program.admin@example.test", IdentityService.HashPassword("StrongPass!2026"), now);
+        var systemAdministrator = new UserAccount(IdentityService.SystemAdministratorUserName, "System Administrator", "admin@example.test", IdentityService.HashPassword("StrongPass!2026"), now);
+        var delegateUser = new UserAccount("delegate.user", "Delegate User", "delegate@example.test", IdentityService.HashPassword("StrongPass!2026"), now);
+        db.AddRange(program, scopedAdministrator, systemAdministrator, delegateUser); await db.SaveChangesAsync();
+        db.ProgramMemberships.AddRange(
+            new(scopedAdministrator.Id, program.Id, ProgramRole.Administrator, systemAdministrator.UserName, now),
+            new(delegateUser.Id, program.Id, ProgramRole.Engineer, systemAdministrator.UserName, now));
+        await db.SaveChangesAsync();
+
+        var identity = new IdentityService(db);
+        var scopedLogin = await identity.LoginAsync(scopedAdministrator.UserName, "StrongPass!2026", "local", "test", now, default);
+        var systemLogin = await identity.LoginAsync(systemAdministrator.UserName, "StrongPass!2026", "local", "test", now, default);
+        Assert.NotNull(scopedLogin); Assert.NotNull(systemLogin);
+        Assert.False(scopedLogin!.User.IsAdministrator); Assert.True(systemLogin!.User.IsAdministrator);
+        Assert.True(await identity.HasRoleAsync(scopedAdministrator.Id, program.Id, ProgramRole.Administrator, now, default));
+        Assert.False(await identity.HasRoleAsync(scopedAdministrator.Id, program.Id, ProgramRole.ProgramManager, now, default));
+
+        db.RoleDelegations.Add(new(program.Id, scopedAdministrator.Id, delegateUser.Id, ProgramRole.Administrator, now.AddMinutes(-1), now.AddHours(1), "Temporary scoped administration.", scopedAdministrator.UserName, now));
+        await db.SaveChangesAsync();
+        Assert.True(await identity.HasRoleAsync(delegateUser.Id, program.Id, ProgramRole.Administrator, now, default));
+        Assert.False(await identity.HasRoleAsync(delegateUser.Id, program.Id, ProgramRole.ProgramManager, now, default));
+    }
 }

@@ -10,6 +10,8 @@ test('AeroLink starts against the real API and presents a valid entry state', as
 test('Sign in recovers cleanly when the local API is temporarily unavailable', async ({ page }) => {
   await page.route('**/api/auth/login', route => route.abort('connectionrefused'))
   await page.goto('/')
+  await page.getByLabel('Username').fill('admin')
+  await page.getByLabel('Password').fill('AeroLink!2026')
   await page.getByRole('button', { name: /Sign in securely/ }).click()
 
   await expect(page.getByText(/could not reach its local API/i)).toBeVisible()

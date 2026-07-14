@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Releases;
@@ -18,6 +20,8 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == campaignId, ct) ?? throw new DomainException("Release campaign not found.");
+        if (campaign.State == ReleaseCampaignState.InReview) throw new DomainException("The release package is frozen while approval is in progress.");
+        if (campaign.State == ReleaseCampaignState.Released) throw new DomainException("A released campaign is immutable.");
         var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == campaign.BaselineId, ct);
         if (baseline.RequirementsMaterializedAt is null) throw new DomainException("Materialize the release baseline before reconciling lifecycle links.");
         if (baseline.PredecessorBaselineId is null) throw new DomainException("A predecessor baseline is required for controlled link carry-forward.");
@@ -71,6 +75,8 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
     {
         if (string.IsNullOrWhiteSpace(actorId)) throw new DomainException("The verification import owner is required.");
         var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == campaignId, ct) ?? throw new DomainException("Release campaign not found.");
+        if (campaign.State == ReleaseCampaignState.InReview) throw new DomainException("The release package is frozen while approval is in progress.");
+        if (campaign.State == ReleaseCampaignState.Released) throw new DomainException("A released campaign is immutable.");
         if (campaign.SoftwareBuildId is null) throw new DomainException("Select the exact verification build before importing results.");
         List<VerificationManifestRow> manifest;
         try { manifest = await JsonSerializer.DeserializeAsync<List<VerificationManifestRow>>(manifestStream, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, ct) ?? []; }
@@ -101,6 +107,54 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             return new(executions.Count, executions.Count(x => x.Outcome == TestOutcome.Pass), executions.Count(x => x.Outcome == TestOutcome.Fail), executions.Count(x => x.Outcome == TestOutcome.Blocked), evidence.Id, evidence.Sha256);
         }
         catch { evidenceStore.Delete(stored.StorageKey); throw; }
+    }
+
+    public async Task<string> ComputeReviewManifestHashAsync(Guid campaignId, CancellationToken ct)
+    {
+        var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == campaignId, ct)
+            ?? throw new DomainException("Release campaign not found.");
+        if (campaign.SoftwareBuildId is null) throw new DomainException("Select the exact verification build before freezing the release package.");
+
+        var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == campaign.BaselineId, ct);
+        var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == campaign.ReleaseId, ct);
+        var build = await db.SoftwareBuilds.AsNoTracking().SingleAsync(x => x.Id == campaign.SoftwareBuildId, ct);
+        var members = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
+        var revisionIds = members.Select(x => x.RevisionId).ToHashSet();
+        var selections = await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
+        var selectedScrIds = selections.Select(x => x.ScrId).ToList();
+        var changes = await db.SystemChangeRequests.AsNoTracking().Where(x => selectedScrIds.Contains(x.Id)).ToListAsync(ct);
+        var impacts = await db.ImpactDispositions.AsNoTracking().Where(x => x.CampaignId == campaign.Id).ToListAsync(ct);
+        var traces = await db.RequirementTraces.AsNoTracking().Where(x => x.ProjectId == campaign.ProjectId && (revisionIds.Contains(x.SourceRevisionId) || revisionIds.Contains(x.TargetRevisionId))).ToListAsync(ct);
+        var coverage = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
+        var procedureRevisionIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
+        var procedureRevisions = await db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id)).ToListAsync(ct);
+        var procedureIds = procedureRevisions.Select(x => x.ProcedureId).Distinct().ToList();
+        var procedures = await db.TestProcedures.AsNoTracking().Where(x => procedureIds.Contains(x.Id)).ToListAsync(ct);
+        var executions = await db.TestExecutions.AsNoTracking().Where(x => x.SoftwareBuildId == campaign.SoftwareBuildId && procedureRevisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
+        var executionIds = executions.Select(x => x.Id).ToList();
+        var evidenceLinks = await db.TestExecutionEvidence.AsNoTracking().Where(x => executionIds.Contains(x.TestExecutionId)).ToListAsync(ct);
+        var evidenceIds = evidenceLinks.Select(x => x.EvidenceId).Distinct().ToList();
+        var evidence = await db.EvidenceRecords.AsNoTracking().Where(x => evidenceIds.Contains(x.Id)).ToListAsync(ct);
+        var documents = await db.ControlledDocuments.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
+
+        var canonical = JsonSerializer.Serialize(new
+        {
+            schema = "aerolink.release-review-manifest.v1",
+            campaign = new { campaign.Id, campaign.ProjectId, campaign.ReleaseId, campaign.BaselineId, campaign.SoftwareBuildId },
+            release = new { release.Id, release.Version, release.PredecessorReleaseId },
+            baseline = new { baseline.Id, baseline.DisplayNumber, baseline.PredecessorBaselineId, baseline.ContentHash, baseline.RequirementsHash, baseline.RequirementsMaterializedAt },
+            build = new { build.Id, build.BuildNumber, build.Description, build.RecordedBy, build.RecordedAt },
+            members = members.OrderBy(x => x.ArtifactId).ThenBy(x => x.RevisionId).Select(x => new { x.ArtifactId, x.RevisionId }),
+            changes = changes.OrderBy(x => x.BaseNumber).ThenBy(x => x.Revision).Select(x => new { x.Id, x.BaseNumber, x.Revision, state = x.State.ToString(), x.Version, x.UpdatedAt }),
+            impacts = impacts.OrderBy(x => x.ScrId).ThenBy(x => x.Kind).ThenBy(x => x.Id).Select(x => new { x.Id, x.ScrId, kind = x.Kind.ToString(), state = x.State.ToString(), x.Rationale, x.DispositionedBy, x.DispositionedAt }),
+            traces = traces.OrderBy(x => x.SourceRevisionId).ThenBy(x => x.TargetRevisionId).ThenBy(x => x.Type).Select(x => new { x.Id, x.SourceRevisionId, x.TargetRevisionId, type = x.Type.ToString(), x.Rationale }),
+            coverage = coverage.OrderBy(x => x.RequirementRevisionId).ThenBy(x => x.ProcedureRevisionId).Select(x => new { x.RequirementRevisionId, x.ProcedureRevisionId }),
+            procedures = (from revision in procedureRevisions join procedure in procedures on revision.ProcedureId equals procedure.Id orderby procedure.BaseNumber, revision.Revision select new { procedure.Id, procedure.BaseNumber, procedure.Title, revisionId = revision.Id, revision.Revision, state = revision.State.ToString(), revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult }),
+            executions = executions.OrderBy(x => x.ProcedureRevisionId).ThenBy(x => x.ExecutedAt).ThenBy(x => x.Id).Select(x => new { x.Id, x.ProcedureRevisionId, x.SoftwareBuildId, x.RetestOfExecutionId, outcome = x.Outcome.ToString(), x.ExecutedBy, x.Configuration, x.Determination, x.EvidenceReference, x.ExecutedAt, x.RecordedAt }),
+            evidence = (from link in evidenceLinks join item in evidence on link.EvidenceId equals item.Id orderby link.TestExecutionId, item.Id select new { link.TestExecutionId, item.Id, item.OriginalFileName, item.ContentType, item.Size, item.Sha256, item.UploadedBy, item.UploadedAt }),
+            documents = documents.OrderBy(x => x.Type).ThenBy(x => x.DocumentNumber).ThenBy(x => x.Revision).Select(x => new { x.Id, type = x.Type.ToString(), x.DocumentNumber, x.Revision, x.ContentHash, x.ArtifactCount, x.GeneratedAt })
+        });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
     private async Task<List<(Guid Id, string DisplayNumber)>> RequiredProceduresAsync(Guid baselineId, CancellationToken ct)
