@@ -78,7 +78,9 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Open `http://127.0.0.1:5173`. Local development uses PostgreSQL on port `54329`; application startup applies versioned migrations. A fresh database opens the guided New Program workflow, and demonstration data is disabled by default. SQLite remains available for isolated tests. Set `DemoData:Enabled` to `true` only when the explicit FMS sample workspace is wanted.
+Open `http://127.0.0.1:5173`. Local development uses PostgreSQL on port `54329`; application startup applies versioned migrations. The checked-in Development profile enables the explicit FMS showcase and local demonstration identities, while the production defaults keep both disabled. Set `DemoData__Enabled=false` and `Identity__SeedDemoAccounts=false` for a blank local onboarding run. SQLite remains available for isolated tests.
+
+For a production database, demo identities remain disabled. Configure the one-time, zero-user administrator bootstrap through the protected `Identity__BootstrapSecret` service environment setting, then remove it immediately after creating the first `admin` account. The complete procedure is in [Operations and recovery](docs/OPERATIONS.md#production-first-install-administrator); no bootstrap secret belongs in this repository.
 
 Local demonstration identities include `admin`, `systems.author`, `software.author`, `systems.reviewer`, and `release.manager`; their local-only password is `AeroLink!2026`. These credentials are intentionally non-production and must be replaced before any operational deployment. See [Operations and recovery](docs/OPERATIONS.md).
 

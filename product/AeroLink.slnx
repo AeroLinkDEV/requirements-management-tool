@@ -5,6 +5,7 @@
     <Project Path="src/AeroLink.Infrastructure/AeroLink.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj" />
     <Project Path="tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj" />
     <Project Path="tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj" />
   </Folder>

@@ -1,7 +1,15 @@
 import { expect, test } from '@playwright/test'
+import type { Page } from '@playwright/test'
 import { apiBase, login, openNavigationGroup } from './auth'
 
-test('author creates, edits, submits, and sequentially approves an SCR', async ({ page }) => {
+async function openPageFromPalette(page:Page,label:string){
+  await page.getByRole('button',{name:/Search & navigate/}).click()
+  const palette=page.getByRole('dialog',{name:'Quick navigation'})
+  await palette.getByPlaceholder(/Search pages/).fill(label)
+  await palette.getByRole('link',{name:new RegExp(label)}).click()
+}
+
+test('author creates, edits, submits, and sequentially approves an SCR', async ({ page,playwright }) => {
   test.setTimeout(60_000)
   await login(page)
   const suffix=Date.now().toString().slice(-7),programName=`Browser Workflow ${suffix}`
@@ -19,8 +27,17 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
     await page.locator('.program > select:not(.releaseSelector)').selectOption({label:programName})
   }
 
-  await openNavigationGroup(page,'SOFTWARE ENGINEERING')
-  await page.getByRole('link', { name: 'New Software SWCR' }).click()
+  await openPageFromPalette(page,'New Software SWCR')
+  await expect(page.getByRole('navigation', { name: 'Change authoring progress' })).toBeVisible()
+  await expect(page.getByLabel('Identifier')).toHaveValue(/^HLR-\d{8}$/)
+  await expect(page.getByLabel('Identifier')).not.toBeEditable()
+  await expect(page.getByLabel('Revision')).toHaveValue('00')
+  await expect(page.getByLabel('Revision')).not.toBeEditable()
+  await expect(page.getByRole('textbox',{name:'Level',exact:true})).toHaveValue('Software HLR')
+  await expect(page.getByRole('textbox',{name:'Level',exact:true})).not.toBeEditable()
+  await expect(page.getByLabel('Change type')).toHaveValue('Introduce')
+  await expect(page.getByLabel('Change type')).not.toBeEditable()
+  await expect(page.getByText('SWR-00000001')).toHaveCount(0)
   await page.getByLabel('Title').fill('Introduce controlled browser workflow')
   await page.getByLabel('Problem').fill('The workflow is not yet controlled end to end.')
   await page.getByLabel('Analysis', { exact: true }).fill('SCR content, reviewers, and history must remain attributable.')
@@ -40,10 +57,10 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByRole('heading', { name: 'Introduce controlled approval workflow' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Configure & Submit Review' }).click()
+  await expect(page.getByText('No reviewers selected')).toBeVisible()
+  await page.getByRole('button', { name: '+ Add approver' }).click()
   await page.getByLabel('Approver 1 search').fill('AeroLink Administrator')
   await page.getByRole('button', { name: /AeroLink Administrator.*Administrator/ }).click()
-  await page.getByRole('button', { name: 'Remove' }).nth(2).click()
-  await page.getByRole('button', { name: 'Remove' }).nth(1).click()
   await page.getByRole('button', { name: 'Submit for Review' }).click()
   await expect(page.getByText('InReview', { exact: true }).first()).toBeVisible()
 
@@ -74,8 +91,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByText(/HLR-\d{8}\.00/).last()).toBeVisible()
 
   await page.getByRole('link', { name: /Command Center/ }).first().click()
-  await openNavigationGroup(page,'VERIFICATION')
-  await page.getByRole('link', { name: 'Software Verification' }).click()
+  await openPageFromPalette(page,'Software Verification')
   await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible()
   await expect(page.getByText('1', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: 'New Test Procedure' }).click()
@@ -86,16 +102,22 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByRole('checkbox').check()
   await page.getByRole('button', { name: 'Create Procedure' }).click()
   await expect(page.getByText(/(?:HLRTP|LLRTP)-\d{8}\.00/, { exact: true }).last()).toBeVisible()
+  const workspacesResponse=await page.request.get(`${apiBase}/api/workspaces`);expect(workspacesResponse.ok(),await workspacesResponse.text()).toBeTruthy();const workspaces=await workspacesResponse.json();const workspace=workspaces.find((x:{program:{name:string}})=>x.program.name===programName);const projectId=workspace.projects[0].project.id
+  const usersResponse=await page.request.get(`${apiBase}/api/admin/users`);expect(usersResponse.ok(),await usersResponse.text()).toBeTruthy();const reviewer=(await usersResponse.json()).find((x:{userName:string})=>x.userName==='systems.reviewer')
+  const grant=await page.request.post(`${apiBase}/api/admin/users/${reviewer.id}/memberships`,{data:{programId:workspace.program.id,role:'Approver'}});expect(grant.ok(),await grant.text()).toBeTruthy()
+  const proceduresResponse=await page.request.get(`${apiBase}/api/test-procedures?projectId=${projectId}&scope=Software`);expect(proceduresResponse.ok(),await proceduresResponse.text()).toBeTruthy();const procedure=(await proceduresResponse.json()).find((x:{title:string})=>x.title==='Verify ordered approval workflow')
+  const approver=await playwright.request.newContext();const approverLogin=await approver.post(`${apiBase}/api/auth/login`,{data:{userName:'systems.reviewer',password:'AeroLink!2026'}});expect(approverLogin.ok(),await approverLogin.text()).toBeTruthy();const approval=await approver.post(`${apiBase}/api/test-procedures/${procedure.revisionId}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved after independent review for controlled verification use.'}});expect(approval.ok(),await approval.text()).toBeTruthy();await approver.dispose()
+  await page.reload();await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible()
   await page.getByRole('button', { name: /Test procedures/ }).click()
   await page.getByRole('button', { name: 'Record result' }).click()
   await page.getByLabel('Outcome').selectOption('Fail')
-  await page.getByPlaceholder('File path, evidence ID, repository URL…').fill('evidence/workflow-fail-001.json')
+  await page.getByLabel('Evidence reference').fill('evidence/workflow-fail-001.json')
   await page.getByPlaceholder('Why this run passed, failed, or was blocked').fill('The second approval stage did not activate.')
   await page.getByRole('button', { name: 'Record immutable result' }).click()
   await expect(page.getByText('Fail', { exact: true }).last()).toBeVisible()
   await page.getByRole('button', { name: 'Record retest' }).click()
   await page.getByLabel('Outcome').selectOption('Pass')
-  await page.getByPlaceholder('File path, evidence ID, repository URL…').fill('evidence/workflow-pass-002.json')
+  await page.getByLabel('Evidence reference').fill('evidence/workflow-pass-002.json')
   await page.getByPlaceholder('Why this run passed, failed, or was blocked').fill('All ordered approval stages activated correctly after correction.')
   await page.getByRole('button', { name: 'Record immutable result' }).click()
   await page.getByRole('button', { name: /Requirement coverage/ }).click()

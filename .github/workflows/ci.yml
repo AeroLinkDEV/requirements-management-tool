@@ -1,0 +1,148 @@
+name: Product quality gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Build, test, and exercise product journeys
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+
+      - name: Restore .NET dependencies
+        run: dotnet restore product/AeroLink.slnx
+
+      - name: Build backend
+        run: dotnet build product/AeroLink.slnx --configuration Release --no-restore
+
+      - name: Run backend tests
+        run: dotnet test product/AeroLink.slnx --configuration Release --no-build --logger "console;verbosity=normal"
+
+      - name: Install client dependencies
+        working-directory: product/client
+        run: npm ci
+
+      - name: Lint client
+        working-directory: product/client
+        run: npm run lint
+
+      - name: Build client
+        working-directory: product/client
+        run: npm run build
+
+      - name: Install browser runtime
+        working-directory: product/client
+        run: npx playwright install chromium
+
+      - name: Run end-to-end journeys
+        working-directory: product/client
+        run: npm run test:e2e
+
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics-${{ github.run_attempt }}
+          path: |
+            product/client/playwright-report
+            product/client/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  postgresql-smoke:
+    name: PostgreSQL migrations and secure bootstrap
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: aerolink_ci
+          POSTGRES_USER: aerolink
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aerolink -d aerolink_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore and build API
+        run: |
+          dotnet restore product/AeroLink.slnx
+          dotnet build product/AeroLink.slnx --configuration Release --no-restore
+
+      - name: Apply migrations and prove first-install identity path
+        env:
+          ASPNETCORE_ENVIRONMENT: Production
+          Database__Provider: PostgreSql
+          ConnectionStrings__AeroLink: Host=127.0.0.1;Port=5432;Database=aerolink_ci;Username=aerolink;Password=ci-only-password
+          DemoData__Enabled: "false"
+          Identity__SeedDemoAccounts: "false"
+          Identity__CookieSecure: "false"
+          Identity__BootstrapSecret: ci-only-bootstrap-secret-0123456789-abcdef
+        run: |
+          set -euo pipefail
+          dotnet run --project product/src/AeroLink.Api --configuration Release --no-build --no-launch-profile --urls http://127.0.0.1:5080 > postgres-api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..60}; do
+            if curl -fsS http://127.0.0.1:5080/health >/dev/null; then break; fi
+            if ! kill -0 "$api_pid" 2>/dev/null; then cat postgres-api.log; exit 1; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:5080/health | jq -e '.status == "healthy"'
+          curl -fsS http://127.0.0.1:5080/api/setup/status | jq -e '.bootstrapRequired == true and .bootstrapEnabled == true'
+          curl -fsS -X POST http://127.0.0.1:5080/api/setup/bootstrap \
+            -H 'Content-Type: application/json' \
+            -H 'X-AeroLink-Bootstrap-Secret: ci-only-bootstrap-secret-0123456789-abcdef' \
+            -d '{"displayName":"CI Administrator","email":"ci-admin@example.invalid","password":"CiOnly!Administrator2026"}'
+          curl -fsS http://127.0.0.1:5080/api/setup/status | jq -e '.bootstrapRequired == false and .bootstrapEnabled == false'
+          curl -fsS -c cookies.txt -X POST http://127.0.0.1:5080/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"userName":"admin","password":"CiOnly!Administrator2026"}' | jq -e '.userName == "admin" and .isAdministrator == true'
+          curl -fsS -b cookies.txt http://127.0.0.1:5080/api/auth/me | jq -e '.userName == "admin" and .isAdministrator == true'
+
+      - name: Upload PostgreSQL startup diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgresql-api-diagnostics-${{ github.run_attempt }}
+          path: postgres-api.log
+          if-no-files-found: ignore
+          retention-days: 7

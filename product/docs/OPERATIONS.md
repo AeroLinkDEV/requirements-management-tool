@@ -8,6 +8,27 @@ Use `STOP_AEROLINK.bat` for a controlled stop. The script only stops listeners w
 
 Logs are under `product/.local/logs`. The authoritative database is `aerolink`; controlled evidence is under `%LOCALAPPDATA%\AeroLink\evidence`.
 
+## Production first-install administrator
+
+Production does not seed identities. Before the first API start against an empty database, set `Identity__BootstrapSecret` in the service environment to a randomly generated value of at least 32 characters. Do not place it in `appsettings.json`, source control, a command-line argument, or an operator transcript. `GET /api/setup/status` reports only whether bootstrap is required and enabled.
+
+While the API is reachable only from the administrative network, open the website. An empty, bootstrap-enabled deployment automatically presents the one-time activation screen; enter the protected bootstrap secret and choose the administrator display name, email, and password. The administrator username is always `admin`. The password must contain at least 14 characters with uppercase, lowercase, numeric, and symbol characters. The equivalent API procedure is retained below for headless installations.
+
+```powershell
+$secureBootstrapSecret = Read-Host 'Bootstrap secret from the protected service configuration' -AsSecureString
+$bootstrapSecret = [System.Net.NetworkCredential]::new('', $secureBootstrapSecret).Password
+$securePassword = Read-Host 'New AeroLink administrator password' -AsSecureString
+$administratorPassword = [System.Net.NetworkCredential]::new('', $securePassword).Password
+$headers = @{ 'X-AeroLink-Bootstrap-Secret' = $bootstrapSecret }
+$body = @{ displayName = 'AeroLink Administrator'; email = 'admin@example.org'; password = $administratorPassword } | ConvertTo-Json
+Invoke-RestMethod 'https://aerolink.example.org/api/setup/bootstrap' -Method Post -Headers $headers -ContentType 'application/json' -Body $body
+Remove-Variable secureBootstrapSecret, bootstrapSecret, securePassword, administratorPassword, body
+```
+
+The operation uses a serializable zero-user transaction and permanently closes after the first account exists. Confirm `GET /api/setup/status` returns `bootstrapRequired: false`, remove `Identity__BootstrapSecret` from the service environment, restart the API, and sign in with the chosen password. If the database already contains any user, recovery requires the approved database/identity recovery procedure; bootstrap cannot overwrite or add an administrator.
+
+Demo identity seeding fails closed outside the `Development` environment. `Identity__AllowDemoAccounts=true` is an explicit escape hatch only for an isolated, non-production showcase and must never be used for an operational deployment.
+
 ## Local credentials warning
 
 The deterministic demonstration password is `AeroLink!2026`. Useful users include `admin`, `systems.author`, `software.author`, `systems.reviewer`, and `release.manager`. These credentials are for the disconnected local development installation only. Replace them, remove credential prefill, configure TLS, and establish organizational identity and privileged-access policy before operational use.

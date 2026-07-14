@@ -24,6 +24,28 @@
 .navGroup > summary::-webkit-details-marker { display: none; }
 .navGroup > summary::after { content: '›'; float: right; transform: rotate(90deg); transition: transform .15s; font-size: 17px; line-height: 1; }
 .navGroup:not([open]) > summary::after { transform: rotate(0); }
+.navScopeSwitch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  margin: 0 10px 5px;
+  padding: 3px;
+  border: 1px solid #2a405d;
+  border-radius: 8px;
+  background: #0d1d34;
+}
+.navScopeSwitch button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #91a4bc;
+  font-size: 12px;
+  font-weight: 750;
+}
+.navScopeSwitch button:hover,
+.navScopeSwitch button:focus-visible { color: white; background: #172e4d; }
+.navScopeSwitch button[aria-pressed="true"] { color: white; background: #1d4c64; box-shadow: inset 0 0 0 1px #3a7983; }
 .primaryNavigation a {
   display: flex;
   align-items: center;
@@ -83,8 +105,11 @@
 .contextBar nav b { color: #a4afbf; font-size: 16px; font-weight: 400; }
 .contextBar nav strong { color: var(--ink-900); overflow: hidden; text-overflow: ellipsis; }
 .contextActions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.contextScopeSwitch { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: #f4f7f9; }
 .contextReleaseState { color: var(--teal-700); background: #e8f5f2; border-radius: 14px; padding: 4px 9px; font-size: 12px; font-weight: 700; }
 .contextBar button { min-height: 32px; border: 0; background: transparent; color: var(--teal-700); font-size: 13px; font-weight: 700; padding: 5px 8px; }
+.contextActions .contextScopeSwitch button { min-height: 28px; padding: 3px 9px; border-radius: 6px; color: var(--ink-500); font-size: 12px; }
+.contextActions .contextScopeSwitch button[aria-pressed="true"] { background: white; color: var(--teal-700); box-shadow: 0 1px 4px rgba(17,35,58,.12); }
 .appNavigation footer { background: var(--navy-950); }
 .appNavigation .signOut { grid-column: 2; justify-self: start; color: #a9b8cb; border: 0; background: transparent; font-size: 12px; padding: 3px 0; min-height: 26px; }
 

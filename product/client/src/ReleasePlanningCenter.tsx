@@ -81,12 +81,22 @@ export default function ReleasePlanningCenter({
     [creating, setCreating] = useState(false),
     [campaignBaseline, setCampaignBaseline] = useState<Baseline>(),
     [error, setError] = useState(""),
+    [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
-    const response = await fetch(
-      `${api}/api/release-planning?projectId=${projectId}`,
-    );
-    if (response.ok) setData(await response.json());
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `${api}/api/release-planning?projectId=${projectId}`,
+      );
+      if (!response.ok) throw new Error("Release planning could not be loaded.");
+      setData(await response.json());
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Release planning could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
   }, [api, projectId]);
   useEffect(() => {
     load();
@@ -189,6 +199,7 @@ export default function ReleasePlanningCenter({
         </button>
       </header>
       {error && <div className="workspaceError">{error}</div>}
+      {loading && !data && <section className="planningState" aria-live="polite"><i/><div><b>Loading controlled product history</b><span>Resolving versions, baselines, and campaigns…</span></div></section>}
       <section className="continuity">
         <div>
           <span>CONTROLLED PRODUCT LINE</span>
@@ -199,14 +210,9 @@ export default function ReleasePlanningCenter({
           </p>
         </div>
         <div className="continuityRule">
-          <b>1.5</b>
-          <i />
-          <b>1.6</b>
-          <i />
-          <b>1.7</b>
-          <i />
-          <b>1.8</b>
-          <small>You decide when each version is ready.</small>
+          {releases.slice(-4).map((item, index, visible) => <span className={item.isReleased ? "released" : "inwork"} key={item.id}><b>{item.version}</b>{index < visible.length - 1 && <i/>}</span>)}
+          {!releases.length && <b>First release</b>}
+          <small>{inWorkRelease ? `${inWorkRelease.version} remains in work until its release gates are complete.` : `The next suggested version is ${suggestNext(latest?.version ?? "1.0")}.`}</small>
         </div>
       </section>
       <section className="releaseTimeline">
@@ -304,9 +310,9 @@ export default function ReleasePlanningCenter({
         <div>
           <b>Release authority stays with your team</b>
           <p>
-            AeroLink does not create 1.6, 1.7, or 1.8 baselines automatically.
+            AeroLink never creates future baselines or approvals automatically.
             It calculates readiness and blocks unsafe progression; assigned
-            humans approve SCR/SWCR revisions and the release campaign.
+            humans approve exact change revisions and the release campaign.
           </p>
         </div>
         {[

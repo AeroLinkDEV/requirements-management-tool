@@ -33,7 +33,7 @@ test('searches full history and proves exact software build contents', async ({ 
 
   await page.getByRole('button', { name: /Software Builds/ }).click()
   await page.getByRole('button', { name: 'Record Software Build' }).click()
-  await page.getByPlaceholder('e.g. FMS-3.3.0-rc1').fill('FMS-3.3.0-rc1')
+  await page.getByLabel('Build number').fill('FMS-3.3.0-rc1')
   await page.getByLabel('Frozen baseline').selectOption(baseline.id)
   await page.getByRole('button', { name: 'Record Build', exact: true }).click()
   await page.getByRole('button', { name: /FMS-3.3.0-rc1/ }).click()

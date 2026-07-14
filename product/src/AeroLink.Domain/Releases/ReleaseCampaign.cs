@@ -31,17 +31,24 @@ public sealed class ReleaseCampaign
     public string? ReleaseHash { get; private set; }
     public IReadOnlyCollection<ReleaseCampaignEvent> Events => _events.AsReadOnly();
     public IReadOnlyCollection<ReleaseApproval> Approvals => _approvals.AsReadOnly();
-    public void StartVerification(string actorId, DateTimeOffset now) { EnsureNotReleased(); State = ReleaseCampaignState.Verification; Event("VerificationStarted", actorId, "Started release verification campaign.", now); }
-    public void SelectVerificationBuild(Guid softwareBuildId, string actorId, DateTimeOffset now)
-    { EnsureNotReleased(); SoftwareBuildId = softwareBuildId; Event("VerificationBuildSelected", actorId, $"Selected software build {softwareBuildId} for release verification.", now); }
-    public void RecordExecutionProgress(string eventType, string detail, string actorId, DateTimeOffset now)
-    { EnsureNotReleased(); if (string.IsNullOrWhiteSpace(eventType) || string.IsNullOrWhiteSpace(detail)) throw new DomainException("Release progress type and detail are required."); Event(eventType.Trim(), actorId, detail.Trim(), now); }
-    public void BeginReleaseReview(string actorId, IReadOnlyList<(string Id, string Name)> approvers, DateTimeOffset now)
+    public void StartVerification(string actorId, DateTimeOffset now)
     {
-        EnsureNotReleased(); if (approvers.Count == 0) throw new DomainException("At least one release approver is required.");
+        if (State != ReleaseCampaignState.Planning) throw new DomainException("Only a planning campaign can start verification.");
+        State = ReleaseCampaignState.Verification; Event("VerificationStarted", actorId, "Started release verification campaign.", now);
+    }
+    public void SelectVerificationBuild(Guid softwareBuildId, string actorId, DateTimeOffset now)
+    { EnsurePackageMutable(); SoftwareBuildId = softwareBuildId; Event("VerificationBuildSelected", actorId, $"Selected software build {softwareBuildId} for release verification.", now); }
+    public void RecordExecutionProgress(string eventType, string detail, string actorId, DateTimeOffset now)
+    { EnsurePackageMutable(); if (string.IsNullOrWhiteSpace(eventType) || string.IsNullOrWhiteSpace(detail)) throw new DomainException("Release progress type and detail are required."); Event(eventType.Trim(), actorId, detail.Trim(), now); }
+    public void BeginReleaseReview(string actorId, IReadOnlyList<(string Id, string Name)> approvers, string manifestHash, DateTimeOffset now)
+    {
+        if (State != ReleaseCampaignState.Verification) throw new DomainException("Release review can begin only after verification is complete.");
+        if (approvers.Count == 0) throw new DomainException("At least one release approver is required.");
+        if (string.IsNullOrWhiteSpace(manifestHash) || manifestHash.Length != 64) throw new DomainException("A valid release review manifest hash is required.");
         if (_approvals.Count != 0) throw new DomainException("Release review has already been configured.");
         for (var i = 0; i < approvers.Count; i++) _approvals.Add(new ReleaseApproval(Id, i, approvers[i].Id, approvers[i].Name, i == 0 ? ReleaseApprovalState.Active : ReleaseApprovalState.Pending));
-        State = ReleaseCampaignState.InReview; Event("ReleaseReviewStarted", actorId, $"Started ordered release review with {approvers.Count} approvers.", now);
+        ReleaseHash = manifestHash; State = ReleaseCampaignState.InReview;
+        Event("ReleaseReviewStarted", actorId, $"Started ordered release review with {approvers.Count} approvers against manifest SHA-256 {manifestHash}.", now);
     }
     public bool Approve(string actorId, DateTimeOffset now)
     {
@@ -55,10 +62,17 @@ public sealed class ReleaseCampaign
     {
         if (State != ReleaseCampaignState.InReview || _approvals.Any(x => x.State != ReleaseApprovalState.Approved)) throw new DomainException("Every configured release approver must approve before release.");
         if (string.IsNullOrWhiteSpace(releaseHash) || releaseHash.Length != 64) throw new DomainException("A valid release hash is required.");
-        SoftwareBuildId = softwareBuildId; ReleaseHash = releaseHash; ReleasedAt = now; State = ReleaseCampaignState.Released;
+        if (!string.Equals(ReleaseHash, releaseHash, StringComparison.OrdinalIgnoreCase)) throw new DomainException("The release package changed after review began. Cancel and restart release review against the current manifest.");
+        if (SoftwareBuildId != softwareBuildId) throw new DomainException("The reviewed verification build does not match the release build.");
+        ReleasedAt = now; State = ReleaseCampaignState.Released;
         Event("ReleaseCompleted", actorId, $"Released campaign with software build {softwareBuildId} and hash {releaseHash}.", now);
     }
     private void EnsureNotReleased() { if (State == ReleaseCampaignState.Released) throw new DomainException("A released campaign is immutable."); }
+    private void EnsurePackageMutable()
+    {
+        if (State == ReleaseCampaignState.InReview) throw new DomainException("The release package is frozen while approval is in progress.");
+        EnsureNotReleased();
+    }
     private void Event(string type, string actor, string detail, DateTimeOffset now) => _events.Add(new ReleaseCampaignEvent(Id, type, actor, detail, now));
 }
 

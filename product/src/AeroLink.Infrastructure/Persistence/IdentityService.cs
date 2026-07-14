@@ -12,6 +12,7 @@ public sealed record LoginResult(AuthenticatedUser User, string Token, DateTimeO
 public sealed class IdentityService(AeroLinkDbContext db)
 {
     public const string CookieName = "aerolink_session";
+    public const string SystemAdministratorUserName = "admin";
     public static string HashPassword(string password)
     {
         if (password.Length < 10) throw new ArgumentException("Password must contain at least 10 characters.");
@@ -51,11 +52,20 @@ public sealed class IdentityService(AeroLinkDbContext db)
         var delegations = await db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == programId && x.DelegateUserId == user.Id && x.Role == role && x.RevokedAt == null).ToListAsync(ct);
         return delegations.Any(x => x.StartsAt <= now && x.EndsAt > now);
     }
+    public async Task<bool> HasRoleAsync(Guid userId, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)
+    {
+        var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId && x.State == AccountState.Active, ct);
+        if (account is null) return false;
+        if (account.UserName == SystemAdministratorUserName) return true;
+        if (await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.Role == role, ct)) return true;
+        var delegations = await db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == programId && x.DelegateUserId == userId && x.Role == role && x.RevokedAt == null).ToListAsync(ct);
+        return delegations.Any(x => x.StartsAt <= now && x.EndsAt > now);
+    }
     private async Task<AuthenticatedUser> MapAsync(UserAccount user, DateTimeOffset now, CancellationToken ct)
     {
         var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.UserId == user.Id).ToListAsync(ct);
         var programs = memberships.GroupBy(x => x.ProgramId).Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList())).ToList();
-        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.UserName == "admin" || memberships.Any(x => x.Role == ProgramRole.Administrator), programs);
+        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.UserName == SystemAdministratorUserName, programs);
     }
     private static string TokenHash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 }

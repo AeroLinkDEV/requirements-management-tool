@@ -1,1 +1,311 @@
-.verificationPage{max-width:1500px!important;padding:36px 44px!important}.verificationPage header>button{background:#176b62;color:white;border:0;border-radius:9px;padding:11px 15px}.verificationContext{display:flex;gap:14px;background:white;border:1px solid #dfe5ec;border-radius:11px;padding:15px}.verificationContext label{display:flex;flex-direction:column;gap:5px;flex:1;font-size:10px;color:#677386}.verificationContext select,.procedureForm input,.procedureForm textarea,.resultForm input,.resultForm textarea,.resultForm select{border:1px solid #d6dde7;border-radius:7px;padding:9px;background:white}.coverageMetrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:15px 0}.coverageMetrics article{background:white;border:1px solid #dfe5ec;border-radius:10px;padding:16px}.coverageMetrics b{font:700 23px Manrope;display:block}.coverageMetrics span{font-size:10px;color:#738094}.coverageMetrics .warning{border-left:3px solid #e0a838}.verificationGrid{display:grid;grid-template-columns:1.4fr .8fr;gap:15px}.verificationGrid aside{display:flex;flex-direction:column;gap:15px}.verificationCard,.procedureForm,.resultForm{background:white;border:1px solid #dfe5ec;border-radius:12px;padding:17px}.cardTitle{border-bottom:1px solid #e7ebf0;padding-bottom:10px}.cardTitle h2{font-size:14px;margin:0}.cardTitle p{font-size:10px;color:#8994a4;margin:3px 0}.coverageRow,.procedureRow,.executionRow{padding:12px 2px;border-bottom:1px solid #e9edf2}.coverageRow>div,.procedureRow>div,.executionRow>div{display:flex;justify-content:space-between}.coverageRow p,.procedureRow p,.executionRow p{font-size:11px;color:#576478;margin:5px 0}.coverageRow small,.procedureRow small,.executionRow small{display:block;color:#8893a3;font-size:9px;margin-top:3px}.coverageRow i,.procedureRow i,.executionRow i{font-style:normal;font-size:8px;border-radius:9px;padding:4px 7px}.pass{background:#e3f4ed;color:#28765e}.covered{background:#e8f1ff;color:#3168ac}.gap,.fail{background:#fbe8eb;color:#a04b5d}.blocked{background:#fff4d9;color:#936814}.procedureRow button,.executionRow button{border:0;background:#e8f3f1;color:#257e70;padding:6px 8px;border-radius:6px;font-size:9px;margin-top:7px}.procedureForm,.resultForm{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:15px 0}.procedureForm>div:first-child,.resultForm>div:first-child,.procedureForm .wide,.resultForm .wide,.procedureForm fieldset{grid-column:1/-1}.procedureForm label,.resultForm label{display:flex;flex-direction:column;gap:5px;font-size:10px;color:#687589}.procedureForm h2,.resultForm h2{margin:0}.procedureForm p,.resultForm p{font-size:11px;color:#788497}.procedureForm fieldset{border:1px solid #dfe5ec;border-radius:8px}.reqCheck{display:flex!important;flex-direction:row!important;align-items:flex-start;padding:6px}.reqCheck span{display:flex;flex-direction:column}.procedureForm>div:last-child,.resultForm>div:last-child{display:flex;gap:8px;align-items:end}@media(max-width:900px){.verificationGrid,.coverageMetrics,.procedureForm,.resultForm{grid-template-columns:1fr}.procedureForm .wide,.resultForm .wide{grid-column:auto}}
+.verificationPage {
+  max-width: 1500px !important;
+  padding: 36px 44px !important;
+}
+
+.verificationPage header > button {
+  border: 0;
+  border-radius: 10px;
+  background: #176b62;
+  color: #fff;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.verificationPage header > button:disabled {
+  cursor: not-allowed;
+  background: #dfe5eb;
+  color: #69798b;
+}
+
+.verificationContext {
+  display: flex;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid #dfe5ec;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.verificationContext label,
+.procedureForm label,
+.resultForm label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 7px;
+  color: #58697c;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.verificationContext select,
+.procedureForm input,
+.procedureForm textarea,
+.procedureForm select,
+.resultForm input,
+.resultForm textarea,
+.resultForm select {
+  min-height: 42px;
+  border: 1px solid #cbd6e1;
+  border-radius: 9px;
+  background: #fff;
+  padding: 10px 12px;
+  color: #1e3348;
+  font: inherit;
+  font-size: 14px;
+}
+
+.coverageMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.coverageMetrics article {
+  padding: 19px;
+  border: 1px solid #dfe5ec;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.coverageMetrics b {
+  display: block;
+  font: 750 28px Manrope, sans-serif;
+}
+
+.coverageMetrics span {
+  color: #657589;
+  font-size: 13px;
+}
+
+.coverageMetrics .warning {
+  border-left: 4px solid #e0a838;
+}
+
+.verificationCard,
+.procedureForm,
+.resultForm {
+  border: 1px solid #dfe5ec;
+  border-radius: 13px;
+  background: #fff;
+  padding: 20px;
+}
+
+.cardTitle {
+  border-bottom: 1px solid #e7ebf0;
+  padding-bottom: 13px;
+}
+
+.cardTitle h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.cardTitle p {
+  margin: 4px 0 0;
+  color: #718095;
+  font-size: 13px;
+}
+
+.coverageRow,
+.procedureRow,
+.executionRow {
+  padding: 16px 2px;
+  border-bottom: 1px solid #e9edf2;
+}
+
+.coverageRow > div,
+.procedureRow > div,
+.executionRow > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.coverageRow p,
+.procedureRow p,
+.executionRow p {
+  margin: 7px 0;
+  color: #4f6074;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.coverageRow small,
+.procedureRow small,
+.executionRow small {
+  display: block;
+  margin-top: 5px;
+  color: #748296;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.coverageRow i,
+.procedureRow i,
+.executionRow i {
+  align-self: flex-start;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.pass { background: #e3f4ed; color: #28765e; }
+.covered { background: #e8f1ff; color: #3168ac; }
+.gap,
+.fail { background: #fbe8eb; color: #a04b5d; }
+.blocked,
+.procedureRow i.draft { background: #fff4d9; color: #936814; }
+
+.procedureRow button,
+.executionRow button {
+  margin-top: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: #e8f3f1;
+  color: #176f65;
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.procedureHold {
+  display: inline-flex;
+  margin-top: 10px;
+  border-radius: 8px;
+  background: #f5f7fa;
+  color: #667588;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.procedureForm,
+.resultForm {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.procedureLead,
+.procedureForm > div:first-child,
+.resultForm > div:first-child,
+.procedureForm .wide,
+.resultForm .wide,
+.procedureForm fieldset {
+  grid-column: 1 / -1;
+}
+
+.procedureLead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.procedureLead > span {
+  border-radius: 999px;
+  background: #e7f5f2;
+  color: #126c61;
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.procedureForm h2,
+.resultForm h2 {
+  margin: 0;
+}
+
+.procedureForm p,
+.resultForm p {
+  color: #68788c;
+  font-size: 13px;
+}
+
+.resultForm label small {
+  color: #66788b;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.resultForm input[readonly] {
+  background: #f2f5f8;
+  color: #40566b;
+}
+
+.procedureForm fieldset {
+  border: 1px solid #dfe5ec;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.requirementPicker > input {
+  width: 100%;
+  margin: 8px 0;
+}
+
+.requirementPicker > small {
+  display: block;
+  margin-bottom: 10px;
+  color: #65788b;
+  font-size: 12px;
+}
+
+.reqCheck {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-start;
+  padding: 7px;
+  font-weight: 400 !important;
+}
+
+.reqCheck span {
+  display: flex;
+  flex-direction: column;
+}
+
+.procedureForm > div:last-child,
+.resultForm > div:last-child {
+  display: flex;
+  align-items: end;
+  gap: 9px;
+}
+
+.verificationEmpty {
+  display: flex;
+  min-height: 120px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 24px;
+  color: #67798b;
+  text-align: center;
+}
+
+.verificationEmpty b {
+  color: #1c344c;
+  font-size: 16px;
+}
+
+.verificationEmpty span {
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .verificationPage { padding: 24px 20px !important; }
+  .verificationContext { flex-direction: column; }
+  .coverageMetrics,
+  .procedureForm,
+  .resultForm { grid-template-columns: 1fr; }
+  .procedureForm .wide,
+  .resultForm .wide { grid-column: auto; }
+}

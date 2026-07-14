@@ -244,8 +244,9 @@ export default function BaselineCenter({
               />
             </label>
             <label>
-              Configuration manager ID
-              <input name="actorId" defaultValue="cm.demo" required />
+              Authority
+              <input value="Authenticated configuration manager" readOnly />
+              <input type="hidden" name="actorId" value="server-derived" />
             </label>
             <label className="full">
               Exact predecessor product baseline
@@ -369,7 +370,7 @@ export default function BaselineCenter({
                     <button
                       disabled={busy || !detail.selections.length}
                       onClick={() =>
-                        action("freeze", "POST", { actorId: "cm.demo" })
+                        action("freeze", "POST", { actorId: "server-derived" })
                       }
                     >
                       Freeze Baseline
@@ -381,7 +382,7 @@ export default function BaselineCenter({
                       disabled={busy}
                       onClick={() =>
                         action("materialize-requirements", "POST", {
-                          actorId: "cm.demo",
+                          actorId: "server-derived",
                         })
                       }
                     >
@@ -454,7 +455,7 @@ export default function BaselineCenter({
                             <button
                               onClick={() =>
                                 action(
-                                  `selections/${item.id}?actorId=cm.demo`,
+                                  `selections/${item.id}?actorId=server-derived`,
                                   "DELETE",
                                 )
                               }
@@ -526,7 +527,7 @@ export default function BaselineCenter({
                               onClick={() =>
                                 action("selections", "POST", {
                                   scrId: scr.id,
-                                  actorId: "cm.demo",
+                                  actorId: "server-derived",
                                 })
                               }
                             >

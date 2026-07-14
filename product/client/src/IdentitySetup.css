@@ -1,0 +1,72 @@
+.loginPanel form,
+.setupBlocked,
+.setupChecking {
+  box-sizing: border-box;
+  width: min(430px, 100%);
+  padding: 42px;
+  border: 1px solid #dfe5ed;
+  border-radius: 20px;
+  background: white;
+  box-shadow: 0 30px 80px #07152b22;
+}
+
+.loginPanel form > p,
+.setupBlocked > p,
+.setupChecking > p {
+  margin: 0 0 26px;
+  color: #6d7b90;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.loginPanel label { font-size: 13px; }
+.loginPanel label small { color: #77869a; font-size: 12px; font-weight: 500; line-height: 1.45; }
+.loginPanel input, .loginPanel button { font-size: 14px; }
+.loginPanel aside { font-size: 13px; line-height: 1.4; }
+.loginPanel aside small { font-size: 12px; }
+.loginPanel .loginError { font-size: 13px; line-height: 1.4; }
+
+.setupSuccess {
+  margin: 16px 0;
+  padding: 11px 12px;
+  border: 1px solid #bfe1d5;
+  border-radius: 9px;
+  background: #eaf8f3;
+  color: #246f58;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.bootstrapForm .eyebrow,
+.setupBlocked .eyebrow {
+  margin: 20px 0 5px;
+  color: #168270;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.setupBlocked code {
+  display: block;
+  margin: 13px 0;
+  padding: 10px;
+  overflow-wrap: anywhere;
+  border-radius: 8px;
+  background: #eef3f7;
+  color: #29475e;
+  font-size: 13px;
+}
+
+.setupBlocked aside { margin-top: 22px; }
+.setupChecking { min-height: 320px; display: flex; flex-direction: column; justify-content: center; }
+.setupChecking .securityMark { animation: setupPulse 1.4s ease-in-out infinite; }
+.setupChecking h2 { margin-top: 22px; }
+
+@keyframes setupPulse {
+  50% { transform: scale(1.06); box-shadow: 0 0 0 8px #e3f6f255; }
+}
+
+@media (max-width: 560px) {
+  .loginPanel { padding: 24px 16px; }
+  .loginPanel form, .setupBlocked, .setupChecking { padding: 28px 24px; }
+}

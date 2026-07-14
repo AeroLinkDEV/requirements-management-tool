@@ -1,2 +1,524 @@
-.controlledEditor{border:1px solid #dce4ea;border-radius:12px;overflow:hidden;margin:12px 0;background:#f8fafb}.controlledEditor>header{display:flex;justify-content:space-between;align-items:center;background:#153653;color:white;padding:12px 15px}.controlledEditor>header span{font-size:7px;letter-spacing:.1em;color:#7fc9bf}.controlledEditor>header h3{color:white;margin:3px 0;font-size:15px}.controlledEditor>header>div:last-child{display:flex;align-items:center;gap:6px}.controlledEditor>header i{font-style:normal;font-size:7px;background:#ffffff18;border:1px solid #ffffff22;border-radius:5px;padding:4px 6px}.controlledEditor>header button{border:0;background:#8f3b4b;color:white;border-radius:5px;padding:5px 8px;font-size:7px}.editorIdentity{display:grid;grid-template-columns:2fr 1fr 1.4fr 1.4fr;gap:8px;padding:12px 14px;background:white;border-bottom:1px solid #e0e6eb}.controlledEditor label{display:flex;flex-direction:column;gap:4px;font-size:8px;font-weight:700;color:#536579}.controlledEditor input,.controlledEditor select,.controlledEditor textarea{border:1px solid #d3dde5;border-radius:6px;padding:8px;background:white;font:9px Manrope;color:#26384d}.editorColumns{display:grid;grid-template-columns:minmax(0,2fr) 300px;gap:0}.editorColumns>section{padding:15px}.editorColumns>aside{padding:15px;border-left:1px solid #dce4ea;background:#f1f5f7}.sectionTitle{display:flex;justify-content:space-between;margin-bottom:9px}.sectionTitle b{font-size:10px}.sectionTitle span{font-size:7px;color:#8090a0}.statementEditor{min-height:75px;font:11px/1.5 Georgia,serif!important}.richToolbar{display:flex;gap:4px;margin-top:9px}.richToolbar button{border:1px solid #cfdae3;background:white;color:#4d6579;border-radius:5px;padding:5px 8px;font-size:7px}.richEditor{min-height:120px;font:10px/1.5 Consolas,monospace!important}.controlledPreview{margin-top:8px;background:white;border:1px solid #dbe3e9;border-radius:7px;padding:10px}.controlledPreview small{font-size:6px;letter-spacing:.1em;color:#178077}.controlledPreview pre{white-space:pre-wrap;font:10px/1.55 Georgia,serif;margin:7px 0;color:#2b3c50}.editorMetadata{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;margin-top:10px}.editorMetadata textarea{min-height:55px}.editorColumns>aside>p{font-size:8px;line-height:1.5;color:#718193}.editorColumns>aside>label{background:white;border:1px solid #dce4ea;border-left:3px solid #d39a38;border-radius:6px;padding:7px;margin:6px 0}.editorColumns>aside>label.affected,.editorColumns>aside>label.not\ affected,.editorColumns>aside>label.follow-up\ assigned{border-left-color:#229776}.editorColumns>aside>label span{font-size:8px}.impactGate{background:#153653;color:white;border-radius:7px;padding:10px;margin-top:10px;display:flex;flex-direction:column}.impactGate b{font-size:10px}.impactGate span{font-size:7px;color:#b8c7d4;margin-top:3px}@media(max-width:900px){.editorColumns{grid-template-columns:1fr}.editorColumns>aside{border-left:0;border-top:1px solid #dce4ea}.editorMetadata{grid-template-columns:1fr 1fr}}@media(max-width:600px){.editorIdentity,.editorMetadata{grid-template-columns:1fr}.controlledEditor>header{align-items:flex-start}.controlledEditor>header>div:last-child{flex-wrap:wrap;justify-content:flex-end}}
-.editorColumns>aside>label.not-affected,.editorColumns>aside>label.follow-up-assigned{border-left-color:#229776}
+.controlledEditor {
+  margin: 16px 0;
+  overflow: hidden;
+  border: 1px solid #d5e0e8;
+  border-radius: 16px;
+  background: #f8fafb;
+  box-shadow: 0 12px 30px rgb(18 42 65 / 7%);
+}
+
+.controlledEditor > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 20px;
+  color: white;
+  background: linear-gradient(115deg, #102f4c, #174c64 72%, #177567);
+}
+
+.controlledEditor > header span {
+  color: #92d7ce;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+}
+
+.controlledEditor > header h3 {
+  margin: 4px 0 0;
+  color: white;
+  font: 700 18px/1.25 Manrope, sans-serif;
+}
+
+.controlledEditor > header > div:last-child {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.controlledEditor > header i {
+  padding: 5px 9px;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 10%);
+  color: #e7f5f4;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.controlledEditor > header button {
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 8px;
+  background: #8d3f4e;
+  color: white;
+  font: 700 12px Manrope, sans-serif;
+}
+
+.proposalLookup {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(320px, 1.15fr);
+  gap: 18px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #dce5eb;
+  background: #fff9ec;
+}
+
+.proposalLookup > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.proposalLookup > div:first-child b {
+  color: #5e4a1f;
+  font-size: 14px;
+}
+
+.proposalLookup > div:first-child span,
+.proposalLookup label,
+.controlledEditor label {
+  color: #596a7e;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.proposalLookup label,
+.controlledEditor label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.controlledEditor input,
+.controlledEditor select,
+.controlledEditor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 1px solid #ccd8e2;
+  border-radius: 8px;
+  background: white;
+  color: #26384d;
+  font: 400 14px/1.45 "DM Sans", sans-serif;
+}
+
+.controlledEditor textarea {
+  resize: vertical;
+}
+
+.controlledEditor input:focus,
+.controlledEditor select:focus,
+.controlledEditor textarea:focus {
+  border-color: #358f82;
+  outline: 3px solid rgb(53 143 130 / 14%);
+}
+
+.controlledEditor input[readonly] {
+  border-style: dashed;
+  background: #f2f6f8;
+  color: #435a70;
+}
+
+.controlledEditor input[readonly] + small {
+  color: #748597;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.lookupStatus {
+  grid-column: 2;
+  margin-top: -12px;
+  color: #6d7c8c;
+  font-size: 12px;
+}
+
+.lookupStatus.error {
+  color: #a33f4c;
+}
+
+.proposalLookupResults {
+  position: absolute;
+  z-index: 20;
+  top: 83px;
+  right: 20px;
+  width: min(620px, calc(100% - 40px));
+  max-height: 330px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid #c9d6df;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 18px 48px rgb(15 41 63 / 18%);
+}
+
+.proposalLookupResults button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  width: 100%;
+  min-height: 64px;
+  padding: 11px 12px;
+  border: 0;
+  border-bottom: 1px solid #edf1f4;
+  border-radius: 8px;
+  background: white;
+  color: #26384d;
+  text-align: left;
+}
+
+.proposalLookupResults button:hover,
+.proposalLookupResults button:focus-visible {
+  background: #edf8f5;
+}
+
+.proposalLookupResults button span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.proposalLookupResults button b {
+  color: #186f77;
+  font-size: 13px;
+}
+
+.proposalLookupResults button small,
+.proposalLookupResults button em {
+  color: #718195;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.proposalLookupResults button p {
+  grid-column: 1 / -1;
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: #526378;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proposalLookupResults button em {
+  color: #227c6e;
+  font-weight: 700;
+}
+
+.editorIdentity {
+  display: grid;
+  grid-template-columns: 2fr 0.7fr 1.1fr 1fr;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #dce5eb;
+  background: white;
+}
+
+.editorColumns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+}
+
+.editorColumns > section,
+.editorColumns > aside {
+  padding: 20px;
+}
+
+.editorColumns > aside {
+  border-left: 1px solid #d7e1e8;
+  background: #f0f5f7;
+}
+
+.controlledEditor .sectionTitle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid #dfe6eb;
+}
+
+.controlledEditor .sectionTitle > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.controlledEditor .sectionTitle b {
+  color: #20364c;
+  font-size: 14px;
+}
+
+.controlledEditor .sectionTitle span {
+  color: #748597;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.controlledEditor .sectionTitle em {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e7f4f0;
+  color: #247565;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.statementEditor {
+  min-height: 112px !important;
+  font: 400 16px/1.65 Georgia, serif !important;
+}
+
+.primaryMetadata {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(180px, 0.7fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.primaryMetadata textarea {
+  min-height: 78px;
+}
+
+.supportingDetails {
+  margin-top: 16px;
+  border: 1px solid #d9e3e9;
+  border-radius: 10px;
+  background: white;
+}
+
+.supportingDetails > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+  padding: 10px 13px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.supportingDetails > summary::-webkit-details-marker {
+  display: none;
+}
+
+.supportingDetails > summary span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.supportingDetails > summary b {
+  color: #30475d;
+  font-size: 13px;
+}
+
+.supportingDetails > summary small,
+.supportingDetails > summary em {
+  color: #748597;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.supportingBody {
+  padding: 0 13px 14px;
+  border-top: 1px solid #e4eaee;
+}
+
+.richToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 0 8px;
+}
+
+.richToolbar button {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid #cbd8e1;
+  border-radius: 7px;
+  background: #f8fafb;
+  color: #405970;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.richEditor {
+  min-height: 118px !important;
+  font: 400 13px/1.55 Consolas, monospace !important;
+}
+
+.controlledPreview {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #d9e3e9;
+  border-radius: 8px;
+  background: #f8faf9;
+}
+
+.controlledPreview small {
+  color: #177c70;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.controlledPreview pre {
+  margin: 8px 0 0;
+  color: #2b3c50;
+  font: 400 13px/1.6 Georgia, serif;
+  white-space: pre-wrap;
+}
+
+.classificationMetadata {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1.5fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.derivedControl button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 9px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid #d4dee5;
+  border-radius: 8px;
+  background: #f7f9fb;
+  color: #536276;
+  text-align: left;
+}
+
+.derivedControl button.active {
+  border-color: #55ae9f;
+  background: #eaf7f3;
+  color: #186f63;
+}
+
+.derivedControl button i {
+  grid-row: 1 / 3;
+  color: #2d8e7e;
+  font-size: 19px;
+  font-style: normal;
+}
+
+.derivedControl button span {
+  display: flex;
+  flex-direction: column;
+}
+
+.derivedControl button b {
+  font-size: 12px;
+}
+
+.derivedControl button small {
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.editorColumns > aside > p {
+  margin: 0 0 13px;
+  color: #687a8d;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.editorColumns > aside > label {
+  margin: 8px 0;
+  padding: 9px 10px;
+  border: 1px solid #d6e0e6;
+  border-left: 4px solid #d19a38;
+  border-radius: 8px;
+  background: white;
+}
+
+.editorColumns > aside > label.affected,
+.editorColumns > aside > label.not-affected,
+.editorColumns > aside > label.follow-up-assigned {
+  border-left-color: #229776;
+}
+
+.editorColumns > aside > label span {
+  color: #42576d;
+  font-size: 12px;
+}
+
+.impactGate {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 9px;
+  color: white;
+  background: #153653;
+}
+
+.impactGate.complete {
+  background: #176b5d;
+}
+
+.impactGate.pending {
+  background: #6e5525;
+}
+
+.impactGate b {
+  font-size: 13px;
+}
+
+.impactGate span {
+  color: rgb(255 255 255 / 78%);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+@media (max-width: 1050px) {
+  .editorColumns {
+    grid-template-columns: 1fr;
+  }
+
+  .editorColumns > aside {
+    border-top: 1px solid #d7e1e8;
+    border-left: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .controlledEditor > header,
+  .proposalLookup {
+    grid-template-columns: 1fr;
+  }
+
+  .controlledEditor > header {
+    align-items: flex-start;
+  }
+
+  .controlledEditor > header > div:last-child {
+    justify-content: flex-start;
+  }
+
+  .proposalLookupResults {
+    position: static;
+    grid-column: 1;
+    width: auto;
+  }
+
+  .lookupStatus {
+    grid-column: 1;
+  }
+
+  .editorIdentity,
+  .primaryMetadata,
+  .classificationMetadata {
+    grid-template-columns: 1fr;
+  }
+}
