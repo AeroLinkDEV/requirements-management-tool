@@ -120,6 +120,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByLabel('Evidence reference').fill('evidence/workflow-pass-002.json')
   await page.getByPlaceholder('Why this run passed, failed, or was blocked').fill('All ordered approval stages activated correctly after correction.')
   await page.getByRole('button', { name: 'Record immutable result' }).click()
+  await expect(page.getByText('Pass', { exact: true }).last()).toBeVisible({timeout:15_000})
   await page.getByRole('button', { name: /Requirement coverage/ }).click()
-  await expect(page.getByText('Verified', { exact: true })).toBeVisible()
+  await expect(page.getByText('Verified', { exact: true })).toBeVisible({timeout:15_000})
 })
