@@ -127,6 +127,15 @@ The Enterprise Requirements Workspace is the next recommended massive implementa
 
 PR scope will include classification, effects, investigation, resolution, verification, closure, alternative dispositions, and links across requirements, tests, changes, builds, and releases.
 
+## Post-MVP Identity and Account Hardening Backlog
+
+These controls remain committed follow-up work, but they do not displace the current showcase and usability priority:
+
+- [ ] require temporary-password rotation at first sign-in and support configurable password-expiration policy;
+- [ ] add secure self-service account recovery with short-lived, single-use tokens, rate limiting, revocation, and complete audit history;
+- [ ] add multi-factor authentication, recovery codes, and step-up authentication for privileged actions; and
+- [ ] add enterprise identity federation and provisioning through OIDC/SAML and SCIM while retaining a tightly controlled break-glass administrator path.
+
 ## Future: Optional AI Assistance
 
 AI may be considered only after the artifact, revision, workflow, traceability, and authorization models are mature. Any AI feature must remain suggestion-only, locally governable, provenance-recorded, and subject to explicit qualified human acceptance.
