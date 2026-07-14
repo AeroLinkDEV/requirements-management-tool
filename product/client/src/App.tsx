@@ -11,7 +11,10 @@ import ReleasePlanningCenter from "./ReleasePlanningCenter";
 import RequirementsWorkspace from "./RequirementsWorkspace";
 import EnterpriseControlCenter from "./EnterpriseControlCenter";
 import CommandPalette from "./CommandPalette";
+import ExperienceControls from "./ExperienceControls";
+import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
 import ArtifactRecordPage from "./ArtifactRecordPage";
+import { identityInitials, identityLabel } from "./presentation";
 import { readRoute, routePath } from "./routing";
 import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
 import {
@@ -26,6 +29,7 @@ import "./DashboardInteractions.css";
 import "./Showcase.css";
 import "./PortalNavigation.css";
 import "./ShowcaseRefresh.css";
+import "./ExperiencePolish.css";
 
 type Scr = {
   id: string;
@@ -71,9 +75,9 @@ type Workspace = {
 };
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:5080";
 
-function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, context, onProgram, onProject, onRelease, onNavigate, onSearch, onSignOut }:{
+function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, context, density, onProgram, onProject, onRelease, onNavigate, onSearch, onDisplay, onSignOut }:{
   user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;
-  onProgram:(id:string)=>void;onProject:(id:string)=>void;onRelease:(id:string)=>void;onNavigate:(view:View,discipline?:Discipline)=>void;onSearch:()=>void;onSignOut:()=>void;
+  density:WorkspaceDensity;onProgram:(id:string)=>void;onProject:(id:string)=>void;onRelease:(id:string)=>void;onNavigate:(view:View,discipline?:Discipline)=>void;onSearch:()=>void;onDisplay:()=>void;onSignOut:()=>void;
 }) {
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
@@ -107,7 +111,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
         <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Product Versions","planning","⑂","system","Product Versions / Release Planning")}{item("Baselines","baselines","⌘")}{item("Release Readiness","release","◆","system","Release Readiness / Release Campaign")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
       </nav>
-      <footer><div className="avatar">{user.displayName.split(" ").map(x=>x[0]).join("").slice(0,2)}</div><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button></footer>
+      <footer><div className="avatar">{user.displayName.split(" ").map(x=>x[0]).join("").slice(0,2)}</div><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button><button className="workspaceDisplay" onClick={onDisplay} aria-label="Open workspace display settings"><span>Aa</span><div><b>Workspace display</b><small>{density} density</small></div><i aria-hidden="true">›</i></button></footer>
     </aside>
   );
 }
@@ -135,6 +139,11 @@ function App() {
     [selectedArtifactId,setSelectedArtifactId]=useState(initialRoute.artifactId ?? ""),
     [selectedArtifactKind,setSelectedArtifactKind]=useState(initialRoute.artifactKind ?? ""),
     [paletteOpen,setPaletteOpen]=useState(false),
+    [displayOpen,setDisplayOpen]=useState(false),
+    [density,setDensity]=useState<WorkspaceDensity>(()=>(localStorage.getItem('aerolink-density')==='compact'?'compact':'comfortable')),
+    [motion,setMotion]=useState<MotionPreference>(()=>(localStorage.getItem('aerolink-motion')==='reduced'?'reduced':'full')),
+    [toast,setToast]=useState(''),
+    [dashboardLoading,setDashboardLoading]=useState(true),
     [historyStateIntent,setHistoryStateIntent]=useState<HistoryStateIntent|undefined>(initialRoute.historyStateIntent),
     [historyTypeIntent,setHistoryTypeIntent]=useState<HistoryTypeIntent|undefined>(initialRoute.historyTypeIntent),
     [discipline,setDiscipline]=useState<Discipline>(initialRoute.discipline),
@@ -170,9 +179,13 @@ function App() {
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
   useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
-  useEffect(()=>{const handler=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape")setPaletteOpen(false)};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[]);
+  useEffect(()=>{const handler=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[]);
+  useEffect(()=>{document.documentElement.dataset.density=density;localStorage.setItem('aerolink-density',density)},[density]);
+  useEffect(()=>{document.documentElement.dataset.motion=motion;localStorage.setItem('aerolink-motion',motion)},[motion]);
+  useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),2600);return()=>clearTimeout(timer)},[toast]);
   const loadData = useCallback(async () => {
     if (!project) return;
+    setDashboardLoading(true);
     try {
       const [a, b, c, d] = await Promise.all([
         fetch(
@@ -191,6 +204,8 @@ function App() {
       if (d.ok) setCampaigns(await d.json());
     } catch {
       setConnected(false);
+    } finally {
+      setDashboardLoading(false);
     }
   }, [project, release]);
   useEffect(() => {
@@ -225,7 +240,7 @@ function App() {
     setSaving(false);
   };
   if (user === undefined)
-    return <div className="appBoot">Establishing secure session…</div>;
+    return <div className="appBoot"><div className="bootMark">▲</div><div><p>AEROLINK CONTROLLED WORKSPACE</p><h1>Establishing your secure session</h1><span>Confirming identity, authority, and active program context…</span><i><b/></i></div></div>;
   if (user === null) return <LoginPage api={API} onLogin={setUser} />;
   if (connected && !workspaces.length)
     return (
@@ -300,13 +315,17 @@ function App() {
   const changeProject=(id:string)=>{const next=active?.projects.find(x=>x.project.id===id),nextRelease=[...(next?.releases??[])].reverse().find(x=>!x.isReleased)??next?.releases.at(-1);if(!next||!nextRelease)return;setSelectedProjectId(id);setSelectedReleaseId(nextRelease.id);history.pushState({},"",routePath({programId:active!.program.id,projectId:id,releaseId:nextRelease.id},view,discipline,selectedArtifactId,selectedArtifactKind,view==="history"?historyStateIntent:undefined,view==="history"?historyTypeIntent:undefined))};
   const changeRelease=(id:string)=>{setSelectedReleaseId(id);if(active&&project)history.pushState({},"",routePath({programId:active.program.id,projectId:project.project.id,releaseId:id},view,discipline,selectedArtifactId,selectedArtifactKind,view==="history"?historyStateIntent:undefined,view==="history"?historyTypeIntent:undefined))};
   if(context&&location.pathname==="/")history.replaceState({},"",routePath(context,"dashboard"));
-  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} context={context} onProgram={changeProgram} onProject={changeProject} onRelease={changeRelease} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onSignOut={async()=>{await fetch(`${API}/api/auth/logout`,{method:"POST"});setUser(null)}}/>;
+  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} context={context} density={density} onProgram={changeProgram} onProject={changeProject} onRelease={changeRelease} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onSignOut={async()=>{await fetch(`${API}/api/auth/logout`,{method:"POST"});setUser(null)}}/>;
   const labels:Record<View,string>={dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements",verification:"Verification",lifecycle:"Traceability",release:"Release Readiness",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",artifact:"Artifact",notFound:"Not Found"};
   const scopedLabel=view==="history"?`${historyTypeIntent==="All"?"All":discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
   const scopeSwitch=view==="history"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={historyTypeIntent==="All"} onClick={()=>navigate("history",discipline,undefined,undefined,false,historyStateIntent,"All")}>All</button><button aria-pressed={historyTypeIntent!=="All"&&discipline!=="software"} onClick={()=>navigate("history","system",undefined,undefined,false,historyStateIntent,"System")}>System</button><button aria-pressed={historyTypeIntent!=="All"&&discipline==="software"} onClick={()=>navigate("history","software",undefined,undefined,false,historyStateIntent,"Software")}>Software</button></div>:view==="requirements"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={discipline!=="software"} onClick={()=>navigate(view,"system")}>System</button><button aria-pressed={discipline==="software"} onClick={()=>navigate(view,"software")}>Software</button></div>:view==="verification"?<div className="contextScopeSwitch" role="group" aria-label="Verification scope"><button aria-pressed={discipline!=="softwareTest"} onClick={()=>navigate("verification","systemTest")}>System</button><button aria-pressed={discipline==="softwareTest"} onClick={()=>navigate("verification","softwareTest")}>Software</button></div>:null;
-  const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b><span>{release?.version}</span><b aria-hidden="true">›</b><strong>{scopedLabel}</strong></nav><div className="contextActions">{scopeSwitch}<span className="contextReleaseState">{release?.isReleased?"Released":"In work"}</span><button aria-label="Copy link to this page" onClick={async()=>navigator.clipboard.writeText(location.href)}>Copy link</button></div></div>;
+  const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
+  const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b><span>{release?.version}</span><b aria-hidden="true">›</b><strong>{scopedLabel}</strong></nav><div className="contextActions">{scopeSwitch}<span className="contextReleaseState">{release?.isReleased?"Released":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
   const palette=context?<CommandPalette api={API} context={context} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
-  const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{contextBar}{content}</div>{palette}</div>;
+  const experience=<ExperienceControls open={displayOpen} density={density} motion={motion} onDensityChange={next=>{setDensity(next);setToast(`${next==='compact'?'Compact':'Comfortable'} density applied`)}} onMotionChange={next=>{setMotion(next);setToast(`${next==='reduced'?'Reduced':'Purposeful'} motion applied`)}} onClose={()=>setDisplayOpen(false)}/>;
+  const feedback=toast?<div className="experienceToast" role="status" aria-live="polite"><span>✓</span><b>{toast}</b></div>:null;
+  const overlays=<>{palette}{experience}{feedback}</>;
+  const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{contextBar}<div className="workspaceView" key={`${view}-${discipline}`}>{content}</div></div>{overlays}</div>;
   if(view==="notFound")return inShell(<main className="artifactState"><div><span>?</span><h1>Page not found</h1><p>This AeroLink route is not recognized. Use quick navigation to find an authorized workspace or artifact.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
   if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} onBack={()=>navigate("dashboard")} onOpen={(kind,id)=>{if(kind==="change-request")navigate("scr","system",id);else if(kind==="requirement")navigate("requirements","system",id);else navigate("artifact","system",id,kind)}}/>);
   if ((view === "createSystemScr" || view === "createSoftwareChange") && project && release)
@@ -489,7 +508,7 @@ function App() {
   return (
     <div className="shell">
       {navigation}
-      <main className="commandCenterPage">
+      <div className="workspaceStage"><div className="workspaceView" key={`${view}-${discipline}`}><main className="commandCenterPage">
         <header>
           <div>
             <p className="eyebrow">
@@ -533,8 +552,8 @@ function App() {
           </div>
           <button onClick={() => navigate(releaseAction.target)}>{releaseAction.label}</button>
         </section>
-        <section className="metrics">
-          {dashboardMetrics.map(({label,value,color,accessibleLabel,stateIntent}) => (
+        <section className="metrics" aria-busy={dashboardLoading} aria-label="Change request metrics">
+          {dashboardLoading ? Array.from({length:4},(_,index)=><div className="dashboardSkeleton" key={index}><span className="skeletonLine medium"/><i className="skeletonMetric"/><span className="skeletonLine short"/></div>) : dashboardMetrics.map(({label,value,color,accessibleLabel,stateIntent}) => (
             <button
               key={label}
               type="button"
@@ -587,7 +606,9 @@ function App() {
                 <button onClick={() => navigate(dashboardScope==="software"?"createSoftwareChange":"createSystemScr",dashboardScope)}>+ New {dashboardScope==="software"?"Software SWCR":"System SCR"}</button>
               )}
             </div>
-            {scrs.length ? (
+            {dashboardLoading ? (
+              <div className="dashboardRowSkeletons" aria-label="Loading change requests">{Array.from({length:4},(_,index)=><div className="row dashboardSkeleton" key={index}><span className="skeletonAvatar"/><div><span className="skeletonLine medium"/><span className="skeletonLine"/></div><span className="skeletonPill"/><span className="skeletonLine"/></div>)}</div>
+            ) : scrs.length ? (
               scrs.slice(0,5).map((scr) => (
                 <div
                   className="row"
@@ -606,10 +627,7 @@ function App() {
                     <b>
                       {scr.displayNumber} · {scr.title}
                     </b>
-                    <p>
-                      {scr.requirementCount} requirement change
-                      {scr.requirementCount === 1 ? "" : "s"} · {scr.authorId}
-                    </p>
+                    <p>{scr.requirementCount} requirement change{scr.requirementCount === 1 ? "" : "s"} · <span className="personMeta"><i>{identityInitials(scr.authorId)}</i>{identityLabel(scr.authorId)}</span></p>
                   </div>
                   <span className={`state ${scr.state.toLowerCase()}`}>
                     {scr.state}
@@ -638,8 +656,8 @@ function App() {
             {metrics.totalScrs?<><button className={metrics.inReview?"signal amber":"signal green"} onClick={()=>navigate(metrics.inReview?"mywork":"history",dashboardScope,undefined,undefined,false,metrics.inReview?undefined:"InReview",metrics.inReview?undefined:"All")}><b>Awaiting review decisions</b><strong>{metrics.inReview}</strong><p>{metrics.inReview?"Open the accountable review queue":"No change requests are waiting for review"}</p></button><button className={metrics.draft?"signal blue":"signal green"} onClick={()=>navigate("history",dashboardScope,undefined,undefined,false,"Draft","All")}><b>Draft change packages</b><strong>{metrics.draft}</strong><p>{metrics.draft?"Open controlled work in progress":"No draft change packages remain"}</p></button><button className={activeCampaign?.readiness.readyForRelease?"signal green":"signal amber"} onClick={()=>navigate(activeCampaign?"release":"planning")}><b>Release readiness</b><strong>{activeCampaign?.readiness.percent??0}%</strong><p>{activeCampaign?.readiness.readyForRelease?"Review the complete release package":"Open the next release-readiness action"}</p></button></>:<><div className="signal green"><b>Program workspace</b><strong>✓</strong><p>{active?.program.name} is configured</p></div><div className="signal blue"><b>Initial release</b><strong>✓</strong><p>{release?.version} establishes the starting context</p></div><button className="signal amber" onClick={()=>navigate(dashboardScope==="software"?"createSoftwareChange":"createSystemScr",dashboardScope)}><b>Next action</b><strong>1</strong><p>Create the first controlled change request →</p></button></>}
           </div>
         </section>
-      </main>
-      {palette}
+      </main></div></div>
+      {overlays}
     </div>
   );
 }
