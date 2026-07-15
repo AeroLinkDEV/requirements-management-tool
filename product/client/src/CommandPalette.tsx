@@ -16,7 +16,7 @@ const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:st
   {label:'Software Requirements',view:'requirements',discipline:'software',detail:'Controlled HLR and LLR workspace',icon:'≡'},
   {label:'System Verification',view:'verification',discipline:'systemTest',detail:'Coverage, procedures, and immutable results',icon:'✓'},
   {label:'Software Verification',view:'verification',discipline:'softwareTest',detail:'Software coverage and test evidence',icon:'✓'},
-  {label:'Traceability & Outputs',view:'lifecycle',discipline:'system',detail:'Navigate the released digital thread',icon:'↗'},
+  {label:'Digital Thread',view:'lifecycle',discipline:'system',detail:'Traceability and outputs across the released evidence path',icon:'↗'},
   {label:'Product Versions',view:'planning',discipline:'system',detail:'Plan versions and release lineage',icon:'②'},
   {label:'Baselines',view:'baselines',discipline:'system',detail:'Candidate and frozen controlled sets',icon:'⌘'},
   {label:'Release Readiness',view:'release',discipline:'system',detail:'Resolve gates and release evidence',icon:'◆'},

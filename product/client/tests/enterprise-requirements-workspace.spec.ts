@@ -35,12 +35,13 @@ test("enterprise workspace supports discovery, collaboration, saved views, bulk 
     .fill(commentText);
   await page.getByRole("button", { name: "Add comment" }).click();
   await expect(page.getByText(commentText)).toBeVisible();
-  await page.getByRole("button", { name: "×" }).click();
+  await page.getByRole("button", { name: "Close requirement inspector" }).click();
   await page.getByText("Workspace tools", { exact: true }).click();
   await page.getByRole("button", { name: "☆ Save view" }).click();
   await page.getByLabel("View name").fill(viewName);
   await page.getByRole("button", { name: "Save view", exact: true }).click();
-  await page.locator('.savedViews > summary').click();
+  if ((await page.locator('.savedViews').getAttribute('open')) === null)
+    await page.locator('.savedViews > summary').click();
   await expect(page.getByText(viewName)).toBeVisible();
   await page.getByLabel("Search requirements").fill("SYSR-000001");
   await page

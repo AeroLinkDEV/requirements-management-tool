@@ -45,7 +45,7 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await openNavigationGroup(page,"VERIFICATION");
   await page.getByRole("link", { name: "Traceability & Outputs" }).click();
   await expect(
-    page.getByRole("heading", { name: "Traceability & Documents" }),
+    page.getByRole("heading", { name: "Digital Thread" }),
   ).toBeVisible();
   await expect(page.getByText("1,250 requirements")).toBeVisible();
   await page.getByRole("button", { name: /Controlled Documents/ }).click();

@@ -123,11 +123,12 @@ export default function ReleaseCampaignCenter({
     [impact, setImpact] = useState<Impact>(),
     [rationale, setRationale] = useState(""),
     [error, setError] = useState(""),
-    [loading,setLoading]=useState(true),
-    [workbenchOpen,setWorkbenchOpen]=useState(false),
-    [confirmingRelease,setConfirmingRelease]=useState(false),
+    [loading, setLoading] = useState(true),
+    [workbenchOpen, setWorkbenchOpen] = useState(false),
+    [confirmingRelease, setConfirmingRelease] = useState(false),
     [signing, setSigning] = useState(false);
-  const workbenchRef=useRef<HTMLDetailsElement>(null),approvalRef=useRef<HTMLElement>(null);
+  const workbenchRef = useRef<HTMLDetailsElement>(null),
+    approvalRef = useRef<HTMLElement>(null);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -135,7 +136,8 @@ export default function ReleaseCampaignCenter({
         fetch(`${api}/api/release-campaigns?projectId=${projectId}`),
         fetch(`${api}/api/builds?projectId=${projectId}`),
       ]);
-      if(!campaignsResponse.ok)throw new Error("Release readiness could not be loaded.");
+      if (!campaignsResponse.ok)
+        throw new Error("Release readiness could not be loaded.");
       const campaigns = await campaignsResponse.json();
       const matching = campaigns.find(
         (x: { releaseId: string }) => x.releaseId === activeReleaseId,
@@ -151,7 +153,8 @@ export default function ReleaseCampaignCenter({
       if (buildsResponse.ok) setBuilds(await buildsResponse.json());
       if (id) {
         const response = await fetch(`${api}/api/release-campaigns/${id}`);
-        if (!response.ok)throw new Error("The selected release campaign is unavailable.");
+        if (!response.ok)
+          throw new Error("The selected release campaign is unavailable.");
         setDetail(await response.json());
       } else setDetail(undefined);
       const activeIndex = releases.findIndex((x) => x.id === activeReleaseId);
@@ -162,8 +165,12 @@ export default function ReleaseCampaignCenter({
         if (response.ok) setComparison(await response.json());
       } else setComparison(undefined);
       setError("");
-    } catch(reason) {
-      setError(reason instanceof Error?reason.message:"Release readiness could not be loaded.");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Release readiness could not be loaded.",
+      );
     } finally {
       setLoading(false);
     }
@@ -211,49 +218,153 @@ export default function ReleaseCampaignCenter({
     await load();
   };
   const activeApproval = detail?.approvals.find((x) => x.state === "Active");
-  const blockers=detail?.readiness.gates.filter(x=>!x.complete)??[];
-  const firstBlocker=blockers[0];
-  const gateGroups=[
-    {key:"change",label:"Change control",codes:["change_control","impact_disposition"]},
-    {key:"configuration",label:"Configuration",codes:["baseline","documents"]},
-    {key:"assurance",label:"Assurance evidence",codes:["traceability","coverage","verification","evidence"]},
-    {key:"authority",label:"Release authority",codes:["release_approval"]},
-  ].map(group=>({...group,gates:blockers.filter(gate=>group.codes.includes(gate.code))})).filter(group=>group.gates.length);
-  const pendingImpactGroups=Object.values((detail?.impacts.filter(x=>x.state==="Pending")??[]).reduce<Record<string,{scr:string;title:string;items:Impact[]}>>((groups,item)=>{
-    const group=groups[item.scrId]??{scr:item.scr,title:item.title,items:[]};group.items.push(item);groups[item.scrId]=group;return groups;
-  },{}));
-  const openWorkbench=()=>{setWorkbenchOpen(true);setTimeout(()=>workbenchRef.current?.scrollIntoView({behavior:"smooth",block:"start"}),0)};
-  const openApproval=()=>setTimeout(()=>approvalRef.current?.scrollIntoView({behavior:"smooth",block:"center"}),0);
-  const actionForGate=(gate:Gate)=>{
-    if(["coverage","verification","evidence"].includes(gate.code))return{label:"Open Verification",run:onOpenVerification};
-    if(["traceability","documents"].includes(gate.code))return{label:"Open Traceability & Outputs",run:onOpenDocuments};
-    if(gate.code==="release_approval")return{label:"Complete release approval",run:openApproval};
-    return{label:"Open release workbench",run:openWorkbench};
+  const blockers = detail?.readiness.gates.filter((x) => !x.complete) ?? [];
+  const firstBlocker = blockers[0];
+  const gateGroups = [
+    {
+      key: "change",
+      label: "Change control",
+      codes: ["change_control", "impact_disposition"],
+    },
+    {
+      key: "configuration",
+      label: "Configuration",
+      codes: ["baseline", "documents"],
+    },
+    {
+      key: "assurance",
+      label: "Assurance evidence",
+      codes: ["traceability", "coverage", "verification", "evidence"],
+    },
+    {
+      key: "authority",
+      label: "Release authority",
+      codes: ["release_approval"],
+    },
+  ]
+    .map((group) => ({
+      ...group,
+      gates: blockers.filter((gate) => group.codes.includes(gate.code)),
+    }))
+    .filter((group) => group.gates.length);
+  const pendingImpactGroups = Object.values(
+    (detail?.impacts.filter((x) => x.state === "Pending") ?? []).reduce<
+      Record<string, { scr: string; title: string; items: Impact[] }>
+    >((groups, item) => {
+      const group = groups[item.scrId] ?? {
+        scr: item.scr,
+        title: item.title,
+        items: [],
+      };
+      group.items.push(item);
+      groups[item.scrId] = group;
+      return groups;
+    }, {}),
+  );
+  const openWorkbench = () => {
+    setWorkbenchOpen(true);
+    setTimeout(
+      () =>
+        workbenchRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        }),
+      0,
+    );
   };
-  const nextAction=detail?.state==="Released"
-    ? {tone:"complete",eyebrow:"CONTROLLED RELEASE",title:`Version ${detail.release} is released`,detail:"The immutable release package and generated outputs remain available for inspection.",label:"View controlled outputs",run:onOpenDocuments}
-    : detail?.readiness.readyForRelease
-      ? {tone:"complete",eyebrow:"RELEASE AUTHORITY",title:"Every release gate is complete",detail:`Review the exact ${detail.baseline} package before recording the final release transition.`,label:`Release version ${detail.release}`,run:()=>setConfirmingRelease(true)}
-      : firstBlocker
-        ? {tone:"attention",eyebrow:"NEXT CONTROLLED ACTION",title:firstBlocker.name,detail:firstBlocker.detail,label:actionForGate(firstBlocker).label,run:actionForGate(firstBlocker).run}
-        : undefined;
+  const openApproval = () =>
+    setTimeout(
+      () =>
+        approvalRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        }),
+      0,
+    );
+  const actionForGate = (gate: Gate) => {
+    if (["coverage", "verification", "evidence"].includes(gate.code))
+      return { label: "Open Verification", run: onOpenVerification };
+    if (["traceability", "documents"].includes(gate.code))
+      return { label: "Open Traceability & Outputs", run: onOpenDocuments };
+    if (gate.code === "release_approval")
+      return { label: "Complete release approval", run: openApproval };
+    return { label: "Open release workbench", run: openWorkbench };
+  };
+  const nextAction =
+    detail?.state === "Released"
+      ? {
+          tone: "complete",
+          eyebrow: "CONTROLLED RELEASE",
+          title: `Version ${detail.release} is released`,
+          detail:
+            "The immutable release package and generated outputs remain available for inspection.",
+          label: "View controlled outputs",
+          run: onOpenDocuments,
+        }
+      : detail?.readiness.readyForRelease
+        ? {
+            tone: "complete",
+            eyebrow: "RELEASE AUTHORITY",
+            title: "Every release gate is complete",
+            detail: `Review the exact ${detail.baseline} package before recording the final release transition.`,
+            label: `Release version ${detail.release}`,
+            run: () => setConfirmingRelease(true),
+          }
+        : firstBlocker
+          ? {
+              tone: "attention",
+              eyebrow: "NEXT CONTROLLED ACTION",
+              title: firstBlocker.name,
+              detail: firstBlocker.detail,
+              label: actionForGate(firstBlocker).label,
+              run: actionForGate(firstBlocker).run,
+            }
+          : undefined;
   const renderGate = (gate: Gate) => (
     <article className={gate.complete ? "complete" : "blocked"} key={gate.code}>
-      <div><span>{gate.complete ? "✓" : "!"}</span><b>{gate.name}</b></div>
-      <strong>{gate.completed}/{gate.total}</strong>
+      <div>
+        <span>{gate.complete ? "✓" : "!"}</span>
+        <b>{gate.name}</b>
+      </div>
+      <strong>
+        {gate.completed}/{gate.total}
+      </strong>
       <p>{gate.complete ? "Gate complete." : gate.detail}</p>
-      <small>{gate.complete ? "Configuration evidence is current." : gate.action}</small>
+      <small>
+        {gate.complete ? "Configuration evidence is current." : gate.action}
+      </small>
     </article>
   );
   const renderImpact = (item: Impact) => (
     <article key={item.id}>
-      <div><button className="impactScr" onClick={() => onOpenScr(item.scrId)}>{item.scr}</button><i className={item.state.toLowerCase()}>{item.state}</i></div>
-      <b>{item.kind} · {item.artifactReference}</b>
+      <div>
+        <button className="impactScr" onClick={() => onOpenScr(item.scrId)}>
+          {item.scr}
+        </button>
+        <i className={item.state.toLowerCase()}>{item.state}</i>
+      </div>
+      <b>
+        {item.kind} · {item.artifactReference}
+      </b>
       <p>{item.description}</p>
       {item.rationale && <small>{item.rationale}</small>}
-      {item.state === "Pending" && <button onClick={() => setImpact(item)}>Disposition impact</button>}
+      {item.state === "Pending" && (
+        <button onClick={() => setImpact(item)}>Disposition impact</button>
+      )}
     </article>
   );
+  const gateCompleted =
+    detail?.readiness.gates.reduce((total, gate) => total + gate.completed, 0) ??
+    0;
+  const gateTotal =
+    detail?.readiness.gates.reduce((total, gate) => total + gate.total, 0) ?? 0;
+  const pendingImpactCount = pendingImpactGroups.reduce(
+    (total, group) => total + group.items.length,
+    0,
+  );
+  const approvedCount =
+    detail?.approvals.filter((approval) => approval.state === "Approved")
+      .length ?? 0;
   return (
     <main className="campaignPage">
       <header>
@@ -262,7 +373,8 @@ export default function ReleaseCampaignCenter({
             ← Command Center
           </button>
           <p className="eyebrow">
-            RELEASE CONTROL {detail?.release ? `/ VERSION ${detail.release}` : ""}
+            RELEASE COMMAND{" "}
+            {detail?.release ? `/ VERSION ${detail.release}` : ""}
           </p>
           <h1>{detail?.name ?? "Release Campaign"}</h1>
           <p>
@@ -277,11 +389,39 @@ export default function ReleaseCampaignCenter({
         )}
       </header>
       {error && <div className="workspaceError">{error}</div>}
-      {loading&&<div className="campaignLoading" role="status"><i/><b>Calculating release readiness</b><span>Checking the selected version, baseline, evidence, and approval state…</span></div>}
-      {!loading&&!detail&&!error&&<section className="campaignEmpty"><span aria-hidden="true">◆</span><h2>No release campaign for this version</h2><p>Create a campaign from an eligible candidate baseline before collecting release evidence and authority.</p><button onClick={onOpenPlanning}>Open Product Versions</button></section>}
-      {!loading&&detail && (
+      {loading && (
+        <div className="campaignLoading" role="status">
+          <i />
+          <b>Calculating release readiness</b>
+          <span>
+            Checking the selected version, baseline, evidence, and approval
+            state…
+          </span>
+        </div>
+      )}
+      {!loading && !detail && !error && (
+        <section className="campaignEmpty">
+          <span aria-hidden="true">◆</span>
+          <h2>No release campaign for this version</h2>
+          <p>
+            Create a campaign from an eligible candidate baseline before
+            collecting release evidence and authority.
+          </p>
+          <button onClick={onOpenPlanning}>Open Product Versions</button>
+        </section>
+      )}
+      {!loading && detail && (
         <>
-          {nextAction&&<section className={`campaignNextAction ${nextAction.tone}`}><div><p className="eyebrow">{nextAction.eyebrow}</p><h2>{nextAction.title}</h2><p>{nextAction.detail}</p></div><button onClick={nextAction.run}>{nextAction.label} →</button></section>}
+          {nextAction && (
+            <section className={`campaignNextAction ${nextAction.tone}`}>
+              <div>
+                <p className="eyebrow">{nextAction.eyebrow}</p>
+                <h2>{nextAction.title}</h2>
+                <p>{nextAction.detail}</p>
+              </div>
+              <button onClick={nextAction.run}>{nextAction.label} →</button>
+            </section>
+          )}
           <section className="readinessHero">
             <div
               className="readinessDial"
@@ -317,16 +457,150 @@ export default function ReleaseCampaignCenter({
                 <br />
                 <small>{detail.releaseHash?.slice(0, 16)}…</small>
               </div>
-            ) : <div className="progressionMark"><b>{blockers.length}</b><span>open gate{blockers.length===1?"":"s"}</span></div>}
+            ) : (
+              <div className="progressionMark">
+                <b>{blockers.length}</b>
+                <span>open gate{blockers.length === 1 ? "" : "s"}</span>
+              </div>
+            )}
           </section>
+          <section className="campaignGateRail" aria-label="Sequential release gates">
+            {detail.readiness.gates.map((gate, index) => (
+              <article
+                className={
+                  gate.complete
+                    ? "complete"
+                    : gate.completed > 0
+                      ? "warning"
+                      : "pending"
+                }
+                key={gate.code}
+              >
+                <span>{String(index + 1).padStart(2, "0")} · GATE</span>
+                <b>{gate.name}</b>
+                <small>
+                  {gate.complete
+                    ? "Complete"
+                    : `${gate.completed}/${gate.total} · ${gate.action}`}
+                </small>
+              </article>
+            ))}
+          </section>
+          <div className="releaseCommandGrid">
           <section className="readinessFocus">
-            <div className="sectionHeading"><div><p className="eyebrow">RELEASE DECISION</p><h2>{detail.readiness.readyForRelease?"All release gates are complete":"Release blockers by decision area"}</h2></div><b>{blockers.length} blocking</b></div>
-            {blockers.length
-              ? <section className="blockerGroups">{gateGroups.map((group,index)=><details className="blockerGroup" open={index===0} key={group.key}><summary><div><b>{group.label}</b><span>{group.gates[0].action}</span></div><em>{group.gates.length} blocker{group.gates.length===1?'':'s'}</em></summary><section className="gateGrid">{group.gates.map(renderGate)}</section></details>)}</section>
-              : <div className="allGatesClear"><b>✓ Ready for release authority</b><span>All configuration evidence is current.</span></div>}
-            <details className="completedGates"><summary>{detail.readiness.gates.filter(x=>x.complete).length} completed gates <span>Review evidence</span></summary><section className="gateGrid">{detail.readiness.gates.filter(x=>x.complete).map(renderGate)}</section></details>
+            <div className="sectionHeading">
+              <div>
+                <p className="eyebrow">RELEASE DECISION</p>
+                <h2>
+                  {detail.readiness.readyForRelease
+                    ? "All release gates are complete"
+                    : "Release blockers by decision area"}
+                </h2>
+              </div>
+              <b>{blockers.length} blocking</b>
+            </div>
+            {blockers.length ? (
+              <section className="blockerGroups">
+                {gateGroups.map((group, index) => (
+                  <details
+                    className="blockerGroup"
+                    open={index === 0}
+                    key={group.key}
+                  >
+                    <summary>
+                      <div>
+                        <b>{group.label}</b>
+                        <span>{group.gates[0].action}</span>
+                      </div>
+                      <em>
+                        {group.gates.length} blocker
+                        {group.gates.length === 1 ? "" : "s"}
+                      </em>
+                    </summary>
+                    <section className="gateGrid">
+                      {group.gates.map(renderGate)}
+                    </section>
+                  </details>
+                ))}
+              </section>
+            ) : (
+              <div className="allGatesClear">
+                <b>✓ Ready for release authority</b>
+                <span>All configuration evidence is current.</span>
+              </div>
+            )}
+            <details className="completedGates">
+              <summary>
+                {detail.readiness.gates.filter((x) => x.complete).length}{" "}
+                completed gates <span>Review evidence</span>
+              </summary>
+              <section className="gateGrid">
+                {detail.readiness.gates
+                  .filter((x) => x.complete)
+                  .map(renderGate)}
+              </section>
+            </details>
           </section>
-          <details className="campaignDisclosure" ref={workbenchRef} open={workbenchOpen} onToggle={event=>setWorkbenchOpen(event.currentTarget.open)}><summary><div><b>Release execution workbench</b><span>Drive controlled blockers to authoritative evidence</span></div><em>{workbenchOpen?'Close workbench':'Open workbench'}</em></summary><ReleaseExecutionWorkbench api={api} detail={detail} builds={builds} onRefresh={load} onError={setError} onOpenScr={onOpenScr} onOpenVerification={onOpenVerification} onOpenDocuments={onOpenDocuments}/></details>
+          <aside className="evidencePulse">
+            <div className="evidencePulseTitle">
+              <div>
+                <p className="eyebrow">EVIDENCE PULSE</p>
+                <h2>Current release scope</h2>
+              </div>
+              <span>{detail.softwareBuildId ? "Fresh" : "Build needed"}</span>
+            </div>
+            <div className="evidencePulseScore">
+              <div
+                className="readinessDial"
+                style={
+                  {
+                    "--ready": `${detail.readiness.percent * 3.6}deg`,
+                  } as React.CSSProperties
+                }
+              >
+                <b>{detail.readiness.percent}%</b>
+                <span>ready</span>
+              </div>
+              <p><b>Claims backed by current configuration</b><span>{gateCompleted.toLocaleString()} of {gateTotal.toLocaleString()} gate checks are complete.</span></p>
+            </div>
+            <div className="evidencePulseStats">
+              <div><b>{detail.changes.filter((change) => change.included).length}</b><span>Included changes</span></div>
+              <div><b>{pendingImpactCount}</b><span>Impact decisions</span></div>
+              <div><b>{builds.filter((build) => build.releaseId === detail.releaseId).length}</b><span>Release builds</span></div>
+              <div><b>{approvedCount}/{detail.approvals.length}</b><span>Approvals</span></div>
+            </div>
+            <dl className="releasePackagePulse">
+              <div><dt>Baseline manifest</dt><dd className={detail.baselineId ? "ready" : "pending"}>{detail.baselineId ? "Ready" : "Needed"}</dd></div>
+              <div><dt>Verification build</dt><dd className={detail.softwareBuildId ? "ready" : "pending"}>{detail.softwareBuildId ? "Selected" : "Needed"}</dd></div>
+              <div><dt>Requirements hash</dt><dd className={detail.requirementsHash ? "ready" : "pending"}>{detail.requirementsHash ? "Verified" : "Needed"}</dd></div>
+              <div><dt>Release authority</dt><dd className={detail.state === "Released" ? "ready" : "pending"}>{detail.state === "Released" ? "Released" : "In progress"}</dd></div>
+            </dl>
+          </aside>
+          </div>
+          <details
+            className="campaignDisclosure"
+            ref={workbenchRef}
+            open={workbenchOpen}
+            onToggle={(event) => setWorkbenchOpen(event.currentTarget.open)}
+          >
+            <summary>
+              <div>
+                <b>Release execution workbench</b>
+                <span>Drive controlled blockers to authoritative evidence</span>
+              </div>
+              <em>{workbenchOpen ? "Close workbench" : "Open workbench"}</em>
+            </summary>
+            <ReleaseExecutionWorkbench
+              api={api}
+              detail={detail}
+              builds={builds}
+              onRefresh={load}
+              onError={setError}
+              onOpenScr={onOpenScr}
+              onOpenVerification={onOpenVerification}
+              onOpenDocuments={onOpenDocuments}
+            />
+          </details>
           <div className="campaignGrid">
             <section className="campaignCard impacts">
               <div className="campaignTitle">
@@ -338,12 +612,47 @@ export default function ReleaseCampaignCenter({
                   </p>
                 </div>
                 <b>
-                  {pendingImpactGroups.reduce((total,group)=>total+group.items.length,0)}{" "}
+                  {pendingImpactGroups.reduce(
+                    (total, group) => total + group.items.length,
+                    0,
+                  )}{" "}
                   pending
                 </b>
               </div>
-              {pendingImpactGroups.length?<div className="pendingImpactGroups">{pendingImpactGroups.map(group=><details className="pendingImpactGroup" key={group.scr}><summary><div><b>{group.scr}</b><span>{group.title}</span></div><em>{group.items.length} pending</em></summary><div>{group.items.map(renderImpact)}</div></details>)}</div>:<div className="impactClear"><b>✓ Every change impact is dispositioned</b><span>No pending lifecycle impact decisions remain.</span></div>}
-              {!!detail.impacts.filter(x=>x.state!=="Pending").length&&<details className="closedImpacts"><summary>{detail.impacts.filter(x=>x.state!=="Pending").length} completed dispositions <span>Show history</span></summary><div>{detail.impacts.filter(x=>x.state!=="Pending").map(renderImpact)}</div></details>}
+              {pendingImpactGroups.length ? (
+                <div className="pendingImpactGroups">
+                  {pendingImpactGroups.map((group) => (
+                    <details className="pendingImpactGroup" key={group.scr}>
+                      <summary>
+                        <div>
+                          <b>{group.scr}</b>
+                          <span>{group.title}</span>
+                        </div>
+                        <em>{group.items.length} pending</em>
+                      </summary>
+                      <div>{group.items.map(renderImpact)}</div>
+                    </details>
+                  ))}
+                </div>
+              ) : (
+                <div className="impactClear">
+                  <b>✓ Every change impact is dispositioned</b>
+                  <span>No pending lifecycle impact decisions remain.</span>
+                </div>
+              )}
+              {!!detail.impacts.filter((x) => x.state !== "Pending").length && (
+                <details className="closedImpacts">
+                  <summary>
+                    {detail.impacts.filter((x) => x.state !== "Pending").length}{" "}
+                    completed dispositions <span>Show history</span>
+                  </summary>
+                  <div>
+                    {detail.impacts
+                      .filter((x) => x.state !== "Pending")
+                      .map(renderImpact)}
+                  </div>
+                </details>
+              )}
             </section>
             <aside>
               <section className="campaignCard">
@@ -361,7 +670,9 @@ export default function ReleaseCampaignCenter({
                     })
                   }
                 >
-                  <option value="">Select version {detail.release} build…</option>
+                  <option value="">
+                    Select version {detail.release} build…
+                  </option>
                   {builds
                     .filter((x) => x.releaseId === detail.releaseId)
                     .map((x) => (
@@ -428,47 +739,81 @@ export default function ReleaseCampaignCenter({
                     </div>
                   ))}
               </section>
-              <details className="campaignCard campaignHistory"><summary><div><b>Campaign history</b><span>Append-only release events</span></div><em>{detail.events.length}</em></summary><div>{detail.events.map((x, i) => <div className="campaignEvent" key={i}><i/><div><b>{x.eventType.replace(/([A-Z])/g, " $1").trim()}</b><p>{x.detail}</p><small>{x.actorId} · {new Date(x.occurredAt).toLocaleString()}</small></div></div>)}</div></details>
+              <details className="campaignCard campaignHistory">
+                <summary>
+                  <div>
+                    <b>Campaign history</b>
+                    <span>Append-only release events</span>
+                  </div>
+                  <em>{detail.events.length}</em>
+                </summary>
+                <div>
+                  {detail.events.map((x, i) => (
+                    <div className="campaignEvent" key={i}>
+                      <i />
+                      <div>
+                        <b>{x.eventType.replace(/([A-Z])/g, " $1").trim()}</b>
+                        <p>{x.detail}</p>
+                        <small>
+                          {x.actorId} ·{" "}
+                          {new Date(x.occurredAt).toLocaleString()}
+                        </small>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
             </aside>
           </div>
           {comparison && (
-            <details className="campaignDisclosure comparisonDisclosure"><summary><div><b>Compare {comparison.fromRelease} → {comparison.toRelease}</b><span>Requirement and proposed-change differences</span></div><em>Open comparison</em></summary><section className="campaignCard comparison">
-              <div className="campaignTitle">
+            <details className="campaignDisclosure comparisonDisclosure">
+              <summary>
                 <div>
-                  <h2>
-                    Version {comparison.fromRelease} → {comparison.toRelease}
-                  </h2>
-                  <p>
-                    {comparison.toMaterialized
-                      ? "Effective baseline comparison"
-                      : "Proposed change comparison while release remains in work"}
-                  </p>
+                  <b>
+                    Compare {comparison.fromRelease} → {comparison.toRelease}
+                  </b>
+                  <span>Requirement and proposed-change differences</span>
                 </div>
-              </div>
-              <div className="comparisonStats">
-                {Object.entries(comparison.summary).map(([k, v]) => (
-                  <article key={k}>
-                    <b>{v}</b>
-                    <span>{k}</span>
+                <em>Open comparison</em>
+              </summary>
+              <section className="campaignCard comparison">
+                <div className="campaignTitle">
+                  <div>
+                    <h2>
+                      Version {comparison.fromRelease} → {comparison.toRelease}
+                    </h2>
+                    <p>
+                      {comparison.toMaterialized
+                        ? "Effective baseline comparison"
+                        : "Proposed change comparison while release remains in work"}
+                    </p>
+                  </div>
+                </div>
+                <div className="comparisonStats">
+                  {Object.entries(comparison.summary).map(([k, v]) => (
+                    <article key={k}>
+                      <b>{v}</b>
+                      <span>{k}</span>
+                    </article>
+                  ))}
+                </div>
+                {comparison.proposed.map((x) => (
+                  <article
+                    className="proposedChange"
+                    key={`${x.scr}-${x.displayNumber}`}
+                  >
+                    <span>{x.scr}</span>
+                    <b>
+                      {x.displayNumber} · {x.kind}
+                    </b>
+                    <p>{x.statement}</p>
+                    <small>
+                      {x.type} · {x.level} · {x.state}
+                    </small>
                   </article>
                 ))}
-              </div>
-              {comparison.proposed.map((x) => (
-                <article
-                  className="proposedChange"
-                  key={`${x.scr}-${x.displayNumber}`}
-                >
-                  <span>{x.scr}</span>
-                  <b>
-                    {x.displayNumber} · {x.kind}
-                  </b>
-                  <p>{x.statement}</p>
-                  <small>
-                    {x.type} · {x.level} · {x.state}
-                  </small>
-                </article>
-              ))}
-            </section></details>
+              </section>
+            </details>
           )}
         </>
       )}
@@ -505,7 +850,63 @@ export default function ReleaseCampaignCenter({
           </div>
         </div>
       )}
-      {confirmingRelease&&detail&&<div className="campaignModal releaseConfirm" role="dialog" aria-modal="true" aria-labelledby="release-confirm-title"><div><p className="eyebrow">FINAL CONTROLLED TRANSITION</p><h2 id="release-confirm-title">Release version {detail.release}?</h2><p>This will release <b>{detail.baseline}</b> as the immutable product configuration after all recorded gates and approvals.</p><dl><div><dt>Baseline</dt><dd>{detail.baseline}</dd></div><div><dt>Release gates</dt><dd>{detail.readiness.gates.length}/{detail.readiness.gates.length} complete</dd></div><div><dt>Release approvals</dt><dd>{detail.approvals.filter(x=>x.state==='Approved').length}/{detail.approvals.length} approved</dd></div></dl><div><button className="outline" onClick={()=>setConfirmingRelease(false)}>Cancel</button><button onClick={async()=>{if(await call("release",{}))setConfirmingRelease(false)}}>Confirm controlled release</button></div></div></div>}
+      {confirmingRelease && detail && (
+        <div
+          className="campaignModal releaseConfirm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="release-confirm-title"
+        >
+          <div>
+            <p className="eyebrow">FINAL CONTROLLED TRANSITION</p>
+            <h2 id="release-confirm-title">
+              Release version {detail.release}?
+            </h2>
+            <p>
+              This will release <b>{detail.baseline}</b> as the immutable
+              product configuration after all recorded gates and approvals.
+            </p>
+            <dl>
+              <div>
+                <dt>Baseline</dt>
+                <dd>{detail.baseline}</dd>
+              </div>
+              <div>
+                <dt>Release gates</dt>
+                <dd>
+                  {detail.readiness.gates.length}/
+                  {detail.readiness.gates.length} complete
+                </dd>
+              </div>
+              <div>
+                <dt>Release approvals</dt>
+                <dd>
+                  {
+                    detail.approvals.filter((x) => x.state === "Approved")
+                      .length
+                  }
+                  /{detail.approvals.length} approved
+                </dd>
+              </div>
+            </dl>
+            <div>
+              <button
+                className="outline"
+                onClick={() => setConfirmingRelease(false)}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (await call("release", {})) setConfirmingRelease(false);
+                }}
+              >
+                Confirm controlled release
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {signing && detail && (
         <SignatureDialog
           title={`Authorize version ${detail.release}`}
