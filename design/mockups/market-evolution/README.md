@@ -4,6 +4,8 @@ These mockups explore incremental AeroLink evolution rather than a wholesale red
 
 Research snapshot: 2026-07-14.
 
+Implementation status: all three concepts were accepted and implemented on 2026-07-14. Concept A now drives the live Requirements workspace, Concept B the Digital Thread relationship view, and Concept C the Release Readiness command surface. The mockups remain as the visual decision record rather than pixel-perfect production specifications.
+
 ## Products reviewed
 
 - IBM Engineering Requirements Management DOORS Next
