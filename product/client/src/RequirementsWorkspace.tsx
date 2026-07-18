@@ -171,6 +171,7 @@ export default function RequirementsWorkspace({
 }: Props) {
   const appliedInitialView = useRef(false);
   const autoSelected = useRef(false);
+  const actionsMenu = useRef<HTMLDetailsElement>(null);
   const [data, setData] = useState<Workspace>(),
     [loading, setLoading] = useState(true),
     [search, setSearch] = useState(""),
@@ -577,11 +578,17 @@ export default function RequirementsWorkspace({
             <i aria-hidden="true">◈</i>
             <span><b>Authoritative view</b><small>Requirement content is read-only here</small></span>
           </span>
-          <details className="pageActionsMenu">
+          <details className="pageActionsMenu" ref={actionsMenu}>
             <summary>Workspace tools</summary>
             <div>
-              <button onClick={() => setShowSchema(true)}>⚙ Schemas</button>
-              <button onClick={() => setShowSave(true)}>☆ Save view</button>
+              <button onClick={() => {
+                actionsMenu.current?.removeAttribute("open");
+                setShowSchema(true);
+              }}>⚙ Schemas</button>
+              <button onClick={() => {
+                actionsMenu.current?.removeAttribute("open");
+                setShowSave(true);
+              }}>☆ Save view</button>
             </div>
           </details>
         </div>

@@ -48,6 +48,7 @@ test("requirements stay read-only while controlled proposals and imports move in
   if ((await page.locator('.pageActionsMenu').getAttribute('open')) === null)
     await page.getByText("Workspace tools", { exact: true }).click();
   await page.getByRole("button", { name: /Schemas/ }).click();
+  await expect(page.locator(".pageActionsMenu")).not.toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { name: "Artifact schemas" })).toBeVisible();
   await expect(page.getByText("High-Level Software Requirement", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Done" }).click();
