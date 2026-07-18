@@ -1623,6 +1623,7 @@ static string? BootstrapPasswordError(string password)
 }
 
 app.MapAeroLinkIntegrationEndpoints();
+app.MapAeroLinkReqIfEndpoints();
 
 app.Run();
 

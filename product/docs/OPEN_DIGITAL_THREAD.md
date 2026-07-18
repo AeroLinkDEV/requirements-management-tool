@@ -49,6 +49,29 @@ hex(HMAC-SHA256(signing-secret, timestamp + "." + raw-request-body))
 
 The result is sent as `X-AeroLink-Signature: v1=<hex>`. Verify the signature using constant-time comparison before parsing the body, reject stale `X-AeroLink-Timestamp` values, and retain `X-AeroLink-Delivery` for support correlation. Failed deliveries use exponential backoff, stop after five attempts, and can be replayed from the Integration Command Center.
 
+## Lifecycle event catalog
+
+Authoritative lifecycle mutations and their integration-event records are committed in the same database save. A subscriber can select individual event types or use `*`:
+
+- `aerolink.change-request.changed`
+- `aerolink.baseline.changed`
+- `aerolink.requirement.revision-created`
+- `aerolink.release-campaign.changed`
+- `aerolink.software-build.recorded` and `aerolink.software-build.changed`
+- `aerolink.test-execution.recorded`
+
+Each event names the Project and aggregate, identifies the actor, records occurrence time, and enters the signed webhook delivery pipeline without a second non-transactional publication step.
+
+## ReqIF 1.2 exchange
+
+The **ReqIF Exchange Center** exports a `.reqifz` package containing the ReqIF document, an integrity manifest, and controlled attachment binaries. AeroLink's governed round-trip profile preserves stable requirement and revision identifiers, hierarchy, trace relations, statements, rationale, verification methods, the rich-text source, schema attributes, tags, and attachment metadata/hashes.
+
+ReqIF 1.2 reuses the normative `20110401/reqif.xsd` schema, whose `REQ-IF-VERSION` element is fixed to `1.0`; AeroLink therefore identifies the product profile as ReqIF 1.2 while emitting the schema-required XML header value `1.0`.
+
+Inbound `.reqif` and `.reqifz` files pass a preview and reconciliation boundary before they can affect controlled work. The parser prohibits DTDs and external entities, limits package and expanded size, rejects unsafe archive paths, checks duplicate and existing identifiers, and retains the immutable source package. A successful commit creates a Draft SCR/SWCR; it never creates approved requirements or bypasses review and baseline controls.
+
+The round-trip guarantee applies to the documented AeroLink profile. Vendor-specific extensions outside that profile remain preserved in the immutable source package but require an explicit mapping decision before they become controlled AeroLink fields.
+
 ## Compatibility
 
 Breaking changes require a new path version. Additive fields may appear within v1, so consumers must ignore unknown JSON properties. Stable machine-readable error codes accompany security and idempotency failures.

@@ -9,6 +9,7 @@ using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Identity;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Persistence;
 
@@ -69,6 +70,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<WebhookSubscription> WebhookSubscriptions => Set<WebhookSubscription>();
     public DbSet<IntegrationEvent> IntegrationEvents => Set<IntegrationEvent>();
     public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
+    public DbSet<ReqIfExchangeJob> ReqIfExchangeJobs => Set<ReqIfExchangeJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -429,6 +431,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("webhook_deliveries"); b.HasKey(x=>x.Id); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.LastError).HasMaxLength(2000); b.HasIndex(x=>new{x.State,x.NextAttemptAt}); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt}); b.HasIndex(x=>new{x.IntegrationEventId,x.SubscriptionId}).IsUnique(); b.HasOne<IntegrationEvent>().WithMany().HasForeignKey(x=>x.IntegrationEventId).OnDelete(DeleteBehavior.Restrict); b.HasOne<WebhookSubscription>().WithMany().HasForeignKey(x=>x.SubscriptionId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<ReqIfExchangeJob>(b =>
+        {
+            b.ToTable("reqif_exchange_jobs"); b.HasKey(x=>x.Id); b.Property(x=>x.Direction).HasConversion<string>().HasMaxLength(20); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.FileName).HasMaxLength(260).IsRequired(); b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired(); b.Property(x=>x.StorageKey).HasMaxLength(500).IsRequired(); b.Property(x=>x.ManifestJson).IsRequired(); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt}); b.HasIndex(x=>new{x.ProjectId,x.Direction,x.State}); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
@@ -452,6 +458,45 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             if (entry.State == EntityState.Modified)
                 entry.Property(x => x.Version).CurrentValue = entry.Property(x => x.Version).OriginalValue + 1;
         }
+        await AddLifecycleEventsAsync(cancellationToken);
         return await base.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task AddLifecycleEventsAsync(CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var pending = new List<(Guid ProjectId,string EventType,string AggregateType,Guid AggregateId,object Payload,string Actor)>();
+        foreach(var entry in ChangeTracker.Entries<SystemChangeRequest>().Where(x=>x.State is EntityState.Added or EntityState.Modified))
+            pending.Add((entry.Entity.ProjectId,"aerolink.change-request.changed","ChangeRequest",entry.Entity.Id,new{entry.Entity.DisplayNumber,state=entry.Entity.State.ToString(),entry.Entity.Version,entry.Entity.TargetReleaseId},entry.Entity.AuditEvents.OrderByDescending(x=>x.OccurredAt).FirstOrDefault()?.ActorId??entry.Entity.AuthorId));
+        foreach(var entry in ChangeTracker.Entries<CandidateBaseline>().Where(x=>x.State is EntityState.Added or EntityState.Modified))
+            pending.Add((entry.Entity.ProjectId,"aerolink.baseline.changed","CandidateBaseline",entry.Entity.Id,new{entry.Entity.DisplayNumber,state=entry.Entity.State.ToString(),entry.Entity.ReleaseId,entry.Entity.ContentHash},entry.Entity.Events.OrderByDescending(x=>x.OccurredAt).FirstOrDefault()?.ActorId??"aerolink.lifecycle"));
+        foreach(var entry in ChangeTracker.Entries<RequirementRevision>().Where(x=>x.State==EntityState.Added))
+        {
+            var projectId=ChangeTracker.Entries<RequirementArtifact>().FirstOrDefault(x=>x.Entity.Id==entry.Entity.ArtifactId)?.Entity.ProjectId;
+            projectId??=await Requirements.AsNoTracking().Where(x=>x.Id==entry.Entity.ArtifactId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if(projectId is Guid id)pending.Add((id,"aerolink.requirement.revision-created","RequirementRevision",entry.Entity.Id,new{entry.Entity.ArtifactId,entry.Entity.Revision,state=entry.Entity.State.ToString(),entry.Entity.SourceScrId,entry.Entity.EffectiveBaselineId},"aerolink.lifecycle"));
+        }
+        foreach(var entry in ChangeTracker.Entries<ReleaseCampaign>().Where(x=>x.State is EntityState.Added or EntityState.Modified))
+            pending.Add((entry.Entity.ProjectId,"aerolink.release-campaign.changed","ReleaseCampaign",entry.Entity.Id,new{state=entry.Entity.State.ToString(),entry.Entity.ReleaseId,entry.Entity.BaselineId,entry.Entity.SoftwareBuildId,entry.Entity.ReleaseHash},entry.Entity.Events.OrderByDescending(x=>x.OccurredAt).FirstOrDefault()?.ActorId??entry.Entity.OwnerId));
+        foreach(var entry in ChangeTracker.Entries<SoftwareBuild>().Where(x=>x.State is EntityState.Added or EntityState.Modified))
+            pending.Add((entry.Entity.ProjectId,entry.State==EntityState.Added?"aerolink.software-build.recorded":"aerolink.software-build.changed","SoftwareBuild",entry.Entity.Id,new{entry.Entity.BuildNumber,state=entry.Entity.State.ToString(),entry.Entity.ReleaseId,entry.Entity.BaselineId},entry.Entity.RecordedBy));
+        foreach(var entry in ChangeTracker.Entries<TestExecution>().Where(x=>x.State==EntityState.Added))
+            pending.Add((entry.Entity.ProjectId,"aerolink.test-execution.recorded","TestExecution",entry.Entity.Id,new{outcome=entry.Entity.Outcome.ToString(),entry.Entity.ProcedureRevisionId,entry.Entity.SoftwareBuildId,entry.Entity.RetestOfExecutionId,entry.Entity.ExecutedAt},entry.Entity.ExecutedBy));
+        if(pending.Count==0)return;
+        var projectIds=pending.Select(x=>x.ProjectId).Distinct().ToList();
+        var subscriptions=await WebhookSubscriptions.AsNoTracking().Where(x=>projectIds.Contains(x.ProjectId)&&x.IsEnabled).ToListAsync(ct);
+        foreach(var item in pending)
+        {
+            if(ChangeTracker.Entries<IntegrationEvent>().Any(x=>x.State==EntityState.Added&&x.Entity.AggregateId==item.AggregateId&&x.Entity.EventType==item.EventType))continue;
+            var payload=JsonSerializer.Serialize(item.Payload,new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var integrationEvent=new IntegrationEvent(item.ProjectId,item.EventType,item.AggregateType,item.AggregateId,payload,item.Actor,now);
+            IntegrationEvents.Add(integrationEvent);
+            foreach(var subscription in subscriptions.Where(x=>x.ProjectId==item.ProjectId))
+            {
+                var types=JsonSerializer.Deserialize<string[]>(subscription.EventTypesJson)??[];
+                if(types.Any(x=>x=="*"||x.Equals(item.EventType,StringComparison.OrdinalIgnoreCase)))WebhookDeliveries.Add(new WebhookDelivery(item.ProjectId,integrationEvent.Id,subscription.Id,now));
+            }
+            integrationEvent.MarkDispatched(now);
+        }
     }
 }

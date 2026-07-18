@@ -47,6 +47,15 @@ public sealed class OpenDigitalThreadTests
     public async Task Readiness_reports_database_connectivity()
     {using var factory=new AeroLinkApiFactory();using var client=factory.CreateClient();using var response=await client.GetAsync("/health/ready");Assert.Equal(HttpStatusCode.OK,response.StatusCode);var body=await response.Content.ReadFromJsonAsync<JsonElement>();Assert.Equal("connected",body.GetProperty("database").GetString());}
 
+    [Fact]
+    public async Task ReqIf_export_can_be_downloaded_and_revalidated_as_an_import_preview()
+    {
+        using var factory=new AeroLinkApiFactory();using var client=factory.CreateClient();await BootstrapAndLoginAsync(client);await SecurityBoundaryTests.AuthorizeMutationsAsync(client);var projectId=await CreateProjectAsync(factory);
+        using var exported=await client.PostAsJsonAsync("/api/reqif/exports",new{projectId});Assert.Equal(HttpStatusCode.Created,exported.StatusCode);var exportBody=await exported.Content.ReadFromJsonAsync<JsonElement>();var downloadUrl=exportBody.GetProperty("downloadUrl").GetString();
+        var package=await client.GetByteArrayAsync(downloadUrl);Assert.True(package.Length>100);
+        using var form=new MultipartFormDataContent();form.Add(new ByteArrayContent(package),"file","round-trip.reqifz");using var preview=await client.PostAsync($"/api/reqif/imports/preview?projectId={projectId}",form);Assert.Equal(HttpStatusCode.OK,preview.StatusCode);var body=await preview.Content.ReadFromJsonAsync<JsonElement>();Assert.Equal("1.0",body.GetProperty("preview").GetProperty("reqIfVersion").GetString());Assert.Equal("Preview",body.GetProperty("job").GetProperty("state").GetString());Assert.Contains("No requirements",body.GetProperty("preview").GetProperty("warnings")[0].GetString());
+    }
+
     private static async Task BootstrapAndLoginAsync(HttpClient client)
     {
         using var bootstrap=new HttpRequestMessage(HttpMethod.Post,"/api/setup/bootstrap"){Content=JsonContent.Create(new{displayName="AeroLink Administrator",email="admin@example.test",password=AeroLinkApiFactory.AdministratorPassword})};bootstrap.Headers.Add("X-AeroLink-Bootstrap-Secret",AeroLinkApiFactory.BootstrapSecret);using var created=await client.SendAsync(bootstrap);Assert.Equal(HttpStatusCode.Created,created.StatusCode);
