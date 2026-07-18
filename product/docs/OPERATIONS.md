@@ -50,6 +50,22 @@ Demo identity seeding fails closed outside the `Development` environment. `Ident
 
 The deterministic demonstration password is `AeroLink!2026`. Useful users include `admin`, `systems.author`, `software.author`, `systems.reviewer`, and `release.manager`. These credentials are for the disconnected local development installation only. Replace them, remove credential prefill, configure TLS, and establish organizational identity and privileged-access policy before operational use.
 
+## FMS-only local showcase cleanup
+
+The Development seed creates only `Flight Management System Live Program` (`FMSLIVE`) with released version 1.5 and in-work version 1.6. Playwright uses a disposable SQLite database, so browser journeys do not add Programs to the live PostgreSQL selector.
+
+If an older development database contains obsolete sample or browser-test Programs, first preview the dependency-aware cleanup from the repository root:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Prune-LocalShowcasePrograms.ps1
+```
+
+After reviewing the exact keep/delete list, apply it with `-Apply`. The command validates the single FMS Program and its exact 1.5/1.6 release pair, creates and verifies a full pre-purge backup, detects cross-Program dependency overlap, then deletes the obsolete Program graphs in one transaction. The live `aerolink` database cannot bypass its backup.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Prune-LocalShowcasePrograms.ps1 -Apply
+```
+
 ## Backup and verification
 
 Run `BACKUP_AEROLINK.bat`. The output under `product/.local/backups` contains a PostgreSQL custom-format dump, evidence, runtime configuration, `manifest.json`, and a ZIP SHA-256 sidecar. Retention defaults to 30 days.
