@@ -1,0 +1,115 @@
+/* Product-wide acceptance pass: preserve density without sacrificing legibility. */
+.program .activeProgram {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: #f4f8fb;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appNavigation footer > .personAvatar.large {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+}
+
+.workMetrics small,
+.queueTitle > span {
+  font-size: 11px;
+}
+
+.adminSummary span {
+  font-size: 12px;
+}
+
+/* System Operations was the last workspace still using 7–9 px production text. */
+.enterpriseTabs button { font-size: 12px; }
+.enterpriseHero p,
+.enterpriseHero span,
+.enterpriseHero > b small,
+.enterpriseMetric span,
+.enterpriseMetric small,
+.sectionTitle p,
+.sectionTitle > i,
+.signalRow span,
+.checkpoint p,
+.checkpoint small,
+.vaultUpload p,
+.vaultUpload label,
+.queryBuilder label,
+.emptyEnterprise p,
+.queryBuilder > p:not(.eyebrow),
+.savedQueryList article p,
+.savedQueryList article small,
+.jobHero p:not(.eyebrow),
+.qualificationHero p:not(.eyebrow),
+.concurrencyFlow p,
+.activeSessions article,
+.qualificationGrid article span,
+.qualificationGrid article small,
+.integrityEvidence p,
+.integrityEvidence small {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.enterpriseMetric span,
+.sectionTitle > i,
+.jobHead,
+.redlineBoard section h3,
+.threadLane > small {
+  letter-spacing: .06em;
+}
+
+.signalRow b,
+.vaultFiles article b,
+.savedQueryList article b,
+.jobTable b,
+.qualificationGrid article b {
+  font-size: 12px;
+}
+
+.enterprisePage button,
+.enterprisePage input,
+.enterprisePage select,
+.enterprisePage textarea,
+.fileActions a,
+.fileActions label {
+  font-size: 12px;
+}
+
+.checkpoint code,
+.integrityEvidence code,
+.vaultFiles article code,
+.jobTable code,
+.jobTable small,
+.concurrencyFlow code,
+.mergeBoard pre {
+  font-size: 10px;
+}
+
+@media (max-width: 1360px) {
+  .reqCommand .pageSizeControl { display: none; }
+  .enterprisePage { padding: 28px 28px 64px; }
+  .enterpriseMetrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .program .activeProgram { white-space: normal; }
+  .enterpriseMetrics { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 1100px) {
+  .release {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 18px 24px;
+  }
+  .release .readiness { margin-left: 0; }
+  .release > button { grid-column: 1 / -1; justify-self: end; }
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

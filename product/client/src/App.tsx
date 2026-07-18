@@ -34,6 +34,7 @@ import "./PortalNavigation.css";
 import "./ShowcaseRefresh.css";
 import "./ExperiencePolish.css";
 import "./People.css";
+import "./CohesionPass.css";
 
 type Scr = {
   id: string;
@@ -103,7 +104,9 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       <button className="quickSearch" onClick={onSearch}><span aria-hidden="true">⌕</span> Search &amp; navigate <kbd>Ctrl K</kbd></button>
       <div className="program">
         <small>ACTIVE CONTEXT</small>
-        <select value={activeId} onChange={event=>onProgram(event.target.value)} aria-label="Active program">{workspaces.map(x=><option value={x.program.id} key={x.program.id}>{x.program.name}</option>)}</select>
+        {workspaces.length > 1
+          ? <select value={activeId} onChange={event=>onProgram(event.target.value)} aria-label="Active program">{workspaces.map(x=><option value={x.program.id} key={x.program.id}>{x.program.name}</option>)}</select>
+          : <strong className="activeProgram" title={active?.program.name}>{active?.program.name}</strong>}
         {active?.projects.length>1
           ? <select value={project?.project.id??""} onChange={event=>onProject(event.target.value)} aria-label="Active project">{active.projects.map(x=><option value={x.project.id} key={x.project.id}>{x.project.name}</option>)}</select>
           : <span title={project?.project.name}>{project?.project.name}</span>}
@@ -414,6 +417,7 @@ function App() {
         onOpenScr={(id) => navigate("scr",discipline,id)}
         onProposeChange={(id) => navigate(discipline === "software" ? "createSoftwareChange" : "createSystemScr", discipline, id)}
         onOpenRequirement={(id) => navigate("requirements",discipline,id)}
+        onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
         onOpenTraceability={() => navigate("lifecycle")}
       />
     );

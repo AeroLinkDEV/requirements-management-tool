@@ -143,6 +143,7 @@ type Props = {
   onOpenScr: (id: string) => void;
   onProposeChange: (requirementId: string) => void;
   onOpenRequirement: (id: string) => void;
+  onCloseRequirement: () => void;
   onOpenTraceability: () => void;
 };
 
@@ -165,6 +166,7 @@ export default function RequirementsWorkspace({
   onOpenScr,
   onProposeChange,
   onOpenRequirement,
+  onCloseRequirement,
   onOpenTraceability,
 }: Props) {
   const appliedInitialView = useRef(false);
@@ -829,7 +831,7 @@ export default function RequirementsWorkspace({
               )}
             </div>
           ))}
-          <details className="savedViews" open>
+          <details className="savedViews">
             <summary>
               <b>Saved views</b>
               <span>{data?.views.length ?? 0}</span>
@@ -994,6 +996,8 @@ export default function RequirementsWorkspace({
               <button
                 aria-label="Close requirement inspector"
                 onClick={() => {
+                  autoSelected.current = true;
+                  onCloseRequirement();
                   setSelected(undefined);
                   setDetail(undefined);
                 }}
