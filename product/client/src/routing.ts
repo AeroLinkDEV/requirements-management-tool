@@ -1,6 +1,6 @@
 export type View =
   | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "lifecycle" | "release" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "artifact" | "notFound";
+  | "verification" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
@@ -66,7 +66,10 @@ export function readRoute(): AppRoute {
   if (path === "traceability") return { ...base, view: "lifecycle", discipline: "system" };
   if (path === "release-planning") return { ...base, view: "planning", discipline: "system" };
   if (path === "baselines") return { ...base, view: "baselines", discipline: "system" };
-  if (path === "release-campaign") return { ...base, view: "release", discipline: "system" };
+  if (path === "release-readiness" || path === "release-campaign") return { ...base, view: "release", discipline: "system" };
+  if (tail[0] === "release-readiness" && tail[1] === "changes" && tail[2]) return { ...base, view: "releaseImpact", discipline: "system", artifactId: decoded(tail[2]) };
+  if (path === "release-readiness/evidence") return { ...base, view: "releaseDecision", discipline: "system" };
+  if (path === "release-readiness/operations") return { ...base, view: "releaseOperations", discipline: "system" };
   if (path === "enterprise-control") return { ...base, view: "enterprise", discipline: "system" };
   if (path === "integration-command-center") return { ...base, view: "integrations", discipline: "system" };
   if (path === "administration") return { ...base, view: "admin", discipline: "system" };
@@ -97,7 +100,10 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "lifecycle": return `${root}/traceability`;
     case "planning": return `${root}/release-planning`;
     case "baselines": return `${root}/baselines`;
-    case "release": return `${root}/release-campaign`;
+    case "release": return `${root}/release-readiness`;
+    case "releaseImpact": return `${root}/release-readiness/changes/${artifactId}`;
+    case "releaseDecision": return `${root}/release-readiness/evidence`;
+    case "releaseOperations": return `${root}/release-readiness/operations`;
     case "enterprise": return `${root}/enterprise-control`;
     case "integrations": return `${root}/integration-command-center`;
     case "admin": return `${root}/administration`;

@@ -19,7 +19,7 @@ const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:st
   {label:'Digital Thread',view:'lifecycle',discipline:'system',detail:'Traceability and outputs across the released evidence path',icon:'↗'},
   {label:'Product Versions',view:'planning',discipline:'system',detail:'Plan versions and release lineage',icon:'②'},
   {label:'Baselines',view:'baselines',discipline:'system',detail:'Candidate and frozen controlled sets',icon:'⌘'},
-  {label:'Release Readiness',view:'release',discipline:'system',detail:'Resolve gates and release evidence',icon:'◆'},
+  {label:'Lifecycle Decision Room',view:'release',discipline:'system',detail:'Release readiness, change impact, evidence, and authority',icon:'◆'},
   {label:'System Operations',view:'enterprise',discipline:'system',detail:'Operational controls and integrity',icon:'◈'},
 ]
 

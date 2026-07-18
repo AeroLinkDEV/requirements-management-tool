@@ -10,10 +10,10 @@ test('deep links survive refresh, universal search resolves fragments, and check
  await openNavigationGroup(page,'SYSTEMS ENGINEERING')
  await page.getByRole('link',{name:'System Requirements Explorer'}).click()
  await page.getByLabel('Search requirements').fill('0150')
- const requirement=page.getByText(/SYSR-00000150\.\d{2}/).first();await expect(requirement).toBeVisible();await requirement.click()
+ const requirement=page.getByText(/SYSR-000150\.\d{2}/).first();await expect(requirement).toBeVisible();await requirement.click()
  await expect(page).toHaveURL(/\/requirements\/[0-9a-f-]+\?discipline=system$/)
- const requirementUrl=page.url();await page.reload();await expect(page.getByText(/SYSR-00000150\.\d{2}/).first()).toBeVisible();await expect(page).toHaveURL(requirementUrl)
- await page.keyboard.press('Control+K');await page.getByPlaceholder(/Search pages, SCRs/).fill('0150');await expect(page.getByRole('dialog').getByRole('link',{name:/SYSR-00000150\.\d{2}/}).first()).toBeVisible()
+ const requirementUrl=page.url();await page.reload();await expect(page.getByText(/SYSR-000150\.\d{2}/).first()).toBeVisible();await expect(page).toHaveURL(requirementUrl)
+ await page.keyboard.press('Control+K');await page.getByPlaceholder(/Search pages, SCRs/).fill('0150');await expect(page.getByRole('dialog').getByRole('link',{name:/SYSR-000150\.\d{2}/}).first()).toBeVisible()
  await page.keyboard.press('Escape')
 
  await page.getByRole('link',{name:/Command Center/}).click()

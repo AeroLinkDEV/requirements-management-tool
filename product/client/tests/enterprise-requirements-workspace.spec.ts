@@ -23,9 +23,9 @@ test("requirements stay read-only while controlled proposals and imports move in
     page.getByRole("heading", { name: "System Requirements Explorer" }),
   ).toBeVisible();
   await expect(page.getByText("150 requirements")).toBeVisible();
-  await page.getByLabel("Search requirements").fill("SYSR-00000150");
-  await expect(page.getByText(/SYSR-00000150\.\d{2}/)).toBeVisible();
-  await page.getByText(/SYSR-00000150\.\d{2}/).click();
+  await page.getByLabel("Search requirements").fill("SYSR-000150");
+  await expect(page.getByText(/SYSR-000150\.\d{2}/)).toBeVisible();
+  await page.getByText(/SYSR-000150\.\d{2}/).click();
   await expect(page.getByText("Controlled revision")).toBeVisible();
   await page.getByRole("button", { name: /Discussion/ }).click();
   await page
@@ -49,15 +49,15 @@ test("requirements stay read-only while controlled proposals and imports move in
   await expect(page.getByRole("heading", { name: "Artifact schemas" })).toBeVisible();
   await expect(page.getByText("High-Level Software Requirement", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Done" }).click();
-  await page.getByLabel("Search requirements").fill("SYSR-00000150");
-  await page.getByRole("button", { name: /SYSR-00000150\.\d{2}/ }).first().click();
+  await page.getByLabel("Search requirements").fill("SYSR-000150");
+  await page.getByRole("button", { name: /SYSR-000150\.\d{2}/ }).first().click();
   await page.getByRole("button", { name: "Trace & impact" }).click();
   await expect(page.getByRole("button", { name: "Open complete Digital Thread →" })).toBeVisible();
   await page.getByRole("button", { name: "Overview" }).click();
   await page.getByRole("button", { name: "Propose controlled change →" }).click();
   await expect(page.getByRole("heading", { name: "Create System Change Request" })).toBeVisible();
   await expect(page.getByText("Started from Requirements Explorer")).toBeVisible();
-  await expect(page.locator('input[value*="SYSR-00000150"]').first()).toBeVisible();
+  await expect(page.locator('input[value*="SYSR-000150"]').first()).toBeVisible();
   await page.getByRole("button", { name: "Import into Draft SCR" }).click();
   await page
     .getByLabel("Requirements import file")
@@ -65,7 +65,7 @@ test("requirements stay read-only while controlled proposals and imports move in
       name: "requirements.csv",
       mimeType: "text/csv",
       buffer: Buffer.from(
-        "Identifier,Level,Statement,Rationale,VerificationMethod\nHLR-00999999,HighLevel,The FMS software shall retain a governed import preview.,Enterprise onboarding,Test",
+        "Identifier,Level,Statement,Rationale,VerificationMethod\nHLR-999999,HighLevel,The FMS software shall retain a governed import preview.,Enterprise onboarding,Test",
       ),
     });
   await page.getByRole("button", { name: "Validate and preview" }).click();
@@ -75,5 +75,5 @@ test("requirements stay read-only while controlled proposals and imports move in
   await expect(
     page.locator(".changeImportIdentity").getByText("valid", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("HLR-00999999")).toBeVisible();
+  await expect(page.getByText("HLR-999999")).toBeVisible();
 });

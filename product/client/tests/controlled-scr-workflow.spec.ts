@@ -29,7 +29,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
 
   await openPageFromPalette(page,'New Software SWCR')
   await expect(page.getByRole('navigation', { name: 'Change authoring progress' })).toBeVisible()
-  await expect(page.getByLabel('Identifier')).toHaveValue(/^HLR-\d{8}$/)
+  await expect(page.getByLabel('Identifier')).toHaveValue(/^HLR-\d{6}$/)
   await expect(page.getByLabel('Identifier')).not.toBeEditable()
   await expect(page.getByLabel('Revision')).toHaveValue('00')
   await expect(page.getByLabel('Revision')).not.toBeEditable()
@@ -37,7 +37,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByRole('textbox',{name:'Level',exact:true})).not.toBeEditable()
   await expect(page.getByLabel('Change type')).toHaveValue('Introduce')
   await expect(page.getByLabel('Change type')).not.toBeEditable()
-  await expect(page.getByText('SWR-00000001')).toHaveCount(0)
+  await expect(page.getByText('SWR-000001')).toHaveCount(0)
   await page.getByLabel('Title').fill('Introduce controlled browser workflow')
   await page.getByLabel('Problem').fill('The workflow is not yet controlled end to end.')
   await page.getByLabel('Analysis', { exact: true }).fill('SCR content, reviewers, and history must remain attributable.')
@@ -88,7 +88,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByText('SWRD materialized')).toBeVisible()
   await expect(page.getByText('Software Requirements Document')).toBeVisible()
   await expect(page.getByText('REQUIREMENT MANIFEST SHA-256')).toBeVisible()
-  await expect(page.getByText(/HLR-\d{8}\.00/).last()).toBeVisible()
+  await expect(page.getByText(/HLR-\d{6}\.00/).last()).toBeVisible()
 
   await page.getByRole('link', { name: /Command Center/ }).first().click()
   await openPageFromPalette(page,'Software Verification')
@@ -101,7 +101,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByLabel('Procedure steps').fill('Configure, stimulate, and observe the workflow.')
   await page.getByRole('checkbox').check()
   await page.getByRole('button', { name: 'Create Procedure' }).click()
-  await expect(page.getByText(/(?:HLRTP|LLRTP)-\d{8}\.00/, { exact: true }).last()).toBeVisible()
+  await expect(page.getByText(/(?:HLRTP|LLRTP)-\d{6}\.00/, { exact: true }).last()).toBeVisible()
   const workspacesResponse=await page.request.get(`${apiBase}/api/workspaces`);expect(workspacesResponse.ok(),await workspacesResponse.text()).toBeTruthy();const workspaces=await workspacesResponse.json();const workspace=workspaces.find((x:{program:{name:string}})=>x.program.name===programName);const projectId=workspace.projects[0].project.id
   const usersResponse=await page.request.get(`${apiBase}/api/admin/users`);expect(usersResponse.ok(),await usersResponse.text()).toBeTruthy();const reviewer=(await usersResponse.json()).find((x:{userName:string})=>x.userName==='systems.reviewer')
   const grant=await page.request.post(`${apiBase}/api/admin/users/${reviewer.id}/memberships`,{data:{programId:workspace.program.id,role:'Approver'}});expect(grant.ok(),await grant.text()).toBeTruthy()

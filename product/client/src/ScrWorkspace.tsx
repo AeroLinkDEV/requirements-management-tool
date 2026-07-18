@@ -135,7 +135,7 @@ const addToIdentifier = (identifier: string | undefined, offset: number) => {
   if (!identifier) return "";
   const match = identifier.match(/^([A-Z]+)-(\d+)$/);
   if (!match) return identifier;
-  return `${match[1]}-${(Number(match[2]) + offset).toString().padStart(8, "0")}`;
+  return `${match[1]}-${(Number(match[2]) + offset).toString().padStart(6, "0")}`;
 };
 const createRequirement = (
   level: RequirementLevel,

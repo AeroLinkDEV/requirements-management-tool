@@ -20,8 +20,8 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await expect(
     page.getByRole("heading", { name: "System Requirements Explorer" }),
   ).toBeVisible();
-  await page.getByLabel("Search requirements").fill("SYSR-00000150");
-  await page.getByRole("button", { name: /SYSR-00000150\.\d{2}/ }).first().click();
+  await page.getByLabel("Search requirements").fill("SYSR-000150");
+  await page.getByRole("button", { name: /SYSR-000150\.\d{2}/ }).first().click();
   await page.getByRole("button", { name: "Trace & impact" }).click();
   await expect(page.getByRole("heading", { name: "Verification coverage" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open complete Digital Thread →" })).toBeVisible();
@@ -30,7 +30,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
     .getByRole("button", { name: "Propose controlled change →" })
     .click();
   await expect(page.getByText("Started from Requirements Explorer")).toBeVisible();
-  await expect(page.locator('input[value*="SYSR-00000150"]').first()).toBeVisible();
+  await expect(page.locator('input[value*="SYSR-000150"]').first()).toBeVisible();
   await page.getByLabel("Problem").fill("The selected controlled behavior requires an attributable update.");
   await page.getByRole("textbox", { name: "Analysis", exact: true }).fill("The requirement, trace, verification, and document impacts will be dispositioned in this change.");
   await page.getByLabel("Solution").fill("Create the proposed successor revision without altering the authoritative requirement directly.");
@@ -45,7 +45,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await page
     .locator(".richEditor")
     .fill(
-      "**Controlled update**\n- preserve deterministic sequencing\n- verify the affected route mode\n\n[[SYSR-00000150]]",
+      "**Controlled update**\n- preserve deterministic sequencing\n- verify the affected route mode\n\n[[SYSR-000150]]",
     );
   const dispositions = page.locator(".editorColumns aside select");
   expect(await dispositions.count()).toBe(5);

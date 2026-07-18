@@ -82,12 +82,12 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         await db.SaveChangesAsync(ct);
 
         var docSpecs = new[] {
-            (ControlledDocumentType.Sysrd,"SYSRD-00000015","FMS System Requirements Document",150),
-            (ControlledDocumentType.SwrdHighLevel,"HLRD-00000015","FMS High-Level Software Requirements Document",400),
-            (ControlledDocumentType.SwrdLowLevel,"LLRD-00000015","FMS Low-Level Software Requirements Document",700),
-            (ControlledDocumentType.SystemTestProcedures,"SYSTD-00000015","FMS System Test Procedures",75),
-            (ControlledDocumentType.HighLevelTestProcedures,"HLRTD-00000015","FMS HLR Test Procedures",160),
-            (ControlledDocumentType.LowLevelTestProcedures,"LLRTD-00000015","FMS LLR Test Procedures",280) };
+            (ControlledDocumentType.Sysrd,"SYSRD-000015","FMS System Requirements Document",150),
+            (ControlledDocumentType.SwrdHighLevel,"HLRD-000015","FMS High-Level Software Requirements Document",400),
+            (ControlledDocumentType.SwrdLowLevel,"LLRD-000015","FMS Low-Level Software Requirements Document",700),
+            (ControlledDocumentType.SystemTestProcedures,"SYSTD-000015","FMS System Test Procedures",75),
+            (ControlledDocumentType.HighLevelTestProcedures,"HLRTD-000015","FMS HLR Test Procedures",160),
+            (ControlledDocumentType.LowLevelTestProcedures,"LLRTD-000015","FMS LLR Test Procedures",280) };
         foreach (var spec in docSpecs) db.ControlledDocuments.Add(new ControlledDocument(project.Id, release15.Id, baseline15.Id, spec.Item1, spec.Item2, spec.Item3, 0, Hash($"{baseline15.RequirementsHash}|{spec.Item1}|{spec.Item4}"), spec.Item4, start.AddDays(159)));
 
         var activeRequests = BuildActive16Requests(project.Id, release16.Id, current, start.AddDays(300));
@@ -122,14 +122,14 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
     {
         var request = new SystemChangeRequest(number, 0, projectId, releaseId, $"Establish FMS {label} requirement group {number[^2..]}", "The product baseline requires controlled FMS behavior.", "Operational and assurance needs were analyzed and allocated.", "Introduce the approved requirement set with verification criteria.", type == ChangeRequestType.System ? "systems.author" : "software.author", now, type);
         for (var j = 1; j <= count; j++) { var index = offset + j; var prefix = level == RequirementLevel.System ? "SYSR" : level == RequirementLevel.HighLevel ? "HLR" : "LLR"; var revision = index % 11 == 0 ? 2 : index % 5 == 0 ? 1 : 0;
-            request.AddRequirementChange(request.AuthorId, $"{prefix}-{index:D8}", revision, level, RequirementChangeKind.Introduce, CurrentStatement(level, index), $"Allocated {Topics[(index - 1) % Topics.Length]} capability for the FMS 1.5 baseline.", "Test", now); }
+            request.AddRequirementChange(request.AuthorId, $"{prefix}-{index:D6}", revision, level, RequirementChangeKind.Introduce, CurrentStatement(level, index), $"Allocated {Topics[(index - 1) % Topics.Length]} capability for the FMS 1.5 baseline.", "Test", now); }
         request.SubmitForReview(request.AuthorId, [new("assurance.reviewer", "Development Assurance Reviewer")], now.AddHours(2)); request.ApproveActiveStage("assurance.reviewer", now.AddDays(1)); return request;
     }
 
     private static List<(TestProcedure, TestProcedureRevision, List<Guid>)> BuildProcedures(Guid projectId, List<Guid> requirements, int count, TestProcedureLevel level, string prefix, DateTimeOffset now)
     {
         var buckets = Enumerable.Range(0, count).Select(_ => new List<Guid>()).ToList(); for (var i = 0; i < requirements.Count; i++) buckets[i % count].Add(requirements[i]);
-        return buckets.Select((ids, i) => { var number = $"{prefix}-{i + 1:D8}"; var procedure = new TestProcedure(projectId, number, $"Verify {level} FMS behavior group {i + 1:D3}", "test.author", now, level);
+        return buckets.Select((ids, i) => { var number = $"{prefix}-{i + 1:D6}"; var procedure = new TestProcedure(projectId, number, $"Verify {level} FMS behavior group {i + 1:D3}", "test.author", now, level);
             var revision = new TestProcedureRevision(procedure.Id, 0, "Verify all linked FMS requirement revisions.", "Load released FMS 1.5 software and the approved navigation database.", "Initialize the applicable mode, stimulate the defined inputs, and record each observable output.", "Every observed output meets the linked requirement acceptance criteria.", TestProcedureState.Approved, "test.author", now); return (procedure, revision, ids); }).ToList();
     }
 
@@ -140,8 +140,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         {
             var system = i <= 2; var type = system ? ChangeRequestType.System : ChangeRequestType.Software; var number = system ? $"SCR-{30 + i:D8}" : $"SWCR-{75 + i - 2:D8}";
             var request = new SystemChangeRequest(number, 0, projectId, releaseId, i == 1 ? "Introduce oceanic round-robin waypoint sequencing" : $"FMS 1.6 change package {i}", "Operational feedback or a product improvement requires controlled change.", "The impact to requirements, traces, and verification has been assessed.", "Update the applicable FMS behavior and verification assets.", type == ChangeRequestType.System ? "systems.author" : "software.author", now.AddDays(i), type);
-            if (i == 1) request.AddRequirementChange(request.AuthorId, "SYSR-00000151", 0, RequirementLevel.System, RequirementChangeKind.Introduce, "The FMS shall support configurable round-robin sequencing of eligible oceanic waypoints.", "New FMS 1.6 capability.", "Test", now);
-            else { var level = i <= 4 ? RequirementLevel.HighLevel : RequirementLevel.LowLevel; var prefix = level == RequirementLevel.HighLevel ? "HLR" : "LLR"; var max = level == RequirementLevel.HighLevel ? 400 : 700; var idx = ((i * 37) % max) + 1; var row = current[$"{prefix}-{idx:D8}"]; request.AddRequirementChange(request.AuthorId, $"{prefix}-{idx:D8}", row.Revision.Revision + 1, level, RequirementChangeKind.Modify, CurrentStatement(level, idx) + " The behavior shall include the approved FMS 1.6 refinement.", "Product improvement or corrective action.", "Test", now); }
+            if (i == 1) request.AddRequirementChange(request.AuthorId, "SYSR-000151", 0, RequirementLevel.System, RequirementChangeKind.Introduce, "The FMS shall support configurable round-robin sequencing of eligible oceanic waypoints.", "New FMS 1.6 capability.", "Test", now);
+            else { var level = i <= 4 ? RequirementLevel.HighLevel : RequirementLevel.LowLevel; var prefix = level == RequirementLevel.HighLevel ? "HLR" : "LLR"; var max = level == RequirementLevel.HighLevel ? 400 : 700; var idx = ((i * 37) % max) + 1; var row = current[$"{prefix}-{idx:D6}"]; request.AddRequirementChange(request.AuthorId, $"{prefix}-{idx:D6}", row.Revision.Revision + 1, level, RequirementChangeKind.Modify, CurrentStatement(level, idx) + " The behavior shall include the approved FMS 1.6 refinement.", "Product improvement or corrective action.", "Test", now); }
             if (i <= 2) { request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Engineering Lead")], now.AddDays(i).AddHours(1)); request.ApproveActiveStage("lead.reviewer", now.AddDays(i).AddHours(2)); }
             else if (i <= 4) request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Engineering Lead"), new("manager.reviewer", "Engineering Manager")], now.AddDays(i).AddHours(1));
             else if (i == 8) request.Defer(request.AuthorId, "Deferred from FMS 1.6 pending operational priority confirmation.", now.AddDays(i).AddHours(2));

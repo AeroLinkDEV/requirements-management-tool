@@ -21,7 +21,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  const systemDraft=await systemDraftResponse.json()
  expect(systemDraft.baseNumber).toMatch(/^SCR-\d{8}$/)
  expect(systemDraft.authorId).toBe('admin')
- expect(systemDraft.requirementChanges[0].displayNumber).toMatch(/^SYSR-\d{8}\.00$/)
+ expect(systemDraft.requirementChanges[0].displayNumber).toMatch(/^SYSR-\d{6}\.00$/)
  const partialLookup=await request.get(`${apiBase}/api/authoring/requirements?projectId=${project.id}&scope=System&search=0150&limit=8`)
  expect(partialLookup.ok(),await partialLookup.text()).toBeTruthy()
  const existingSystem=(await partialLookup.json())[0]
@@ -92,7 +92,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  const draft=await draftResponse.json()
  expect(draft.baseNumber).toMatch(/^SWCR-\d{8}$/)
  expect(draft.authorId).toBe('admin')
- expect(draft.requirementChanges[0].displayNumber).toMatch(/^HLR-\d{8}\.00$/)
+ expect(draft.requirementChanges[0].displayNumber).toMatch(/^HLR-\d{6}\.00$/)
 
  const submitted=await request.post(`${apiBase}/api/scrs/${draft.id}/submit`,{data:{expectedVersion:draft.version,mode:'Sequential',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'}]}})
  expect(submitted.ok(),await submitted.text()).toBeTruthy()
@@ -159,7 +159,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  }
 
  const searchKinds=new Set<string>()
- for(const query of ['SCR','SWCR','SYSR','SWBL','SYSRD','1.5','FMS-1.5.0','SYSTP-00000001','evidence/fms-1.5']){
+ for(const query of ['SCR','SWCR','SYSR','SWBL','SYSRD','1.5','FMS-1.5.0','SYSTP-000001','evidence/fms-1.5']){
   const response=await request.get(`${apiBase}/api/search?projectId=${project.id}&query=${encodeURIComponent(query)}&limit=50`)
   expect(response.ok(),await response.text()).toBeTruthy()
   for(const item of (await response.json()).items)searchKinds.add(item.kind)

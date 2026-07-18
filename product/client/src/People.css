@@ -1,0 +1,13 @@
+.personAvatar {
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  object-fit: cover;
+  background: #dce8ef;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(17, 48, 79, .12);
+}
+.personAvatar.small { width: 28px; height: 28px; }
+.personAvatar.medium { width: 38px; height: 38px; }
+.personAvatar.large { width: 48px; height: 48px; }
+.personInitials { display: inline-grid; place-items: center; color: #123653; background: #78dbcd; font-weight: 800; font-size: 11px; }

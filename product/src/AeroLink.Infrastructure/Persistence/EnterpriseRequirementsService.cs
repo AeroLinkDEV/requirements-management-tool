@@ -17,9 +17,9 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
 {
     private static readonly (RequirementLevel Level,string SchemaKey,string SchemaName,string SpecNumber,string SpecTitle)[] Defaults=
     [
-        (RequirementLevel.System,"SYSTEM-REQ","System Requirement","SYSRD-00000001","System Requirements Specification"),
-        (RequirementLevel.HighLevel,"HLR","High-Level Software Requirement","HLRD-00000001","High-Level Software Requirements Specification"),
-        (RequirementLevel.LowLevel,"LLR","Low-Level Software Requirement","LLRD-00000001","Low-Level Software Requirements Specification")
+        (RequirementLevel.System,"SYSTEM-REQ","System Requirement","SYSRD-000001","System Requirements Specification"),
+        (RequirementLevel.HighLevel,"HLR","High-Level Software Requirement","HLRD-000001","High-Level Software Requirements Specification"),
+        (RequirementLevel.LowLevel,"LLR","Low-Level Software Requirement","LLRD-000001","Low-Level Software Requirements Specification")
     ];
 
     public async Task SynchronizeProjectAsync(Guid projectId,string actor,CancellationToken ct=default)

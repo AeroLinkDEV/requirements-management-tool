@@ -301,7 +301,7 @@ export default function ControlledRequirementEditor({
                 <button type="button" onClick={() => insert("- controlled list item")}>List</button>
                 <button type="button" onClick={() => insert("| Parameter | Value |\n| --- | --- |\n| Mode | Defined |")}>Table</button>
                 <button type="button" onClick={() => insert("≤ ≥ ± ° Δ")}>Symbols</button>
-                <button type="button" onClick={() => insert("[[REQ-00000000]]")}>Reference</button>
+                <button type="button" onClick={() => insert("[[REQ-000001]]")}>Reference</button>
               </div>
               <label>
                 Formatted supporting content
