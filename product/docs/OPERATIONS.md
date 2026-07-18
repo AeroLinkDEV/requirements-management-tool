@@ -8,6 +8,23 @@ Use `STOP_AEROLINK.bat` for a controlled stop. The script only stops listeners w
 
 Logs are under `product/.local/logs`. The authoritative database is `aerolink`; controlled evidence is under `%LOCALAPPDATA%\AeroLink\evidence`.
 
+Liveness is available at `/health/live`. Deployment orchestrators should use `/health/ready`, which returns `503` until the database can be reached.
+
+## Open Digital Thread configuration
+
+Production permits no cross-origin browser callers unless each trusted origin is configured as `Cors__AllowedOrigins__0`, `Cors__AllowedOrigins__1`, and so on. Never use a wildcard origin with credentialed browser sessions.
+
+The service API is rooted at `/api/v1`. Machine credentials and webhook signing secrets are created in **Administration → Integration Center** and are displayed once. Store them in the calling system's secret manager; do not place them in source control, operator transcripts, or shared configuration files.
+
+Relevant production settings are:
+
+- `Integrations__ApiRateLimitPerMinute` — per-credential request budget; default `240`.
+- `Integrations__DeliveryPollSeconds` — webhook dispatcher interval; default `3`.
+- `Integrations__AllowInsecureWebhookTargets` — must remain `false` outside isolated development.
+- `Integrations__AllowPrivateWebhookTargets` — must remain `false` unless a reviewed private-network integration requires it.
+
+Webhook requests include `X-AeroLink-Event`, `X-AeroLink-Delivery`, `X-AeroLink-Timestamp`, and `X-AeroLink-Signature`. Consumers must reject stale timestamps and verify the `v1=<hex>` HMAC-SHA256 over `<timestamp>.<raw request body>` before parsing the payload. Multi-instance deployments must use a shared, protected ASP.NET Core Data Protection key ring so encrypted webhook secrets and browser mutation tokens remain valid across instances.
+
 ## Production first-install administrator
 
 Production does not seed identities. Before the first API start against an empty database, set `Identity__BootstrapSecret` in the service environment to a randomly generated value of at least 32 characters. Do not place it in `appsettings.json`, source control, a command-line argument, or an operator transcript. `GET /api/setup/status` reports only whether bootstrap is required and enabled.

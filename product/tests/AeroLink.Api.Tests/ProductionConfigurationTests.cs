@@ -16,6 +16,9 @@ public sealed class ProductionConfigurationTests
         Assert.False(root.GetProperty("DemoData").GetProperty("Enabled").GetBoolean());
         Assert.False(root.GetProperty("Identity").GetProperty("SeedDemoAccounts").GetBoolean());
         Assert.True(root.GetProperty("Identity").GetProperty("CookieSecure").GetBoolean());
+        Assert.Empty(root.GetProperty("Cors").GetProperty("AllowedOrigins").EnumerateArray());
+        Assert.False(root.GetProperty("Integrations").GetProperty("AllowInsecureWebhookTargets").GetBoolean());
+        Assert.False(root.GetProperty("Integrations").GetProperty("AllowPrivateWebhookTargets").GetBoolean());
         Assert.NotEqual("*", root.GetProperty("AllowedHosts").GetString());
     }
 

@@ -18,6 +18,7 @@ using System.Text.Json;
 using System.Diagnostics;
 using System.Data;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 using System.Text.Encodings.Web;
@@ -30,19 +31,20 @@ builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.C
 builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
 builder.Services.AddAuthentication(AeroLinkAuthorizationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, AeroLinkAuthorizationHandler>(AeroLinkAuthorizationHandler.SchemeName, _ => { });
+builder.Services.AddSingleton<BrowserMutationProtector>();
 var loginRateLimit = Math.Max(1, builder.Configuration.GetValue<int?>("Identity:LoginRateLimitPerMinute") ?? 30);
-builder.Services.AddRateLimiter(options => options.AddPolicy("authentication", context =>
-    RateLimitPartition.GetFixedWindowLimiter(
-        context.Connection.RemoteIpAddress?.ToString() ?? "local",
-        _ => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = loginRateLimit,
-            Window = TimeSpan.FromMinutes(1),
-            QueueLimit = 0,
-            AutoReplenishment = true
-        })));
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("authentication", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "local", _ => new FixedWindowRateLimiterOptions { PermitLimit = loginRateLimit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+    options.AddPolicy("service-api", context => RateLimitPartition.GetFixedWindowLimiter(IntegrationSecurityService.Hash(context.Request.Headers.Authorization.ToString()), _ => new FixedWindowRateLimiterOptions { PermitLimit = Math.Max(10,builder.Configuration.GetValue<int?>("Integrations:ApiRateLimitPerMinute")??240), Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+});
+var configuredOrigins=builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()??[];
+var allowedOrigins=configuredOrigins.Length>0?configuredOrigins:builder.Environment.IsDevelopment()?["http://localhost:5173","http://127.0.0.1:5173","http://127.0.0.1:5174"]:[];
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
-    policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:5174").AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
+{
+    if(allowedOrigins.Length>0)policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
+    else policy.SetIsOriginAllowed(_=>false);
+}));
 
 var app = builder.Build();
 app.UseExceptionHandler();
@@ -70,15 +72,27 @@ app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? "";
     var isApi = path.Equals("/api", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase);
-    var isAnonymous = path.Equals("/health", StringComparison.OrdinalIgnoreCase)
+    var isAnonymous = path.StartsWith("/health", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/setup/status", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/setup/bootstrap", StringComparison.OrdinalIgnoreCase);
     if (!isApi || isAnonymous) { await next(); return; }
+    if(path.StartsWith("/api/v1",StringComparison.OrdinalIgnoreCase))
+    {
+        var security=context.RequestServices.GetRequiredService<IntegrationSecurityService>();var service=await security.ResolveAsync(context.Request.Headers.Authorization.ToString(),DateTimeOffset.UtcNow,context.RequestAborted);
+        if(service is null){context.Response.StatusCode=StatusCodes.Status401Unauthorized;await context.Response.WriteAsJsonAsync(new{error="A valid AeroLink service API key is required.",code="service_authentication_required"});return;}
+        context.Items["AeroLink.ServiceIdentity"]=service;await next();return;
+    }
     var identity = context.RequestServices.GetRequiredService<IdentityService>();
     var user = await identity.ResolveAsync(context.Request.Cookies[IdentityService.CookieName], DateTimeOffset.UtcNow, context.RequestAborted);
     if (user is null) { context.Response.StatusCode = StatusCodes.Status401Unauthorized; await context.Response.WriteAsJsonAsync(new { error = "Authentication required.", code = "authentication_required" }); return; }
     context.Items["AeroLink.User"] = user;
+    var browserMutation=!string.IsNullOrWhiteSpace(context.Request.Headers.Origin)||!string.IsNullOrWhiteSpace(context.Request.Headers["Sec-Fetch-Site"]);
+    if(browserMutation&&context.Request.Method is not ("GET" or "HEAD" or "OPTIONS" or "TRACE"))
+    {
+        var valid=context.RequestServices.GetRequiredService<BrowserMutationProtector>().Validate(context.Request.Cookies[IdentityService.CookieName],context.Request.Headers["X-AeroLink-CSRF"].ToString());
+        if(!valid){context.Response.StatusCode=StatusCodes.Status400BadRequest;await context.Response.WriteAsJsonAsync(new{error="The browser mutation token is missing or expired. Refresh and try again.",code="antiforgery_validation_failed"});return;}
+    }
     var db=context.RequestServices.GetRequiredService<AeroLinkDbContext>();Guid? scopedProjectId=null;
     if(context.Request.Query.TryGetValue("projectId",out var rawProject)&&Guid.TryParse(rawProject.FirstOrDefault(),out var queryProject))scopedProjectId=queryProject;
     var segments=path.Split('/',StringSplitOptions.RemoveEmptyEntries);if(scopedProjectId is null&&segments.Length>=3&&Guid.TryParse(segments[2],out var resourceId))
@@ -87,7 +101,9 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "AeroLink API" }));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
+app.MapGet("/health/live", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
+app.MapGet("/health/ready", async (AeroLinkDbContext db,CancellationToken ct) => await db.Database.CanConnectAsync(ct)?Results.Ok(new{status="ready",service="AeroLink API",database="connected"}):Results.Json(new{status="not_ready",service="AeroLink API",database="unavailable"},statusCode:StatusCodes.Status503ServiceUnavailable));
 
 app.MapGet("/api/setup/status", async (AeroLinkDbContext db, IConfiguration configuration, CancellationToken ct) =>
 {
@@ -136,6 +152,10 @@ app.MapPost("/api/auth/login", async (LoginRequest request, HttpContext http, Id
 }).RequireRateLimiting("authentication");
 app.MapPost("/api/auth/logout", async (HttpContext http, IdentityService identity, CancellationToken ct) => { await identity.LogoutAsync(http.Request.Cookies[IdentityService.CookieName], http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct); http.Response.Cookies.Delete(IdentityService.CookieName); return Results.NoContent(); });
 app.MapGet("/api/auth/me", (HttpContext http) => Results.Ok(http.UserAccount()));
+app.MapGet("/api/auth/csrf", (HttpContext http,BrowserMutationProtector protector) =>
+{
+    var session=http.Request.Cookies[IdentityService.CookieName];return Results.Ok(new{token=protector.Issue(session!),header="X-AeroLink-CSRF"});
+});
 
 app.MapPost("/api/showcase/seed", async (HttpContext http,FmsShowcaseSeeder seeder, IdentitySeeder identities, EnterpriseWorkspaceSeeder workspace, IConfiguration configuration, CancellationToken ct) => {if(!http.UserAccount().IsAdministrator)return Results.Forbid();if(!configuration.GetValue<bool>("Identity:SeedDemoAccounts"))return Results.NotFound();var result=await seeder.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); await workspace.EnsureAllAsync(ct); return Results.Ok(result); });
 
@@ -1602,9 +1622,22 @@ static string? BootstrapPasswordError(string password)
     return null;
 }
 
+app.MapAeroLinkIntegrationEndpoints();
+
 app.Run();
 
 public partial class Program { }
+
+public sealed class BrowserMutationProtector(Microsoft.AspNetCore.DataProtection.IDataProtectionProvider provider)
+{
+    private readonly Microsoft.AspNetCore.DataProtection.IDataProtector _protector=provider.CreateProtector("AeroLink.BrowserMutation.v1");
+    public string Issue(string sessionToken)=>_protector.Protect(sessionToken);
+    public bool Validate(string? sessionToken,string? requestToken)
+    {
+        if(string.IsNullOrWhiteSpace(sessionToken)||string.IsNullOrWhiteSpace(requestToken))return false;
+        try{var protectedSession=_protector.Unprotect(requestToken);var left=Encoding.UTF8.GetBytes(sessionToken);var right=Encoding.UTF8.GetBytes(protectedSession);return left.Length==right.Length&&CryptographicOperations.FixedTimeEquals(left,right);}catch(CryptographicException){return false;}
+    }
+}
 
 public sealed class AeroLinkAuthorizationHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
