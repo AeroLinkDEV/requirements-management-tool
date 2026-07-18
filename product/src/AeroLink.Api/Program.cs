@@ -157,7 +157,7 @@ app.MapGet("/api/auth/csrf", (HttpContext http,BrowserMutationProtector protecto
     var session=http.Request.Cookies[IdentityService.CookieName];return Results.Ok(new{token=protector.Issue(session!),header="X-AeroLink-CSRF"});
 });
 
-app.MapPost("/api/showcase/seed", async (HttpContext http,FmsShowcaseSeeder seeder, IdentitySeeder identities, EnterpriseWorkspaceSeeder workspace, IConfiguration configuration, CancellationToken ct) => {if(!http.UserAccount().IsAdministrator)return Results.Forbid();if(!configuration.GetValue<bool>("Identity:SeedDemoAccounts"))return Results.NotFound();var result=await seeder.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); await workspace.EnsureAllAsync(ct); return Results.Ok(result); });
+app.MapPost("/api/showcase/seed", async (HttpContext http,FmsShowcaseSeeder seeder, IdentitySeeder identities, EnterpriseRequirementsService workspace, IConfiguration configuration, CancellationToken ct) => {if(!http.UserAccount().IsAdministrator)return Results.Forbid();if(!configuration.GetValue<bool>("Identity:SeedDemoAccounts"))return Results.NotFound();var result=await seeder.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); await workspace.SynchronizeProjectAsync(result.ProjectId,"system.workspace",ct); return Results.Ok(result); });
 
 app.MapGet("/api/programs", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
 {

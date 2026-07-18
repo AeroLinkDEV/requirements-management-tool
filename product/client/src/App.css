@@ -72,10 +72,11 @@
   border-top: 1px solid #263954;
   padding: 16px 8px 0;
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
 }
+.appNavigation footer > .personAvatar { grid-row: 1; }
 .avatar {
   background: #6bd5c6;
   color: #0c2b32;

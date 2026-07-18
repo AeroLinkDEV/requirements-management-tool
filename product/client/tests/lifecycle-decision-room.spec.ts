@@ -15,7 +15,7 @@ test("Lifecycle Decision Room connects readiness, impact, evidence, people, and 
   await expect(page.getByRole("heading", { name: "Release Readiness" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Release lifecycle" })).toBeVisible();
   await expect(page.getByRole("img", { name: /Maya Patel, Systems Lead/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Compare with 1\.5/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Explore changes vs 1\.5/ })).toBeVisible();
 
   await page.getByRole("button", { name: "Explore baseline changes →" }).click();
   await expect(page.getByRole("heading", { name: "Change Impact Review" })).toBeVisible();

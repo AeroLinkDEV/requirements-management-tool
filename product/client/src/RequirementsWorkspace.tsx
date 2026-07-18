@@ -143,6 +143,7 @@ type Props = {
   onOpenScr: (id: string) => void;
   onProposeChange: (requirementId: string) => void;
   onOpenRequirement: (id: string) => void;
+  onCloseRequirement: () => void;
   onOpenTraceability: () => void;
 };
 
@@ -165,10 +166,12 @@ export default function RequirementsWorkspace({
   onOpenScr,
   onProposeChange,
   onOpenRequirement,
+  onCloseRequirement,
   onOpenTraceability,
 }: Props) {
   const appliedInitialView = useRef(false);
   const autoSelected = useRef(false);
+  const actionsMenu = useRef<HTMLDetailsElement>(null);
   const [data, setData] = useState<Workspace>(),
     [loading, setLoading] = useState(true),
     [search, setSearch] = useState(""),
@@ -575,11 +578,17 @@ export default function RequirementsWorkspace({
             <i aria-hidden="true">◈</i>
             <span><b>Authoritative view</b><small>Requirement content is read-only here</small></span>
           </span>
-          <details className="pageActionsMenu">
+          <details className="pageActionsMenu" ref={actionsMenu}>
             <summary>Workspace tools</summary>
             <div>
-              <button onClick={() => setShowSchema(true)}>⚙ Schemas</button>
-              <button onClick={() => setShowSave(true)}>☆ Save view</button>
+              <button onClick={() => {
+                actionsMenu.current?.removeAttribute("open");
+                setShowSchema(true);
+              }}>⚙ Schemas</button>
+              <button onClick={() => {
+                actionsMenu.current?.removeAttribute("open");
+                setShowSave(true);
+              }}>☆ Save view</button>
             </div>
           </details>
         </div>
@@ -829,7 +838,7 @@ export default function RequirementsWorkspace({
               )}
             </div>
           ))}
-          <details className="savedViews" open>
+          <details className="savedViews">
             <summary>
               <b>Saved views</b>
               <span>{data?.views.length ?? 0}</span>
@@ -994,6 +1003,8 @@ export default function RequirementsWorkspace({
               <button
                 aria-label="Close requirement inspector"
                 onClick={() => {
+                  autoSelected.current = true;
+                  onCloseRequirement();
                   setSelected(undefined);
                   setDetail(undefined);
                 }}

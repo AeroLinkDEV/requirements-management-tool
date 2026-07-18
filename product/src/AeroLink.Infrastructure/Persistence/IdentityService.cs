@@ -96,15 +96,34 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
     private static readonly string[] LastNames = ["Anderson","Bennett","Campbell","Chen","Clarke","Dubois","Evans","Foster","Garcia","Gupta","Harris","Ibrahim","Johnson","Kim","Lewis","Martin","Nguyen","Patel","Robinson","Wilson"];
     public async Task EnsureSeededAsync(CancellationToken ct = default)
     {
-        var now = DateTimeOffset.UtcNow; var programs = await db.Programs.AsNoTracking().Select(x => x.Id).ToListAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        var programs = await db.Programs.AsNoTracking().Select(x => x.Id).ToListAsync(ct);
         var demoPasswordHash = IdentityService.HashPassword(DemoPassword);
-        foreach (var person in People.Concat(GeneratedPeople()))
+        var directory = People.Concat(GeneratedPeople()).ToList();
+        var userNames = directory.Select(x => x.User).ToList();
+        var users = (await db.UserAccounts.Where(x => userNames.Contains(x.UserName)).ToListAsync(ct))
+            .ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
+        var membershipKeys = (await db.ProgramMemberships.AsNoTracking()
+                .Where(x => programs.Contains(x.ProgramId))
+                .Select(x => new { x.UserId, x.ProgramId, x.Role })
+                .ToListAsync(ct))
+            .Select(x => (x.UserId, x.ProgramId, x.Role))
+            .ToHashSet();
+        var curatedUsers = People.Select(x => x.User).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var person in directory)
         {
-            var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.UserName == person.User, ct);
-            if (user is null) { user = new(person.User, person.Name, person.Email, demoPasswordHash, now); db.UserAccounts.Add(user); await db.SaveChangesAsync(ct); }
-            else if (People.Any(x => x.User == person.User) && (user.DisplayName != person.Name || user.Email != person.Email)) user.RefreshDirectoryProfile(person.Name, person.Email);
+            if (!users.TryGetValue(person.User, out var user))
+            {
+                user = new(person.User, person.Name, person.Email, demoPasswordHash, now);
+                db.UserAccounts.Add(user);
+                users[person.User] = user;
+            }
+            else if (curatedUsers.Contains(person.User) && (user.DisplayName != person.Name || user.Email != person.Email))
+                user.RefreshDirectoryProfile(person.Name, person.Email);
             foreach (var program in programs) foreach (var role in person.Roles)
-                if (!await db.ProgramMemberships.AnyAsync(x => x.UserId == user.Id && x.ProgramId == program && x.Role == role, ct)) db.ProgramMemberships.Add(new(user.Id, program, role, "system.bootstrap", now));
+                if (membershipKeys.Add((user.Id, program, role)))
+                    db.ProgramMemberships.Add(new(user.Id, program, role, "system.bootstrap", now));
         }
         await db.SaveChangesAsync(ct);
     }

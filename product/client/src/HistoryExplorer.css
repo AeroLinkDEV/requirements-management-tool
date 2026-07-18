@@ -205,6 +205,17 @@
   font-weight: 700;
 }
 
+.historyState {
+  white-space: normal;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.historyState.selectedforbaseline,
+.historyState.inreview { font-size: 0; }
+.historyState.selectedforbaseline::after { content: "Baseline selected"; font-size: 11px; }
+.historyState.inreview::after { content: "In review"; font-size: 11px; }
+
 .historyState.approved,
 .historyState.selectedforbaseline {
   background: #e3f4ed;
@@ -477,7 +488,7 @@
   white-space: nowrap;
 }
 
-.large {
+.historyEmpty.large {
   padding-top: 140px;
 }
 
