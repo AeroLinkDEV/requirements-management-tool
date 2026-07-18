@@ -39,7 +39,7 @@ test('workspace tuning persists and quick navigation provides previews and recen
   await page.keyboard.press('Escape')
 
   await page.getByRole('button',{name:'Copy link to this page'}).click()
-  await expect(page.getByRole('status')).toContainText(/Link copied to clipboard|clipboard access/)
+  await expect(page.locator('.experienceToast')).toContainText(/Link copied to clipboard|clipboard access/)
   const sticky=await page.locator('.reqTableHead').evaluate(element=>getComputedStyle(element).position)
   expect(sticky).toBe('sticky')
 
