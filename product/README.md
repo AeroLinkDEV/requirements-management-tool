@@ -80,6 +80,8 @@ npm.cmd run dev
 
 Open `http://127.0.0.1:5173`. Local development uses PostgreSQL on port `54329`; application startup applies versioned migrations. The checked-in Development profile enables the explicit FMS showcase and local demonstration identities, while the production defaults keep both disabled. Set `DemoData__Enabled=false` and `Identity__SeedDemoAccounts=false` for a blank local onboarding run. SQLite remains available for isolated tests.
 
+The default showcase contains only `Flight Management System Live Program`, with released version 1.5 and in-work version 1.6. Older local databases can be reduced safely with the preview-first `product\scripts\Prune-LocalShowcasePrograms.ps1` maintenance command documented in [Operations and recovery](docs/OPERATIONS.md#fms-only-local-showcase-cleanup).
+
 For a production database, demo identities remain disabled. Configure the one-time, zero-user administrator bootstrap through the protected `Identity__BootstrapSecret` service environment setting, then remove it immediately after creating the first `admin` account. The complete procedure is in [Operations and recovery](docs/OPERATIONS.md#production-first-install-administrator); no bootstrap secret belongs in this repository.
 
 Local demonstration identities include `admin`, `systems.author`, `software.author`, `systems.reviewer`, and `release.manager`; their local-only password is `AeroLink!2026`. These credentials are intentionally non-production and must be replaced before any operational deployment. See [Operations and recovery](docs/OPERATIONS.md).
