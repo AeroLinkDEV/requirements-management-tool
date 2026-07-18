@@ -39,6 +39,24 @@ Implementation status: all three concepts were accepted and implemented on 2026-
 
 ## Concepts
 
+### Specification Studio — proposed next evolution
+
+![AeroLink Specification Studio concept](specification-studio-concept.png)
+
+This concept develops the implemented Precision Workbench into a true daily
+authoring environment: a resizable specification outline, a spacious inline
+document editor, and a contextual quality and change-impact inspector. The
+screen keeps Draft SCR/SWCR authority and autosave visible without allowing
+change-control mechanics to overwhelm the engineering work.
+
+Key proposal decisions:
+
+- make inline document authoring the primary working mode;
+- keep structure, content, and selected-requirement context visible together;
+- surface requirement-quality guidance and suspect impact at the point of edit;
+- keep change authority in a compact persistent strip; and
+- reserve deeper lifecycle evidence for contextual drill-down.
+
 ### A — Precision Workbench
 
 A requirements workspace with specification structure, a large controlled-record surface, and a contextual inspector. This is the safest next evolution and the strongest improvement for daily authoring and review.
