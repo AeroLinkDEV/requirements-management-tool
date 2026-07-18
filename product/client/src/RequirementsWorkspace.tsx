@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import type { AuthUser } from "./IdentityCenter";
-import ControlledAuthoringCenter from "./ControlledAuthoringCenter";
 import "./RequirementsWorkspace.css";
 
 type Field = {
@@ -99,6 +97,29 @@ type Detail = {
   traceCount: number;
   testCoverageCount: number;
 };
+type ImpactItem = {
+  id: string;
+  displayNumber?: string;
+  buildNumber?: string;
+  documentNumber?: string;
+  title?: string;
+  statement?: string;
+  level?: string;
+  state?: string;
+  release?: string;
+  baseline?: string;
+  name?: string;
+  type?: string;
+};
+type Impact = {
+  parents: ImpactItem[];
+  children: ImpactItem[];
+  tests: ImpactItem[];
+  baselines: ImpactItem[];
+  builds: ImpactItem[];
+  documents: ImpactItem[];
+  activeChanges: (ImpactItem & { kind?: string; proposedRevision?: number })[];
+};
 type Comment = {
   id: string;
   parentCommentId?: string;
@@ -111,37 +132,16 @@ type Comment = {
   resolvedAt?: string;
   disposition?: string;
 };
-type ImportRow = {
-  rowNumber: number;
-  identifier: string;
-  level: string;
-  statement: string;
-  rationale: string;
-  verificationMethod: string;
-  valid: boolean;
-  errors: string[];
-};
-type ImportPreview = {
-  id: string;
-  fileName: string;
-  sha256: string;
-  total: number;
-  validRows: number;
-  invalidRows: number;
-  rows: ImportRow[];
-};
-type Release = { id: string; version: string; isReleased: boolean };
 type Props = {
   api: string;
   projectId: string;
-  releases: Release[];
-  user: AuthUser;
   scope: "System" | "Software";
   initialViewId?: string;
   initialArtifactId?: string;
   onScopeChange: (scope: "System" | "Software") => void;
   onBack: () => void;
   onOpenScr: (id: string) => void;
+  onProposeChange: (requirementId: string) => void;
   onOpenRequirement: (id: string) => void;
   onOpenTraceability: () => void;
 };
@@ -157,14 +157,13 @@ const parseTags = (json: string) => {
 export default function RequirementsWorkspace({
   api,
   projectId,
-  releases,
-  user,
   scope,
   initialViewId,
   initialArtifactId,
   onScopeChange,
   onBack,
   onOpenScr,
+  onProposeChange,
   onOpenRequirement,
   onOpenTraceability,
 }: Props) {
@@ -182,32 +181,20 @@ export default function RequirementsWorkspace({
     [openComments, setOpenComments] = useState(false),
     [sort, setSort] = useState("identifier"),
     [showAdvanced, setShowAdvanced] = useState(false),
-    [showControl, setShowControl] = useState(false),
     [specificationId, setSpecificationId] = useState(""),
     [page, setPage] = useState(1),
     [pageSize, setPageSize] = useState(25),
     [mode, setMode] = useState<"table" | "document">("table"),
-    [selectedIds, setSelectedIds] = useState<string[]>([]),
     [selected, setSelected] = useState<Requirement>(),
     [detail, setDetail] = useState<Detail>(),
+    [impact, setImpact] = useState<Impact>(),
     [comments, setComments] = useState<Comment[]>([]),
     [inspectorTab, setInspectorTab] = useState<
-      "details" | "history" | "discussion"
+      "details" | "trace" | "history" | "discussion"
     >("details"),
     [error, setError] = useState(""),
-    [busy, setBusy] = useState(false),
-    [showImport, setShowImport] = useState(false),
-    [importPreview, setImportPreview] = useState<ImportPreview>(),
     [showSave, setShowSave] = useState(false),
     [showSchema, setShowSchema] = useState(false),
-    [bulkTag, setBulkTag] = useState(""),
-    [bulkPreview, setBulkPreview] = useState<{
-      id: string;
-      requested: number;
-      valid: number;
-      rejected: number;
-      operation: string;
-    }>(),
     [redline, setRedline] = useState<{
       from: number;
       to: number;
@@ -291,12 +278,14 @@ export default function RequirementsWorkspace({
   const open = useCallback(async (item: Requirement) => {
     setSelected(item);
     setInspectorTab("details");
-    const [a, b] = await Promise.all([
+    const [a, b, c] = await Promise.all([
       fetch(`${api}/api/enterprise-requirements/${item.id}`),
       fetch(`${api}/api/enterprise-requirements/${item.id}/comments`),
+      fetch(`${api}/api/enterprise-requirements/${item.id}/impact`),
     ]);
     if (a.ok) setDetail(await a.json());
     if (b.ok) setComments(await b.json());
+    if (c.ok) setImpact(await c.json());
   }, [api]);
   useEffect(() => {
     if (
@@ -314,11 +303,12 @@ export default function RequirementsWorkspace({
     if (!initialArtifactId || selected?.id === initialArtifactId) return;
     let cancelled = false;
     (async () => {
-      const [detailResponse, commentsResponse] = await Promise.all([
+      const [detailResponse, commentsResponse, impactResponse] = await Promise.all([
         fetch(`${api}/api/enterprise-requirements/${initialArtifactId}`),
         fetch(
           `${api}/api/enterprise-requirements/${initialArtifactId}/comments`,
         ),
+        fetch(`${api}/api/enterprise-requirements/${initialArtifactId}/impact`),
       ]);
       if (!detailResponse.ok) return;
       const value: Detail = await detailResponse.json();
@@ -347,15 +337,12 @@ export default function RequirementsWorkspace({
       setSelected(item);
       setInspectorTab("details");
       if (commentsResponse.ok) setComments(await commentsResponse.json());
+      if (impactResponse.ok) setImpact(await impactResponse.json());
     })();
     return () => {
       cancelled = true;
     };
   }, [api, initialArtifactId, selected?.id]);
-  const toggle = (id: string) =>
-    setSelectedIds((x) =>
-      x.includes(id) ? x.filter((y) => y !== id) : [...x, id],
-    );
   const clearFilters = () => {
     setSearch("");
     setLevel(scope);
@@ -482,92 +469,6 @@ export default function RequirementsWorkspace({
     );
     if (response.ok) setRedline(await response.json());
   };
-  const previewBulk = async () => {
-    if (!bulkTag.trim() || !selectedIds.length) return;
-    const spec = data?.specifications.find((x) => x.id === specificationId);
-    const response = await fetch(
-      `${api}/api/enterprise-requirements/bulk/preview`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId,
-          artifactIds: selectedIds,
-          tag: bulkTag,
-          specificationId: spec?.id || null,
-          sectionId: spec?.sections[0]?.id || null,
-        }),
-      },
-    );
-    if (response.ok) setBulkPreview(await response.json());
-    else setError((await response.json()).error);
-  };
-  const commitBulk = async () => {
-    if (!bulkPreview) return;
-    setBusy(true);
-    const response = await fetch(
-      `${api}/api/enterprise-requirements/bulk/${bulkPreview.id}/commit`,
-      { method: "POST" },
-    );
-    setBusy(false);
-    if (!response.ok) {
-      setError((await response.json()).error);
-      return;
-    }
-    setBulkPreview(undefined);
-    setBulkTag("");
-    setSelectedIds([]);
-    await load();
-  };
-  const previewImport = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    setBusy(true);
-    const response = await fetch(
-      `${api}/api/enterprise-requirements/import/preview?projectId=${projectId}`,
-      { method: "POST", body: f },
-    );
-    setBusy(false);
-    if (!response.ok) {
-      setError((await response.json()).error);
-      return;
-    }
-    setImportPreview(await response.json());
-  };
-  const commitImport = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!importPreview) return;
-    const f = new FormData(e.currentTarget);
-    const body = {
-      targetReleaseId: f.get("targetReleaseId"),
-      baseNumber: f.get("baseNumber"),
-      title: f.get("title"),
-      problem: f.get("problem"),
-      analysis: f.get("analysis"),
-      solution: f.get("solution"),
-      type: f.get("type"),
-    };
-    setBusy(true);
-    const response = await fetch(
-      `${api}/api/enterprise-requirements/import/${importPreview.id}/commit`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-    );
-    setBusy(false);
-    if (!response.ok) {
-      setError((await response.json()).error);
-      return;
-    }
-    const result = await response.json();
-    setShowImport(false);
-    setImportPreview(undefined);
-    onOpenScr(result.id);
-  };
-  const allSelected =
-    data?.items.length && data.items.every((x) => selectedIds.includes(x.id));
   const filterChips: { key: string; label: string; clear: () => void }[] = [];
   if (search.trim())
     filterChips.push({
@@ -641,12 +542,12 @@ export default function RequirementsWorkspace({
             ← Command Center
           </button>
           <p className="eyebrow">
-            CONTROLLED REQUIREMENTS / PRECISION WORKBENCH
+            CONTROLLED REQUIREMENTS / READ-ONLY EXPLORER
           </p>
-          <h1>{scope} Requirements</h1>
+          <h1>{scope} Requirements Explorer</h1>
           <p>
-            Author and review exact requirements with structure, records, and
-            engineering context visible together.
+            Read, trace, compare, and understand authoritative requirements.
+            Controlled content changes are created only through SCRs and SWCRs.
           </p>
         </div>
         <div className="reqHeaderActions">
@@ -670,35 +571,15 @@ export default function RequirementsWorkspace({
               Software
             </button>
           </div>
-          <span className="activeAuthor">
-            <i>
-              {user.displayName
-                .split(" ")
-                .map((part) => part[0])
-                .join("")
-                .slice(0, 2)}
-            </i>
-            <span>
-              <b>{user.displayName}</b>
-              <small>authenticated author</small>
-            </span>
+          <span className="explorerBoundary">
+            <i aria-hidden="true">◈</i>
+            <span><b>Authoritative view</b><small>Requirement content is read-only here</small></span>
           </span>
           <details className="pageActionsMenu">
             <summary>Workspace tools</summary>
             <div>
-              <button
-                onClick={() => {
-                  setSelected(undefined);
-                  setShowControl(true);
-                }}
-              >
-                ◎ My work
-              </button>
               <button onClick={() => setShowSchema(true)}>⚙ Schemas</button>
               <button onClick={() => setShowSave(true)}>☆ Save view</button>
-              <button onClick={() => setShowImport(true)}>
-                ⇧ Import requirements
-              </button>
             </div>
           </details>
         </div>
@@ -997,32 +878,19 @@ export default function RequirementsWorkspace({
               <p>
                 {filterChips.length
                   ? "Remove one or more filters to broaden the exact controlled set."
-                  : "Import approved source data or create a change request to establish the first controlled revision."}
+                  : "Create a controlled change request to introduce the first requirement revision."}
               </p>
               <div>
                 {filterChips.length ? (
                   <button onClick={clearFilters}>Clear all filters</button>
                 ) : (
-                  <button onClick={() => setShowImport(true)}>
-                    Import requirements
-                  </button>
+                  <button onClick={() => onProposeChange("")}>Open Changes</button>
                 )}
               </div>
             </div>
           ) : mode === "table" ? (
             <div className="reqTable">
               <div className="reqTableHead">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={!!allSelected}
-                    onChange={() =>
-                      setSelectedIds(
-                        allSelected ? [] : (data?.items.map((x) => x.id) ?? []),
-                      )
-                    }
-                  />
-                </label>
                 <span>Identifier & statement</span>
                 <span>Level</span>
                 <span>Verification</span>
@@ -1034,13 +902,6 @@ export default function RequirementsWorkspace({
                   className={selected?.id === item.id ? "selected" : ""}
                   key={item.id}
                 >
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(item.id)}
-                      onChange={() => toggle(item.id)}
-                    />
-                  </label>
                   <button
                     onClick={() => {
                       onOpenRequirement(item.id);
@@ -1148,6 +1009,12 @@ export default function RequirementsWorkspace({
                 Overview
               </button>
               <button
+                className={inspectorTab === "trace" ? "active" : ""}
+                onClick={() => setInspectorTab("trace")}
+              >
+                Trace &amp; impact
+              </button>
+              <button
                 className={inspectorTab === "history" ? "active" : ""}
                 onClick={() => setInspectorTab("history")}
               >
@@ -1168,10 +1035,13 @@ export default function RequirementsWorkspace({
                 </div>
                 <button
                   className="impactLaunch"
-                  onClick={() => setShowControl(true)}
+                  onClick={() => onProposeChange(selected.id)}
                 >
-                  Analyze impact &amp; propose change →
+                  Propose controlled change →
                 </button>
+                <p className="changeBoundaryNote">
+                  Opens a new Draft SCR/SWCR in Changes. This authoritative revision remains unchanged.
+                </p>
                 <h3>Requirement statement</h3>
                 <div className="richRequirement">{selected.statement}</div>
                 <h3>Digital thread</h3>
@@ -1252,6 +1122,35 @@ export default function RequirementsWorkspace({
                 ))}
               </div>
             )}
+            {inspectorTab === "trace" && (
+              <div className="inspectorBody traceInspector">
+                <div className="traceSummary">
+                  <article><b>{impact?.parents.length ?? 0}</b><span>upstream</span></article>
+                  <article><b>{impact?.children.length ?? 0}</b><span>downstream</span></article>
+                  <article><b>{impact?.tests.length ?? 0}</b><span>tests</span></article>
+                </div>
+                <button className="openDigitalThread" onClick={onOpenTraceability}>
+                  Open complete Digital Thread →
+                </button>
+                <h3>Active controlled changes</h3>
+                {impact?.activeChanges.length ? impact.activeChanges.map((item) => (
+                  <button className="activeChangeCard" key={item.id} onClick={() => onOpenScr(item.id)}>
+                    <span><b>{item.displayNumber}</b><i>{item.state}</i></span>
+                    <p>{item.title}</p>
+                    <small>{item.kind} · proposed revision {item.proposedRevision}</small>
+                  </button>
+                )) : <div className="traceEmpty"><b>No active change package</b><span>This requirement has no Draft, In Review, or Approved proposal awaiting baseline effectivity.</span></div>}
+                <h3>Upstream requirements</h3>
+                {impact?.parents.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
+                {!impact?.parents.length && <div className="traceEmpty"><span>No upstream requirement is recorded.</span></div>}
+                <h3>Downstream requirements</h3>
+                {impact?.children.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
+                {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
+                <h3>Verification coverage</h3>
+                {impact?.tests.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {item.state}</small></article>)}
+                {!impact?.tests.length && <div className="traceEmpty attention"><span>No verification procedure currently covers this revision.</span></div>}
+              </div>
+            )}
             {inspectorTab === "history" && (
               <div className="inspectorBody">
                 <div className="historyLead">
@@ -1316,57 +1215,6 @@ export default function RequirementsWorkspace({
           </aside>
         )}
       </div>
-      {!!selectedIds.length && (
-        <div className="bulkBar">
-          <b>{selectedIds.length} selected</b>
-          <span>Apply one governed operation to exact artifacts</span>
-          <input
-            value={bulkTag}
-            onChange={(e) => setBulkTag(e.target.value)}
-            placeholder="Classification tag"
-          />
-          <button disabled={!bulkTag.trim()} onClick={previewBulk}>
-            Preview bulk change
-          </button>
-          <button className="quiet" onClick={() => setSelectedIds([])}>
-            Clear
-          </button>
-        </div>
-      )}
-      {bulkPreview && (
-        <div className="reqModal">
-          <div>
-            <p className="eyebrow">GOVERNED BULK OPERATION</p>
-            <h2>Review before commit</h2>
-            <p>{bulkPreview.operation}</p>
-            <div className="previewStats">
-              <b>
-                {bulkPreview.valid}
-                <small>valid</small>
-              </b>
-              <b>
-                {bulkPreview.rejected}
-                <small>rejected</small>
-              </b>
-              <b>
-                {bulkPreview.requested}
-                <small>requested</small>
-              </b>
-            </div>
-            <div className="modalActions">
-              <button
-                className="secondary"
-                onClick={() => setBulkPreview(undefined)}
-              >
-                Cancel
-              </button>
-              <button disabled={busy} onClick={commitBulk}>
-                {busy ? "Committing…" : "Commit attributable change"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {showSave && (
         <div className="reqModal">
           <form onSubmit={saveView}>
@@ -1434,148 +1282,6 @@ export default function RequirementsWorkspace({
           </div>
         </div>
       )}
-      {showImport && (
-        <div className="reqModal importModal">
-          <div>
-            <button
-              className="modalClose"
-              onClick={() => {
-                setShowImport(false);
-                setImportPreview(undefined);
-              }}
-            >
-              ×
-            </button>
-            <p className="eyebrow">GOVERNED INTERCHANGE CENTER</p>
-            <h2>Import requirements</h2>
-            <p>
-              CSV and XLSX rows are mapped, validated, hashed, and previewed.
-              Commit creates a Draft SCR/SWCR—never approved requirements.
-            </p>
-            {!importPreview ? (
-              <form onSubmit={previewImport}>
-                <div className="dropZone">
-                  <span>⇧</span>
-                  <b>Select CSV or XLSX</b>
-                  <small>
-                    Columns: Identifier, Level, Statement, Rationale,
-                    VerificationMethod · 25 MB maximum
-                  </small>
-                  <input
-                    aria-label="Requirements import file"
-                    type="file"
-                    name="file"
-                    accept=".csv,.xlsx"
-                    required
-                  />
-                </div>
-                <button disabled={busy}>
-                  {busy ? "Validating…" : "Validate & preview"}
-                </button>
-              </form>
-            ) : (
-              <>
-                <div className="importIdentity">
-                  <div>
-                    <b>{importPreview.fileName}</b>
-                    <small>SHA-256 {importPreview.sha256.slice(0, 20)}…</small>
-                  </div>
-                  <div>
-                    <b>{importPreview.validRows}</b>
-                    <span>valid</span>
-                    <b className={importPreview.invalidRows ? "bad" : ""}>
-                      {importPreview.invalidRows}
-                    </b>
-                    <span>invalid</span>
-                  </div>
-                </div>
-                <div className="importRows">
-                  {importPreview.rows.slice(0, 10).map((r) => (
-                    <article
-                      className={r.valid ? "valid" : "invalid"}
-                      key={r.rowNumber}
-                    >
-                      <span>{r.rowNumber}</span>
-                      <div>
-                        <b>{r.identifier || "Missing identifier"}</b>
-                        <p>{r.statement || "Missing statement"}</p>
-                        <small>
-                          {r.valid
-                            ? `${r.level} · ${r.verificationMethod}`
-                            : r.errors.join(" · ")}
-                        </small>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-                {importPreview.invalidRows === 0 ? (
-                  <form className="commitImport" onSubmit={commitImport}>
-                    <h3>Create controlled change package</h3>
-                    <div className="importFields">
-                      <label>
-                        Type
-                        <select name="type">
-                          <option value="Software">SWCR</option>
-                          <option value="System">SCR</option>
-                        </select>
-                      </label>
-                      <label>
-                        Target release
-                        <select name="targetReleaseId" required>
-                          {releases
-                            .filter((x) => !x.isReleased)
-                            .map((x) => (
-                              <option value={x.id} key={x.id}>
-                                {x.version}
-                              </option>
-                            ))}
-                        </select>
-                      </label>
-                      <label>
-                        SCR/SWCR number
-                        <input
-                          name="baseNumber"
-                          pattern="[A-Z]+-[0-9]{8}"
-                          required
-                        />
-                      </label>
-                      <label className="wide">
-                        Title
-                        <input name="title" required />
-                      </label>
-                      <label>
-                        Problem
-                        <textarea name="problem" required />
-                      </label>
-                      <label>
-                        Analysis
-                        <textarea name="analysis" required />
-                      </label>
-                      <label>
-                        Solution
-                        <textarea name="solution" required />
-                      </label>
-                    </div>
-                    <button disabled={busy}>
-                      {busy
-                        ? "Creating Draft…"
-                        : `Create Draft with ${importPreview.validRows} changes`}
-                    </button>
-                  </form>
-                ) : (
-                  <div className="importBlocked">
-                    <b>Import blocked</b>
-                    <p>
-                      Correct the invalid rows in the source file and preview it
-                      again. No lifecycle data has been changed.
-                    </p>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
       {redline && (
         <div className="reqModal redlineModal">
           <div>
@@ -1613,17 +1319,6 @@ export default function RequirementsWorkspace({
             )}
           </div>
         </div>
-      )}
-      {showControl && (
-        <ControlledAuthoringCenter
-          api={api}
-          projectId={projectId}
-          releases={releases}
-          requirement={selected}
-          onClose={() => setShowControl(false)}
-          onOpenScr={onOpenScr}
-          onChanged={load}
-        />
       )}
     </main>
   );

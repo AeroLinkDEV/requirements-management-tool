@@ -6,7 +6,6 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   request,
 }) => {
   test.setTimeout(75_000);
-  const assignmentTitle = `Disposition requirement 150 verification impact ${Date.now()}`;
   await apiLogin(request);
   const seed = await request.post(`${apiBase}/api/showcase/seed`, {
     timeout: 45_000,
@@ -17,58 +16,25 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
     .locator(".program > select:not(.releaseSelector)")
     .selectOption({ label: "Flight Management System Live Program" });
   await openNavigationGroup(page,"SYSTEMS ENGINEERING");
-  await page.getByRole("link", { name: "System Requirements" }).click();
+  await page.getByRole("link", { name: "System Requirements Explorer" }).click();
   await expect(
-    page.getByRole("heading", { name: "System Requirements" }),
+    page.getByRole("heading", { name: "System Requirements Explorer" }),
   ).toBeVisible();
-  await page.getByText("Workspace tools", { exact: true }).click();
-  await page.getByRole("button", { name: /My work/ }).click();
-  await expect(
-    page.getByRole("heading", { name: "Engineering Work Center" }),
-  ).toBeVisible();
-  await expect(page.getByText("Repository scale")).toBeVisible();
-  await expect(page.getByText("Performance gate")).toBeVisible();
-  await page.getByLabel("Close controlled authoring center").click();
   await page.getByLabel("Search requirements").fill("SYSR-00000150");
-  await page.getByText(/SYSR-00000150\.\d{2}/).click();
+  await page.getByRole("button", { name: /SYSR-00000150\.\d{2}/ }).first().click();
+  await page.getByRole("button", { name: "Trace & impact" }).click();
+  await expect(page.getByRole("heading", { name: "Verification coverage" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open complete Digital Thread →" })).toBeVisible();
+  await page.getByRole("button", { name: "Overview" }).click();
   await page
-    .getByRole("button", { name: "Analyze impact & propose change →" })
+    .getByRole("button", { name: "Propose controlled change →" })
     .click();
-  await expect(page.getByText("Change-impact readiness")).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Verification procedures" }),
-  ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Baselines" })).toBeVisible();
-  await page.getByRole("button", { name: "Collaboration" }).click();
-  await page.getByLabel("Assignee username").fill("admin");
-  await page
-    .getByLabel("Title", { exact: true })
-    .fill(assignmentTitle);
-  await page
-    .getByLabel("Description")
-    .fill(
-      "Confirm the existing procedure remains sufficient for the proposed revision.",
-    );
-  await page.getByLabel("Due date").fill("2026-08-01");
-  await page.getByRole("button", { name: "Create assignment" }).click();
-  await expect(
-    page.getByText(assignmentTitle, {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "My work & operations" }).click();
-  await expect(
-    page
-      .getByText(assignmentTitle, {
-        exact: true,
-      })
-      .first(),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Propose controlled change" }).click();
-  await expect(
-    page.getByText("SCR/SWCR remains the approval authority"),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Create Draft SCR/SWCR →" }).click();
+  await expect(page.getByText("Started from Requirements Explorer")).toBeVisible();
+  await expect(page.locator('input[value*="SYSR-00000150"]').first()).toBeVisible();
+  await page.getByLabel("Problem").fill("The selected controlled behavior requires an attributable update.");
+  await page.getByRole("textbox", { name: "Analysis", exact: true }).fill("The requirement, trace, verification, and document impacts will be dispositioned in this change.");
+  await page.getByLabel("Solution").fill("Create the proposed successor revision without altering the authoritative requirement directly.");
+  await page.getByRole("button", { name: "Save SCR Draft" }).click();
   await expect(
     page.getByRole("heading", { name: "Change case" }),
   ).toBeVisible();

@@ -26,10 +26,10 @@ test('workspace tuning persists and quick navigation provides previews and recen
   await page.keyboard.press('Control+K')
   const palette=page.getByRole('dialog',{name:'Quick navigation'})
   await expect(palette.getByText('SUGGESTED WORKSPACES')).toBeVisible()
-  await palette.getByLabel('Search AeroLink').fill('System Requirements')
-  await expect(palette.locator('.palettePreview').getByRole('heading',{name:'System Requirements'})).toBeVisible()
+  await palette.getByLabel('Search AeroLink').fill('System Requirements Explorer')
+  await expect(palette.locator('.palettePreview').getByRole('heading',{name:'System Requirements Explorer'})).toBeVisible()
   await palette.getByLabel('Search AeroLink').press('Enter')
-  await expect(page.getByRole('heading',{name:'System Requirements'})).toBeVisible()
+  await expect(page.getByRole('heading',{name:'System Requirements Explorer'})).toBeVisible()
 
   await page.keyboard.press('Control+K')
   await expect(palette.getByText('RECENT DESTINATIONS')).toBeVisible()

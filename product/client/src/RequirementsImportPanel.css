@@ -1,0 +1,39 @@
+.changeIntakeTools { display:flex; align-items:center; justify-content:space-between; gap:20px; margin:0 0 18px; border:1px solid #dce5eb; border-radius:12px; background:#fff; padding:13px 16px; box-shadow:0 5px 18px rgba(20,43,65,.05); }
+.changeIntakeTools > div { display:flex; flex-direction:column; gap:3px; }
+.changeIntakeTools b { color:#263b50; font-size:12px; }
+.changeIntakeTools span { color:#718096; font-size:11px; }
+.changeIntakeTools button { min-height:38px; border:1px solid #b8d7d2; border-radius:8px; background:#edf7f5; padding:8px 12px; color:#176f66; font-weight:750; }
+.changeImportBackdrop { position:fixed; z-index:1000; inset:0; display:grid; place-items:center; background:rgba(8,20,38,.6); padding:28px; backdrop-filter:blur(4px); }
+.changeImportPanel { width:min(980px,96vw); max-height:92vh; overflow:auto; border-radius:16px; background:#f7f9fa; box-shadow:0 30px 80px rgba(6,18,33,.35); }
+.changeImportPanel > header { display:flex; justify-content:space-between; gap:20px; border-bottom:1px solid #dce4e9; background:#fff; padding:24px 28px; }
+.changeImportPanel h2 { margin:4px 0 5px; color:#172b44; font:700 23px Manrope,sans-serif; }
+.changeImportPanel header p:last-child { max-width:720px; margin:0; color:#66768a; font-size:12px; line-height:1.5; }
+.changeImportPanel header > button { width:36px; height:36px; border:0; border-radius:9px; background:#edf1f4; color:#42566b; font-size:20px; }
+.changeImportFile { display:flex; flex-direction:column; align-items:center; gap:16px; padding:34px; }
+.changeImportFile label { width:100%; display:flex; min-height:190px; flex-direction:column; align-items:center; justify-content:center; gap:7px; border:2px dashed #b8cbd2; border-radius:13px; background:#fff; color:#315166; }
+.changeImportFile label > span { color:#268a7e; font-size:28px; }
+.changeImportFile small { color:#788798; font-size:11px; }
+.changeImportFile input { margin-top:8px; }
+.changeImportFile > button,.changeImportCase > button { min-height:42px; border:0; border-radius:9px; background:#176f66; padding:10px 16px; color:#fff; font-weight:750; }
+.changeImportPreview { display:flex; flex-direction:column; gap:15px; padding:24px 28px 30px; }
+.changeImportIdentity { display:flex; justify-content:space-between; gap:20px; border:1px solid #dce4e9; border-radius:11px; background:#fff; padding:14px; }
+.changeImportIdentity > div { display:flex; align-items:center; gap:9px; }
+.changeImportIdentity > div:first-child { flex-direction:column; align-items:flex-start; gap:2px; }
+.changeImportIdentity small,.changeImportIdentity span { color:#718096; font-size:10px; }
+.changeImportIdentity .bad { color:#a13c4c; }
+.changeImportRows { max-height:300px; overflow:auto; border:1px solid #dce4e9; border-radius:11px; background:#fff; }
+.changeImportRows article { display:grid; grid-template-columns:34px 1fr; gap:10px; border-bottom:1px solid #edf1f3; padding:11px 13px; }
+.changeImportRows article > span { color:#8a96a5; font-size:10px; }
+.changeImportRows p { margin:4px 0; color:#41556a; font-size:12px; }
+.changeImportRows small { color:#748397; font-size:10px; }
+.changeImportRows article.invalid { border-left:3px solid #c55e6d; background:#fff8f8; }
+.changeImportCase { display:flex; flex-direction:column; gap:12px; border:1px solid #dce4e9; border-radius:11px; background:#fff; padding:18px; }
+.changeImportCase h3 { margin:0; color:#263b50; font-size:14px; }
+.changeImportCase > label,.changeImportCase > div label { display:flex; flex-direction:column; gap:5px; color:#536579; font-size:11px; font-weight:700; }
+.changeImportCase > div { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.changeImportCase input,.changeImportCase textarea { border:1px solid #cfd9e1; border-radius:8px; padding:9px; font:inherit; }
+.changeImportCase textarea { min-height:75px; resize:vertical; }
+.changeImportBlocked { display:flex; align-items:center; gap:12px; border:1px solid #ebd29a; border-radius:10px; background:#fff8e9; padding:13px; color:#765c22; }
+.changeImportBlocked span { flex:1; font-size:11px; }
+.changeImportBlocked button { border:1px solid #d9bd7c; border-radius:7px; background:#fff; padding:8px 10px; color:#765c22; }
+@media(max-width:800px){.changeIntakeTools{align-items:flex-start;flex-direction:column}.changeImportCase>div{grid-template-columns:1fr}.changeImportBackdrop{padding:10px}}

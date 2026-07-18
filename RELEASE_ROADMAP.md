@@ -111,6 +111,10 @@ The current application now includes a complete first vertical increment for dur
 
 The next increment should extend the proven edit-session contract to requirement proposals, specification structures, test procedures, trace links, and release-planning drafts; complete email outbox delivery; broaden universal search facets and pagination; and add browser journeys for the remaining controlled document, verification/retest, and release-approval paths.
 
+### 2026-07-18 Requirements Explorer boundary delivered
+
+The Requirements surface is now intentionally read-only: users browse specifications, inspect authoritative revisions, understand trace and verification context, review history and discussion, and see active controlled changes without editing requirement content. “Propose controlled change” creates a durable handoff to the dedicated SCR/SWCR editor with the selected requirement pre-populated. Governed CSV/XLSX onboarding also begins in Changes and creates a Draft package; direct bulk mutation and import entry points have been removed from Explorer. No AI-facing score, suggestion, assistant, or generative control is presented.
+
 The market benchmark in [ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md](ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md) establishes a maturity program that cuts across the original domain phases:
 
 1. **Enterprise Requirements Workspace:** configurable schemas, specification/module authoring, rich content, collaboration, universal search, saved views, bulk operations, redlines, and governed CSV/Excel onboarding.

@@ -35,9 +35,9 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   ).toBeVisible();
 
   await openNavigationGroup(page,"SOFTWARE ENGINEERING");
-  await page.getByRole("link", { name: "HLR & LLR Requirements" }).click();
+  await page.getByRole("link", { name: "Software Requirements Explorer" }).click();
   await expect(
-    page.getByRole("heading", { name: "Software Requirements" }),
+    page.getByRole("heading", { name: "Software Requirements Explorer" }),
   ).toBeVisible();
   await page.getByLabel("Search requirements").fill("LLR-00000700");
   await expect(page.getByText(/LLR-00000700/).first()).toBeVisible();
