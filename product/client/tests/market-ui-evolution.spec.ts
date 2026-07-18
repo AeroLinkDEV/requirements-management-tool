@@ -37,7 +37,8 @@ test("market evolution views stay live, legible, and visually contained", async 
   await testInfo.attach("concept-b-digital-thread", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
 
   await openNavigationGroup(page, "RELEASE & CONFIGURATION");
-  await page.getByRole("link", { name: "Release Campaign" }).click();
+  await page.getByRole("link", { name: "Lifecycle Decision Room" }).click();
+  await page.getByRole("button", { name: "Open exact work →" }).first().click();
   await expect(page.locator(".campaignGateRail")).toBeVisible();
   await expect(page.locator(".evidencePulse")).toBeVisible();
   await expectLegibleAndContained(page, ".campaignPage");

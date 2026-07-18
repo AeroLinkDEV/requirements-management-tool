@@ -72,8 +72,8 @@ public sealed class ReleaseCampaignPersistenceTests
             var service = new ReleaseExecutionService(db, new EvidenceFileStore(evidenceRoot)); var reconciled = await service.ReconcileAsync(campaign.Id, "assurance.test", now, default);
             Assert.True(reconciled.TraceLinksCreated > 0); Assert.True(reconciled.CoverageLinksCreated > 0); Assert.Equal(1, reconciled.UncoveredRequirements);
 
-            var introducedRevision = await (from member in db.BaselineRequirements where member.BaselineId == baseline.Id join artifact in db.Requirements on member.ArtifactId equals artifact.Id where artifact.BaseNumber == "SYSR-00000151" select member.RevisionId).SingleAsync();
-            var procedure = new TestProcedure(summary.ProjectId, "SYSTP-00000076", "Verify round-robin waypoint sequencing", "test.author", now, TestProcedureLevel.System);
+            var introducedRevision = await (from member in db.BaselineRequirements where member.BaselineId == baseline.Id join artifact in db.Requirements on member.ArtifactId equals artifact.Id where artifact.BaseNumber == "SYSR-000151" select member.RevisionId).SingleAsync();
+            var procedure = new TestProcedure(summary.ProjectId, "SYSTP-000076", "Verify round-robin waypoint sequencing", "test.author", now, TestProcedureLevel.System);
             var revision = new TestProcedureRevision(procedure.Id, 0, "Verify round-robin sequencing.", "Load the release candidate.", "Exercise every eligible sequencing transition.", "Every transition follows the approved round-robin requirement.", TestProcedureState.Approved, "test.author", now);
             db.AddRange(procedure, revision, new TestRequirementCoverage(revision.Id, introducedRevision));
             var build = new SoftwareBuild(summary.ProjectId, campaign.ReleaseId, baseline.Id, "FMS-1.6-RC1", "Release-candidate verification build.", "build.engineer", now); db.SoftwareBuilds.Add(build);

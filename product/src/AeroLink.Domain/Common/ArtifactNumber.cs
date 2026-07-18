@@ -4,7 +4,7 @@ namespace AeroLink.Domain.Common;
 
 public static partial class ArtifactNumber
 {
-    [GeneratedRegex("^[A-Z]+-[0-9]{8}$")]
+    [GeneratedRegex("^[A-Z]+-[0-9]{6,8}$")]
     private static partial Regex BasePattern();
 
     public static string ValidateBase(string value)
@@ -12,7 +12,7 @@ public static partial class ArtifactNumber
         var normalized = value.Trim().ToUpperInvariant();
         if (!BasePattern().IsMatch(normalized))
         {
-            throw new DomainException("Artifact identifiers must use PREFIX-00000000 format.");
+            throw new DomainException("Artifact identifiers must use PREFIX-000001 format (legacy eight-digit identifiers remain accepted during migration).");
         }
 
         return normalized;

@@ -81,16 +81,16 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
         ("software.author", "Software Requirements Author", "software.author@aerolink.local", [ProgramRole.Engineer]),
         ("systems.reviewer", "Systems Engineer", "systems.reviewer@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
         ("assurance.reviewer", "Development Assurance Reviewer", "assurance@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
-        ("lead.reviewer", "Engineering Lead", "engineering.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
+        ("lead.reviewer", "Maya Patel", "maya.patel@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
         ("software.lead", "Software Engineering Lead", "software.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
         ("systems.lead", "Systems Engineering Lead", "systems.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
         ("engineering.manager", "Engineering Manager", "engineering.manager@aerolink.local", [ProgramRole.ProgramManager, ProgramRole.Approver]),
         ("manager.reviewer", "Engineering Manager", "manager.reviewer@aerolink.local", [ProgramRole.ProgramManager, ProgramRole.Approver]),
-        ("program.manager", "Program Manager", "program.manager@aerolink.local", [ProgramRole.ProgramManager, ProgramRole.Approver]),
-        ("release.manager", "Release Manager", "release.manager@aerolink.local", [ProgramRole.ConfigurationManager, ProgramRole.ProgramManager]),
+        ("program.manager", "Olivia Chen", "olivia.chen@aerolink.local", [ProgramRole.ProgramManager, ProgramRole.Approver]),
+        ("release.manager", "Daniel Reyes", "daniel.reyes@aerolink.local", [ProgramRole.ConfigurationManager, ProgramRole.ProgramManager]),
         ("cm.fms", "Configuration Manager", "configuration@aerolink.local", [ProgramRole.ConfigurationManager]),
         ("test.author", "Verification Author", "test.author@aerolink.local", [ProgramRole.TestEngineer]),
-        ("test.engineer", "Verification Engineer", "test.engineer@aerolink.local", [ProgramRole.TestEngineer])
+        ("test.engineer", "Ethan Brooks", "ethan.brooks@aerolink.local", [ProgramRole.TestEngineer])
     ];
     private static readonly string[] FirstNames = ["Avery","Blake","Cameron","Casey","Devon","Emerson","Finley","Harper","Jordan","Kai","Logan","Morgan","Parker","Quinn","Reese","Riley","Rowan","Sage","Sawyer","Taylor","Alex","Jamie","Robin"];
     private static readonly string[] LastNames = ["Anderson","Bennett","Campbell","Chen","Clarke","Dubois","Evans","Foster","Garcia","Gupta","Harris","Ibrahim","Johnson","Kim","Lewis","Martin","Nguyen","Patel","Robinson","Wilson"];
@@ -102,6 +102,7 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
         {
             var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.UserName == person.User, ct);
             if (user is null) { user = new(person.User, person.Name, person.Email, demoPasswordHash, now); db.UserAccounts.Add(user); await db.SaveChangesAsync(ct); }
+            else if (People.Any(x => x.User == person.User) && (user.DisplayName != person.Name || user.Email != person.Email)) user.RefreshDirectoryProfile(person.Name, person.Email);
             foreach (var program in programs) foreach (var role in person.Roles)
                 if (!await db.ProgramMemberships.AnyAsync(x => x.UserId == user.Id && x.ProgramId == program && x.Role == role, ct)) db.ProgramMemberships.Add(new(user.Id, program, role, "system.bootstrap", now));
         }

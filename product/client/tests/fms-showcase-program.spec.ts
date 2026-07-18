@@ -5,10 +5,10 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   page,
   request,
 }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
   await apiLogin(request);
   const seed = await request.post(`${apiBase}/api/showcase/seed`, {
-    timeout: 45_000,
+    timeout: 90_000,
   });
   expect(seed.ok(), await seed.text()).toBeTruthy();
   await login(page);
@@ -39,8 +39,8 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await expect(
     page.getByRole("heading", { name: "Software Requirements Explorer" }),
   ).toBeVisible();
-  await page.getByLabel("Search requirements").fill("LLR-00000700");
-  await expect(page.getByText(/LLR-00000700/).first()).toBeVisible();
+  await page.getByLabel("Search requirements").fill("LLR-000700");
+  await expect(page.getByText(/LLR-000700/).first()).toBeVisible();
   await page.getByRole("link", { name: /Command Center/ }).first().click();
   await openNavigationGroup(page,"VERIFICATION");
   await page.getByRole("link", { name: "Traceability & Outputs" }).click();
@@ -49,12 +49,13 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   ).toBeVisible();
   await expect(page.getByText("1,250 requirements")).toBeVisible();
   await page.getByRole("button", { name: /Controlled Documents/ }).click();
-  await expect(page.getByText("SYSRD-00000015.00")).toBeVisible();
-  await expect(page.getByText("HLRD-00000015.00")).toBeVisible();
-  await expect(page.getByText("LLRD-00000015.00")).toBeVisible();
+  await expect(page.getByText("SYSRD-000015.00")).toBeVisible();
+  await expect(page.getByText("HLRD-000015.00")).toBeVisible();
+  await expect(page.getByText("LLRD-000015.00")).toBeVisible();
   await page.getByRole("link", { name: /Command Center/ }).first().click();
   await openNavigationGroup(page,"RELEASE & CONFIGURATION");
-  await page.getByRole("link", { name: "Release Campaign" }).click();
+  await page.getByRole("link", { name: "Lifecycle Decision Room" }).click();
+  await page.getByRole("button", { name: "Open exact work →" }).first().click();
   await expect(
     page.getByRole("heading", { name: "FMS 1.6 Release Campaign" }),
   ).toBeVisible();

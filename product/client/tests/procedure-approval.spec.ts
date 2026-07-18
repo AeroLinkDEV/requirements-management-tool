@@ -9,7 +9,7 @@ test('test procedures require independent electronic approval before execution',
 
   const engineer=await playwright.request.newContext();const login=await engineer.post(`${apiBase}/api/auth/login`,{data:{userName:'test.engineer',password:'AeroLink!2026'}});expect(login.ok(),await login.text()).toBeTruthy()
   const created=await engineer.post(`${apiBase}/api/test-procedures`,{data:{projectId:showcase.projectId,baseNumber:'CLIENT-IGNORED',title:'Verify independent approval control',objective:'Verify the selected exact requirement.',preconditions:'Released baseline loaded.',steps:'Exercise the required behavior.',expectedResult:'The approved behavior is observed.',requirementRevisionIds:[requirements.items[0].revisionId],level:'System'}})
-  expect(created.ok(),await created.text()).toBeTruthy();const procedure=await created.json();expect(procedure.state).toBe('Draft');expect(procedure.displayNumber).toMatch(/^SYSTP-\d{8}\.00$/)
+  expect(created.ok(),await created.text()).toBeTruthy();const procedure=await created.json();expect(procedure.state).toBe('Draft');expect(procedure.displayNumber).toMatch(/^SYSTP-\d{6}\.00$/)
 
   const execution={projectId:showcase.projectId,procedureRevisionId:procedure.revisionId,softwareBuildId:null,retestOfExecutionId:null,outcome:'Pass',executedBy:'ignored.client.actor',configuration:'Controlled integration rig',determination:'Observed result satisfies the approved expected result.',evidenceReference:'evidence/procedure-approval.json',executedAt:new Date().toISOString()}
   const blocked=await engineer.post(`${apiBase}/api/test-executions`,{data:execution});expect(blocked.status(),await blocked.text()).toBe(400);expect((await blocked.json()).error).toContain('approved')

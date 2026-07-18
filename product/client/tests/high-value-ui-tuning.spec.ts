@@ -34,12 +34,12 @@ test('workspace tuning persists and quick navigation provides previews and recen
   await page.keyboard.press('Control+K')
   await expect(palette.getByText('RECENT DESTINATIONS')).toBeVisible()
   await expect(palette.getByRole('link',{name:/System Requirements/}).first()).toBeVisible()
-  await palette.getByLabel('Search AeroLink').fill('SYSR-00000150')
-  await expect(palette.locator('.palettePreview').getByRole('heading',{name:/SYSR-00000150/})).toBeVisible()
+  await palette.getByLabel('Search AeroLink').fill('SYSR-000150')
+  await expect(palette.locator('.palettePreview').getByRole('heading',{name:/SYSR-000150/})).toBeVisible()
   await page.keyboard.press('Escape')
 
   await page.getByRole('button',{name:'Copy link to this page'}).click()
-  await expect(page.getByRole('status')).toContainText(/Link copied to clipboard|clipboard access/)
+  await expect(page.locator('.experienceToast')).toContainText(/Link copied to clipboard|clipboard access/)
   const sticky=await page.locator('.reqTableHead').evaluate(element=>getComputedStyle(element).position)
   expect(sticky).toBe('sticky')
 

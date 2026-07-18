@@ -15,7 +15,7 @@ Keys belong to one Project, are hashed at rest, cannot be recovered, and can be 
 ## Requirement reads
 
 ```http
-GET /api/v1/requirements?projectId=<guid>&pageSize=50&cursor=SYSR-00000100
+GET /api/v1/requirements?projectId=<guid>&pageSize=50&cursor=SYSR-000100
 Authorization: Bearer <api-key>
 ```
 

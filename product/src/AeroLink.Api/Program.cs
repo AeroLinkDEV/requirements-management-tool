@@ -760,12 +760,12 @@ app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, Gener
     var requirementCounts = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id group artifact by artifact.Level into g select new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
     var testCounts = await db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == project.Id).GroupBy(x => x.Level).Select(x => new { x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
     var suffix = release.Version.Replace(".", ""); var specs = new[] {
-        (ControlledDocumentType.Sysrd,$"SYSRD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} System Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.System)),
-        (ControlledDocumentType.SwrdHighLevel,$"HLRD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} High-Level Software Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.HighLevel)),
-        (ControlledDocumentType.SwrdLowLevel,$"LLRD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} Low-Level Software Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.LowLevel)),
-        (ControlledDocumentType.SystemTestProcedures,$"SYSTD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} System Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.System)),
-        (ControlledDocumentType.HighLevelTestProcedures,$"HLRTD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} HLR Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.HighLevel)),
-        (ControlledDocumentType.LowLevelTestProcedures,$"LLRTD-{int.Parse(suffix):D8}",$"{project.SoftwareProduct} LLR Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.LowLevel)) };
+        (ControlledDocumentType.Sysrd,$"SYSRD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} System Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.System)),
+        (ControlledDocumentType.SwrdHighLevel,$"HLRD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} High-Level Software Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.HighLevel)),
+        (ControlledDocumentType.SwrdLowLevel,$"LLRD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} Low-Level Software Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.LowLevel)),
+        (ControlledDocumentType.SystemTestProcedures,$"SYSTD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} System Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.System)),
+        (ControlledDocumentType.HighLevelTestProcedures,$"HLRTD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} HLR Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.HighLevel)),
+        (ControlledDocumentType.LowLevelTestProcedures,$"LLRTD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} LLR Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.LowLevel)) };
     var existing = await db.ControlledDocuments.Where(x => x.BaselineId == id).ToListAsync(ct); foreach (var spec in specs.Where(s => existing.All(x => x.Type != s.Item1))) { var content = $"{baseline.RequirementsHash}|{spec.Item1}|{spec.Item4}|{http.UserAccount().UserName}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant(); db.ControlledDocuments.Add(new ControlledDocument(project.Id, release.Id, baseline.Id, spec.Item1, spec.Item2, spec.Item3, 0, hash, spec.Item4, DateTimeOffset.UtcNow)); }
     await db.SaveChangesAsync(ct); return Results.Ok(new { generated = await db.ControlledDocuments.CountAsync(x => x.BaselineId == id, ct) });
 });
@@ -1390,7 +1390,7 @@ app.MapGet("/api/enterprise-requirements/import/{id:guid}/errors.csv",async(Guid
 });
 app.MapGet("/api/enterprise-requirements/performance",async(Guid projectId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
 {
-    if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();var total=await db.Requirements.AsNoTracking().CountAsync(x=>x.ProjectId==projectId,ct);var samples=new List<PerformanceSample>();async Task Measure(string name,long target,Func<Task> action){await action();var timings=new List<long>();for(var i=0;i<3;i++){var sw=Stopwatch.StartNew();await action();sw.Stop();timings.Add(sw.ElapsedMilliseconds);}var p95=timings.Max();samples.Add(new(name,target,p95,p95<=target,timings));}await Measure("page_100",500,async()=>{_=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderBy(x=>x.BaseNumber).Take(100).Select(x=>new{x.Id,x.BaseNumber}).ToListAsync(ct);});await Measure("exact_identifier",300,async()=>{_=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.BaseNumber=="SYSR-00000001").Select(x=>x.Id).FirstOrDefaultAsync(ct);});await Measure("open_collaboration",500,async()=>{_=await db.ArtifactComments.AsNoTracking().CountAsync(x=>x.ProjectId==projectId&&x.State==CollaborationState.Open,ct);});return Results.Ok(new{totalRequirements=total,scaleTarget=50_000,measuredAt=DateTimeOffset.UtcNow,allPassed=samples.All(x=>x.Passed),samples});
+    if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();var total=await db.Requirements.AsNoTracking().CountAsync(x=>x.ProjectId==projectId,ct);var samples=new List<PerformanceSample>();async Task Measure(string name,long target,Func<Task> action){await action();var timings=new List<long>();for(var i=0;i<3;i++){var sw=Stopwatch.StartNew();await action();sw.Stop();timings.Add(sw.ElapsedMilliseconds);}var p95=timings.Max();samples.Add(new(name,target,p95,p95<=target,timings));}await Measure("page_100",500,async()=>{_=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderBy(x=>x.BaseNumber).Take(100).Select(x=>new{x.Id,x.BaseNumber}).ToListAsync(ct);});await Measure("exact_identifier",300,async()=>{_=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.BaseNumber=="SYSR-000001").Select(x=>x.Id).FirstOrDefaultAsync(ct);});await Measure("open_collaboration",500,async()=>{_=await db.ArtifactComments.AsNoTracking().CountAsync(x=>x.ProjectId==projectId&&x.State==CollaborationState.Open,ct);});return Results.Ok(new{totalRequirements=total,scaleTarget=50_000,measuredAt=DateTimeOffset.UtcNow,allPassed=samples.All(x=>x.Passed),samples});
 });
 
 app.MapPost("/api/enterprise-requirements/import/preview",async(Guid projectId,Guid? mappingId,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
@@ -1735,7 +1735,7 @@ static class IdentifierAllocator
     {
         var prefix = type == ChangeRequestType.System ? "SCR" : "SWCR";
         var numbers = await db.SystemChangeRequests.AsNoTracking().Where(x => x.BaseNumber.StartsWith(prefix + "-")).Select(x => x.BaseNumber).ToListAsync(ct);
-        return Format(prefix, Max(numbers, prefix) + 1);
+        return FormatChangeRequest(prefix, Max(numbers, prefix) + 1);
     }
 
     public static async Task<string> NextRequirementAsync(AeroLinkDbContext db, string prefix, CancellationToken ct)
@@ -1753,7 +1753,8 @@ static class IdentifierAllocator
     }
 
     public static int Sequence(string number) => int.TryParse(number[(number.LastIndexOf('-') + 1)..], out var value) ? value : 1;
-    public static string Format(string prefix, int sequence) => $"{prefix}-{sequence:D8}";
+    public static string Format(string prefix, int sequence) => $"{prefix}-{sequence:D6}";
+    private static string FormatChangeRequest(string prefix, int sequence) => $"{prefix}-{sequence:D8}";
     private static int Max(IEnumerable<string> numbers, string prefix) => numbers.Select(x => x.StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase) && int.TryParse(x[(prefix.Length + 1)..], out var value) ? value : 0).DefaultIfEmpty(0).Max();
 }
 
