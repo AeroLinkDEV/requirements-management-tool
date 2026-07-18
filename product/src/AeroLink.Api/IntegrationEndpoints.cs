@@ -40,7 +40,7 @@ public static class IntegrationEndpoints
         return Results.Ok(new
         {
             generatedAt=DateTimeOffset.UtcNow,
-            api=new{version="v1",basePath="/api/v1",status="Operational",capabilities=new[]{"Scoped service identities","Cursor pagination","Idempotent event ingestion","Stable problem responses"}},
+            api=new{version="v1",basePath="/api/v1",status="Operational",capabilities=new[]{"Scoped service identities","Cursor pagination","Idempotent event ingestion","Lifecycle-wide events","ReqIF 1.2 exchange","Stable problem responses"}},
             metrics=new{activeIdentities=identities.Count(x=>x.State==ServiceIdentityState.Active),enabledWebhooks=subscriptions.Count(x=>x.IsEnabled),events24h=events.Count(x=>x.OccurredAt>=DateTimeOffset.UtcNow.AddHours(-24)),deliverySuccess=deliveries.Count==0?100:(int)Math.Round(deliveries.Count(x=>x.State==WebhookDeliveryState.Delivered)*100d/deliveries.Count),deadLetters=deliveries.Count(x=>x.State==WebhookDeliveryState.DeadLettered)},
             identities=identities.Select(x=>new{x.Id,x.Name,x.ClientId,scopes=JsonSerializer.Deserialize<string[]>(x.ScopesJson)??[],state=x.State.ToString(),x.CreatedAt,x.CreatedBy,x.LastUsedAt,x.RevokedAt}),
             webhooks=subscriptions.Select(x=>new{x.Id,x.Name,x.EndpointUrl,eventTypes=JsonSerializer.Deserialize<string[]>(x.EventTypesJson)??[],x.IsEnabled,x.CreatedAt,x.UpdatedAt}),

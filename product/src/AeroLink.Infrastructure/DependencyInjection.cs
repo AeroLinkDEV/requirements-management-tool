@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<IdentityService>();
         services.AddScoped<IdentitySeeder>();
         services.AddScoped<EnterpriseRequirementsService>();
+        services.AddScoped<ReqIfExchangeService>();
         services.AddScoped<EnterpriseWorkspaceSeeder>();
         return services;
     }

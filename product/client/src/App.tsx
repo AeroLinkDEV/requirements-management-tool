@@ -496,6 +496,7 @@ function App() {
       <IntegrationCommandCenter
         api={API}
         projectId={project.project.id}
+        releaseId={release?.id??""}
         onBack={() => navigate("dashboard")}
       />
     );
