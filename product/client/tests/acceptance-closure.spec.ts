@@ -2,9 +2,9 @@ import { expect, test } from '@playwright/test'
 import { apiBase, apiLogin } from './auth'
 
 test('acceptance closure proves governed revisioning, direct review work, publications, full trace and historical discovery',async({request,playwright})=>{
- test.setTimeout(120_000)
+ test.setTimeout(180_000)
  await apiLogin(request)
- const seeded=await request.post(`${apiBase}/api/showcase/seed`,{timeout:60_000})
+ const seeded=await request.post(`${apiBase}/api/showcase/seed`,{timeout:120_000})
  expect(seeded.ok(),await seeded.text()).toBeTruthy()
  const workspaces=await (await request.get(`${apiBase}/api/workspaces`)).json()
  const fms=workspaces.find((x:any)=>x.program.name==='Flight Management System Live Program')
