@@ -55,8 +55,8 @@ export function readRoute(): AppRoute {
   if (path === "my-work") return { ...base, view: "mywork", discipline: "system" };
   if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "System" };
   if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
-  if (path === "systems/change-requests/new") return { ...base, view: "createSystemScr", discipline: "system" };
-  if (path === "software/change-requests/new") return { ...base, view: "createSoftwareChange", discipline: "software" };
+  if (path === "systems/change-requests/new") return { ...base, view: "createSystemScr", discipline: "system", artifactId: query.get("requirement") || undefined };
+  if (path === "software/change-requests/new") return { ...base, view: "createSoftwareChange", discipline: "software", artifactId: query.get("requirement") || undefined };
   if (tail[0] === "change-requests" && tail[1]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[1]) };
   if (path === "systems/requirements") return { ...base, view: "requirements", discipline: "system", savedViewId: query.get("view") || undefined };
   if (path === "software/requirements") return { ...base, view: "requirements", discipline: "software", savedViewId: query.get("view") || undefined };
@@ -88,8 +88,8 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
   switch (view) {
     case "dashboard": return `${root}/command-center`;
     case "mywork": return `${root}/my-work`;
-    case "createSystemScr": return `${root}/systems/change-requests/new`;
-    case "createSoftwareChange": return `${root}/software/change-requests/new`;
+    case "createSystemScr": return `${root}/systems/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;
+    case "createSoftwareChange": return `${root}/software/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;
     case "scr": return `${root}/change-requests/${artifactId}`;
     case "history": return historyPath(discipline === "software" ? "software" : "systems");
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;

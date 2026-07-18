@@ -36,8 +36,8 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
 
   await page.getByRole('link',{name:/Command Center/}).click()
   await openNavigationGroup(page,'SYSTEMS ENGINEERING')
-  await page.getByRole('link',{name:'System Requirements'}).click()
-  await expect(page.getByRole('heading',{name:'System Requirements'})).toBeVisible()
+  await page.getByRole('link',{name:'System Requirements Explorer'}).click()
+  await expect(page.getByRole('heading',{name:'System Requirements Explorer'})).toBeVisible()
   await expect(page.getByLabel('Rows per page')).toHaveValue('25')
   await expect(page.locator('.reqTable article')).toHaveCount(25)
   await expect(page.locator('.requirementInspector')).toBeVisible()

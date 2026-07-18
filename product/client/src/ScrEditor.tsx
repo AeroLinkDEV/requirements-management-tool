@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { AuthUser } from "./IdentityCenter";
 import ControlledRequirementEditor from "./ControlledRequirementEditor";
+import RequirementsImportPanel from "./RequirementsImportPanel";
 import type {
   ControlledRequirementDraft,
   RequirementKind,
@@ -24,6 +25,7 @@ type Props = {
   releaseVersion: string;
   scope: ChangeScope;
   user: AuthUser;
+  sourceRequirementId?: string;
   onCancel: () => void;
   onSaved: (scrId: string) => void;
 };
@@ -108,12 +110,14 @@ export default function ScrEditor({
   releaseVersion,
   scope,
   user,
+  sourceRequirementId,
   onCancel,
   onSaved,
 }: Props) {
   const abbreviation = scope === "System" ? "SCR" : "SWCR";
   const defaultLevel: RequirementLevel = scope === "System" ? "System" : "HighLevel";
   const storageKey = `aerolink:new-${scope.toLowerCase()}-change:${projectId}:${releaseId}`;
+  const seededSource = useRef("");
   const restored = useMemo<SavedDraft | undefined>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) || "") as SavedDraft;
@@ -133,7 +137,9 @@ export default function ScrEditor({
   const [changes, setChanges] = useState<ControlledRequirementDraft[]>(
     restored?.changes?.length
       ? restored.changes
-      : [createProposal(defaultLevel, "Introduce")],
+      : sourceRequirementId
+        ? []
+        : [createProposal(defaultLevel, "Introduce")],
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -160,6 +166,39 @@ export default function ScrEditor({
       cancelled = true;
     };
   }, [api, projectId, scope]);
+
+  useEffect(() => {
+    if (!sourceRequirementId || seededSource.current === sourceRequirementId) return;
+    seededSource.current = sourceRequirementId;
+    fetch(`${api}/api/enterprise-requirements/${sourceRequirementId}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("The selected requirement could not be loaded into this change.");
+        return response.json() as Promise<{
+          baseNumber: string;
+          level: RequirementLevel;
+          history: { revision: number; displayNumber: string; statement: string; rationale: string; verificationMethod: string; richText?: string; attributesJson?: string }[];
+        }>;
+      })
+      .then((source) => {
+        const latest = source.history[0];
+        if (!latest) throw new Error("The selected requirement has no controlled revision.");
+        setChanges((items) => items.some((item) => item.baseNumber === source.baseNumber)
+          ? items
+          : [...items, normalizeProposal({
+              baseNumber: source.baseNumber,
+              revision: latest.revision + 1,
+              level: source.level,
+              kind: "Modify",
+              statement: latest.statement,
+              rationale: latest.rationale,
+              verificationMethod: latest.verificationMethod,
+              richText: latest.richText || latest.statement,
+              attributesJson: latest.attributesJson || "{}",
+            }, defaultLevel)]);
+        setTitle((value) => value || `Update ${latest.displayNumber} through controlled change`);
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "The selected requirement could not be loaded."));
+  }, [api, defaultLevel, sourceRequirementId]);
 
   useEffect(() => {
     if (!context) return;
@@ -277,6 +316,12 @@ export default function ScrEditor({
           <p>
             Build the case, define controlled requirement changes, and close impact decisions before review.
           </p>
+          {sourceRequirementId && (
+            <div className="sourceHandoff">
+              <b>Started from Requirements Explorer</b>
+              <span>The authoritative requirement remains read-only. Its proposed successor is being prepared in this Draft {abbreviation}.</span>
+            </div>
+          )}
         </div>
         <div className="editorStatus">
           <span className="draftPill">DRAFT</span>
@@ -285,6 +330,17 @@ export default function ScrEditor({
           </small>
         </div>
       </header>
+
+      <RequirementsImportPanel
+        api={api}
+        projectId={projectId}
+        releaseId={releaseId}
+        scope={scope}
+        onCreated={(id) => {
+          localStorage.removeItem(storageKey);
+          onSaved(id);
+        }}
+      />
 
       <nav className="authoringStages" aria-label="Change authoring progress">
         <a href="#change-case" className={caseComplete ? "complete" : "active"}>

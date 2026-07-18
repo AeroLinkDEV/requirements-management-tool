@@ -8,7 +8,7 @@ test('deep links survive refresh, universal search resolves fragments, and check
  await login(page)
  await page.locator('.program > select:not(.releaseSelector)').selectOption({label:'Flight Management System Live Program'})
  await openNavigationGroup(page,'SYSTEMS ENGINEERING')
- await page.getByRole('link',{name:'System Requirements'}).click()
+ await page.getByRole('link',{name:'System Requirements Explorer'}).click()
  await page.getByLabel('Search requirements').fill('0150')
  const requirement=page.getByText(/SYSR-00000150\.\d{2}/).first();await expect(requirement).toBeVisible();await requirement.click()
  await expect(page).toHaveURL(/\/requirements\/[0-9a-f-]+\?discipline=system$/)

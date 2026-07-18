@@ -39,23 +39,24 @@ Implementation status: all three concepts were accepted and implemented on 2026-
 
 ## Concepts
 
-### Specification Studio — proposed next evolution
+### Requirements Explorer — controlled viewing and trace context
 
-![AeroLink Specification Studio concept](specification-studio-concept.png)
+![AeroLink Requirements Explorer concept](requirements-explorer-concept.png)
 
-This concept develops the implemented Precision Workbench into a true daily
-authoring environment: a resizable specification outline, a spacious inline
-document editor, and a contextual quality and change-impact inspector. The
-screen keeps Draft SCR/SWCR authority and autosave visible without allowing
-change-control mechanics to overwhelm the engineering work.
+This concept develops the implemented Precision Workbench into a calm,
+authoritative Requirements Explorer: a resizable specification outline, a
+spacious read-only document surface, and contextual trace, verification,
+history, discussion, and active-change awareness. All content mutations move
+to the dedicated Changes workspace and remain governed by Draft SCR/SWCR
+authority.
 
 Key proposal decisions:
 
-- make inline document authoring the primary working mode;
-- keep structure, content, and selected-requirement context visible together;
-- surface requirement-quality guidance and suspect impact at the point of edit;
-- keep change authority in a compact persistent strip; and
-- reserve deeper lifecycle evidence for contextual drill-down.
+- keep structure, authoritative content, and selected-requirement context visible together;
+- make trace, verification, history, and active changes understandable without editing;
+- hand “Propose controlled change” into a dedicated pre-populated SCR/SWCR route;
+- keep the Explorer visibly read-only and remove bulk/import mutation entry points; and
+- provide no AI-facing controls, scores, suggestions, or branding.
 
 ### A — Precision Workbench
 

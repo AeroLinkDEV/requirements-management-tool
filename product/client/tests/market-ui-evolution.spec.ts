@@ -25,7 +25,7 @@ test("market evolution views stay live, legible, and visually contained", async 
   await page.locator(".program > select:not(.releaseSelector)").selectOption({ label: "Flight Management System Live Program" });
 
   await openNavigationGroup(page, "SYSTEMS ENGINEERING");
-  await page.getByRole("link", { name: "System Requirements" }).click();
+  await page.getByRole("link", { name: "System Requirements Explorer" }).click();
   await expectLegibleAndContained(page, ".reqWorkspace");
   await expect(page.locator(".requirementInspector")).toBeVisible();
   await testInfo.attach("concept-a-precision-workbench", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });

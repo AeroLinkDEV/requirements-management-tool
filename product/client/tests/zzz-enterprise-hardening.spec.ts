@@ -84,6 +84,9 @@ test("enterprise control proves content, queries, jobs, concurrency, redlines, a
   await page.getByRole("button", { name: "Concurrency" }).click();
   await page.getByRole("button", { name: "Open editing session" }).click();
   await page.getByRole("button", { name: "Simulate parallel session" }).click();
+  await expect(
+    page.getByRole("button", { name: "Parallel session detected" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Save draft checkpoint" }).click();
   await expect(page.getByText("MERGE REQUIRED")).toBeVisible();
   await expect(
