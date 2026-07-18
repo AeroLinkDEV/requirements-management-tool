@@ -40,4 +40,12 @@ The enterprise-hardening release adds versioned controlled files, structured and
 
 Files are streamed to protected local content-addressed storage, SHA-256 hashed, permission-checked through their Project and artifact, and retained across superseding versions. Background operations have idempotency keys, attempts, progress, final outcomes, and downloadable controlled output. Edit sessions capture a base snapshot and numeric concurrency version; collisions persist base/local/remote content and require an explicit resolution.
 
-The next control-depth increment should finish embedded inline-image rendering, move governed import commits onto the resumable worker, add production-topology browser concurrency and backup/restore drills, and then begin Wave 2 ReqIF plus versioned public API/event work.
+## Open Digital Thread boundary
+
+AeroLink 2.0 introduces a separate machine-access boundary under `/api/v1`. Machine identities belong to exactly one Project, receive explicit scopes, and authenticate with one-time API keys whose secrets are never persisted. The first public resources expose cursor-paginated, ETag-bearing requirement reads and idempotent external-event ingestion without exposing internal tables or browser-session behavior.
+
+Integration events and webhook deliveries are durable, separate records. Event creation and delivery creation share the application transaction; a hosted dispatcher signs JSON envelopes with HMAC-SHA256, applies exponential retry, and retains delivered, retry-scheduled, and dead-letter outcomes for operator replay. Webhook signing secrets are protected through ASP.NET Core Data Protection and outbound targets fail closed against insecure or private destinations unless a development-only override is configured.
+
+The Integration Command Center is the human control plane over these records. It shows scoped identities, endpoints, event activity, delivery health, replay actions, existing interchange history, and the ReqIF evolution path without creating an alternate approval path for requirements.
+
+The next control-depth increment should complete ReqIF 1.2 mapping and lossless round-trip, emit integration events from the authoritative lifecycle transactions, add filtering and conditional writes to the public API, and then replace the remaining route-string authorization boundary with explicit resource policies.

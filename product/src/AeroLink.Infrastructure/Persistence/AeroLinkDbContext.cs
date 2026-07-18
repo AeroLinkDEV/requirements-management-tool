@@ -3,6 +3,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Verification;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Releases;
@@ -64,6 +65,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ArtifactDraftSnapshot> ArtifactDraftSnapshots => Set<ArtifactDraftSnapshot>();
     public DbSet<ArtifactMergeConflict> ArtifactMergeConflicts => Set<ArtifactMergeConflict>();
     public DbSet<EnterpriseIntegrityCheckpoint> EnterpriseIntegrityCheckpoints => Set<EnterpriseIntegrityCheckpoint>();
+    public DbSet<IntegrationServiceIdentity> IntegrationServiceIdentities => Set<IntegrationServiceIdentity>();
+    public DbSet<WebhookSubscription> WebhookSubscriptions => Set<WebhookSubscription>();
+    public DbSet<IntegrationEvent> IntegrationEvents => Set<IntegrationEvent>();
+    public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -407,6 +412,22 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<EnterpriseIntegrityCheckpoint>(b =>
         {
             b.ToTable("enterprise_integrity_checkpoints");b.HasKey(x=>x.Id);b.Property(x=>x.ManifestHash).HasMaxLength(64).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.Detail).HasMaxLength(4000);b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.CreatedAt});
+        });
+        modelBuilder.Entity<IntegrationServiceIdentity>(b =>
+        {
+            b.ToTable("integration_service_identities"); b.HasKey(x=>x.Id); b.Property(x=>x.Name).HasMaxLength(200).IsRequired(); b.Property(x=>x.ClientId).HasMaxLength(64).IsRequired(); b.Property(x=>x.ApiKeyHash).HasMaxLength(64).IsRequired(); b.Property(x=>x.ScopesJson).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.RevokedBy).HasMaxLength(100); b.HasIndex(x=>x.ClientId).IsUnique(); b.HasIndex(x=>new{x.ProjectId,x.State}); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<WebhookSubscription>(b =>
+        {
+            b.ToTable("webhook_subscriptions"); b.HasKey(x=>x.Id); b.Property(x=>x.Name).HasMaxLength(200).IsRequired(); b.Property(x=>x.EndpointUrl).HasMaxLength(2000).IsRequired(); b.Property(x=>x.EventTypesJson).IsRequired(); b.Property(x=>x.ProtectedSecret).IsRequired(); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.Name}).IsUnique(); b.HasIndex(x=>new{x.ProjectId,x.IsEnabled}); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<IntegrationEvent>(b =>
+        {
+            b.ToTable("integration_events"); b.HasKey(x=>x.Id); b.Property(x=>x.EventType).HasMaxLength(160).IsRequired(); b.Property(x=>x.AggregateType).HasMaxLength(100).IsRequired(); b.Property(x=>x.PayloadJson).IsRequired(); b.Property(x=>x.Actor).HasMaxLength(120).IsRequired(); b.Property(x=>x.IdempotencyKey).HasMaxLength(160); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.LastError).HasMaxLength(2000); b.HasIndex(x=>new{x.ProjectId,x.OccurredAt}); b.HasIndex(x=>new{x.ProjectId,x.IdempotencyKey}).IsUnique(); b.HasIndex(x=>new{x.State,x.OccurredAt}); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<WebhookDelivery>(b =>
+        {
+            b.ToTable("webhook_deliveries"); b.HasKey(x=>x.Id); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.LastError).HasMaxLength(2000); b.HasIndex(x=>new{x.State,x.NextAttemptAt}); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt}); b.HasIndex(x=>new{x.IntegrationEventId,x.SubscriptionId}).IsUnique(); b.HasOne<IntegrationEvent>().WithMany().HasForeignKey(x=>x.IntegrationEventId).OnDelete(DeleteBehavior.Restrict); b.HasOne<WebhookSubscription>().WithMany().HasForeignKey(x=>x.SubscriptionId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

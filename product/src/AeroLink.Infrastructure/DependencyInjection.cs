@@ -24,6 +24,11 @@ public static class DependencyInjection
         services.AddScoped<FmsShowcaseSeeder>();
         services.AddSingleton<EvidenceFileStore>();
         services.AddHostedService<EnterpriseJobWorker>();
+        services.AddDataProtection();
+        services.AddHttpClient("AeroLinkWebhooks", client => client.Timeout = TimeSpan.FromSeconds(15));
+        services.AddHostedService<WebhookDeliveryWorker>();
+        services.AddScoped<IntegrationSecurityService>();
+        services.AddScoped<IntegrationEventPublisher>();
         services.AddScoped<ReleaseReadinessService>();
         services.AddScoped<ControlledOutputGenerator>();
         services.AddScoped<ChangeRequestOutputGenerator>();

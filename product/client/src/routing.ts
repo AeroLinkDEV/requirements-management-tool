@@ -1,6 +1,6 @@
 export type View =
   | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "lifecycle" | "release" | "planning" | "mywork" | "admin" | "enterprise" | "artifact" | "notFound";
+  | "verification" | "lifecycle" | "release" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
@@ -68,6 +68,7 @@ export function readRoute(): AppRoute {
   if (path === "baselines") return { ...base, view: "baselines", discipline: "system" };
   if (path === "release-campaign") return { ...base, view: "release", discipline: "system" };
   if (path === "enterprise-control") return { ...base, view: "enterprise", discipline: "system" };
+  if (path === "integration-command-center") return { ...base, view: "integrations", discipline: "system" };
   if (path === "administration") return { ...base, view: "admin", discipline: "system" };
   if (tail[0] === "artifacts" && tail[1] && tail[2]) return { ...base, view: "artifact", discipline: "system", artifactKind: decoded(tail[1]), artifactId: decoded(tail[2]) };
   return { ...base, view: "notFound", discipline: "system" };
@@ -98,6 +99,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "baselines": return `${root}/baselines`;
     case "release": return `${root}/release-campaign`;
     case "enterprise": return `${root}/enterprise-control`;
+    case "integrations": return `${root}/integration-command-center`;
     case "admin": return `${root}/administration`;
     case "artifact": return `${root}/artifacts/${artifactKind}/${artifactId}`;
     default: return root;

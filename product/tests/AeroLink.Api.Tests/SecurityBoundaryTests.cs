@@ -84,6 +84,7 @@ public sealed class SecurityBoundaryTests
 
         using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName = "program.engineer", password = AeroLinkApiFactory.MemberPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await AuthorizeMutationsAsync(client);
 
         var responses = new List<HttpResponseMessage>
         {
@@ -190,6 +191,14 @@ public sealed class SecurityBoundaryTests
         Assert.Equal(HttpStatusCode.Created, bootstrap.StatusCode);
         using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await AuthorizeMutationsAsync(client);
+    }
+
+    internal static async Task AuthorizeMutationsAsync(HttpClient client)
+    {
+        var response=await client.GetFromJsonAsync<JsonElement>("/api/auth/csrf");
+        client.DefaultRequestHeaders.Remove("X-AeroLink-CSRF");
+        client.DefaultRequestHeaders.Add("X-AeroLink-CSRF",response.GetProperty("token").GetString());
     }
 }
 
