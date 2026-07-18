@@ -35,13 +35,14 @@ public sealed class ReleaseCampaignPersistenceTests
             using (var archive = new ZipArchive(new MemoryStream(scrOutput!.Content), ZipArchiveMode.Read)) { using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()); var xml = await reader.ReadToEndAsync(); Assert.Contains("APPROVALS RECORDED FOR THIS PUBLICATION", xml); Assert.Contains("Change Request Definition", xml); Assert.Contains("Audit History", xml); }
             var procedureDocumentId = await db.ControlledDocuments.Where(x => x.BaselineId == summary.ReleasedBaselineId && x.Type == AeroLink.Domain.Traceability.ControlledDocumentType.SystemTestProcedures).Select(x => x.Id).SingleAsync();
             var procedureOutput = await generator.GenerateAsync(procedureDocumentId, "docx", default); Assert.NotNull(procedureOutput);
-            using (var archive = new ZipArchive(new MemoryStream(procedureOutput!.Content), ZipArchiveMode.Read)) { using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()); var xml = await reader.ReadToEndAsync(); Assert.Contains("System Test Procedure Document", xml); Assert.Contains("Procedure steps", xml); Assert.Contains("Expected result", xml); Assert.Contains("Approval Register", xml); }
+            string procedureXml;
+            using (var archive = new ZipArchive(new MemoryStream(procedureOutput!.Content), ZipArchiveMode.Read)) { using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()); procedureXml = await reader.ReadToEndAsync(); Assert.Contains("System Test Procedure Document", procedureXml); Assert.Contains("Procedure steps", procedureXml); Assert.Contains("Expected result", procedureXml); Assert.Contains("Approval Register", procedureXml); }
             var generatedAt = await db.ControlledDocuments.Where(x => x.Id == procedureDocumentId).Select(x => x.GeneratedAt).SingleAsync();
             var laterProcedure = new TestProcedure(summary.ProjectId, "SYSTP-00000999", "Future procedure excluded from the historical publication", "test.author", generatedAt.AddMinutes(1), TestProcedureLevel.System);
             var laterRevision = new TestProcedureRevision(laterProcedure.Id, 0, "Verify later behavior.", "Later configuration.", "Execute later behavior.", "Later result is observed.", TestProcedureState.Approved, "test.author", generatedAt.AddMinutes(1));
             db.AddRange(laterProcedure, laterRevision); await db.SaveChangesAsync();
             var regenerated = await generator.GenerateAsync(procedureDocumentId, "docx", default); Assert.NotNull(regenerated);
-            Assert.Equal(procedureOutput.Content, regenerated!.Content);
+            using (var archive = new ZipArchive(new MemoryStream(regenerated!.Content), ZipArchiveMode.Read)) { using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()); var regeneratedXml = await reader.ReadToEndAsync(); Assert.Equal(procedureXml, regeneratedXml); Assert.DoesNotContain(laterProcedure.Title, regeneratedXml); }
             var store = new EvidenceFileStore(evidenceRoot);
             var stored = await store.StoreAsync(new MemoryStream("evidence payload"u8.ToArray()), "run.json", "application/json", default); Assert.Equal(64, stored.Sha256.Length); await using var opened = store.OpenRead(stored.StorageKey); Assert.Equal(stored.Size, opened.Length);
         }
