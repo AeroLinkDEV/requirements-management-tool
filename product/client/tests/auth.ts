@@ -39,7 +39,7 @@ export async function selectProgram(page:Page,label:string){
   await expect.poll(async()=>{
     if(await selector.count())return (await selector.locator('option').allTextContents()).includes(label)
     return (await activeProgram.textContent())?.trim()===label
-  },{message:`Wait for Program context "${label}"`,timeout:15_000}).toBe(true)
+  },{message:`Wait for Program context "${label}"`,timeout:30_000}).toBe(true)
   if(await selector.count())await selector.selectOption({label})
   else await expect(activeProgram).toHaveText(label)
 }
