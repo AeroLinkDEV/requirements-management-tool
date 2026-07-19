@@ -1,13 +1,11 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login } from './auth'
+import { apiLogin, login, selectProgram } from './auth'
 
 test('dashboard lifecycle metrics open shareable, clearable History drill-downs', async ({ page, request }) => {
   test.setTimeout(60_000)
   await apiLogin(request)
-  const seed = await request.post(`${apiBase}/api/showcase/seed`, { timeout: 45_000 })
-  expect(seed.ok(), await seed.text()).toBeTruthy()
   await login(page)
-  await page.locator('.program > select:not(.releaseSelector)').selectOption({ label: 'Flight Management System Live Program' })
+  await selectProgram(page,'Flight Management System Live Program')
 
   await page.getByRole('button', { name: 'Open Draft changes' }).click()
   await expect(page).toHaveURL(/[?&]state=Draft(?:&|$)/)

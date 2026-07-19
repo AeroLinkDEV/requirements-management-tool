@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiBase, apiLogin, login, openNavigationGroup } from "./auth";
+import { apiLogin, login, openNavigationGroup, selectProgram } from "./auth";
 
 test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle exploration", async ({
   page,
@@ -7,14 +7,8 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
 }) => {
   test.setTimeout(120_000);
   await apiLogin(request);
-  const seed = await request.post(`${apiBase}/api/showcase/seed`, {
-    timeout: 90_000,
-  });
-  expect(seed.ok(), await seed.text()).toBeTruthy();
   await login(page);
-  await page
-    .locator(".program > select:not(.releaseSelector)")
-    .selectOption({ label: "Flight Management System Live Program" });
+  await selectProgram(page,"Flight Management System Live Program");
   await expect(page.getByText("FMS Product Development", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Active release")).toHaveValue(/.+/);
   await expect(

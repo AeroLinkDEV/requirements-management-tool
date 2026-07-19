@@ -13,66 +13,136 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Build, test, and exercise product journeys
+  backend:
+    name: Backend build and tests
     runs-on: windows-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
       - name: Install .NET 10
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - name: Restore dependencies
+        run: dotnet restore product/AeroLink.slnx
+      - name: Build backend
+        run: dotnet build product/AeroLink.slnx --configuration Release --no-restore
+      - name: Run backend tests
+        run: dotnet test product/AeroLink.slnx --configuration Release --no-build --logger "console;verbosity=normal"
 
+  client:
+    name: Client lint and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: product/client/package-lock.json
-
-      - name: Restore .NET dependencies
-        run: dotnet restore product/AeroLink.slnx
-
-      - name: Build backend
-        run: dotnet build product/AeroLink.slnx --configuration Release --no-restore
-
-      - name: Run backend tests
-        run: dotnet test product/AeroLink.slnx --configuration Release --no-build --logger "console;verbosity=normal"
-
       - name: Install client dependencies
         working-directory: product/client
         run: npm ci
-
       - name: Lint client
         working-directory: product/client
         run: npm run lint
-
       - name: Build client
         working-directory: product/client
         run: npm run build
 
+  browser:
+    name: Browser journeys (${{ matrix.shard }}/3)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - name: Restore and build browser API
+        run: |
+          dotnet restore product/src/AeroLink.Api/AeroLink.Api.csproj
+          dotnet build product/src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
+      - name: Install client dependencies
+        working-directory: product/client
+        run: npm ci
+      - name: Cache Playwright Chromium
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Install browser runtime
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: product/client
         run: npx playwright install chromium
-
-      - name: Run end-to-end journeys
+      - name: Run browser journey shard
         working-directory: product/client
-        run: npm run test:e2e
-
+        env:
+          AEROLINK_E2E_SKIP_BUILD: "true"
+        run: npx playwright test --shard=${{ matrix.shard }}/3
       - name: Upload browser diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-diagnostics-${{ github.run_attempt }}
+          name: playwright-diagnostics-${{ matrix.shard }}-${{ github.run_attempt }}
           path: |
             product/client/playwright-report
             product/client/test-results
           if-no-files-found: ignore
           retention-days: 7
+      - name: Upload browser timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-timings-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: product/client/test-results/test-timings.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  validate:
+    name: Build, test, and exercise product journeys
+    if: always()
+    needs: [backend, client, browser]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm all product lanes passed
+        env:
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          CLIENT_RESULT: ${{ needs.client.result }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
+        run: |
+          test "$BACKEND_RESULT" = success
+          test "$CLIENT_RESULT" = success
+          test "$BROWSER_RESULT" = success
 
   postgresql-smoke:
     name: PostgreSQL migrations and secure bootstrap
@@ -92,21 +162,23 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
       - name: Install .NET 10
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
-
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets') }}
+          restore-keys: nuget-${{ runner.os }}-
       - name: Restore and build API
         run: |
           dotnet restore product/AeroLink.slnx
           dotnet build product/AeroLink.slnx --configuration Release --no-restore
-
       - name: Apply migrations and prove first-install identity path
         env:
           ASPNETCORE_ENVIRONMENT: Production
@@ -137,7 +209,6 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"userName":"admin","password":"CiOnly!Administrator2026"}' | jq -e '.userName == "admin" and .isAdministrator == true'
           curl -fsS -b cookies.txt http://127.0.0.1:5080/api/auth/me | jq -e '.userName == "admin" and .isAdministrator == true'
-
       - name: Upload PostgreSQL startup diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

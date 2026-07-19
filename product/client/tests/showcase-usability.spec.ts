@@ -1,14 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, openNavigationGroup } from './auth'
+import { apiLogin, login, openNavigationGroup, selectProgram } from './auth'
 
 test('showcase-critical surfaces are readable, focused, and progressively disclosed',async({page,request})=>{
   test.setTimeout(90_000)
   await page.setViewportSize({width:1440,height:900})
   await apiLogin(request)
-  const seed=await request.post(`${apiBase}/api/showcase/seed`,{timeout:45_000})
-  expect(seed.ok(),await seed.text()).toBeTruthy()
   await login(page)
-  await page.locator('.program > select:not(.releaseSelector)').selectOption({label:'Flight Management System Live Program'})
+  await selectProgram(page,'Flight Management System Live Program')
 
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()
   await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()

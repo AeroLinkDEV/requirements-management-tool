@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiBase, apiLogin, login, openNavigationGroup } from "./auth";
+import { apiLogin, login, openNavigationGroup, selectProgram } from "./auth";
 
 test("engineer analyzes impact and creates a rich controlled requirement proposal", async ({
   page,
@@ -7,14 +7,8 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
 }) => {
   test.setTimeout(75_000);
   await apiLogin(request);
-  const seed = await request.post(`${apiBase}/api/showcase/seed`, {
-    timeout: 45_000,
-  });
-  expect(seed.ok(), await seed.text()).toBeTruthy();
   await login(page);
-  await page
-    .locator(".program > select:not(.releaseSelector)")
-    .selectOption({ label: "Flight Management System Live Program" });
+  await selectProgram(page,"Flight Management System Live Program");
   await openNavigationGroup(page,"SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "System Requirements Explorer" }).click();
   await expect(

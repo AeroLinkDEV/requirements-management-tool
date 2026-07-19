@@ -1,10 +1,8 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, openNavigationGroup } from './auth'
+import { apiLogin, login, openNavigationGroup } from './auth'
 
 test('ReqIF Exchange Center exports and securely previews a governed package', async ({ page, request }, testInfo) => {
   await apiLogin(request)
-  const seeded = await request.post(`${apiBase}/api/showcase/seed`, { timeout: 60_000 })
-  expect(seeded.ok(), await seeded.text()).toBeTruthy()
   await login(page)
   await openNavigationGroup(page, 'ADMINISTRATION')
   await page.getByRole('link', { name: 'Integration Command Center' }).click()

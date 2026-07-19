@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiBase, apiLogin, login, openNavigationGroup } from "./auth";
+import { apiLogin, login, openNavigationGroup, selectProgram } from "./auth";
 
 test("requirements stay read-only while controlled proposals and imports move into Changes", async ({
   page,
@@ -9,16 +9,8 @@ test("requirements stay read-only while controlled proposals and imports move in
   const viewName = `System requirement 150 review ${Date.now()}`;
   const commentText = `Please confirm coverage with @test.engineer before baseline ${Date.now()}.`;
   await apiLogin(request);
-  const seed = await request.post(`${apiBase}/api/showcase/seed`, {
-    timeout: 90_000,
-  });
-  expect(seed.ok(), await seed.text()).toBeTruthy();
   await login(page);
-  const programSelector = page.locator(".program > select:not(.releaseSelector)");
-  if (await programSelector.count())
-    await programSelector.selectOption({ label: "Flight Management System Live Program" });
-  else
-    await expect(page.locator(".activeProgram")).toHaveText("Flight Management System Live Program");
+  await selectProgram(page,"Flight Management System Live Program");
   await openNavigationGroup(page,"SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "System Requirements Explorer" }).click();
   await expect(

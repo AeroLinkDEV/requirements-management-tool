@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiBase, apiLogin, login, openNavigationGroup } from "./auth";
+import { apiLogin, login, openNavigationGroup, selectProgram } from "./auth";
 
 async function expectLegibleAndContained(page: import("@playwright/test").Page, root: string) {
   await expect(page.locator(root)).toBeVisible();
@@ -19,10 +19,8 @@ test("market evolution views stay live, legible, and visually contained", async 
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await apiLogin(request);
-  const seed = await request.post(`${apiBase}/api/showcase/seed`, { timeout: 45_000 });
-  expect(seed.ok(), await seed.text()).toBeTruthy();
   await login(page);
-  await page.locator(".program > select:not(.releaseSelector)").selectOption({ label: "Flight Management System Live Program" });
+  await selectProgram(page,"Flight Management System Live Program");
 
   await openNavigationGroup(page, "SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "System Requirements Explorer" }).click();
