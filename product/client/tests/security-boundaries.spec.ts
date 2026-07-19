@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
-import { apiBase, apiLogin } from './auth'
+import { apiBase, apiLogin, showcaseSeed } from './auth'
 
 test('mutation authentication and Program-scoped discovery prevent direct-object access',async({request,playwright})=>{
  const anonymous=await playwright.request.newContext();const deniedSeed=await anonymous.post(`${apiBase}/api/showcase/seed`);expect(deniedSeed.status()).toBe(401)
@@ -31,7 +31,7 @@ test('mutation authentication and Program-scoped discovery prevent direct-object
 
 test('Program scope protects dashboards, signatures, impacts, directories, and baseline views',async({request,playwright})=>{
  await apiLogin(request)
- const seeded=await request.post(`${apiBase}/api/showcase/seed`);expect(seeded.ok(),await seeded.text()).toBeTruthy();const showcase=await seeded.json()
+ const showcase=await showcaseSeed(request)
  const draftsResponse=await request.get(`${apiBase}/api/scrs?projectId=${showcase.projectId}&state=Draft&page=1&pageSize=10`);expect(draftsResponse.ok(),await draftsResponse.text()).toBeTruthy();const drafts=await draftsResponse.json();expect(drafts.items.length).toBeGreaterThan(0);const signedArtifact=drafts.items[0]
  const author=await playwright.request.newContext();const authorLogin=await author.post(`${apiBase}/api/auth/login`,{data:{userName:signedArtifact.authorId,password:'AeroLink!2026'}});expect(authorLogin.ok(),await authorLogin.text()).toBeTruthy();const submitted=await author.post(`${apiBase}/api/scrs/${signedArtifact.id}/submit`,{data:{actorId:signedArtifact.authorId,expectedVersion:null,approvers:[{userId:'admin',name:'AeroLink Administrator'}],mode:'Sequential'}});expect(submitted.ok(),await submitted.text()).toBeTruthy();await author.dispose()
  const approved=await request.post(`${apiBase}/api/scrs/${signedArtifact.id}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved as a tenant-isolation signature probe.',expectedVersion:null}});expect(approved.ok(),await approved.text()).toBeTruthy()

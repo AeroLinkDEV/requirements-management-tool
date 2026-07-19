@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin } from './auth'
+import { apiBase, apiLogin, showcaseSeed } from './auth'
 
 test('draft updates preserve controlled identities and normalize new proposals on the server',async({request})=>{
   await apiLogin(request)
-  const seeded=await request.post(`${apiBase}/api/showcase/seed`);expect(seeded.ok(),await seeded.text()).toBeTruthy();const showcase=await seeded.json()
+  const showcase=await showcaseSeed(request)
   const authoritativeResponse=await request.get(`${apiBase}/api/authoring/requirements?projectId=${showcase.projectId}&scope=System&limit=1`)
   expect(authoritativeResponse.ok(),await authoritativeResponse.text()).toBeTruthy();const authoritative=(await authoritativeResponse.json())[0]
 

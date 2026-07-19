@@ -10,13 +10,18 @@ process.env.AEROLINK_E2E_RUN_ID = runId
 const e2eDatabase = join(tmpdir(), `aerolink-e2e-${runId}.db`).replaceAll('\\', '/')
 const e2eApiPort = process.env.AEROLINK_E2E_API_PORT ?? '5082'
 const e2eClientPort = process.env.AEROLINK_E2E_CLIENT_PORT ?? '5174'
+const skipApiBuild = process.env.AEROLINK_E2E_SKIP_BUILD === 'true'
+const outputDir = process.env.AEROLINK_E2E_OUTPUT_DIR ?? 'test-results'
+const reportDir = process.env.AEROLINK_E2E_REPORT_DIR ?? 'playwright-report'
 process.env.AEROLINK_E2E_API_BASE = `http://127.0.0.1:${e2eApiPort}`
 
 export default defineConfig({
   testDir: './tests',
+  globalSetup: './tests/global-setup.ts',
+  outputDir,
   fullyParallel: false,
   workers: 1,
-  reporter: [['list'], ['html', { open: 'never' }]],
+  reporter: [['list'], ['./tests/slow-test-reporter.ts'], ['html', { open: 'never', outputFolder: reportDir }]],
   use: {
     baseURL: `http://127.0.0.1:${e2eClientPort}`,
     trace: 'retain-on-failure',
@@ -25,7 +30,7 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: `powershell.exe -NoProfile -Command "$env:Database__Provider='Sqlite'; $env:DemoData__Enabled='false'; $env:Identity__SeedDemoAccounts='true'; $env:Identity__AllowDemoAccounts='true'; $env:Identity__CookieSecure='false'; $env:Identity__LoginRateLimitPerMinute='500'; $env:ConnectionStrings__AeroLink='Data Source=${e2eDatabase}'; & '${dotnet}' run --configuration Release --project ../src/AeroLink.Api --urls http://127.0.0.1:${e2eApiPort}"`,
+      command: `powershell.exe -NoProfile -Command "$env:Database__Provider='Sqlite'; $env:DemoData__Enabled='false'; $env:Identity__SeedDemoAccounts='true'; $env:Identity__AllowDemoAccounts='true'; $env:Identity__CookieSecure='false'; $env:Identity__LoginRateLimitPerMinute='500'; $env:Cors__AllowedOrigins__0='http://127.0.0.1:${e2eClientPort}'; $env:ConnectionStrings__AeroLink='Data Source=${e2eDatabase}'; & '${dotnet}' run --configuration Release ${skipApiBuild ? '--no-build ' : ''}--project ../src/AeroLink.Api --urls http://127.0.0.1:${e2eApiPort}"`,
       url: `http://127.0.0.1:${e2eApiPort}/health`,
       reuseExistingServer: false,
       timeout: 120_000,

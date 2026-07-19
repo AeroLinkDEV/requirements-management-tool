@@ -1,14 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { apiBase, apiLogin, login, openNavigationGroup } from "./auth";
+import { apiLogin, login, openNavigationGroup, selectProgram } from "./auth";
 
 test("Lifecycle Decision Room connects readiness, impact, evidence, people, and compact identifiers", async ({ page, request }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1600, height: 1000 });
   await apiLogin(request);
-  const seed = await request.post(`${apiBase}/api/showcase/seed`, { timeout: 60_000 });
-  expect(seed.ok(), await seed.text()).toBeTruthy();
   await login(page);
-  await page.locator(".program > select:not(.releaseSelector)").selectOption({ label: "Flight Management System Live Program" });
+  await selectProgram(page,"Flight Management System Live Program");
 
   await openNavigationGroup(page, "RELEASE & CONFIGURATION");
   await page.getByRole("link", { name: "Lifecycle Decision Room" }).click();

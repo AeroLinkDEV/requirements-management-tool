@@ -2,6 +2,15 @@ import { expect } from '@playwright/test'
 import type { APIRequestContext, Page } from '@playwright/test'
 export const apiBase=process.env.AEROLINK_E2E_API_BASE??'http://127.0.0.1:5082'
 
+export type ShowcaseSeed = {
+  programId: string
+  projectId: string
+  activeReleaseId: string
+  releasedBaselineId: string
+}
+
+let cachedShowcase: ShowcaseSeed | undefined
+
 export async function login(page:Page,userName='admin'){
   await page.goto('/')
   await page.getByLabel('Username').fill(userName)
@@ -12,6 +21,22 @@ export async function login(page:Page,userName='admin'){
 export async function apiLogin(request:APIRequestContext,userName='admin'){
   const response=await request.post(`${apiBase}/api/auth/login`,{data:{userName,password:'AeroLink!2026'}})
   expect(response.ok(),await response.text()).toBeTruthy()
+}
+export async function showcaseSeed(request:APIRequestContext){
+  if(cachedShowcase)return cachedShowcase
+  const prepared=process.env.AEROLINK_SHOWCASE_SEED
+  if(prepared){cachedShowcase=JSON.parse(prepared) as ShowcaseSeed;return cachedShowcase}
+  await apiLogin(request)
+  const response=await request.post(`${apiBase}/api/showcase/seed`,{timeout:120_000})
+  const body=await response.text()
+  expect(response.ok(),body).toBeTruthy()
+  cachedShowcase=JSON.parse(body) as ShowcaseSeed
+  return cachedShowcase
+}
+export async function selectProgram(page:Page,label:string){
+  const selector=page.locator('.program > select:not(.releaseSelector)')
+  if(await selector.count())await selector.selectOption({label})
+  else await expect(page.locator('.activeProgram')).toHaveText(label)
 }
 export async function openNavigationGroup(page:Page,name:string){
   const currentName:{[key:string]:string}={

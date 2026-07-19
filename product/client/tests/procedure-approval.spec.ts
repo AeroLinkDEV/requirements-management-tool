@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin } from './auth'
+import { apiBase, apiLogin, showcaseSeed } from './auth'
 
 test('test procedures require independent electronic approval before execution',async({request,playwright})=>{
   await apiLogin(request)
-  const seeded=await request.post(`${apiBase}/api/showcase/seed`);expect(seeded.ok(),await seeded.text()).toBeTruthy();const showcase=await seeded.json()
+  const showcase=await showcaseSeed(request)
   const requirementsResponse=await request.get(`${apiBase}/api/requirements?projectId=${showcase.projectId}&baselineId=${showcase.releasedBaselineId}&scope=System&page=1&pageSize=1`)
   expect(requirementsResponse.ok(),await requirementsResponse.text()).toBeTruthy();const requirements=await requirementsResponse.json();expect(requirements.items).toHaveLength(1)
 

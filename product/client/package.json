@@ -7,8 +7,14 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "typecheck": "tsc -b --pretty false",
     "preview": "vite preview",
+    "test:fast": "npm run lint && npm run typecheck",
+    "test:focused": "playwright test",
+    "test:smoke": "playwright test tests/application-smoke.spec.ts tests/showcase-usability.spec.ts",
+    "test:full": "npm run lint && npm run build && npm run test:e2e:sharded",
     "test:e2e": "playwright test",
+    "test:e2e:sharded": "node scripts/run-sharded-e2e.mjs",
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {

@@ -88,13 +88,31 @@ Local demonstration identities include `admin`, `systems.author`, `software.auth
 
 ## Verify
 
+Use the smallest trustworthy loop while developing:
+
+```powershell
+Set-Location product\client
+npm.cmd run test:fast
+npm.cmd run test:focused -- tests\lifecycle-decision-room.spec.ts
+npm.cmd run test:smoke
+```
+
+- `test:fast` runs lint and TypeScript checks without starting the product.
+- `test:focused -- <spec>` starts an isolated product and runs only the named Playwright journey.
+- `test:smoke` exercises login recovery and the showcase-critical UI path.
+- `test:e2e:sharded` builds the API once, then runs three Playwright shards against separate ports, SQLite databases, reports, and diagnostics.
+- `test:e2e` preserves the original single-worker serial path for troubleshooting and compatibility.
+- Every browser run prints its five slowest journeys and writes `test-results/test-timings.json` (one file per shard for sharded runs).
+
+Before publishing, run the complete backend and parallel client gates:
+
 ```powershell
 & "$HOME\.dotnet\dotnet.exe" test product\AeroLink.slnx
 Set-Location product\client
-npm.cmd run lint
-npm.cmd run build
-npm.cmd run test:e2e
+npm.cmd run test:full
 ```
+
+GitHub runs backend tests, the client production build, three isolated browser shards, and PostgreSQL migration/bootstrap verification concurrently. NuGet, npm, and Chromium caches keep repeat runs fast while the aggregate `Build, test, and exercise product journeys` check preserves one branch-protection result.
 
 ## Structure
 

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiBase, apiLogin, login, openNavigationGroup } from "./auth";
+import { apiLogin, login, openNavigationGroup, selectProgram } from "./auth";
 
 test("enterprise control proves content, queries, jobs, concurrency, redlines, and qualification", async ({
   page,
@@ -8,14 +8,8 @@ test("enterprise control proves content, queries, jobs, concurrency, redlines, a
   test.setTimeout(120_000);
   const documentLabel = `FMS controlled interface note ${Date.now()}`;
   await apiLogin(request);
-  const seed = await request.post(`${apiBase}/api/showcase/seed`, {
-    timeout: 60_000,
-  });
-  expect(seed.ok(), await seed.text()).toBeTruthy();
   await login(page);
-  await page
-    .locator(".program > select:not(.releaseSelector)")
-    .selectOption({ label: "Flight Management System Live Program" });
+  await selectProgram(page,"Flight Management System Live Program");
   await openNavigationGroup(page,"ADMINISTRATION");
   await page.getByRole("link", { name: /Enterprise Control/ }).click();
   await expect(

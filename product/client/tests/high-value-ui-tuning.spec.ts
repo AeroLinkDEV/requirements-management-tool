@@ -1,14 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login } from './auth'
+import { apiLogin, login, selectProgram } from './auth'
 
 test('workspace tuning persists and quick navigation provides previews and recents',async({page,request})=>{
   test.setTimeout(90_000)
   await page.setViewportSize({width:1440,height:900})
   await apiLogin(request)
-  const seed=await request.post(`${apiBase}/api/showcase/seed`,{timeout:60_000})
-  expect(seed.ok(),await seed.text()).toBeTruthy()
   await login(page)
-  await page.locator('.program > select:not(.releaseSelector)').selectOption({label:'Flight Management System Live Program'})
+  await selectProgram(page,'Flight Management System Live Program')
 
   await page.getByRole('button',{name:'Open workspace display settings'}).click()
   const display=page.getByRole('dialog',{name:'Workspace display'})
