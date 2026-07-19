@@ -35,8 +35,13 @@ export async function showcaseSeed(request:APIRequestContext){
 }
 export async function selectProgram(page:Page,label:string){
   const selector=page.locator('.program > select:not(.releaseSelector)')
+  const activeProgram=page.locator('.activeProgram')
+  await expect.poll(async()=>{
+    if(await selector.count())return (await selector.locator('option').allTextContents()).includes(label)
+    return (await activeProgram.textContent())?.trim()===label
+  },{message:`Wait for Program context "${label}"`,timeout:15_000}).toBe(true)
   if(await selector.count())await selector.selectOption({label})
-  else await expect(page.locator('.activeProgram')).toHaveText(label)
+  else await expect(activeProgram).toHaveText(label)
 }
 export async function openNavigationGroup(page:Page,name:string){
   const currentName:{[key:string]:string}={

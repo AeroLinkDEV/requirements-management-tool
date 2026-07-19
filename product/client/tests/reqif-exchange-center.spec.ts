@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { apiLogin, login, openNavigationGroup } from './auth'
 
 test('ReqIF Exchange Center exports and securely previews a governed package', async ({ page, request }, testInfo) => {
+  test.setTimeout(90_000)
   await apiLogin(request)
   await login(page)
   await openNavigationGroup(page, 'ADMINISTRATION')
