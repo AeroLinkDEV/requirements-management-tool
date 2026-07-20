@@ -10,7 +10,7 @@ public sealed class UniversalControlledEditingContractTests
     {
         Assert.All(ControlledArtifactEditPolicies.All, policy =>
         {
-            Assert.Contains(policy.CanonicalType, policy.Aliases, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains(policy.Aliases, alias => string.Equals(alias, policy.CanonicalType, StringComparison.OrdinalIgnoreCase));
             Assert.True(policy.Exclusive);
             Assert.InRange(policy.DefaultLeaseMinutes, policy.MinimumLeaseMinutes, policy.MaximumLeaseMinutes);
         });
