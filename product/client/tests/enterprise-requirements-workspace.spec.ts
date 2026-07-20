@@ -16,7 +16,13 @@ test("requirements stay read-only while controlled proposals and imports move in
   await expect(
     page.getByRole("heading", { name: "System Requirements Explorer" }),
   ).toBeVisible();
-  await expect(page.getByText("150 requirements")).toBeVisible({ timeout: 30_000 });
+
+  const loadingState = page.getByRole("status", {
+    name: /Loading controlled requirements/,
+  });
+  await expect(loadingState).toBeHidden();
+  await expect(page.getByText("150 requirements")).toBeVisible();
+
   await page.getByLabel("Search requirements").fill("SYSR-000150");
   await expect(page.getByText(/SYSR-000150\.\d{2}/)).toBeVisible();
   await page.getByText(/SYSR-000150\.\d{2}/).click();
