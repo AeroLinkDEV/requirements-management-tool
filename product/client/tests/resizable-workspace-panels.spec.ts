@@ -52,3 +52,28 @@ test('Reusable layout supports up and down resizing with keyboard access', async
 
   expect(after?.height ?? 0).toBeGreaterThan(before?.height ?? 0)
 })
+
+test('Resizable layouts rebuild when a panel is added dynamically', async ({ page }) => {
+  await page.goto('/')
+  await page.evaluate(() => {
+    document.body.innerHTML = `
+      <div data-resizable-layout="horizontal" data-resizable-key="dynamic-test">
+        <section>Left</section>
+        <section>Center</section>
+      </div>`
+  })
+
+  const layout = page.locator('[data-resizable-key="dynamic-test"]')
+  await expect(layout.getByRole('separator')).toHaveCount(1)
+
+  await page.evaluate(() => {
+    const layout = document.querySelector('[data-resizable-key="dynamic-test"]')
+    const panel = document.createElement('section')
+    panel.textContent = 'Inspector'
+    layout?.appendChild(panel)
+  })
+
+  await expect(layout.locator(':scope > .resizableWorkspacePanel')).toHaveCount(3)
+  await expect(layout.getByRole('separator')).toHaveCount(2)
+  await expect(layout).toHaveAttribute('data-resizable-panel-count', '3')
+})
