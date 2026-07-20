@@ -15,7 +15,15 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
     page.getByRole("heading", { name: "System Requirements Explorer" }),
   ).toBeVisible();
   await page.getByLabel("Search requirements").fill("SYSR-000150");
-  await page.getByRole("button", { name: /SYSR-000150\.\d{2}/ }).first().click();
+  const requirementResult = page
+    .getByRole("button", { name: /SYSR-000150\.\d{2}/ })
+    .first();
+  const requirementInspector = page.getByRole("heading", {
+    name: /SYSR-000150\.\d{2}/,
+  });
+  await expect(requirementResult.or(requirementInspector)).toBeVisible();
+  if (await requirementResult.isVisible()) await requirementResult.click();
+  await expect(requirementInspector).toBeVisible();
   await page.getByRole("button", { name: "Trace & impact" }).click();
   await expect(page.getByRole("heading", { name: "Verification coverage" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open complete Digital Thread →" })).toBeVisible();
