@@ -18,8 +18,11 @@ function directPanels(container) {
 
 function storageKey(container, target) {
   const explicit = container.getAttribute("data-resizable-key");
-  const identity = explicit || target.key || container.id || container.className || target.selector;
-  return `${STORAGE_PREFIX}${location.pathname}:${identity}`;
+  const stableIdentity = explicit || target.key || container.id;
+  if (stableIdentity) return `${STORAGE_PREFIX}${stableIdentity}`;
+
+  const fallbackIdentity = container.className || target.selector;
+  return `${STORAGE_PREFIX}${location.pathname}:${fallbackIdentity}`;
 }
 
 function equalSizes(count) {
