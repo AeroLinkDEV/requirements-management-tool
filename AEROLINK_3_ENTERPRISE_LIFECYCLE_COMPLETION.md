@@ -19,261 +19,289 @@ AeroLink 3.0 completes the remaining enterprise lifecycle capabilities without i
 
 ## Existing foundation retained
 
-The program must preserve and reuse the current implementations for:
+The program builds on, and must not regress:
 
-- system requirements, HLRs, LLRs, SCRs, and SWCRs;
-- sequential and parallel review, electronic approval, comments, dispositions, due work, and notifications;
-- immutable candidate/released baselines and baseline comparison;
-- SYSRD, SWRD, change-request, test, traceability, PDF, and DOCX publication;
-- typed links, suspect links, impact analysis, completeness checks, lifecycle exploration, and release lineage;
-- test procedures, executions, results, evidence, failures, amendments, and retests;
-- controlled attachments, redlines, saved queries, bulk operations, CSV/XLSX and ReqIF exchange;
-- REST APIs, service identities, event ingestion, outbox events, signed webhooks, retries, dead letters, and replay;
-- Program-scoped authorization, exclusive SCR/SWCR editing, autosave recovery, audit, backup, restore, diagnostics, and qualification tooling.
+- System, HLR, and LLR requirement records and revision history;
+- SCR/SWCR package authoring, review, approval, and next-revision creation;
+- immutable baselines and release lineage;
+- typed traceability, suspect links, impact analysis, and completeness checks;
+- controlled SYSRD, SWRD, test, traceability, review, and release outputs;
+- versioned procedures, executions, results, evidence, failures, and retests;
+- role-aware dashboards and decision-room workflows;
+- comments, dispositions, assignments, watches, notifications, and audit;
+- universal search, saved views, bulk operations, and governed onboarding;
+- ReqIF 1.2 governed round trip;
+- versioned REST reads, transactional events, webhooks, replay, and service identities;
+- PostgreSQL production defaults, isolated SQLite tests, and safe migrations;
+- complete backup verification and isolated restore tooling; and
+- 50,000-requirement qualification data and mixed database workload tools.
+
+## Implementation checkpoint — universal editing foundation
+
+The first AeroLink 3.0 implementation increment is now present on the program branch:
+
+- a single fail-closed controlled-artifact editing policy registry;
+- canonical artifact families and aliases, including SCR, SWCR, and PR;
+- explicit editable lifecycle states for every family;
+- exclusive-editing policy for all nine AeroLink 3.0 draft families;
+- shared lease limits of two to 120 minutes with a fifteen-minute default; and
+- domain tests proving full family coverage, alias normalization, state eligibility, lease bounds, and unsupported-type rejection.
+
+The existing API still needs to consume this registry and resolve each family to its authoritative project, revision, lifecycle state, snapshot, and atomic commit operation. This checkpoint is therefore a real shared-code foundation, not a claim that universal controlled editing is complete.
 
 ## Workstream 1 — Universal controlled editing
 
-Extend the proven checkout/lease/autosave/recovery contract from SCR/SWCR records to every controlled draft family:
+Extend the existing renewable exclusive checkout, autosave, immutable snapshot, recovery, check-in, discard, expiry, and forced-unlock contract beyond SCR/SWCR drafts.
 
-- requirement proposals;
-- specification hierarchy and placement edits;
-- test procedures and steps;
-- trace-link proposals and suspect-link dispositions;
-- release-planning and candidate-baseline drafts;
-- controlled document-template drafts;
-- problem-report investigations and resolutions;
-- configuration change sets.
+Controlled families:
 
-### Required behavior
+1. change requests;
+2. requirement proposals;
+3. specification structures;
+4. test procedures;
+5. trace-link proposals;
+6. release-planning drafts;
+7. document templates;
+8. problem reports; and
+9. configuration change sets.
 
-- one accountable editor per controlled draft scope;
-- renewable server lease with visible owner, activity, and expiry;
-- read-only observers;
-- server autosave snapshots with sequence, hash, actor, and timestamp;
-- optimistic version checks at commit;
-- explicit check-in, discard, recovery, and administrator forced unlock with reason;
-- review submission blocked while an incompatible editing session exists;
-- no lock may make approved or released data editable.
+Required behavior:
 
-### Acceptance gate
+- one canonical server-side artifact resolver;
+- artifact-specific permission and editable-state policies;
+- database-enforced exclusive locks;
+- stable lease heartbeat and expiry;
+- version-checked autosave snapshots;
+- atomic check-in against artifact and session versions;
+- discard without controlled-content mutation;
+- administrator/configuration-manager recovery with mandatory reason;
+- review/freeze/release transitions blocked by incompatible active sessions;
+- read-only observation for other authorized users; and
+- audit and security events for every material transition.
 
-Two-user browser journeys prove contention, read-only observation, autosave recovery, check-in, abandoned-lock recovery, forced unlock, and immutable approved history for every supported artifact family.
+Acceptance gate:
+
+- two-user contention journeys for every supported family;
+- snapshot recovery after browser interruption;
+- stale artifact and stale session conflict tests;
+- forced-unlock and expiry tests;
+- approved/frozen/released artifacts proven non-editable; and
+- no regression to existing SCR/SWCR behavior.
 
 ## Workstream 2 — Full problem-report lifecycle
 
-Implement PR-001 and PR-002 as first-class controlled records.
+Implement first-class controlled problem reports rather than retaining PRs as external references.
 
-### Controlled content
+Capabilities:
 
-- server-generated PR identifier and immutable revision history;
-- title, description, discovery context, affected product/configuration, reporter, owner, dates, severity, priority, classification, safety/security relevance, reproducibility, and attachments;
-- investigation, root cause, effects, containment, alternatives, selected disposition, resolution, verification plan, verification results, closure rationale, and residual risk;
-- statuses covering Draft, Submitted, Screening, Investigating, AwaitingDisposition, Implementing, Verification, ClosureReview, Closed, Rejected, Duplicate, Deferred, and Reopened;
-- configurable required fields and transition guards;
-- independent closure approval where policy requires it.
+- server-authoritative PR numbering and revisions;
+- classification, severity, priority, origin, affected configuration, and ownership;
+- investigation, root cause, effects, containment, corrective action, and disposition;
+- duplicate, cannot reproduce, no fault found, deferred, accepted risk, fixed, and rejected paths;
+- links to requirements, SCR/SWCRs, procedures, executions, evidence, builds, baselines, documents, and releases;
+- resolution verification and independent closure approval;
+- reopen while retaining prior closure history;
+- PR-driven impact analysis and suspect-link propagation;
+- release blocker/waiver policy;
+- dashboards, saved views, notifications, comments, assignments, and escalations;
+- controlled PR publications and audit export; and
+- search, API, event, and ReqIF/reference integration where applicable.
 
-### Relationships
+Acceptance gate:
 
-PRs must link bidirectionally to:
-
-- SCRs/SWCRs;
-- requirements and exact revisions;
-- trace links and suspect-link dispositions;
-- test procedures, executions, failures, and retests;
-- builds, releases, baselines, documents, evidence references, and external implementation references.
-
-### Required views
-
-- PR workspace and controlled editor;
-- triage and ownership queues;
-- investigation and disposition history;
-- impact graph;
-- verification and closure package;
-- release blockers and escaped-defect metrics;
-- controlled PR PDF/DOCX publication.
-
-### Acceptance gate
-
-An end-to-end scenario creates a PR from a failed execution, classifies and investigates it, raises linked change requests, resolves and verifies the issue in a successor build, retains the original failure, obtains closure approval, publishes the closure package, and shows the complete chain in search, dashboards, trace views, audit, and release readiness.
+- create a PR from a failed execution;
+- investigate and classify it;
+- raise linked requirement/software changes;
+- verify the correction in a successor build while retaining the original failure;
+- approve closure;
+- publish the exact closure package; and
+- navigate the complete chain bidirectionally.
 
 ## Workstream 3 — Product-line configuration and reuse
 
-Implement CFG-001 through CFG-003.
+Implement components, streams, change sets, controlled libraries, synchronized reuse, variants, and composite configurations.
 
-### Capabilities
+Capabilities:
 
-- components and component ownership;
-- streams derived from exact predecessor configurations;
-- controlled change sets containing exact artifact revisions and relationship changes;
-- compare, accept, reject, merge, and conflict-resolution workflows;
+- project components and named streams;
+- controlled change sets with exact artifact deltas;
+- compare, accept, deliver, rebase, and merge;
+- retained three-way conflicts and attributable resolution;
 - immutable component baselines;
-- controlled libraries and reusable approved artifacts;
-- origin, reuse mode, applicability, synchronization state, divergence, propagation decisions, and version-correct links;
-- product variants and applicability expressions;
-- composite configurations selecting exact component baselines;
-- configuration-aware trace, publication, verification, search, and release readiness.
+- controlled reusable libraries with origin and synchronization state;
+- reference, synchronized-copy, and intentionally diverged reuse modes;
+- propagation previews and accept/defer/reject decisions;
+- variant definitions and applicability expressions;
+- composite configurations selecting exact component baselines; and
+- configuration-correct traceability, documents, verification, dashboards, and APIs.
 
-### Acceptance gate
+Acceptance gate:
 
-Two streams modify overlapping reusable content, expose a deterministic three-way conflict, resolve it through a controlled merge, baseline both components, assemble two variants, and prove that every document, trace endpoint, test result, and metric resolves against the selected composite configuration.
+- two parallel streams change shared content;
+- merge conflict is retained and deterministically resolved;
+- approved library content is reused by two product variants;
+- one variant accepts an upstream update while another defers it; and
+- every output resolves to the correct exact configuration.
 
 ## Workstream 4 — Enterprise identity and account assurance
 
-Implement OPS-001 and the committed identity-hardening backlog.
-
-### Capabilities
+Capabilities:
 
 - OIDC and SAML federation;
-- SCIM users and groups;
-- Program-role mapping from trusted groups;
-- service accounts with scoped credentials and expiry;
-- tightly controlled local break-glass administration;
-- first-sign-in temporary-password rotation for local accounts;
-- configurable password-expiration policy where local passwords remain enabled;
-- secure self-service recovery using short-lived, single-use, rate-limited, revocable tokens;
-- MFA, recovery codes, and step-up authentication for privileged actions;
+- SCIM user/group provisioning;
+- trusted group-to-Program-role mapping;
+- scoped service accounts;
+- tightly controlled break-glass local administrator;
+- temporary-password rotation;
+- password policy and expiration where locally managed;
+- secure account recovery with single-use short-lived tokens;
+- MFA and recovery codes;
+- privileged step-up authentication;
 - session inventory and revocation;
-- complete identity and privilege audit.
+- identity-provider and provisioning health; and
+- complete security auditing without secret disclosure.
 
-### Acceptance gate
+Acceptance gate:
 
-Automated integration tests prove group provisioning, deprovisioning, least-privilege Program access, step-up enforcement, recovery-token replay prevention, service-account scoping, emergency local access, and preservation of historical attribution after identity changes.
+- federated sign-in and logout;
+- SCIM create/update/disable;
+- role mapping and least-privilege proof;
+- MFA enrollment/recovery;
+- privileged step-up enforcement; and
+- break-glass recovery with complete audit evidence.
 
 ## Workstream 5 — Resumable interchange and monitored integrations
 
-Complete EXCH-001 through EXCH-003, API-001 through API-003, and INT-003 depth.
-
-### Capabilities
+Capabilities:
 
 - resumable import workers with durable checkpoints;
-- retry-safe item processing and idempotent commits;
+- item-level idempotency and retry;
 - cancellation and restart without duplicate controlled records;
 - mapping-version history and reusable mappings;
-- embedded image and attachment round-trip for CSV/XLSX/ReqIF-supported profiles;
-- conditional requirement writes through `/api/v1`;
+- downloadable error workbooks;
+- attachment and embedded-binary round trip;
+- conditional `/api/v1` requirement writes using ETags and idempotency keys;
 - OSLC RM provider and consumer support;
-- connector credentials, mappings, health, checkpoints, conflicts, error history, replay, and provenance;
-- signed webhook delivery observability and operator alerts.
+- monitored connector checkpoints;
+- connector health, error history, replay, and provenance; and
+- operator-visible queues and dead letters.
 
-### Acceptance gate
+Acceptance gate:
 
-A large ReqIF/import job is interrupted mid-run, resumes from its checkpoint, produces no duplicate identities or relationships, preserves rich content and binaries, and reports complete item-level provenance. API and OSLC tests prove conditional writes, configuration-aware reads, authorization, pagination, idempotency, and stable errors.
+- interrupt and resume a large CSV/XLSX import;
+- replay failed items without duplicating successful items;
+- conditional API writes reject stale ETags;
+- OSLC resources preserve configuration-aware links; and
+- connector failure/recovery remains observable and attributable.
 
-## Workstream 6 — Controlled documents and rich technical content
+## Workstream 6 — Rich technical content and controlled publications
 
-Complete enterprise publication depth.
+Capabilities:
 
-### Capabilities
+- inline-image rendering in authoring and generated outputs;
+- deterministic tables, symbols, equations-as-controlled-content, and references;
+- approved template lifecycle;
+- organization-specific SYSRD, SWRD, procedure, trace, PR, review, and release templates;
+- exact revision/baseline redlines;
+- resumable publication jobs;
+- publication integrity verification and regeneration proof;
+- controlled distribution metadata; and
+- release evidence packages with manifests and reproducible contents.
 
-- embedded inline-image rendering in authoring, redlines, PDF, DOCX, and ReqIF;
-- deterministic table, symbol, equation, reference, and attachment rendering;
-- controlled template versions with approval and retirement;
-- organization-specific SYSRD/SWRD/SDD/test/trace/PR/review-package templates;
-- revision-to-revision and baseline-to-baseline document redlines;
-- publication queue, retry, cancellation, retention, and integrity verification;
-- reproducibility check that regenerates and compares hashes where deterministic formats allow it;
-- release evidence package containing exact approved documents and manifest.
+Acceptance gate:
 
-### Acceptance gate
+- one rich requirement with image, table, symbols, and references renders equivalently in UI, DOCX, and PDF;
+- regeneration from identical controlled inputs produces equivalent authoritative content;
+- a template revision change affects only later outputs; and
+- release package manifest verifies every included file and source record.
 
-A rich requirement containing tables, symbols, inline images, attachments, and links renders consistently in the application, redline, PDF, DOCX, and ReqIF round trip. A release evidence package verifies every file hash and source reference.
+## Workstream 7 — Quality, certification-evidence, and portfolio intelligence
 
-## Workstream 7 — Certification, quality, and portfolio intelligence
+This workstream supports assurance planning and evidence discovery without claiming compliance or certification.
 
-Extend the existing trusted dashboard framework without claiming certification.
+Capabilities:
 
-### Capabilities
+- configurable lifecycle objective and evidence-expectation records;
+- readiness blockers, exceptions, waivers, owners, due dates, and rationale;
+- certification-evidence index and review status;
+- release and baseline completeness trends;
+- PR arrival, aging, recurrence, escape, and closure metrics;
+- review time and bottleneck analysis;
+- verification pass/retest/failure trends;
+- suspect-link and orphan trends;
+- cross-program portfolio aggregation with permission-safe suppression;
+- metric contracts exposing definition, scope, freshness, and drill-down; and
+- controlled dashboard exports.
 
-- configurable lifecycle objectives and evidence expectations by Program;
-- requirement, review, trace, verification, document, baseline, build, PR, and audit completeness contracts;
-- DAL/assurance-level, verification-method, independence, derived-requirement, safety, security, and compliance attributes through configurable schemas;
-- release readiness with explicit blockers, waivers, owners, due dates, and approval provenance;
-- certification-evidence index linking objectives to exact controlled records;
-- cross-release trends for churn, review duration, suspect links, verification closure, defects, escapes, rework, and waiver aging;
-- authorized cross-program portfolio views using aggregated data that cannot disclose restricted artifact content;
-- metric definition, scope, freshness, owner, authorization behavior, and drill-down for every displayed measure;
-- controlled dashboard exports with filters, timestamp, provisional/final state, and hashes.
+Acceptance gate:
 
-### Acceptance gate
+- every headline metric drills to its exact records;
+- unauthorized Programs do not influence disclosed totals;
+- historical metrics reconstruct from immutable event time rather than current state; and
+- waivers and exceptions remain visible in readiness decisions.
 
-Every readiness percentage and trend can be recomputed from source records. Permission tests prove that cross-program aggregation cannot reveal restricted identities or content. A release cannot be represented as ready while an unwaived configured blocker remains.
+## Workstream 8 — Production operations and qualification
 
-## Workstream 8 — Production operations and recovery assurance
+Capabilities:
 
-Complete OPS-002 and OPS-003.
+- structured logs, metrics, traces, correlation IDs, and audit separation;
+- liveness, readiness, dependency, storage, queue, and migration health;
+- alert thresholds and operator runbooks;
+- retention policies, preview, legal/quality holds, and auditable execution;
+- scheduled backups copied to protected off-device storage;
+- scheduled verification and isolated restore drills;
+- measured RPO/RTO evidence;
+- safe upgrade preflight, backup, migration, rollback decision, and post-checks;
+- capacity and performance qualification against published workloads; and
+- operational evidence export.
 
-### Capabilities
+Qualification target:
 
-- structured application, security, audit, job, webhook, database, storage, and backup telemetry;
-- health, readiness, and dependency checks;
-- alert rules and operator runbooks;
-- retention policies with legal/quality holds and dry-run previews;
-- scheduled off-device backup handoff and verification;
-- scheduled isolated restore drills with recorded RPO/RTO evidence;
-- upgrade preflight, backup gate, migration, rollback boundary, and post-upgrade verification;
-- capacity tests covering 150 concurrent mixed users, 50,000+ requirements, deep traces, large documents, imports, exports, and webhook load;
-- published qualification report with environment, dataset, workload, objectives, results, bottlenecks, and limitations.
-
-### Acceptance gate
-
-A scheduled recovery drill restores the latest eligible backup into isolation, verifies integrity, migrates, starts the application, runs smoke tests, records achieved RPO/RTO, and leaves production untouched. Capacity qualification meets the approved service objectives or records explicit blockers.
+- 50,000 controlled requirements;
+- representative revisions, traces, procedures, executions, evidence metadata, comments, and assignments;
+- 150 authenticated mixed-workload clients;
+- bounded search, trace, dashboard, publication, import, and webhook objectives; and
+- repeatable results with documented hardware and configuration.
 
 ## Delivery sequence
 
-### Increment A — Universal control and PR foundation
+1. Universal editing policy and artifact resolver.
+2. Universal checkout API and reusable client shell.
+3. Problem-report lifecycle.
+4. Configuration streams/change sets.
+5. Controlled reuse and variants.
+6. Rich publications and resumable jobs.
+7. Enterprise identity.
+8. Operations and qualification.
+9. Portfolio and evidence intelligence.
 
-1. Shared edit-session abstraction and migrations.
-2. Requirement, procedure, trace, release-plan, and configuration draft coverage.
-3. PR domain, API, persistence, search, audit, and basic workspace.
-4. PR impact, verification, closure, documents, dashboards, and release gates.
+Dependencies may cause small supporting slices to land earlier, but no workstream may bypass the shared authorization, revision, audit, configuration, or immutable-history contracts.
 
-### Increment B — Configuration and rich publication
+## Increment rules
 
-1. Components, streams, change sets, compare, merge, and conflicts.
-2. Controlled libraries, reuse, synchronization, and divergence.
-3. Variants and composite configurations.
-4. Inline rich media, template lifecycle, document redlines, and release evidence packages.
+Every implementation PR must:
 
-### Increment C — Connected enterprise
+- start from current green `main`;
+- identify its workstream and acceptance slice;
+- include safe additive migration or a documented no-migration rationale;
+- include domain and persistence tests;
+- include client/browser tests for user-visible behavior;
+- retain existing tests;
+- pass PostgreSQL bootstrap/migration smoke when persistence changes;
+- document security and operational impacts;
+- avoid unrelated cleanup; and
+- merge only when the complete required gate is green.
 
-1. Resumable interchange worker.
-2. Conditional REST writes.
-3. OSLC RM.
-4. Monitored connector checkpoints and operator health.
-5. OIDC/SAML, SCIM, MFA, recovery, and step-up authentication.
-
-### Increment D — Intelligence and production qualification
-
-1. Configurable lifecycle objective/evidence model.
-2. Certification, quality, PR, and portfolio dashboards.
-3. Observability, retention, upgrade safety, scheduled restore drills.
-4. Full scale and concurrency qualification.
-
-## Mandatory automated coverage
-
-Each increment must add:
-
-- domain transition and invariant tests;
-- persistence tests against isolated SQLite where valid and isolated PostgreSQL for provider-specific behavior;
-- authorization and direct-object boundary tests;
-- migration-upgrade tests from the current production schema;
-- API contract tests;
-- Playwright journeys for author, reviewer, manager, quality/configuration, administrator, and operator roles;
-- document and interchange signature/hash checks;
-- concurrency, retry, idempotency, and recovery tests;
-- backup/restore impact validation;
-- accessibility and keyboard-navigation coverage for new critical surfaces.
-
-## Release gate
+## Program completion gate
 
 AeroLink 3.0 is complete only when:
 
-1. all workstream acceptance gates are executable and green;
-2. all previous acceptance scenarios remain green;
-3. current PostgreSQL data migrates without loss of controlled history;
-4. released FMS 1.5 remains immutable and in-work successors remain explicit;
-5. backup, restore, and upgrade validation pass in isolation;
-6. security review finds no unresolved critical or high-severity defect;
-7. performance qualification evidence is published with limitations;
-8. user-facing documentation and operator runbooks are current; and
-9. no AI feature, API call, model dependency, or generative user control is introduced.
+- all eight workstreams meet their acceptance gates;
+- all prior acceptance scenarios remain green;
+- migrations are proven against a restored pre-3.0 PostgreSQL database;
+- backup, restore, and upgrade drills are recorded;
+- the configured scale workload meets published objectives;
+- security review finds no unresolved critical/high issue;
+- controlled documents and evidence packages regenerate correctly;
+- no AI functionality exists in the release; and
+- `main` is releasable with complete implementation and limitation records.
