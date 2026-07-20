@@ -21,8 +21,10 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   const requirementInspector = page.getByRole("heading", {
     name: /SYSR-000150\.\d{2}/,
   });
-  await expect(requirementResult.or(requirementInspector)).toBeVisible();
-  if (await requirementResult.isVisible()) await requirementResult.click();
+  if (!(await requirementInspector.isVisible())) {
+    await expect(requirementResult).toBeVisible();
+    await requirementResult.click();
+  }
   await expect(requirementInspector).toBeVisible();
   await page.getByRole("button", { name: "Trace & impact" }).click();
   await expect(page.getByRole("heading", { name: "Verification coverage" })).toBeVisible();
