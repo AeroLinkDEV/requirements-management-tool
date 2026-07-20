@@ -280,7 +280,7 @@ public static class ControlledEditingEndpoints
                 {
                     var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.Id == revision.ProcedureId, ct);
                     return new(procedure.ProjectId, revision.State.ToString(), revision.Id,
-                        JsonSerializer.Serialize(new { procedure.Id, procedure.BaseNumber, procedure.Title, procedure.OwnerId, level = procedure.Level.ToString(), revision.Id, revision.Revision, revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult, state = revision.State.ToString(), revision.AuthorId }),
+                        JsonSerializer.Serialize(new { procedureId = procedure.Id, procedure.BaseNumber, procedure.Title, procedure.OwnerId, level = procedure.Level.ToString(), revisionId = revision.Id, revision.Revision, revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult, state = revision.State.ToString(), revision.AuthorId }),
                         "TestProcedureRevision");
                 }
                 var procedureOnly = await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
