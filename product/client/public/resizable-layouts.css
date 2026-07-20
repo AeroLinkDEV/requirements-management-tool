@@ -1,0 +1,137 @@
+.resizableWorkspace {
+  position: relative;
+  display: grid !important;
+  min-width: 0;
+  min-height: 0;
+}
+
+.resizableWorkspacePanel {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.workspaceSplitter {
+  position: absolute;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted, #7d8ba3);
+  touch-action: none;
+  user-select: none;
+  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.workspaceSplitter::before {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border, #8da0bd) 42%, transparent);
+  transition: background-color 140ms ease, transform 140ms ease;
+}
+
+.workspaceSplitter span {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--border, #8da0bd) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface, #111827) 92%, transparent);
+  box-shadow: 0 5px 16px rgb(0 0 0 / 16%);
+  font-size: 15px;
+  font-weight: 800;
+  opacity: 0;
+  transform: scale(.86);
+  transition: opacity 140ms ease, transform 140ms ease, border-color 140ms ease;
+}
+
+.workspaceSplitter--horizontal {
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+}
+
+.workspaceSplitter--horizontal::before {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+}
+
+.workspaceSplitter--vertical {
+  left: 0;
+  right: 0;
+  height: 18px;
+  transform: translateY(-50%);
+  cursor: row-resize;
+}
+
+.workspaceSplitter--vertical::before {
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+
+.workspaceSplitter:hover,
+.workspaceSplitter:focus-visible,
+.workspaceSplitter.isDragging {
+  color: var(--accent, #4d8dff);
+  outline: none;
+}
+
+.workspaceSplitter:hover::before,
+.workspaceSplitter:focus-visible::before,
+.workspaceSplitter.isDragging::before {
+  background: var(--accent, #4d8dff);
+  transform: scale(1.5);
+}
+
+.workspaceSplitter:hover span,
+.workspaceSplitter:focus-visible span,
+.workspaceSplitter.isDragging span {
+  opacity: 1;
+  transform: scale(1);
+  border-color: var(--accent, #4d8dff);
+}
+
+.workspaceIsResizing,
+.workspaceIsResizing * {
+  cursor: inherit !important;
+  user-select: none !important;
+}
+
+.workspaceIsResizing body {
+  cursor: col-resize;
+}
+
+.resizableWorkspace--vertical:has(.workspaceSplitter.isDragging) ~ * {
+  cursor: row-resize;
+}
+
+@media (max-width: 800px) {
+  .resizableWorkspace {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto !important;
+  }
+
+  .workspaceSplitter {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspaceSplitter,
+  .workspaceSplitter::before,
+  .workspaceSplitter span {
+    transition: none;
+  }
+}
