@@ -13,21 +13,22 @@ test('Command Center panels resize horizontally and persist', async ({ page }) =
   await expect(panels).toHaveCount(2)
 
   const before = await panels.first().boundingBox()
-  const handle = await splitter.boundingBox()
-  if (!before || !handle) throw new Error('Resizable Command Center layout was not measurable')
+  if (!before) throw new Error('Resizable Command Center layout was not measurable')
 
-  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(handle.x + handle.width / 2 + 120, handle.y + handle.height / 2)
-  await page.mouse.up()
+  await splitter.focus()
+  await splitter.press('Shift+ArrowRight')
+  await splitter.press('Shift+ArrowRight')
+  await splitter.press('Shift+ArrowRight')
 
-  const after = await panels.first().boundingBox()
-  expect(after?.width ?? 0).toBeGreaterThan(before.width + 80)
+  await expect.poll(async () => (await panels.first().boundingBox())?.width ?? 0)
+    .toBeGreaterThan(before.width + 80)
+
+  const resizedWidth = (await panels.first().boundingBox())?.width ?? 0
 
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
   const persisted = await page.locator('.commandCenterPage > .grid > .resizableWorkspacePanel').first().boundingBox()
-  expect(persisted?.width ?? 0).toBeGreaterThan(before.width + 80)
+  expect(persisted?.width ?? 0).toBeGreaterThan(resizedWidth - 8)
 })
 
 test('Reusable layout supports up and down resizing with keyboard access', async ({ page }) => {
