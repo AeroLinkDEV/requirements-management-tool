@@ -19,6 +19,7 @@ public static class IntegrationEndpoints
         app.MapPut("/api/integrations/webhooks/{id:guid}/state", SetWebhookStateAsync);
         app.MapPost("/api/integrations/events/test", PublishTestEventAsync);
         app.MapPost("/api/integrations/deliveries/{id:guid}/replay", ReplayDeliveryAsync);
+        app.MapAeroLinkControlledEditingEndpoints();
 
         var publicApi = app.MapGroup("/api/v1").RequireRateLimiting("service-api");
         publicApi.MapGet("/requirements", GetRequirementsAsync);
