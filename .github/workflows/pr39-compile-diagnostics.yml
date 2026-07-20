@@ -15,13 +15,23 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: 10.0.x
-      - name: Compile API and print errors
+      - name: Compile API
+        id: compile
         shell: bash
         run: |
           set +e
-          dotnet build product/src/AeroLink.Api/AeroLink.Api.csproj --no-restore --verbosity quiet > build.log 2>&1
+          dotnet build product/src/AeroLink.Api/AeroLink.Api.csproj --no-restore --verbosity diagnostic > build.log 2>&1
           code=$?
-          echo "--- compiler diagnostics ---"
-          grep -E "error CS|error :|Build FAILED|Build succeeded" build.log | head -100 || true
-          echo "--- end diagnostics; exit code $code ---"
-          exit $code
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload compiler report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pr39-compiler-report
+          path: build.log
+          if-no-files-found: error
+          retention-days: 2
+      - name: Fail when compile failed
+        if: steps.compile.outputs.exit_code != '0'
+        shell: bash
+        run: exit 1
