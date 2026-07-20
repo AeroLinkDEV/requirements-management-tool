@@ -34,12 +34,15 @@ export async function showcaseSeed(request:APIRequestContext){
   return cachedShowcase
 }
 export async function selectProgram(page:Page,label:string){
-  const selector=page.locator('.program > select:not(.releaseSelector)')
+  const accessibleSelector=page.getByRole('combobox',{name:'Active program'})
+  const legacySelector=page.locator('.program > select:not(.releaseSelector)')
   const activeProgram=page.locator('.activeProgram')
   await expect.poll(async()=>{
+    const selector=await accessibleSelector.count()?accessibleSelector:legacySelector
     if(await selector.count())return (await selector.locator('option').allTextContents()).includes(label)
     return (await activeProgram.textContent())?.trim()===label
   },{message:`Wait for Program context "${label}"`,timeout:30_000}).toBe(true)
+  const selector=await accessibleSelector.count()?accessibleSelector:legacySelector
   if(await selector.count())await selector.selectOption({label})
   else await expect(activeProgram).toHaveText(label)
 }
