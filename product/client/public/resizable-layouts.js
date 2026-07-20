@@ -1,6 +1,7 @@
 const MIN_PANEL_PX = 220;
 const STORAGE_PREFIX = "aerolink-resizable-layout:";
 const ENHANCED = "data-resizable-enhanced";
+const PANEL_COUNT = "data-resizable-panel-count";
 
 const layoutTargets = [
   { selector: ".commandCenterPage > .grid", axis: "horizontal", key: "command-center-main" },
@@ -27,7 +28,7 @@ function equalSizes(count) {
 
 function loadSizes(key, count) {
   try {
-    const value = JSON.parse(localStorage.getItem(key) || "null");
+    const value = JSON.parse(localStorage.getItem(`${key}:${count}`) || "null");
     if (
       Array.isArray(value) &&
       value.length === count &&
@@ -44,7 +45,7 @@ function loadSizes(key, count) {
 
 function saveSizes(key, sizes) {
   try {
-    localStorage.setItem(key, JSON.stringify(sizes));
+    localStorage.setItem(`${key}:${sizes.length}`, JSON.stringify(sizes));
   } catch {
     // Persistence is an enhancement; dragging still works without storage.
   }
@@ -170,19 +171,24 @@ function createHandle(container, panels, target, sizesRef, boundary, key) {
 }
 
 function enhance(container, target) {
-  if (container.getAttribute(ENHANCED) === "true") return;
   const panels = directPanels(container);
   if (panels.length < 2) return;
 
+  const previousCount = Number(container.getAttribute(PANEL_COUNT) || 0);
+  if (container.getAttribute(ENHANCED) === "true" && previousCount === panels.length) return;
+
+  container.querySelectorAll(":scope > .workspaceSplitter").forEach((handle) => handle.remove());
+  const currentPanels = directPanels(container);
   const key = storageKey(container, target);
-  const sizesRef = { value: loadSizes(key, panels.length) };
+  const sizesRef = { value: loadSizes(key, currentPanels.length) };
   container.setAttribute(ENHANCED, "true");
+  container.setAttribute(PANEL_COUNT, String(currentPanels.length));
   container.classList.add("resizableWorkspace", `resizableWorkspace--${target.axis}`);
-  panels.forEach((panel) => panel.classList.add("resizableWorkspacePanel"));
+  currentPanels.forEach((panel) => panel.classList.add("resizableWorkspacePanel"));
   applySizes(container, target.axis, sizesRef.value);
 
-  for (let boundary = 0; boundary < panels.length - 1; boundary += 1) {
-    createHandle(container, panels, target, sizesRef, boundary, key);
+  for (let boundary = 0; boundary < currentPanels.length - 1; boundary += 1) {
+    createHandle(container, currentPanels, target, sizesRef, boundary, key);
   }
   positionHandles(container, target.axis, sizesRef.value);
 }
@@ -193,7 +199,17 @@ function scan() {
   });
 }
 
-const observer = new MutationObserver(() => requestAnimationFrame(scan));
+let scanQueued = false;
+function queueScan() {
+  if (scanQueued) return;
+  scanQueued = true;
+  requestAnimationFrame(() => {
+    scanQueued = false;
+    scan();
+  });
+}
+
+const observer = new MutationObserver(queueScan);
 observer.observe(document.documentElement, { childList: true, subtree: true });
-addEventListener("resize", scan, { passive: true });
+addEventListener("resize", queueScan, { passive: true });
 scan();
