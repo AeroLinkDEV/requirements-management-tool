@@ -1450,6 +1450,7 @@ app.MapGet("/api/search",async(Guid projectId,string query,int? limit,HttpContex
     if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
     var q=(query??string.Empty).Trim().ToLowerInvariant();if(q.Length<2)return Results.Ok(new{query,items=Array.Empty<SearchResultDto>()});var take=Math.Clamp(limit??30,1,50);var items=new List<SearchResultDto>();
     items.AddRange(await db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.BaseNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"change-request",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),x.Type==ChangeRequestType.Software?"software":"system",x.UpdatedAt)).ToListAsync(ct));
+    items.AddRange(await db.ProblemReports.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.ReportNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q)||x.RootCause.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"problem-report",x.ReportNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),"assurance",x.UpdatedAt)).ToListAsync(ct));
     var requirementRows=await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)&&(artifact.BaseNumber.ToLower().Contains(q)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q)) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct);
     items.AddRange(requirementRows.Select(x=>new SearchResultDto(x.Id,"requirement",$"{x.BaseNumber}.{x.Revision:D2}",x.Statement,x.State.ToString(),x.Level==RequirementLevel.System?"system":"software",x.CreatedAt)));
     items.AddRange(await db.CandidateBaselines.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.BaseNumber.ToLower().Contains(q)||x.Name.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"baseline",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
@@ -1484,6 +1485,8 @@ app.MapGet("/api/artifacts/{kind}/{id:guid}",async(string kind,Guid id,HttpConte
     {var item=await db.TestExecutions.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var revision=await db.TestProcedureRevisions.AsNoTracking().SingleAsync(x=>x.Id==item.ProcedureRevisionId,ct);var procedure=await db.TestProcedures.AsNoTracking().SingleAsync(x=>x.Id==revision.ProcedureId,ct);var related=new[]{new RelatedArtifactDto("test-procedure",procedure.Id,$"{procedure.BaseNumber}.{revision.Revision:D2}",procedure.Title)};return Results.Ok(new{kind=normalized,item.Id,identifier=$"{procedure.BaseNumber}.{revision.Revision:D2}",title=procedure.Title+" result",state=item.Outcome.ToString(),subtitle="Immutable attributable verification determination",updatedAt=item.RecordedAt,details=Details(("executedBy",item.ExecutedBy),("executedAt",item.ExecutedAt),("configuration",item.Configuration),("determination",item.Determination),("evidenceReference",item.EvidenceReference),("retestOfExecutionId",item.RetestOfExecutionId)),related});}
     if(normalized=="evidence")
     {var item=await db.EvidenceRecords.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var executionIds=await db.TestExecutionEvidence.AsNoTracking().Where(x=>x.EvidenceId==id).Select(x=>x.TestExecutionId).ToListAsync(ct);var related=await db.TestExecutions.AsNoTracking().Where(x=>executionIds.Contains(x.Id)).Select(x=>new RelatedArtifactDto("test-execution",x.Id,x.Id.ToString(),x.Determination)).ToListAsync(ct);return Results.Ok(new{kind=normalized,item.Id,identifier=item.OriginalFileName,title=item.OriginalFileName,state="Immutable",subtitle="Content-addressed verification evidence",updatedAt=item.UploadedAt,details=Details(("sha256",item.Sha256),("contentType",item.ContentType),("size",item.Size),("uploadedBy",item.UploadedBy),("uploadedAt",item.UploadedAt)),related});}
+    if(normalized is "problem-report" or "problemreport" or "pr")
+    {var item=await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var links=await db.ProblemReportLinks.AsNoTracking().Where(x=>x.ProblemReportId==id).ToListAsync(ct);var related=links.Select(x=>new RelatedArtifactDto(ProblemReportIntegrationMap.ArtifactKind(x.ArtifactType),x.ArtifactId,x.Relationship,ProblemReportIntegrationMap.ArtifactLabel(x.ArtifactType))).ToList();return Results.Ok(new{kind="problem-report",item.Id,identifier=item.DisplayNumber,title=item.Title,state=item.State.ToString(),subtitle="Controlled problem report with immutable lifecycle evidence",updatedAt=item.UpdatedAt,details=Details(("classification",item.Classification),("severity",item.Severity.ToString()),("priority",item.Priority.ToString()),("reportedBy",item.ReportedBy),("origin",item.Origin),("affectedConfiguration",item.AffectedConfiguration),("rootCause",item.RootCause),("correctiveAction",item.CorrectiveAction),("disposition",item.Disposition?.ToString()),("releaseBlocker",item.IsReleaseBlocker),("waiver",item.WaiverRationale),("verificationExecutionId",item.ResolutionVerificationExecutionId)),related});}
     return Results.NotFound();
 });
 
@@ -1728,6 +1731,32 @@ static class DirectoryTitles
         if(roles.Contains("Engineer"))return "Engineer";
         return "AeroLink User";
     }
+}
+
+static class ProblemReportIntegrationMap
+{
+    public static string ArtifactKind(string artifactType) => artifactType.Trim().ToLowerInvariant() switch
+    {
+        "requirement" => "requirement",
+        "changerequest" or "scr" or "swcr" => "change-request",
+        "testexecution" => "test-execution",
+        "softwarebuild" or "build" => "build",
+        "baseline" => "baseline",
+        "document" => "document",
+        "evidence" => "evidence",
+        "release" => "release",
+        "problemreport" or "pr" => "problem-report",
+        _ => "artifact"
+    };
+
+    public static string ArtifactLabel(string artifactType) => artifactType.Trim().ToLowerInvariant() switch
+    {
+        "changerequest" or "scr" or "swcr" => "Controlled change",
+        "testexecution" => "Verification execution",
+        "softwarebuild" or "build" => "Software build",
+        "problemreport" or "pr" => "Related problem report",
+        _ => artifactType
+    };
 }
 
 static class ApiMap

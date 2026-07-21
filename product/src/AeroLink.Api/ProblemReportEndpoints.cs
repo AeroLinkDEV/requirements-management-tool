@@ -98,7 +98,8 @@ public static class ProblemReportEndpoints
 
     private static async Task<IResult> LinkedAsync(string artifactType, Guid artifactId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
-        var links = await db.ProblemReportLinks.AsNoTracking().Where(x => x.ArtifactType == artifactType && x.ArtifactId == artifactId).ToListAsync(ct);
+        var canonicalType = CanonicalLinkType(artifactType);
+        var links = await db.ProblemReportLinks.AsNoTracking().Where(x => x.ArtifactType == canonicalType && x.ArtifactId == artifactId).ToListAsync(ct);
         var ids = links.Select(x => x.ProblemReportId).Distinct().ToList(); var reports = await db.ProblemReports.AsNoTracking().Where(x => ids.Contains(x.Id)).ToListAsync(ct);
         var permitted = new List<ProblemReport>(); foreach (var report in reports) if (await http.HasProjectAccessAsync(db, report.ProjectId, ct)) permitted.Add(report);
         return Results.Ok(permitted.Select(Summary));
@@ -145,11 +146,12 @@ public static class ProblemReportEndpoints
     {
         var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
-        if (!await LinkExistsInProjectAsync(request.ArtifactType, request.ArtifactId, report.ProjectId, db, ct)) return Results.BadRequest(new { error = "The linked artifact does not exist in this problem report's project or is not a supported link target." });
+        var canonicalType = CanonicalLinkType(request.ArtifactType);
+        if (!await LinkExistsInProjectAsync(canonicalType, request.ArtifactId, report.ProjectId, db, ct)) return Results.BadRequest(new { error = "The linked artifact does not exist in this problem report's project or is not a supported link target." });
         try
         {
-            var now = DateTimeOffset.UtcNow; var actor = http.UserAccount(); db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, request.ArtifactType, request.ArtifactId, request.Relationship, actor.UserName, now)); AddRevision(db, report, "ArtifactLinked", actor.UserName, now);
-            await db.SaveChangesAsync(ct); return Results.Created($"/api/problem-reports/{id}/links/{request.ArtifactId}", new { request.ArtifactType, request.ArtifactId, request.Relationship });
+            var now = DateTimeOffset.UtcNow; var actor = http.UserAccount(); db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, canonicalType, request.ArtifactId, request.Relationship, actor.UserName, now)); AddRevision(db, report, "ArtifactLinked", actor.UserName, now);
+            await db.SaveChangesAsync(ct); return Results.Created($"/api/problem-reports/{id}/links/{request.ArtifactId}", new { artifactType = canonicalType, request.ArtifactId, request.Relationship });
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (DbUpdateException) { return Results.Conflict(new { error = "That problem-report link already exists." }); }
@@ -202,6 +204,20 @@ public static class ProblemReportEndpoints
         "release" => await db.Releases.AnyAsync(x => x.Id == artifactId && x.ProjectId == projectId, ct),
         "problemreport" or "pr" => await db.ProblemReports.AnyAsync(x => x.Id == artifactId && x.ProjectId == projectId, ct),
         _ => false
+    };
+
+    private static string CanonicalLinkType(string artifactType) => artifactType.Trim().ToLowerInvariant() switch
+    {
+        "changerequest" or "change-request" or "scr" or "swcr" => "ChangeRequest",
+        "testexecution" or "test-execution" => "TestExecution",
+        "softwarebuild" or "software-build" or "build" => "SoftwareBuild",
+        "problemreport" or "problem-report" or "pr" => "ProblemReport",
+        "requirement" => "Requirement",
+        "baseline" => "Baseline",
+        "document" => "Document",
+        "evidence" => "Evidence",
+        "release" => "Release",
+        _ => artifactType.Trim()
     };
 
     private static object Summary(ProblemReport x) => new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = x.State.ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Classification, x.ReportedBy, x.IsReleaseBlocker, waived = !string.IsNullOrWhiteSpace(x.WaiverRationale), x.UpdatedAt, x.Version };

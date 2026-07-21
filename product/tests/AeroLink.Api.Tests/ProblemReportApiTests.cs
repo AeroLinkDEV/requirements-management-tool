@@ -49,6 +49,21 @@ public sealed class ProblemReportApiTests
         Assert.Contains(dashboard.GetProperty("attention").EnumerateArray(), x => x.GetProperty("id").GetGuid() == id);
     }
 
+    [Fact]
+    public async Task Universal_search_and_artifact_inspector_expose_problem_reports()
+    {
+        using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory);
+        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { projectId, title = "Navigation data corruption", problem = "Route data becomes inconsistent after reset.", classification = "Software anomaly", severity = "Critical", priority = "Urgent", origin = "Manual report" });
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var results = await client.GetFromJsonAsync<JsonElement>($"/api/search?projectId={projectId}&query=corruption");
+        Assert.Contains(results.GetProperty("items").EnumerateArray(), x => x.GetProperty("kind").GetString() == "problem-report" && x.GetProperty("id").GetGuid() == id);
+        var artifact = await client.GetFromJsonAsync<JsonElement>($"/api/artifacts/problem-report/{id}");
+        Assert.Equal("PR-00001.00", artifact.GetProperty("identifier").GetString());
+        Assert.Equal("Critical", artifact.GetProperty("details").GetProperty("severity").GetString());
+    }
+
     private static async Task<Guid> SeedProjectAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
