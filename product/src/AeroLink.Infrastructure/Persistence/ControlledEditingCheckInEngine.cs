@@ -654,3 +654,66 @@ public sealed class ReleasePlanningControlledEditingAdapter(AeroLinkDbContext db
         Guid ReleaseId, Guid? PredecessorBaselineId, string? State, string? ContentHash, string? RequirementsHash,
         long Version, List<Guid>? SelectedScrIds);
 }
+
+public sealed class DocumentTemplateControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+{
+    private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true };
+    public ControlledArtifactFamily Family => ControlledArtifactFamily.DocumentTemplate;
+    public string Name => "DocumentTemplateControlledEditingAdapter";
+    public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
+    {
+        var item = await db.DocumentTemplates.SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+        return item is null ? null : new(item.ProjectId, item.State.ToString(), item, item.Version, null, null);
+    }
+    public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) => Snapshot((DocumentTemplate)artifact.Aggregate, versionOverride);
+    public static string Snapshot(DocumentTemplate item, long? versionOverride = null) => JsonSerializer.Serialize(new { item.Id, item.ProjectId, item.TemplateNumber, item.Title, item.Body, item.OwnerId, state = item.State.ToString(), version = versionOverride ?? item.Version });
+    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, DateTimeOffset now, CancellationToken ct)
+    {
+        var item = (DocumentTemplate)artifact.Aggregate; var draft = JsonSerializer.Deserialize<TemplateDraft>(draftJson, Options) ?? throw new JsonException("The latest document-template draft is empty.");
+        if (draft.Id != item.Id || draft.ProjectId != item.ProjectId || !string.Equals(draft.TemplateNumber?.Trim(), item.TemplateNumber, StringComparison.OrdinalIgnoreCase)) throw new DomainException("The controlled document-template identity cannot change.");
+        item.UpdateDraft(draft.Title ?? "", draft.Body ?? "", draft.OwnerId ?? "", now); return Task.CompletedTask;
+    }
+    private sealed record TemplateDraft(Guid Id, Guid ProjectId, string? TemplateNumber, string? Title, string? Body, string? OwnerId, string? State, long Version);
+}
+
+public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+{
+    private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true };
+    public ControlledArtifactFamily Family => ControlledArtifactFamily.ProblemReport;
+    public string Name => "ProblemReportControlledEditingAdapter";
+    public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
+    {
+        var item = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+        return item is null ? null : new(item.ProjectId, item.State.ToString(), item, item.Version, null, null);
+    }
+    public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) => Snapshot((ProblemReport)artifact.Aggregate, versionOverride);
+    public static string Snapshot(ProblemReport item, long? versionOverride = null) => JsonSerializer.Serialize(new { item.Id, item.ProjectId, item.ReportNumber, item.Title, item.Problem, item.Analysis, item.ReportedBy, state = item.State.ToString(), version = versionOverride ?? item.Version });
+    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, DateTimeOffset now, CancellationToken ct)
+    {
+        var item = (ProblemReport)artifact.Aggregate; var draft = JsonSerializer.Deserialize<ProblemDraft>(draftJson, Options) ?? throw new JsonException("The latest problem-report draft is empty.");
+        if (draft.Id != item.Id || draft.ProjectId != item.ProjectId || !string.Equals(draft.ReportNumber?.Trim(), item.ReportNumber, StringComparison.OrdinalIgnoreCase) || !string.Equals(draft.ReportedBy?.Trim(), item.ReportedBy, StringComparison.OrdinalIgnoreCase)) throw new DomainException("The controlled problem-report identity cannot change.");
+        item.UpdateDraft(draft.Title ?? "", draft.Problem ?? "", draft.Analysis ?? "", now); return Task.CompletedTask;
+    }
+    private sealed record ProblemDraft(Guid Id, Guid ProjectId, string? ReportNumber, string? Title, string? Problem, string? Analysis, string? ReportedBy, string? State, long Version);
+}
+
+public sealed class ConfigurationChangeSetControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+{
+    private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true };
+    public ControlledArtifactFamily Family => ControlledArtifactFamily.ConfigurationChangeSet;
+    public string Name => "ConfigurationChangeSetControlledEditingAdapter";
+    public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
+    {
+        var item = await db.ConfigurationChangeSets.SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+        return item is null ? null : new(item.ProjectId, item.State.ToString(), item, item.Version, null, null);
+    }
+    public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) => Snapshot((ConfigurationChangeSet)artifact.Aggregate, versionOverride);
+    public static string Snapshot(ConfigurationChangeSet item, long? versionOverride = null) => JsonSerializer.Serialize(new { item.Id, item.ProjectId, item.ChangeSetNumber, item.Title, item.Description, item.OwnerId, state = item.State.ToString(), version = versionOverride ?? item.Version });
+    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, DateTimeOffset now, CancellationToken ct)
+    {
+        var item = (ConfigurationChangeSet)artifact.Aggregate; var draft = JsonSerializer.Deserialize<ChangeSetDraft>(draftJson, Options) ?? throw new JsonException("The latest configuration change-set draft is empty.");
+        if (draft.Id != item.Id || draft.ProjectId != item.ProjectId || !string.Equals(draft.ChangeSetNumber?.Trim(), item.ChangeSetNumber, StringComparison.OrdinalIgnoreCase)) throw new DomainException("The controlled configuration change-set identity cannot change.");
+        item.UpdateDraft(draft.Title ?? "", draft.Description ?? "", draft.OwnerId ?? "", now); return Task.CompletedTask;
+    }
+    private sealed record ChangeSetDraft(Guid Id, Guid ProjectId, string? ChangeSetNumber, string? Title, string? Description, string? OwnerId, string? State, long Version);
+}

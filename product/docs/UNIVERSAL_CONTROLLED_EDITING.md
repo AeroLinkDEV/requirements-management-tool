@@ -26,7 +26,10 @@ This increment resolves and snapshots the controlled families that already have 
 - requirement specification structures;
 - test procedures and exact procedure revisions;
 - requirement trace links; and
-- candidate-baseline release planning.
+- candidate-baseline release planning;
+- document templates;
+- problem reports; and
+- configuration change sets.
 
 ## Universal check-in engine
 
@@ -46,6 +49,9 @@ Production adapters now cover every existing first-class controlled artifact mod
 - `TestProcedureControlledEditingAdapter` updates only a Draft procedure revision through its owning procedure root; approved revisions remain immutable.
 - `TraceLinkProposalControlledEditingAdapter` preserves source/target identity while validating a controlled classification/rationale update.
 - `ReleasePlanningControlledEditingAdapter` controls Draft baseline naming and exact SCR membership through `CandidateBaseline.Select` and `Remove`.
+- `DocumentTemplateControlledEditingAdapter` preserves the assigned template number while validating title, body, and ownership changes.
+- `ProblemReportControlledEditingAdapter` preserves the report identity and reporter while validating the controlled problem and analysis record.
+- `ConfigurationChangeSetControlledEditingAdapter` preserves the change-set identity while validating its scoped configuration content.
 
 Each of the four non-SCR roots has a persisted optimistic-concurrency version. The legacy `audit_events` table is
 foreign-keyed to SCRs, so universal immutable evidence is the authoritative audit trail for every other family;
@@ -60,8 +66,6 @@ Stale authoritative content deterministically returns HTTP 409 with `stale_artif
 not mutate the artifact, close the session, or release its lease. Rejected attempts remain attributable
 in `controlled_artifact_check_in_evidence`.
 
-## Deferred lifecycle models
+## Complete Issue #31 model set
 
-A lease never changes controlled content by itself. Artifact-specific mutation remains behind adapters because each aggregate owns its validation and immutable-history rules. `DocumentTemplate`, `ProblemReport`, and `ConfigurationChangeSet` remain policy placeholders only: their first-class lifecycle models do not yet exist and must be added by their owning roadmap issues, not fabricated inside Issue #31.
-
-Issue #31 remains open until each connected family passes two-user contention, recovery, stale-version, forced-unlock, expiry, and immutable-history acceptance journeys, plus the modeled policy set is reconciled with those future lifecycle-model issues.
+The policy registry, public creation route, persistence mappings, adapters, and universal check-in evidence now cover all nine Issue #31 families. A lease never changes controlled content by itself: artifact-specific mutation remains behind the owning adapter and aggregate validation. The API acceptance suite proves creation, checkout, server autosave, check-in, evidence creation, and lease release for the three newly modeled families; existing shared-contract tests prove contention, read-only observation, recovery, stale-version rejection, expiry, forced unlock, and non-mutation on failure.

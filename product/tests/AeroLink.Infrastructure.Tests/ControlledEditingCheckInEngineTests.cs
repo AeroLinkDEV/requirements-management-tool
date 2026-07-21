@@ -354,6 +354,54 @@ public sealed class ControlledEditingCheckInEngineTests
         return await engine.CheckInAsync(session.Id, session.Version, scenario.Actor, scenario.Now.AddMinutes(1), default);
     }
 
+    [Fact]
+    public async Task Document_template_check_in_creates_immutable_universal_evidence()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var template = new DocumentTemplate(scenario.Project.Id, "TPL-00001", "Verification template", "Initial controlled body", scenario.Actor.UserName, scenario.Now);
+        scenario.Db.DocumentTemplates.Add(template); await scenario.Db.SaveChangesAsync();
+        var adapter = new DocumentTemplateControlledEditingAdapter(scenario.Db);
+        var draft = JsonSerializer.Serialize(new { template.Id, template.ProjectId, template.TemplateNumber, title = "Approved verification template", body = "Latest autosaved controlled body", template.OwnerId, state = template.State.ToString(), version = template.Version });
+
+        var result = await CheckInAsync(scenario, adapter, "DocumentTemplate", template.Id, draft);
+
+        Assert.True(result.Success); scenario.Db.ChangeTracker.Clear();
+        Assert.Equal("Approved verification template", (await scenario.Db.DocumentTemplates.SingleAsync(x => x.Id == template.Id)).Title);
+        Assert.Equal("DocumentTemplateControlledEditingAdapter", (await scenario.Db.ControlledArtifactCheckInEvidence.SingleAsync(x => x.Id == result.EvidenceId)).Adapter);
+    }
+
+    [Fact]
+    public async Task Problem_report_check_in_creates_immutable_universal_evidence()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var report = new ProblemReport(scenario.Project.Id, "PR-00001", "Unexpected reset", "The unit reset unexpectedly.", "Initial analysis", scenario.Actor.UserName, scenario.Now);
+        scenario.Db.ProblemReports.Add(report); await scenario.Db.SaveChangesAsync();
+        var adapter = new ProblemReportControlledEditingAdapter(scenario.Db);
+        var draft = JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, title = "Reset under recovery load", problem = "The unit reset during recovery load.", analysis = "Latest root-cause analysis", report.ReportedBy, state = report.State.ToString(), version = report.Version });
+
+        var result = await CheckInAsync(scenario, adapter, "ProblemReport", report.Id, draft);
+
+        Assert.True(result.Success); scenario.Db.ChangeTracker.Clear();
+        Assert.Equal("Latest root-cause analysis", (await scenario.Db.ProblemReports.SingleAsync(x => x.Id == report.Id)).Analysis);
+        Assert.Equal("ProblemReportControlledEditingAdapter", (await scenario.Db.ControlledArtifactCheckInEvidence.SingleAsync(x => x.Id == result.EvidenceId)).Adapter);
+    }
+
+    [Fact]
+    public async Task Configuration_change_set_check_in_creates_immutable_universal_evidence()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var changeSet = new ConfigurationChangeSet(scenario.Project.Id, "CCS-00001", "Recovery configuration", "Initial controlled scope", scenario.Actor.UserName, scenario.Now);
+        scenario.Db.ConfigurationChangeSets.Add(changeSet); await scenario.Db.SaveChangesAsync();
+        var adapter = new ConfigurationChangeSetControlledEditingAdapter(scenario.Db);
+        var draft = JsonSerializer.Serialize(new { changeSet.Id, changeSet.ProjectId, changeSet.ChangeSetNumber, title = "Recovery configuration release", description = "Latest controlled configuration scope", changeSet.OwnerId, state = changeSet.State.ToString(), version = changeSet.Version });
+
+        var result = await CheckInAsync(scenario, adapter, "ConfigurationChangeSet", changeSet.Id, draft);
+
+        Assert.True(result.Success); scenario.Db.ChangeTracker.Clear();
+        Assert.Equal("Recovery configuration release", (await scenario.Db.ConfigurationChangeSets.SingleAsync(x => x.Id == changeSet.Id)).Title);
+        Assert.Equal("ConfigurationChangeSetControlledEditingAdapter", (await scenario.Db.ControlledArtifactCheckInEvidence.SingleAsync(x => x.Id == result.EvidenceId)).Adapter);
+    }
+
     private sealed class Scenario : IAsyncDisposable
     {
         private Scenario(AeroLinkDbContext db, ProgramRecord program, ProjectRecord project,

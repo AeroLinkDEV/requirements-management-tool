@@ -61,6 +61,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ArtifactAssignment> ArtifactAssignments => Set<ArtifactAssignment>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<RequirementImportMapping> RequirementImportMappings => Set<RequirementImportMapping>();
+    public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();
+    public DbSet<ProblemReport> ProblemReports => Set<ProblemReport>();
+    public DbSet<ConfigurationChangeSet> ConfigurationChangeSets => Set<ConfigurationChangeSet>();
     public DbSet<ControlledAttachment> ControlledAttachments => Set<ControlledAttachment>();
     public DbSet<ArtifactEditSession> ArtifactEditSessions => Set<ArtifactEditSession>();
     public DbSet<ArtifactDraftSnapshot> ArtifactDraftSnapshots => Set<ArtifactDraftSnapshot>();
@@ -409,6 +412,27 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<ArtifactDraftSnapshot>(b=>
         {
             b.ToTable("artifact_draft_snapshots");b.HasKey(x=>x.Id);b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired();b.Property(x=>x.DraftJson).IsRequired();b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.RestoredBy).HasMaxLength(100);b.HasIndex(x=>new{x.SessionId,x.Sequence}).IsUnique();b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.CreatedAt});b.HasOne<ArtifactEditSession>().WithMany().HasForeignKey(x=>x.SessionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<DocumentTemplate>(b =>
+        {
+            b.ToTable("document_templates"); b.HasKey(x => x.Id); b.Property(x => x.TemplateNumber).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Title).HasMaxLength(300).IsRequired(); b.Property(x => x.Body).HasMaxLength(32000); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.TemplateNumber }).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProblemReport>(b =>
+        {
+            b.ToTable("problem_reports"); b.HasKey(x => x.Id); b.Property(x => x.ReportNumber).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Title).HasMaxLength(300).IsRequired(); b.Property(x => x.Problem).HasMaxLength(8000).IsRequired(); b.Property(x => x.Analysis).HasMaxLength(8000); b.Property(x => x.ReportedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ReportNumber }).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ConfigurationChangeSet>(b =>
+        {
+            b.ToTable("configuration_change_sets"); b.HasKey(x => x.Id); b.Property(x => x.ChangeSetNumber).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Title).HasMaxLength(300).IsRequired(); b.Property(x => x.Description).HasMaxLength(16000); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ChangeSetNumber }).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ControlledArtifactCheckInEvidence>(b =>
         {

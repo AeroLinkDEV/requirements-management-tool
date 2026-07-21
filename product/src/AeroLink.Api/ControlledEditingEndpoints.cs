@@ -15,6 +15,7 @@ public static class ControlledEditingEndpoints
     {
         var group = app.MapGroup("/api/controlled-editing");
         group.MapGet("/policies", GetPolicies);
+        group.MapPost("/artifacts", CreateArtifactAsync);
         group.MapGet("/status", GetStatusAsync);
         group.MapPost("/checkout", CheckoutAsync);
         group.MapPut("/sessions/{id:guid}/autosave", AutosaveAsync);
@@ -36,6 +37,31 @@ public static class ControlledEditingEndpoints
         editableStates = policy.EditableStates.OrderBy(x => x),
         aliases = policy.Aliases.OrderBy(x => x)
     }));
+
+    private static async Task<IResult> CreateArtifactAsync(CreateControlledArtifactRequest request, HttpContext http,
+        AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+    {
+        if (!ControlledArtifactEditPolicies.TryResolve(request.ArtifactType, out var policy) || policy.Family is not (
+                ControlledArtifactFamily.DocumentTemplate or ControlledArtifactFamily.ProblemReport or ControlledArtifactFamily.ConfigurationChangeSet))
+            return Results.BadRequest(new { error = "This endpoint creates DocumentTemplate, ProblemReport, and ConfigurationChangeSet artifacts only." });
+        if (!await http.HasProjectAccessAsync(db, request.ProjectId, ct) || !await http.HasProjectRoleAsync(db, identity,
+                request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+        var now = DateTimeOffset.UtcNow; var actor = http.UserAccount().UserName;
+        try
+        {
+            object item = policy.Family switch
+            {
+                ControlledArtifactFamily.DocumentTemplate => new DocumentTemplate(request.ProjectId, request.Number, request.Title, request.Content ?? "", actor, now),
+                ControlledArtifactFamily.ProblemReport => new ProblemReport(request.ProjectId, request.Number, request.Title, request.Content ?? "", request.Analysis ?? "", actor, now),
+                _ => new ConfigurationChangeSet(request.ProjectId, request.Number, request.Title, request.Content ?? "", actor, now)
+            };
+            db.Add(item); await db.SaveChangesAsync(ct);
+            var id = item switch { DocumentTemplate x => x.Id, ProblemReport x => x.Id, ConfigurationChangeSet x => x.Id, _ => Guid.Empty };
+            return Results.Created($"/api/controlled-editing/artifacts/{id}", new { id, artifactType = policy.CanonicalType, state = "Draft" });
+        }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        catch (DbUpdateException) { return Results.Conflict(new { error = "A controlled artifact with that identifier already exists in this project." }); }
+    }
 
     private static async Task<IResult> GetStatusAsync(string artifactType, Guid artifactId, HttpContext http,
         AeroLinkDbContext db, CancellationToken ct)
@@ -345,6 +371,24 @@ public static class ControlledEditingEndpoints
                 return new(item.ProjectId, item.State.ToString(), null,
                     ReleasePlanningControlledEditingAdapter.Snapshot(item), "CandidateBaseline");
             }
+            case ControlledArtifactFamily.DocumentTemplate:
+            {
+                var item = await db.DocumentTemplates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+                return item is null ? null : new(item.ProjectId, item.State.ToString(), null,
+                    DocumentTemplateControlledEditingAdapter.Snapshot(item), "DocumentTemplate");
+            }
+            case ControlledArtifactFamily.ProblemReport:
+            {
+                var item = await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+                return item is null ? null : new(item.ProjectId, item.State.ToString(), null,
+                    ProblemReportControlledEditingAdapter.Snapshot(item), "ProblemReport");
+            }
+            case ControlledArtifactFamily.ConfigurationChangeSet:
+            {
+                var item = await db.ConfigurationChangeSets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+                return item is null ? null : new(item.ProjectId, item.State.ToString(), null,
+                    ConfigurationChangeSetControlledEditingAdapter.Snapshot(item), "ConfigurationChangeSet");
+            }
             default:
                 return null;
         }
@@ -355,6 +399,7 @@ public static class ControlledEditingEndpoints
 }
 
 public sealed record UniversalCheckoutRequest(string ArtifactType, Guid ArtifactId, int? LeaseMinutes = null);
+public sealed record CreateControlledArtifactRequest(string ArtifactType, Guid ProjectId, string Number, string Title, string? Content, string? Analysis);
 public sealed record UniversalAutosaveRequest(long ExpectedVersion, string DraftJson, int? LeaseMinutes = null);
 public sealed record UniversalHeartbeatRequest(long ExpectedVersion, int? LeaseMinutes = null);
 public sealed record UniversalCheckInRequest(long ExpectedVersion);

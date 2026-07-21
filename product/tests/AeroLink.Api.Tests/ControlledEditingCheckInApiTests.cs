@@ -7,6 +7,7 @@ using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Api.Tests;
 
@@ -54,6 +55,37 @@ public sealed class ControlledEditingCheckInApiTests
         Assert.Equal(EditSessionState.Active, session!.State);
         Assert.NotNull(session.LockKey);
         Assert.Equal("Authoritative concurrent update", artifact!.Title);
+    }
+
+    [Theory]
+    [InlineData("DocumentTemplate", "TPL-00001")]
+    [InlineData("ProblemReport", "PR-00001")]
+    [InlineData("ConfigurationChangeSet", "CCS-00001")]
+    public async Task Remaining_controlled_families_complete_the_public_checkout_to_evidence_lifecycle(string artifactType, string number)
+    {
+        using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient();
+        await BootstrapAndLoginAsync(client); var projectId = await SeedProjectAsync(factory);
+        using var created = await client.PostAsJsonAsync("/api/controlled-editing/artifacts", new
+        { artifactType, projectId, number, title = $"{artifactType} controlled draft", content = "Initial controlled content", analysis = "Initial engineering analysis" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var artifactId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout", new { artifactType, artifactId });
+        Assert.True(checkout.IsSuccessStatusCode); var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid(); var draft = session.GetProperty("draftJson").GetString()!;
+        using var autosave = await client.PutAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/autosave", new { expectedVersion = 1, draftJson = draft });
+        Assert.Equal(HttpStatusCode.OK, autosave.StatusCode); var version = (await autosave.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using var checkIn = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/check-in", new { expectedVersion = version });
+        Assert.Equal(HttpStatusCode.OK, checkIn.StatusCode); Assert.True((await checkIn.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("leaseReleased").GetBoolean());
+        using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Contains(await db.ControlledArtifactCheckInEvidence.ToListAsync(), x => x.ArtifactType == artifactType && x.ArtifactId == artifactId && x.Outcome == ControlledCheckInOutcome.Succeeded);
+    }
+
+    private static async Task<Guid> SeedProjectAsync(AeroLinkApiFactory factory)
+    {
+        using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var program = new ProgramRecord("Universal Family Program", $"UF{Guid.NewGuid():N}"[..12]);
+        var project = new ProjectRecord(program.Id, "Universal Controlled Product", "Flight Management System");
+        db.AddRange(program, project); await db.SaveChangesAsync(); return project.Id;
     }
 
     private static async Task<(Guid SessionId, Guid ArtifactId)> SeedAsync(AeroLinkApiFactory factory, bool stale)
