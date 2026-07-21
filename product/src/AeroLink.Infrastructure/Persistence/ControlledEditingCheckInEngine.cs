@@ -536,10 +536,10 @@ public sealed class TestProcedureControlledEditingAdapter(AeroLinkDbContext db) 
     public static string Snapshot(TestProcedure procedure, TestProcedureRevision revision, long? versionOverride = null) =>
         JsonSerializer.Serialize(new
         {
-            procedureId = procedure.Id, procedure.BaseNumber, procedure.Title, procedure.OwnerId,
+            procedureId = procedure.Id, baseNumber = procedure.BaseNumber, title = procedure.Title, ownerId = procedure.OwnerId,
             level = procedure.Level.ToString(), version = versionOverride ?? procedure.Version,
-            revisionId = revision.Id, revision.Revision, revision.Objective, revision.Preconditions,
-            revision.Steps, revision.ExpectedResult, state = revision.State.ToString(), revision.AuthorId
+            revisionId = revision.Id, revision = revision.Revision, objective = revision.Objective, preconditions = revision.Preconditions,
+            steps = revision.Steps, expectedResult = revision.ExpectedResult, state = revision.State.ToString(), authorId = revision.AuthorId
         });
 
     public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,

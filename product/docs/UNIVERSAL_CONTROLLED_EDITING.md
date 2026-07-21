@@ -52,6 +52,10 @@ foreign-keyed to SCRs, so universal immutable evidence is the authoritative audi
 SCR and proposal evidence additionally attaches to the existing SCR audit stream. The live SCR workspace uses this
 universal pipeline, and the retired direct-update route returns HTTP 410.
 
+Verification Center now exposes the same controlled authoring contract for Draft test procedures: an author chooses
+the exact Draft revision, acquires its exclusive lease, edits a server-recoverable snapshot, and checks it in before
+an independent approver can make the revision immutable.
+
 Stale authoritative content deterministically returns HTTP 409 with `stale_artifact_version` and does
 not mutate the artifact, close the session, or release its lease. Rejected attempts remain attributable
 in `controlled_artifact_check_in_evidence`.
