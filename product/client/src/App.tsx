@@ -5,6 +5,7 @@ import ScrWorkspace from "./ScrWorkspace";
 import BaselineCenter from "./BaselineCenter";
 import HistoryExplorer from "./HistoryExplorer";
 import VerificationCenter from "./VerificationCenter";
+import ProblemReportCenter from "./ProblemReportCenter";
 import LifecycleExplorer from "./LifecycleExplorer";
 import ReleaseCampaignCenter from "./ReleaseCampaignCenter";
 import LifecycleDecisionRoom from "./LifecycleDecisionRoom";
@@ -35,6 +36,7 @@ import "./ShowcaseRefresh.css";
 import "./ExperiencePolish.css";
 import "./People.css";
 import "./CohesionPass.css";
+import "./ProblemReportCenter.css";
 
 type Scr = {
   id: string;
@@ -115,7 +117,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       <nav className="primaryNavigation" aria-label="Primary navigation">
         <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
         <details className="navGroup" open={engineeringView}><summary>ENGINEERING</summary><div className="navScopeSwitch" role="group" aria-label="Engineering scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{item("New Change Request",newChangeView,"+",engineeringScope,engineeringScope==="software"?"New Software SWCR":"New System SCR")}</details>
-        <details className="navGroup" open={view==="verification"||view==="lifecycle"}><summary>ASSURANCE</summary><div className="navScopeSwitch" role="group" aria-label="Assurance scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{item("Verification","verification","✓",verificationScope,verificationScope==="softwareTest"?"Software Verification":"System Verification")}{item("Digital Thread","lifecycle","↗","system","Traceability & Outputs / Digital Thread")}</details>
+        <details className="navGroup" open={view==="verification"||view==="problemReports"||view==="lifecycle"}><summary>ASSURANCE</summary><div className="navScopeSwitch" role="group" aria-label="Assurance scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{item("Verification","verification","✓",verificationScope,verificationScope==="softwareTest"?"Software Verification":"System Verification")}{item("Problem Reports","problemReports","!","system","Issue lifecycle records")}{item("Digital Thread","lifecycle","↗","system","Traceability & Outputs / Digital Thread")}</details>
         <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Product Versions","planning","⑂","system","Product Versions / Release Planning")}{item("Baselines","baselines","⌘")}{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("Integration Center","integrations","↗","system","Integration Command Center")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
       </nav>
@@ -324,7 +326,7 @@ function App() {
   const changeRelease=(id:string)=>{setSelectedReleaseId(id);if(active&&project)history.pushState({},"",routePath({programId:active.program.id,projectId:project.project.id,releaseId:id},view,discipline,selectedArtifactId,selectedArtifactKind,view==="history"?historyStateIntent:undefined,view==="history"?historyTypeIntent:undefined))};
   if(context&&location.pathname==="/")history.replaceState({},"",routePath(context,"dashboard"));
   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} context={context} density={density} onProgram={changeProgram} onProject={changeProject} onRelease={changeRelease} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onSignOut={async()=>{await fetch(`${API}/api/auth/logout`,{method:"POST"});setUser(null)}}/>;
-  const labels:Record<View,string>={dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",artifact:"Artifact",notFound:"Not Found"};
+  const labels:Record<View,string>={dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",artifact:"Artifact",notFound:"Not Found"};
   const scopedLabel=view==="history"?`${historyTypeIntent==="All"?"All":discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
   const scopeSwitch=view==="history"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={historyTypeIntent==="All"} onClick={()=>navigate("history",discipline,undefined,undefined,false,historyStateIntent,"All")}>All</button><button aria-pressed={historyTypeIntent!=="All"&&discipline!=="software"} onClick={()=>navigate("history","system",undefined,undefined,false,historyStateIntent,"System")}>System</button><button aria-pressed={historyTypeIntent!=="All"&&discipline==="software"} onClick={()=>navigate("history","software",undefined,undefined,false,historyStateIntent,"Software")}>Software</button></div>:view==="requirements"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={discipline!=="software"} onClick={()=>navigate(view,"system")}>System</button><button aria-pressed={discipline==="software"} onClick={()=>navigate(view,"software")}>Software</button></div>:view==="verification"?<div className="contextScopeSwitch" role="group" aria-label="Verification scope"><button aria-pressed={discipline!=="softwareTest"} onClick={()=>navigate("verification","systemTest")}>System</button><button aria-pressed={discipline==="softwareTest"} onClick={()=>navigate("verification","softwareTest")}>Software</button></div>:null;
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
@@ -431,6 +433,16 @@ function App() {
         scope={discipline === "softwareTest" ? "Software" : "System"}
         user={user}
         onBack={() => navigate("dashboard")}
+      />
+    );
+  if (view === "problemReports" && project)
+    return inShell(
+      <ProblemReportCenter
+        api={API}
+        projectId={project.project.id}
+        user={user}
+        onBack={() => navigate("dashboard")}
+        onOpenVerification={() => navigate("verification", "systemTest")}
       />
     );
   if (view === "lifecycle" && project)
