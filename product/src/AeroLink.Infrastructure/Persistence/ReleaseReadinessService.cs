@@ -1,6 +1,7 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,6 +26,9 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         var latestRuns = executions.GroupBy(x => x.ProcedureRevisionId).Select(x => x.OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).First()).ToList();
         var runIds = latestRuns.Select(x => x.Id).ToList(); var evidenceRunIds = await db.TestExecutionEvidence.AsNoTracking().Where(x => runIds.Contains(x.TestExecutionId)).Select(x => x.TestExecutionId).Distinct().ToListAsync(ct);
         var docs = await db.ControlledDocuments.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
+        // A release cannot be declared ready while an unwaived controlled problem report remains a blocker.
+        // This is deliberately project-scoped until product-line configuration provides exact release applicability.
+        var problemBlockers = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == campaign.ProjectId && x.IsReleaseBlocker && string.IsNullOrEmpty(x.WaiverRationale)).ToListAsync(ct);
         var integrated = requests.Count(x => x.State == ScrState.SelectedForBaseline); var disposed = impacts.Count(x => x.State != ImpactDispositionState.Pending);
         var gates = new List<ReadinessGate>
         {
@@ -35,6 +39,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
             new("coverage","Requirement coverage complete",members.Count > 0 && coveredIds.Count == members.Count,coveredIds.Count,members.Count,$"{members.Count-coveredIds.Count} effective requirement revisions have no procedure link.","Add version-aware test coverage."),
             new("verification","Required verification passed",procedureIds.Count > 0 && latestRuns.Count == procedureIds.Count && latestRuns.All(x=>x.Outcome==TestOutcome.Pass),latestRuns.Count(x=>x.Outcome==TestOutcome.Pass),procedureIds.Count,$"{procedureIds.Count-latestRuns.Count(x=>x.Outcome==TestOutcome.Pass)} required procedures lack a latest Pass.","Execute tests, resolve failures, and record retests."),
             new("evidence","Evidence uploaded and checksummed",latestRuns.Count > 0 && evidenceRunIds.Count == latestRuns.Count,evidenceRunIds.Count,latestRuns.Count,$"{latestRuns.Count-evidenceRunIds.Count} latest results lack uploaded evidence.","Upload evidence files for every latest required result."),
+            new("problem_reports","Problem-report blockers resolved",problemBlockers.Count==0,0,problemBlockers.Count,problemBlockers.Count==0?"No unwaived controlled problem reports block this release.":$"{problemBlockers.Count} unwaived problem report blocker(s) remain: {string.Join(", ",problemBlockers.Take(3).Select(x=>x.DisplayNumber))}.","Resolve, formally disposition, or record an attributable waiver for every release-blocking problem report."),
             new("documents","Controlled outputs generated",docs.Select(x=>x.Type).Distinct().Count()>=6,docs.Select(x=>x.Type).Distinct().Count(),6,"The release package requires six controlled document types.","Generate SYSRD, both SWRDs, and three test-procedure documents."),
             new("release_approval","Release approval complete",campaign.Approvals.Count>0 && campaign.Approvals.All(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count==0?3:campaign.Approvals.Count,"Ordered release approval must be unanimous.","Start release review and collect every approval.")
         };
