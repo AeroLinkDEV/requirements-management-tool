@@ -314,25 +314,13 @@ app.MapGet("/api/scrs/{id:guid}/download", async (Guid id, string? format, Chang
     var output = await generator.GenerateAsync(id, format ?? "docx", ct); return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
 });
 
-app.MapPut("/api/scrs/{id:guid}/draft", async (Guid id, UpdateScrDraftRequest request, HttpContext http, IScrRepository repository,AeroLinkDbContext db,IdentityService identity,CancellationToken ct) =>
+app.MapPut("/api/scrs/{id:guid}/draft", (Guid id) => Results.Json(new
 {
-    var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
-    if(!await http.HasProjectRoleAsync(db,identity,scr.ProjectId,ct,ProgramRole.Engineer))return Results.Forbid();
-    if (scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before saving.", code = "stale_version" });
-    if(request.EditSessionId is null||request.EditSessionVersion is null)return Results.Conflict(new{error="Check out this Draft before saving controlled changes.",code="checkout_required"});
-    var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==request.EditSessionId&&x.ArtifactId==id&&x.ArtifactType=="SCR"&&x.IsExclusive,ct);if(session is null||session.UserName!=http.UserAccount().UserName)return Results.Conflict(new{error="The controlled edit session is missing or belongs to another user.",code="checkout_required"});
-    try
-    {
-        await using var transaction=await db.Database.BeginTransactionAsync(IsolationLevel.Serializable,ct);
-        var now=DateTimeOffset.UtcNow;var normalized=await NormalizeRequirementDraftsAsync(scr,request.RequirementChanges,db,ct);scr.UpdateDraft(http.UserAccount().UserName, request.Title, request.Problem, request.Analysis, request.Solution,normalized,now);
-        session.Close(EditSessionState.Committed,request.EditSessionVersion.Value,now,http.UserAccount().UserName,"Saved and checked in.");
-        await repository.SaveAsync(ct);
-        await transaction.CommitAsync(ct);
-        return Results.Ok(ApiMap.ScrDetail(scr));
-    }
-    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
-    catch (DbUpdateException) { return Results.Conflict(new { error = "Another author reserved a controlled identifier while this Draft was being saved. Refresh and save again." }); }
-});
+    error = "Direct controlled-content updates are retired. Autosave the edit session and use the universal check-in endpoint.",
+    code = "universal_check_in_required",
+    artifactId = id,
+    checkInRoute = "/api/controlled-editing/sessions/{sessionId}/check-in"
+}, statusCode: StatusCodes.Status410Gone));
 
 app.MapGet("/api/requirement-changes", async (Guid projectId, int page, int pageSize, string? search, AeroLinkDbContext db, CancellationToken ct) =>
 {
@@ -1559,46 +1547,6 @@ app.MapGet("/api/verification-coverage", async (Guid projectId, Guid? baselineId
 static string ControlledScrDraft(SystemChangeRequest scr)=>JsonSerializer.Serialize(new{scrVersion=scr.Version,title=scr.Title,problem=scr.Problem,analysis=scr.Analysis,solution=scr.Solution,requirementChanges=scr.RequirementChanges.Select(x=>new{baseNumber=x.BaseNumber,revision=x.Revision,level=x.Level.ToString(),kind=x.Kind.ToString(),statement=x.Statement,rationale=x.Rationale,verificationMethod=x.VerificationMethod,richText=x.RichText,attributesJson=x.AttributesJson,impactDispositionJson=x.ImpactDispositionJson})});
 static object EditSessionMap(ArtifactEditSession session,string draftJson,bool resumed)=>new{session.Id,session.ArtifactType,session.ArtifactId,session.Version,session.UserName,session.OpenedAt,lastActivityAt=session.UpdatedAt,session.ExpiresAt,session.BaseSnapshotHash,draftJson,resumed,readOnly=false,status="Saved"};
 
-static async Task<IReadOnlyList<RequirementChangeDraft>> NormalizeRequirementDraftsAsync(SystemChangeRequest scr,IReadOnlyList<DraftRequirementRequest> requested,AeroLinkDbContext db,CancellationToken ct)
-{
-    var existing=scr.RequirementChanges.ToDictionary(x=>x.BaseNumber,StringComparer.OrdinalIgnoreCase);
-    var nextNumbers=new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
-    var reserved=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    var normalized=new List<RequirementChangeDraft>(requested.Count);
-    foreach(var item in requested)
-    {
-        if(scr.Type==ChangeRequestType.System&&item.Level!=RequirementLevel.System)throw new DomainException("A System SCR can contain only System requirement changes.");
-        if(scr.Type==ChangeRequestType.Software&&item.Level==RequirementLevel.System)throw new DomainException("A Software SWCR can contain only HLR and LLR changes.");
-        if(item.IsDerived&&string.IsNullOrWhiteSpace(item.Rationale))throw new DomainException("Every derived software requirement requires an explicit engineering rationale.");
-        var supplied=(item.BaseNumber??string.Empty).Trim().ToUpperInvariant();
-        string baseNumber;int revision;RequirementLevel level;RequirementChangeKind kind;
-        if(existing.TryGetValue(supplied,out var preserved))
-        {
-            if(item.Revision!=preserved.Revision||item.Level!=preserved.Level||item.Kind!=preserved.Kind)
-                throw new DomainException($"The controlled identity of {preserved.DisplayNumber} cannot change. Remove the proposal and create a new controlled proposal if its intent changed.");
-            baseNumber=preserved.BaseNumber;revision=preserved.Revision;level=preserved.Level;kind=preserved.Kind;
-        }
-        else if(item.Kind==RequirementChangeKind.Introduce)
-        {
-            var prefix=RequirementPrefix(item.Level);
-            if(!nextNumbers.TryGetValue(prefix,out var next))next=IdentifierAllocator.Sequence(await IdentifierAllocator.NextRequirementAsync(db,prefix,ct));
-            baseNumber=IdentifierAllocator.Format(prefix,next);nextNumbers[prefix]=next+1;revision=0;level=item.Level;kind=item.Kind;
-        }
-        else
-        {
-            var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.ProjectId==scr.ProjectId&&x.BaseNumber==supplied,ct);
-            if(artifact is null)throw new DomainException($"Select an existing controlled requirement before proposing a {item.Kind.ToString().ToLowerInvariant()}.");
-            if(artifact.Level!=item.Level)throw new DomainException($"{artifact.BaseNumber} is not a {item.Level} requirement.");
-            baseNumber=artifact.BaseNumber;revision=await db.RequirementRevisions.Where(x=>x.ArtifactId==artifact.Id).MaxAsync(x=>x.Revision,ct)+1;level=artifact.Level;kind=item.Kind;
-        }
-        if(!reserved.Add(baseNumber))throw new DomainException($"{baseNumber} appears more than once in this Draft. Each controlled requirement identity can have only one proposed change.");
-        normalized.Add(new RequirementChangeDraft(baseNumber,revision,level,kind,item.Statement,item.Rationale,item.VerificationMethod,item.RichText,item.AttributesJson,item.ImpactDispositionJson));
-    }
-    return normalized;
-}
-
-static string RequirementPrefix(RequirementLevel level)=>level switch{RequirementLevel.System=>"SYSR",RequirementLevel.HighLevel=>"HLR",_=>"LLR"};
-
 static string? BootstrapSecret(IConfiguration configuration)
 {
     var value = configuration["Identity:BootstrapSecret"]?.Trim();
@@ -1654,7 +1602,6 @@ record BootstrapAdministratorRequest(string DisplayName, string Email, string Pa
 record CreateScrRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, ChangeRequestType Type = ChangeRequestType.System);
 record DraftRequirementRequest(string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod,string RichText="",string AttributesJson="{}",string ImpactDispositionJson="{}",bool IsDerived=false);
 record CreateScrDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, List<DraftRequirementRequest> RequirementChanges, ChangeRequestType Type = ChangeRequestType.System);
-record UpdateScrDraftRequest(long ExpectedVersion, string ActorId, string Title, string Problem, string Analysis, string Solution, List<DraftRequirementRequest> RequirementChanges,Guid? EditSessionId=null,long? EditSessionVersion=null);
 record CreateWorkspaceRequest(string ProgramName, string ProgramCode, string ProjectName, string SoftwareProduct, string InitialRelease, bool InitialReleaseIsReleased);
 record CreateReleaseRequest(Guid ProjectId, string Version, Guid? PredecessorReleaseId);
 record RetargetScrRequest(Guid TargetReleaseId, string Reason);

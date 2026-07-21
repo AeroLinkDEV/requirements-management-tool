@@ -19,6 +19,7 @@ public static class ControlledEditingEndpoints
         group.MapPost("/checkout", CheckoutAsync);
         group.MapPut("/sessions/{id:guid}/autosave", AutosaveAsync);
         group.MapPost("/sessions/{id:guid}/heartbeat", HeartbeatAsync);
+        group.MapPost("/sessions/{id:guid}/check-in", CheckInAsync);
         group.MapPost("/sessions/{id:guid}/discard", DiscardAsync);
         group.MapPost("/sessions/{id:guid}/force-unlock", ForceUnlockAsync);
         return app;
@@ -181,6 +182,32 @@ public static class ControlledEditingEndpoints
         catch (DomainException ex) { return Results.Conflict(new { error = ex.Message, code = "edit_session_conflict" }); }
     }
 
+    private static async Task<IResult> CheckInAsync(Guid id, UniversalCheckInRequest request, HttpContext http,
+        ControlledEditingCheckInEngine engine, CancellationToken ct)
+    {
+        var result = await engine.CheckInAsync(id, request.ExpectedVersion, http.UserAccount(),
+            DateTimeOffset.UtcNow, ct);
+        if (result.Success)
+            return Results.Ok(new
+            {
+                success = true,
+                resultingArtifactVersion = result.ResultingArtifactVersion,
+                resultingHash = result.ResultingHash,
+                sessionClosed = true,
+                leaseReleased = true,
+                revision = result.Revision,
+                evidenceId = result.EvidenceId
+            });
+        var error = new { error = result.Error, code = result.Code, evidenceId = result.EvidenceId };
+        return result.Status switch
+        {
+            ControlledCheckInStatus.NotFound => Results.NotFound(error),
+            ControlledCheckInStatus.Forbidden => Results.Json(error, statusCode: StatusCodes.Status403Forbidden),
+            ControlledCheckInStatus.InvalidDraft => Results.BadRequest(error),
+            _ => Results.Conflict(error)
+        };
+    }
+
     private static async Task<IResult> DiscardAsync(Guid id, UniversalCloseSessionRequest request, HttpContext http,
         AeroLinkDbContext db, CancellationToken ct)
     {
@@ -242,8 +269,7 @@ public static class ControlledEditingEndpoints
                 var item = await db.SystemChangeRequests.AsNoTracking().Include(x => x.RequirementChanges)
                     .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
                 return item is null ? null : new(item.ProjectId, item.State.ToString(), null,
-                    JsonSerializer.Serialize(new { item.Title, item.Problem, item.Analysis, item.Solution, item.Version,
-                        requirementChanges = item.RequirementChanges.Select(x => new { x.Id, x.BaseNumber, x.Revision, level = x.Level.ToString(), kind = x.Kind.ToString(), x.Statement, x.Rationale, x.VerificationMethod, x.RichText, x.AttributesJson, x.ImpactDispositionJson }) }),
+                    SystemChangeRequestControlledEditingAdapter.Snapshot(item),
                     "ChangeRequest");
             }
             case ControlledArtifactFamily.RequirementProposal:
@@ -314,5 +340,6 @@ public static class ControlledEditingEndpoints
 public sealed record UniversalCheckoutRequest(string ArtifactType, Guid ArtifactId, int? LeaseMinutes = null);
 public sealed record UniversalAutosaveRequest(long ExpectedVersion, string DraftJson, int? LeaseMinutes = null);
 public sealed record UniversalHeartbeatRequest(long ExpectedVersion, int? LeaseMinutes = null);
+public sealed record UniversalCheckInRequest(long ExpectedVersion);
 public sealed record UniversalCloseSessionRequest(long ExpectedVersion, string? Reason = null);
 public sealed record UniversalForceUnlockRequest(string Reason);

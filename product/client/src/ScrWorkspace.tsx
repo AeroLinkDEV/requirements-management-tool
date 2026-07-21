@@ -231,7 +231,7 @@ export default function ScrWorkspace({
   const savingRef = useRef(false);
 
   const loadStatus = useCallback(async () => {
-    const response = await fetch(`${api}/api/edit-sessions/status?artifactType=SCR&artifactId=${scrId}`);
+    const response = await fetch(`${api}/api/controlled-editing/status?artifactType=SCR&artifactId=${scrId}`);
     if (response.ok) setLockStatus((await response.json()) as LockStatus);
   }, [api, scrId]);
 
@@ -287,7 +287,7 @@ export default function ScrWorkspace({
   const beginEdit = async () => {
     setBusy(true);
     setError("");
-    const response = await fetch(`${api}/api/edit-sessions/checkout`, {
+    const response = await fetch(`${api}/api/controlled-editing/checkout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ artifactType: "SCR", artifactId: scrId, leaseMinutes: 15 }),
@@ -325,7 +325,7 @@ export default function ScrWorkspace({
     }
   };
 
-  const autosave = useCallback(async () => {
+  const autosave = useCallback(async (): Promise<EditLock | undefined> => {
     const currentLock = lockRef.current;
     const currentDraft = draftRef.current;
     if (
@@ -334,11 +334,11 @@ export default function ScrWorkspace({
       !currentDraft ||
       currentDraft === lastSavedRef.current
     )
-      return;
+      return currentLock;
     savingRef.current = true;
     setAutosaveStatus("Saving");
     try {
-      const response = await fetch(`${api}/api/edit-sessions/${currentLock.id}/autosave`, {
+      const response = await fetch(`${api}/api/controlled-editing/sessions/${currentLock.id}/autosave`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -351,7 +351,7 @@ export default function ScrWorkspace({
         setAutosaveStatus(response.status === 409 ? "Conflict" : "Error");
         const body = (await response.json()) as { error?: string };
         setError(body.error || "Server autosave failed.");
-        return;
+        return undefined;
       }
       const value = (await response.json()) as {
         version: number;
@@ -368,8 +368,10 @@ export default function ScrWorkspace({
       lockRef.current = next;
       lastSavedRef.current = currentDraft;
       setAutosaveStatus("Saved");
+      return next;
     } catch {
       setAutosaveStatus("Error");
+      return undefined;
     } finally {
       savingRef.current = false;
     }
@@ -381,7 +383,7 @@ export default function ScrWorkspace({
     const heartbeat = window.setInterval(async () => {
       const current = lockRef.current;
       if (!current || savingRef.current) return;
-      const response = await fetch(`${api}/api/edit-sessions/${current.id}/heartbeat`, {
+      const response = await fetch(`${api}/api/controlled-editing/sessions/${current.id}/heartbeat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expectedVersion: current.version, leaseMinutes: 15 }),
@@ -413,7 +415,7 @@ export default function ScrWorkspace({
   const discard = async () => {
     const current = lockRef.current;
     if (current) {
-      const response = await fetch(`${api}/api/edit-sessions/${current.id}/discard`, {
+      const response = await fetch(`${api}/api/controlled-editing/sessions/${current.id}/discard`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -519,18 +521,21 @@ export default function ScrWorkspace({
       return;
     }
     setBusy(true);
-    savingRef.current = true;
     setError("");
-    const current = lockRef.current;
-    const response = await fetch(`${api}/api/scrs/${scr.id}/draft`, {
-      method: "PUT",
+    while (savingRef.current)
+      await new Promise((resolve) => window.setTimeout(resolve, 25));
+    const current = await autosave();
+    if (!current) {
+      setError("The latest recovery snapshot could not be saved for check-in.");
+      setBusy(false);
+      return;
+    }
+    savingRef.current = true;
+    const response = await fetch(`${api}/api/controlled-editing/sessions/${current.id}/check-in`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        expectedVersion: scr.version,
-        ...draft,
-        requirementChanges: requirements,
-        editSessionId: current.id,
-        editSessionVersion: current.version,
+        expectedVersion: current.version,
       }),
     });
     savingRef.current = false;
