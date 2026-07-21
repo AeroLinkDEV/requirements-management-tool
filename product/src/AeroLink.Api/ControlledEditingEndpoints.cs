@@ -221,8 +221,6 @@ public static class ControlledEditingEndpoints
             var now = DateTimeOffset.UtcNow;
             session.Close(EditSessionState.Abandoned, request.ExpectedVersion, now, http.UserAccount().UserName,
                 string.IsNullOrWhiteSpace(request.Reason) ? "Controlled draft checkout discarded." : request.Reason);
-            db.AuditEvents.Add(new AuditEvent(session.ArtifactId, "EditSessionDiscarded", http.UserAccount().UserName,
-                session.ClosedReason ?? "Controlled draft checkout discarded.", now));
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         }
@@ -242,8 +240,6 @@ public static class ControlledEditingEndpoints
         {
             var now = DateTimeOffset.UtcNow;
             session.ForceUnlock(actor.UserName, request.Reason, now);
-            db.AuditEvents.Add(new AuditEvent(session.ArtifactId, "EditSessionForceUnlocked", actor.UserName,
-                $"Force-unlocked {session.ArtifactType} held by {session.UserName}. Reason: {request.Reason}", now));
             db.SecurityAuditEvents.Add(new SecurityAuditEvent("ForcedUnlock", actor.UserName,
                 $"{session.ArtifactType}:{session.ArtifactId}", "Success", request.Reason,
                 http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
@@ -287,18 +283,17 @@ public static class ControlledEditingEndpoints
                 var specification = await db.RequirementSpecifications.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
                 if (specification is not null)
                 {
-                    var nodes = await db.SpecificationNodes.AsNoTracking().Where(x => x.SpecificationId == artifactId)
-                        .OrderBy(x => x.Position).Select(x => new { x.Id, x.ParentId, x.Position, type = x.Type.ToString(), x.Heading, x.RequirementArtifactId }).ToListAsync(ct);
+                    var nodes = await db.SpecificationNodes.AsNoTracking().Where(x => x.SpecificationId == artifactId).ToListAsync(ct);
                     return new(specification.ProjectId, "InWork", null,
-                        JsonSerializer.Serialize(new { specification.Id, specification.DocumentNumber, specification.Title, specification.Level, specification.Description, nodes }),
+                        SpecificationStructureControlledEditingAdapter.Snapshot(specification, nodes),
                         "RequirementSpecification");
                 }
                 var node = await db.SpecificationNodes.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
                 if (node is null) return null;
                 var owner = await db.RequirementSpecifications.AsNoTracking().SingleAsync(x => x.Id == node.SpecificationId, ct);
+                var ownerNodes = await db.SpecificationNodes.AsNoTracking().Where(x => x.SpecificationId == owner.Id).ToListAsync(ct);
                 return new(owner.ProjectId, "InWork", null,
-                    JsonSerializer.Serialize(new { node.Id, node.SpecificationId, node.ParentId, node.Position, type = node.Type.ToString(), node.Heading, node.RequirementArtifactId }),
-                    "SpecificationNode");
+                    SpecificationStructureControlledEditingAdapter.Snapshot(owner, ownerNodes), "RequirementSpecification");
             }
             case ControlledArtifactFamily.TestProcedure:
             {
@@ -307,28 +302,28 @@ public static class ControlledEditingEndpoints
                 {
                     var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.Id == revision.ProcedureId, ct);
                     return new(procedure.ProjectId, revision.State.ToString(), revision.Id,
-                        JsonSerializer.Serialize(new { procedureId = procedure.Id, procedure.BaseNumber, procedure.Title, procedure.OwnerId, level = procedure.Level.ToString(), revisionId = revision.Id, revision.Revision, revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult, state = revision.State.ToString(), revision.AuthorId }),
-                        "TestProcedureRevision");
+                        TestProcedureControlledEditingAdapter.Snapshot(procedure, revision), "TestProcedureRevision");
                 }
                 var procedureOnly = await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
                 if (procedureOnly is null) return null;
                 var latest = await db.TestProcedureRevisions.AsNoTracking().Where(x => x.ProcedureId == artifactId)
                     .OrderByDescending(x => x.Revision).FirstOrDefaultAsync(ct);
-                return new(procedureOnly.ProjectId, latest?.State.ToString() ?? "Draft", latest?.Id,
-                    JsonSerializer.Serialize(new { procedureOnly.Id, procedureOnly.BaseNumber, procedureOnly.Title, procedureOnly.OwnerId, level = procedureOnly.Level.ToString(), latest }),
-                    "TestProcedure");
+                return latest is null ? null : new(procedureOnly.ProjectId, latest.State.ToString(), latest.Id,
+                    TestProcedureControlledEditingAdapter.Snapshot(procedureOnly, latest), "TestProcedureRevision");
             }
             case ControlledArtifactFamily.TraceLinkProposal:
             {
                 var item = await db.RequirementTraces.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
-                return item is null ? null : new(item.ProjectId, "Proposed", null, JsonSerializer.Serialize(item), "RequirementTraceLink");
+                return item is null ? null : new(item.ProjectId, "Proposed", null,
+                    TraceLinkProposalControlledEditingAdapter.Snapshot(item), "RequirementTraceLink");
             }
             case ControlledArtifactFamily.ReleasePlanning:
             {
-                var item = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
-                return item is null ? null : new(item.ProjectId, item.State.ToString(), null,
-                    JsonSerializer.Serialize(new { item.Id, item.BaseNumber, item.Revision, item.Name, item.ReleaseId, item.PredecessorBaselineId, state = item.State.ToString(), item.ContentHash, item.RequirementsHash }),
-                    "CandidateBaseline");
+                var item = await db.CandidateBaselines.SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+                if (item is null) return null;
+                await db.Entry(item).Collection(x => x.Selections).LoadAsync(ct);
+                return new(item.ProjectId, item.State.ToString(), null,
+                    ReleasePlanningControlledEditingAdapter.Snapshot(item), "CandidateBaseline");
             }
             default:
                 return null;

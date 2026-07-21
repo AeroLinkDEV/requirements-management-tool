@@ -2,9 +2,12 @@ using System.Data;
 using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -20,7 +23,7 @@ public interface IControlledEditingAdapter
 }
 
 public sealed record ControlledEditingArtifact(Guid ProjectId, string LifecycleState, object Aggregate,
-    long Version, string? Revision, Guid AuditAggregateId);
+    long Version, string? Revision, Guid? AuditAggregateId);
 
 public enum ControlledCheckInStatus { Succeeded, NotFound, Forbidden, Conflict, InvalidDraft }
 
@@ -131,12 +134,12 @@ public sealed class ControlledEditingCheckInEngine(
                 ControlledCheckInOutcome.Succeeded, "check_in_succeeded", draft, resultingVersion,
                 resultingHash, artifact.Revision);
             db.ControlledArtifactCheckInEvidence.Add(evidence);
-            db.AuditEvents.Add(new AuditEvent(artifact.AuditAggregateId, "ArtifactCheckedIn", actor.UserName,
+            AddLegacyAudit(artifact.AuditAggregateId, "ArtifactCheckedIn", actor.UserName,
                 JsonSerializer.Serialize(new { evidenceId = evidence.Id, sessionId = session.Id,
                     sessionVersion = session.Version, adapter = adapter.Name, session.BaseSnapshotHash,
                     resultingSnapshotHash = resultingHash, aggregateVersionBefore = artifact.Version,
                     aggregateVersionAfter = resultingVersion, revisionBefore = artifact.Revision,
-                    revisionAfter = artifact.Revision }), now));
+                    revisionAfter = artifact.Revision }), now);
             session.Close(EditSessionState.Committed, expectedVersion, now, actor.UserName,
                 $"Checked in through {adapter.Name}; evidence {evidence.Id}.");
             await db.SaveChangesAsync(ct);
@@ -187,10 +190,10 @@ public sealed class ControlledEditingCheckInEngine(
             $"{code}: {error}", draft);
         db.ControlledArtifactCheckInEvidence.Add(evidence);
         if (artifact is not null)
-            db.AuditEvents.Add(new AuditEvent(artifact.AuditAggregateId, "ArtifactCheckInRejected", actor,
+            AddLegacyAudit(artifact.AuditAggregateId, "ArtifactCheckInRejected", actor,
             JsonSerializer.Serialize(new { evidenceId = evidence.Id, sessionId = session.Id, code, error,
                 adapter = adapter?.Name ?? "Unavailable", sessionVersion = session.Version,
-                session.BaseSnapshotHash, aggregateVersion = artifact.Version }), now));
+                session.BaseSnapshotHash, aggregateVersion = artifact.Version }), now);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return new(status, code, error, EvidenceId: evidence.Id);
@@ -198,7 +201,7 @@ public sealed class ControlledEditingCheckInEngine(
 
     private async Task<ControlledCheckInResult> PersistRejectedAfterRollbackAsync(Guid sessionId,
         string actor, DateTimeOffset now, string code, string error, ControlledCheckInStatus status,
-        string adapterName, Guid auditAggregateId, CancellationToken ct)
+        string adapterName, Guid? auditAggregateId, CancellationToken ct)
     {
         db.ChangeTracker.Clear();
         var session = await db.ArtifactEditSessions.AsNoTracking().SingleAsync(x => x.Id == sessionId, ct);
@@ -207,9 +210,9 @@ public sealed class ControlledEditingCheckInEngine(
             session.BaseSnapshotHash, null, 0, null, null, null, null, null,
             ControlledCheckInOutcome.Failed, $"{code}: {error}");
         db.ControlledArtifactCheckInEvidence.Add(evidence);
-        db.AuditEvents.Add(new AuditEvent(auditAggregateId, "ArtifactCheckInRejected", actor,
+        AddLegacyAudit(auditAggregateId, "ArtifactCheckInRejected", actor,
             JsonSerializer.Serialize(new { evidenceId = evidence.Id, sessionId, code, error,
-                adapter = adapterName, sessionVersion = session.Version, session.BaseSnapshotHash }), now));
+                adapter = adapterName, sessionVersion = session.Version, session.BaseSnapshotHash }), now);
         await db.SaveChangesAsync(ct);
         return new(status, code, error, EvidenceId: evidence.Id);
     }
@@ -225,6 +228,13 @@ public sealed class ControlledEditingCheckInEngine(
             draft?.Id, draft?.Sequence, outcome, reason);
 
     private static string Hash(string value) => EnterpriseRequirementsService.Hash(Encoding.UTF8.GetBytes(value));
+
+    private void AddLegacyAudit(Guid? aggregateId, string eventType, string actor, string detail, DateTimeOffset now)
+    {
+        // The legacy audit_events table is scoped to SystemChangeRequest. Universal evidence is
+        // the authoritative audit record for every other artifact family.
+        if (aggregateId is not null) db.AuditEvents.Add(new AuditEvent(aggregateId.Value, eventType, actor, detail, now));
+    }
 }
 
 public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
@@ -402,4 +412,245 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
     private sealed record ProposalDraft(string? BaseNumber, int Revision, string? Level, string? Kind,
         string? Statement, string? Rationale, string? VerificationMethod, string? RichText,
         string? AttributesJson, string? ImpactDispositionJson);
+}
+
+public sealed class SpecificationStructureControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+{
+    private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
+    public ControlledArtifactFamily Family => ControlledArtifactFamily.SpecificationStructure;
+    public string Name => "SpecificationStructureControlledEditingAdapter";
+
+    public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
+    {
+        var specification = await db.RequirementSpecifications.SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+        if (specification is null)
+        {
+            var node = await db.SpecificationNodes.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+            if (node is null) return null;
+            specification = await db.RequirementSpecifications.SingleOrDefaultAsync(x => x.Id == node.SpecificationId, ct);
+        }
+        if (specification is null) return null;
+        var nodes = await db.SpecificationNodes.Where(x => x.SpecificationId == specification.Id).ToListAsync(ct);
+        return new(specification.ProjectId, "InWork", new State(specification, nodes), specification.Version, null, null);
+    }
+
+    public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null)
+    {
+        var state = (State)artifact.Aggregate;
+        return Snapshot(state.Specification, state.Nodes, versionOverride);
+    }
+
+    public static string Snapshot(RequirementSpecification specification, IEnumerable<SpecificationNode> nodes,
+        long? versionOverride = null) => JsonSerializer.Serialize(new
+    {
+        id = specification.Id, specification.DocumentNumber, specification.Title, specification.Level,
+        specification.Description, version = versionOverride ?? specification.Version,
+        nodes = nodes.OrderBy(x => x.ParentId).ThenBy(x => x.Position).ThenBy(x => x.Id).Select(x => new
+        {
+            x.Id, x.ParentId, x.Position, type = x.Type.ToString(), x.Heading, x.RequirementArtifactId
+        })
+    });
+
+    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var state = (State)artifact.Aggregate;
+        var draft = JsonSerializer.Deserialize<SpecificationDraft>(draftJson, DraftOptions)
+            ?? throw new JsonException("The latest autosaved specification draft is empty.");
+        var specification = state.Specification;
+        if (draft.Id != specification.Id || !string.Equals(draft.DocumentNumber?.Trim(), specification.DocumentNumber, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("The controlled specification identity cannot change.");
+        if (draft.Nodes is null) throw new JsonException("The latest autosaved specification draft does not contain nodes.");
+        var existing = state.Nodes.ToDictionary(x => x.Id);
+        if (draft.Nodes.Count != existing.Count || draft.Nodes.Any(x => !existing.ContainsKey(x.Id)))
+            throw new DomainException("Adding or removing specification nodes requires the controlled structural authoring operation.");
+        if (draft.Nodes.GroupBy(x => new { x.ParentId, x.Position }).Any(x => x.Count() > 1))
+            throw new DomainException("Specification node positions must be unique within each parent section.");
+        var ids = draft.Nodes.Select(x => x.Id).ToHashSet();
+        if (draft.Nodes.Any(x => x.ParentId is not null && !ids.Contains(x.ParentId.Value)))
+            throw new DomainException("Every specification node parent must remain within the same specification.");
+        foreach (var item in draft.Nodes)
+        {
+            var node = existing[item.Id];
+            if (!Enum.TryParse<SpecificationNodeType>(item.Type, true, out var type) || type != node.Type ||
+                item.RequirementArtifactId != node.RequirementArtifactId)
+                throw new DomainException("The controlled specification node identity cannot change.");
+            node.UpdateDraft(item.ParentId, item.Position, item.Heading ?? string.Empty, actor, now);
+        }
+        EnsureAcyclic(draft.Nodes);
+        specification.UpdateDraft(draft.Title ?? string.Empty, draft.Level ?? string.Empty, draft.Description ?? string.Empty, actor, now);
+        specification.RecordStructureUpdate(actor, now);
+        return Task.CompletedTask;
+    }
+
+    private static void EnsureAcyclic(IEnumerable<SpecificationNodeDraft> nodes)
+    {
+        var parents = nodes.ToDictionary(x => x.Id, x => x.ParentId);
+        foreach (var node in parents.Keys)
+        {
+            var visited = new HashSet<Guid> { node };
+            var current = parents[node];
+            while (current is not null)
+            {
+                if (!visited.Add(current.Value)) throw new DomainException("A specification structure cannot contain a parent cycle.");
+                current = parents[current.Value];
+            }
+        }
+    }
+
+    private sealed record State(RequirementSpecification Specification, List<SpecificationNode> Nodes);
+    private sealed record SpecificationDraft(Guid Id, string? DocumentNumber, string? Title, string? Level,
+        string? Description, long Version, List<SpecificationNodeDraft>? Nodes);
+    private sealed record SpecificationNodeDraft(Guid Id, Guid? ParentId, int Position, string? Type,
+        string? Heading, Guid? RequirementArtifactId);
+}
+
+public sealed class TestProcedureControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+{
+    private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
+    public ControlledArtifactFamily Family => ControlledArtifactFamily.TestProcedure;
+    public string Name => "TestProcedureControlledEditingAdapter";
+
+    public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
+    {
+        var revision = await db.TestProcedureRevisions.SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+        TestProcedure? procedure;
+        if (revision is null)
+        {
+            procedure = await db.TestProcedures.SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+            if (procedure is null) return null;
+            revision = await db.TestProcedureRevisions.Where(x => x.ProcedureId == procedure.Id)
+                .OrderByDescending(x => x.Revision).FirstOrDefaultAsync(ct);
+        }
+        else procedure = await db.TestProcedures.SingleOrDefaultAsync(x => x.Id == revision.ProcedureId, ct);
+        return procedure is null || revision is null ? null : new(procedure.ProjectId, revision.State.ToString(),
+            new State(procedure, revision), procedure.Version, revision.Revision.ToString(), null);
+    }
+
+    public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null)
+    {
+        var state = (State)artifact.Aggregate;
+        return Snapshot(state.Procedure, state.Revision, versionOverride);
+    }
+
+    public static string Snapshot(TestProcedure procedure, TestProcedureRevision revision, long? versionOverride = null) =>
+        JsonSerializer.Serialize(new
+        {
+            procedureId = procedure.Id, procedure.BaseNumber, procedure.Title, procedure.OwnerId,
+            level = procedure.Level.ToString(), version = versionOverride ?? procedure.Version,
+            revisionId = revision.Id, revision.Revision, revision.Objective, revision.Preconditions,
+            revision.Steps, revision.ExpectedResult, state = revision.State.ToString(), revision.AuthorId
+        });
+
+    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var state = (State)artifact.Aggregate;
+        var draft = JsonSerializer.Deserialize<TestProcedureDraft>(draftJson, DraftOptions)
+            ?? throw new JsonException("The latest autosaved test procedure draft is empty.");
+        var procedure = state.Procedure; var revision = state.Revision;
+        if (draft.ProcedureId != procedure.Id || draft.RevisionId != revision.Id || draft.Revision != revision.Revision ||
+            !string.Equals(draft.BaseNumber?.Trim(), procedure.BaseNumber, StringComparison.OrdinalIgnoreCase) ||
+            !Enum.TryParse<TestProcedureLevel>(draft.Level, true, out var level) || level != procedure.Level)
+            throw new DomainException("The controlled test procedure identity cannot change.");
+        procedure.UpdateDraft(draft.Title ?? string.Empty, draft.OwnerId ?? string.Empty, now);
+        revision.UpdateDraft(draft.Objective ?? string.Empty, draft.Preconditions ?? string.Empty,
+            draft.Steps ?? string.Empty, draft.ExpectedResult ?? string.Empty, actor);
+        return Task.CompletedTask;
+    }
+
+    private sealed record State(TestProcedure Procedure, TestProcedureRevision Revision);
+    private sealed record TestProcedureDraft(Guid ProcedureId, string? BaseNumber, string? Title, string? OwnerId,
+        string? Level, long Version, Guid RevisionId, int Revision, string? Objective, string? Preconditions,
+        string? Steps, string? ExpectedResult, string? State, string? AuthorId);
+}
+
+public sealed class TraceLinkProposalControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+{
+    private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
+    public ControlledArtifactFamily Family => ControlledArtifactFamily.TraceLinkProposal;
+    public string Name => "TraceLinkProposalControlledEditingAdapter";
+
+    public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
+    {
+        var item = await db.RequirementTraces.SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+        return item is null ? null : new(item.ProjectId, "Proposed", item, item.Version, null, null);
+    }
+
+    public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) =>
+        Snapshot((RequirementTraceLink)artifact.Aggregate, versionOverride);
+
+    public static string Snapshot(RequirementTraceLink item, long? versionOverride = null) => JsonSerializer.Serialize(new
+    {
+        item.Id, item.ProjectId, item.SourceRevisionId, item.TargetRevisionId, type = item.Type.ToString(),
+        item.Rationale, version = versionOverride ?? item.Version
+    });
+
+    public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var item = (RequirementTraceLink)artifact.Aggregate;
+        var draft = JsonSerializer.Deserialize<TraceLinkDraft>(draftJson, DraftOptions)
+            ?? throw new JsonException("The latest autosaved trace-link draft is empty.");
+        if (draft.Id != item.Id || draft.ProjectId != item.ProjectId || draft.SourceRevisionId != item.SourceRevisionId ||
+            draft.TargetRevisionId != item.TargetRevisionId || !Enum.TryParse<RequirementTraceType>(draft.Type, true, out var type))
+            throw new DomainException("The controlled trace-link identity cannot change.");
+        if (await db.RequirementTraces.AsNoTracking().AnyAsync(x => x.Id != item.Id &&
+                x.SourceRevisionId == item.SourceRevisionId && x.TargetRevisionId == item.TargetRevisionId && x.Type == type, ct))
+            throw new DomainException("An identical controlled trace link already exists.");
+        item.UpdateProposal(type, draft.Rationale ?? string.Empty, now);
+    }
+
+    private sealed record TraceLinkDraft(Guid Id, Guid ProjectId, Guid SourceRevisionId, Guid TargetRevisionId,
+        string? Type, string? Rationale, long Version);
+}
+
+public sealed class ReleasePlanningControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+{
+    private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
+    public ControlledArtifactFamily Family => ControlledArtifactFamily.ReleasePlanning;
+    public string Name => "ReleasePlanningControlledEditingAdapter";
+
+    public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
+    {
+        var item = await db.CandidateBaselines.Include(x => x.Selections).SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+        return item is null ? null : new(item.ProjectId, item.State.ToString(), item, item.Version,
+            item.Revision.ToString(), null);
+    }
+
+    public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) =>
+        Snapshot((CandidateBaseline)artifact.Aggregate, versionOverride);
+
+    public static string Snapshot(CandidateBaseline item, long? versionOverride = null) => JsonSerializer.Serialize(new
+    {
+        item.Id, item.BaseNumber, item.Revision, item.Name, item.ReleaseId, item.PredecessorBaselineId,
+        state = item.State.ToString(), item.ContentHash, item.RequirementsHash, version = versionOverride ?? item.Version,
+        selectedScrIds = item.Selections.OrderBy(x => x.ScrDisplayNumber).Select(x => x.ScrId)
+    });
+
+    public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var baseline = (CandidateBaseline)artifact.Aggregate;
+        var draft = JsonSerializer.Deserialize<ReleasePlanningDraft>(draftJson, DraftOptions)
+            ?? throw new JsonException("The latest autosaved release-planning draft is empty.");
+        if (draft.Id != baseline.Id || draft.ReleaseId != baseline.ReleaseId || draft.Revision != baseline.Revision ||
+            draft.PredecessorBaselineId != baseline.PredecessorBaselineId ||
+            !string.Equals(draft.BaseNumber?.Trim(), baseline.BaseNumber, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("The controlled release-planning identity cannot change.");
+        if (draft.SelectedScrIds is null || draft.SelectedScrIds.Count != draft.SelectedScrIds.Distinct().Count())
+            throw new DomainException("Release-planning selections must contain distinct SCR identifiers.");
+        var requested = draft.SelectedScrIds.ToHashSet();
+        var existing = baseline.Selections.Select(x => x.ScrId).ToHashSet();
+        var allIds = requested.Union(existing).ToList();
+        var scrs = await db.SystemChangeRequests.Where(x => allIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        if (scrs.Count != allIds.Count) throw new DomainException("Every selected release-planning SCR must exist.");
+        foreach (var id in existing.Except(requested).ToList()) baseline.Remove(scrs[id], actor, now);
+        foreach (var id in requested.Except(existing).ToList()) baseline.Select(scrs[id], actor, now);
+        baseline.UpdateDraft(draft.Name ?? string.Empty, actor, now);
+    }
+
+    private sealed record ReleasePlanningDraft(Guid Id, string? BaseNumber, int Revision, string? Name,
+        Guid ReleaseId, Guid? PredecessorBaselineId, string? State, string? ContentHash, string? RequirementsHash,
+        long Version, List<Guid>? SelectedScrIds);
 }

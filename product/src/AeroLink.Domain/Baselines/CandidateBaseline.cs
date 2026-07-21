@@ -43,7 +43,7 @@ public sealed class CandidateBaseline
         Id = Guid.NewGuid(); BaseNumber = ArtifactNumber.ValidateBase(baseNumber); Revision = revision;
         ProjectId = projectId; ReleaseId = releaseId; PredecessorBaselineId = predecessorBaselineId;
         if (string.IsNullOrWhiteSpace(name)) throw new DomainException("A baseline name is required.");
-        Name = name.Trim(); CreatedAt = now; State = CandidateBaselineState.Draft;
+        Name = name.Trim(); CreatedAt = now; UpdatedAt = now; State = CandidateBaselineState.Draft;
         Event("CandidateBaselineCreated", actorId, $"Created {DisplayNumber}.", now);
     }
 
@@ -58,11 +58,21 @@ public sealed class CandidateBaseline
     public CandidateBaselineState State { get; private set; }
     public string? ContentHash { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
+    public long Version { get; private set; } = 1;
     public DateTimeOffset? FrozenAt { get; private set; }
     public DateTimeOffset? RequirementsMaterializedAt { get; private set; }
     public string? RequirementsHash { get; private set; }
     public IReadOnlyCollection<BaselineScrSelection> Selections => _selections.AsReadOnly();
     public IReadOnlyCollection<BaselineEvent> Events => _events.AsReadOnly();
+
+    public void UpdateDraft(string name, string actorId, DateTimeOffset now)
+    {
+        EnsureDraft();
+        if (string.IsNullOrWhiteSpace(name)) throw new DomainException("A baseline name is required.");
+        Name = name.Trim(); UpdatedAt = now;
+        Event("CandidateBaselineDraftUpdated", actorId, $"Updated draft {DisplayNumber}.", now);
+    }
 
     public void Select(SystemChangeRequest scr, string actorId, DateTimeOffset now)
     {
@@ -72,6 +82,7 @@ public sealed class CandidateBaseline
             throw new DomainException("The SCR does not belong to this project and target release.");
         if (_selections.Any(x => x.ScrId == scr.Id)) throw new DomainException("The SCR is already selected.");
         _selections.Add(new BaselineScrSelection(Id, scr.Id, scr.DisplayNumber));
+        UpdatedAt = now;
         scr.MarkSelectedForBaseline(actorId, now);
         Event("ScrSelected", actorId, $"Selected {scr.DisplayNumber}.", now);
     }
@@ -82,6 +93,7 @@ public sealed class CandidateBaseline
         var selection = _selections.SingleOrDefault(x => x.ScrId == scr.Id)
             ?? throw new DomainException("The SCR is not selected in this baseline.");
         _selections.Remove(selection);
+        UpdatedAt = now;
         scr.UnmarkSelectedForBaseline(actorId, now);
         Event("ScrRemoved", actorId, $"Removed {scr.DisplayNumber}.", now);
     }
@@ -95,6 +107,7 @@ public sealed class CandidateBaseline
         ContentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
         State = CandidateBaselineState.Frozen;
         FrozenAt = now;
+        UpdatedAt = now;
         Event("CandidateBaselineFrozen", actorId, $"Frozen {DisplayNumber} with {_selections.Count} exact SCR revisions and hash {ContentHash}.", now);
     }
 
@@ -104,13 +117,14 @@ public sealed class CandidateBaseline
         if (RequirementsMaterializedAt is not null) throw new DomainException("The requirement baseline is already materialized and immutable.");
         if (string.IsNullOrWhiteSpace(requirementsHash) || requirementsHash.Length != 64) throw new DomainException("A valid requirement manifest hash is required.");
         RequirementsHash = requirementsHash; RequirementsMaterializedAt = now;
+        UpdatedAt = now;
         Event("RequirementsMaterialized", actorId, $"Materialized {activeCount} effective requirement revisions with hash {requirementsHash}.", now);
     }
 
     public void MarkReleased(string actorId, DateTimeOffset now)
     {
         if (State != CandidateBaselineState.Frozen || RequirementsMaterializedAt is null) throw new DomainException("Only a frozen, materialized baseline can be released.");
-        State = CandidateBaselineState.Released; Event("BaselineReleased", actorId, $"Released immutable baseline {DisplayNumber}.", now);
+        State = CandidateBaselineState.Released; UpdatedAt = now; Event("BaselineReleased", actorId, $"Released immutable baseline {DisplayNumber}.", now);
     }
 
     private void EnsureDraft() { if (State != CandidateBaselineState.Draft) throw new DomainException("A frozen baseline is immutable."); }

@@ -38,6 +38,10 @@ public static class DependencyInjection
         services.AddScoped<EnterpriseRequirementsService>();
         services.AddScoped<IControlledEditingAdapter, SystemChangeRequestControlledEditingAdapter>();
         services.AddScoped<IControlledEditingAdapter, RequirementProposalControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, SpecificationStructureControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, TestProcedureControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, TraceLinkProposalControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, ReleasePlanningControlledEditingAdapter>();
         services.AddScoped<ControlledEditingCheckInEngine>();
         services.AddScoped<ReqIfExchangeService>();
         services.AddScoped<EnterpriseWorkspaceSeeder>();

@@ -14,7 +14,7 @@ public sealed class TestProcedure
     {
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A test procedure title is required.");
         Id = Guid.NewGuid(); ProjectId = projectId; BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
-        Title = title.Trim(); OwnerId = ownerId.Trim(); CreatedAt = now; Level = level;
+        Title = title.Trim(); OwnerId = ownerId.Trim(); CreatedAt = now; UpdatedAt = now; Level = level;
     }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
@@ -23,6 +23,15 @@ public sealed class TestProcedure
     public string OwnerId { get; private set; } = string.Empty;
     public TestProcedureLevel Level { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
+    public long Version { get; private set; } = 1;
+
+    public void UpdateDraft(string title, string ownerId, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A test procedure title is required.");
+        if (string.IsNullOrWhiteSpace(ownerId)) throw new DomainException("A test procedure owner is required.");
+        Title = title.Trim(); OwnerId = ownerId.Trim(); UpdatedAt = now;
+    }
 }
 
 public sealed class TestProcedureRevision
@@ -48,6 +57,15 @@ public sealed class TestProcedureRevision
     public TestProcedureState State { get; private set; }
     public string AuthorId { get; private set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; private set; }
+
+    public void UpdateDraft(string objective, string preconditions, string steps, string expectedResult, string actor)
+    {
+        if (State != TestProcedureState.Draft) throw new DomainException("Only a Draft test procedure revision can be edited.");
+        if (string.IsNullOrWhiteSpace(objective) || string.IsNullOrWhiteSpace(steps) || string.IsNullOrWhiteSpace(expectedResult))
+            throw new DomainException("Objective, steps, and expected result are required.");
+        if (string.IsNullOrWhiteSpace(actor)) throw new DomainException("A test procedure update actor is required.");
+        Objective = objective.Trim(); Preconditions = preconditions.Trim(); Steps = steps.Trim(); ExpectedResult = expectedResult.Trim();
+    }
 
     public void Approve(string approverId)
     {

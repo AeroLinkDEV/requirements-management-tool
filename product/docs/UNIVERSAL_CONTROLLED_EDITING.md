@@ -38,18 +38,26 @@ This increment resolves and snapshots the controlled families that already have 
 4. aggregate mutation exclusively through the registered family adapter; and
 5. atomic aggregate persistence, immutable check-in evidence, audit evidence, session closure, and lease release.
 
-The production adapters now include `SystemChangeRequestControlledEditingAdapter` and
-`RequirementProposalControlledEditingAdapter`. Both preserve SCR/SWCR identity allocation and aggregate
-validation through `SystemChangeRequest.UpdateDraft`; proposal evidence remains keyed to the proposal while
-aggregate audit events attach to its owning SCR. The live SCR workspace uses this universal pipeline, and the
-retired direct-update route returns HTTP 410.
+Production adapters now cover every existing first-class controlled artifact model:
+
+- `SystemChangeRequestControlledEditingAdapter` preserves SCR/SWCR identity allocation and aggregate validation through `SystemChangeRequest.UpdateDraft`.
+- `RequirementProposalControlledEditingAdapter` updates a proposal through its owning SCR aggregate without changing the proposal identity.
+- `SpecificationStructureControlledEditingAdapter` controls specification metadata plus reordering/retitling existing structure nodes, validates parent ownership and cycles, and rejects identity-changing node edits.
+- `TestProcedureControlledEditingAdapter` updates only a Draft procedure revision through its owning procedure root; approved revisions remain immutable.
+- `TraceLinkProposalControlledEditingAdapter` preserves source/target identity while validating a controlled classification/rationale update.
+- `ReleasePlanningControlledEditingAdapter` controls Draft baseline naming and exact SCR membership through `CandidateBaseline.Select` and `Remove`.
+
+Each of the four non-SCR roots has a persisted optimistic-concurrency version. The legacy `audit_events` table is
+foreign-keyed to SCRs, so universal immutable evidence is the authoritative audit trail for every other family;
+SCR and proposal evidence additionally attaches to the existing SCR audit stream. The live SCR workspace uses this
+universal pipeline, and the retired direct-update route returns HTTP 410.
 
 Stale authoritative content deterministically returns HTTP 409 with `stale_artifact_version` and does
 not mutate the artifact, close the session, or release its lease. Rejected attempts remain attributable
 in `controlled_artifact_check_in_evidence`.
 
-## Remaining family adapters
+## Deferred lifecycle models
 
-A lease never changes controlled content by itself. Artifact-specific mutation remains behind adapters because each aggregate owns its validation and immutable-history rules. The next increments connect adapters for the other existing authoritative families, then add problem-report, configuration-change-set, and controlled-template adapters when those first-class lifecycle models are introduced by their owning roadmap issues.
+A lease never changes controlled content by itself. Artifact-specific mutation remains behind adapters because each aggregate owns its validation and immutable-history rules. `DocumentTemplate`, `ProblemReport`, and `ConfigurationChangeSet` remain policy placeholders only: their first-class lifecycle models do not yet exist and must be added by their owning roadmap issues, not fabricated inside Issue #31.
 
-Issue #31 must remain open until every family passes two-user contention, recovery, stale-version, forced-unlock, expiry, and immutable-history acceptance journeys.
+Issue #31 remains open until each connected family passes two-user contention, recovery, stale-version, forced-unlock, expiry, and immutable-history acceptance journeys, plus the modeled policy set is reconciled with those future lifecycle-model issues.

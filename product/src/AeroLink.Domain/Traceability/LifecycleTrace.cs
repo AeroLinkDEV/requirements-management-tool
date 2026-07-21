@@ -12,7 +12,7 @@ public sealed class RequirementTraceLink
     {
         if (sourceRevisionId == targetRevisionId) throw new DomainException("A requirement revision cannot trace to itself.");
         Id = Guid.NewGuid(); ProjectId = projectId; SourceRevisionId = sourceRevisionId; TargetRevisionId = targetRevisionId;
-        Type = type; Rationale = rationale.Trim(); CreatedAt = createdAt;
+        Type = type; Rationale = rationale.Trim(); CreatedAt = createdAt; UpdatedAt = createdAt;
     }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
@@ -21,6 +21,13 @@ public sealed class RequirementTraceLink
     public RequirementTraceType Type { get; private set; }
     public string Rationale { get; private set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
+    public long Version { get; private set; } = 1;
+
+    public void UpdateProposal(RequirementTraceType type, string rationale, DateTimeOffset now)
+    {
+        Type = type; Rationale = rationale.Trim(); UpdatedAt = now;
+    }
 }
 
 public sealed class ControlledDocument

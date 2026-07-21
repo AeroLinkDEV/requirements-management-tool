@@ -182,6 +182,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.ContentHash).HasMaxLength(64);
             b.Property(x => x.RequirementsHash).HasMaxLength(64);
+            b.Property(x => x.Version).IsConcurrencyToken();
             b.Ignore(x => x.DisplayNumber);
             b.HasIndex(x => new { x.ProjectId, x.BaseNumber, x.Revision }).IsUnique();
             b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.State });
@@ -237,6 +238,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("test_procedures"); b.HasKey(x => x.Id); b.Property(x => x.BaseNumber).HasMaxLength(30).IsRequired();
             b.Property(x => x.Title).HasMaxLength(300).IsRequired(); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired();
             b.Property(x => x.Level).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Version).IsConcurrencyToken();
             b.HasIndex(x => new { x.ProjectId, x.BaseNumber }).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -269,7 +271,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<RequirementTraceLink>(b =>
         {
             b.ToTable("requirement_trace_links"); b.HasKey(x => x.Id); b.Property(x => x.Type).HasConversion<string>().HasMaxLength(30);
-            b.Property(x => x.Rationale).HasMaxLength(2000); b.HasIndex(x => new { x.SourceRevisionId, x.TargetRevisionId, x.Type }).IsUnique();
+            b.Property(x => x.Rationale).HasMaxLength(2000); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.SourceRevisionId, x.TargetRevisionId, x.Type }).IsUnique();
             b.HasIndex(x => x.TargetRevisionId); b.HasIndex(x => x.ProjectId);
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.SourceRevisionId).OnDelete(DeleteBehavior.Restrict);
@@ -354,7 +356,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<RequirementSpecification>(b =>
         {
-            b.ToTable("requirement_specifications"); b.HasKey(x=>x.Id); b.Property(x=>x.DocumentNumber).HasMaxLength(40).IsRequired(); b.Property(x=>x.Title).HasMaxLength(300).IsRequired(); b.Property(x=>x.Level).HasMaxLength(40).IsRequired(); b.Property(x=>x.Description).HasMaxLength(4000); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.DocumentNumber}).IsUnique(); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.ToTable("requirement_specifications"); b.HasKey(x=>x.Id); b.Property(x=>x.DocumentNumber).HasMaxLength(40).IsRequired(); b.Property(x=>x.Title).HasMaxLength(300).IsRequired(); b.Property(x=>x.Level).HasMaxLength(40).IsRequired(); b.Property(x=>x.Description).HasMaxLength(4000); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.Version).IsConcurrencyToken(); b.HasIndex(x=>new{x.ProjectId,x.DocumentNumber}).IsUnique(); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<SpecificationNode>(b =>
         {
@@ -475,6 +477,26 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             if (entry.State == EntityState.Added) entry.Property(x => x.Version).CurrentValue = 1;
             if (entry.State == EntityState.Modified)
                 entry.Property(x => x.Version).CurrentValue = entry.Property(x => x.Version).OriginalValue + 1;
+        }
+        foreach (var entry in ChangeTracker.Entries<RequirementSpecification>())
+        {
+            if (entry.State == EntityState.Added) entry.Property(x => x.Version).CurrentValue = 1;
+            if (entry.State == EntityState.Modified) entry.Property(x => x.Version).CurrentValue = entry.Property(x => x.Version).OriginalValue + 1;
+        }
+        foreach (var entry in ChangeTracker.Entries<TestProcedure>())
+        {
+            if (entry.State == EntityState.Added) entry.Property(x => x.Version).CurrentValue = 1;
+            if (entry.State == EntityState.Modified) entry.Property(x => x.Version).CurrentValue = entry.Property(x => x.Version).OriginalValue + 1;
+        }
+        foreach (var entry in ChangeTracker.Entries<RequirementTraceLink>())
+        {
+            if (entry.State == EntityState.Added) entry.Property(x => x.Version).CurrentValue = 1;
+            if (entry.State == EntityState.Modified) entry.Property(x => x.Version).CurrentValue = entry.Property(x => x.Version).OriginalValue + 1;
+        }
+        foreach (var entry in ChangeTracker.Entries<CandidateBaseline>())
+        {
+            if (entry.State == EntityState.Added) entry.Property(x => x.Version).CurrentValue = 1;
+            if (entry.State == EntityState.Modified) entry.Property(x => x.Version).CurrentValue = entry.Property(x => x.Version).OriginalValue + 1;
         }
         await AddLifecycleEventsAsync(cancellationToken);
         return await base.SaveChangesAsync(cancellationToken);
