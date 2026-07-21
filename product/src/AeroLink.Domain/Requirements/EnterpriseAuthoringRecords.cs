@@ -50,7 +50,7 @@ public sealed class RequirementSpecification
 {
     private RequirementSpecification() { }
     public RequirementSpecification(Guid projectId,string documentNumber,string title,string level,string description,string actor,DateTimeOffset now)
-    { Id=Guid.NewGuid();ProjectId=projectId;DocumentNumber=ArtifactNumber.ValidateBase(documentNumber);Title=title.Trim();Level=level;Description=description.Trim();CreatedBy=actor;CreatedAt=now; }
+    { Id=Guid.NewGuid();ProjectId=projectId;DocumentNumber=ArtifactNumber.ValidateBase(documentNumber);Title=Required(title, "A specification title is required.");Level=Required(level, "A specification level is required.");Description=description.Trim();CreatedBy=actor;CreatedAt=now;UpdatedAt=now; }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public string DocumentNumber { get; private set; }="";
@@ -59,6 +59,25 @@ public sealed class RequirementSpecification
     public string Description { get; private set; }="";
     public string CreatedBy { get; private set; }="";
     public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
+    public long Version { get; private set; } = 1;
+
+    public void UpdateDraft(string title, string level, string description, string actor, DateTimeOffset now)
+    {
+        Title = Required(title, "A specification title is required.");
+        Level = Required(level, "A specification level is required.");
+        Description = description.Trim();
+        UpdatedAt = now;
+    }
+
+    public void RecordStructureUpdate(string actor, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(actor)) throw new DomainException("A specification update actor is required.");
+        UpdatedAt = now;
+    }
+
+    private static string Required(string value, string message) => string.IsNullOrWhiteSpace(value)
+        ? throw new DomainException(message) : value.Trim();
 }
 
 public sealed class SpecificationNode
@@ -75,6 +94,15 @@ public sealed class SpecificationNode
     public Guid? RequirementArtifactId { get; private set; }
     public string CreatedBy { get; private set; }="";
     public DateTimeOffset CreatedAt { get; private set; }
+
+    public void UpdateDraft(Guid? parentId, int position, string heading, string actor, DateTimeOffset now)
+    {
+        if (position < 0) throw new DomainException("A specification node position cannot be negative.");
+        if (Type == SpecificationNodeType.Section && string.IsNullOrWhiteSpace(heading))
+            throw new DomainException("A specification section heading is required.");
+        if (string.IsNullOrWhiteSpace(actor)) throw new DomainException("A specification update actor is required.");
+        ParentId = parentId; Position = position; Heading = heading.Trim();
+    }
 }
 
 public sealed class RequirementRevisionProfile

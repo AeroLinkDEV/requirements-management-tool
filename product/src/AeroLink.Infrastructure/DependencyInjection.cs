@@ -36,6 +36,16 @@ public static class DependencyInjection
         services.AddScoped<IdentityService>();
         services.AddScoped<IdentitySeeder>();
         services.AddScoped<EnterpriseRequirementsService>();
+        services.AddScoped<IControlledEditingAdapter, SystemChangeRequestControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, RequirementProposalControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, SpecificationStructureControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, TestProcedureControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, TraceLinkProposalControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, ReleasePlanningControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, DocumentTemplateControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, ProblemReportControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, ConfigurationChangeSetControlledEditingAdapter>();
+        services.AddScoped<ControlledEditingCheckInEngine>();
         services.AddScoped<ReqIfExchangeService>();
         services.AddScoped<EnterpriseWorkspaceSeeder>();
         return services;
