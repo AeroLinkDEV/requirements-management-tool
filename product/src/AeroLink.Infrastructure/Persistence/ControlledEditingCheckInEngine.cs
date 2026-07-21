@@ -20,7 +20,7 @@ public interface IControlledEditingAdapter
 }
 
 public sealed record ControlledEditingArtifact(Guid ProjectId, string LifecycleState, object Aggregate,
-    long Version, string? Revision);
+    long Version, string? Revision, Guid AuditAggregateId);
 
 public enum ControlledCheckInStatus { Succeeded, NotFound, Forbidden, Conflict, InvalidDraft }
 
@@ -131,7 +131,7 @@ public sealed class ControlledEditingCheckInEngine(
                 ControlledCheckInOutcome.Succeeded, "check_in_succeeded", draft, resultingVersion,
                 resultingHash, artifact.Revision);
             db.ControlledArtifactCheckInEvidence.Add(evidence);
-            db.AuditEvents.Add(new AuditEvent(session.ArtifactId, "ArtifactCheckedIn", actor.UserName,
+            db.AuditEvents.Add(new AuditEvent(artifact.AuditAggregateId, "ArtifactCheckedIn", actor.UserName,
                 JsonSerializer.Serialize(new { evidenceId = evidence.Id, sessionId = session.Id,
                     sessionVersion = session.Version, adapter = adapter.Name, session.BaseSnapshotHash,
                     resultingSnapshotHash = resultingHash, aggregateVersionBefore = artifact.Version,
@@ -149,20 +149,22 @@ public sealed class ControlledEditingCheckInEngine(
         {
             await transaction.RollbackAsync(ct);
             return await PersistRejectedAfterRollbackAsync(sessionId, actor.UserName, now,
-                "malformed_draft_json", ex.Message, ControlledCheckInStatus.InvalidDraft, adapter.Name, ct);
+                "malformed_draft_json", ex.Message, ControlledCheckInStatus.InvalidDraft, adapter.Name,
+                artifact.AuditAggregateId, ct);
         }
         catch (DomainException ex)
         {
             await transaction.RollbackAsync(ct);
             return await PersistRejectedAfterRollbackAsync(sessionId, actor.UserName, now,
-                "aggregate_validation_failed", ex.Message, ControlledCheckInStatus.InvalidDraft, adapter.Name, ct);
+                "aggregate_validation_failed", ex.Message, ControlledCheckInStatus.InvalidDraft, adapter.Name,
+                artifact.AuditAggregateId, ct);
         }
         catch (DbUpdateConcurrencyException)
         {
             await transaction.RollbackAsync(ct);
             return await PersistRejectedAfterRollbackAsync(sessionId, actor.UserName, now,
                 "stale_artifact_version", "The authoritative artifact changed during check-in.",
-                ControlledCheckInStatus.Conflict, adapter.Name, ct);
+                ControlledCheckInStatus.Conflict, adapter.Name, artifact.AuditAggregateId, ct);
         }
     }
 
@@ -184,10 +186,11 @@ public sealed class ControlledEditingCheckInEngine(
         var evidence = Evidence(session, adapter, artifact, actor, now, ControlledCheckInOutcome.Failed,
             $"{code}: {error}", draft);
         db.ControlledArtifactCheckInEvidence.Add(evidence);
-        db.AuditEvents.Add(new AuditEvent(session.ArtifactId, "ArtifactCheckInRejected", actor,
+        if (artifact is not null)
+            db.AuditEvents.Add(new AuditEvent(artifact.AuditAggregateId, "ArtifactCheckInRejected", actor,
             JsonSerializer.Serialize(new { evidenceId = evidence.Id, sessionId = session.Id, code, error,
                 adapter = adapter?.Name ?? "Unavailable", sessionVersion = session.Version,
-                session.BaseSnapshotHash, aggregateVersion = artifact?.Version }), now));
+                session.BaseSnapshotHash, aggregateVersion = artifact.Version }), now));
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return new(status, code, error, EvidenceId: evidence.Id);
@@ -195,7 +198,7 @@ public sealed class ControlledEditingCheckInEngine(
 
     private async Task<ControlledCheckInResult> PersistRejectedAfterRollbackAsync(Guid sessionId,
         string actor, DateTimeOffset now, string code, string error, ControlledCheckInStatus status,
-        string adapterName, CancellationToken ct)
+        string adapterName, Guid auditAggregateId, CancellationToken ct)
     {
         db.ChangeTracker.Clear();
         var session = await db.ArtifactEditSessions.AsNoTracking().SingleAsync(x => x.Id == sessionId, ct);
@@ -204,7 +207,7 @@ public sealed class ControlledEditingCheckInEngine(
             session.BaseSnapshotHash, null, 0, null, null, null, null, null,
             ControlledCheckInOutcome.Failed, $"{code}: {error}");
         db.ControlledArtifactCheckInEvidence.Add(evidence);
-        db.AuditEvents.Add(new AuditEvent(session.ArtifactId, "ArtifactCheckInRejected", actor,
+        db.AuditEvents.Add(new AuditEvent(auditAggregateId, "ArtifactCheckInRejected", actor,
             JsonSerializer.Serialize(new { evidenceId = evidence.Id, sessionId, code, error,
                 adapter = adapterName, sessionVersion = session.Version, session.BaseSnapshotHash }), now));
         await db.SaveChangesAsync(ct);
@@ -235,7 +238,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
         var item = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
             .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
         return item is null ? null : new(item.ProjectId, item.State.ToString(), item, item.Version,
-            item.Revision.ToString());
+            item.Revision.ToString(), item.Id);
     }
 
     public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null)
@@ -334,4 +337,69 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     private sealed record SystemChangeRequestRequirementDraft(string? BaseNumber, int Revision,
         string? Level, string? Kind, string? Statement, string? Rationale, string? VerificationMethod,
         string? RichText, string? AttributesJson, string? ImpactDispositionJson, bool IsDerived = false);
+}
+
+public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+{
+    private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
+    public ControlledArtifactFamily Family => ControlledArtifactFamily.RequirementProposal;
+    public string Name => "RequirementProposalControlledEditingAdapter";
+
+    public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
+    {
+        var parent = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
+            .SingleOrDefaultAsync(x => x.RequirementChanges.Any(change => change.Id == artifactId), ct);
+        if (parent is null) return null;
+        var proposal = parent.RequirementChanges.Single(x => x.Id == artifactId);
+        return new(parent.ProjectId, parent.State.ToString(),
+            new State(parent, artifactId, proposal.BaseNumber, proposal.Revision), parent.Version,
+            proposal.Revision.ToString(), parent.Id);
+    }
+
+    public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null)
+    {
+        var state = (State)artifact.Aggregate;
+        return Snapshot(FindProposal(state),
+            versionOverride ?? state.Parent.Version);
+    }
+
+    public static string Snapshot(RequirementChange item, long parentVersion) =>
+        JsonSerializer.Serialize(new { item.Id, item.BaseNumber, item.Revision,
+            level = item.Level.ToString(), kind = item.Kind.ToString(), item.Statement, item.Rationale,
+            item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
+            parentVersion });
+
+    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var state = (State)artifact.Aggregate;
+        var parent = state.Parent;
+        var current = parent.RequirementChanges.Single(x => x.Id == state.ProposalId);
+        var draft = JsonSerializer.Deserialize<ProposalDraft>(draftJson, DraftOptions)
+            ?? throw new JsonException("The latest autosaved requirement proposal is empty.");
+        if (!string.Equals(draft.BaseNumber?.Trim(), current.BaseNumber, StringComparison.OrdinalIgnoreCase) ||
+            draft.Revision != current.Revision ||
+            !Enum.TryParse<RequirementLevel>(draft.Level, true, out var level) || level != current.Level ||
+            !Enum.TryParse<RequirementChangeKind>(draft.Kind, true, out var kind) || kind != current.Kind)
+            throw new DomainException($"The controlled identity of {current.DisplayNumber} cannot change.");
+
+        var changes = parent.RequirementChanges.Select(item => item.Id == current.Id
+            ? new RequirementChangeDraft(current.BaseNumber, current.Revision, current.Level, current.Kind,
+                draft.Statement ?? "", draft.Rationale ?? "", draft.VerificationMethod ?? "",
+                draft.RichText ?? "", draft.AttributesJson ?? "{}", draft.ImpactDispositionJson ?? "{}")
+            : new RequirementChangeDraft(item.BaseNumber, item.Revision, item.Level, item.Kind, item.Statement,
+                item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson,
+                item.ImpactDispositionJson)).ToList();
+        parent.UpdateDraft(actor, parent.Title, parent.Problem, parent.Analysis, parent.Solution, changes, now);
+        return Task.CompletedTask;
+    }
+
+    private static RequirementChange FindProposal(State state) => state.Parent.RequirementChanges.Single(x =>
+        x.Id == state.ProposalId ||
+        (x.BaseNumber.Equals(state.BaseNumber, StringComparison.OrdinalIgnoreCase) && x.Revision == state.Revision));
+
+    private sealed record State(SystemChangeRequest Parent, Guid ProposalId, string BaseNumber, int Revision);
+    private sealed record ProposalDraft(string? BaseNumber, int Revision, string? Level, string? Kind,
+        string? Statement, string? Rationale, string? VerificationMethod, string? RichText,
+        string? AttributesJson, string? ImpactDispositionJson);
 }

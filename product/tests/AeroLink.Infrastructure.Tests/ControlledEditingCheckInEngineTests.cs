@@ -172,6 +172,53 @@ public sealed class ControlledEditingCheckInEngineTests
             .SingleAsync(x => x.Id == result.EvidenceId)).Reason);
     }
 
+    [Fact]
+    public async Task Requirement_proposal_adapter_updates_content_through_parent_aggregate_without_changing_identity()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var proposal = scenario.Scr.AddRequirementChange(scenario.Actor.UserName, "SYSR-000777", 0,
+            RequirementLevel.System, RequirementChangeKind.Introduce, "Original proposal", "Rationale",
+            "Test", scenario.Now.AddSeconds(1));
+        await scenario.Db.SaveChangesAsync();
+        var adapter = new RequirementProposalControlledEditingAdapter(scenario.Db);
+        var artifact = await adapter.ResolveAsync(proposal.Id, default) ?? throw new InvalidOperationException();
+        var canonical = adapter.CanonicalSnapshot(artifact);
+        var baseHash = EnterpriseRequirementsService.Hash(Encoding.UTF8.GetBytes(canonical));
+        var session = new ArtifactEditSession(scenario.Project.Id, "RequirementProposal", proposal.Id, null,
+            baseHash, canonical, scenario.Actor.UserName, scenario.Now.AddSeconds(2), true, 15);
+        scenario.Db.AddRange(session, new ArtifactDraftSnapshot(scenario.Project.Id, session.Id,
+            "RequirementProposal", proposal.Id, 1, canonical, baseHash, scenario.Actor.UserName,
+            scenario.Now.AddSeconds(2)));
+        await scenario.Db.SaveChangesAsync();
+        var latest = JsonSerializer.Serialize(new { proposal.BaseNumber, proposal.Revision,
+            level = proposal.Level.ToString(), kind = proposal.Kind.ToString(),
+            statement = "Updated proposal through the universal adapter", proposal.Rationale,
+            proposal.VerificationMethod, proposal.RichText, proposal.AttributesJson,
+            proposal.ImpactDispositionJson });
+        session.Save(latest, session.Version, scenario.Now.AddSeconds(3), 15);
+        var latestHash = EnterpriseRequirementsService.Hash(Encoding.UTF8.GetBytes(latest));
+        scenario.Db.ArtifactDraftSnapshots.Add(new(scenario.Project.Id, session.Id,
+            "RequirementProposal", proposal.Id, session.Version, latest, latestHash,
+            scenario.Actor.UserName, scenario.Now.AddSeconds(3)));
+        await scenario.Db.SaveChangesAsync();
+        var engine = new ControlledEditingCheckInEngine(scenario.Db, new IdentityService(scenario.Db),
+            [new SystemChangeRequestControlledEditingAdapter(scenario.Db), adapter]);
+
+        var result = await engine.CheckInAsync(session.Id, session.Version, scenario.Actor,
+            scenario.Now.AddMinutes(1), default);
+
+        Assert.True(result.Success);
+        scenario.Db.ChangeTracker.Clear();
+        var parent = await scenario.Db.SystemChangeRequests.Include(x => x.RequirementChanges)
+            .SingleAsync(x => x.Id == scenario.Scr.Id);
+        var updated = Assert.Single(parent.RequirementChanges);
+        Assert.Equal("SYSR-000777", updated.BaseNumber);
+        Assert.Equal(0, updated.Revision);
+        Assert.Equal("Updated proposal through the universal adapter", updated.Statement);
+        Assert.Equal(EditSessionState.Committed,
+            (await scenario.Db.ArtifactEditSessions.SingleAsync(x => x.Id == session.Id)).State);
+    }
+
     private sealed class Scenario : IAsyncDisposable
     {
         private Scenario(AeroLinkDbContext db, ProgramRecord program, ProjectRecord project,

@@ -38,9 +38,11 @@ This increment resolves and snapshots the controlled families that already have 
 4. aggregate mutation exclusively through the registered family adapter; and
 5. atomic aggregate persistence, immutable check-in evidence, audit evidence, session closure, and lease release.
 
-The first production adapter is `SystemChangeRequestControlledEditingAdapter`. It preserves SCR/SWCR
-identity allocation and aggregate validation through `SystemChangeRequest.UpdateDraft`. The live SCR
-workspace now uses this universal pipeline; the retired direct-update route returns HTTP 410.
+The production adapters now include `SystemChangeRequestControlledEditingAdapter` and
+`RequirementProposalControlledEditingAdapter`. Both preserve SCR/SWCR identity allocation and aggregate
+validation through `SystemChangeRequest.UpdateDraft`; proposal evidence remains keyed to the proposal while
+aggregate audit events attach to its owning SCR. The live SCR workspace uses this universal pipeline, and the
+retired direct-update route returns HTTP 410.
 
 Stale authoritative content deterministically returns HTTP 409 with `stale_artifact_version` and does
 not mutate the artifact, close the session, or release its lease. Rejected attempts remain attributable

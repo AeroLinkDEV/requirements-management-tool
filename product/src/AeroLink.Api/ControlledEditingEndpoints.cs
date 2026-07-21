@@ -121,8 +121,9 @@ public static class ControlledEditingEndpoints
         db.ArtifactEditSessions.Add(session);
         db.ArtifactDraftSnapshots.Add(new ArtifactDraftSnapshot(artifact.ProjectId, session.Id, policy.CanonicalType,
             request.ArtifactId, 1, artifact.SnapshotJson, hash, actor.UserName, now));
-        db.AuditEvents.Add(new AuditEvent(request.ArtifactId, "ArtifactCheckedOut", actor.UserName,
-            $"Checked out {policy.CanonicalType} until {session.ExpiresAt:O} using adapter {artifact.Adapter}.", now));
+        if (artifact.AuditAggregateId is Guid auditAggregateId)
+            db.AuditEvents.Add(new AuditEvent(auditAggregateId, "ArtifactCheckedOut", actor.UserName,
+                $"Checked out {policy.CanonicalType}:{request.ArtifactId} until {session.ExpiresAt:O} using adapter {artifact.Adapter}.", now));
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException)
         {
@@ -270,7 +271,7 @@ public static class ControlledEditingEndpoints
                     .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
                 return item is null ? null : new(item.ProjectId, item.State.ToString(), null,
                     SystemChangeRequestControlledEditingAdapter.Snapshot(item),
-                    "ChangeRequest");
+                    "ChangeRequest", item.Id);
             }
             case ControlledArtifactFamily.RequirementProposal:
             {
@@ -278,8 +279,8 @@ public static class ControlledEditingEndpoints
                 if (item is null) return null;
                 var parent = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == item.ScrId, ct);
                 return new(parent.ProjectId, parent.State.ToString(), null,
-                    JsonSerializer.Serialize(new { item.Id, item.BaseNumber, item.Revision, level = item.Level.ToString(), kind = item.Kind.ToString(), item.Statement, item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson, parentVersion = parent.Version }),
-                    "RequirementProposal");
+                    RequirementProposalControlledEditingAdapter.Snapshot(item, parent.Version),
+                    "RequirementProposal", parent.Id);
             }
             case ControlledArtifactFamily.SpecificationStructure:
             {
@@ -334,7 +335,8 @@ public static class ControlledEditingEndpoints
         }
     }
 
-    private sealed record ResolvedControlledArtifact(Guid ProjectId, string State, Guid? RevisionId, string SnapshotJson, string Adapter);
+    private sealed record ResolvedControlledArtifact(Guid ProjectId, string State, Guid? RevisionId,
+        string SnapshotJson, string Adapter, Guid? AuditAggregateId = null);
 }
 
 public sealed record UniversalCheckoutRequest(string ArtifactType, Guid ArtifactId, int? LeaseMinutes = null);
