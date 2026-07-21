@@ -687,7 +687,7 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
         return item is null ? null : new(item.ProjectId, item.State.ToString(), item, item.Version, null, null);
     }
     public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) => Snapshot((ProblemReport)artifact.Aggregate, versionOverride);
-    public static string Snapshot(ProblemReport item, long? versionOverride = null) => JsonSerializer.Serialize(new { item.Id, item.ProjectId, item.ReportNumber, item.Title, item.Problem, item.Analysis, item.ReportedBy, state = item.State.ToString(), version = versionOverride ?? item.Version });
+    public static string Snapshot(ProblemReport item, long? versionOverride = null) => JsonSerializer.Serialize(new { item.Id, item.ProjectId, item.ReportNumber, item.Revision, item.Title, item.Problem, item.Analysis, item.ReportedBy, item.Classification, severity = item.Severity.ToString(), priority = item.Priority.ToString(), item.Origin, item.AffectedConfiguration, item.RootCause, item.Effects, item.Containment, item.CorrectiveAction, disposition = item.Disposition?.ToString(), item.DispositionRationale, item.ResolutionVerificationExecutionId, item.IsReleaseBlocker, item.WaiverRationale, state = item.State.ToString(), version = versionOverride ?? item.Version });
     public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, DateTimeOffset now, CancellationToken ct)
     {
         var item = (ProblemReport)artifact.Aggregate; var draft = JsonSerializer.Deserialize<ProblemDraft>(draftJson, Options) ?? throw new JsonException("The latest problem-report draft is empty.");

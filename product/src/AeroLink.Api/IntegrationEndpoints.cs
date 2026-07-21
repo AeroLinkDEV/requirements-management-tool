@@ -20,6 +20,7 @@ public static class IntegrationEndpoints
         app.MapPost("/api/integrations/events/test", PublishTestEventAsync);
         app.MapPost("/api/integrations/deliveries/{id:guid}/replay", ReplayDeliveryAsync);
         app.MapAeroLinkControlledEditingEndpoints();
+        app.MapAeroLinkProblemReportEndpoints();
 
         var publicApi = app.MapGroup("/api/v1").RequireRateLimiting("service-api");
         publicApi.MapGet("/requirements", GetRequirementsAsync);

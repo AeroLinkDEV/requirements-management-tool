@@ -1,6 +1,6 @@
 export type View =
   | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "artifact" | "notFound";
+  | "verification" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
@@ -63,6 +63,7 @@ export function readRoute(): AppRoute {
   if (tail[0] === "requirements" && tail[1]) return { ...base, view: "requirements", discipline: query.get("discipline") === "software" ? "software" : "system", artifactId: decoded(tail[1]) };
   if (path === "system-verification") return { ...base, view: "verification", discipline: "systemTest" };
   if (path === "software-verification") return { ...base, view: "verification", discipline: "softwareTest" };
+  if (path === "problem-reports") return { ...base, view: "problemReports", discipline: "system" };
   if (path === "traceability") return { ...base, view: "lifecycle", discipline: "system" };
   if (path === "release-planning") return { ...base, view: "planning", discipline: "system" };
   if (path === "baselines") return { ...base, view: "baselines", discipline: "system" };
@@ -97,6 +98,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "history": return historyPath(discipline === "software" ? "software" : "systems");
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
     case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification`;
+    case "problemReports": return `${root}/problem-reports`;
     case "lifecycle": return `${root}/traceability`;
     case "planning": return `${root}/release-planning`;
     case "baselines": return `${root}/baselines`;

@@ -1699,6 +1699,12 @@ static class IdentifierAllocator
         return Format(prefix, Max(numbers, prefix) + 1);
     }
 
+    public static async Task<string> NextProblemReportAsync(AeroLinkDbContext db, CancellationToken ct)
+    {
+        var numbers = await db.ProblemReports.AsNoTracking().Where(x => x.ReportNumber.StartsWith("PR-")).Select(x => x.ReportNumber).ToListAsync(ct);
+        return $"PR-{Max(numbers, "PR") + 1:D5}";
+    }
+
     public static int Sequence(string number) => int.TryParse(number[(number.LastIndexOf('-') + 1)..], out var value) ? value : 1;
     public static string Format(string prefix, int sequence) => $"{prefix}-{sequence:D6}";
     private static string FormatChangeRequest(string prefix, int sequence) => $"{prefix}-{sequence:D8}";

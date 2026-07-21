@@ -63,6 +63,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<RequirementImportMapping> RequirementImportMappings => Set<RequirementImportMapping>();
     public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();
     public DbSet<ProblemReport> ProblemReports => Set<ProblemReport>();
+    public DbSet<ProblemReportRevision> ProblemReportRevisions => Set<ProblemReportRevision>();
+    public DbSet<ProblemReportLink> ProblemReportLinks => Set<ProblemReportLink>();
     public DbSet<ConfigurationChangeSet> ConfigurationChangeSets => Set<ConfigurationChangeSet>();
     public DbSet<ControlledAttachment> ControlledAttachments => Set<ControlledAttachment>();
     public DbSet<ArtifactEditSession> ArtifactEditSessions => Set<ArtifactEditSession>();
@@ -424,8 +426,22 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("problem_reports"); b.HasKey(x => x.Id); b.Property(x => x.ReportNumber).HasMaxLength(80).IsRequired();
             b.Property(x => x.Title).HasMaxLength(300).IsRequired(); b.Property(x => x.Problem).HasMaxLength(8000).IsRequired(); b.Property(x => x.Analysis).HasMaxLength(8000); b.Property(x => x.ReportedBy).HasMaxLength(100).IsRequired();
-            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ReportNumber }).IsUnique();
+            b.Property(x => x.Classification).HasMaxLength(100).IsRequired(); b.Property(x => x.Origin).HasMaxLength(200).IsRequired(); b.Property(x => x.AffectedConfiguration).HasMaxLength(1000);
+            b.Property(x => x.RootCause).HasMaxLength(8000); b.Property(x => x.Effects).HasMaxLength(8000); b.Property(x => x.Containment).HasMaxLength(8000); b.Property(x => x.CorrectiveAction).HasMaxLength(8000); b.Property(x => x.DispositionRationale).HasMaxLength(8000);
+            b.Property(x => x.WaiverRationale).HasMaxLength(8000); b.Property(x => x.WaivedBy).HasMaxLength(100); b.Property(x => x.ClosureApprovedByName).HasMaxLength(100);
+            b.Property(x => x.Severity).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Priority).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Disposition).HasConversion<string>().HasMaxLength(30); b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ReportNumber }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.State, x.Severity }); b.HasIndex(x => new { x.ProjectId, x.IsReleaseBlocker });
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProblemReportRevision>(b =>
+        {
+            b.ToTable("problem_report_revisions"); b.HasKey(x => x.Id); b.Property(x => x.EventType).HasMaxLength(80).IsRequired(); b.Property(x => x.Actor).HasMaxLength(100).IsRequired(); b.Property(x => x.SnapshotHash).HasMaxLength(64).IsRequired(); b.Property(x => x.SnapshotJson).IsRequired();
+            b.HasIndex(x => new { x.ProblemReportId, x.OccurredAt }); b.HasIndex(x => new { x.ProblemReportId, x.Revision, x.EventType }); b.HasOne<ProblemReport>().WithMany().HasForeignKey(x => x.ProblemReportId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProblemReportLink>(b =>
+        {
+            b.ToTable("problem_report_links"); b.HasKey(x => x.Id); b.Property(x => x.ArtifactType).HasMaxLength(80).IsRequired(); b.Property(x => x.Relationship).HasMaxLength(80).IsRequired(); b.Property(x => x.AddedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ProblemReportId, x.ArtifactType, x.ArtifactId, x.Relationship }).IsUnique(); b.HasIndex(x => new { x.ArtifactType, x.ArtifactId }); b.HasOne<ProblemReport>().WithMany().HasForeignKey(x => x.ProblemReportId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ConfigurationChangeSet>(b =>
         {
