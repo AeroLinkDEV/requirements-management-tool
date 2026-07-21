@@ -127,6 +127,26 @@ public static class ControlledEditingEndpoints
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException)
         {
+            // Concurrent checkout requests can legitimately originate from the same browser. In particular,
+            // React development StrictMode mounts a controlled editor twice. The exclusive database index is
+            // still the source of truth; once it selects a winner, treat that winner as a resumable checkout
+            // when it belongs to this actor instead of presenting a spurious foreign-lock error.
+            db.ChangeTracker.Clear();
+            var winner = await db.ArtifactEditSessions
+                .SingleOrDefaultAsync(x => x.ArtifactId == request.ArtifactId && x.ArtifactType == policy.CanonicalType
+                    && x.IsExclusive && x.State == EditSessionState.Active && x.ExpiresAt > DateTimeOffset.UtcNow, ct);
+            if (winner?.UserName == actor.UserName)
+            {
+                var latest = await db.ArtifactDraftSnapshots.AsNoTracking().Where(x => x.SessionId == winner.Id)
+                    .OrderByDescending(x => x.Sequence).FirstOrDefaultAsync(ct);
+                return Results.Ok(MapSession(winner, latest?.DraftJson ?? winner.DraftJson, true, artifact.Adapter));
+            }
+            if (winner is not null)
+                return Results.Conflict(new
+                {
+                    error = $"{winner.UserName} has this artifact checked out.", code = "exclusive_lock",
+                    holder = winner.UserName, winner.OpenedAt, lastActivityAt = winner.UpdatedAt, winner.ExpiresAt, readOnly = true
+                });
             return Results.Conflict(new { error = "Another user obtained the edit lock first. Refresh to see the current holder.", code = "exclusive_lock" });
         }
         return Results.Created($"/api/controlled-editing/sessions/{session.Id}", MapSession(session, artifact.SnapshotJson, false, artifact.Adapter));

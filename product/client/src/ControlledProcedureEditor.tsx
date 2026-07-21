@@ -10,6 +10,30 @@ type Draft = {
 }
 
 type Props = { api: string; procedure: Procedure; onClose: () => void; onCommitted: () => Promise<void> }
+type CheckoutOutcome = { session: Session } | { error: string }
+
+// React StrictMode deliberately mounts, unmounts, and mounts a component again in development.
+// A lease checkout is a state-changing operation, so both mounts must share one in-flight request.
+const checkoutFlights = new Map<string, Promise<CheckoutOutcome>>()
+
+const checkoutProcedure = (api: string, procedureId: string) => {
+  const key = `${api}|${procedureId}`
+  const existing = checkoutFlights.get(key)
+  if (existing) return existing
+  const request = (async (): Promise<CheckoutOutcome> => {
+    try {
+      const response = await fetch(`${api}/api/controlled-editing/checkout`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artifactType: 'TestProcedure', artifactId: procedureId, leaseMinutes: 15 }),
+      })
+      const body = await response.json() as Session & { error?: string }
+      return response.ok ? { session: body } : { error: body.error || 'This procedure could not be checked out.' }
+    } catch { return { error: 'This procedure could not be checked out.' } }
+  })()
+  checkoutFlights.set(key, request)
+  void request.finally(() => checkoutFlights.delete(key))
+  return request
+}
 
 export default function ControlledProcedureEditor({ api, procedure, onClose, onCommitted }: Props) {
   const [session, setSession] = useState<Session>()
@@ -28,16 +52,12 @@ export default function ControlledProcedureEditor({ api, procedure, onClose, onC
   useEffect(() => {
     let live = true
     void (async () => {
-      const response = await fetch(`${api}/api/controlled-editing/checkout`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artifactType: 'TestProcedure', artifactId: procedure.revisionId, leaseMinutes: 15 }),
-      })
-      if (!response.ok) {
-        const body = await response.json() as { error?: string }
-        if (live) { setError(body.error || 'This procedure could not be checked out.'); setStatus('Checkout unavailable') }
+      const outcome = await checkoutProcedure(api, procedure.revisionId)
+      if ('error' in outcome) {
+        if (live) { setError(outcome.error); setStatus('Checkout unavailable') }
         return
       }
-      const value = await response.json() as Session
+      const value = outcome.session
       try {
         const recovered = JSON.parse(value.draftJson) as Draft
         if (!live) return
