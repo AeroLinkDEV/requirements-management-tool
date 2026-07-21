@@ -77,6 +77,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<IntegrationEvent> IntegrationEvents => Set<IntegrationEvent>();
     public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
     public DbSet<ReqIfExchangeJob> ReqIfExchangeJobs => Set<ReqIfExchangeJob>();
+    public DbSet<ProductLineComponent> ProductLineComponents => Set<ProductLineComponent>();
+    public DbSet<ComponentStream> ComponentStreams => Set<ComponentStream>();
+    public DbSet<ComponentStreamRevision> ComponentStreamRevisions => Set<ComponentStreamRevision>();
+    public DbSet<ProductVariant> ProductVariants => Set<ProductVariant>();
+    public DbSet<VariantComponentSelection> VariantComponentSelections => Set<VariantComponentSelection>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -93,6 +98,26 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Name).HasMaxLength(200).IsRequired();
             b.Property(x => x.SoftwareProduct).HasMaxLength(200).IsRequired();
             b.HasIndex(x => new { x.ProgramId, x.Name }).IsUnique();
+        });
+        modelBuilder.Entity<ProductLineComponent>(b =>
+        {
+            b.ToTable("product_line_components"); b.HasKey(x=>x.Id); b.Property(x=>x.ComponentNumber).HasMaxLength(80).IsRequired(); b.Property(x=>x.Name).HasMaxLength(300).IsRequired(); b.Property(x=>x.Description).HasMaxLength(8000); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.Version).IsConcurrencyToken(); b.HasIndex(x=>new{x.ProjectId,x.ComponentNumber}).IsUnique(); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ComponentStream>(b =>
+        {
+            b.ToTable("component_streams"); b.HasKey(x=>x.Id); b.Property(x=>x.StreamKey).HasMaxLength(80).IsRequired(); b.Property(x=>x.Name).HasMaxLength(300).IsRequired(); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.HasIndex(x=>new{x.ComponentId,x.StreamKey}).IsUnique(); b.HasOne<ProductLineComponent>().WithMany().HasForeignKey(x=>x.ComponentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ComponentStreamRevision>(b =>
+        {
+            b.ToTable("component_stream_revisions"); b.HasKey(x=>x.Id); b.Property(x=>x.ContentJson).IsRequired(); b.Property(x=>x.ManifestHash).HasMaxLength(64).IsRequired(); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.StreamId,x.Revision}).IsUnique(); b.HasIndex(x=>x.ManifestHash); b.HasOne<ComponentStream>().WithMany().HasForeignKey(x=>x.StreamId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ProductVariant>(b =>
+        {
+            b.ToTable("product_variants"); b.HasKey(x=>x.Id); b.Property(x=>x.VariantKey).HasMaxLength(80).IsRequired(); b.Property(x=>x.Name).HasMaxLength(300).IsRequired(); b.Property(x=>x.ApplicabilityJson).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.Version).IsConcurrencyToken(); b.HasIndex(x=>new{x.ProjectId,x.VariantKey}).IsUnique(); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<VariantComponentSelection>(b =>
+        {
+            b.ToTable("variant_component_selections"); b.HasKey(x=>x.Id); b.Property(x=>x.ApplicabilityJson).IsRequired(); b.Property(x=>x.SelectedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.VariantId,x.ComponentRevisionId}).IsUnique(); b.HasOne<ProductVariant>().WithMany().HasForeignKey(x=>x.VariantId).OnDelete(DeleteBehavior.Cascade); b.HasOne<ComponentStreamRevision>().WithMany().HasForeignKey(x=>x.ComponentRevisionId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<SoftwareRelease>(b =>
         {
