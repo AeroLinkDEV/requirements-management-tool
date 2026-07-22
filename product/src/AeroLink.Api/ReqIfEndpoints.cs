@@ -17,6 +17,7 @@ public static class ReqIfEndpoints
         app.MapGet("/api/reqif/jobs/{id:guid}", JobAsync);
         app.MapGet("/api/reqif/jobs/{id:guid}/download", DownloadAsync);
         app.MapPost("/api/reqif/jobs/{id:guid}/commit", CommitAsync);
+        app.MapPost("/api/reqif/jobs/{id:guid}/reject", RejectAsync);
         return app;
     }
 
@@ -73,6 +74,9 @@ public static class ReqIfEndpoints
         }
         catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
     }
+
+    private static async Task<IResult> RejectAsync(Guid id,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
+    {var job=await db.ReqIfExchangeJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();try{job.Reject(DateTimeOffset.UtcNow);db.SecurityAuditEvents.Add(new("ReqIfExchangeRejected",http.UserAccount().UserName,$"reqif:{job.Id}","Success","Operator rejected the staged exchange; no controlled artifact was mutated.",http.Connection.RemoteIpAddress?.ToString()??"local",DateTimeOffset.UtcNow));await db.SaveChangesAsync(ct);return Results.Ok(new{job.Id,state=job.State.ToString()});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}}
 
     private static object Map(ReqIfExchangeJob x)=>new{x.Id,direction=x.Direction.ToString(),state=x.State.ToString(),x.FileName,x.Sha256,x.RequirementCount,x.HierarchyCount,x.RelationCount,x.AttachmentCount,x.WarningCount,x.ErrorCount,x.CreatedBy,x.CreatedAt,x.CompletedAt,x.CreatedScrId,downloadUrl=$"/api/reqif/jobs/{x.Id}/download"};
 }
