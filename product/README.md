@@ -40,6 +40,8 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 - predecessor-aware reconciliation that creates only target-baseline-valid versioned trace and coverage links while exposing genuinely new coverage gaps
 - exact JSON verification-manifest export and atomic bulk import of hundreds of build-specific results with shared checksum-protected campaign evidence
 - professional DOCX/PDF publication of SCRs, requirements, and test procedures with editorial covers, named approval provenance, document-control registers, revision history, and controlled-copy markings
+- controlled product-line libraries with immutable revisions, reference/synchronized/diverged reuse, retained accept/defer/reject decisions, exact variant configurations, and configuration-correct requirements, traces, tests, and metrics
+- approved organization template revisions, equivalent rich engineering content in the UI/DOCX/PDF, exact baseline redlines, resumable deterministic publication jobs, integrity verification, and manifest-backed release evidence packages
 - enterprise requirements workspace spanning the complete System/HLR/LLR repository, with high-density table and document modes, structured specifications, paging, filters, and revision inspection
 - Program-configurable artifact-schema records and structured specification/section placement while stable requirement identity remains independent of document position
 - attributable requirement discussions with mentions, resolution/disposition state, exact-revision context, saved personal/shared views, and visual revision redlines

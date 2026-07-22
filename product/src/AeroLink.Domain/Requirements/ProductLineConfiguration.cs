@@ -5,7 +5,7 @@ namespace AeroLink.Domain.Requirements;
 public enum ProductLineComponentState { Draft, Approved, Retired }
 public enum ComponentStreamState { Active, Closed }
 public enum ProductVariantState { Draft, Approved, Retired }
-public enum PropagationDecisionKind { Accept, Defer, Diverge }
+public enum PropagationDecisionKind { Accept, Defer, Reject, Diverge }
 
 /// <summary>Reusable, controlled engineering content with independent release streams.</summary>
 public sealed class ProductLineComponent

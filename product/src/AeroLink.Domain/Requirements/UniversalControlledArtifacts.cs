@@ -25,8 +25,13 @@ public sealed class DocumentTemplate
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; }
+    public int ApprovedRevision { get; private set; }
+    public string? ApprovedBy { get; private set; }
+    public DateTimeOffset? ApprovedAt { get; private set; }
     public void UpdateDraft(string title, string body, string ownerId, DateTimeOffset now)
-    { Title = Required(title, "A document-template title is required."); Body = body?.Trim() ?? ""; OwnerId = Required(ownerId, "A document-template owner is required."); UpdatedAt = now; Version++; }
+    { if(State==DocumentTemplateState.Approved)throw new DomainException("Begin a successor template revision before editing an approved template.");Title = Required(title, "A document-template title is required."); Body = body?.Trim() ?? ""; OwnerId = Required(ownerId, "A document-template owner is required.");State=DocumentTemplateState.InWork; UpdatedAt = now; Version++; }
+    public int Approve(string actor,DateTimeOffset now){if(State==DocumentTemplateState.Approved)throw new DomainException("This template revision is already approved.");if(string.IsNullOrWhiteSpace(Body))throw new DomainException("An empty template cannot be approved.");ApprovedRevision++;ApprovedBy=Required(actor,"An approving actor is required.");ApprovedAt=now;State=DocumentTemplateState.Approved;UpdatedAt=now;Version++;return ApprovedRevision;}
+    public void BeginSuccessorRevision(string actor,DateTimeOffset now){if(State!=DocumentTemplateState.Approved)throw new DomainException("Only an approved template can begin a successor revision.");_ = Required(actor,"An actor is required.");State=DocumentTemplateState.InWork;ApprovedBy=null;ApprovedAt=null;UpdatedAt=now;Version++;}
     private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
 }
 
