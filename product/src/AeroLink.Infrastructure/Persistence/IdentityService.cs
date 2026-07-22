@@ -67,7 +67,8 @@ public sealed class IdentityService(AeroLinkDbContext db)
         var programs = memberships.GroupBy(x => x.ProgramId).Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList())).ToList();
         return new(user.Id, user.UserName, user.DisplayName, user.Email, user.UserName == SystemAdministratorUserName, programs);
     }
-    private static string TokenHash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+    public static string? TokenDigest(string? token) => string.IsNullOrWhiteSpace(token)?null:Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+    private static string TokenHash(string token) => TokenDigest(token)!;
 }
 
 public sealed class IdentitySeeder(AeroLinkDbContext db)

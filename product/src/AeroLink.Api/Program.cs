@@ -152,6 +152,18 @@ app.MapPost("/api/auth/login", async (LoginRequest request, HttpContext http, Id
     return Results.Ok(result.User);
 }).RequireRateLimiting("authentication");
 app.MapPost("/api/auth/logout", async (HttpContext http, IdentityService identity, CancellationToken ct) => { await identity.LogoutAsync(http.Request.Cookies[IdentityService.CookieName], http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct); http.Response.Cookies.Delete(IdentityService.CookieName); return Results.NoContent(); });
+app.MapGet("/api/auth/sessions", async (HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
+{
+    var actor=http.UserAccount();return Results.Ok(await db.UserSessions.AsNoTracking().Where(x=>x.UserId==actor.Id).OrderByDescending(x=>x.LastSeenAt).Select(x=>new{x.Id,x.IpAddress,x.UserAgent,x.CreatedAt,x.LastSeenAt,x.ExpiresAt,x.RevokedAt}).ToListAsync(ct));
+});
+app.MapPost("/api/auth/sessions/revoke-others", async (HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
+{
+    var actor=http.UserAccount();var currentHash=IdentityService.TokenDigest(http.Request.Cookies[IdentityService.CookieName]);var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==actor.Id&&x.RevokedAt==null&&x.TokenHash!=currentHash).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("SessionsRevoked",actor.UserName,"session","Success",$"Revoked {sessions.Count} other active session(s).",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.Ok(new{revoked=sessions.Count});
+});
+app.MapPost("/api/auth/password", async (ChangeOwnPasswordRequest request,HttpContext http,IdentityService identity,AeroLinkDbContext db,CancellationToken ct) =>
+{
+    var actor=http.UserAccount();if(!await identity.ConfirmPasswordAsync(actor.Id,request.CurrentPassword,ct))return Results.Json(new{error="Current password confirmation failed."},statusCode:401);try{var user=await db.UserAccounts.SingleAsync(x=>x.Id==actor.Id,ct);user.ChangePassword(IdentityService.HashPassword(request.NewPassword));var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==actor.Id&&x.RevokedAt==null).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("PasswordChanged",actor.UserName,user.UserName,"Success","Password changed and all sessions revoked.",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);http.Response.Cookies.Delete(IdentityService.CookieName);return Results.NoContent();}catch(ArgumentException ex){return Results.BadRequest(new{error=ex.Message});}
+});
 app.MapGet("/api/auth/me", (HttpContext http) => Results.Ok(http.UserAccount()));
 app.MapGet("/api/auth/csrf", (HttpContext http,BrowserMutationProtector protector) =>
 {
@@ -1189,6 +1201,10 @@ app.MapPost("/api/admin/users/{id:guid}/state", async (Guid id, SetAccountStateR
     }
     db.SecurityAuditEvents.Add(new(request.Enabled ? "AccountEnabled" : "AccountDisabled", actor.UserName, user.UserName, "Success", $"Account state set to {(request.Enabled ? "Active" : "Disabled")}; revoked {revokedSessions} outstanding session(s).", http.Connection.RemoteIpAddress?.ToString() ?? "local", now)); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.NoContent();
 });
+app.MapPost("/api/admin/users/{id:guid}/reset-password",async(Guid id,ResetPasswordRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();try{var user=await db.UserAccounts.SingleOrDefaultAsync(x=>x.Id==id,ct);if(user is null)return Results.NotFound();user.ChangePassword(IdentityService.HashPassword(request.TemporaryPassword));var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==id&&x.RevokedAt==null).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("AdministratorPasswordReset",actor.UserName,user.UserName,"Success",$"Reset password and revoked {sessions.Count} session(s). Reason: {request.Reason.Trim()}",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.NoContent();}catch(ArgumentException ex){return Results.BadRequest(new{error=ex.Message});}
+});
 app.MapPost("/api/delegations", async (CreateDelegationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
     var actor = http.UserAccount(); if (request.DelegatorUserId != actor.Id && !actor.IsAdministrator) return Results.Forbid(); if (request.DelegatorUserId == request.DelegateUserId) return Results.BadRequest(new { error = "A person cannot delegate a role to themselves." });
@@ -1603,6 +1619,8 @@ public sealed class AeroLinkAuthorizationHandler(IOptionsMonitor<AuthenticationS
 }
 
 record LoginRequest(string UserName, string Password);
+record ChangeOwnPasswordRequest(string CurrentPassword,string NewPassword);
+record ResetPasswordRequest(string TemporaryPassword,string Reason);
 record BootstrapAdministratorRequest(string DisplayName, string Email, string Password);
 record CreateScrRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, ChangeRequestType Type = ChangeRequestType.System);
 record DraftRequirementRequest(string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod,string RichText="",string AttributesJson="{}",string ImpactDispositionJson="{}",bool IsDerived=false);
