@@ -105,6 +105,10 @@ app.Use(async (context, next) =>
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
 app.MapGet("/health/ready", async (AeroLinkDbContext db,CancellationToken ct) => await db.Database.CanConnectAsync(ct)?Results.Ok(new{status="ready",service="AeroLink API",database="connected"}):Results.Json(new{status="not_ready",service="AeroLink API",database="unavailable"},statusCode:StatusCodes.Status503ServiceUnavailable));
+app.MapGet("/api/operations/overview",async(Guid projectId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();var checkpoint=await db.EnterpriseIntegrityCheckpoints.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderByDescending(x=>x.CreatedAt).FirstOrDefaultAsync(ct);var jobs=await db.EnterpriseOperationJobs.AsNoTracking().Where(x=>x.ProjectId==projectId).ToListAsync(ct);var attachments=await db.ControlledAttachments.AsNoTracking().Where(x=>x.ProjectId==projectId).ToListAsync(ct);return Results.Ok(new{generatedAt=DateTimeOffset.UtcNow,health=new{database=await db.Database.CanConnectAsync(ct)?"ready":"not_ready",integrity=checkpoint?.State.ToString()??"not_checked",latestManifest=checkpoint?.ManifestHash,checkpointAt=checkpoint?.CreatedAt},operations=new{runningJobs=jobs.Count(x=>x.State==EnterpriseJobState.Running),failedJobs=jobs.Count(x=>x.State==EnterpriseJobState.Failed),attachments=attachments.Count,attachmentBytes=attachments.Sum(x=>x.Size),unverifiedAttachments=attachments.Count(x=>x.IntegrityVerifiedAt is null)},qualification=new{scaleTargetRequirements=50_000,concurrentUserTarget=150,contract="Run scale qualification before production release; retain result with the release evidence package."}});
+});
 
 app.MapGet("/api/setup/status", async (AeroLinkDbContext db, IConfiguration configuration, CancellationToken ct) =>
 {
