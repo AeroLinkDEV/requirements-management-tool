@@ -8,6 +8,26 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class IdentityPersistenceTests
 {
     [Fact]
+    public void Mfa_secrets_are_standard_base32_and_totp_matches_rfc_6238()
+    {
+        var generated = IdentityService.CreateMfaSecret();
+        Assert.Equal(32, generated.Length);
+        Assert.All(generated, value => Assert.Contains(value, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"));
+        Assert.True(IdentityService.VerifyTotp("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "287082", DateTimeOffset.FromUnixTimeSeconds(59)));
+        Assert.False(IdentityService.VerifyTotp("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "287083", DateTimeOffset.FromUnixTimeSeconds(59)));
+    }
+
+    [Fact]
+    public async Task Mfa_secret_is_protected_at_rest_and_can_be_used_after_reload()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        await using var db = new AeroLinkDbContext(options); await db.Database.OpenConnectionAsync(); await db.Database.EnsureCreatedAsync();
+        var identity = new IdentityService(db); var secret = IdentityService.CreateMfaSecret(); var protectedSecret = identity.ProtectMfaSecret(secret);
+        Assert.StartsWith("dp:v1:", protectedSecret); Assert.DoesNotContain(secret, protectedSecret);
+        Assert.Equal(secret, identity.RevealMfaSecret(protectedSecret));
+    }
+
+    [Fact]
     public async Task Password_session_role_and_signature_form_an_accountable_chain()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-identity-{Guid.NewGuid():N}.db");

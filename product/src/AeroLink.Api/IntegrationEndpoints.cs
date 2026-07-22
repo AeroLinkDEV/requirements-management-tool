@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Integrations;
@@ -8,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 public static class IntegrationEndpoints
 {
-    private static readonly HashSet<string> AllowedScopes = new(StringComparer.OrdinalIgnoreCase) { "requirements:read", "events:write", "integrations:read", "*" };
+    private static readonly HashSet<string> AllowedScopes = new(StringComparer.OrdinalIgnoreCase) { "requirements:read", "requirements:write", "oslc:read", "events:write", "integrations:read", "*" };
 
     public static IEndpointRouteBuilder MapAeroLinkIntegrationEndpoints(this IEndpointRouteBuilder app)
     {
@@ -25,6 +26,9 @@ public static class IntegrationEndpoints
         var publicApi = app.MapGroup("/api/v1").RequireRateLimiting("service-api");
         publicApi.MapGet("/requirements", GetRequirementsAsync);
         publicApi.MapGet("/requirements/{id:guid}", GetRequirementAsync);
+        publicApi.MapPut("/requirements/{id:guid}", ProposeConditionalRequirementWriteAsync);
+        publicApi.MapGet("/oslc/rm/catalog", GetOslcCatalogAsync);
+        publicApi.MapGet("/oslc/rm/requirements/{id:guid}", GetOslcRequirementAsync);
         publicApi.MapGet("/integrations/health", GetIntegrationHealthAsync);
         publicApi.MapPost("/events", PublishServiceEventAsync);
         return app;
@@ -101,6 +105,25 @@ public static class IntegrationEndpoints
     private static async Task<IResult> GetRequirementAsync(Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)
     {var service=http.ServiceIdentity();if(!service.HasScope("requirements:read"))return Results.Forbid();var item=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id&&x.ProjectId==service.ProjectId,ct);if(item is null)return Results.NotFound();var revisions=await db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==id).OrderByDescending(x=>x.Revision).ToListAsync(ct);http.Response.Headers.ETag=$"\"{IntegrationSecurityService.Hash($"{id}:{revisions.FirstOrDefault()?.Revision}")}\"";return Results.Ok(new{item.Id,identifier=item.BaseNumber,level=item.Level.ToString(),revisions=revisions.Select(x=>new{x.Id,x.Revision,x.Statement,x.Rationale,x.VerificationMethod,state=x.State.ToString(),x.SourceScrId,x.EffectiveBaselineId,x.CreatedAt})});}
 
+    private static async Task<IResult> ProposeConditionalRequirementWriteAsync(Guid id,ConditionalRequirementWriteRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)
+    {
+        var service=http.ServiceIdentity();if(!service.HasScope("requirements:write"))return Results.Forbid();var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id&&x.ProjectId==service.ProjectId,ct);if(artifact is null)return Results.NotFound();var current=await db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==id).OrderByDescending(x=>x.Revision).FirstOrDefaultAsync(ct);if(current is null)return Results.Conflict(new{error="The requirement has no controlled revision.",code="requirement_revision_missing"});var currentEtag=$"\"{IntegrationSecurityService.Hash($"{id}:{current.Revision}")}\"";if(!string.Equals(http.Request.Headers.IfMatch.ToString(),currentEtag,StringComparison.Ordinal))return Results.Json(new{error="The requirement changed after the caller read it.",code="precondition_failed",currentEtag},statusCode:StatusCodes.Status412PreconditionFailed);if(!await db.Releases.AnyAsync(x=>x.Id==request.TargetReleaseId&&x.ProjectId==service.ProjectId,ct))return Results.BadRequest(new{error="The target release is not part of the service identity Project."});
+        try{var now=DateTimeOffset.UtcNow;var number=await IdentifierAllocator.NextChangeRequestAsync(db,request.Type,ct);var scr=new SystemChangeRequest(number,0,service.ProjectId,request.TargetReleaseId,request.Title,$"Conditional API change proposed for {artifact.BaseNumber}.",request.Analysis,request.Solution,service.Name,now,request.Type);scr.AddRequirementChange(service.Name,artifact.BaseNumber,current.Revision,artifact.Level,RequirementChangeKind.Modify,request.Statement,request.Rationale,request.VerificationMethod,now);db.SystemChangeRequests.Add(scr);db.SecurityAuditEvents.Add(new("ConditionalRequirementWriteProposed",service.Name,artifact.BaseNumber,"Success",$"Created {scr.DisplayNumber} from If-Match {currentEtag}; the controlled requirement remains unchanged until approval and baseline selection.",http.Connection.RemoteIpAddress?.ToString()??"service-api",now));await db.SaveChangesAsync(ct);return Results.Accepted($"/api/scrs/{scr.Id}",new{scr.Id,scr.DisplayNumber,governance="Controlled change proposal created; direct requirement mutation is prohibited.",sourceEtag=currentEtag});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+    }
+
+    private static async Task<IResult> GetOslcCatalogAsync(HttpContext http,AeroLinkDbContext db,CancellationToken ct)
+    {
+        var service=http.ServiceIdentity();if(!service.HasScope("oslc:read")&&!service.HasScope("requirements:read"))return Results.Forbid();var project=await db.Projects.AsNoTracking().SingleAsync(x=>x.Id==service.ProjectId,ct);
+        var queryCapability=new Dictionary<string,object?>{{"oslc:queryBase",$"/api/v1/requirements?projectId={project.Id}"}};
+        var rmService=new Dictionary<string,object?>{{"oslc:domain","http://open-services.net/ns/rm#"},{"oslc:queryCapability",queryCapability}};
+        var provider=new Dictionary<string,object?>{{"@id",$"/api/v1/oslc/rm/catalog#provider-{project.Id:N}"},{"dcterms:title",project.Name},{"oslc:service",rmService}};
+        var catalog=new Dictionary<string,object?>{{"@context",new Dictionary<string,string>{{"oslc","http://open-services.net/ns/core#"},{"oslc_rm","http://open-services.net/ns/rm#"},{"dcterms","http://purl.org/dc/terms/"}}},{"@type","oslc:ServiceProviderCatalog"},{"dcterms:title",$"AeroLink {project.Name} requirements"},{"oslc:serviceProvider",new[]{provider}}};
+        return Results.Json(catalog,contentType:"application/ld+json");
+    }
+
+    private static async Task<IResult> GetOslcRequirementAsync(Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)
+    {var service=http.ServiceIdentity();if(!service.HasScope("oslc:read")&&!service.HasScope("requirements:read"))return Results.Forbid();var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id&&x.ProjectId==service.ProjectId,ct);if(artifact is null)return Results.NotFound();var revision=await db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==id).OrderByDescending(x=>x.Revision).FirstOrDefaultAsync(ct);if(revision is null)return Results.NotFound();var etag=$"\"{IntegrationSecurityService.Hash($"{id}:{revision.Revision}")}\"";http.Response.Headers.ETag=etag;return Results.Json(new Dictionary<string,object?>{{"@context",new Dictionary<string,string>{{"oslc_rm","http://open-services.net/ns/rm#"},{"dcterms","http://purl.org/dc/terms/"}}},{"@id",$"/api/v1/oslc/rm/requirements/{id}"},{"@type","oslc_rm:Requirement"},{"dcterms:identifier",artifact.BaseNumber},{"dcterms:title",artifact.BaseNumber},{"dcterms:description",revision.Statement},{"aerolink:revision",revision.Revision},{"aerolink:verificationMethod",revision.VerificationMethod}},contentType:"application/ld+json");}
+
     private static async Task<IResult> GetIntegrationHealthAsync(HttpContext http,AeroLinkDbContext db,CancellationToken ct)
     {var service=http.ServiceIdentity();if(!service.HasScope("integrations:read"))return Results.Forbid();var subscriptions=await db.WebhookSubscriptions.AsNoTracking().CountAsync(x=>x.ProjectId==service.ProjectId&&x.IsEnabled,ct);var deliveries=await db.WebhookDeliveries.AsNoTracking().Where(x=>x.ProjectId==service.ProjectId).ToListAsync(ct);return Results.Ok(new{status=deliveries.Any(x=>x.State==WebhookDeliveryState.DeadLettered)?"attention":"healthy",projectId=service.ProjectId,enabledSubscriptions=subscriptions,pendingDeliveries=deliveries.Count(x=>x.State is WebhookDeliveryState.Pending or WebhookDeliveryState.RetryScheduled),deadLetters=deliveries.Count(x=>x.State==WebhookDeliveryState.DeadLettered),checkedAt=DateTimeOffset.UtcNow});}
 
@@ -115,3 +138,4 @@ public sealed record CreateWebhookRequest(Guid ProjectId,string Name,string Endp
 public sealed record SetWebhookStateRequest(bool Enabled);
 public sealed record PublishTestEventRequest(Guid ProjectId,string? Message);
 public sealed record PublishServiceEventRequest(string EventType,string AggregateType,Guid AggregateId,JsonElement Data);
+public sealed record ConditionalRequirementWriteRequest(Guid TargetReleaseId,string Title,string Analysis,string Solution,string Statement,string Rationale,string VerificationMethod,ChangeRequestType Type=ChangeRequestType.System);

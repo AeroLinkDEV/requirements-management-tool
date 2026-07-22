@@ -1,16 +1,19 @@
 using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Domain.Identity;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
-public sealed record AuthenticatedUser(Guid Id, string UserName, string DisplayName, string Email, bool IsAdministrator, IReadOnlyList<UserProgramAccess> Programs);
+public sealed record AuthenticatedUser(Guid Id, string UserName, string DisplayName, string Email, bool IsAdministrator, IReadOnlyList<UserProgramAccess> Programs, bool MustChangePassword = false);
 public sealed record UserProgramAccess(Guid ProgramId, IReadOnlyList<string> Roles);
 public sealed record LoginResult(AuthenticatedUser User, string Token, DateTimeOffset ExpiresAt);
 
-public sealed class IdentityService(AeroLinkDbContext db)
+public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvider? dataProtection = null)
 {
+    private const string ProtectedMfaPrefix = "dp:v1:";
+    private readonly IDataProtector _mfaProtector = (dataProtection ?? new EphemeralDataProtectionProvider()).CreateProtector("AeroLink.Identity.MfaSecret.v1");
     public const string CookieName = "aerolink_session";
     public const string SystemAdministratorUserName = "admin";
     public static string HashPassword(string password)
@@ -31,7 +34,7 @@ public sealed class IdentityService(AeroLinkDbContext db)
         var normalized = userName.Trim().ToLowerInvariant(); var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.UserName == normalized, ct);
         if (user is null) { db.SecurityAuditEvents.Add(new("Login", normalized, "session", "Denied", "Unknown account.", ip, now)); await db.SaveChangesAsync(ct); return null; }
         if (user.State != AccountState.Active || !VerifyPassword(password, user.PasswordHash)) { user.LoginFailed(); db.SecurityAuditEvents.Add(new("Login", normalized, "session", "Denied", user.State == AccountState.Active ? "Invalid credentials." : $"Account is {user.State}.", ip, now)); await db.SaveChangesAsync(ct); return null; }
-        var enrollment=await db.UserMfaEnrollments.SingleOrDefaultAsync(x=>x.UserId==user.Id&&x.Confirmed,ct);if(enrollment is not null){var valid=VerifyTotp(enrollment.Secret,mfaCode??"",now);if(!valid&&!string.IsNullOrWhiteSpace(mfaCode)){var recovery=await db.MfaRecoveryCodes.SingleOrDefaultAsync(x=>x.UserId==user.Id&&x.CodeHash==RecoveryHash(mfaCode)&&x.UsedAt==null,ct);if(recovery is not null){recovery.Use(now);valid=true;}}if(!valid){db.SecurityAuditEvents.Add(new("MfaChallenge",user.UserName,"session","Denied","A valid authenticator or unused recovery code is required.",ip,now));await db.SaveChangesAsync(ct);return null;}}
+        var enrollment=await db.UserMfaEnrollments.SingleOrDefaultAsync(x=>x.UserId==user.Id&&x.Confirmed,ct);if(enrollment is not null){var valid=VerifyTotp(RevealMfaSecret(enrollment.Secret),mfaCode??"",now);if(!valid&&!string.IsNullOrWhiteSpace(mfaCode)){var recovery=await db.MfaRecoveryCodes.SingleOrDefaultAsync(x=>x.UserId==user.Id&&x.CodeHash==RecoveryHash(mfaCode)&&x.UsedAt==null,ct);if(recovery is not null){recovery.Use(now);valid=true;}}if(!valid){db.SecurityAuditEvents.Add(new("MfaChallenge",user.UserName,"session","Denied","A valid authenticator or unused recovery code is required.",ip,now));await db.SaveChangesAsync(ct);return null;}}
         user.LoginSucceeded(now); var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant(); var expires = now.AddHours(12);
         db.UserSessions.Add(new(user.Id, TokenHash(token), ip, userAgent, now, expires)); db.SecurityAuditEvents.Add(new("Login", user.UserName, "session", "Success", "Authenticated session created.", ip, now)); await db.SaveChangesAsync(ct);
         return new(await MapAsync(user, now, ct), token, expires);
@@ -68,15 +71,29 @@ public sealed class IdentityService(AeroLinkDbContext db)
     {
         var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.UserId == user.Id).ToListAsync(ct);
         var programs = memberships.GroupBy(x => x.ProgramId).Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList())).ToList();
-        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.UserName == SystemAdministratorUserName, programs);
+        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.UserName == SystemAdministratorUserName, programs, user.MustChangePassword);
     }
     public static string? TokenDigest(string? token) => string.IsNullOrWhiteSpace(token)?null:Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
-    public static string CreateMfaSecret()=>Convert.ToBase64String(RandomNumberGenerator.GetBytes(20));
+    public static string CreateMfaSecret()=>Base32Encode(RandomNumberGenerator.GetBytes(20));
+    public string ProtectMfaSecret(string secret)=>ProtectedMfaPrefix+_mfaProtector.Protect(secret);
+    public string RevealMfaSecret(string storedSecret)=>storedSecret.StartsWith(ProtectedMfaPrefix,StringComparison.Ordinal)?_mfaProtector.Unprotect(storedSecret[ProtectedMfaPrefix.Length..]):storedSecret;
     public static bool VerifyTotp(string secret,string code,DateTimeOffset now)
     {if(code.Length!=6||!code.All(char.IsDigit))return false;return Enumerable.Range(-1,3).Select(offset=>Totp(secret,now.AddSeconds(offset*30))).Any(expected=>CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(expected),Encoding.ASCII.GetBytes(code)));}
     public static string RecoveryHash(string code)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(code.Trim().ToUpperInvariant()))).ToLowerInvariant();
     public static string NewRecoveryCode()=>Convert.ToHexString(RandomNumberGenerator.GetBytes(5));
-    private static string Totp(string secret,DateTimeOffset now){var counter=BitConverter.GetBytes(now.ToUnixTimeSeconds()/30);if(BitConverter.IsLittleEndian)Array.Reverse(counter);using var hmac=new HMACSHA1(Convert.FromBase64String(secret));var hash=hmac.ComputeHash(counter);var offset=hash[^1]&15;var value=((hash[offset]&127)<<24)|(hash[offset+1]<<16)|(hash[offset+2]<<8)|hash[offset+3];return (value%1_000_000).ToString("D6");}
+    private static string Totp(string secret,DateTimeOffset now){var counter=BitConverter.GetBytes(now.ToUnixTimeSeconds()/30);if(BitConverter.IsLittleEndian)Array.Reverse(counter);using var hmac=new HMACSHA1(DecodeMfaSecret(secret));var hash=hmac.ComputeHash(counter);var offset=hash[^1]&15;var value=((hash[offset]&127)<<24)|(hash[offset+1]<<16)|(hash[offset+2]<<8)|hash[offset+3];return (value%1_000_000).ToString("D6");}
+    private static byte[] DecodeMfaSecret(string secret)
+    {
+        const string alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";var normalized=secret.Trim().TrimEnd('=').ToUpperInvariant();var output=new List<byte>();var buffer=0;var bits=0;
+        foreach(var ch in normalized){var value=alphabet.IndexOf(ch);if(value<0){try{return Convert.FromBase64String(secret);}catch{throw new FormatException("MFA secret is not valid Base32.");}}buffer=(buffer<<5)|value;bits+=5;if(bits>=8){bits-=8;output.Add((byte)((buffer>>bits)&255));}}
+        return output.ToArray();
+    }
+    private static string Base32Encode(byte[] bytes)
+    {
+        const string alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";var output=new StringBuilder();var buffer=0;var bits=0;
+        foreach(var value in bytes){buffer=(buffer<<8)|value;bits+=8;while(bits>=5){bits-=5;output.Append(alphabet[(buffer>>bits)&31]);}}
+        if(bits>0)output.Append(alphabet[(buffer<<(5-bits))&31]);return output.ToString();
+    }
     private static string TokenHash(string token) => TokenDigest(token)!;
 }
 

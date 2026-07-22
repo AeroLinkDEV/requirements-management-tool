@@ -21,9 +21,11 @@ import { identityInitials, identityLabel } from "./presentation";
 import { readRoute, routePath } from "./routing";
 import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
 import {
+  AccountSecurityDialog,
   AdministrationCenter,
   LoginPage,
   MyWorkCenter,
+  RequiredPasswordChange,
 } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import { PersonAvatar } from "./People";
@@ -86,6 +88,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;
   density:WorkspaceDensity;onProgram:(id:string)=>void;onProject:(id:string)=>void;onRelease:(id:string)=>void;onNavigate:(view:View,discipline?:Discipline)=>void;onSearch:()=>void;onDisplay:()=>void;onSignOut:()=>void;
 }) {
+  const [securityOpen,setSecurityOpen]=useState(false);
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
   const release = project?.releases.find(x => x.id === selectedReleaseId) ?? project?.releases.at(-1);
@@ -121,7 +124,8 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
         <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Product Versions","planning","⑂","system","Product Versions / Release Planning")}{item("Baselines","baselines","⌘")}{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("Integration Center","integrations","↗","system","Integration Command Center")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
       </nav>
-      <footer><PersonAvatar userName={user.userName} displayName={user.displayName} size="large"/><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button><button className="workspaceDisplay" onClick={onDisplay} aria-label="Open workspace display settings"><span>Aa</span><div><b>Workspace display</b><small>{density} density</small></div><i aria-hidden="true">›</i></button></footer>
+      <footer><PersonAvatar userName={user.userName} displayName={user.displayName} size="large"/><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="accountSecurity" onClick={()=>setSecurityOpen(true)}>Account security</button><button className="signOut" onClick={onSignOut}>Sign out</button><button className="workspaceDisplay" onClick={onDisplay} aria-label="Open workspace display settings"><span>Aa</span><div><b>Workspace display</b><small>{density} density</small></div><i aria-hidden="true">›</i></button></footer>
+      {securityOpen&&<AccountSecurityDialog api={API} onClose={()=>setSecurityOpen(false)}/>}
     </aside>
   );
 }
@@ -165,8 +169,7 @@ function App() {
   }, []);
   const loadWorkspaces = useCallback(async () => {
     try {
-      const response = await fetch(`${API}/api/workspaces`),
-        next = await response.json() as Workspace[];
+      const response = await fetch(`${API}/api/workspaces`);if(!response.ok)throw new Error('Workspace access is unavailable.');const next = await response.json() as Workspace[];if(!Array.isArray(next))throw new Error('Workspace response is invalid.');
       setWorkspaces(next);
       const program=next.find(x=>x.program.id===initialRoute.programId)??next[0],project=program?.projects.find(x=>x.project.id===initialRoute.projectId)??program?.projects[0],release=project?.releases.find(x=>x.id===initialRoute.releaseId)??[...(project?.releases??[])].reverse().find(x=>!x.isReleased)??project?.releases.at(-1);
       setActiveId((current) => next.some(x=>x.program.id===current)?current:program?.program.id||"");
@@ -219,7 +222,7 @@ function App() {
     }
   }, [project, release]);
   useEffect(() => {
-    if (!user) return;
+    if (!user||user.mustChangePassword) return;
     loadWorkspaces();
   }, [loadWorkspaces, user]);
   useEffect(() => {
@@ -252,6 +255,7 @@ function App() {
   if (user === undefined)
     return <div className="appBoot"><div className="bootMark">▲</div><div><p>AEROLINK CONTROLLED WORKSPACE</p><h1>Establishing your secure session</h1><span>Confirming identity, authority, and active program context…</span><i><b/></i></div></div>;
   if (user === null) return <LoginPage api={API} onLogin={setUser} />;
+  if (user.mustChangePassword) return <RequiredPasswordChange api={API} onComplete={()=>setUser(null)} />;
   if (connected && !workspaces.length)
     return (
       <div className="onboarding">

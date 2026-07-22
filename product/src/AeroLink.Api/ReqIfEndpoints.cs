@@ -17,6 +17,8 @@ public static class ReqIfEndpoints
         app.MapGet("/api/reqif/jobs/{id:guid}", JobAsync);
         app.MapGet("/api/reqif/jobs/{id:guid}/download", DownloadAsync);
         app.MapPost("/api/reqif/jobs/{id:guid}/commit", CommitAsync);
+        app.MapPost("/api/reqif/jobs/{id:guid}/process", ProcessAsync);
+        app.MapPost("/api/reqif/jobs/{id:guid}/cancel", CancelAsync);
         app.MapPost("/api/reqif/jobs/{id:guid}/reject", RejectAsync);
         return app;
     }
@@ -78,8 +80,15 @@ public static class ReqIfEndpoints
     private static async Task<IResult> RejectAsync(Guid id,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
     {var job=await db.ReqIfExchangeJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();try{job.Reject(DateTimeOffset.UtcNow);db.SecurityAuditEvents.Add(new("ReqIfExchangeRejected",http.UserAccount().UserName,$"reqif:{job.Id}","Success","Operator rejected the staged exchange; no controlled artifact was mutated.",http.Connection.RemoteIpAddress?.ToString()??"local",DateTimeOffset.UtcNow));await db.SaveChangesAsync(ct);return Results.Ok(new{job.Id,state=job.State.ToString()});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}}
 
-    private static object Map(ReqIfExchangeJob x)=>new{x.Id,direction=x.Direction.ToString(),state=x.State.ToString(),x.FileName,x.Sha256,x.RequirementCount,x.HierarchyCount,x.RelationCount,x.AttachmentCount,x.WarningCount,x.ErrorCount,x.CreatedBy,x.CreatedAt,x.CompletedAt,x.CreatedScrId,downloadUrl=$"/api/reqif/jobs/{x.Id}/download"};
+    private static async Task<IResult> ProcessAsync(Guid id,ProcessReqIfJobRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
+    {var job=await db.ReqIfExchangeJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();if(job.Direction!=ReqIfExchangeDirection.Import)return Results.BadRequest(new{error="Only imports require checkpointed validation."});try{if(job.State!=ReqIfExchangeState.Processing)job.BeginOrResume(DateTimeOffset.UtcNow);var manifest=ReqIfExchangeService.ReadManifest(job);var size=Math.Clamp(request.BatchSize??100,1,1000);var next=Math.Min(manifest.Items.Count,job.ProcessedCount+size);var batch=manifest.Items.Skip(job.ProcessedCount).Take(size).Select(x=>x.ExternalId).ToList();var checkpoint=JsonSerializer.Serialize(new{processed=next,total=manifest.Items.Count,lastExternalId=batch.LastOrDefault(),packageHash=job.Sha256});job.Checkpoint(next,checkpoint,DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.Ok(new{job=Map(job),complete=job.State==ReqIfExchangeState.Ready,remaining=Math.Max(0,manifest.Items.Count-next)});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}}
+
+    private static async Task<IResult> CancelAsync(Guid id,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
+    {var job=await db.ReqIfExchangeJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();try{job.Cancel(DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.Ok(new{job=Map(job)});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}}
+
+    private static object Map(ReqIfExchangeJob x)=>new{x.Id,direction=x.Direction.ToString(),state=x.State.ToString(),x.FileName,x.Sha256,x.RequirementCount,x.HierarchyCount,x.RelationCount,x.AttachmentCount,x.WarningCount,x.ErrorCount,x.ProcessedCount,x.CheckpointJson,x.Attempt,x.LastError,x.CreatedBy,x.CreatedAt,x.CompletedAt,x.CreatedScrId,downloadUrl=$"/api/reqif/jobs/{x.Id}/download"};
 }
 
 public sealed record ReqIfExportRequest(Guid ProjectId);
 public sealed record CommitReqIfImportRequest(Guid TargetReleaseId,string Title,string Problem,string Analysis,string Solution,ChangeRequestType Type);
+public sealed record ProcessReqIfJobRequest(int? BatchSize);

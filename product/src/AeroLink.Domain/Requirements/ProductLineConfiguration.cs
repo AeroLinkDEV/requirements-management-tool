@@ -5,6 +5,7 @@ namespace AeroLink.Domain.Requirements;
 public enum ProductLineComponentState { Draft, Approved, Retired }
 public enum ComponentStreamState { Active, Closed }
 public enum ProductVariantState { Draft, Approved, Retired }
+public enum PropagationDecisionKind { Accept, Defer, Diverge }
 
 /// <summary>Reusable, controlled engineering content with independent release streams.</summary>
 public sealed class ProductLineComponent
@@ -88,4 +89,24 @@ public sealed class VariantComponentSelection
     public string ApplicabilityJson { get; private set; }="{}";
     public string SelectedBy { get; private set; }="";
     public DateTimeOffset SelectedAt { get; private set; }
+}
+
+/// <summary>An immutable, reproducible configuration snapshot for one approved product variant.</summary>
+public sealed class ProductVariantBaseline
+{
+    private ProductVariantBaseline() { }
+    public ProductVariantBaseline(Guid variantId,int revision,string manifestJson,string manifestHash,string actor,DateTimeOffset now)
+    {if(revision<1)throw new DomainException("Variant baseline revisions begin at one.");Id=Guid.NewGuid();VariantId=variantId;Revision=revision;ManifestJson=Required(manifestJson,"A variant manifest is required.");ManifestHash=Required(manifestHash,"A variant manifest hash is required.").ToLowerInvariant();CreatedBy=Required(actor,"An actor is required.");CreatedAt=now;}
+    public Guid Id {get;private set;} public Guid VariantId {get;private set;} public int Revision {get;private set;} public string ManifestJson {get;private set;}="{}"; public string ManifestHash {get;private set;}=""; public string CreatedBy {get;private set;}=""; public DateTimeOffset CreatedAt {get;private set;}
+    private static string Required(string? value,string error)=>string.IsNullOrWhiteSpace(value)?throw new DomainException(error):value.Trim();
+}
+
+/// <summary>An attributable decision describing how a reusable component revision affects a variant.</summary>
+public sealed class ComponentPropagationDecision
+{
+    private ComponentPropagationDecision() { }
+    public ComponentPropagationDecision(Guid variantId,Guid componentRevisionId,PropagationDecisionKind decision,string rationale,string actor,DateTimeOffset now)
+    {Id=Guid.NewGuid();VariantId=variantId;ComponentRevisionId=componentRevisionId;Decision=decision;Rationale=Required(rationale,"A propagation rationale is required.");DecidedBy=Required(actor,"An actor is required.");DecidedAt=now;}
+    public Guid Id {get;private set;} public Guid VariantId {get;private set;} public Guid ComponentRevisionId {get;private set;} public PropagationDecisionKind Decision {get;private set;} public string Rationale {get;private set;}=""; public string DecidedBy {get;private set;}=""; public DateTimeOffset DecidedAt {get;private set;}
+    private static string Required(string? value,string error)=>string.IsNullOrWhiteSpace(value)?throw new DomainException(error):value.Trim();
 }
