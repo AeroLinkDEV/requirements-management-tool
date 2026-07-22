@@ -746,6 +746,10 @@ app.MapGet("/api/documents/{id:guid}/download", async (Guid id, string? format, 
     if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
     var output = await generator.GenerateAsync(id, format ?? "docx", ct); return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
 });
+app.MapGet("/api/documents/{id:guid}/manifest",async(Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    var document=await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(document is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,document.ProjectId,ct))return Results.Forbid();var baseline=await db.CandidateBaselines.AsNoTracking().SingleAsync(x=>x.Id==document.BaselineId,ct);var release=await db.Releases.AsNoTracking().SingleAsync(x=>x.Id==document.ReleaseId,ct);var approvals=await(from approval in db.ReleaseApprovals.AsNoTracking() join campaign in db.ReleaseCampaigns.AsNoTracking() on approval.CampaignId equals campaign.Id where campaign.ProjectId==document.ProjectId select new{approval.ApproverId,approval.ApproverName,state=approval.State.ToString(),approval.ApprovedAt}).OrderByDescending(x=>x.ApprovedAt).Take(100).ToListAsync(ct);return Results.Ok(new{format="AeroLink controlled-publication-manifest/v1",document=new{document.Id,document.DocumentNumber,document.Revision,document.Title,type=document.Type.ToString(),document.ContentHash,document.ArtifactCount,document.GeneratedAt},source=new{baseline=baseline.DisplayNumber,baseline.ContentHash,baseline.RequirementsHash,release=release.Version},approvalEvidence=approvals,reproducibility=new{renderer="AeroLink professional publication renderer",contentHash=document.ContentHash,deterministic=true}});
+});
 
 app.MapGet("/api/traceability/{baselineId:guid}/download", async (Guid baselineId,string? format,HttpContext http,AeroLinkDbContext db,ControlledOutputGenerator generator,CancellationToken ct) =>
 {
