@@ -66,6 +66,23 @@ public sealed class UserSession
     public void Revoke(DateTimeOffset now) => RevokedAt = now;
 }
 
+public sealed class UserMfaEnrollment
+{
+    private UserMfaEnrollment() { }
+    public UserMfaEnrollment(Guid userId,string secret,string actor,DateTimeOffset now)
+    {Id=Guid.NewGuid();UserId=userId;Secret=secret;CreatedBy=actor;CreatedAt=now;}
+    public Guid Id {get;private set;} public Guid UserId {get;private set;} public string Secret {get;private set;}=""; public bool Confirmed {get;private set;} public string CreatedBy {get;private set;}=""; public DateTimeOffset CreatedAt {get;private set;} public DateTimeOffset? ConfirmedAt {get;private set;}
+    public void Confirm(DateTimeOffset now){Confirmed=true;ConfirmedAt=now;}
+}
+
+public sealed class MfaRecoveryCode
+{
+    private MfaRecoveryCode() { }
+    public MfaRecoveryCode(Guid userId,string codeHash,DateTimeOffset now){Id=Guid.NewGuid();UserId=userId;CodeHash=codeHash;CreatedAt=now;}
+    public Guid Id {get;private set;} public Guid UserId {get;private set;} public string CodeHash {get;private set;}=""; public DateTimeOffset CreatedAt {get;private set;} public DateTimeOffset? UsedAt {get;private set;}
+    public void Use(DateTimeOffset now){if(UsedAt is not null)throw new InvalidOperationException("Recovery code has already been used.");UsedAt=now;}
+}
+
 public sealed class RoleDelegation
 {
     private RoleDelegation() { }
