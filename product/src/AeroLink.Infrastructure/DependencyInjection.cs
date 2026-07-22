@@ -31,6 +31,8 @@ public static class DependencyInjection
         services.AddScoped<IntegrationEventPublisher>();
         services.AddScoped<ReleaseReadinessService>();
         services.AddScoped<ControlledOutputGenerator>();
+        services.AddScoped<VariantConfigurationProjectionService>();
+        services.AddScoped<VariantPublicationGenerator>();
         services.AddScoped<ChangeRequestOutputGenerator>();
         services.AddScoped<ReleaseExecutionService>();
         services.AddScoped<IdentityService>();

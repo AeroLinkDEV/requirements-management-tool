@@ -1,11 +1,13 @@
 using System.IO.Compression;
 using System.Security;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Persistence;
 
 public sealed record PublicationApproval(string Role, string Name, string UserId, string State, DateTimeOffset? DecidedAt);
-public sealed record PublicationRecord(string Number, string Classification, string Title, string Body, IReadOnlyList<(string Label, string Value)> Details);
+public sealed record PublicationRecord(string Number, string Classification, string Title, string Body, IReadOnlyList<(string Label, string Value)> Details,string RichContentJson="");
 public sealed record PublicationSection(string Heading, string Introduction, IReadOnlyList<PublicationRecord> Records);
 public sealed record ProfessionalPublication(string Product, string Program, string Project, string DocumentType, string Title, string Subtitle,
     string DocumentNumber, string Revision, string Status, string Release, string Baseline, string PreparedBy, DateTimeOffset GeneratedAt,
@@ -20,11 +22,13 @@ public static class ProfessionalPublicationRenderer
 
     private static byte[] BuildDocx(ProfessionalPublication publication)
     {
+        var images=Images(publication);
         using var output = new MemoryStream(); using (var zip = new ZipArchive(output, ZipArchiveMode.Create, true))
         {
-            Entry(zip, "[Content_Types].xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/word/header1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\"/><Override PartName=\"/word/footer1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/></Types>");
+            Entry(zip, "[Content_Types].xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"jpg\" ContentType=\"image/jpeg\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/word/header1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\"/><Override PartName=\"/word/footer1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/></Types>");
             Entry(zip, "_rels/.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>");
-            Entry(zip, "word/_rels/document.xml.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/header\" Target=\"header1.xml\"/><Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer1.xml\"/></Relationships>");
+            Entry(zip, "word/_rels/document.xml.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/header\" Target=\"header1.xml\"/><Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer1.xml\"/>"+string.Join("",images.Select(x=>$"<Relationship Id=\"rId{x.Index+3}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image{x.Index}.jpg\"/>"))+"</Relationships>");
+            foreach(var image in images)BinaryEntry(zip,$"word/media/image{image.Index}.jpg",image.Bytes);
             Entry(zip, "word/styles.xml", Styles()); Entry(zip, "word/header1.xml", Header(publication)); Entry(zip, "word/footer1.xml", Footer(publication));
             var body = new StringBuilder();
             body.Append(P("CONTROLLED LIFECYCLE PUBLICATION", "CoverKicker")).Append(P(publication.Title, "CoverTitle")).Append(P(publication.Subtitle, "CoverSubtitle"));
@@ -55,11 +59,11 @@ public static class ProfessionalPublicationRenderer
                 foreach (var record in section.Records)
                 {
                     body.Append(P(record.Number + "  |  " + record.Classification, "Heading2", true)); if (!string.IsNullOrWhiteSpace(record.Title)) body.Append(P(record.Title, "RecordTitle", true));
-                    body.Append(P(record.Body, "Normal", record.Details.Count > 0)); foreach (var detail in record.Details) body.Append(P(detail.Label + ": " + detail.Value, "RecordMeta"));
+                    body.Append(P(record.Body, "Normal", record.Details.Count > 0));body.Append(RichDocx(record,images)); foreach (var detail in record.Details) body.Append(P(detail.Label + ": " + detail.Value, "RecordMeta"));
                 }
             }
             body.Append("<w:sectPr><w:headerReference w:type=\"default\" r:id=\"rId2\"/><w:footerReference w:type=\"default\" r:id=\"rId3\"/><w:pgSz w:w=\"12240\" w:h=\"15840\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"708\" w:footer=\"708\"/></w:sectPr>");
-            Entry(zip, "word/document.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><w:body>" + body + "</w:body></w:document>");
+            Entry(zip, "word/document.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><w:body>" + body + "</w:body></w:document>");
         }
         return output.ToArray();
     }
@@ -78,11 +82,28 @@ public static class ProfessionalPublicationRenderer
     private static string Header(ProfessionalPublication p) => $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"168578\"/></w:pBdr></w:pPr><w:r><w:rPr><w:b/><w:color w:val=\"102A43\"/><w:sz w:val=\"18\"/></w:rPr><w:t>{SecurityElement.Escape(p.Product)}  |  {SecurityElement.Escape(p.DocumentType.ToUpperInvariant())}</w:t></w:r></w:p></w:hdr>";
     private static string Footer(ProfessionalPublication p) => $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:ftr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:color w:val=\"718096\"/><w:sz w:val=\"14\"/></w:rPr><w:t>{SecurityElement.Escape(p.DocumentNumber)} Rev {SecurityElement.Escape(p.Revision)} | {SecurityElement.Escape(p.Status)} | Manifest {p.ManifestHash[..Math.Min(12, p.ManifestHash.Length)]} | Page </w:t></w:r><w:fldSimple w:instr=\"PAGE\"><w:r><w:t>1</w:t></w:r></w:fldSimple></w:p></w:ftr>";
     private static string ApprovalDecision(PublicationApproval approval) => approval.State + (approval.DecidedAt is null ? "" : " - " + approval.DecidedAt.Value.UtcDateTime.ToString("yyyy-MM-dd"));
-    private static void Entry(ZipArchive zip, string name, string content) { var entry = zip.CreateEntry(name, CompressionLevel.Optimal); using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)); writer.Write(content); }
+    private static readonly DateTimeOffset DeterministicArchiveTime=new(2000,1,1,0,0,0,TimeSpan.Zero);
+    private static void Entry(ZipArchive zip, string name, string content) { var entry = zip.CreateEntry(name, CompressionLevel.Optimal);entry.LastWriteTime=DeterministicArchiveTime; using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)); writer.Write(content); }
+    private static void BinaryEntry(ZipArchive zip,string name,byte[] content){var entry=zip.CreateEntry(name,CompressionLevel.Optimal);entry.LastWriteTime=DeterministicArchiveTime;using var stream=entry.Open();stream.Write(content);}
+
+    private sealed record PublicationImage(int Index,string Key,byte[] Bytes,string Alt,string Caption,int Width,int Height);
+    private static List<PublicationImage> Images(ProfessionalPublication publication)
+    {var result=new List<PublicationImage>();foreach(var record in publication.Sections.SelectMany(x=>x.Records))foreach(var block in Blocks(record)){if(BlockType(block)!="image"||!block.TryGetProperty("dataUri",out var data)||data.ValueKind!=JsonValueKind.String)continue;var uri=data.GetString()??"";const string prefix="data:image/jpeg;base64,";if(!uri.StartsWith(prefix,StringComparison.OrdinalIgnoreCase))continue;try{var bytes=Convert.FromBase64String(uri[prefix.Length..]);var key=Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();if(result.Any(x=>x.Key==key))continue;var size=JpegSize(bytes);result.Add(new(result.Count+1,key,bytes,Text(block,"alt","Controlled inline image"),Text(block,"caption",""),size.Width,size.Height));}catch(FormatException){/* Invalid controlled image data is represented by its authored alt text. */}}return result;}
+    private static IEnumerable<JsonElement> Blocks(PublicationRecord record)
+    {if(string.IsNullOrWhiteSpace(record.RichContentJson))yield break;JsonDocument? document=null;try{document=JsonDocument.Parse(record.RichContentJson);var root=document.RootElement;if(root.TryGetProperty("blocks",out var blocks)&&blocks.ValueKind==JsonValueKind.Array)foreach(var block in blocks.EnumerateArray())yield return block.Clone();}finally{document?.Dispose();}}
+    private static string BlockType(JsonElement block)=>Text(block,"type","").ToLowerInvariant();
+    private static string Text(JsonElement block,string name,string fallback)=>block.TryGetProperty(name,out var value)&&value.ValueKind==JsonValueKind.String?value.GetString()??fallback:fallback;
+    private static string RichDocx(PublicationRecord record,IReadOnlyList<PublicationImage> images)
+    {var body=new StringBuilder();foreach(var block in Blocks(record)){switch(BlockType(block)){case "paragraph":body.Append(P(Text(block,"text",""),"Normal"));break;case "symbol":body.Append(P("Controlled symbol: "+Text(block,"value",""),"Callout"));break;case "reference":body.Append(P("Reference: "+Text(block,"label","")+" — "+Text(block,"target",""),"RecordMeta"));break;case "table":if(block.TryGetProperty("rows",out var rows)&&rows.ValueKind==JsonValueKind.Array){var values=rows.EnumerateArray().Where(x=>x.ValueKind==JsonValueKind.Array).Select(x=>(IReadOnlyList<string>)x.EnumerateArray().Select(v=>v.ToString()).ToList()).ToList();if(values.Count>0){var count=values.Max(x=>x.Count);var widths=Enumerable.Repeat(9360/Math.Max(1,count),count).ToList();body.Append(Table(values[0],values.Skip(1).ToList(),widths,false));}}break;case "image":if(block.TryGetProperty("dataUri",out var data)){var uri=data.GetString()??"";var comma=uri.IndexOf(',');if(comma>0){try{var key=Convert.ToHexString(SHA256.HashData(Convert.FromBase64String(uri[(comma+1)..]))).ToLowerInvariant();var image=images.FirstOrDefault(x=>x.Key==key);if(image is not null)body.Append(ImageDrawing(image));}catch(FormatException){body.Append(P(Text(block,"alt","Invalid controlled image"),"Callout"));}}}break;}}return body.ToString();}
+    private static string ImageDrawing(PublicationImage image)
+    {var cx=5_400_000L;var cy=Math.Clamp((long)(cx*Math.Max(1,image.Height)/(double)Math.Max(1,image.Width)),1_800_000L,4_000_000L);var alt=SecurityElement.Escape(image.Alt);return $"<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{100+image.Index}\" name=\"ControlledImage{image.Index}\" descr=\"{alt}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"{image.Index}\" name=\"image{image.Index}.jpg\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rId{image.Index+3}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"+P(image.Caption.Length>0?image.Caption:image.Alt,"RecordMeta");}
+    private static (int Width,int Height) JpegSize(byte[] bytes)
+    {for(var i=2;i+9<bytes.Length;){if(bytes[i]!=0xFF){i++;continue;}var marker=bytes[i+1];if(marker is >=0xC0 and <=0xC3 or >=0xC5 and <=0xC7 or >=0xC9 and <=0xCB or >=0xCD and <=0xCF)return((bytes[i+7]<<8)+bytes[i+8],(bytes[i+5]<<8)+bytes[i+6]);if(i+3>=bytes.Length)break;var length=(bytes[i+2]<<8)+bytes[i+3];if(length<2)break;i+=2+length;}return(640,360);}
 
     private sealed record PdfLine(string Text, int Size, bool Bold, string Color = "25364D", int Indent = 0, int After = 4);
     private static byte[] BuildPdf(ProfessionalPublication p)
     {
+        var images = Images(p);
         var pageStreams = new List<string> { PdfCover(p) };
         var control = new List<PdfLine> { new("DOCUMENT CONTROL", 18, true, "2E74B5", 0, 10) };
         var metadata = new List<(string Label, string Value)> { ("Document type",p.DocumentType),("Document number",p.DocumentNumber),("Revision",p.Revision),("Status",p.Status),("Release",p.Release),("Baseline",p.Baseline),("Prepared by",p.PreparedBy),("Generated",p.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm UTC")),("Manifest SHA-256",p.ManifestHash) }; metadata.AddRange(p.Metadata);
@@ -95,7 +116,8 @@ public static class ProfessionalPublicationRenderer
         {
             pageStreams.AddRange(PaginateSection(section, p));
         }
-        return AssemblePdf(pageStreams, p);
+        pageStreams.AddRange(images.Select(image => PdfImagePage(image, p)));
+        return AssemblePdf(pageStreams, images);
     }
     private static string PdfCover(ProfessionalPublication p)
     {
@@ -121,7 +143,9 @@ public static class ProfessionalPublicationRenderer
         foreach (var record in section.Records)
         {
             var block = new List<PdfLine> { new(record.Number + " | " + record.Classification, 11, true, "2E74B5", 0, 3) }; if (!string.IsNullOrWhiteSpace(record.Title)) block.AddRange(Wrap(record.Title, 92).Select(x => new PdfLine(x, 9, true, "25364D", 0, 3)));
-            block.AddRange(Wrap(record.Body, 105).Select(x => new PdfLine(x, 8, false, "25364D", 0, 2))); foreach (var detail in record.Details) block.AddRange(Wrap(detail.Label + ": " + detail.Value, 110).Select(x => new PdfLine(x, 7, false, "718096", 0, 2))); block.Add(new("", 5, false, "25364D", 0, 4)); var height = block.Sum(LineHeight);
+            block.AddRange(Wrap(record.Body, 105).Select(x => new PdfLine(x, 8, false, "25364D", 0, 2)));
+            foreach (var rich in RichPdfLines(record)) block.Add(rich);
+            foreach (var detail in record.Details) block.AddRange(Wrap(detail.Label + ": " + detail.Value, 110).Select(x => new PdfLine(x, 7, false, "718096", 0, 2))); block.Add(new("", 5, false, "25364D", 0, 4)); var height = block.Sum(LineHeight);
             if (used + height > max && current.Count > 0) { pages.Add(PdfContentPage(current, p, false)); current = [new(section.Heading.ToUpperInvariant() + " - CONTINUED", 10, true, "718096", 0, 8)]; used = current.Sum(LineHeight); }
             current.AddRange(block); used += height;
         }
@@ -136,11 +160,33 @@ public static class ProfessionalPublicationRenderer
     }
     private static void Text(StringBuilder s, string value, int x, int y, int size, bool bold, string color) { var (r,g,b)=Rgb(color); s.Append($"{r:0.###} {g:0.###} {b:0.###} rg /{(bold ? "F2" : "F1")} {size} Tf 1 0 0 1 {x} {y} Tm ({PdfEscape(value)}) Tj\n"); }
     private static (double,double,double) Rgb(string hex) => (Convert.ToInt32(hex[..2],16)/255d,Convert.ToInt32(hex.Substring(2,2),16)/255d,Convert.ToInt32(hex.Substring(4,2),16)/255d);
-    private static byte[] AssemblePdf(IReadOnlyList<string> streams, ProfessionalPublication p)
+    private static IEnumerable<PdfLine> RichPdfLines(PublicationRecord record)
     {
-        var objects = new List<string> { "<< /Type /Catalog /Pages 2 0 R >>" }; var pageNumbers = Enumerable.Range(0, streams.Count).Select(i => 5 + i * 2).ToList(); objects.Add($"<< /Type /Pages /Kids [{string.Join(" ", pageNumbers.Select(x => x + " 0 R"))}] /Count {streams.Count} >>"); objects.Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"); objects.Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
-        for (var i=0;i<streams.Count;i++) { var stream = streams[i] + $"\nBT /F1 7 Tf 0.443 0.502 0.565 rg 1 0 0 1 500 28 Tm (Page {i+1} of {streams.Count}) Tj ET"; objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {6+i*2} 0 R >>"); objects.Add($"<< /Length {Encoding.ASCII.GetByteCount(stream)} >>\nstream\n{stream}\nendstream"); }
-        using var output = new MemoryStream(); using var writer = new StreamWriter(output, Encoding.ASCII, 1024, true) { NewLine = "\n" }; writer.Write("%PDF-1.4\n"); writer.Flush(); var offsets = new List<long>{0}; for(var i=0;i<objects.Count;i++){offsets.Add(output.Position);writer.Write($"{i+1} 0 obj\n{objects[i]}\nendobj\n");writer.Flush();}var xref=output.Position;writer.Write($"xref\n0 {objects.Count+1}\n0000000000 65535 f \n");foreach(var offset in offsets.Skip(1))writer.Write($"{offset:D10} 00000 n \n");writer.Write($"trailer\n<< /Size {objects.Count+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF");writer.Flush();return output.ToArray();
+        foreach (var block in Blocks(record)) switch (BlockType(block))
+        {
+            case "paragraph": foreach(var line in Wrap(Text(block,"text",""),105)) yield return new(line,8,false); break;
+            case "symbol": yield return new("Controlled symbol: "+Text(block,"value",""),9,true,"168578",12,3); break;
+            case "reference": yield return new("Reference: "+Text(block,"label","")+" -> "+Text(block,"target",""),8,false,"526274",12,3); break;
+            case "image": yield return new("Inline controlled image: "+Text(block,"caption",Text(block,"alt","image")),8,true,"168578",12,3); break;
+            case "table" when block.TryGetProperty("rows",out var rows)&&rows.ValueKind==JsonValueKind.Array:
+                foreach(var row in rows.EnumerateArray().Where(x=>x.ValueKind==JsonValueKind.Array)) yield return new(string.Join(" | ",row.EnumerateArray().Select(x=>x.ToString())),8,false,"25364D",12,2);
+                break;
+        }
+    }
+    private static string PdfImagePage(PublicationImage image,ProfessionalPublication p)
+    {
+        var width=480d;var height=Math.Clamp(width*Math.Max(1,image.Height)/Math.Max(1d,image.Width),180d,540d);var y=680-height;
+        var s=new StringBuilder("0.086 0.522 0.471 RG 1.3 w 54 760 m 558 760 l S\nBT\n");Text(s,p.Product+" | CONTROLLED INLINE IMAGE",54,772,8,true,"102A43");Text(s,image.Caption.Length>0?image.Caption:image.Alt,66,730,13,true,"2E74B5");s.Append("ET\n").Append($"q {width:0.###} 0 0 {height:0.###} 66 {y:0.###} cm /Im{image.Index} Do Q\nBT\n");Text(s,image.Alt,66,(int)Math.Max(52,y-22),8,false,"526274");return s.Append("ET").ToString();
+    }
+    private static byte[] AssemblePdf(IReadOnlyList<string> streams,IReadOnlyList<PublicationImage> images)
+    {
+        static byte[] A(string value)=>Encoding.ASCII.GetBytes(value);
+        var imageStart=5;var pageStart=imageStart+images.Count;var pageNumbers=Enumerable.Range(0,streams.Count).Select(i=>pageStart+i*2).ToList();
+        var objects=new List<byte[]>{A("<< /Type /Catalog /Pages 2 0 R >>"),A($"<< /Type /Pages /Kids [{string.Join(" ",pageNumbers.Select(x=>x+" 0 R"))}] /Count {streams.Count} >>"),A("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),A("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>")};
+        foreach(var image in images){using var item=new MemoryStream();var head=A($"<< /Type /XObject /Subtype /Image /Width {image.Width} /Height {image.Height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {image.Bytes.Length} >>\nstream\n");item.Write(head);item.Write(image.Bytes);item.Write(A("\nendstream"));objects.Add(item.ToArray());}
+        var xobjects=images.Count==0?"":$" /XObject << {string.Join(" ",images.Select(x=>$"/Im{x.Index} {imageStart+x.Index-1} 0 R"))} >>";
+        for(var i=0;i<streams.Count;i++){var stream=streams[i]+$"\nBT /F1 7 Tf 0.443 0.502 0.565 rg 1 0 0 1 500 28 Tm (Page {i+1} of {streams.Count}) Tj ET";var contentNumber=pageNumbers[i]+1;objects.Add(A($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>{xobjects} >> /Contents {contentNumber} 0 R >>"));objects.Add(A($"<< /Length {Encoding.ASCII.GetByteCount(stream)} >>\nstream\n{stream}\nendstream"));}
+        using var output=new MemoryStream();output.Write(A("%PDF-1.4\n%----\n"));var offsets=new List<long>{0};for(var i=0;i<objects.Count;i++){offsets.Add(output.Position);output.Write(A($"{i+1} 0 obj\n"));output.Write(objects[i]);output.Write(A("\nendobj\n"));}var xref=output.Position;output.Write(A($"xref\n0 {objects.Count+1}\n0000000000 65535 f \n"));foreach(var offset in offsets.Skip(1))output.Write(A($"{offset:D10} 00000 n \n"));output.Write(A($"trailer\n<< /Size {objects.Count+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF"));return output.ToArray();
     }
     private static IEnumerable<string> Wrap(string text, int width) { text = text ?? ""; if (text.Length == 0) { yield return ""; yield break; } for(var start=0;start<text.Length;){var length=Math.Min(width,text.Length-start);if(start+length<text.Length){var split=text.LastIndexOf(' ',start+length-1,length);if(split>start)length=split-start;}yield return text.Substring(start,length).Trim();start+=length;while(start<text.Length&&text[start]==' ')start++;} }
     private static string PdfEscape(string value) => new(value.Select(c => c is '(' or ')' or '\\' ? ' ' : c > 126 ? '-' : c).ToArray());
