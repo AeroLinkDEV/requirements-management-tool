@@ -145,8 +145,8 @@ app.MapPost("/api/setup/bootstrap", async (BootstrapAdministratorRequest request
 
 app.MapPost("/api/auth/login", async (LoginRequest request, HttpContext http, IdentityService identity, CancellationToken ct) =>
 {
-    var result = await identity.LoginAsync(request.UserName, request.Password, http.Connection.RemoteIpAddress?.ToString() ?? "local", http.Request.Headers.UserAgent.ToString(), DateTimeOffset.UtcNow, ct);
-    if (result is null) return Results.Json(new { error = "The username or password is incorrect." }, statusCode: 401);
+    var result = await identity.LoginAsync(request.UserName, request.Password, http.Connection.RemoteIpAddress?.ToString() ?? "local", http.Request.Headers.UserAgent.ToString(), DateTimeOffset.UtcNow,request.MfaCode, ct);
+    if (result is null) return Results.Json(new { error = "The credentials or second-factor code were not accepted." }, statusCode: 401);
     var secureCookie = builder.Configuration.GetValue<bool?>("Identity:CookieSecure") ?? !app.Environment.IsDevelopment();
     http.Response.Cookies.Append(IdentityService.CookieName, result.Token, new CookieOptions { HttpOnly = true, Secure = secureCookie, SameSite = SameSiteMode.Lax, Expires = result.ExpiresAt, Path = "/" });
     return Results.Ok(result.User);
@@ -1620,7 +1620,7 @@ public sealed class AeroLinkAuthorizationHandler(IOptionsMonitor<AuthenticationS
     protected override Task HandleForbiddenAsync(AuthenticationProperties properties) { Response.StatusCode = StatusCodes.Status403Forbidden; return Task.CompletedTask; }
 }
 
-record LoginRequest(string UserName, string Password);
+record LoginRequest(string UserName, string Password,string? MfaCode=null);
 record ChangeOwnPasswordRequest(string CurrentPassword,string NewPassword);
 record ConfirmMfaRequest(string Code);
 record ResetPasswordRequest(string TemporaryPassword,string Reason);
