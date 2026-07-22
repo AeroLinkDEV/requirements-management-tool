@@ -45,6 +45,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<UserAccount> UserAccounts => Set<UserAccount>();
     public DbSet<ProgramMembership> ProgramMemberships => Set<ProgramMembership>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
+    public DbSet<UserMfaEnrollment> UserMfaEnrollments => Set<UserMfaEnrollment>();
+    public DbSet<MfaRecoveryCode> MfaRecoveryCodes => Set<MfaRecoveryCode>();
     public DbSet<RoleDelegation> RoleDelegations => Set<RoleDelegation>();
     public DbSet<ElectronicSignature> ElectronicSignatures => Set<ElectronicSignature>();
     public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
@@ -359,6 +361,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("program_memberships"); b.HasKey(x => x.Id); b.Property(x => x.Role).HasConversion<string>().HasMaxLength(40); b.Property(x => x.GrantedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x => new { x.UserId, x.ProgramId, x.Role }).IsUnique();
             b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict); b.HasOne<ProgramRecord>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<UserMfaEnrollment>(b=>{b.ToTable("user_mfa_enrollments");b.HasKey(x=>x.Id);b.Property(x=>x.Secret).HasMaxLength(128).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>x.UserId).IsUnique();b.HasOne<UserAccount>().WithMany().HasForeignKey(x=>x.UserId).OnDelete(DeleteBehavior.Cascade);});
+        modelBuilder.Entity<MfaRecoveryCode>(b=>{b.ToTable("mfa_recovery_codes");b.HasKey(x=>x.Id);b.Property(x=>x.CodeHash).HasMaxLength(64).IsRequired();b.HasIndex(x=>new{x.UserId,x.CodeHash}).IsUnique();b.HasOne<UserAccount>().WithMany().HasForeignKey(x=>x.UserId).OnDelete(DeleteBehavior.Cascade);});
         modelBuilder.Entity<UserSession>(b =>
         {
             b.ToTable("user_sessions"); b.HasKey(x => x.Id); b.Property(x => x.TokenHash).HasMaxLength(64).IsRequired(); b.Property(x => x.IpAddress).HasMaxLength(100); b.Property(x => x.UserAgent).HasMaxLength(500); b.HasIndex(x => x.TokenHash).IsUnique(); b.HasIndex(x => new { x.UserId, x.ExpiresAt });

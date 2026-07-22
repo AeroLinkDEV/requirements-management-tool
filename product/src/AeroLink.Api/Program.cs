@@ -145,13 +145,27 @@ app.MapPost("/api/setup/bootstrap", async (BootstrapAdministratorRequest request
 
 app.MapPost("/api/auth/login", async (LoginRequest request, HttpContext http, IdentityService identity, CancellationToken ct) =>
 {
-    var result = await identity.LoginAsync(request.UserName, request.Password, http.Connection.RemoteIpAddress?.ToString() ?? "local", http.Request.Headers.UserAgent.ToString(), DateTimeOffset.UtcNow, ct);
-    if (result is null) return Results.Json(new { error = "The username or password is incorrect." }, statusCode: 401);
+    var result = await identity.LoginAsync(request.UserName, request.Password, http.Connection.RemoteIpAddress?.ToString() ?? "local", http.Request.Headers.UserAgent.ToString(), DateTimeOffset.UtcNow,request.MfaCode, ct);
+    if (result is null) return Results.Json(new { error = "The credentials or second-factor code were not accepted." }, statusCode: 401);
     var secureCookie = builder.Configuration.GetValue<bool?>("Identity:CookieSecure") ?? !app.Environment.IsDevelopment();
     http.Response.Cookies.Append(IdentityService.CookieName, result.Token, new CookieOptions { HttpOnly = true, Secure = secureCookie, SameSite = SameSiteMode.Lax, Expires = result.ExpiresAt, Path = "/" });
     return Results.Ok(result.User);
 }).RequireRateLimiting("authentication");
 app.MapPost("/api/auth/logout", async (HttpContext http, IdentityService identity, CancellationToken ct) => { await identity.LogoutAsync(http.Request.Cookies[IdentityService.CookieName], http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct); http.Response.Cookies.Delete(IdentityService.CookieName); return Results.NoContent(); });
+app.MapGet("/api/auth/sessions", async (HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
+{
+    var actor=http.UserAccount();return Results.Ok(await db.UserSessions.AsNoTracking().Where(x=>x.UserId==actor.Id).OrderByDescending(x=>x.LastSeenAt).Select(x=>new{x.Id,x.IpAddress,x.UserAgent,x.CreatedAt,x.LastSeenAt,x.ExpiresAt,x.RevokedAt}).ToListAsync(ct));
+});
+app.MapPost("/api/auth/sessions/revoke-others", async (HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
+{
+    var actor=http.UserAccount();var currentHash=IdentityService.TokenDigest(http.Request.Cookies[IdentityService.CookieName]);var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==actor.Id&&x.RevokedAt==null&&x.TokenHash!=currentHash).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("SessionsRevoked",actor.UserName,"session","Success",$"Revoked {sessions.Count} other active session(s).",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.Ok(new{revoked=sessions.Count});
+});
+app.MapPost("/api/auth/password", async (ChangeOwnPasswordRequest request,HttpContext http,IdentityService identity,AeroLinkDbContext db,CancellationToken ct) =>
+{
+    var actor=http.UserAccount();if(!await identity.ConfirmPasswordAsync(actor.Id,request.CurrentPassword,ct))return Results.Json(new{error="Current password confirmation failed."},statusCode:401);try{var user=await db.UserAccounts.SingleAsync(x=>x.Id==actor.Id,ct);user.ChangePassword(IdentityService.HashPassword(request.NewPassword));var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==actor.Id&&x.RevokedAt==null).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("PasswordChanged",actor.UserName,user.UserName,"Success","Password changed and all sessions revoked.",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);http.Response.Cookies.Delete(IdentityService.CookieName);return Results.NoContent();}catch(ArgumentException ex){return Results.BadRequest(new{error=ex.Message});}
+});
+app.MapPost("/api/auth/mfa/enroll",async(HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>{var actor=http.UserAccount();var prior=await db.UserMfaEnrollments.SingleOrDefaultAsync(x=>x.UserId==actor.Id,ct);if(prior is not null)db.UserMfaEnrollments.Remove(prior);var enrollment=new UserMfaEnrollment(actor.Id,IdentityService.CreateMfaSecret(),actor.UserName,DateTimeOffset.UtcNow);db.UserMfaEnrollments.Add(enrollment);await db.SaveChangesAsync(ct);return Results.Ok(new{enrollment.Id,secret=enrollment.Secret,otpauthUri=$"otpauth://totp/AeroLink:{Uri.EscapeDataString(actor.UserName)}?secret={enrollment.Secret}&issuer=AeroLink"});});
+app.MapPost("/api/auth/mfa/confirm",async(ConfirmMfaRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>{var actor=http.UserAccount();var enrollment=await db.UserMfaEnrollments.SingleOrDefaultAsync(x=>x.UserId==actor.Id,ct);if(enrollment is null)return Results.NotFound();if(!IdentityService.VerifyTotp(enrollment.Secret,request.Code,DateTimeOffset.UtcNow))return Results.BadRequest(new{error="The authenticator code is not valid."});enrollment.Confirm(DateTimeOffset.UtcNow);var codes=Enumerable.Range(0,10).Select(_=>IdentityService.NewRecoveryCode()).ToList();db.MfaRecoveryCodes.RemoveRange(db.MfaRecoveryCodes.Where(x=>x.UserId==actor.Id));db.MfaRecoveryCodes.AddRange(codes.Select(code=>new MfaRecoveryCode(actor.Id,IdentityService.RecoveryHash(code),DateTimeOffset.UtcNow)));db.SecurityAuditEvents.Add(new("MfaEnabled",actor.UserName,"mfa","Success","Authenticator enrollment confirmed and recovery codes generated.",http.Connection.RemoteIpAddress?.ToString()??"local",DateTimeOffset.UtcNow));await db.SaveChangesAsync(ct);return Results.Ok(new{recoveryCodes=codes});});
 app.MapGet("/api/auth/me", (HttpContext http) => Results.Ok(http.UserAccount()));
 app.MapGet("/api/auth/csrf", (HttpContext http,BrowserMutationProtector protector) =>
 {
@@ -1189,6 +1203,10 @@ app.MapPost("/api/admin/users/{id:guid}/state", async (Guid id, SetAccountStateR
     }
     db.SecurityAuditEvents.Add(new(request.Enabled ? "AccountEnabled" : "AccountDisabled", actor.UserName, user.UserName, "Success", $"Account state set to {(request.Enabled ? "Active" : "Disabled")}; revoked {revokedSessions} outstanding session(s).", http.Connection.RemoteIpAddress?.ToString() ?? "local", now)); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.NoContent();
 });
+app.MapPost("/api/admin/users/{id:guid}/reset-password",async(Guid id,ResetPasswordRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();try{var user=await db.UserAccounts.SingleOrDefaultAsync(x=>x.Id==id,ct);if(user is null)return Results.NotFound();user.ChangePassword(IdentityService.HashPassword(request.TemporaryPassword));var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==id&&x.RevokedAt==null).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("AdministratorPasswordReset",actor.UserName,user.UserName,"Success",$"Reset password and revoked {sessions.Count} session(s). Reason: {request.Reason.Trim()}",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.NoContent();}catch(ArgumentException ex){return Results.BadRequest(new{error=ex.Message});}
+});
 app.MapPost("/api/delegations", async (CreateDelegationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
     var actor = http.UserAccount(); if (request.DelegatorUserId != actor.Id && !actor.IsAdministrator) return Results.Forbid(); if (request.DelegatorUserId == request.DelegateUserId) return Results.BadRequest(new { error = "A person cannot delegate a role to themselves." });
@@ -1602,7 +1620,10 @@ public sealed class AeroLinkAuthorizationHandler(IOptionsMonitor<AuthenticationS
     protected override Task HandleForbiddenAsync(AuthenticationProperties properties) { Response.StatusCode = StatusCodes.Status403Forbidden; return Task.CompletedTask; }
 }
 
-record LoginRequest(string UserName, string Password);
+record LoginRequest(string UserName, string Password,string? MfaCode=null);
+record ChangeOwnPasswordRequest(string CurrentPassword,string NewPassword);
+record ConfirmMfaRequest(string Code);
+record ResetPasswordRequest(string TemporaryPassword,string Reason);
 record BootstrapAdministratorRequest(string DisplayName, string Email, string Password);
 record CreateScrRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, ChangeRequestType Type = ChangeRequestType.System);
 record DraftRequirementRequest(string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod,string RichText="",string AttributesJson="{}",string ImpactDispositionJson="{}",bool IsDerived=false);

@@ -25,10 +25,13 @@ public sealed class IdentityService(AeroLinkDbContext db)
         catch { return false; }
     }
     public async Task<LoginResult?> LoginAsync(string userName, string password, string ip, string userAgent, DateTimeOffset now, CancellationToken ct)
+        => await LoginAsync(userName,password,ip,userAgent,now,null,ct);
+    public async Task<LoginResult?> LoginAsync(string userName, string password, string ip, string userAgent, DateTimeOffset now, string? mfaCode, CancellationToken ct)
     {
         var normalized = userName.Trim().ToLowerInvariant(); var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.UserName == normalized, ct);
         if (user is null) { db.SecurityAuditEvents.Add(new("Login", normalized, "session", "Denied", "Unknown account.", ip, now)); await db.SaveChangesAsync(ct); return null; }
         if (user.State != AccountState.Active || !VerifyPassword(password, user.PasswordHash)) { user.LoginFailed(); db.SecurityAuditEvents.Add(new("Login", normalized, "session", "Denied", user.State == AccountState.Active ? "Invalid credentials." : $"Account is {user.State}.", ip, now)); await db.SaveChangesAsync(ct); return null; }
+        var enrollment=await db.UserMfaEnrollments.SingleOrDefaultAsync(x=>x.UserId==user.Id&&x.Confirmed,ct);if(enrollment is not null){var valid=VerifyTotp(enrollment.Secret,mfaCode??"",now);if(!valid&&!string.IsNullOrWhiteSpace(mfaCode)){var recovery=await db.MfaRecoveryCodes.SingleOrDefaultAsync(x=>x.UserId==user.Id&&x.CodeHash==RecoveryHash(mfaCode)&&x.UsedAt==null,ct);if(recovery is not null){recovery.Use(now);valid=true;}}if(!valid){db.SecurityAuditEvents.Add(new("MfaChallenge",user.UserName,"session","Denied","A valid authenticator or unused recovery code is required.",ip,now));await db.SaveChangesAsync(ct);return null;}}
         user.LoginSucceeded(now); var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant(); var expires = now.AddHours(12);
         db.UserSessions.Add(new(user.Id, TokenHash(token), ip, userAgent, now, expires)); db.SecurityAuditEvents.Add(new("Login", user.UserName, "session", "Success", "Authenticated session created.", ip, now)); await db.SaveChangesAsync(ct);
         return new(await MapAsync(user, now, ct), token, expires);
@@ -67,7 +70,14 @@ public sealed class IdentityService(AeroLinkDbContext db)
         var programs = memberships.GroupBy(x => x.ProgramId).Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList())).ToList();
         return new(user.Id, user.UserName, user.DisplayName, user.Email, user.UserName == SystemAdministratorUserName, programs);
     }
-    private static string TokenHash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+    public static string? TokenDigest(string? token) => string.IsNullOrWhiteSpace(token)?null:Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+    public static string CreateMfaSecret()=>Convert.ToBase64String(RandomNumberGenerator.GetBytes(20));
+    public static bool VerifyTotp(string secret,string code,DateTimeOffset now)
+    {if(code.Length!=6||!code.All(char.IsDigit))return false;return Enumerable.Range(-1,3).Select(offset=>Totp(secret,now.AddSeconds(offset*30))).Any(expected=>CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(expected),Encoding.ASCII.GetBytes(code)));}
+    public static string RecoveryHash(string code)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(code.Trim().ToUpperInvariant()))).ToLowerInvariant();
+    public static string NewRecoveryCode()=>Convert.ToHexString(RandomNumberGenerator.GetBytes(5));
+    private static string Totp(string secret,DateTimeOffset now){var counter=BitConverter.GetBytes(now.ToUnixTimeSeconds()/30);if(BitConverter.IsLittleEndian)Array.Reverse(counter);using var hmac=new HMACSHA1(Convert.FromBase64String(secret));var hash=hmac.ComputeHash(counter);var offset=hash[^1]&15;var value=((hash[offset]&127)<<24)|(hash[offset+1]<<16)|(hash[offset+2]<<8)|hash[offset+3];return (value%1_000_000).ToString("D6");}
+    private static string TokenHash(string token) => TokenDigest(token)!;
 }
 
 public sealed class IdentitySeeder(AeroLinkDbContext db)
