@@ -20,6 +20,29 @@ namespace AeroLink.Api.Tests;
 public sealed class SecurityBoundaryTests
 {
     [Fact]
+    public async Task Mfa_enrollment_returns_interoperable_uri_protects_secret_and_cannot_downgrade_confirmed_factor()
+    {
+        using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient();
+        await BootstrapAndLoginAdministratorAsync(client);
+        using var enrolled = await client.PostAsJsonAsync("/api/auth/mfa/enroll", new { });
+        Assert.Equal(HttpStatusCode.OK, enrolled.StatusCode); var payload = await enrolled.Content.ReadFromJsonAsync<JsonElement>();
+        var secret = payload.GetProperty("secret").GetString()!; var uri = payload.GetProperty("otpauthUri").GetString()!;
+        Assert.Equal(32, secret.Length); Assert.StartsWith("otpauth://totp/AeroLink%3Aadmin?secret=", uri); Assert.Contains("issuer=AeroLink", uri);
+        using (var scope=factory.Services.CreateScope())
+        {
+            var stored=await scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>().UserMfaEnrollments.AsNoTracking().SingleAsync();
+            Assert.StartsWith("dp:v1:",stored.Secret); Assert.DoesNotContain(secret,stored.Secret);
+        }
+        var code=Totp(secret,DateTimeOffset.UtcNow);using var confirmed=await client.PostAsJsonAsync("/api/auth/mfa/confirm",new{code});Assert.Equal(HttpStatusCode.OK,confirmed.StatusCode);
+        var recovery=(await confirmed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("recoveryCodes");Assert.Equal(10,recovery.GetArrayLength());
+        var status=await client.GetFromJsonAsync<JsonElement>("/api/auth/security");Assert.True(status.GetProperty("mfaEnabled").GetBoolean());Assert.Equal(10,status.GetProperty("recoveryCodesRemaining").GetInt32());
+        using var repeated=await client.PostAsJsonAsync("/api/auth/mfa/enroll",new{});Assert.Equal(HttpStatusCode.Conflict,repeated.StatusCode);
+        using var badDisable=await client.PostAsJsonAsync("/api/auth/mfa/disable",new{password=AeroLinkApiFactory.AdministratorPassword,code="000000"});Assert.Equal(HttpStatusCode.Unauthorized,badDisable.StatusCode);
+        using var disabled=await client.PostAsJsonAsync("/api/auth/mfa/disable",new{password=AeroLinkApiFactory.AdministratorPassword,code=Totp(secret,DateTimeOffset.UtcNow)});Assert.Equal(HttpStatusCode.NoContent,disabled.StatusCode);
+        status=await client.GetFromJsonAsync<JsonElement>("/api/auth/security");Assert.False(status.GetProperty("mfaEnabled").GetBoolean());Assert.Equal(0,status.GetProperty("recoveryCodesRemaining").GetInt32());
+    }
+
+    [Fact]
     public async Task Empty_database_bootstrap_requires_secret_runs_once_and_creates_login()
     {
         using var factory = new AeroLinkApiFactory();
@@ -199,6 +222,13 @@ public sealed class SecurityBoundaryTests
         var response=await client.GetFromJsonAsync<JsonElement>("/api/auth/csrf");
         client.DefaultRequestHeaders.Remove("X-AeroLink-CSRF");
         client.DefaultRequestHeaders.Add("X-AeroLink-CSRF",response.GetProperty("token").GetString());
+    }
+
+    private static string Totp(string secret,DateTimeOffset now)
+    {
+        const string alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";var bytes=new List<byte>();var buffer=0;var bits=0;
+        foreach(var ch in secret){buffer=(buffer<<5)|alphabet.IndexOf(ch);bits+=5;if(bits>=8){bits-=8;bytes.Add((byte)((buffer>>bits)&255));}}
+        var counter=BitConverter.GetBytes(now.ToUnixTimeSeconds()/30);if(BitConverter.IsLittleEndian)Array.Reverse(counter);using var hmac=new System.Security.Cryptography.HMACSHA1(bytes.ToArray());var hash=hmac.ComputeHash(counter);var offset=hash[^1]&15;var value=((hash[offset]&127)<<24)|(hash[offset+1]<<16)|(hash[offset+2]<<8)|hash[offset+3];return(value%1_000_000).ToString("D6");
     }
 }
 

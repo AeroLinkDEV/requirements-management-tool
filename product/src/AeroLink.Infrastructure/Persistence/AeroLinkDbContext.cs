@@ -84,6 +84,16 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ComponentStreamRevision> ComponentStreamRevisions => Set<ComponentStreamRevision>();
     public DbSet<ProductVariant> ProductVariants => Set<ProductVariant>();
     public DbSet<VariantComponentSelection> VariantComponentSelections => Set<VariantComponentSelection>();
+    public DbSet<ProductVariantBaseline> ProductVariantBaselines => Set<ProductVariantBaseline>();
+    public DbSet<ComponentPropagationDecision> ComponentPropagationDecisions => Set<ComponentPropagationDecision>();
+    public DbSet<WorkloadQualificationEvidence> WorkloadQualificationEvidence => Set<WorkloadQualificationEvidence>();
+    public DbSet<BackupRestoreDrillEvidence> BackupRestoreDrillEvidence => Set<BackupRestoreDrillEvidence>();
+    public DbSet<RetentionPolicyEvidence> RetentionPolicyEvidence => Set<RetentionPolicyEvidence>();
+    public DbSet<UpgradeAssuranceEvidence> UpgradeAssuranceEvidence => Set<UpgradeAssuranceEvidence>();
+    public DbSet<OperationalAlert> OperationalAlerts => Set<OperationalAlert>();
+    public DbSet<QualityLifecycleObjective> QualityLifecycleObjectives => Set<QualityLifecycleObjective>();
+    public DbSet<ReadinessWaiver> ReadinessWaivers => Set<ReadinessWaiver>();
+    public DbSet<CertificationEvidenceIndexEntry> CertificationEvidenceIndex => Set<CertificationEvidenceIndexEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -121,6 +131,16 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("variant_component_selections"); b.HasKey(x=>x.Id); b.Property(x=>x.ApplicabilityJson).IsRequired(); b.Property(x=>x.SelectedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.VariantId,x.ComponentRevisionId}).IsUnique(); b.HasOne<ProductVariant>().WithMany().HasForeignKey(x=>x.VariantId).OnDelete(DeleteBehavior.Cascade); b.HasOne<ComponentStreamRevision>().WithMany().HasForeignKey(x=>x.ComponentRevisionId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<ProductVariantBaseline>(b=>{b.ToTable("product_variant_baselines");b.HasKey(x=>x.Id);b.Property(x=>x.ManifestJson).IsRequired();b.Property(x=>x.ManifestHash).HasMaxLength(64).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.VariantId,x.Revision}).IsUnique();b.HasIndex(x=>x.ManifestHash);b.HasOne<ProductVariant>().WithMany().HasForeignKey(x=>x.VariantId).OnDelete(DeleteBehavior.Restrict);});
+        modelBuilder.Entity<ComponentPropagationDecision>(b=>{b.ToTable("component_propagation_decisions");b.HasKey(x=>x.Id);b.Property(x=>x.Decision).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.Rationale).HasMaxLength(4000).IsRequired();b.Property(x=>x.DecidedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.VariantId,x.ComponentRevisionId}).IsUnique();b.HasOne<ProductVariant>().WithMany().HasForeignKey(x=>x.VariantId).OnDelete(DeleteBehavior.Restrict);b.HasOne<ComponentStreamRevision>().WithMany().HasForeignKey(x=>x.ComponentRevisionId).OnDelete(DeleteBehavior.Restrict);});
+        modelBuilder.Entity<WorkloadQualificationEvidence>(b=>{b.ToTable("workload_qualification_evidence");b.HasKey(x=>x.Id);b.Property(x=>x.Environment).HasMaxLength(200).IsRequired();b.Property(x=>x.ResultsJson).IsRequired();b.Property(x=>x.ReportHash).HasMaxLength(64).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.ExecutedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.ExecutedAt});});
+        modelBuilder.Entity<BackupRestoreDrillEvidence>(b=>{b.ToTable("backup_restore_drill_evidence");b.HasKey(x=>x.Id);b.Property(x=>x.BackupLocation).HasMaxLength(500).IsRequired();b.Property(x=>x.BackupHash).HasMaxLength(64).IsRequired();b.Property(x=>x.RestoreEnvironment).HasMaxLength(200).IsRequired();b.Property(x=>x.EvidenceHash).HasMaxLength(64).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.ExecutedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.ExecutedAt});});
+        modelBuilder.Entity<RetentionPolicyEvidence>(b=>{b.ToTable("retention_policy_evidence");b.HasKey(x=>x.Id);b.Property(x=>x.RecordType).HasMaxLength(100).IsRequired();b.Property(x=>x.Rationale).HasMaxLength(4000).IsRequired();b.Property(x=>x.ConfiguredBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.RecordType,x.ConfiguredAt});});
+        modelBuilder.Entity<UpgradeAssuranceEvidence>(b=>{b.ToTable("upgrade_assurance_evidence");b.HasKey(x=>x.Id);b.Property(x=>x.FromVersion).HasMaxLength(80).IsRequired();b.Property(x=>x.ToVersion).HasMaxLength(80).IsRequired();b.Property(x=>x.PreflightJson).IsRequired();b.Property(x=>x.PostCheckJson).IsRequired();b.Property(x=>x.EvidenceHash).HasMaxLength(64).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.ExecutedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.ExecutedAt});});
+        modelBuilder.Entity<OperationalAlert>(b=>{b.ToTable("operational_alerts");b.HasKey(x=>x.Id);b.Property(x=>x.Severity).HasMaxLength(30).IsRequired();b.Property(x=>x.Signal).HasMaxLength(160).IsRequired();b.Property(x=>x.Detail).HasMaxLength(4000).IsRequired();b.Property(x=>x.RunbookUrl).HasMaxLength(500).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.OpenedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.ResolvedBy).HasMaxLength(100);b.HasIndex(x=>new{x.ProjectId,x.State,x.OpenedAt});});
+        modelBuilder.Entity<QualityLifecycleObjective>(b=>{b.ToTable("quality_lifecycle_objectives");b.HasKey(x=>x.Id);b.Property(x=>x.Code).HasMaxLength(80).IsRequired();b.Property(x=>x.Title).HasMaxLength(300).IsRequired();b.Property(x=>x.TargetJson).IsRequired();b.Property(x=>x.EvidenceExpectation).HasMaxLength(4000).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.Code}).IsUnique();});
+        modelBuilder.Entity<ReadinessWaiver>(b=>{b.ToTable("readiness_waivers");b.HasKey(x=>x.Id);b.Property(x=>x.BlockerType).HasMaxLength(80).IsRequired();b.Property(x=>x.Rationale).HasMaxLength(4000).IsRequired();b.Property(x=>x.ApprovedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.BlockerType,x.BlockerId,x.ExpiresAt});});
+        modelBuilder.Entity<CertificationEvidenceIndexEntry>(b=>{b.ToTable("certification_evidence_index");b.HasKey(x=>x.Id);b.Property(x=>x.ObjectiveCode).HasMaxLength(80).IsRequired();b.Property(x=>x.ArtifactType).HasMaxLength(80).IsRequired();b.Property(x=>x.EvidenceHash).HasMaxLength(64).IsRequired();b.Property(x=>x.ClaimBoundary).HasMaxLength(2000).IsRequired();b.Property(x=>x.IndexedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.ObjectiveCode,x.ArtifactType,x.ArtifactId}).IsUnique();});
         modelBuilder.Entity<SoftwareRelease>(b =>
         {
             b.ToTable("software_releases"); b.HasKey(x => x.Id);
@@ -361,7 +381,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("program_memberships"); b.HasKey(x => x.Id); b.Property(x => x.Role).HasConversion<string>().HasMaxLength(40); b.Property(x => x.GrantedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x => new { x.UserId, x.ProgramId, x.Role }).IsUnique();
             b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict); b.HasOne<ProgramRecord>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
         });
-        modelBuilder.Entity<UserMfaEnrollment>(b=>{b.ToTable("user_mfa_enrollments");b.HasKey(x=>x.Id);b.Property(x=>x.Secret).HasMaxLength(128).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>x.UserId).IsUnique();b.HasOne<UserAccount>().WithMany().HasForeignKey(x=>x.UserId).OnDelete(DeleteBehavior.Cascade);});
+        modelBuilder.Entity<UserMfaEnrollment>(b=>{b.ToTable("user_mfa_enrollments");b.HasKey(x=>x.Id);b.Property(x=>x.Secret).HasMaxLength(512).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>x.UserId).IsUnique();b.HasOne<UserAccount>().WithMany().HasForeignKey(x=>x.UserId).OnDelete(DeleteBehavior.Cascade);});
         modelBuilder.Entity<MfaRecoveryCode>(b=>{b.ToTable("mfa_recovery_codes");b.HasKey(x=>x.Id);b.Property(x=>x.CodeHash).HasMaxLength(64).IsRequired();b.HasIndex(x=>new{x.UserId,x.CodeHash}).IsUnique();b.HasOne<UserAccount>().WithMany().HasForeignKey(x=>x.UserId).OnDelete(DeleteBehavior.Cascade);});
         modelBuilder.Entity<UserSession>(b =>
         {
@@ -476,7 +496,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("configuration_change_sets"); b.HasKey(x => x.Id); b.Property(x => x.ChangeSetNumber).HasMaxLength(80).IsRequired();
             b.Property(x => x.Title).HasMaxLength(300).IsRequired(); b.Property(x => x.Description).HasMaxLength(16000); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired();
-            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ChangeSetNumber }).IsUnique();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.MergeResultJson);b.Property(x=>x.ConflictJson);b.Property(x=>x.ResolutionRationale).HasMaxLength(4000); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ChangeSetNumber }).IsUnique();b.HasIndex(x=>new{x.ComponentId,x.State});
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ControlledArtifactCheckInEvidence>(b =>
@@ -522,7 +542,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<ReqIfExchangeJob>(b =>
         {
-            b.ToTable("reqif_exchange_jobs"); b.HasKey(x=>x.Id); b.Property(x=>x.Direction).HasConversion<string>().HasMaxLength(20); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.FileName).HasMaxLength(260).IsRequired(); b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired(); b.Property(x=>x.StorageKey).HasMaxLength(500).IsRequired(); b.Property(x=>x.ManifestJson).IsRequired(); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt}); b.HasIndex(x=>new{x.ProjectId,x.Direction,x.State}); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.ToTable("reqif_exchange_jobs"); b.HasKey(x=>x.Id); b.Property(x=>x.Direction).HasConversion<string>().HasMaxLength(20); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.FileName).HasMaxLength(260).IsRequired(); b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired(); b.Property(x=>x.StorageKey).HasMaxLength(500).IsRequired(); b.Property(x=>x.ManifestJson).IsRequired();b.Property(x=>x.CheckpointJson).IsRequired();b.Property(x=>x.LastError).HasMaxLength(4000); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt}); b.HasIndex(x=>new{x.ProjectId,x.Direction,x.State}); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

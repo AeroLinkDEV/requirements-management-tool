@@ -27,6 +27,7 @@ public sealed class UserAccount
     public void LoginSucceeded(DateTimeOffset now) { FailedLoginCount = 0; LastLoginAt = now; }
     public void LoginFailed() { FailedLoginCount++; if (FailedLoginCount >= 8) State = AccountState.Locked; }
     public void ChangePassword(string hash) { PasswordHash = hash; MustChangePassword = false; FailedLoginCount = 0; State = AccountState.Active; }
+    public void RequirePasswordChange(string temporaryHash) { PasswordHash = temporaryHash; MustChangePassword = true; FailedLoginCount = 0; State = AccountState.Active; }
     public void RefreshDirectoryProfile(string displayName, string email) { DisplayName = Required(displayName, nameof(displayName)); Email = Required(email, nameof(email)); }
     public void Disable(DateTimeOffset now) { State = AccountState.Disabled; DisabledAt = now; }
     public void Enable() { State = AccountState.Active; DisabledAt = null; FailedLoginCount = 0; }

@@ -171,6 +171,7 @@ export default function RequirementsWorkspace({
 }: Props) {
   const appliedInitialView = useRef(false);
   const autoSelected = useRef(false);
+  const loadGeneration = useRef(0);
   const actionsMenu = useRef<HTMLDetailsElement>(null);
   const [data, setData] = useState<Workspace>(),
     [loading, setLoading] = useState(true),
@@ -247,13 +248,17 @@ export default function RequirementsWorkspace({
     specificationId,
   ]);
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     setLoading(true);
     try {
       const response = await fetch(
         `${api}/api/enterprise-requirements/workspace?${params}`,
       );
+      if (generation !== loadGeneration.current) return;
       if (response.ok) {
-        setData(await response.json());
+        const payload = await response.json();
+        if (generation !== loadGeneration.current) return;
+        setData(payload);
         setError("");
       } else
         setError(
@@ -261,11 +266,12 @@ export default function RequirementsWorkspace({
             "Requirements workspace could not be loaded.",
         );
     } catch {
+      if (generation !== loadGeneration.current) return;
       setError(
         "Requirements could not be loaded. Check the AeroLink service and try again.",
       );
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
   }, [api, params]);
   useEffect(() => {

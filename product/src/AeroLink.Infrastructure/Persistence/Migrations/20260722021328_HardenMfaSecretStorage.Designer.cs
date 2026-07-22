@@ -3,6 +3,7 @@ using System;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    partial class AeroLinkDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260722021328_HardenMfaSecretStorage")]
+    partial class HardenMfaSecretStorage
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1864,73 +1867,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.ToTable("artifact_watches", (string)null);
                 });
 
-            modelBuilder.Entity("AeroLink.Domain.Requirements.BackupRestoreDrillEvidence", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("ActualRpoMinutes")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("ActualRtoMinutes")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset>("BackupCreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("BackupHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("BackupLocation")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("EvidenceHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTimeOffset>("ExecutedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ExecutedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTimeOffset>("OffsiteVerifiedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("RestoreEnvironment")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<int>("TargetRpoMinutes")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("TargetRtoMinutes")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "ExecutedAt");
-
-                    b.ToTable("backup_restore_drill_evidence", (string)null);
-                });
-
             modelBuilder.Entity("AeroLink.Domain.Requirements.BaselineRequirementSelection", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1959,94 +1895,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("baseline_requirement_selections", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Requirements.CertificationEvidenceIndexEntry", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ArtifactId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ArtifactType")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<string>("ClaimBoundary")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<string>("EvidenceHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTimeOffset>("IndexedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("IndexedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("ObjectiveCode")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "ObjectiveCode", "ArtifactType", "ArtifactId")
-                        .IsUnique();
-
-                    b.ToTable("certification_evidence_index", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Requirements.ComponentPropagationDecision", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ComponentRevisionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("DecidedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DecidedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Decision")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<string>("Rationale")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<Guid>("VariantId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ComponentRevisionId");
-
-                    b.HasIndex("VariantId", "ComponentRevisionId")
-                        .IsUnique();
-
-                    b.ToTable("component_propagation_decisions", (string)null);
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Requirements.ComponentStream", b =>
@@ -2134,22 +1982,10 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("BaseRevisionId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("ChangeSetNumber")
                         .IsRequired()
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
-
-                    b.Property<DateTimeOffset?>("ClosedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("ComponentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ConflictJson")
-                        .HasColumnType("text");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -2159,9 +1995,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .HasMaxLength(16000)
                         .HasColumnType("character varying(16000)");
 
-                    b.Property<string>("MergeResultJson")
-                        .HasColumnType("text");
-
                     b.Property<string>("OwnerId")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -2170,23 +2003,10 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("ResolutionRationale")
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<Guid?>("SourceRevisionId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
-
-                    b.Property<Guid?>("TargetRevisionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("TargetStreamId")
-                        .HasColumnType("uuid");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -2201,8 +2021,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ComponentId", "State");
 
                     b.HasIndex("ProjectId", "ChangeSetNumber")
                         .IsUnique();
@@ -2575,62 +2393,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.ToTable("enterprise_operation_jobs", (string)null);
                 });
 
-            modelBuilder.Entity("AeroLink.Domain.Requirements.OperationalAlert", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Detail")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<DateTimeOffset>("OpenedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("OpenedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("ResolvedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ResolvedBy")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("RunbookUrl")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("Severity")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<string>("Signal")
-                        .IsRequired()
-                        .HasMaxLength(160)
-                        .HasColumnType("character varying(160)");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "State", "OpenedAt");
-
-                    b.ToTable("operational_alerts", (string)null);
-                });
-
             modelBuilder.Entity("AeroLink.Domain.Requirements.ProblemReport", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2965,140 +2727,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.ToTable("product_variants", (string)null);
                 });
 
-            modelBuilder.Entity("AeroLink.Domain.Requirements.ProductVariantBaseline", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("ManifestHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("ManifestJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("Revision")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("VariantId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ManifestHash");
-
-                    b.HasIndex("VariantId", "Revision")
-                        .IsUnique();
-
-                    b.ToTable("product_variant_baselines", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Requirements.QualityLifecycleObjective", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("EvidenceExpectation")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("TargetJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("character varying(300)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "Code")
-                        .IsUnique();
-
-                    b.ToTable("quality_lifecycle_objectives", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Requirements.ReadinessWaiver", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ApprovedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid>("BlockerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("BlockerType")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTimeOffset>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Rationale")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<DateTimeOffset?>("RevokedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "BlockerType", "BlockerId", "ExpiresAt");
-
-                    b.ToTable("readiness_waivers", (string)null);
-                });
-
             modelBuilder.Entity("AeroLink.Domain.Requirements.ReqIfExchangeJob", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3107,13 +2735,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("AttachmentCount")
                         .HasColumnType("integer");
-
-                    b.Property<int>("Attempt")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("CheckpointJson")
-                        .IsRequired()
-                        .HasColumnType("text");
 
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
@@ -3145,16 +2766,9 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.Property<int>("HierarchyCount")
                         .HasColumnType("integer");
 
-                    b.Property<string>("LastError")
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
                     b.Property<string>("ManifestJson")
                         .IsRequired()
                         .HasColumnType("text");
-
-                    b.Property<int>("ProcessedCount")
-                        .HasColumnType("integer");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");
@@ -3470,46 +3084,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.ToTable("requirement_specifications", (string)null);
                 });
 
-            modelBuilder.Entity("AeroLink.Domain.Requirements.RetentionPolicyEvidence", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("ConfiguredAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ConfiguredBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<bool>("LegalHold")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Rationale")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<string>("RecordType")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<int>("RetentionDays")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "RecordType", "ConfiguredAt");
-
-                    b.ToTable("retention_policy_evidence", (string)null);
-                });
-
             modelBuilder.Entity("AeroLink.Domain.Requirements.SavedRequirementView", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3597,58 +3171,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("specification_nodes", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Requirements.UpgradeAssuranceEvidence", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("EvidenceHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTimeOffset>("ExecutedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ExecutedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("FromVersion")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<string>("PostCheckJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("PreflightJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<string>("ToVersion")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "ExecutedAt");
-
-                    b.ToTable("upgrade_assurance_evidence", (string)null);
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Requirements.UserNotification", b =>
@@ -3740,58 +3262,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("variant_component_selections", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Requirements.WorkloadQualificationEvidence", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("ConcurrentUsers")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("DurationMinutes")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Environment")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTimeOffset>("ExecutedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ExecutedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ReportHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<int>("RequirementCount")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("ResultsJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "ExecutedAt");
-
-                    b.ToTable("workload_qualification_evidence", (string)null);
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Traceability.ControlledDocument", b =>
@@ -4386,21 +3856,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("AeroLink.Domain.Requirements.ComponentPropagationDecision", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Requirements.ComponentStreamRevision", null)
-                        .WithMany()
-                        .HasForeignKey("ComponentRevisionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("AeroLink.Domain.Requirements.ProductVariant", null)
-                        .WithMany()
-                        .HasForeignKey("VariantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("AeroLink.Domain.Requirements.ComponentStream", b =>
                 {
                     b.HasOne("AeroLink.Domain.Requirements.ProductLineComponent", null)
@@ -4500,15 +3955,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.HasOne("AeroLink.Domain.Programs.ProjectRecord", null)
                         .WithMany()
                         .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Requirements.ProductVariantBaseline", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Requirements.ProductVariant", null)
-                        .WithMany()
-                        .HasForeignKey("VariantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

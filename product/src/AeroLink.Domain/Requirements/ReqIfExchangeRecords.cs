@@ -3,7 +3,7 @@ using AeroLink.Domain.Common;
 namespace AeroLink.Domain.Requirements;
 
 public enum ReqIfExchangeDirection { Import, Export }
-public enum ReqIfExchangeState { Preview, Ready, Committed, Rejected }
+public enum ReqIfExchangeState { Preview, Processing, Ready, Failed, Cancelled, Committed, Rejected }
 
 /// <summary>Durable audit record for one governed ReqIF package operation.</summary>
 public sealed class ReqIfExchangeJob
@@ -39,6 +39,14 @@ public sealed class ReqIfExchangeJob
     public DateTimeOffset CreatedAt { get; private set; }
     public Guid? CreatedScrId { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
+    public int ProcessedCount { get; private set; }
+    public string CheckpointJson { get; private set; } = "{}";
+    public int Attempt { get; private set; }
+    public string? LastError { get; private set; }
+    public void BeginOrResume(DateTimeOffset now){if(State is not (ReqIfExchangeState.Ready or ReqIfExchangeState.Failed or ReqIfExchangeState.Cancelled))throw new DomainException("Only a staged, failed, or cancelled ReqIF job can process.");State=ReqIfExchangeState.Processing;Attempt++;LastError=null;CompletedAt=null;}
+    public void Checkpoint(int processed,string checkpointJson,DateTimeOffset now){if(State!=ReqIfExchangeState.Processing)throw new DomainException("Only a processing ReqIF job can checkpoint.");if(processed<ProcessedCount||processed>RequirementCount)throw new DomainException("ReqIF checkpoint progress is invalid.");ProcessedCount=processed;CheckpointJson=Required(checkpointJson);if(ProcessedCount>=RequirementCount)State=ReqIfExchangeState.Ready;}
+    public void Fail(string error,DateTimeOffset now){if(State!=ReqIfExchangeState.Processing)throw new DomainException("Only a processing ReqIF job can fail.");State=ReqIfExchangeState.Failed;LastError=Required(error);CompletedAt=now;}
+    public void Cancel(DateTimeOffset now){if(State is ReqIfExchangeState.Committed or ReqIfExchangeState.Rejected)throw new DomainException("A completed ReqIF exchange is immutable.");State=ReqIfExchangeState.Cancelled;CompletedAt=now;}
     public void Commit(Guid scrId, DateTimeOffset now)
     {
         if (Direction != ReqIfExchangeDirection.Import || State != ReqIfExchangeState.Ready)

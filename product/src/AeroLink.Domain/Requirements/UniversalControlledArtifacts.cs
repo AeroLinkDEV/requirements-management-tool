@@ -50,7 +50,21 @@ public sealed class ConfigurationChangeSet
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; }
+    public Guid? ComponentId { get; private set; }
+    public Guid? TargetStreamId { get; private set; }
+    public Guid? BaseRevisionId { get; private set; }
+    public Guid? SourceRevisionId { get; private set; }
+    public Guid? TargetRevisionId { get; private set; }
+    public string? MergeResultJson { get; private set; }
+    public string? ConflictJson { get; private set; }
+    public string? ResolutionRationale { get; private set; }
+    public DateTimeOffset? ClosedAt { get; private set; }
     public void UpdateDraft(string title, string description, string ownerId, DateTimeOffset now)
     { Title = Required(title, "A configuration change-set title is required."); Description = description?.Trim() ?? ""; OwnerId = Required(ownerId, "A configuration change-set owner is required."); UpdatedAt = now; Version++; }
+    public void ConfigureMerge(Guid componentId,Guid targetStreamId,Guid baseRevisionId,Guid sourceRevisionId,Guid targetRevisionId,string? mergedJson,string? conflictJson,DateTimeOffset now)
+    {if(State!=ConfigurationChangeSetState.Draft)throw new DomainException("Only a draft change set can be configured.");ComponentId=componentId;TargetStreamId=targetStreamId;BaseRevisionId=baseRevisionId;SourceRevisionId=sourceRevisionId;TargetRevisionId=targetRevisionId;MergeResultJson=mergedJson;ConflictJson=conflictJson;State=string.IsNullOrWhiteSpace(conflictJson)?ConfigurationChangeSetState.InWork:ConfigurationChangeSetState.Conflict;UpdatedAt=now;Version++;}
+    public void Resolve(string resolutionJson,string rationale,DateTimeOffset now)
+    {if(State!=ConfigurationChangeSetState.Conflict)throw new DomainException("Only a conflicting change set can be resolved.");MergeResultJson=Required(resolutionJson,"A deterministic resolution is required.");ResolutionRationale=Required(rationale,"A conflict-resolution rationale is required.");ConflictJson=null;State=ConfigurationChangeSetState.InWork;UpdatedAt=now;Version++;}
+    public void Close(DateTimeOffset now){if(State!=ConfigurationChangeSetState.InWork||string.IsNullOrWhiteSpace(MergeResultJson))throw new DomainException("Only a resolved in-work change set can be closed.");State=ConfigurationChangeSetState.Closed;ClosedAt=UpdatedAt=now;Version++;}
     private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
 }

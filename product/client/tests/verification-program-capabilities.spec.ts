@@ -95,6 +95,15 @@ test('verification actions follow authority in the selected Program',async({page
   await page.getByLabel('Username').fill(userName)
   await page.getByLabel('Password').fill(password)
   await page.getByRole('button',{name:/Sign in securely/}).click()
+  await expect(page.getByRole('heading',{name:'Replace temporary password'})).toBeVisible()
+  const rotatedPassword=`Rotated-${password}`
+  await page.getByLabel('Temporary password').fill(password)
+  await page.getByLabel('New password',{exact:true}).fill(rotatedPassword)
+  await page.getByLabel('Confirm new password').fill(rotatedPassword)
+  await page.getByRole('button',{name:/Change password securely/}).click()
+  await page.getByLabel('Username').fill(userName)
+  await page.getByLabel('Password').fill(rotatedPassword)
+  await page.getByRole('button',{name:/Sign in securely/}).click()
   await expect(page.getByRole('heading',{name:/Command Center/})).toBeVisible()
 
   await page.getByLabel('Active program').selectOption({label:`Test Authority ${suffix}`})

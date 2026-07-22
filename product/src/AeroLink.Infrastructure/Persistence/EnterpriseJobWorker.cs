@@ -30,6 +30,15 @@ public sealed class EnterpriseJobWorker(IServiceScopeFactory scopes, ILogger<Ent
         {
             job.Start(DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct);
             job.ReportProgress(25, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct);
+            if(job.JobType=="BackgroundControlledPublication")
+            {
+                var request=JsonSerializer.Deserialize<PublicationJobPayload>(job.RequestJson)??throw new InvalidOperationException("Publication request is invalid.");
+                var document=await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==request.DocumentId&&x.ProjectId==job.ProjectId,ct)??throw new InvalidOperationException("The controlled document no longer exists.");
+                var output=await scope.ServiceProvider.GetRequiredService<ControlledOutputGenerator>().GenerateAsync(request.DocumentId,request.Format,ct)??throw new InvalidOperationException("The controlled publication could not be rendered.");
+                job.ReportProgress(75,DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);await using var content=new MemoryStream(output.Content);var stored=await scope.ServiceProvider.GetRequiredService<EvidenceFileStore>().StoreAsync(content,output.FileName,output.ContentType,ct);
+                var publicationResult=new{document.Id,document.DocumentNumber,document.Revision,document.ContentHash,document.GeneratedAt,format=request.Format,templateId=request.TemplateId,previousDocumentId=request.PreviousDocumentId,renderer="AeroLink professional publication renderer",reproducible=true,stored.StorageKey,stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256};
+                job.Complete(1,0,JsonSerializer.Serialize(publicationResult),DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return;
+            }
             var requirements = await db.Requirements.AsNoTracking().CountAsync(x => x.ProjectId == job.ProjectId, ct);
             var revisions = await (from revision in db.RequirementRevisions.AsNoTracking() join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == job.ProjectId) on revision.ArtifactId equals artifact.Id select revision.Id).CountAsync(ct);
             var attachments = await db.ControlledAttachments.AsNoTracking().CountAsync(x => x.ProjectId == job.ProjectId, ct);
@@ -55,3 +64,5 @@ public sealed class EnterpriseJobWorker(IServiceScopeFactory scopes, ILogger<Ent
         }
     }
 }
+
+public sealed record PublicationJobPayload(Guid DocumentId,string Format,Guid? PreviousDocumentId,Guid? TemplateId);
