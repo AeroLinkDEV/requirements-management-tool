@@ -1032,6 +1032,10 @@ app.MapGet("/api/dashboard", async (Guid? projectId, Guid? releaseId, HttpContex
         approved = await source.CountAsync(x => x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline, ct)
     });
 });
+app.MapGet("/api/quality/metric-contracts",async(Guid? projectId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+{
+    if(projectId is not null&&!await http.HasProjectAccessAsync(db,projectId.Value,ct))return Results.Forbid();var actor=http.UserAccount();var allowed=actor.IsAdministrator?null:await db.Projects.Where(x=>actor.Programs.Select(p=>p.ProgramId).Contains(x.ProgramId)).Select(x=>x.Id).ToListAsync(ct);var scope=(allowed is null?db.Projects.AsNoTracking():db.Projects.AsNoTracking().Where(x=>allowed.Contains(x.Id))).Where(x=>projectId==null||x.Id==projectId);var ids=await scope.Select(x=>x.Id).ToListAsync(ct);var generated=DateTimeOffset.UtcNow;return Results.Ok(new{generatedAt=generated,scope=new{projectCount=ids.Count,permissionSafe=true},contracts=new[]{new{key="controlled_changes",definition="System change requests in Draft, InReview, Approved, or SelectedForBaseline state.",value=await db.SystemChangeRequests.CountAsync(x=>ids.Contains(x.ProjectId),ct),unit="records"},new{key="open_problem_reports",definition="Problem reports not in Closed state.",value=await db.ProblemReports.CountAsync(x=>ids.Contains(x.ProjectId)&&x.State!=ProblemReportState.Closed,ct),unit="records"},new{key="verification_coverage",definition="Requirement revision-to-test procedure coverage links in the authorized portfolio.",value=await db.TestCoverage.CountAsync(ct),unit="links"},new{key="controlled_publications",definition="Generated controlled documents for authorized projects.",value=await db.ControlledDocuments.CountAsync(x=>ids.Contains(x.ProjectId),ct),unit="records"}}}); 
+});
 
 app.MapGet("/api/test-procedures", async (Guid projectId, string? search, string? scope, AeroLinkDbContext db, CancellationToken ct) =>
 {
