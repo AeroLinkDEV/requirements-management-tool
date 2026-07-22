@@ -8,6 +8,7 @@ using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
+using AeroLink.Api;
 using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Infrastructure;
@@ -1575,6 +1576,7 @@ static string? BootstrapPasswordError(string password)
 
 app.MapAeroLinkIntegrationEndpoints();
 app.MapAeroLinkReqIfEndpoints();
+app.MapProductLineConfigurationEndpoints();
 
 app.Run();
 
