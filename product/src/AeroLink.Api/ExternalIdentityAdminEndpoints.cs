@@ -14,15 +14,20 @@ public static class ExternalIdentityAdminEndpoints
         group.MapGet("/mappings",ListMappingsAsync);
         group.MapPost("/mappings",CreateMappingAsync);
         group.MapPost("/mappings/{id:guid}/enabled",SetMappingEnabledAsync);
+        group.MapGet("/bindings",ListBindingsAsync);
+        group.MapPost("/bindings",CreateBindingAsync);
+        group.MapPost("/bindings/{id:guid}/enabled",SetBindingEnabledAsync);
         group.MapPost("/resolve",ResolveAsync);
         return app;
     }
 
-    private static IResult ForbidUnlessAdministrator(HttpContext http)=>http.UserAccount().IsAdministrator?Results.Ok():Results.Forbid();
     private static async Task<IResult> ListProvidersAsync(HttpContext http,ExternalIdentityAdministrationService service,CancellationToken ct)
         =>http.UserAccount().IsAdministrator?Results.Ok(await service.ListProvidersAsync(ct)):Results.Forbid();
     private static async Task<IResult> ListMappingsAsync(Guid? providerId,Guid? programId,HttpContext http,ExternalIdentityAdministrationService service,CancellationToken ct)
         =>http.UserAccount().IsAdministrator?Results.Ok(await service.ListMappingsAsync(providerId,programId,ct)):Results.Forbid();
+    private static async Task<IResult> ListBindingsAsync(Guid? providerId,HttpContext http,FederatedIdentityRuntimeService service,CancellationToken ct)
+        =>http.UserAccount().IsAdministrator?Results.Ok(await service.ListBindingsAsync(providerId,ct)):Results.Forbid();
+
     private static async Task<IResult> CreateProviderAsync(CreateExternalIdentityProviderRequest request,HttpContext http,ExternalIdentityAdministrationService service,CancellationToken ct)
     {
         var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();
@@ -38,6 +43,14 @@ public static class ExternalIdentityAdminEndpoints
         catch(KeyNotFoundException ex){return Results.NotFound(new{error=ex.Message});}
         catch(InvalidOperationException ex){return Results.Conflict(new{error=ex.Message,code="external_group_role_mapping_conflict"});}
     }
+    private static async Task<IResult> CreateBindingAsync(CreateExternalIdentityAccountBindingRequest request,HttpContext http,FederatedIdentityRuntimeService service,CancellationToken ct)
+    {
+        var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();
+        try{var created=await service.BindAsync(request.ProviderId,request.ExternalSubject,request.UserId,actor.UserName,http.Connection.RemoteIpAddress?.ToString()??"local",DateTimeOffset.UtcNow,ct);return Results.Created($"/api/admin/external-identity/bindings/{created.Id}",created);}
+        catch(ArgumentException ex){return Results.BadRequest(new{error=ex.Message});}
+        catch(KeyNotFoundException ex){return Results.NotFound(new{error=ex.Message});}
+        catch(InvalidOperationException ex){return Results.Conflict(new{error=ex.Message,code="external_identity_binding_conflict"});}
+    }
     private static async Task<IResult> SetProviderEnabledAsync(Guid id,SetExternalIdentityEnabledRequest request,HttpContext http,ExternalIdentityAdministrationService service,CancellationToken ct)
     {
         var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();var found=await service.SetProviderEnabledAsync(id,request.Enabled,actor.UserName,http.Connection.RemoteIpAddress?.ToString()??"local",DateTimeOffset.UtcNow,ct);return found?Results.NoContent():Results.NotFound();
@@ -45,6 +58,10 @@ public static class ExternalIdentityAdminEndpoints
     private static async Task<IResult> SetMappingEnabledAsync(Guid id,SetExternalIdentityEnabledRequest request,HttpContext http,ExternalIdentityAdministrationService service,CancellationToken ct)
     {
         var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();var found=await service.SetMappingEnabledAsync(id,request.Enabled,actor.UserName,http.Connection.RemoteIpAddress?.ToString()??"local",DateTimeOffset.UtcNow,ct);return found?Results.NoContent():Results.NotFound();
+    }
+    private static async Task<IResult> SetBindingEnabledAsync(Guid id,SetExternalIdentityEnabledRequest request,HttpContext http,FederatedIdentityRuntimeService service,CancellationToken ct)
+    {
+        var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();var found=await service.SetBindingEnabledAsync(id,request.Enabled,actor.UserName,http.Connection.RemoteIpAddress?.ToString()??"local",DateTimeOffset.UtcNow,ct);return found?Results.NoContent():Results.NotFound();
     }
     private static async Task<IResult> ResolveAsync(ResolveExternalIdentityRolesRequest request,HttpContext http,ExternalIdentityAdministrationService service,CancellationToken ct)
     {
@@ -54,5 +71,6 @@ public static class ExternalIdentityAdminEndpoints
 
 public sealed record CreateExternalIdentityProviderRequest(string Key,string DisplayName,ExternalIdentityProtocol Protocol,string Issuer,string SubjectClaim,string GroupClaim);
 public sealed record CreateExternalGroupRoleMappingRequest(Guid ProviderId,string ExternalGroup,Guid ProgramId,ProgramRole Role);
+public sealed record CreateExternalIdentityAccountBindingRequest(Guid ProviderId,string ExternalSubject,Guid UserId);
 public sealed record SetExternalIdentityEnabledRequest(bool Enabled);
 public sealed record ResolveExternalIdentityRolesRequest(Guid ProviderId,string Issuer,IReadOnlyList<string> ExternalGroups,Guid ProgramId);
