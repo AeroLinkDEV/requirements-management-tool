@@ -12,23 +12,50 @@ public sealed class ExternalIdentityMappingTests
             " Corporate-Entra ",
             "Corporate Entra ID",
             ExternalIdentityProtocol.OpenIdConnect,
-            "https://login.example.test/tenant/v2.0",
+            "https://login.example.test/tenant/v2.0/",
             "sub",
             "groups",
             "system.admin",
             now);
 
         Assert.Equal("corporate-entra", provider.Key);
+        Assert.Equal("https://login.example.test/tenant/v2.0", provider.Issuer);
         Assert.True(provider.Enabled);
         Assert.Equal(ExternalIdentityProtocol.OpenIdConnect, provider.Protocol);
+        Assert.True(provider.MatchesIssuer("HTTPS://LOGIN.EXAMPLE.TEST/TENANT/V2.0/"));
 
         provider.Disable(now.AddMinutes(1));
         Assert.False(provider.Enabled);
+        Assert.False(provider.MatchesIssuer(provider.Issuer));
         Assert.Equal(now.AddMinutes(1), provider.DisabledAt);
 
         provider.Enable();
         Assert.True(provider.Enabled);
         Assert.Null(provider.DisabledAt);
+    }
+
+    [Fact]
+    public void Provider_rejects_invalid_protocol_or_non_absolute_issuer()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ExternalIdentityProvider(
+            "provider",
+            "Provider",
+            (ExternalIdentityProtocol)999,
+            "https://identity.example.test",
+            "sub",
+            "groups",
+            "system.admin",
+            DateTimeOffset.UtcNow));
+
+        Assert.Throws<ArgumentException>(() => new ExternalIdentityProvider(
+            "provider",
+            "Provider",
+            ExternalIdentityProtocol.Saml2,
+            "identity.example.test",
+            "nameid",
+            "groups",
+            "system.admin",
+            DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -52,8 +79,26 @@ public sealed class ExternalIdentityMappingTests
     }
 
     [Fact]
+    public void Mapping_match_fails_closed_for_malformed_external_input()
+    {
+        var mapping = new ExternalGroupRoleMapping(
+            Guid.NewGuid(),
+            "aerolink-reviewers",
+            Guid.NewGuid(),
+            ProgramRole.Reviewer,
+            "system.admin",
+            DateTimeOffset.UtcNow);
+
+        Assert.False(mapping.Matches(Guid.Empty, "aerolink-reviewers"));
+        Assert.False(mapping.Matches(mapping.ProviderId, null));
+        Assert.False(mapping.Matches(mapping.ProviderId, ""));
+        Assert.False(mapping.Matches(mapping.ProviderId, "   "));
+    }
+
+    [Fact]
     public void Disabled_group_mapping_never_grants_authority()
     {
+        var now = DateTimeOffset.UtcNow;
         var providerId = Guid.NewGuid();
         var mapping = new ExternalGroupRoleMapping(
             providerId,
@@ -61,11 +106,13 @@ public sealed class ExternalIdentityMappingTests
             Guid.NewGuid(),
             ProgramRole.Reviewer,
             "system.admin",
-            DateTimeOffset.UtcNow);
+            now);
 
-        mapping.Disable(DateTimeOffset.UtcNow.AddMinutes(1));
+        mapping.Disable(now.AddMinutes(1));
+        mapping.Disable(now.AddMinutes(2));
 
         Assert.False(mapping.Matches(providerId, "aerolink-reviewers"));
+        Assert.Equal(now.AddMinutes(1), mapping.DisabledAt);
     }
 
     [Theory]
@@ -85,7 +132,7 @@ public sealed class ExternalIdentityMappingTests
     }
 
     [Fact]
-    public void Mapping_rejects_unscoped_provider_or_program()
+    public void Mapping_rejects_unscoped_provider_program_or_unknown_role()
     {
         Assert.Throws<ArgumentException>(() => new ExternalGroupRoleMapping(
             Guid.Empty,
@@ -102,5 +149,38 @@ public sealed class ExternalIdentityMappingTests
             ProgramRole.Engineer,
             "system.admin",
             DateTimeOffset.UtcNow));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ExternalGroupRoleMapping(
+            Guid.NewGuid(),
+            "group",
+            Guid.NewGuid(),
+            (ProgramRole)999,
+            "system.admin",
+            DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void Lifecycle_timestamps_cannot_precede_creation()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var provider = new ExternalIdentityProvider(
+            "provider",
+            "Provider",
+            ExternalIdentityProtocol.OpenIdConnect,
+            "https://identity.example.test",
+            "sub",
+            "groups",
+            "system.admin",
+            now);
+        var mapping = new ExternalGroupRoleMapping(
+            provider.Id,
+            "group",
+            Guid.NewGuid(),
+            ProgramRole.Engineer,
+            "system.admin",
+            now);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => provider.Disable(now.AddSeconds(-1)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => mapping.Disable(now.AddSeconds(-1)));
     }
 }
