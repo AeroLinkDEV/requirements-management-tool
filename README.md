@@ -1,5 +1,10 @@
 # Aerospace Development Assurance Platform
 
+> **New here — human or model? Read [PROJECT_STATE.md](PROJECT_STATE.md) first.** It records what
+> exists today, what is deliberately excluded, where delivery stands, and the known limitations. The
+> documents indexed below are durable definitions and historical records; `PROJECT_STATE.md` describes
+> the present.
+
 This repository contains the working, local/on-premises AeroLink Aerospace Development Assurance Platform and its authoritative product-definition records. AeroLink manages controlled system and software requirements, change, review, traceability, verification evidence, immutable baselines, builds, documents, and release campaigns without claiming certification or tool qualification.
 
 The production-oriented application uses React/TypeScript, ASP.NET Core, Entity Framework, and PostgreSQL. Its FMS workspace retains released version 1.5 as immutable history and version 1.6 as an explicitly user-controlled in-work successor.
@@ -22,24 +27,32 @@ The first usable vertical slice is system-level:
 
 This slice proved controlled change, immutable history, exact baselines, controlled document generation, verification evidence, and an end-to-end audit story. Implementation has now expanded through software HLRs, LLRs, SWCRs, typed traceability, and build-specific verification.
 
-## Interactive Showcase
+## The application
 
-The local [AeroLink FMS 3.3 showcase](showcase/README.md) implements the Phase 0.5 fictional walkthrough defined in [SHOWCASE_STORY_FMS_3_3.md](SHOWCASE_STORY_FMS_3_3.md). It is an interactive design-validation prototype, not production software.
+The [AeroLink product application](product/README.md) is the single software artifact in this
+repository. It provides an ASP.NET Core API, executable domain rules, PostgreSQL persistence, isolated
+SQLite tests, automated domain and browser tests, and a React application connected to live lifecycle
+data.
 
-## Real Product
-
-The [AeroLink product application](product/README.md) is separate from the original visual showcase. It currently provides an ASP.NET Core API, executable domain rules, PostgreSQL local persistence, isolated SQLite tests, automated domain and browser tests, and a React application connected to live lifecycle data.
+A separate Phase 0.5 static-data prototype under `showcase/` was retired on 2026-07-24 once the
+application surpassed it in both capability and visual maturity. See DEC-046. Its design intent
+survives in the north-star mockups under `design/mockups` and in
+[DESIGN_VISION_AND_DASHBOARDS.md](DESIGN_VISION_AND_DASHBOARDS.md); its narrative survives in
+[SHOWCASE_STORY_FMS_3_3.md](SHOWCASE_STORY_FMS_3_3.md), retained as a historical record. Live
+demonstrations use the `FMSLIVE` dataset described in
+[FMS_LIVE_SHOWCASE_DATASET.md](FMS_LIVE_SHOWCASE_DATASET.md).
 
 ## Authoritative Documents
 
 | Document | Purpose |
 | --- | --- |
+| [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
 | [Project vision](PROJECT_VISION.md) | Problem, audience, value, ambition, and success definition |
 | [Scope and boundaries](SCOPE_AND_BOUNDARIES.md) | Current, future, and excluded capabilities |
 | [Domain model and glossary](DOMAIN_MODEL_AND_GLOSSARY.md) | Shared vocabulary and lifecycle concepts |
 | [Product principles](PRODUCT_PRINCIPLES.md) | Non-negotiable behavioral rules |
 | [Design vision and dashboards](DESIGN_VISION_AND_DASHBOARDS.md) | North-star mockups, role-aware dashboards, trusted metrics, and showcase direction |
-| [FMS 3.3 showcase story](SHOWCASE_STORY_FMS_3_3.md) | Canonical fictional data and walkthrough for the interactive concept |
+| [FMS 3.3 showcase story](SHOWCASE_STORY_FMS_3_3.md) | Historical Phase 0.5 narrative; superseded for live use by the FMS live dataset |
 | [FMS live showcase dataset](FMS_LIVE_SHOWCASE_DATASET.md) | Deterministic released 1.5 lifecycle baseline and active 1.6 development program |
 | [FMS 1.6 release campaign](FMS_1_6_RELEASE_CAMPAIGN.md) | Governed change, verification, evidence, readiness, review, and release workflow |
 | [Controlled document publication standard](CONTROLLED_DOCUMENT_PUBLICATION_STANDARD.md) | Professional covers, approval provenance, front matter, body content, and rendering rules |
@@ -68,12 +81,21 @@ The [AeroLink product application](product/README.md) is separate from the origi
 - Standards references inform terminology and expected rigor but do not constitute a compliance or certification claim.
 - Source Word documents remain unmodified in the repository root for provenance during this initial consolidation.
 
-## Documentation Baseline Gate
+## Documentation baseline gate — met
 
-Phase 0 is ready to baseline when:
+Phase 0 established the product-definition baseline and is complete. Implementation began afterwards
+and has since delivered the system-level slice, the software level, and the enterprise maturity work
+described in [PROJECT_STATE.md](PROJECT_STATE.md).
+
+The gate that was met, retained because it still describes what a good documentation change looks
+like:
 
 1. Every substantive source statement is accepted, deferred, excluded, recorded as a decision or assumption, or tracked as an open question.
 2. The eight paper scenarios in [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md) have unambiguous actors, inputs, state changes, outputs, and retained history.
 3. Terminology and feature identifiers are consistent across the document set.
 4. High-impact open questions required for the first product slice are resolved.
 5. The documentation is reviewed and approved as the starting product-definition baseline.
+
+Some open questions in [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md) remain
+recorded as open. Where implementation has since answered one in practice, close it with a decision
+record rather than editing the question away.

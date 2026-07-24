@@ -145,9 +145,15 @@ Before implementation, each candidate measure must be resolved through the Trust
 
 WCAG 2.2 is the initial accessibility reference. A future design system must define exact tokens, components, interaction states, content patterns, and test methods.
 
-## Interactive Showcase: Recommended Next Step
+## Interactive Showcase — completed and retired
 
-After the Phase 0 documentation baseline is approved, build a **static but interactive concept showcase** before production architecture or application development.
+**Historical.** This section recorded the recommendation that produced the Phase 0.5 prototype. The
+prototype was built, validated the information architecture and experience, fed its visual direction
+into the product through the July 2026 usability refresh, and was retired on 2026-07-24 (DEC-046).
+
+The visual system, dashboard direction and metric expectations in the rest of this document remain
+authoritative for the product. The requirements below describe what the retired prototype had to do;
+they are not outstanding work.
 
 The showcase should:
 

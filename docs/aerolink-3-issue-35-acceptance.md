@@ -1,5 +1,8 @@
 # AeroLink 3.0 Issue #35 acceptance evidence
 
+> **Historical closure note.** Records the evidence that closed one increment. Not maintained; see
+> [PROJECT_STATE.md](../PROJECT_STATE.md) for current state.
+
 This closure note maps the implementation to Issue #35 acceptance.
 
 - Resumable ReqIF processing retains durable progress, package hash, attempts, cancellation, restart, and governed commit semantics.

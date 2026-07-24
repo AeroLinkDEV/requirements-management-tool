@@ -1,6 +1,14 @@
 # Interactive Showcase Story: FMS Software Version 3.3
 
-This is the canonical fictional story for the Phase 0.5 interactive showcase. It gives every dashboard, workflow, and traceability screen one coherent set of data.
+> **Historical record.** This was the canonical story for the Phase 0.5 prototype, which was retired on
+> 2026-07-24 (DEC-046). The live demonstration dataset is now `FMSLIVE`, described in
+> [FMS_LIVE_SHOWCASE_DATASET.md](FMS_LIVE_SHOWCASE_DATASET.md), which uses a different release
+> numbering (1.5 released, 1.6 in work) and is built through the product's real domain and persistence
+> rules. Use that document for anything current. This one is retained because it captures the workflow
+> narrative — sequential approval, approver replacement, coverage gap, blocked execution and retest —
+> that the product was built to support.
+
+This was the canonical fictional story for the Phase 0.5 interactive showcase. It gave every dashboard, workflow, and traceability screen one coherent set of data.
 
 The story is representative and fictional. It must not contain customer, proprietary, export-controlled, or real program data.
 

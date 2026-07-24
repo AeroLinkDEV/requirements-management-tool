@@ -2,6 +2,11 @@
 
 Status: delivered and validated on 2026-07-13.
 
+> **Historical snapshot.** This records the visual refresh of the **product application** — it is not
+> about the retired `showcase/` prototype, despite the name. "Showcase-critical surfaces" here means the
+> product screens used in demonstrations. The design system it introduced is still in force; the test
+> counts and validation results were true on that date and are not maintained.
+
 ## Outcome
 
 AeroLink now presents its existing lifecycle depth with a readable visual hierarchy instead of treating maximum information density as the default. The refresh changes presentation and navigation without weakening controlled workflows, immutable history, authority checks, or artifact provenance.

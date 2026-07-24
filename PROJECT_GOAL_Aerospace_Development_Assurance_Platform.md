@@ -48,6 +48,13 @@ Plans and standards management, software architecture/code management, automated
 
 ## Current Phase
 
-The project is in documentation and domain validation. No application code, technical architecture, database schema, or UI design should begin until the foundational documents and high-impact open questions have been reviewed and baselined.
+The documentation and domain-validation phase this section originally described is complete, and the
+gate it imposed — that no application code, architecture, schema, or UI design begin until the
+foundational documents were baselined — was satisfied before implementation started.
 
-Start with [README.md](README.md), then review [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md), [FEATURE_CATALOG.md](FEATURE_CATALOG.md), and [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md).
+AeroLink is now a working application. The first system-level slice is proven, the software level and
+enterprise maturity work have followed, and delivery is tracked as the AeroLink 3.0 program.
+
+For the current state, read [PROJECT_STATE.md](PROJECT_STATE.md). The goal, first slice, product
+direction, and core rules stated above remain the authoritative statement of intent and have not
+changed.

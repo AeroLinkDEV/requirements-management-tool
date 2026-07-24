@@ -1,6 +1,11 @@
 # AeroLink Product
 
-This directory contains the real application foundation. The visual showcase remains separate under `showcase/` and acts as design inspiration; data shown here comes from the actual API and persistence layer.
+This directory contains the application — the only software artifact in the repository. All data shown
+comes from the actual API and persistence layer. The former `showcase/` prototype was retired on
+2026-07-24 (DEC-046); design reference now lives in `design/mockups` and
+[DESIGN_VISION_AND_DASHBOARDS.md](../DESIGN_VISION_AND_DASHBOARDS.md).
+
+For project-wide orientation, start at [PROJECT_STATE.md](../PROJECT_STATE.md).
 
 ## Current vertical slice
 

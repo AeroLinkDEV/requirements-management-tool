@@ -4,9 +4,9 @@
 
 Capabilities are divided into four categories: Phase 0 documentation, the first system-level product slice, later product capabilities, and explicit near-term exclusions. A later capability is not implicitly authorized for the first slice.
 
-## Phase 0: Current Work
+## Phase 0: Complete
 
-The current deliverable is a reviewed, internally consistent Markdown product-definition baseline covering:
+Phase 0 delivered a reviewed, internally consistent Markdown product-definition baseline covering:
 
 - vision and outcomes;
 - scope and exclusions;
@@ -16,11 +16,15 @@ The current deliverable is a reviewed, internally consistent Markdown product-de
 - accepted decisions, assumptions, and open questions; and
 - traceability back to the supplied source documents.
 
-Phase 0 contains no application code, database schema, user-interface design, or technology-stack decision.
+Phase 0 itself contained no application code, database schema, user-interface design, or
+technology-stack decision. Those followed after the baseline was approved, and the stack is now
+recorded in [product/docs/ARCHITECTURE.md](product/docs/ARCHITECTURE.md).
 
-## First Product Slice: System Level
+## First Product Slice: System Level — delivered
 
-The first usable slice includes:
+This slice is implemented and proven end to end; implementation has since extended through the
+software level and the enterprise maturity program. The list below remains the definition of the
+slice's scope. It included:
 
 - multiple programs and program-scoped access;
 - stable, globally unique system requirement identities and immutable revision history;
@@ -42,7 +46,14 @@ Automated execution of tests is outside this slice. Tests run in external enviro
 
 ## Later Product Capabilities
 
-The planned product direction preserves space for:
+Several entries below have since been delivered — software HLRs and LLRs, SWCRs and SWRD generation,
+software verification artifacts, deeper release and configuration management, and external
+integrations. Enterprise identity integration is partially delivered with its remainder formally
+deferred (see the Workstream 4 decision record in
+[AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md)).
+Current status always lives in [PROJECT_STATE.md](PROJECT_STATE.md), not here.
+
+The planned product direction preserved space for:
 
 - software HLRs and LLRs, including derived requirements;
 - SWCRs and controlled SWRD generation;

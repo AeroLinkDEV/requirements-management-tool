@@ -1,5 +1,11 @@
 # Massive Enterprise Update Report
 
+> **Historical snapshot — 2026-07-13.** This records one delivery increment and the evidence that
+> closed it. Test counts, backup hashes, migration numbers and "next increment" statements were true on
+> that date and are not maintained. For current state read [PROJECT_STATE.md](PROJECT_STATE.md); for
+> current delivery status read
+> [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md).
+
 ## Executive summary
 
 The 2026-07-13 update advances AeroLink from a broad working prototype to a safer enterprise control foundation. The implemented vertical slice concentrates on the highest-risk gaps: durable artifact navigation, server-enforced exclusive SCR/SWCR editing and recovery, Program-scope security, isolated tests, safe schema evolution, and provable backup/restore operations. Existing PostgreSQL data and FMS history were preserved; FMS 1.5 remains released and immutable, while 1.6 remains derived from 1.5 and intentionally in work.

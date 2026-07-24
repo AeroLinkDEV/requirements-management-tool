@@ -127,10 +127,12 @@ Future entries use:
 ### DEC-014 - Interactive Showcase Before Production Implementation
 
 - **Date:** 2026-07-11
-- **Status:** Accepted
+- **Status:** Accepted; fulfilled and superseded by DEC-046 on 2026-07-24
 - **Decision:** After the documentation baseline, create a static-data interactive web showcase of the end-to-end experience before production application architecture and implementation.
 - **Rationale:** A realistic show-and-tell experience will validate desirability, terminology, information architecture, dashboard priorities, and workflow comprehension at far lower cost than production code.
 - **Consequences:** The showcase must be labeled as a concept and must not imply production authentication, workflow enforcement, audit integrity, compliance, data persistence, integration, or deployment readiness.
+- **Superseded by:** DEC-046. The showcase was built, served its validation purpose, and was retired
+  once the product surpassed it. The sequencing this decision required was followed.
 
 ### DEC-015 - System Engineer and Manager Are the Initial Primary Users
 
@@ -373,6 +375,27 @@ Future entries use:
 - **Decision:** Backup verification checks the archive sidecar, safe entry paths, manifest paths, sizes, and SHA-256 values. Automated restore exercises target only explicitly named validation databases and isolated evidence storage. Production restore requires a separate elevated switch and exact confirmation phrase and creates a pre-restore backup.
 - **Rationale:** Recovery tooling is valuable only when testable without risking the authoritative PostgreSQL database or evidence store.
 - **Consequences:** Production recovery is an attended operator action. A successful archive check alone does not replace periodic isolated restore drills and post-restore health validation.
+
+### DEC-046 - The Concept Showcase Is Retired; One Product Remains
+
+- **Date:** 2026-07-24
+- **Status:** Accepted
+- **Decision:** Delete the `showcase/` Phase 0.5 static-data prototype. The product application is the
+  single software artifact and the only thing demonstrated to stakeholders.
+- **Rationale:** The prototype had served its purpose. It was a single-file click-through over
+  hardcoded arrays, and the product had surpassed it in both capability and visual maturity — the July
+  2026 usability refresh had already carried its design direction into the real application. Keeping a
+  second, better-looking but entirely fictional artifact created a standing risk of demonstrating the
+  wrong one, and split effort across two front ends.
+- **Consequences:** Phase 0.5 is closed. Demonstrations use the application with the `FMSLIVE` dataset,
+  which exercises real domain and persistence rules rather than mock data. The prototype's design
+  intent survives in `design/mockups` and
+  [DESIGN_VISION_AND_DASHBOARDS.md](DESIGN_VISION_AND_DASHBOARDS.md); its narrative survives in
+  [SHOWCASE_STORY_FMS_3_3.md](SHOWCASE_STORY_FMS_3_3.md), retained as a historical record. Feature
+  SHOW-001 is closed as delivered and retired. Any future design exploration extends the product or
+  the mockups rather than reviving a parallel application.
+- **Supersedes:** DEC-014, which required an interactive showcase before production implementation.
+  That sequencing was followed and is complete.
 
 ## Working Assumptions
 

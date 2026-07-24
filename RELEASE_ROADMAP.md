@@ -2,6 +2,23 @@
 
 This roadmap is capability-driven, not calendar-driven. Each phase ends with evidence that its behavior works before the next phase broadens scope.
 
+## Phase status at a glance
+
+| Phase | Status |
+| --- | --- |
+| 0 — Documentation and domain validation | Complete |
+| 0.5 — Interactive concept showcase | Complete; the prototype was retired on 2026-07-24 (DEC-046) |
+| 1 — Platform skeleton and system-requirement control | Complete |
+| 2 — SCRs, review, baselines, and SYSRD | Complete |
+| 3 — System verification and traceability | Complete |
+| 4 — Software-level lifecycle | Delivered: HLRs, LLRs, SWCRs, SWRDs, and software verification are implemented |
+| 5 — PR management and integrations | Partially delivered; problem-report lifecycle is in progress |
+| Enterprise maturity program | In progress as AeroLink 3.0 — see the workstream scorecard |
+
+The phase goals and exit evidence below are retained as the definition of what each phase had to
+prove. Live status is in [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md)
+and [PROJECT_STATE.md](PROJECT_STATE.md); this roadmap is not the status record.
+
 ## Phase 0: Documentation and Domain Validation
 
 **Goal:** Establish an agreed product-definition baseline.
@@ -22,6 +39,11 @@ Exit criteria:
 - stakeholders approve the documentation baseline.
 
 ## Phase 0.5: Interactive Concept Showcase
+
+**Complete.** The static-data prototype validated the information architecture and experience, and its
+findings were absorbed into the product — including the July 2026 usability refresh that carried its
+visual direction into the real application. The prototype was retired on 2026-07-24 (DEC-046) once the
+product exceeded it. Demonstrations now use the application with the `FMSLIVE` dataset.
 
 **Goal:** Validate the information architecture, terminology, dashboard measures, and end-to-end experience before production technical design.
 
@@ -123,7 +145,10 @@ The market benchmark in [ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md](ENTERP
 4. **Enterprise Operations and Identity Federation:** OIDC/SAML, SCIM, backup/restore, observability, retention, audit export, secure upgrades, and performance qualification.
 5. **Risk, Compliance, and Portfolio Intelligence:** configurable risk/hazard/compliance artifacts and cross-program intelligence after subject-matter validation.
 
-The Enterprise Requirements Workspace is the next recommended massive implementation. It turns the existing assurance-control core into a high-throughput daily engineering environment and establishes the model needed for later interchange, reuse, configuration, and reporting.
+The Enterprise Requirements Workspace was recommended as the next implementation at the time of that
+benchmark, and has since been delivered along with the Open Digital Thread and much of the product-line
+configuration work. The current program and its per-workstream status are in
+[AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md).
 
 ## Phase 5: PR Management and Integrations
 
@@ -133,12 +158,21 @@ PR scope will include classification, effects, investigation, resolution, verifi
 
 ## Post-MVP Identity and Account Hardening Backlog
 
-These controls remain committed follow-up work, but they do not displace the current showcase and usability priority:
+Status as of 2026-07-24. The deferred items are deferred **by decision**, not merely unscheduled — see
+the Workstream 4 decision record in
+[AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md) for the
+reason, the trigger to resume, and the order to resume in.
 
-- [ ] require temporary-password rotation at first sign-in and support configurable password-expiration policy;
-- [ ] add secure self-service account recovery with short-lived, single-use tokens, rate limiting, revocation, and complete audit history;
-- [ ] add multi-factor authentication, recovery codes, and step-up authentication for privileged actions; and
-- [ ] add enterprise identity federation and provisioning through OIDC/SAML and SCIM while retaining a tightly controlled break-glass administrator path.
+- [x] require temporary-password rotation at first sign-in — **delivered**; rotation is enforced before
+      workspace access. Configurable password expiration is **deferred**;
+- [ ] secure self-service account recovery with short-lived, single-use tokens, rate limiting,
+      revocation, and complete audit history — **deferred**; also blocked on an email transport the
+      product does not yet have;
+- [x] multi-factor authentication and recovery codes — **delivered**, with encrypted secrets and
+      downgrade protection. Step-up authentication for privileged actions is **deferred**; and
+- [ ] enterprise identity federation and provisioning through OIDC/SAML and SCIM with a break-glass
+      administrator path — **deferred**. The trusted group-to-Program-role mapping that federation will
+      consume is delivered, persisted and audited.
 
 ## Future: Optional AI Assistance
 
