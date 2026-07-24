@@ -4,6 +4,152 @@ namespace AeroLink.Domain.Identity;
 
 public enum AccountState { Active, Disabled, Locked }
 public enum ProgramRole { Engineer, Reviewer, Approver, ConfigurationManager, TestEngineer, ProgramManager, Administrator }
+public enum ExternalIdentityProtocol { OpenIdConnect, Saml2 }
+
+public sealed class ExternalIdentityProvider
+{
+    private ExternalIdentityProvider() { }
+
+    public ExternalIdentityProvider(
+        string key,
+        string displayName,
+        ExternalIdentityProtocol protocol,
+        string issuer,
+        string subjectClaim,
+        string groupClaim,
+        string createdBy,
+        DateTimeOffset now)
+    {
+        if (!Enum.IsDefined(protocol)) throw new ArgumentOutOfRangeException(nameof(protocol));
+
+        Id = Guid.NewGuid();
+        Key = NormalizeKey(key);
+        DisplayName = Required(displayName, nameof(displayName));
+        Protocol = protocol;
+        Issuer = NormalizeIssuer(issuer);
+        SubjectClaim = Required(subjectClaim, nameof(subjectClaim));
+        GroupClaim = Required(groupClaim, nameof(groupClaim));
+        CreatedBy = Required(createdBy, nameof(createdBy));
+        CreatedAt = now;
+        Enabled = true;
+    }
+
+    public Guid Id { get; private set; }
+    public string Key { get; private set; } = "";
+    public string DisplayName { get; private set; } = "";
+    public ExternalIdentityProtocol Protocol { get; private set; }
+    public string Issuer { get; private set; } = "";
+    public string SubjectClaim { get; private set; } = "";
+    public string GroupClaim { get; private set; } = "";
+    public bool Enabled { get; private set; }
+    public string CreatedBy { get; private set; } = "";
+    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset? DisabledAt { get; private set; }
+
+    public bool MatchesIssuer(string? issuer)
+    {
+        if (!Enabled || string.IsNullOrWhiteSpace(issuer)) return false;
+        return string.Equals(Issuer, issuer.Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void Disable(DateTimeOffset now)
+    {
+        if (now < CreatedAt) throw new ArgumentOutOfRangeException(nameof(now));
+        if (!Enabled) return;
+        Enabled = false;
+        DisabledAt = now;
+    }
+
+    public void Enable()
+    {
+        Enabled = true;
+        DisabledAt = null;
+    }
+
+    private static string NormalizeKey(string value) => Required(value, nameof(value)).ToLowerInvariant();
+
+    private static string NormalizeIssuer(string value)
+    {
+        var normalized = Required(value, nameof(value)).TrimEnd('/');
+        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        {
+            throw new ArgumentException("issuer must be an absolute HTTP or HTTPS URI.", nameof(value));
+        }
+
+        return normalized;
+    }
+
+    private static string Required(string value, string name) =>
+        string.IsNullOrWhiteSpace(value)
+            ? throw new ArgumentException($"{name} is required.")
+            : value.Trim();
+}
+
+public sealed class ExternalGroupRoleMapping
+{
+    private ExternalGroupRoleMapping() { }
+
+    public ExternalGroupRoleMapping(
+        Guid providerId,
+        string externalGroup,
+        Guid programId,
+        ProgramRole role,
+        string createdBy,
+        DateTimeOffset now)
+    {
+        if (providerId == Guid.Empty) throw new ArgumentException("providerId is required.", nameof(providerId));
+        if (programId == Guid.Empty) throw new ArgumentException("programId is required.", nameof(programId));
+        if (!Enum.IsDefined(role)) throw new ArgumentOutOfRangeException(nameof(role));
+
+        Id = Guid.NewGuid();
+        ProviderId = providerId;
+        ExternalGroup = NormalizeGroup(externalGroup);
+        ProgramId = programId;
+        Role = role;
+        CreatedBy = Required(createdBy, nameof(createdBy));
+        CreatedAt = now;
+        Enabled = true;
+    }
+
+    public Guid Id { get; private set; }
+    public Guid ProviderId { get; private set; }
+    public string ExternalGroup { get; private set; } = "";
+    public Guid ProgramId { get; private set; }
+    public ProgramRole Role { get; private set; }
+    public bool Enabled { get; private set; }
+    public string CreatedBy { get; private set; } = "";
+    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset? DisabledAt { get; private set; }
+
+    public bool Matches(Guid providerId, string? externalGroup)
+    {
+        if (!Enabled || providerId == Guid.Empty || string.IsNullOrWhiteSpace(externalGroup)) return false;
+        return ProviderId == providerId &&
+               string.Equals(ExternalGroup, externalGroup.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void Disable(DateTimeOffset now)
+    {
+        if (now < CreatedAt) throw new ArgumentOutOfRangeException(nameof(now));
+        if (!Enabled) return;
+        Enabled = false;
+        DisabledAt = now;
+    }
+
+    public void Enable()
+    {
+        Enabled = true;
+        DisabledAt = null;
+    }
+
+    private static string NormalizeGroup(string value) => Required(value, nameof(value)).ToLowerInvariant();
+
+    private static string Required(string value, string name) =>
+        string.IsNullOrWhiteSpace(value)
+            ? throw new ArgumentException($"{name} is required.")
+            : value.Trim();
+}
 
 public sealed class UserAccount
 {
