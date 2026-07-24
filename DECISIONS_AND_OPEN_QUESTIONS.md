@@ -397,6 +397,25 @@ Future entries use:
 - **Supersedes:** DEC-014, which required an interactive showcase before production implementation.
   That sequencing was followed and is complete.
 
+### DEC-047 - The Client Has No External Runtime Dependency
+
+- **Date:** 2026-07-24
+- **Status:** Accepted
+- **Decision:** The web client must not request any resource from outside its own origin at runtime.
+  Fonts, styles, scripts, and assets are served by the AeroLink installation. The two typefaces are
+  self-hosted through versioned packages rather than fetched from a public font CDN.
+- **Rationale:** AeroLink is on-premises software that must run on restricted and disconnected
+  networks. The previous CDN font import was render-blocking: measured on 2026-07-24, first paint took
+  12,994 ms when the request hung — the normal behaviour of a firewall that drops packets rather than
+  rejecting them — against 147 ms when it failed immediately. A dependency that is invisible on a good
+  network and disabling on a customer's network is not acceptable in this product. An outbound call to
+  a third party from a controlled engineering tool is also an egress that a security review would
+  reasonably challenge.
+- **Consequences:** The client starts and renders correctly with all external requests blocked, which
+  is verified behaviour and should be retained as a check. Typography is unchanged; DM Sans and Manrope
+  are SIL Open Font License 1.1 and redistributable, with licences shipped in the packages. Adding any
+  CDN-hosted asset in future requires a superseding decision.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

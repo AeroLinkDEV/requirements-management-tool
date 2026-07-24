@@ -134,13 +134,10 @@ Understating these is a product-integrity failure, not a marketing choice.
   security review remain organization-specific work. See
   [SECURITY_AND_IDENTITY_MODEL.md](SECURITY_AND_IDENTITY_MODEL.md).
 - **Demonstration credentials are non-production** and must be replaced before any operational use.
-- **The client fetches its two webfonts from Google's CDN** (`product/client/src/index.css`, line 1).
-  This is render-blocking: if the request hangs rather than failing fast — common on restricted
-  corporate networks — the application shows a blank screen for roughly thirteen seconds on every
-  load. Measured 2026-07-24: 12,994 ms when the request hangs versus 147 ms when it fails immediately.
-  It is also the product's only external runtime dependency, which contradicts the on-premises and
-  offline-operation posture. Fixing this means vendoring the fonts locally or moving to a system font
-  stack.
+The client has **no external runtime dependency**: it makes no network request outside its own origin,
+and has been verified to start with all external requests blocked. Keep it that way — a CDN reference
+in the client contradicts the on-premises posture and, as the resolved case below showed, can block
+first paint for seconds on a restricted network. See DEC-047.
 
 ## How to run it
 
@@ -191,3 +188,8 @@ reason the document set can be trusted.
   schema from the model rather than from migrations.
 - **Prefer deferring honestly over building speculatively.** Workstream 4's remainder was deferred
   because nothing in it had a real user yet. Recording that is better than a silent backlog.
+- **An on-premises product must be measured on a hostile network, not a good one.** The client fetched
+  its webfonts from a public CDN. On a fast connection this was invisible; when the request hung rather
+  than failing fast — the normal behaviour of a firewall that drops packets instead of rejecting them —
+  first paint took 12,994 ms instead of 147 ms. Fixed by self-hosting (DEC-047). Before shipping
+  anything that loads a resource, ask what happens when that resource is unreachable *slowly*.

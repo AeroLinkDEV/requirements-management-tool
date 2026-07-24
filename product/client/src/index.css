@@ -1,4 +1,15 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700&display=swap');
+/* Typefaces are self-hosted. AeroLink is an on-premises product and must render identically on a
+   restricted or disconnected network. Fetching these from a public CDN previously blocked first paint
+   for about thirteen seconds whenever the request hung rather than failing fast, which is the normal
+   behaviour of a firewall that drops packets instead of rejecting them.
+   DM Sans and Manrope are both SIL Open Font License 1.1; licences ship inside the packages. */
+@import '@fontsource/dm-sans/400.css';
+@import '@fontsource/dm-sans/500.css';
+@import '@fontsource/dm-sans/600.css';
+@import '@fontsource/dm-sans/700.css';
+@import '@fontsource/manrope/500.css';
+@import '@fontsource/manrope/600.css';
+@import '@fontsource/manrope/700.css';
 
 :root {
   font-family: 'DM Sans', sans-serif;
