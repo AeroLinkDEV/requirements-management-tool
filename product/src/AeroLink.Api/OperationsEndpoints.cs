@@ -19,6 +19,7 @@ public static class OperationsEndpoints
         group.MapPost("/upgrade-evidence",RecordUpgradeEvidenceAsync);
         group.MapPost("/alerts",OpenAlertAsync);
         group.MapPost("/alerts/{id:guid}/resolve",ResolveAlertAsync);
+        app.MapAeroLinkExternalIdentityAdminEndpoints();
         return app;
     }
 
