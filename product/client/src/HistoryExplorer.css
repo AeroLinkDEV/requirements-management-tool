@@ -211,10 +211,10 @@
   text-align: center;
   overflow-wrap: anywhere;
 }
-.historyState.selectedforbaseline,
-.historyState.inreview { font-size: 0; }
-.historyState.selectedforbaseline::after { content: "Baseline selected"; font-size: 11px; }
-.historyState.inreview::after { content: "In review"; font-size: 11px; }
+/* The readable label is rendered as real text by HistoryExplorer, not injected through a pseudo-element
+   over font-size:0 raw text. That older approach left the unreadable lifecycle enum in the accessibility
+   tree and produced text below the readable minimum. The exact state remains available to tests and
+   tooling through the data-state attribute. */
 
 .historyState.approved,
 .historyState.selectedforbaseline {

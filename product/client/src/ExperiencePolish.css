@@ -94,7 +94,8 @@ html[data-motion="reduced"] *::after { scroll-behavior: auto !important; transit
 @keyframes skeletonSweep { to { transform: translateX(100%); } }
 
 .personMeta { display: inline-flex; align-items: center; gap: 6px; }
-.personMeta > i { width: 22px; height: 22px; display: inline-grid; place-items: center; border-radius: 50%; background: #dceeea; color: #256d65; font-size: 9px; font-style: normal; font-weight: 800; }
+/* Initials sit at the readable minimum rather than 9px; the circle grows to keep two characters centred. */
+.personMeta > i { width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: 50%; background: #dceeea; color: #256d65; font-size: 12px; font-style: normal; font-weight: 800; }
 .reqHeaderActions .activeAuthor { display: grid; grid-template-columns: 34px minmax(0,auto); align-items: center; gap: 8px; min-width: 158px; margin: 0; text-align: left; }
 .reqHeaderActions .activeAuthor > i { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: #dceeea; color: #256d65; font-size: 11px; font-style: normal; font-weight: 800; }
 .reqHeaderActions .activeAuthor > span { display: flex; flex-direction: column; min-width: 0; }

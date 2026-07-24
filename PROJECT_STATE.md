@@ -188,6 +188,12 @@ reason the document set can be trusted.
   schema from the model rather than from migrations.
 - **Prefer deferring honestly over building speculatively.** Workstream 4's remainder was deferred
   because nothing in it had a real user yet. Recording that is better than a silent backlog.
+- **A test can pass by racing past the thing it checks.** The readability journey asserted that no text
+  on the change-request surface renders below 12px, and it passed for months while the page in fact
+  rendered 9px initials and an 11px lifecycle chip — it sampled the page before those rows appeared.
+  Making the client faster removed the race and the assertion started failing, correctly. When a test
+  starts failing after an unrelated performance change, suspect the test was never really exercising
+  its subject.
 - **An on-premises product must be measured on a hostile network, not a good one.** The client fetched
   its webfonts from a public CDN. On a fast connection this was invisible; when the request hung rather
   than failing fast — the normal behaviour of a firewall that drops packets instead of rejecting them —

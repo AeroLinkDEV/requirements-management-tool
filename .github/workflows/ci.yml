@@ -293,8 +293,12 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"key":"ci-entra-two","displayName":"CI Duplicate","protocol":"OpenIdConnect","issuer":"HTTPS://LOGIN.CI.EXAMPLE:443/tenant","subjectClaim":"sub","groupClaim":"groups"}')
           test "$conflict" = "409" || { echo "expected 409 for a duplicate trust anchor, got $conflict"; exit 1; }
-          program_id=$(psql -h 127.0.0.1 -U aerolink -d aerolink_ci -tAc \
-            "insert into programs (\"Id\",\"Name\",\"Code\") values (gen_random_uuid(),'CI Program','CIP') returning \"Id\";")
+          # -q suppresses the "INSERT 0 1" command tag, which would otherwise be captured alongside the
+          # returned identifier and produce a malformed request body. head -n1 keeps that true regardless
+          # of psql client version.
+          program_id=$(psql -h 127.0.0.1 -U aerolink -d aerolink_ci -qtAc \
+            "insert into programs (\"Id\",\"Name\",\"Code\") values (gen_random_uuid(),'CI Program','CIP') returning \"Id\";" \
+            | head -n1)
           curl -fsS -b cookies.txt -X POST http://127.0.0.1:5080/api/admin/external-identity/mappings \
             -H 'Content-Type: application/json' \
             -d "{\"providerId\":\"$provider_id\",\"externalGroup\":\"CI-Approvers\",\"programId\":\"$program_id\",\"role\":\"Approver\"}" \
@@ -308,7 +312,7 @@ jobs:
             -H 'Content-Type: application/json' \
             -d "{\"providerId\":\"$provider_id\",\"issuer\":\"https://login.ci.example.attacker.test/tenant\",\"externalGroups\":[\"CI-APPROVERS\"],\"programId\":\"$program_id\"}" \
             | jq -e '.roles == []'
-          psql -h 127.0.0.1 -U aerolink -d aerolink_ci -tAc \
+          psql -h 127.0.0.1 -U aerolink -d aerolink_ci -qtAc \
             "select count(*) from security_audit_events where \"EventType\" like 'External%' and \"Outcome\" = 'Success';" \
             | { read -r count; test "$count" -ge 3 || { echo "expected identity audit evidence, found $count"; exit 1; }; }
       - name: Upload PostgreSQL startup diagnostics
