@@ -37,6 +37,7 @@ public static class DependencyInjection
         services.AddScoped<ReleaseExecutionService>();
         services.AddScoped<IdentityService>();
         services.AddScoped<IdentitySeeder>();
+        services.AddScoped<ExternalIdentityAdministrationService>();
         services.AddScoped<EnterpriseRequirementsService>();
         services.AddScoped<IControlledEditingAdapter, SystemChangeRequestControlledEditingAdapter>();
         services.AddScoped<IControlledEditingAdapter, RequirementProposalControlledEditingAdapter>();
