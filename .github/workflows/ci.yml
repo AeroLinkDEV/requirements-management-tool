@@ -247,7 +247,7 @@ jobs:
         run: |
           dotnet restore product/AeroLink.slnx
           dotnet build product/AeroLink.slnx --configuration Release --no-restore
-      - name: Apply migrations and prove first-install identity path
+      - name: Apply migrations and prove first-install and identity administration paths
         env:
           ASPNETCORE_ENVIRONMENT: Production
           Database__Provider: PostgreSql
@@ -256,6 +256,7 @@ jobs:
           Identity__SeedDemoAccounts: "false"
           Identity__CookieSecure: "false"
           Identity__BootstrapSecret: ci-only-bootstrap-secret-0123456789-abcdef
+          PGPASSWORD: ci-only-password
         run: |
           set -euo pipefail
           dotnet run --project product/src/AeroLink.Api --configuration Release --no-build --no-launch-profile --urls http://127.0.0.1:5080 > postgres-api.log 2>&1 &
@@ -277,6 +278,39 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"userName":"admin","password":"CiOnly!Administrator2026"}' | jq -e '.userName == "admin" and .isAdministrator == true'
           curl -fsS -b cookies.txt http://127.0.0.1:5080/api/auth/me | jq -e '.userName == "admin" and .isAdministrator == true'
+
+          # A migration that Entity Framework never discovers still leaves a green boot and login, so the
+          # tables each migration is responsible for creating are exercised through the API here.
+          curl -fsS -b cookies.txt -X POST http://127.0.0.1:5080/api/admin/external-identity/providers \
+            -H 'Content-Type: application/json' \
+            -d '{"key":"ci-entra","displayName":"CI Entra","protocol":"OpenIdConnect","issuer":"https://Login.CI.Example/tenant/","subjectClaim":"sub","groupClaim":"groups"}' \
+            > provider.json
+          jq -e '.enabled == true and .issuer == "https://login.ci.example/tenant"' provider.json
+          provider_id=$(jq -er '.id' provider.json)
+          curl -fsS -b cookies.txt http://127.0.0.1:5080/api/admin/external-identity/providers | jq -e 'length == 1'
+          # The same trust anchor in an equivalent form must be refused by the unique issuer index.
+          conflict=$(curl -s -o /dev/null -w '%{http_code}' -b cookies.txt -X POST http://127.0.0.1:5080/api/admin/external-identity/providers \
+            -H 'Content-Type: application/json' \
+            -d '{"key":"ci-entra-two","displayName":"CI Duplicate","protocol":"OpenIdConnect","issuer":"HTTPS://LOGIN.CI.EXAMPLE:443/tenant","subjectClaim":"sub","groupClaim":"groups"}')
+          test "$conflict" = "409" || { echo "expected 409 for a duplicate trust anchor, got $conflict"; exit 1; }
+          program_id=$(psql -h 127.0.0.1 -U aerolink -d aerolink_ci -tAc \
+            "insert into programs (\"Id\",\"Name\",\"Code\") values (gen_random_uuid(),'CI Program','CIP') returning \"Id\";")
+          curl -fsS -b cookies.txt -X POST http://127.0.0.1:5080/api/admin/external-identity/mappings \
+            -H 'Content-Type: application/json' \
+            -d "{\"providerId\":\"$provider_id\",\"externalGroup\":\"CI-Approvers\",\"programId\":\"$program_id\",\"role\":\"Approver\"}" \
+            | jq -e '.externalGroup == "ci-approvers"'
+          curl -fsS -b cookies.txt -X POST http://127.0.0.1:5080/api/admin/external-identity/resolve \
+            -H 'Content-Type: application/json' \
+            -d "{\"providerId\":\"$provider_id\",\"issuer\":\"https://login.ci.example/tenant\",\"externalGroups\":[\"CI-APPROVERS\"],\"programId\":\"$program_id\"}" \
+            | jq -e '.roles == ["Approver"]'
+          # Fail-closed: a look-alike issuer grants nothing.
+          curl -fsS -b cookies.txt -X POST http://127.0.0.1:5080/api/admin/external-identity/resolve \
+            -H 'Content-Type: application/json' \
+            -d "{\"providerId\":\"$provider_id\",\"issuer\":\"https://login.ci.example.attacker.test/tenant\",\"externalGroups\":[\"CI-APPROVERS\"],\"programId\":\"$program_id\"}" \
+            | jq -e '.roles == []'
+          psql -h 127.0.0.1 -U aerolink -d aerolink_ci -tAc \
+            "select count(*) from security_audit_events where \"EventType\" like 'External%' and \"Outcome\" = 'Success';" \
+            | { read -r count; test "$count" -ge 3 || { echo "expected identity audit evidence, found $count"; exit 1; }; }
       - name: Upload PostgreSQL startup diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -23,16 +23,24 @@ public sealed class ExternalIdentityProvider
         if (!Enum.IsDefined(protocol)) throw new ArgumentOutOfRangeException(nameof(protocol));
 
         Id = Guid.NewGuid();
-        Key = NormalizeKey(key);
-        DisplayName = Required(displayName, nameof(displayName));
+        Key = NormalizeKey(key, nameof(key));
+        DisplayName = Bounded(displayName, DisplayNameMaxLength, nameof(displayName));
         Protocol = protocol;
-        Issuer = NormalizeIssuer(issuer);
-        SubjectClaim = Required(subjectClaim, nameof(subjectClaim));
-        GroupClaim = Required(groupClaim, nameof(groupClaim));
-        CreatedBy = Required(createdBy, nameof(createdBy));
+        Issuer = NormalizeIssuer(issuer, nameof(issuer));
+        SubjectClaim = Bounded(subjectClaim, ClaimMaxLength, nameof(subjectClaim));
+        GroupClaim = Bounded(groupClaim, ClaimMaxLength, nameof(groupClaim));
+        CreatedBy = Bounded(createdBy, ActorMaxLength, nameof(createdBy));
         CreatedAt = now;
         Enabled = true;
     }
+
+    public const int KeyMaxLength = 100;
+    public const int DisplayNameMaxLength = 200;
+    // Bounded well below the PostgreSQL btree key limit so the unique issuer index cannot fail at
+    // insert time on a multi-byte value. Real issuer identifiers are an order of magnitude shorter.
+    public const int IssuerMaxLength = 512;
+    public const int ClaimMaxLength = 100;
+    public const int ActorMaxLength = 100;
 
     public Guid Id { get; private set; }
     public string Key { get; private set; } = "";
@@ -46,10 +54,16 @@ public sealed class ExternalIdentityProvider
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? DisabledAt { get; private set; }
 
+    /// <summary>
+    /// Determines whether a presented issuer identifies this enabled provider. The presented value is
+    /// canonicalized exactly as the stored anchor was, then compared ordinally: scheme, host and default
+    /// port are case- and form-insensitive per RFC 3986, and the path is case-sensitive. This is the only
+    /// issuer comparison in the product so that configuration and authentication cannot diverge.
+    /// </summary>
     public bool MatchesIssuer(string? issuer)
     {
         if (!Enabled || string.IsNullOrWhiteSpace(issuer)) return false;
-        return string.Equals(Issuer, issuer.Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+        return TryNormalizeIssuer(issuer, out var candidate) && string.Equals(Issuer, candidate, StringComparison.Ordinal);
     }
 
     public void Disable(DateTimeOffset now)
@@ -66,18 +80,40 @@ public sealed class ExternalIdentityProvider
         DisabledAt = null;
     }
 
-    private static string NormalizeKey(string value) => Required(value, nameof(value)).ToLowerInvariant();
+    private static string NormalizeKey(string value, string name) => Bounded(value, KeyMaxLength, name).ToLowerInvariant();
 
-    private static string NormalizeIssuer(string value)
+    private static string NormalizeIssuer(string value, string name)
     {
-        var normalized = Required(value, nameof(value)).TrimEnd('/');
-        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
-        {
-            throw new ArgumentException("issuer must be an absolute HTTP or HTTPS URI.", nameof(value));
-        }
-
+        var trimmed = Required(value, name);
+        if (!TryNormalizeIssuer(trimmed, out var normalized))
+            throw new ArgumentException($"{name} must be an absolute HTTP or HTTPS URI without query or fragment.", name);
+        if (normalized.Length > IssuerMaxLength)
+            throw new ArgumentException($"{name} must be {IssuerMaxLength} characters or fewer.", name);
         return normalized;
+    }
+
+    /// <summary>
+    /// Canonicalizes a trust anchor to scheme, lower-cased host, non-default port and path, with any
+    /// trailing separator removed. Query and fragment are rejected because an issuer identifier carries
+    /// neither.
+    /// </summary>
+    public static bool TryNormalizeIssuer(string? value, out string normalized)
+    {
+        normalized = "";
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) return false;
+        if (!string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment)) return false;
+        normalized = uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        return normalized.Length > 0;
+    }
+
+    private static string Bounded(string value, int maxLength, string name)
+    {
+        var required = Required(value, name);
+        return required.Length > maxLength
+            ? throw new ArgumentException($"{name} must be {maxLength} characters or fewer.", name)
+            : required;
     }
 
     private static string Required(string value, string name) =>
@@ -104,13 +140,16 @@ public sealed class ExternalGroupRoleMapping
 
         Id = Guid.NewGuid();
         ProviderId = providerId;
-        ExternalGroup = NormalizeGroup(externalGroup);
+        ExternalGroup = NormalizeGroup(externalGroup, nameof(externalGroup));
         ProgramId = programId;
         Role = role;
-        CreatedBy = Required(createdBy, nameof(createdBy));
+        CreatedBy = Bounded(createdBy, ActorMaxLength, nameof(createdBy));
         CreatedAt = now;
         Enabled = true;
     }
+
+    public const int ExternalGroupMaxLength = 300;
+    public const int ActorMaxLength = 100;
 
     public Guid Id { get; private set; }
     public Guid ProviderId { get; private set; }
@@ -124,9 +163,8 @@ public sealed class ExternalGroupRoleMapping
 
     public bool Matches(Guid providerId, string? externalGroup)
     {
-        if (!Enabled || providerId == Guid.Empty || string.IsNullOrWhiteSpace(externalGroup)) return false;
-        return ProviderId == providerId &&
-               string.Equals(ExternalGroup, externalGroup.Trim(), StringComparison.OrdinalIgnoreCase);
+        if (!Enabled || providerId == Guid.Empty || !TryNormalizeGroup(externalGroup, out var candidate)) return false;
+        return ProviderId == providerId && string.Equals(ExternalGroup, candidate, StringComparison.Ordinal);
     }
 
     public void Disable(DateTimeOffset now)
@@ -143,7 +181,30 @@ public sealed class ExternalGroupRoleMapping
         DisabledAt = null;
     }
 
-    private static string NormalizeGroup(string value) => Required(value, nameof(value)).ToLowerInvariant();
+    private static string NormalizeGroup(string value, string name) =>
+        Bounded(value, ExternalGroupMaxLength, name).ToLowerInvariant();
+
+    /// <summary>
+    /// Canonicalizes a directory group claim value. Group comparison is case-insensitive because
+    /// directories are inconsistent about case, so every stored and presented value is folded here once.
+    /// </summary>
+    public static bool TryNormalizeGroup(string? value, out string normalized)
+    {
+        normalized = "";
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var trimmed = value.Trim();
+        if (trimmed.Length > ExternalGroupMaxLength) return false;
+        normalized = trimmed.ToLowerInvariant();
+        return true;
+    }
+
+    private static string Bounded(string value, int maxLength, string name)
+    {
+        var required = Required(value, name);
+        return required.Length > maxLength
+            ? throw new ArgumentException($"{name} must be {maxLength} characters or fewer.", name)
+            : required;
+    }
 
     private static string Required(string value, string name) =>
         string.IsNullOrWhiteSpace(value)

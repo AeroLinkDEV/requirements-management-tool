@@ -50,6 +50,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<RoleDelegation> RoleDelegations => Set<RoleDelegation>();
     public DbSet<ElectronicSignature> ElectronicSignatures => Set<ElectronicSignature>();
     public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
+    public DbSet<ExternalIdentityProvider> ExternalIdentityProviders => Set<ExternalIdentityProvider>();
+    public DbSet<ExternalGroupRoleMapping> ExternalGroupRoleMappings => Set<ExternalGroupRoleMapping>();
     public DbSet<ArtifactSchemaDefinition> ArtifactSchemas => Set<ArtifactSchemaDefinition>();
     public DbSet<ArtifactFieldDefinition> ArtifactFieldDefinitions => Set<ArtifactFieldDefinition>();
     public DbSet<RequirementSpecification> RequirementSpecifications => Set<RequirementSpecification>();
@@ -409,6 +411,29 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<SecurityAuditEvent>(b =>
         {
             b.ToTable("security_audit_events"); b.HasKey(x => x.Id); b.Property(x => x.EventType).HasMaxLength(100).IsRequired(); b.Property(x => x.ActorId).HasMaxLength(100).IsRequired(); b.Property(x => x.Target).HasMaxLength(300).IsRequired(); b.Property(x => x.Outcome).HasMaxLength(30).IsRequired(); b.Property(x => x.Detail).HasMaxLength(4000).IsRequired(); b.Property(x => x.IpAddress).HasMaxLength(100); b.HasIndex(x => x.OccurredAt); b.HasIndex(x => new { x.ActorId, x.OccurredAt });
+        });
+        modelBuilder.Entity<ExternalIdentityProvider>(b =>
+        {
+            b.ToTable("external_identity_providers"); b.HasKey(x => x.Id);
+            b.Property(x => x.Key).HasMaxLength(ExternalIdentityProvider.KeyMaxLength).IsRequired();
+            b.Property(x => x.DisplayName).HasMaxLength(ExternalIdentityProvider.DisplayNameMaxLength).IsRequired();
+            b.Property(x => x.Protocol).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Issuer).HasMaxLength(ExternalIdentityProvider.IssuerMaxLength).IsRequired();
+            b.Property(x => x.SubjectClaim).HasMaxLength(ExternalIdentityProvider.ClaimMaxLength).IsRequired();
+            b.Property(x => x.GroupClaim).HasMaxLength(ExternalIdentityProvider.ClaimMaxLength).IsRequired();
+            b.Property(x => x.CreatedBy).HasMaxLength(ExternalIdentityProvider.ActorMaxLength).IsRequired();
+            b.HasIndex(x => x.Key).IsUnique(); b.HasIndex(x => x.Issuer).IsUnique();
+        });
+        modelBuilder.Entity<ExternalGroupRoleMapping>(b =>
+        {
+            b.ToTable("external_group_role_mappings"); b.HasKey(x => x.Id);
+            b.Property(x => x.ExternalGroup).HasMaxLength(ExternalGroupRoleMapping.ExternalGroupMaxLength).IsRequired();
+            b.Property(x => x.Role).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.CreatedBy).HasMaxLength(ExternalGroupRoleMapping.ActorMaxLength).IsRequired();
+            b.HasIndex(x => new { x.ProviderId, x.ExternalGroup, x.ProgramId, x.Role }).IsUnique();
+            b.HasIndex(x => x.ProgramId);
+            b.HasOne<ExternalIdentityProvider>().WithMany().HasForeignKey(x => x.ProviderId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ProgramRecord>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ArtifactSchemaDefinition>(b =>
         {

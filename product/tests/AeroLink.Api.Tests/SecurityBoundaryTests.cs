@@ -208,7 +208,7 @@ public sealed class SecurityBoundaryTests
         return await client.SendAsync(request);
     }
 
-    private static async Task BootstrapAndLoginAdministratorAsync(HttpClient client)
+    internal static async Task BootstrapAndLoginAdministratorAsync(HttpClient client)
     {
         using var bootstrap = await BootstrapAsync(client, AeroLinkApiFactory.BootstrapSecret);
         Assert.Equal(HttpStatusCode.Created, bootstrap.StatusCode);

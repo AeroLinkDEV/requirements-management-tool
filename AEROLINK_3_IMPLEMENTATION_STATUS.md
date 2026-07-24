@@ -23,7 +23,7 @@ No entry in this file claims certification, regulatory compliance, or tool quali
 | 1. Universal controlled editing | In progress | Shared policy registry; complete SCR/SWCR checkout, renewable lease, autosave snapshots, recovery, check-in/discard, contention and forced unlock | Connect the shared resolver and editing contract to all nine controlled draft families; add complete two-user and lifecycle-transition coverage for each family |
 | 2. Full problem-report lifecycle | In progress | Problem-report references and lifecycle links exist in parts of the product | First-class PR identity/revisions, investigation and disposition workflow, closure approval/reopen, release blocker/waiver rules, publications, dashboards, API/events and complete bidirectional acceptance journey |
 | 3. Product-line configuration and reuse | In progress | Configuration-aware baseline and integration foundations exist; Workstream 3 delivery has begun | Complete streams, controlled change sets, retained three-way conflicts, reusable libraries, synchronization decisions, variants, composite configurations and configuration-correct outputs |
-| 4. Enterprise identity and account assurance | Foundation only | Existing local accounts, Program membership, sessions, MFA/recovery domain records and security audit; PR #51 adds trusted provider and Program-scoped external-group role-mapping domain contracts | Persistence and migrations; administration APIs/UI; OIDC/SAML login/logout; SCIM; service accounts; break-glass controls; recovery, MFA and step-up enforcement; session revocation; provider health and complete audit evidence |
+| 4. Enterprise identity and account assurance | In progress | Local accounts, Program membership, sessions, MFA/recovery and security audit; trusted provider and Program-scoped external-group role-mapping domain contracts; durable provider/mapping persistence with an applied additive migration, administrator-only administration API, fail-closed audited role resolution, and PostgreSQL smoke coverage that exercises the migrated tables | Administration UI; OIDC/SAML login/logout; SCIM; service accounts; break-glass controls; recovery and step-up enforcement; session revocation; provider health |
 | 5. Resumable interchange and monitored integrations | In progress | ReqIF binary integrity/provenance, mapping versioning, OSLC consumer monitoring/replay and integration completion evidence | Confirm the complete acceptance gate across interrupted large import, durable checkpoints, cancellation/restart, idempotent replay, conditional writes, provider/consumer configuration-aware links, queues and dead letters |
 | 6. Rich technical content and controlled publications | In progress | Controlled SYSRD/SWRD, change, test, traceability and release outputs; valid DOCX/PDF generation and document control | Equivalent rich rendering of images/tables/symbols/references, controlled equations, approved template lifecycle, exact redlines, resumable jobs, reproducibility proof and verified release-package manifests |
 | 7. Quality, evidence and portfolio intelligence | In progress | Role-aware dashboards, drill-down foundations, traceability/completeness measures and qualification datasets | Objective/evidence expectation records, blockers/waivers, historical event-time metrics, PR/review/verification trends, permission-safe cross-Program aggregation, metric contracts and controlled exports |
@@ -33,28 +33,42 @@ No entry in this file claims certification, regulatory compliance, or tool quali
 
 The active delivery focus is **Workstream 4 — enterprise identity and account assurance**, tracked by Issue #34.
 
-PR #51 is an independently reviewable foundation increment. It establishes:
+The merged increments establish:
 
 - explicit OIDC and SAML provider definitions;
-- canonical provider keys and absolute issuer trust anchors;
+- canonical provider keys and canonicalized absolute issuer trust anchors;
 - Program-scoped external-group-to-role mappings;
-- provider-specific matching;
+- provider-specific, fail-closed matching for malformed external identity input;
 - explicit enable/disable lifecycle;
-- fail-closed matching for malformed external identity input; and
-- domain tests for normalization, scope, lifecycle and invalid configuration.
+- durable persistence owned by the EF model, with database uniqueness for the provider key, the issuer
+  anchor and the provider/group/Program/role authority tuple;
+- an administrator-only administration API whose every mutation is saved together with its security
+  audit event, so an authority change cannot be recorded without evidence; and
+- domain, persistence, API and PostgreSQL smoke coverage that exercises the migrated tables.
 
-PR #51 does **not** claim identity federation or provisioning is operational. It intentionally precedes persistence, migration, security audit wiring, administration surfaces, authentication handlers and SCIM endpoints.
+This does **not** claim identity federation or provisioning is operational. It precedes authentication
+handlers, logout propagation, SCIM endpoints, administration UI, service accounts, break-glass access,
+step-up enforcement and provider health monitoring.
+
+### Correction — closure-integrity note
+
+The first attempt at the persistence increment shipped a migration class that carried neither
+`[Migration]` nor `[DbContext]`, and defined its tables outside the EF model. Entity Framework discovers
+migrations by attribute, so `Database.Migrate()` skipped it silently on PostgreSQL and `EnsureCreated()`
+had no model to build from elsewhere: the tables existed only inside a hand-written test fixture, and
+every administration endpoint would have failed at runtime. The quality gate stayed green because no test
+or smoke step called those endpoints. The migration is now generated by `dotnet ef`, the entities are part
+of the model, and two guard tests fail the build if any migration is undiscoverable or if the model drifts
+from its snapshot. Treat "the gate was green" as insufficient evidence that a capability is reachable.
 
 ## Delivery sequence from this checkpoint
 
-1. Merge the identity mapping domain foundation only after the full quality gate is green.
-2. Add provider and mapping persistence with database uniqueness constraints and additive migration proof.
-3. Add security-audited provider/mapping administration APIs and permission-scoped UI.
-4. Consume the shared mapping service from OIDC/SAML authentication.
-5. Add SCIM user/group provisioning using the same server-authoritative mapping model.
-6. Complete session, MFA, recovery, step-up, service-account and break-glass acceptance slices.
-7. Close Issue #34 only after its complete end-to-end acceptance gate is evidenced.
-8. Complete production operations and qualification under Issue #38.
+1. Consume the shared mapping service from OIDC/SAML authentication.
+2. Add SCIM user/group provisioning using the same server-authoritative mapping model.
+3. Add the permission-scoped identity administration UI.
+4. Complete session, MFA, recovery, step-up, service-account and break-glass acceptance slices.
+5. Close Issue #34 only after its complete end-to-end acceptance gate is evidenced.
+6. Complete production operations and qualification under Issue #38.
 
 ## Repository and authority corrections
 

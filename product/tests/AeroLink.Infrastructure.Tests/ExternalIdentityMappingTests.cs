@@ -22,7 +22,14 @@ public sealed class ExternalIdentityMappingTests
         Assert.Equal("https://login.example.test/tenant/v2.0", provider.Issuer);
         Assert.True(provider.Enabled);
         Assert.Equal(ExternalIdentityProtocol.OpenIdConnect, provider.Protocol);
-        Assert.True(provider.MatchesIssuer("HTTPS://LOGIN.EXAMPLE.TEST/TENANT/V2.0/"));
+
+        // Scheme, host and default port are compared per RFC 3986; the path is not, because a
+        // case-folded path would widen the trust anchor beyond the issuer that was configured.
+        Assert.True(provider.MatchesIssuer("HTTPS://LOGIN.EXAMPLE.TEST/tenant/v2.0/"));
+        Assert.True(provider.MatchesIssuer("https://login.example.test:443/tenant/v2.0"));
+        Assert.False(provider.MatchesIssuer("HTTPS://LOGIN.EXAMPLE.TEST/TENANT/V2.0/"));
+        Assert.False(provider.MatchesIssuer("https://login.example.test/tenant"));
+        Assert.False(provider.MatchesIssuer("https://login.example.test.attacker.example/tenant/v2.0"));
 
         provider.Disable(now.AddMinutes(1));
         Assert.False(provider.Enabled);
@@ -54,6 +61,55 @@ public sealed class ExternalIdentityMappingTests
             "identity.example.test",
             "nameid",
             "groups",
+            "system.admin",
+            DateTimeOffset.UtcNow));
+    }
+
+    [Theory]
+    [InlineData("https://identity.example.test/tenant?probe=1")]
+    [InlineData("https://identity.example.test/tenant#fragment")]
+    [InlineData("ftp://identity.example.test/tenant")]
+    public void Provider_rejects_a_trust_anchor_that_is_not_a_bare_http_identifier(string issuer)
+    {
+        Assert.Throws<ArgumentException>(() => new ExternalIdentityProvider(
+            "provider",
+            "Provider",
+            ExternalIdentityProtocol.OpenIdConnect,
+            issuer,
+            "sub",
+            "groups",
+            "system.admin",
+            DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void Provider_and_mapping_reject_input_beyond_the_stored_column_bounds()
+    {
+        Assert.Throws<ArgumentException>(() => new ExternalIdentityProvider(
+            new string('k', ExternalIdentityProvider.KeyMaxLength + 1),
+            "Provider",
+            ExternalIdentityProtocol.OpenIdConnect,
+            "https://identity.example.test",
+            "sub",
+            "groups",
+            "system.admin",
+            DateTimeOffset.UtcNow));
+
+        Assert.Throws<ArgumentException>(() => new ExternalIdentityProvider(
+            "provider",
+            new string('d', ExternalIdentityProvider.DisplayNameMaxLength + 1),
+            ExternalIdentityProtocol.OpenIdConnect,
+            "https://identity.example.test",
+            "sub",
+            "groups",
+            "system.admin",
+            DateTimeOffset.UtcNow));
+
+        Assert.Throws<ArgumentException>(() => new ExternalGroupRoleMapping(
+            Guid.NewGuid(),
+            new string('g', ExternalGroupRoleMapping.ExternalGroupMaxLength + 1),
+            Guid.NewGuid(),
+            ProgramRole.Engineer,
             "system.admin",
             DateTimeOffset.UtcNow));
     }

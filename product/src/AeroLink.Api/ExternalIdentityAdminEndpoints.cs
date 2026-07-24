@@ -18,7 +18,6 @@ public static class ExternalIdentityAdminEndpoints
         return app;
     }
 
-    private static IResult ForbidUnlessAdministrator(HttpContext http)=>http.UserAccount().IsAdministrator?Results.Ok():Results.Forbid();
     private static async Task<IResult> ListProvidersAsync(HttpContext http,ExternalIdentityAdministrationService service,CancellationToken ct)
         =>http.UserAccount().IsAdministrator?Results.Ok(await service.ListProvidersAsync(ct)):Results.Forbid();
     private static async Task<IResult> ListMappingsAsync(Guid? providerId,Guid? programId,HttpContext http,ExternalIdentityAdministrationService service,CancellationToken ct)
@@ -48,7 +47,9 @@ public static class ExternalIdentityAdminEndpoints
     }
     private static async Task<IResult> ResolveAsync(ResolveExternalIdentityRolesRequest request,HttpContext http,ExternalIdentityAdministrationService service,CancellationToken ct)
     {
-        if(!http.UserAccount().IsAdministrator)return Results.Forbid();var roles=await service.ResolveRolesAsync(request.ProviderId,request.Issuer,request.ExternalGroups,request.ProgramId,ct);return Results.Ok(new{roles});
+        var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();
+        var roles=await service.ResolveRolesAsync(request.ProviderId,request.Issuer,request.ExternalGroups,request.ProgramId,actor.UserName,http.Connection.RemoteIpAddress?.ToString()??"local",DateTimeOffset.UtcNow,ct);
+        return Results.Ok(new{roles});
     }
 }
 
