@@ -23,7 +23,7 @@ No entry in this file claims certification, regulatory compliance, or tool quali
 | 1. Universal controlled editing | In progress | Shared policy registry; complete SCR/SWCR checkout, renewable lease, autosave snapshots, recovery, check-in/discard, contention and forced unlock | Connect the shared resolver and editing contract to all nine controlled draft families; add complete two-user and lifecycle-transition coverage for each family |
 | 2. Full problem-report lifecycle | In progress | Problem-report references and lifecycle links exist in parts of the product | First-class PR identity/revisions, investigation and disposition workflow, closure approval/reopen, release blocker/waiver rules, publications, dashboards, API/events and complete bidirectional acceptance journey |
 | 3. Product-line configuration and reuse | In progress | Configuration-aware baseline and integration foundations exist; Workstream 3 delivery has begun | Complete streams, controlled change sets, retained three-way conflicts, reusable libraries, synchronization decisions, variants, composite configurations and configuration-correct outputs |
-| 4. Enterprise identity and account assurance | In progress | Local accounts, Program membership, sessions, MFA/recovery and security audit; trusted provider and Program-scoped external-group role-mapping domain contracts; durable provider/mapping persistence with an applied additive migration, administrator-only administration API, fail-closed audited role resolution, and PostgreSQL smoke coverage that exercises the migrated tables | Administration UI; OIDC/SAML login/logout; SCIM; service accounts; break-glass controls; recovery and step-up enforcement; session revocation; provider health |
+| 4. Enterprise identity and account assurance | Delivered slice; remainder deferred | Local accounts, Program membership, sessions, MFA/recovery and security audit; trusted provider and Program-scoped external-group role-mapping domain contracts; durable provider/mapping persistence with an applied additive migration, administrator-only administration API, fail-closed audited role resolution, and PostgreSQL smoke coverage that exercises the migrated tables | **Deferred by decision (2026-07-24), not in progress:** OIDC/SAML login/logout; SCIM; break-glass; step-up; account recovery and password expiration; administrator session inventory; provider health; administration UI. See the Workstream 4 decision record in the completion contract |
 | 5. Resumable interchange and monitored integrations | In progress | ReqIF binary integrity/provenance, mapping versioning, OSLC consumer monitoring/replay and integration completion evidence | Confirm the complete acceptance gate across interrupted large import, durable checkpoints, cancellation/restart, idempotent replay, conditional writes, provider/consumer configuration-aware links, queues and dead letters |
 | 6. Rich technical content and controlled publications | In progress | Controlled SYSRD/SWRD, change, test, traceability and release outputs; valid DOCX/PDF generation and document control | Equivalent rich rendering of images/tables/symbols/references, controlled equations, approved template lifecycle, exact redlines, resumable jobs, reproducibility proof and verified release-package manifests |
 | 7. Quality, evidence and portfolio intelligence | In progress | Role-aware dashboards, drill-down foundations, traceability/completeness measures and qualification datasets | Objective/evidence expectation records, blockers/waivers, historical event-time metrics, PR/review/verification trends, permission-safe cross-Program aggregation, metric contracts and controlled exports |
@@ -31,7 +31,10 @@ No entry in this file claims certification, regulatory compliance, or tool quali
 
 ## Current accepted delivery focus
 
-The active delivery focus is **Workstream 4 — enterprise identity and account assurance**, tracked by Issue #34.
+Workstream 4 is **no longer the active delivery focus**. Its delivered slice is described below; its
+remaining capabilities were deferred by explicit decision on 2026-07-24 and are recorded in the Workstream 4
+decision record in `AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md`. Issue #34 stays open as the tracking
+record for that deferred work and must not be closed as if the full gate were met.
 
 The merged increments establish:
 
@@ -63,12 +66,14 @@ from its snapshot. Treat "the gate was green" as insufficient evidence that a ca
 
 ## Delivery sequence from this checkpoint
 
-1. Consume the shared mapping service from OIDC/SAML authentication.
-2. Add SCIM user/group provisioning using the same server-authoritative mapping model.
-3. Add the permission-scoped identity administration UI.
-4. Complete session, MFA, recovery, step-up, service-account and break-glass acceptance slices.
-5. Close Issue #34 only after its complete end-to-end acceptance gate is evidenced.
-6. Complete production operations and qualification under Issue #38.
+Workstream 4's remaining sequence is held, not scheduled. It resumes at the trigger recorded in the
+contract — the first commitment to deploy AeroLink for an organization authenticating against its own
+directory — and in the order given there. Issue #34 may close only when that sequence is either completed
+and evidenced, or formally withdrawn from the program.
+
+The next active focus is not yet selected. The candidates are the workstreams still marked *In progress* in
+the scorecard above, each of which advances against its own published acceptance gate. Record the choice
+here when it is made, so that "what is being built now" has one answer in one place.
 
 ## Repository and authority corrections
 

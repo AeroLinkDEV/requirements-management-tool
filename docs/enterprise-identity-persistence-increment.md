@@ -97,6 +97,11 @@ never calls an endpoint proves nothing about that endpoint.
 
 This increment does not complete OIDC login, SAML login, logout propagation, SCIM provisioning, MFA enforcement, step-up authentication, service accounts, break-glass access, provider health monitoring or an identity administration UI.
 
+None of those are in progress. They were deferred by explicit decision on 2026-07-24; the reason, the resume
+trigger and the order to resume in are recorded in the Workstream 4 decision record in
+`AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md`. This document describes a delivered increment, not a
+staging post in active work.
+
 `POST /resolve` is an administrator-only diagnostic that answers what a set of directory groups *would*
 grant. Nothing authenticates through it yet; no login path consumes it.
 

@@ -145,30 +145,82 @@ Acceptance gate:
 
 ## Workstream 4 — Enterprise identity and account assurance
 
-Capabilities:
+**Status: partially delivered, remainder deferred by explicit decision.** See the decision record below.
+Until that deferral is lifted, this workstream's full acceptance gate is not a condition of the AeroLink 3.0
+program completion gate.
+
+Delivered capabilities:
+
+- local controlled accounts, Program membership and role scoping;
+- temporary-password rotation, mandatory before workspace access, and administrator reset;
+- MFA and recovery codes, with encrypted secrets and downgrade protection;
+- scoped service accounts for versioned API access;
+- trusted group-to-Program-role mapping: durable configuration, administrator-only administration API,
+  fail-closed resolution and complete mutation and resolution audit;
+- session issue, expiry, self-service inventory and logout revocation; and
+- security auditing without secret disclosure.
+
+Deferred capabilities:
 
 - OIDC and SAML federation;
 - SCIM user/group provisioning;
-- trusted group-to-Program-role mapping;
-- scoped service accounts;
 - tightly controlled break-glass local administrator;
-- temporary-password rotation;
-- password policy and expiration where locally managed;
-- secure account recovery with single-use short-lived tokens;
-- MFA and recovery codes;
 - privileged step-up authentication;
-- session inventory and revocation;
+- secure account recovery with single-use short-lived tokens;
+- password expiration policy where locally managed;
+- administrator session inventory and single-session revocation;
 - identity-provider and provisioning health; and
-- complete security auditing without secret disclosure.
+- identity administration user interface.
 
-Acceptance gate:
+Acceptance gate that applies now:
+
+- role mapping and least-privilege proof; and
+- MFA enrollment/recovery.
+
+Acceptance gate deferred with its capabilities:
 
 - federated sign-in and logout;
 - SCIM create/update/disable;
-- role mapping and least-privilege proof;
-- MFA enrollment/recovery;
 - privileged step-up enforcement; and
 - break-glass recovery with complete audit evidence.
+
+### Deferred scope — decision record
+
+Recorded 2026-07-24.
+
+AeroLink is not yet operated by an organization whose people sign in with a corporate directory. Federation
+therefore has no user today, and most of the deferred list exists only to support federation: break-glass is
+insurance against a federated login outage, provider health monitors a connection that does not exist, and
+the administration UI is a control panel for configuration that currently has one operator. SCIM automates
+account lifecycle that is presently a handful of manual acts. Building these now would mean maintaining
+security-critical code against no real usage, which is how such code silently rots.
+
+What remains in place is a coherent identity system for a tool at this stage: controlled local accounts,
+enforced temporary-password rotation, MFA with recovery codes, scoped service credentials, Program role
+scoping, and complete security audit.
+
+**Trigger to resume:** the first commitment to deploy AeroLink for an organization that will authenticate
+against its own directory. Federation is the item with the longest lead time and the least ability to be
+faked afterwards, so it should start before that commitment is due, not after.
+
+**Order when resumed**, because these depend on each other rather than being independent choices:
+
+1. OIDC protocol configuration and token validation;
+2. OIDC sign-in, external-subject binding, mapped-role projection and logout;
+3. break-glass local administrator, before any federated deployment goes live;
+4. privileged step-up authentication;
+5. SCIM provisioning;
+6. account recovery and password expiration, which additionally require an email transport the product
+   does not yet have;
+7. administrator session inventory and single-session revocation; and
+8. provider health and the identity administration UI.
+
+SAML should be re-examined rather than assumed when this resumes. It carries roughly the cost of OIDC again
+and most enterprise directories do not require it.
+
+**This deferral does not lower the bar for what is already built.** The delivered capabilities above remain
+subject to the full delivery rules, and the deferred items must not be described as complete, partially
+complete, or "foundation only" anywhere in the product record.
 
 ## Workstream 5 — Resumable interchange and monitored integrations
 
@@ -271,7 +323,8 @@ Qualification target:
 4. Configuration streams/change sets.
 5. Controlled reuse and variants.
 6. Rich publications and resumable jobs.
-7. Enterprise identity.
+7. Enterprise identity — *deferred remainder; see Workstream 4. Re-enters this sequence at its recorded
+   trigger and resumes in the order given there.*
 8. Operations and qualification.
 9. Portfolio and evidence intelligence.
 
@@ -296,7 +349,11 @@ Every implementation PR must:
 
 AeroLink 3.0 is complete only when:
 
-- all eight workstreams meet their acceptance gates;
+- all eight workstreams meet their acceptance gates, except where a workstream records an explicit
+  deferral — currently Workstream 4, whose deferred capabilities and their gate items are excluded until
+  that decision record is lifted;
+- every such deferral is recorded in this contract, with its reason, its resume trigger and its excluded
+  gate items, before the program is described as complete;
 - all prior acceptance scenarios remain green;
 - migrations are proven against a restored pre-3.0 PostgreSQL database;
 - backup, restore, and upgrade drills are recorded;
