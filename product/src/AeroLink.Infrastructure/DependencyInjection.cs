@@ -39,6 +39,7 @@ public static class DependencyInjection
         services.AddScoped<IdentitySeeder>();
         services.AddScoped<ExternalIdentityAdministrationService>();
         services.AddScoped<FederatedIdentityRuntimeService>();
+        services.AddScoped<OidcAuthorizationStateService>();
         services.AddScoped<EnterpriseRequirementsService>();
         services.AddScoped<IControlledEditingAdapter, SystemChangeRequestControlledEditingAdapter>();
         services.AddScoped<IControlledEditingAdapter, RequirementProposalControlledEditingAdapter>();
