@@ -2,6 +2,7 @@ using System.Data;
 using System.Data.Common;
 using AeroLink.Domain.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace AeroLink.Infrastructure.Persistence;
 
