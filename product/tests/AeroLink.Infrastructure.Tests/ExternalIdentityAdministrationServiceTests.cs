@@ -43,7 +43,7 @@ public sealed class ExternalIdentityAdministrationServiceTests
     }
 
     [Fact]
-    public async Task Database_constraints_reject_duplicate_provider_and_mapping_authority()
+    public async Task Database_constraints_reject_duplicates_and_record_denied_audit_events()
     {
         await using var fixture = await TestDatabase.CreateAsync();
         var now = DateTimeOffset.UtcNow;
@@ -59,6 +59,13 @@ public sealed class ExternalIdentityAdministrationServiceTests
 
         await service.CreateMappingAsync(provider.Id, "fms-reviewers", program.Id, ProgramRole.Reviewer, "admin", "local", now, default);
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateMappingAsync(provider.Id, " FMS-REVIEWERS ", program.Id, ProgramRole.Reviewer, "admin", "local", now, default));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.CreateMappingAsync(Guid.NewGuid(), "missing-provider", program.Id, ProgramRole.Engineer, "admin", "local", now, default));
+        Assert.False(await service.SetProviderEnabledAsync(Guid.NewGuid(), false, "admin", "local", now, default));
+
+        var denied=await fixture.Db.SecurityAuditEvents.AsNoTracking().Where(x=>x.Outcome=="Denied").Select(x=>x.EventType).ToListAsync();
+        Assert.Contains("ExternalIdentityProviderCreateRejected",denied);
+        Assert.Contains("ExternalGroupRoleMappingCreateRejected",denied);
+        Assert.Contains("ExternalIdentityProviderStateChangeRejected",denied);
     }
 
     private sealed class TestDatabase(SqliteConnection connection, AeroLinkDbContext db) : IAsyncDisposable
