@@ -23,7 +23,7 @@ public sealed class ReqIfPackageIntegrityTests
     {
         var output=new MemoryStream();using(var zip=new ZipArchive(output,ZipArchiveMode.Create,true))
         {
-            var reqif=zip.CreateEntry("exchange.reqif");using(var writer=new StreamWriter(reqif.Open(),Encoding.UTF8,leaveOpen:false))writer.Write("<REQ-IF xmlns='http://www.omg.org/spec/ReqIF/20110401/reqif.xsd'/>");
+            var reqif=zip.CreateEntry("exchange.reqif");using(var writer=new StreamWriter(reqif.Open(),Encoding.UTF8,1024,leaveOpen:false))writer.Write("<REQ-IF xmlns='http://www.omg.org/spec/ReqIF/20110401/reqif.xsd'/>");
             var attachment=zip.CreateEntry("attachments/evidence.txt");using(var target=attachment.Open())target.Write(binary);
             var manifest=zip.CreateEntry("aerolink-manifest.json");using var manifestStream=manifest.Open();JsonSerializer.Serialize(manifestStream,new{sha256=new Dictionary<string,string>{{"attachments/evidence.txt",expected}}});
         }
