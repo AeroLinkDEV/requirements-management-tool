@@ -66,7 +66,7 @@ public sealed class RequirementImportMapping
 {
     private RequirementImportMapping() { }
     public RequirementImportMapping(Guid projectId,string name,string mappingJson,string actor,DateTimeOffset now)
-    { if(string.IsNullOrWhiteSpace(name))throw new DomainException("A mapping name is required.");Id=Guid.NewGuid();ProjectId=projectId;Name=name.Trim();MappingJson=string.IsNullOrWhiteSpace(mappingJson)?"{}":mappingJson;CreatedBy=actor;CreatedAt=now;UpdatedAt=now;Version=1; }
+    { if(string.IsNullOrWhiteSpace(name))throw new DomainException("A mapping name is required.");Id=Guid.NewGuid();ProjectId=projectId;Name=name.Trim();MappingJson=ValidateMapping(mappingJson);CreatedBy=Required(actor);CreatedAt=now;UpdatedAt=now;Version=1; }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public string Name { get; private set; }="";
@@ -75,4 +75,21 @@ public sealed class RequirementImportMapping
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public int Version { get; private set; }
+
+    public void Update(string name,string mappingJson,string actor,int expectedVersion,DateTimeOffset now)
+    {
+        if(Version!=expectedVersion)throw new DomainException("This import mapping changed after it was opened.");
+        if(string.IsNullOrWhiteSpace(name))throw new DomainException("A mapping name is required.");
+        Name=name.Trim();MappingJson=ValidateMapping(mappingJson);UpdatedAt=now;Version++;
+        _=Required(actor);
+    }
+
+    private static string ValidateMapping(string value)
+    {
+        var json=string.IsNullOrWhiteSpace(value)?"{}":value.Trim();
+        try{using var document=System.Text.Json.JsonDocument.Parse(json);if(document.RootElement.ValueKind!=System.Text.Json.JsonValueKind.Object)throw new DomainException("An import mapping must be a JSON object.");}
+        catch(System.Text.Json.JsonException){throw new DomainException("The import mapping JSON is invalid.");}
+        return json;
+    }
+    private static string Required(string value)=>string.IsNullOrWhiteSpace(value)?throw new DomainException("A required value is missing."):value.Trim();
 }
