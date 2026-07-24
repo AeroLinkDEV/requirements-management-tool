@@ -39,7 +39,10 @@ public sealed class ExternalIdentityAdministrationService(AeroLinkDbContext db)
 
     public async Task<ExternalIdentityProviderView> CreateProviderAsync(string key,string displayName,ExternalIdentityProtocol protocol,string issuer,string subjectClaim,string groupClaim,string actor,string ip,DateTimeOffset now,CancellationToken ct)
     {
-        var provider=new ExternalIdentityProvider(key,displayName,protocol,issuer,subjectClaim,groupClaim,actor,now);
+        ExternalIdentityProvider provider;
+        try { provider=new(key,displayName,protocol,issuer,subjectClaim,groupClaim,actor,now); }
+        catch(ArgumentException ex) { await AuditDeniedAsync("ExternalIdentityProviderCreateRejected",actor,key,"Validation",ex.Message,ip,now,ct); throw; }
+
         await using var transaction=await db.Database.BeginTransactionAsync(IsolationLevel.Serializable,ct);
         try
         {
@@ -49,12 +52,20 @@ public sealed class ExternalIdentityAdministrationService(AeroLinkDbContext db)
             await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);
             return ToView(provider);
         }
-        catch(DbException ex){await transaction.RollbackAsync(ct);throw new InvalidOperationException("An identity provider with the same key or issuer already exists.",ex);}
+        catch(DbException ex)
+        {
+            await transaction.RollbackAsync(ct);await transaction.DisposeAsync();
+            await AuditDeniedAsync("ExternalIdentityProviderCreateRejected",actor,provider.Key,"Conflict","A provider with the same key or issuer already exists.",ip,now,ct);
+            throw new InvalidOperationException("An identity provider with the same key or issuer already exists.",ex);
+        }
     }
 
     public async Task<ExternalGroupRoleMappingView> CreateMappingAsync(Guid providerId,string externalGroup,Guid programId,ProgramRole role,string actor,string ip,DateTimeOffset now,CancellationToken ct)
     {
-        var mapping=new ExternalGroupRoleMapping(providerId,externalGroup,programId,role,actor,now);
+        ExternalGroupRoleMapping mapping;
+        try { mapping=new(providerId,externalGroup,programId,role,actor,now); }
+        catch(ArgumentException ex) { await AuditDeniedAsync("ExternalGroupRoleMappingCreateRejected",actor,$"{providerId}/{programId}","Validation",ex.Message,ip,now,ct); throw; }
+
         await using var transaction=await db.Database.BeginTransactionAsync(IsolationLevel.Serializable,ct);
         try
         {
@@ -66,7 +77,17 @@ public sealed class ExternalIdentityAdministrationService(AeroLinkDbContext db)
             await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);
             return ToView(mapping);
         }
-        catch(DbException ex){await transaction.RollbackAsync(ct);throw new InvalidOperationException("That provider, group, Program and role mapping already exists.",ex);}
+        catch(KeyNotFoundException ex)
+        {
+            await transaction.RollbackAsync(ct);await transaction.DisposeAsync();
+            await AuditDeniedAsync("ExternalGroupRoleMappingCreateRejected",actor,$"{providerId}/{programId}","NotFound",ex.Message,ip,now,ct);throw;
+        }
+        catch(DbException ex)
+        {
+            await transaction.RollbackAsync(ct);await transaction.DisposeAsync();
+            await AuditDeniedAsync("ExternalGroupRoleMappingCreateRejected",actor,mapping.Id.ToString(),"Conflict","The provider, group, Program and role tuple already exists.",ip,now,ct);
+            throw new InvalidOperationException("That provider, group, Program and role mapping already exists.",ex);
+        }
     }
 
     public Task<bool> SetProviderEnabledAsync(Guid id,bool enabled,string actor,string ip,DateTimeOffset now,CancellationToken ct)
@@ -88,9 +109,20 @@ public sealed class ExternalIdentityAdministrationService(AeroLinkDbContext db)
     private async Task<bool> SetEnabledAsync(string table,Guid id,bool enabled,string eventPrefix,string actor,string ip,DateTimeOffset now,CancellationToken ct)
     {
         var affected=await ExecuteAsync($"UPDATE {table} SET enabled=@enabled, disabled_at=@disabledAt WHERE id=@id AND enabled<>@enabled",ct,("enabled",enabled),("disabledAt",enabled?null:now),("id",id));
-        if(affected==0)return await ExistsAsync($"SELECT 1 FROM {table} WHERE id=@id",ct,("id",id));
+        if(affected==0)
+        {
+            var exists=await ExistsAsync($"SELECT 1 FROM {table} WHERE id=@id",ct,("id",id));
+            if(!exists)await AuditDeniedAsync($"{eventPrefix}StateChangeRejected",actor,id.ToString(),"NotFound",$"{eventPrefix} was not found.",ip,now,ct);
+            return exists;
+        }
         db.SecurityAuditEvents.Add(new($"{eventPrefix}{(enabled?"Enabled":"Disabled")}",actor,id.ToString(),"Success",$"{(enabled?"Enabled":"Disabled")} {eventPrefix}.",ip,now));
         await db.SaveChangesAsync(ct);return true;
+    }
+
+    private async Task AuditDeniedAsync(string eventType,string actor,string target,string reason,string detail,string ip,DateTimeOffset now,CancellationToken ct)
+    {
+        db.SecurityAuditEvents.Add(new(eventType,actor,string.IsNullOrWhiteSpace(target)?"external-identity":target,"Denied",$"{reason}: {detail}",ip,now));
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task<ExternalIdentityProviderView?> ReadSingleProviderAsync(Guid id,CancellationToken ct)
