@@ -13,9 +13,16 @@ public static class DependencyInjection
     {
         var provider = configuration["Database:Provider"] ?? "Sqlite";
         var connection = configuration.GetConnectionString("AeroLink") ?? "Data Source=aerolink-dev.db";
+        // An unrecognised provider used to fall through to SQLite, so an installer who wrote "Postgres"
+        // instead of "PostgreSql" got a SQLite parser complaining that 'host' is not a supported keyword —
+        // a message that names neither the mistake nor the setting that caused it. Say what was wrong.
+        var isPostgres = provider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase);
+        if (!isPostgres && !provider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Database:Provider is '{provider}'. AeroLink supports 'PostgreSql' and 'Sqlite'.");
         services.AddDbContext<AeroLinkDbContext>(options =>
         {
-            if (provider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase)) options.UseNpgsql(connection);
+            if (isPostgres) options.UseNpgsql(connection);
             else options.UseSqlite(connection);
         });
         services.AddScoped<IScrRepository, ScrRepository>();

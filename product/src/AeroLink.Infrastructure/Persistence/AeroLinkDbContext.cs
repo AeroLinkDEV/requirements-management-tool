@@ -67,6 +67,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ArtifactAssignment> ArtifactAssignments => Set<ArtifactAssignment>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<ReviewWorkflow> ReviewWorkflows => Set<ReviewWorkflow>();
+    public DbSet<ProjectWorkspaceSynchronization> ProjectWorkspaceSynchronizations => Set<ProjectWorkspaceSynchronization>();
     public DbSet<JiraConnection> JiraConnections => Set<JiraConnection>();
     public DbSet<JiraIssueLink> JiraIssueLinks => Set<JiraIssueLink>();
     public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
@@ -519,6 +520,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<UserNotification>(b =>
         {
             b.ToTable("user_notifications");b.HasKey(x=>x.Id);b.Property(x=>x.Recipient).HasMaxLength(100).IsRequired();b.Property(x=>x.Type).HasMaxLength(60).IsRequired();b.Property(x=>x.Title).HasMaxLength(300).IsRequired();b.Property(x=>x.Detail).HasMaxLength(2000);b.Property(x=>x.Route).HasMaxLength(300);b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.HasIndex(x=>new{x.Recipient,x.State,x.CreatedAt});b.HasIndex(x=>x.ProjectId);
+        });
+        modelBuilder.Entity<ProjectWorkspaceSynchronization>(b =>
+        {
+            b.ToTable("project_workspace_synchronizations"); b.HasKey(x => x.Id);
+            b.HasIndex(x => x.ProjectId).IsUnique();
         });
         modelBuilder.Entity<JiraConnection>(b =>
         {

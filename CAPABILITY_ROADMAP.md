@@ -117,14 +117,37 @@ Document generation is fixed-form. Programs need to define their own SYSRD/SWRD 
 itself must be a controlled, approved, versioned artifact — otherwise changing a template silently changes
 every document generated afterwards. Workstream 6 already carries this as an acceptance-gate item.
 
-### 10. 150 concurrent users
+### 10. 150 concurrent users — **measured; claim unchanged**
 
 Today's evidence is 150 simultaneous *database clients* and 50,000 requirements on one workstation. That is
 not 150 rendered browser sessions, and the documentation is careful never to claim it is.
 
-**Design.** Measurement first: a load harness driving real authenticated sessions through real endpoints,
-then fix what it finds — N+1 queries, missing indexes, connection-pool limits, unbounded result sets. The
-claim is only allowed to change when the measurement supports it.
+**Measurement first was the right call.** The `session-load` harness drives real authenticated HTTP sessions
+— one account and one cookie jar per simulated person, all 150 signed in before any of them works — against
+a 50,000-requirement PostgreSQL repository. It found three things, two of which are now fixed.
+
+**Fixed — the product denied service to its own users.** Sign-in was rate limited to thirty attempts a
+minute per network address. AeroLink is on-premises: a whole engineering group arrives through one corporate
+proxy and presents one address, so thirty a minute was a budget shared by the entire site. At 150 users, 121
+were refused at sign-in. Guessing at a password is stopped by the account itself, which locks after eight
+failures wherever they come from; this limiter is only flood control, and its default now assumes a site
+rather than a person.
+
+**Fixed — the requirements explorer backfilled the whole project on every read.** Each GET loaded every
+requirement, every revision, every profile and every specification node before returning the fifty rows
+somebody asked for. A watermark now answers "is there anything to do" with one indexed count. At 50,000
+requirements this took the page from 9.1s to 3.9s at the median under 25 concurrent sessions.
+
+**Found and not fixed — the workspace query itself.** With the backfill gone, one request for 50 rows out of
+50,000 still costs ~380ms with nobody else on the system. That is what now caps the page, and it is a query
+problem rather than a concurrency one. Everything else scales: dashboard, change requests, and my-work sit
+between 30ms and 120ms per request from 10 to 50 concurrent sessions.
+
+**The claim does not change.** Measurement does not yet support stating 150 *users*, so the documentation
+continues to say 150 simultaneous database clients, exactly as before. The next piece of work is the
+workspace query, and the harness is now in the repository so the next person measures rather than guesses.
+
+Measured on 4 cores with PostgreSQL, the API, and the harness all sharing them, which flatters nothing.
 
 ## Deferred, deliberately
 

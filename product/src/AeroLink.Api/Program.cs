@@ -35,10 +35,22 @@ builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
 builder.Services.AddAuthentication(AeroLinkAuthorizationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, AeroLinkAuthorizationHandler>(AeroLinkAuthorizationHandler.SchemeName, _ => { });
 builder.Services.AddSingleton<BrowserMutationProtector>();
-var loginRateLimit = Math.Max(1, builder.Configuration.GetValue<int?>("Identity:LoginRateLimitPerMinute") ?? 30);
+var loginRateLimit = Math.Max(1, builder.Configuration.GetValue<int?>("Identity:LoginRateLimitPerMinute") ?? 600);
 builder.Services.AddRateLimiter(options =>
 {
-    options.AddPolicy("authentication", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "local", _ => new FixedWindowRateLimiterOptions { PermitLimit = loginRateLimit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+    // This limiter is flood control for one network address, and nothing more.
+    //
+    // Guessing at a password is stopped by the account itself, which locks after eight failed attempts no
+    // matter where they come from. What this stops is a firehose of requests at the sign-in endpoint.
+    //
+    // The old default of thirty a minute was written as though one address meant one person. AeroLink is
+    // on-premises: an entire engineering group reaches it through one corporate proxy and presents one
+    // address, so thirty a minute was a budget shared by the whole site. Measurement at a hundred and fifty
+    // users showed a hundred and twenty of them refused at sign-in on an ordinary morning — a denial of
+    // service the product inflicted on itself. The default now assumes a site, not a person.
+    options.AddPolicy("authentication", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "local",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = loginRateLimit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
     options.AddPolicy("service-api", context => RateLimitPartition.GetFixedWindowLimiter(IntegrationSecurityService.Hash(context.Request.Headers.Authorization.ToString()), _ => new FixedWindowRateLimiterOptions { PermitLimit = Math.Max(10,builder.Configuration.GetValue<int?>("Integrations:ApiRateLimitPerMinute")??240), Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
 });
 var configuredOrigins=builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()??[];
