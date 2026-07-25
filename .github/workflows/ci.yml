@@ -5,7 +5,11 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: "17 6 * * *"
+    # Weekly, not nightly. The nightly gate re-tested an unchanged tree every day and was the
+    # single largest consumer of Actions minutes on this repository — more than every pull request
+    # combined. Nothing drifts on a repo where each merge is already gated, so the schedule exists to
+    # catch environment rot (a runner image change, a dependency yanked), which is a weekly concern.
+    - cron: "17 6 * * 1"
   workflow_dispatch:
     inputs:
       full_diagnostics:
@@ -177,7 +181,10 @@ jobs:
   browser-full:
     name: Full browser journeys (${{ matrix.shard }}/3)
     needs: changes
-    if: github.event_name != 'pull_request' && needs.changes.outputs.browser == 'true'
+    # Schedule and manual dispatch only. A squash merge of a green pull request puts a tree on main that
+    # is identical to the one browser-pr tested minutes earlier, so re-running the journeys on push buys
+    # no information. validate and postgresql-smoke still run on every push as the safety net.
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.browser == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
