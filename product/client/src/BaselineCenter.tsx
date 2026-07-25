@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import "./BaselineCenter.css";
 import "./Swrd.css";
@@ -314,7 +315,7 @@ export default function BaselineCenter({
                 <div>
                   <b>{item.displayNumber}</b>
                   <span className={`baselineState ${item.state.toLowerCase()}`}>
-                    {item.state}
+                    {stateLabel(item.state)}
                   </span>
                 </div>
                 <p>{item.name}</p>
@@ -338,7 +339,7 @@ export default function BaselineCenter({
                     <span
                       className={`baselineState ${detail.state.toLowerCase()}`}
                     >
-                      {detail.state}
+                      {stateLabel(detail.state)}
                     </span>
                     <h2>{detail.displayNumber}</h2>
                     <p>{detail.name}</p>

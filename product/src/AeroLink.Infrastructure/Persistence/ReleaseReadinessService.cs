@@ -21,11 +21,33 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         var members = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct); var revisionIds = members.Select(x => x.RevisionId).ToList();
         var derivedIds = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id where artifact.Level != RequirementLevel.System select member.RevisionId).ToListAsync(ct);
         var tracedDerivedIds = await db.RequirementTraces.AsNoTracking().Where(x => derivedIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId)).Select(x => x.SourceRevisionId).Distinct().ToListAsync(ct);
-        // Suspect coverage is a link carried across a change that nobody has reconfirmed, so it is deliberately
-        // not counted as covered. Treating it as coverage would let a requirement reach release on the strength
-        // of a procedure written against its previous wording.
+        // Coverage counts only when it is settled, which takes three things.
+        //
+        // It must not be suspect: a link carried across a requirement change that nobody has reconfirmed
+        // would otherwise let a requirement reach release on a procedure written against its previous wording.
+        //
+        // The procedure revision it names must itself be Approved. Nothing checked this before, so a
+        // requirement could be counted as covered by a procedure still in draft.
+        //
+        // And the procedure must have no revision in flight. A procedure being modified has to be reviewed
+        // and approved before anything relying on it can be considered approved; counting the superseded
+        // revision in the meantime would claim a settled answer while the answer is being rewritten.
         var coverage = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
-        var coveredIds = coverage.Where(x => !x.IsSuspect).Select(x => x.RequirementRevisionId).Distinct().ToHashSet();
+        var linkedProcedureRevisionIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
+        var linkedRevisions = await db.TestProcedureRevisions.AsNoTracking()
+            .Where(x => linkedProcedureRevisionIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.ProcedureId, x.State }).ToListAsync(ct);
+        var linkedProcedureIds = linkedRevisions.Select(x => x.ProcedureId).Distinct().ToList();
+        var proceduresBeingChanged = (await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => linkedProcedureIds.Contains(x.ProcedureId) && x.State != TestProcedureState.Approved)
+                .Select(x => x.ProcedureId).Distinct().ToListAsync(ct))
+            .ToHashSet();
+        var settledProcedureRevisionIds = linkedRevisions
+            .Where(x => x.State == TestProcedureState.Approved && !proceduresBeingChanged.Contains(x.ProcedureId))
+            .Select(x => x.Id).ToHashSet();
+        var coveredIds = coverage
+            .Where(x => !x.IsSuspect && settledProcedureRevisionIds.Contains(x.ProcedureRevisionId))
+            .Select(x => x.RequirementRevisionId).Distinct().ToHashSet();
         var procedureIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList(); var executions = await db.TestExecutions.AsNoTracking().Where(x => procedureIds.Contains(x.ProcedureRevisionId) && (campaign.SoftwareBuildId == null || x.SoftwareBuildId == campaign.SoftwareBuildId)).ToListAsync(ct);
         var latestRuns = executions.GroupBy(x => x.ProcedureRevisionId).Select(x => x.OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).First()).ToList();
         var runIds = latestRuns.Select(x => x.Id).ToList(); var evidenceRunIds = await db.TestExecutionEvidence.AsNoTracking().Where(x => runIds.Contains(x.TestExecutionId)).Select(x => x.TestExecutionId).Distinct().ToListAsync(ct);
@@ -48,7 +70,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
             new("baseline","Requirement baseline materialized",baseline.State is CandidateBaselineState.Frozen or CandidateBaselineState.Released && baseline.RequirementsMaterializedAt is not null,baseline.RequirementsMaterializedAt is null?0:1,1,"The release needs an exact frozen and materialized requirement set.","Freeze the candidate and materialize its requirements."),
             new("verification_impact","Verification impact decided",impactDecided == verificationImpacts.Count,impactDecided,verificationImpacts.Count,undecided.Count==0?"Every new, modified, and orphaned requirement in this release has a recorded verification decision.":$"{undecided.Count} changed requirement(s) await a verification decision: {string.Join(", ",undecided.Take(3).Select(x=>x.SubjectDisplayNumber))}.","Assign each item to a test engineer, then record an approved procedure or a confirmation that no test is required."),
             new("traceability","Trace network complete",members.Count > 0 && tracedDerivedIds.Count == derivedIds.Count,tracedDerivedIds.Count,derivedIds.Count,"Every derived HLR/LLR must retain an exact parent link.","Resolve orphan and suspect trace links."),
-            new("coverage","Requirement coverage complete",members.Count > 0 && coveredIds.Count == members.Count,coveredIds.Count,members.Count,$"{members.Count-coveredIds.Count} effective requirement revisions have no procedure link.","Add version-aware test coverage."),
+            new("coverage","Requirement coverage complete",members.Count > 0 && coveredIds.Count == members.Count,coveredIds.Count,members.Count,$"{members.Count-coveredIds.Count} effective requirement revisions have no settled coverage. A link counts only when it is not suspect, names an approved procedure revision, and that procedure has no revision still in draft or review.","Approve every procedure being changed, then confirm the coverage each changed requirement needs."),
             new("verification","Required verification passed",procedureIds.Count > 0 && latestRuns.Count == procedureIds.Count && latestRuns.All(x=>x.Outcome==TestOutcome.Pass),latestRuns.Count(x=>x.Outcome==TestOutcome.Pass),procedureIds.Count,$"{procedureIds.Count-latestRuns.Count(x=>x.Outcome==TestOutcome.Pass)} required procedures lack a latest Pass.","Execute tests, resolve failures, and record retests."),
             new("evidence","Evidence uploaded and checksummed",latestRuns.Count > 0 && evidenceRunIds.Count == latestRuns.Count,evidenceRunIds.Count,latestRuns.Count,$"{latestRuns.Count-evidenceRunIds.Count} latest results lack uploaded evidence.","Upload evidence files for every latest required result."),
             new("problem_reports","Problem-report blockers resolved",problemBlockers.Count==0,0,problemBlockers.Count,problemBlockers.Count==0?"No unwaived controlled problem reports block this release.":$"{problemBlockers.Count} unwaived problem report blocker(s) remain: {string.Join(", ",problemBlockers.Take(3).Select(x=>x.DisplayNumber))}.","Resolve, formally disposition, or record an attributable waiver for every release-blocking problem report."),

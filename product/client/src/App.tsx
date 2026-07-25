@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import ScrEditor from "./ScrEditor";
 import ScrWorkspace from "./ScrWorkspace";
@@ -686,7 +687,7 @@ function App() {
                     <p>{scr.requirementCount} requirement change{scr.requirementCount === 1 ? "" : "s"} · <span className="personMeta"><i>{identityInitials(scr.authorId)}</i>{identityLabel(scr.authorId)}</span></p>
                   </div>
                   <span className={`state ${scr.state.toLowerCase()}`}>
-                    {scr.state}
+                    {stateLabel(scr.state)}
                   </span>
                   <time>{new Date(scr.updatedAt).toLocaleDateString()}</time>
                 </div>

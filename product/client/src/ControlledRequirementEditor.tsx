@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { stateLabel } from './presentation'
 import "./ControlledRequirementEditor.css";
 
 export type RequirementLevel = "System" | "HighLevel" | "LowLevel";
@@ -198,7 +199,7 @@ export default function ControlledRequirementEditor({
                 <button type="button" key={result.id} onClick={() => selectExisting(result)}>
                   <span>
                     <b>{result.displayNumber}</b>
-                    <small>{levelLabel(result.level)} · {result.state}</small>
+                    <small>{levelLabel(result.level)} · {stateLabel(result.state)}</small>
                   </span>
                   <p>{result.statement}</p>
                   <em>Use revision {String(result.nextRevision).padStart(2, "0")} →</em>
