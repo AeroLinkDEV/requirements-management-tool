@@ -10,7 +10,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
-public sealed record ReleaseReconciliationResult(int TraceLinksCreated, int CoverageLinksCreated, int UncoveredRequirements);
+/// <summary><paramref name="SuspectCoverage"/> counts requirement revisions whose only coverage was carried
+/// forward across a change and has not been reconfirmed. It is not coverage for release purposes.</summary>
+public sealed record ReleaseReconciliationResult(int TraceLinksCreated, int SuspectCoverage, int UncoveredRequirements);
 public sealed record VerificationManifestRow(Guid ProcedureRevisionId, string DisplayNumber, string Outcome, DateTimeOffset? ExecutedAt, string ExecutedBy, string Configuration, string Determination);
 public sealed record VerificationImportResult(int ExecutionsRecorded, int Passed, int Failed, int Blocked, Guid EvidenceId, string EvidenceSha256);
 
@@ -45,21 +47,20 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             existingTraceKeys.Add(key); traceCreated++;
         }
 
-        var priorCoverage = await db.TestCoverage.AsNoTracking().Where(x => priorRevisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
-        var existingCoverageKeys = (await db.TestCoverage.AsNoTracking().Where(x => current.Select(m => m.RevisionId).Contains(x.RequirementRevisionId))
-            .Select(x => new { x.ProcedureRevisionId, x.RequirementRevisionId }).ToListAsync(ct))
-            .Select(x => (x.ProcedureRevisionId, x.RequirementRevisionId)).ToHashSet();
-        var coverageCreated = 0;
-        foreach (var priorLink in priorCoverage)
-        {
-            if (!priorRevisionToArtifact.TryGetValue(priorLink.RequirementRevisionId, out var artifactId) || !currentByArtifact.TryGetValue(artifactId, out var requirementRevisionId)) continue;
-            var key = (priorLink.ProcedureRevisionId, requirementRevisionId); if (existingCoverageKeys.Contains(key)) continue;
-            db.TestCoverage.Add(new TestRequirementCoverage(priorLink.ProcedureRevisionId, requirementRevisionId)); existingCoverageKeys.Add(key); coverageCreated++;
-        }
-        var covered = existingCoverageKeys.Select(x => x.RequirementRevisionId).Distinct().Count(); var uncovered = current.Count - covered;
-        campaign.RecordExecutionProgress("LifecycleLinksReconciled", $"Created {traceCreated} baseline-valid trace links and {coverageCreated} carried-forward coverage links; {uncovered} requirements still need explicit coverage.", actorId, now);
+        // Coverage carry-forward belongs to materialisation, which marks a link suspect when the requirement
+        // changed under the procedure. This step used to carry the same links forward itself and leave them
+        // unmarked, which asserted that a procedure written against the previous wording still verified the
+        // new one — the precise claim nobody had made. Reconciliation now reports that state instead of
+        // manufacturing it.
+        var currentRevisionIds = current.Select(x => x.RevisionId).ToList();
+        var currentCoverage = await db.TestCoverage.AsNoTracking()
+            .Where(x => currentRevisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
+        var suspect = currentCoverage.Where(x => x.IsSuspect).Select(x => x.RequirementRevisionId).Distinct().Count();
+        var covered = currentCoverage.Where(x => !x.IsSuspect).Select(x => x.RequirementRevisionId).Distinct().Count();
+        var uncovered = current.Count - covered;
+        campaign.RecordExecutionProgress("LifecycleLinksReconciled", $"Created {traceCreated} baseline-valid trace links; {suspect} requirement revisions carry suspect coverage awaiting verification confirmation and {uncovered} still need confirmed coverage.", actorId, now);
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
-        return new(traceCreated, coverageCreated, uncovered);
+        return new(traceCreated, suspect, uncovered);
     }
 
     public async Task<byte[]> CreateVerificationTemplateAsync(Guid campaignId, CancellationToken ct)

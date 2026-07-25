@@ -10,7 +10,7 @@ namespace AeroLink.Infrastructure.Persistence;
 
 public sealed record MaterializationResult(string RequirementsHash, int ActiveRequirementCount, int CreatedRevisionCount);
 
-public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db)
+public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, VerificationImpactService verificationImpact)
 {
     public async Task<MaterializationResult> MaterializeAsync(Guid baselineId, string actorId, DateTimeOffset now, CancellationToken ct)
     {
@@ -40,6 +40,8 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db)
         var scrIds = baseline.Selections.Select(x => x.ScrId).ToList();
         var scrs = await db.SystemChangeRequests.AsNoTracking().Where(x => scrIds.Contains(x.Id)).Include(x => x.RequirementChanges).ToListAsync(ct);
         var created = 0;
+        // What each change became, so verification work can bind to exact revisions once they exist.
+        var materialized = new List<MaterializedRequirementChange>();
         foreach (var pair in scrs.SelectMany(scr => scr.RequirementChanges.Select(change => new { scr, change }))
                      .OrderBy(x => x.scr.DisplayNumber).ThenBy(x => x.change.BaseNumber).ThenBy(x => x.change.Revision))
         {
@@ -52,6 +54,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db)
                 var revision = CreateRevision(artifact, change, pair.scr.Id, baseline.Id, now, RequirementRevisionState.Active);
                 db.RequirementRevisions.Add(revision); revisions.Add(revision); current[artifact.Id] = revision; created++;
                 AddProfile(revision,change,schemas,actorId,now);
+                materialized.Add(new(pair.scr.Id, change.Id, change.Kind, null, revision.Id, change.DisplayNumber));
                 continue;
             }
 
@@ -62,8 +65,13 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db)
             var next = CreateRevision(existing, change, pair.scr.Id, baseline.Id, now, state);
             db.RequirementRevisions.Add(next); revisions.Add(next); created++;
             AddProfile(next,change,schemas,actorId,now);
+            materialized.Add(new(pair.scr.Id, change.Id, change.Kind, prior.Id, next.Id, change.DisplayNumber));
             if (state == RequirementRevisionState.Retired) current.Remove(existing.Id); else current[existing.Id] = next;
         }
+
+        // Requirement revisions exist for the first time here, so this is the earliest point at which
+        // verification work can bind to them, coverage can carry forward, and a stranded procedure is visible.
+        await verificationImpact.ApplyMaterializationAsync(baseline.ProjectId, baseline.ReleaseId, materialized, now, ct);
 
         var artifactById = artifactByBase.Values.ToDictionary(x => x.Id);
         foreach (var item in current.OrderBy(x => artifactById[x.Key].BaseNumber))

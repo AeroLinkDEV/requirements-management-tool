@@ -267,11 +267,20 @@ app.MapPost("/api/releases", async (CreateReleaseRequest request, HttpContext ht
     await db.SaveChangesAsync(ct); return Results.Created($"/api/releases/{release.Id}", new { release.Id, release.Version, release.IsReleased, request.PredecessorReleaseId });
 });
 
-app.MapPost("/api/scrs/{id:guid}/retarget", async (Guid id, RetargetScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+app.MapPost("/api/scrs/{id:guid}/retarget", async (Guid id, RetargetScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
     if (!await db.Releases.AnyAsync(x => x.Id == request.TargetReleaseId && x.ProjectId == scr.ProjectId && !x.IsReleased, ct)) return Results.BadRequest(new { error = "Choose an unreleased target release in this project." });
-    try { scr.Retarget(http.UserAccount().UserName, request.TargetReleaseId, request.Reason, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
+    // Verification work follows its change request. Left behind, it would hold a release the change no longer
+    // belongs to and go missing from the one it does.
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        scr.Retarget(http.UserAccount().UserName, request.TargetReleaseId, request.Reason, now);
+        await verificationImpact.RetargetAsync(scr.Id, request.TargetReleaseId, now, ct);
+        await repository.SaveAsync(ct);
+        return Results.Ok(ApiMap.ScrDetail(scr));
+    }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
