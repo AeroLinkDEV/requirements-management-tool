@@ -35,6 +35,7 @@ public static class DependencyInjection
         services.AddScoped<VariantPublicationGenerator>();
         services.AddScoped<ChangeRequestOutputGenerator>();
         services.AddScoped<ReleaseExecutionService>();
+        services.AddScoped<VerificationImpactService>();
         services.AddScoped<IdentityService>();
         services.AddScoped<IdentitySeeder>();
         services.AddScoped<ExternalIdentityAdministrationService>();

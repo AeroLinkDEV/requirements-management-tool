@@ -3,7 +3,10 @@ using System.Security.Cryptography;
 namespace AeroLink.Domain.Identity;
 
 public enum AccountState { Active, Disabled, Locked }
-public enum ProgramRole { Engineer, Reviewer, Approver, ConfigurationManager, TestEngineer, ProgramManager, Administrator }
+// TestLead holds distribution authority over verification work: impact items raised by an approved change
+// land with the lead, who assigns them to an individual TestEngineer. Roles persist as strings, so the
+// position of a new member in this list carries no meaning.
+public enum ProgramRole { Engineer, Reviewer, Approver, ConfigurationManager, TestEngineer, TestLead, ProgramManager, Administrator }
 public enum ExternalIdentityProtocol { OpenIdConnect, Saml2 }
 
 public sealed class ExternalIdentityProvider

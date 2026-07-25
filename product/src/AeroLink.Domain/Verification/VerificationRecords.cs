@@ -76,14 +76,64 @@ public sealed class TestProcedureRevision
     }
 }
 
+/// <summary>
+/// Binds an exact procedure revision to an exact requirement revision.
+///
+/// A link may be <see cref="IsSuspect"/>: carried forward onto a revision whose requirement changed, so the
+/// procedure was written against earlier wording and its continued validity is unproven. Suspect coverage
+/// must never be counted as verified — it is the difference between "a procedure is attached" and "someone
+/// competent confirmed the procedure still tests this requirement".
+/// </summary>
 public sealed class TestRequirementCoverage
 {
     private TestRequirementCoverage() { }
     public TestRequirementCoverage(Guid procedureRevisionId, Guid requirementRevisionId)
     { Id = Guid.NewGuid(); ProcedureRevisionId = procedureRevisionId; RequirementRevisionId = requirementRevisionId; }
+
+    /// <summary>Creates coverage carried forward from a predecessor revision, marked suspect until reviewed.</summary>
+    public static TestRequirementCoverage CarriedForward(Guid procedureRevisionId, Guid requirementRevisionId,
+        string reason, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("Carried-forward coverage requires a reason.");
+        var coverage = new TestRequirementCoverage(procedureRevisionId, requirementRevisionId);
+        coverage.IsSuspect = true;
+        coverage.SuspectReason = reason.Trim();
+        coverage.SuspectSince = now;
+        return coverage;
+    }
+
     public Guid Id { get; private set; }
     public Guid ProcedureRevisionId { get; private set; }
     public Guid RequirementRevisionId { get; private set; }
+    public bool IsSuspect { get; private set; }
+    public string SuspectReason { get; private set; } = "";
+    public DateTimeOffset? SuspectSince { get; private set; }
+    public string? ConfirmedBy { get; private set; }
+    public DateTimeOffset? ConfirmedAt { get; private set; }
+
+    /// <summary>A verification engineer confirms the procedure still verifies the changed requirement.</summary>
+    public void ConfirmStillValid(string actorId, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(actorId)) throw new DomainException("A confirming verification engineer is required.");
+        if (!IsSuspect) return;
+        IsSuspect = false;
+        SuspectReason = "";
+        SuspectSince = null;
+        ConfirmedBy = actorId.Trim();
+        ConfirmedAt = now;
+    }
+
+    /// <summary>Marks existing coverage suspect because its requirement changed under it.</summary>
+    public void MarkSuspect(string reason, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("Marking coverage suspect requires a reason.");
+        if (IsSuspect) return;
+        IsSuspect = true;
+        SuspectReason = reason.Trim();
+        SuspectSince = now;
+        ConfirmedBy = null;
+        ConfirmedAt = null;
+    }
 }
 
 public sealed class TestExecution

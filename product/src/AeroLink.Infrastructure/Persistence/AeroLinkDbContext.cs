@@ -34,6 +34,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<TestProcedureRevision> TestProcedureRevisions => Set<TestProcedureRevision>();
     public DbSet<TestRequirementCoverage> TestCoverage => Set<TestRequirementCoverage>();
     public DbSet<TestExecution> TestExecutions => Set<TestExecution>();
+    public DbSet<VerificationImpactItem> VerificationImpactItems => Set<VerificationImpactItem>();
     public DbSet<RequirementTraceLink> RequirementTraces => Set<RequirementTraceLink>();
     public DbSet<ControlledDocument> ControlledDocuments => Set<ControlledDocument>();
     public DbSet<ReleaseCampaign> ReleaseCampaigns => Set<ReleaseCampaign>();
@@ -317,9 +318,34 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<TestRequirementCoverage>(b =>
         {
             b.ToTable("test_requirement_coverage"); b.HasKey(x => x.Id);
+            b.Property(x => x.SuspectReason).HasMaxLength(500).IsRequired();
+            b.Property(x => x.ConfirmedBy).HasMaxLength(100);
+            b.HasIndex(x => x.IsSuspect);
             b.HasIndex(x => new { x.ProcedureRevisionId, x.RequirementRevisionId }).IsUnique(); b.HasIndex(x => x.RequirementRevisionId);
             b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.RequirementRevisionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<VerificationImpactItem>(b =>
+        {
+            b.ToTable("verification_impact_items"); b.HasKey(x => x.Id);
+            b.Property(x => x.Trigger).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.SubjectDisplayNumber).HasMaxLength(80).IsRequired();
+            b.Property(x => x.DeclaredVerificationMethod).HasMaxLength(120).IsRequired();
+            b.Property(x => x.AssignedEngineerId).HasMaxLength(100);
+            b.Property(x => x.AssignedByLeadId).HasMaxLength(100);
+            b.Property(x => x.ResolutionRationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.ResolvedBy).HasMaxLength(100);
+            b.Property(x => x.Version).IsConcurrencyToken();
+            // The gate query is "unresolved items for this release", so it leads the index.
+            b.HasIndex(x => new { x.ReleaseId, x.State });
+            b.HasIndex(x => x.ChangeRequestId);
+            b.HasIndex(x => x.RequirementChangeId);
+            b.HasIndex(x => x.RequirementRevisionId);
+            b.HasIndex(x => x.AssignedEngineerId);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<TestExecution>(b =>
         {
