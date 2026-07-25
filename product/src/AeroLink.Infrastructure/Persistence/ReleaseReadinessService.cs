@@ -29,12 +29,20 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         // A release cannot be declared ready while an unwaived controlled problem report remains a blocker.
         // This is deliberately project-scoped until product-line configuration provides exact release applicability.
         var problemBlockers = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == campaign.ProjectId && x.IsReleaseBlocker && string.IsNullOrEmpty(x.WaiverRationale)).ToListAsync(ct);
+        // Every requirement this release introduced or modified raised a verification impact item when its
+        // change request was approved. Each one carries an owed decision: a procedure that covers it, or a
+        // recorded confirmation that no test is required. A release with no requirement changes raises none,
+        // and is complete by having nothing to decide.
+        var verificationImpacts = await db.VerificationImpactItems.AsNoTracking().Where(x => x.ReleaseId == campaign.ReleaseId).ToListAsync(ct);
+        var impactDecided = verificationImpacts.Count(x => x.State == VerificationImpactState.Resolved);
+        var undecided = verificationImpacts.Where(x => x.State != VerificationImpactState.Resolved).ToList();
         var integrated = requests.Count(x => x.State == ScrState.SelectedForBaseline); var disposed = impacts.Count(x => x.State != ImpactDispositionState.Pending);
         var gates = new List<ReadinessGate>
         {
             new("change_control","Change requests integrated",requests.Count > 0 && integrated == requests.Count,integrated,requests.Count,$"{requests.Count-integrated} non-deferred SCR/SWCR records remain outside the candidate baseline.","Approve and select every included change, or formally defer it."),
             new("impact_disposition","Impact analysis dispositioned",impacts.Count > 0 && disposed == impacts.Count,disposed,impacts.Count,$"{impacts.Count-disposed} impact findings remain pending.","Disposition requirement, trace, verification, and document impacts."),
             new("baseline","Requirement baseline materialized",baseline.State is CandidateBaselineState.Frozen or CandidateBaselineState.Released && baseline.RequirementsMaterializedAt is not null,baseline.RequirementsMaterializedAt is null?0:1,1,"The release needs an exact frozen and materialized requirement set.","Freeze the candidate and materialize its requirements."),
+            new("verification_impact","Verification impact decided",impactDecided == verificationImpacts.Count,impactDecided,verificationImpacts.Count,undecided.Count==0?"Every new, modified, and orphaned requirement in this release has a recorded verification decision.":$"{undecided.Count} changed requirement(s) await a verification decision: {string.Join(", ",undecided.Take(3).Select(x=>x.SubjectDisplayNumber))}.","Assign each item to a test engineer, then record an approved procedure or a confirmation that no test is required."),
             new("traceability","Trace network complete",members.Count > 0 && tracedDerivedIds.Count == derivedIds.Count,tracedDerivedIds.Count,derivedIds.Count,"Every derived HLR/LLR must retain an exact parent link.","Resolve orphan and suspect trace links."),
             new("coverage","Requirement coverage complete",members.Count > 0 && coveredIds.Count == members.Count,coveredIds.Count,members.Count,$"{members.Count-coveredIds.Count} effective requirement revisions have no procedure link.","Add version-aware test coverage."),
             new("verification","Required verification passed",procedureIds.Count > 0 && latestRuns.Count == procedureIds.Count && latestRuns.All(x=>x.Outcome==TestOutcome.Pass),latestRuns.Count(x=>x.Outcome==TestOutcome.Pass),procedureIds.Count,$"{procedureIds.Count-latestRuns.Count(x=>x.Outcome==TestOutcome.Pass)} required procedures lack a latest Pass.","Execute tests, resolve failures, and record retests."),

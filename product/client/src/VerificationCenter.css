@@ -1,6 +1,5 @@
 .verificationPage {
   max-width: 1500px !important;
-  padding: 36px 44px !important;
 }
 
 .verificationPage header > button {
@@ -106,7 +105,7 @@
 
 .cardTitle p {
   margin: 4px 0 0;
-  color: #718095;
+  color: #69778b;
   font-size: 13px;
 }
 
@@ -327,7 +326,6 @@
 }
 
 @media (max-width: 900px) {
-  .verificationPage { padding: 24px 20px !important; }
   .verificationContext { flex-direction: column; }
   .draftEditorLaunch { align-items: stretch; flex-direction: column; }
   .draftEditorLaunch select { min-width: 0; }

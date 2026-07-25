@@ -36,7 +36,7 @@ html[data-motion="reduced"] *::after { scroll-behavior: auto !important; transit
 .workspaceDisplay > div { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 .workspaceDisplay b { font-size: 12px; }
 .workspaceDisplay small { color: #8fa1b9; font-size: 12px; text-transform: capitalize; }
-.workspaceDisplay > i { color: #6f849d; font-style: normal; }
+.workspaceDisplay > i { color: #758ba5; font-style: normal; }
 
 .experienceBackdrop { position: fixed; inset: 0; z-index: 1200; background: rgba(5,14,30,.48); backdrop-filter: blur(3px); animation: veilIn .18s ease both; }
 .experienceDrawer { position: absolute; inset: 0 0 0 auto; width: min(470px,100vw); display: flex; flex-direction: column; overflow: auto; background: #f7f9fb; box-shadow: -24px 0 70px rgba(4,15,30,.3); animation: drawerIn .24s cubic-bezier(.2,.72,.25,1) both; }
@@ -66,7 +66,7 @@ html[data-motion="reduced"] *::after { scroll-behavior: auto !important; transit
 .motionChoice button b { font-size: 13px; }
 .motionChoice button small { color: var(--ink-500); font-size: 12px; }
 .motionGlyph { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; background: #dff2ee; color: var(--teal-700); font-size: 20px; }
-.motionGlyph.quiet { background: #e9eef3; color: #65758a; }
+.motionGlyph.quiet { background: #e9eef3; color: #627186; }
 .experienceDrawer > footer { display: flex; align-items: center; gap: 11px; margin-top: auto; padding: 20px 28px; color: var(--ink-500); }
 .experienceDrawer > footer > span { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: #e5f5ef; color: #258063; }
 .experienceDrawer > footer div { display: flex; flex-direction: column; }
@@ -107,30 +107,8 @@ html[data-motion="reduced"] *::after { scroll-behavior: auto !important; transit
 .historyTable .tableHead { position: sticky; top: 187px; z-index: 6; }
 .lifeTabs, .verificationTabs { position: sticky; top: 48px; z-index: 7; background: rgba(243,246,249,.96); backdrop-filter: blur(9px); }
 
-html[data-density="compact"] { --text-body: 14px; --text-control: 13px; }
-html[data-density="compact"] .commandCenterPage,
-html[data-density="compact"] .historyPage,
-html[data-density="compact"] .lifecyclePage,
-html[data-density="compact"] .verificationPage,
-html[data-density="compact"] .campaignPage,
-html[data-density="compact"] .identityPage,
-html[data-density="compact"] .enterprisePage { padding-top: 27px !important; padding-bottom: 42px !important; }
-html[data-density="compact"] .metrics button { min-height: 108px; padding: 14px 17px; }
-html[data-density="compact"] .panel,
-html[data-density="compact"] .campaignCard,
-html[data-density="compact"] .verificationCard { padding: 14px; }
-html[data-density="compact"] .historyTabs button { padding: 12px 18px; }
-html[data-density="compact"] .historyFilters { padding-block: 9px; }
-html[data-density="compact"] .historyRow { padding-block: 10px; }
-html[data-density="compact"] .reqTable article { min-height: 54px; padding-block: 7px; }
-html[data-density="compact"] .traceList > article { padding: 13px 16px; }
-html[data-density="compact"] .coverageRow,
-html[data-density="compact"] .procedureRow,
-html[data-density="compact"] .executionRow { padding-block: 10px; }
-html[data-density="compact"] .gateGrid article { padding: 12px; }
-html[data-density="compact"] .contextBar { height: 44px; min-height: 44px; }
-html[data-density="compact"] .lifeTabs,
-html[data-density="compact"] .verificationTabs { top: 44px; }
+/* Density now lives in Density.css, expressed once as tokens rather than as a per-selector list of
+   hard-coded compact pixel values that reached only a handful of the product's surfaces. */
 
 @media (max-width: 1050px) {
   .workspaceDisplay { display: none; }

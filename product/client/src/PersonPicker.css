@@ -7,5 +7,5 @@
 .personSuggestions i { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: #dff3ef; color: #21776c; font-style: normal; font-size: 12px; font-weight: 800; }
 .personSuggestions span { display: flex; flex-direction: column; min-width: 0; }
 .personSuggestions b { font-size: 12px; }
-.personSuggestions small { color: #748397; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.personSuggestions small { color: #657284; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .personSuggestions em { color: #65768b; font-size: 12px; font-style: normal; }

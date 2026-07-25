@@ -25,7 +25,7 @@
 .changeImportRows article { display:grid; grid-template-columns:34px 1fr; gap:10px; border-bottom:1px solid #edf1f3; padding:11px 13px; }
 .changeImportRows article > span { color:#8a96a5; font-size: 12px; }
 .changeImportRows p { margin:4px 0; color:#41556a; font-size:12px; }
-.changeImportRows small { color:#748397; font-size: 12px; }
+.changeImportRows small { color:#657284; font-size: 12px; }
 .changeImportRows article.invalid { border-left:3px solid #c55e6d; background:#fff8f8; }
 .changeImportCase { display:flex; flex-direction:column; gap:12px; border:1px solid #dce4e9; border-radius: 12px; background:#fff; padding:18px; }
 .changeImportCase h3 { margin:0; color:#263b50; font-size:14px; }

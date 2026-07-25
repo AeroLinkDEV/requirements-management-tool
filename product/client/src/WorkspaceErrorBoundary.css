@@ -17,7 +17,7 @@
 }
 .workspaceCrash .eyebrow {
   margin: 0;
-  font: 700 11px var(--font-display);
+  font: var(--weight-bold) var(--text-xs) var(--font-display);
   letter-spacing: .12em;
   color: #a13636;
 }

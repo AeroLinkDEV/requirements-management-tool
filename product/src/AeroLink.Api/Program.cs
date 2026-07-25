@@ -656,13 +656,15 @@ app.MapDelete("/api/baselines/{id:guid}/selections/{scrId:guid}", async (Guid id
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/baselines/{id:guid}/freeze", async (Guid id, BaselineActorRequest request, HttpContext http, IBaselineRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
+// Freezing is deliberately not gated on verification decisions. Freezing then materializing is what
+// creates the requirement revisions a test engineer needs in order to write a procedure at all, so
+// blocking the freeze would withhold the test team's own inputs and deadlock the release. The gate the
+// verification queue belongs to is release approval, where it appears as a named readiness gate.
+app.MapPost("/api/baselines/{id:guid}/freeze", async (Guid id, BaselineActorRequest request, HttpContext http, IBaselineRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
     var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
     if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-    // A configuration must not be frozen while anyone still owes a decision about how its new or changed
-    // requirements will be verified.
-    try { await verificationImpact.EnsureReleaseMayFreezeAsync(baseline.ReleaseId, ct); baseline.Freeze(http.UserAccount().UserName, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
+    try { baseline.Freeze(http.UserAccount().UserName, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 

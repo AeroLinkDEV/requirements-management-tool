@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import './DesignSystem.css'
+import './Density.css'
 import WorkspaceErrorBoundary from './WorkspaceErrorBoundary.tsx'
 
 const nativeFetch = window.fetch.bind(window)

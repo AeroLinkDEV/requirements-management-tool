@@ -416,6 +416,49 @@ Future entries use:
   are SIL Open Font License 1.1 and redistributable, with licences shipped in the packages. Adding any
   CDN-hosted asset in future requires a superseding decision.
 
+### DEC-048 - Verification Impact Gates Release Approval, Not the Baseline Freeze
+
+- **Date:** 2026-07-25
+- **Status:** Accepted
+- **Decision:** Unresolved verification impact items block **release approval**, enforced as the
+  `verification_impact` gate in `ReleaseReadinessService`. They do not block freezing a candidate
+  baseline. An item is resolved when a test engineer either names an approved procedure or records that
+  no test is required; a release that changed no requirements raises no items and the gate is complete
+  by having nothing to decide.
+- **Rationale:** The gate was first placed on the freeze endpoint. That deadlocks the workflow:
+  requirement revisions do not exist until a baseline is frozen and then materialized, and a revision is
+  what a test procedure is written against. Blocking the freeze therefore withheld the verification
+  team's own inputs and made the item permanently unresolvable. Release approval is also what was
+  actually asked for, and expressing it as a named readiness gate makes the outstanding items visible in
+  the release workbench instead of surfacing as a refusal at the final step.
+- **Consequences:** "Decided" means the procedures are authored and approved. It carries no claim about
+  execution or results — those remain the `coverage`, `verification` and `evidence` gates. The freeze
+  endpoint no longer takes a `VerificationImpactService` dependency.
+
+### DEC-049 - Information Density Is Spacing, and WCAG 2.2 AA Is a Commitment
+
+- **Date:** 2026-07-25
+- **Status:** Accepted
+- **Decision:** Information density is expressed as spacing and line-height tokens with two settings,
+  applied through the workspace shell (`.workspaceView > main`) rather than as a per-page selector list.
+  Compact compresses the block axis only. AeroLink targets **WCAG 2.2 AA**: 4.5:1 contrast for body
+  text, 3:1 for large text, and 24x24 CSS pixel minimum target sizes. Both are verified on rendered
+  pixels, in both densities, by `design-system.spec.ts` and `accessibility-contrast.spec.ts`.
+- **Rationale:** The previous density implementation was fifteen selectors carrying hard-coded compact
+  pixel values; it reached six of the product's twenty-eight row and card families, so most surfaces
+  looked identical in both settings and every new panel silently opted out. Page padding was declared in
+  eight places across seven files, several using `!important` purely to win against each other. On
+  accessibility, the readability floor was a claim in a report until it was measured; the first real
+  measurement in compact found text below the floor, and the first contrast measurement found 96
+  distinct failing colour pairs. A commitment that is not measured is not a commitment.
+- **Consequences:** Compact is measurably denser on record-heavy surfaces, and the spec fails if it
+  stops being so. Only the block axis is compressed, because several record rows carry 3px of inline
+  padding inside an already-padded container and a shared horizontal value would break their alignment.
+  Roughly 110 `color:` declarations were darkened, and two shared colours had to be split because one
+  value cannot satisfy AA on both a light and a dark surface. Elements sitting on a gradient are counted
+  and reported rather than assumed conformant, since their effective background cannot be resolved from
+  computed style; 94 such elements remain unverified by machine and would need visual review.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

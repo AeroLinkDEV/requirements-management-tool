@@ -34,12 +34,16 @@
   gap: 7px;
   margin-bottom: 18px;
 }
+/* These two shared one colour, which cannot be right: .program small sits on the #122642 sidebar card
+   and .eyebrow sits on white and near-white page surfaces. A single value fails AA on one side or the
+   other whichever way it is moved, so the shape and the colour are now separated. */
 .program small, .eyebrow {
   font-size: var(--text-xs);
   letter-spacing: .1em;
   font-weight: 700;
-  color: #73839a;
 }
+.program small { color: #a8b6c9; }
+.eyebrow { color: #606c7e; }
 .program select {
   width: 100%;
   border: 0;
@@ -182,7 +186,7 @@ main > header p { margin: 0; color: var(--ink-500); font-size: 15px; max-width: 
 .scricon { height: 38px; border-radius: 8px; background: #e8f1ff; color: #3168ac; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
 .row b { font-size: 14px; }
 .row p { margin: 4px 0 0; color: var(--ink-500); font-size: 12px; }
-.state { font-size: 12px; font-weight: 700; padding: 6px 9px; border-radius: 12px; background: #f2eee3; color: #956817; }
+.state { font-size: 12px; font-weight: 700; padding: 6px 9px; border-radius: 12px; background: #f2eee3; color: #8e6316; }
 .state.inreview { background: #eee9fb; color: #684bb1; }
 .state.approved, .state.selectedforbaseline { background: #e2f4ed; color: #27785e; }
 .row time { font-size: 12px; color: var(--ink-500); }

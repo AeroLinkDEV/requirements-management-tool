@@ -116,10 +116,13 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
             .ToListAsync(ct);
 
     /// <summary>
-    /// The baseline-approval gate. A configuration must not be frozen while anyone still owes a decision
-    /// about how its new or changed requirements will be verified.
+    /// The release-approval gate. Nobody may authorize a release while a decision is still owed about how one
+    /// of its new or changed requirements will be verified. This is enforced as the verification_impact
+    /// readiness gate in <see cref="ReleaseReadinessService"/>, so the blockers are visible in the release
+    /// workbench rather than surfacing only as a refusal at the final step; this method is the direct check
+    /// for callers that need to fail closed without computing the whole readiness picture.
     /// </summary>
-    public async Task EnsureReleaseMayFreezeAsync(Guid releaseId, CancellationToken ct)
+    public async Task EnsureReleaseMayBeApprovedAsync(Guid releaseId, CancellationToken ct)
     {
         var outstanding = await OutstandingForReleaseAsync(releaseId, ct);
         if (outstanding.Count == 0) return;
@@ -127,7 +130,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
         var more = outstanding.Count > 5 ? $" and {outstanding.Count - 5} more" : "";
         throw new DomainException(
             $"{outstanding.Count} verification impact item(s) are unresolved for this release ({subjects}{more}). " +
-            "Every new or modified requirement needs an approved procedure or a recorded decision that no test is required before the baseline can be frozen.");
+            "Every new or modified requirement needs an approved procedure or a recorded decision that no test is required before the release can be approved.");
     }
 
     /// <summary>

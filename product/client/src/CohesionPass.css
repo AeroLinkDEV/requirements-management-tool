@@ -94,7 +94,7 @@
 
 @media (max-width: 1360px) {
   .reqCommand .pageSizeControl { display: none; }
-  .enterprisePage { padding: 28px 28px 64px; }
+  
   .enterpriseMetrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 

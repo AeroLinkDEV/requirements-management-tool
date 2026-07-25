@@ -116,11 +116,15 @@ jobs:
           npm run typecheck
           npm run build
 
+  # The journeys run on Linux. They were Windows-only for as long as the Playwright config launched both
+  # servers through a PowerShell prologue, which also meant they could not be run on a Linux development
+  # machine at all. The config now passes configuration through webServer.env, so the same suite runs on
+  # either platform; Linux runners are faster and bill at a lower rate.
   browser-pr:
     name: Browser journeys (${{ matrix.shard }}/2)
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.browser == 'true'
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: true
@@ -142,7 +146,7 @@ jobs:
       - name: Cache NuGet packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/\.nuget/packages
+          path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets') }}
           restore-keys: nuget-${{ runner.os }}-
       - name: Restore and build browser API
@@ -153,7 +157,7 @@ jobs:
         working-directory: product/client
         run: |
           npm ci
-          npx playwright install chromium
+          npx playwright install --with-deps chromium
       - name: Run browser journey shard
         working-directory: product/client
         env:
@@ -174,7 +178,7 @@ jobs:
     name: Full browser journeys (${{ matrix.shard }}/3)
     needs: changes
     if: github.event_name != 'pull_request' && needs.changes.outputs.browser == 'true'
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -199,7 +203,7 @@ jobs:
           dotnet restore ../src/AeroLink.Api/AeroLink.Api.csproj
           dotnet build ../src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
           npm ci
-          npx playwright install chromium
+          npx playwright install --with-deps chromium
       - name: Run full browser shard
         working-directory: product/client
         env:
@@ -215,6 +219,51 @@ jobs:
             product/client/test-results/test-timings.json
           if-no-files-found: ignore
           retention-days: 14
+
+  # AeroLink is deployed on-premises and is run from Windows engineering workstations, so Windows stays a
+  # supported platform even though the everyday gate is Linux. This job is the platform assurance: one
+  # unsharded pass on the nightly schedule, rather than paying the Windows rate on every pull request.
+  browser-windows:
+    name: Browser journeys on Windows
+    needs: changes
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+      - name: Restore, build, and install browser dependencies
+        working-directory: product/client
+        run: |
+          dotnet restore ../src/AeroLink.Api/AeroLink.Api.csproj
+          dotnet build ../src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
+          npm ci
+          npx playwright install chromium
+      - name: Run the full suite on Windows
+        working-directory: product/client
+        env:
+          AEROLINK_E2E_SKIP_BUILD: "true"
+        run: npx playwright test
+      - name: Upload Windows diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-windows-${{ github.run_attempt }}
+          path: |
+            product/client/playwright-report
+            product/client/test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
   postgresql-smoke:
     name: PostgreSQL migrations and secure bootstrap

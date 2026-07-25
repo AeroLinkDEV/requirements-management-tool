@@ -62,8 +62,13 @@ public sealed class VerificationImpactApiTests
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
+    /// <summary>
+    /// Freezing is deliberately unguarded, and the queue holds back release approval instead. Freezing then
+    /// materializing is what creates the requirement revisions a test engineer needs before a procedure can
+    /// exist, so gating the freeze would have withheld the test team's own inputs.
+    /// </summary>
     [Fact]
-    public async Task An_unresolved_verification_impact_blocks_the_baseline_from_being_frozen()
+    public async Task An_unresolved_verification_impact_leaves_freezing_alone_and_holds_release_approval()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -71,13 +76,9 @@ public sealed class VerificationImpactApiTests
             ("cm.user", ProgramRole.ConfigurationManager), ("lead.user", ProgramRole.TestLead), ("eng.user", ProgramRole.TestEngineer));
 
         await LoginAsync(client, "cm.user");
-        using var blocked = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/freeze", new { });
-        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
-        var error = (await blocked.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString()!;
-        Assert.Contains("verification impact", error);
-        Assert.Contains("SYSR-00000901", error);
+        using var frozen = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/freeze", new { });
+        Assert.Equal(HttpStatusCode.OK, frozen.StatusCode);
 
-        // The verification engineer confirms no test is required — the declared method alone never sufficed.
         using (var engineer = factory.CreateClient())
         {
             await LoginAsync(engineer, "eng.user");
@@ -85,6 +86,7 @@ public sealed class VerificationImpactApiTests
             Assert.Equal(1, items.GetArrayLength());
             var item = items[0];
             Assert.Equal("Analysis", item.GetProperty("declaredVerificationMethod").GetString());
+            // The declared method alone never sufficed: verification still owes a confirmation.
             Assert.True(item.GetProperty("blocksBaselineApproval").GetBoolean());
 
             using var resolved = await engineer.PostAsJsonAsync($"/api/verification-impact/{item.GetProperty("id").GetGuid()}/resolve",
@@ -92,8 +94,12 @@ public sealed class VerificationImpactApiTests
             Assert.Equal(HttpStatusCode.OK, resolved.StatusCode);
         }
 
-        using var allowed = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/freeze", new { });
-        Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        using (var engineer = factory.CreateClient())
+        {
+            await LoginAsync(engineer, "eng.user");
+            var remaining = await engineer.GetFromJsonAsync<JsonElement>($"/api/releases/{fixture.ReleaseId}/verification-impact?outstandingOnly=true");
+            Assert.Equal(0, remaining.GetArrayLength());
+        }
     }
 
     [Fact]

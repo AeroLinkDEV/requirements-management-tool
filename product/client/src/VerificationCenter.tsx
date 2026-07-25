@@ -17,7 +17,10 @@ type Props={api:string;programId:string;projectId:string;releaseId:string;scope:
 
 export default function VerificationCenter({api,programId,projectId,releaseId,scope,user,onBack}:Props){
  const [baselines,setBaselines]=useState<Baseline[]>([]),[baselineId,setBaselineId]=useState(''),[builds,setBuilds]=useState<Build[]>([]),[buildId,setBuildId]=useState(''),[requirements,setRequirements]=useState<Requirement[]>([]),[procedures,setProcedures]=useState<Procedure[]>([]),[executions,setExecutions]=useState<Execution[]>([]),[coverage,setCoverage]=useState<Coverage>(),[creating,setCreating]=useState(false),[recording,setRecording]=useState<Procedure>(),[approving,setApproving]=useState<Procedure>(),[editing,setEditing]=useState<Procedure>(),[retest,setRetest]=useState<Execution>(),[error,setError]=useState('')
- const [workspaceTab,setWorkspaceTab]=useState<'impact'|'coverage'|'procedures'|'executions'>('impact')
+ // Change impact leads the tab strip and carries a count, which is what signals the outstanding work.
+ // The workspace still opens on coverage, because that is the orientation view people expect to land on
+ // and the badge does the signalling without moving the ground under them.
+ const [workspaceTab,setWorkspaceTab]=useState<'impact'|'coverage'|'procedures'|'executions'>('coverage')
  const [impact,setImpact]=useState<ImpactItem[]>([]),[resolving,setResolving]=useState<ImpactItem>(),[assigning,setAssigning]=useState<ImpactItem>()
  const [requirementQuery,setRequirementQuery]=useState(''),[selectedRequirementIds,setSelectedRequirementIds]=useState<string[]>([])
  const [outcome,setOutcome]=useState<'Pass'|'Fail'|'Blocked'>('Pass')

@@ -1,7 +1,6 @@
 .reqWorkspace {
   min-height: 100vh;
   background: #f4f6f9;
-  padding: 30px 34px;
   max-width: none;
 }
 .reqHeader {
@@ -41,8 +40,13 @@
   padding: 9px 12px;
   gap: 8px;
 }
+/* min-width: 0 is load-bearing. A flex item defaults to min-width: auto, so this box could not shrink
+   below the intrinsic width of the input it wraps; the command row then overflowed its container and the
+   view-mode switch spilled 12px past the right edge of the document. The search field is the element that
+   should absorb a narrow row, so it is the one told it may. */
 .reqSearch {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   align-items: center;
   background: #f6f8fb;
@@ -51,15 +55,17 @@
   padding: 0 10px;
 }
 .reqSearch input {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   border: 0;
   background: transparent;
   padding: 10px;
   outline: 0;
 }
 .reqSearch kbd {
-  font: 9px Manrope;
-  color: #8090a3;
+  flex: 0 0 auto;
+  font: var(--weight-medium) var(--text-xs) var(--font-display);
+  color: #6a7787;
   background: white;
   border: 1px solid #dde4ea;
   border-radius: 8px;
@@ -119,7 +125,7 @@
 .railTitle {
   display: flex;
   justify-content: space-between;
-  color: #68778b;
+  color: #5e6b7d;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -164,7 +170,7 @@
 }
 .specRail button small {
   font-size: 12px;
-  color: #8794a4;
+  color: #646e7a;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -224,7 +230,7 @@
 }
 .resultSummary span {
   font-size: 12px;
-  color: #8491a2;
+  color: #6c7785;
 }
 .confidence {
   font-size: 12px;
@@ -250,7 +256,7 @@
   background: #f8fafc;
   border-bottom: 1px solid #dfe5eb;
   padding: 9px 12px;
-  color: #7d8999;
+  color: #697381;
   font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
@@ -291,7 +297,7 @@
 .reqTable article > i {
   font-style: normal;
   font-size: 12px;
-  color: #258067;
+  color: #247b63;
   background: #e7f5ef;
   padding: 4px 6px;
   border-radius: 8px;
@@ -375,7 +381,7 @@
 }
 .pager span {
   font-size: 12px;
-  color: #7c8999;
+  color: #6c7785;
 }
 .requirementInspector {
   border-left: 1px solid #dce3ea;
@@ -415,7 +421,7 @@
   background: white;
   padding: 11px;
   font-size: 12px;
-  color: #718094;
+  color: #606c7d;
 }
 .inspectorTabs button.active {
   color: #176f77;
@@ -440,13 +446,13 @@
   color: #277660;
 }
 .controlledBanner span {
-  color: #718a83;
+  color: #5e736d;
 }
 .inspectorBody h3 {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #7c8999;
+  color: #6c7785;
   margin: 19px 0 7px;
 }
 .richRequirement {
@@ -470,7 +476,7 @@
   font-size: 12px;
 }
 .inspectorBody dt {
-  color: #7b8898;
+  color: #6c7785;
 }
 .inspectorBody dd {
   margin: 0;
@@ -497,7 +503,7 @@
   font-size: 12px;
 }
 .placement span {
-  color: #748397;
+  color: #657284;
 }
 .historyLead {
   display: flex;
@@ -701,7 +707,7 @@
 }
 .previewStats small {
   display: block;
-  font: 8px sans-serif;
+  font: var(--weight-body) var(--text-xs) var(--font-body);
   color: #788699;
 }
 .schemaModal > div {
@@ -802,7 +808,7 @@
 }
 .importRows article span {
   font-size: 12px;
-  color: #8b96a5;
+  color: #6e7682;
 }
 .importRows article b {
   font-size: 12px;
@@ -890,9 +896,6 @@
   }
 }
 @media (max-width: 750px) {
-  .reqWorkspace {
-    padding: 18px;
-  }
   .specRail {
     display: none;
   }
@@ -938,7 +941,7 @@
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #8794a4;
+  color: #646e7a;
 }
 .reqCommand .advanced {
   border: 1px solid #d7e0e8;
@@ -1010,9 +1013,6 @@
 }
 
 /* Precision Workbench evolution */
-.reqWorkspace {
-  padding: 28px 32px 34px;
-}
 .reqHeader {
   min-height: 88px;
 }
@@ -1115,11 +1115,11 @@
   font-size: 12px;
 }
 .threadPreview span small {
-  color: #718195;
+  color: #657385;
   font-size: 12px;
 }
 .threadPreview em {
-  color: #70a89f;
+  color: #517973;
   font-size: 16px;
   font-style: normal;
 }
@@ -1143,7 +1143,7 @@
 }
 .impactSignal p {
   margin: 3px 0 0;
-  color: #65758a;
+  color: #627186;
   font-size: 12px;
   line-height: 1.45;
 }
@@ -1151,7 +1151,7 @@
   display: flex;
   justify-content: space-between;
   padding: 8px;
-  color: #68778b;
+  color: #5e6b7d;
   cursor: pointer;
   font-size: 12px;
   letter-spacing: 0.08em;

@@ -22,7 +22,7 @@
 .editorHeader > div:first-child > p:last-child {
   max-width: 760px;
   margin: 0;
-  color: #65758a;
+  color: #627186;
   font-size: 15px;
   line-height: 1.55;
 }
@@ -192,7 +192,7 @@
 
 .editorCard > .sectionTitle p {
   margin: 0;
-  color: #718195;
+  color: #657385;
   font-size: 13px;
   line-height: 1.45;
 }
@@ -373,7 +373,7 @@
   height: 28px;
   border-radius: 50%;
   background: #e9edf1;
-  color: #6b7b8b;
+  color: #5e6c7a;
   font-size: 12px;
   font-weight: 800;
 }
@@ -395,7 +395,7 @@
 
 .readinessGrid p {
   margin: 4px 0 0;
-  color: #6b7c8f;
+  color: #67778a;
   font-size: 12px;
   line-height: 1.4;
 }

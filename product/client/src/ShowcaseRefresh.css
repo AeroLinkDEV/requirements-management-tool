@@ -4,7 +4,7 @@
 .workspaceStage { color: var(--ink-900); }
 .workspaceStage main { background: transparent; }
 .workspaceStage main > header h1 { letter-spacing: -.025em; }
-.workspaceStage main > header .eyebrow { color: #6b7f97; }
+.workspaceStage main > header .eyebrow { color: #607287; }
 .workspaceStage .workspaceError { font-size: 14px; line-height: 1.45; }
 
 /* Command Center */
@@ -22,7 +22,7 @@
 .commandCenterPage .programInventory article b { font: 700 22px var(--font-display); }
 
 /* Change Requests and build provenance */
-.historyPage { max-width: 1480px !important; padding: 40px 48px 72px !important; }
+.historyPage { max-width: 1480px !important; }
 .historyHeader { align-items: center; }
 .historyTools { border-radius: var(--radius-md) var(--radius-md) 0 0; margin-top: 24px; }
 .historyTabs button { min-height: 54px; padding: 14px 20px; font-size: 14px; }
@@ -45,7 +45,6 @@
 .buildForm label { font-size: 13px; }
 
 /* Requirements Workspace */
-.reqWorkspace { padding: 34px 38px 60px; }
 .reqHeader { align-items: center; margin-bottom: 24px; }
 .reqHeader h1 { font-size: var(--text-title); }
 .reqHeaderActions { position: relative; align-items: center; gap: 12px; }
@@ -102,7 +101,7 @@
 .specRail button small { font-size: 12px; }
 .sectionTree span { min-height: 32px; font-size: 12px; }
 .savedViews { border-top: 1px solid #e0e6ec; margin-top: 12px; padding-top: 9px; }
-.savedViews > summary { list-style: none; display: flex; justify-content: space-between; padding: 9px; color: #68778b; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
+.savedViews > summary { list-style: none; display: flex; justify-content: space-between; padding: 9px; color: #5e6b7d; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
 .savedViews > summary::-webkit-details-marker { display: none; }
 .savedViews > summary::after { content: '›'; margin-left: 8px; font-size: 16px; }
 .savedViews[open] > summary::after { transform: rotate(90deg); }
@@ -146,7 +145,7 @@
 .reqWorkspace .modalClose { font-size: 24px !important; }
 
 /* Traceability and controlled documents */
-.lifecyclePage { max-width: 1480px !important; padding: 40px 48px 72px !important; }
+.lifecyclePage { max-width: 1480px !important; }
 .lifeTabs button { padding: 14px 19px; min-height: 50px; font-size: 14px; }
 .lifeTabs span { font-size: 12px; }
 .traceTools, .documentActions { padding: 14px; gap: 12px; }
@@ -174,7 +173,7 @@
 .documentGrid h3, .documentGrid dd { font-size: 13px; }
 
 /* Verification */
-.verificationPage { max-width: 1480px !important; padding: 40px 48px 72px !important; }
+.verificationPage { max-width: 1480px !important; }
 .verificationPage > header > button { min-height: 42px; font-size: 14px; }
 .verificationContext { padding: 16px; gap: 16px; }
 .verificationContext label { font-size: 13px; }
@@ -200,7 +199,7 @@
 .procedureForm input, .procedureForm textarea, .procedureForm select, .resultForm input, .resultForm textarea, .resultForm select { font-size: 14px; }
 
 /* Release Campaign */
-.campaignPage { max-width: 1480px !important; padding: 40px 48px 72px !important; }
+.campaignPage { max-width: 1480px !important; }
 .campaignState { font-size: 13px; padding: 7px 12px; }
 .readinessHero { padding: 25px 28px; gap: 24px; }
 .readinessHero p { font-size: 14px; }
@@ -436,11 +435,11 @@
 .explorerBoundary > i { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px; background: #dcefeb; font-style: normal; }
 .explorerBoundary > span { display: flex; flex-direction: column; gap: 1px; }
 .explorerBoundary b { font-size: 12px; }
-.explorerBoundary small { color: #607b77; font-size: 12px; }
+.explorerBoundary small { color: #5c7572; font-size: 12px; }
 .requirementInspector .inspectorTabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .requirementInspector .inspectorTabs button { min-width: 0; padding: 12px 4px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .requirementInspector .inspectorTabs span { padding: 1px 4px; }
-.changeBoundaryNote { margin: 7px 0 18px; color: #6b788a; font-size: 12px; line-height: 1.45; }
+.changeBoundaryNote { margin: 7px 0 18px; color: #6a7789; font-size: 12px; line-height: 1.45; }
 .pageActionsMenu > summary { white-space: nowrap; }
 .traceInspector { display: flex; flex-direction: column; gap: 11px; }
 .traceInspector h3 { margin: 8px 0 0; }
