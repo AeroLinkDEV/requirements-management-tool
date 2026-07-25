@@ -48,21 +48,62 @@ reproducibility claim the product rests on.
 Evidence upload exists but is bound to test executions and release campaigns. Requirements need their own
 attachments (an ICD extract, a diagram). Reuses the evidence store and its integrity manifest.
 
-### 5. Configurable workflows
+### 5. Configurable workflows — **built**
 
-Each team defines the states and transitions that fit its process, rather than inheriting the fixed
-`ScrState` enum.
+Each team records who has to sign a change request, in what authority, and in what order.
 
-**Design.** Strictly additive. `ScrState` is embedded in the readiness gates, the browser journeys, the
-history filters and the seeded showcase; replacing it wholesale would destabilise the product. The
-approach is a workflow *definition* per artifact type — states, allowed transitions, and which transitions
-demand a signature or a rationale — with the current enum as the built-in default definition, so existing
-programs keep working unchanged.
+**What was built.** A `ReviewWorkflow` per project and change-request type: ordered named stages, each
+naming the *authority* that must sign it (Reviewer, Configuration Manager, Approver…) rather than a person,
+so the procedure survives somebody changing jobs. The workflow also fixes the order — sequential or
+parallel — and that choice wins over whatever an author picks at submission, because a team that recorded a
+parallel board does not want an author quietly making it sequential.
 
-**Preserve the `Deferred`-after-`Approved` behaviour.** Approval and inclusion are separate decisions: a
-change can be technically approved and still not belong in this release. Deferring removes it from the
-release's readiness obligations without discarding a valid review, and `Retarget` moves it later. Most
-tools handle this badly; it is worth keeping explicitly in any configurable model.
+Reviews record which procedure and which version they were judged by, and each approval step records the
+stage it answers, so an approval reads as "the configuration manager signed" rather than as "position 1
+signed". An administrator can stand in for any stage: somebody has to be able to unblock a review when the
+named authority is on leave, and a control that can never proceed is not a control.
+
+**Additive, not replacing.** A project with no recorded workflow submits reviews exactly as before, with
+free approver choice. A rule nobody has written down yet must not become a rule that blocks work. `ScrState`
+is untouched — it is embedded in the readiness gates, the browser journeys, the history filters and the
+seeded showcase, and replacing it wholesale would destabilise the product for no gain the teams asked for.
+
+**Versioned, never edited in place.** Revising a procedure produces the next version and retires the prior
+one, which stays retained. A completed review has to remain explainable by the rules it was actually judged
+against; rewriting the procedure underneath it would make its record say something that never happened.
+
+#### What "deferred after approval" means
+
+This came up as a question, and it is worth stating plainly because it is the piece most tools get wrong.
+
+**Approving a change and shipping it are two different decisions.** Approval says: *this change is
+technically correct, the analysis holds, the requirement text is right, and the named authorities have
+signed for it.* Inclusion says: *this change belongs in the release we are about to freeze.*
+
+Those come apart all the time. A change is approved in March and the release freezes in April with a scope
+the programme has cut. The engineering judgement has not changed — the change is still correct, and the
+signatures on it are still valid — but it is not going in this one.
+
+Most tools force one of two bad answers at that point:
+
+- **Reject it**, which throws away a completed, signed review. When it comes back for the next release,
+  everybody reviews it again from scratch, and the audit trail shows a rejection that never reflected any
+  actual engineering objection.
+- **Leave it approved and pointed at the release**, which means the release's readiness gates keep counting
+  it as outstanding work. The release can never show as ready, so people learn to ignore the gate — and a
+  gate people ignore is worse than no gate.
+
+AeroLink's answer is a third state. `Deferred` is reachable from `Approved`, and it means: *approved, and
+deliberately not in this release.* The review stays intact, the signatures stay valid, and the change drops
+out of the release's readiness obligations without anybody pretending it was rejected. `Retarget` then
+moves it to the release it is actually going into, recording who moved it and why.
+
+So the state is not "approved then un-approved". It is "approved, and scheduled elsewhere" — and the reason
+it is a distinct state rather than a flag is that the decision to defer is itself attributable, needs a
+rationale, and belongs in the audit record next to the approval it follows.
+
+This behaviour is preserved unchanged by configurable workflows. Workflows configure *who signs and in what
+order*; they do not configure away the separation between approving a change and shipping it.
 
 ### 8. Jira integration
 

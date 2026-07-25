@@ -112,6 +112,7 @@ app.MapGet("/health/ready", async (AeroLinkDbContext db,CancellationToken ct) =>
 app.MapAeroLinkOperationsEndpoints();
 app.MapAeroLinkPublicationEndpoints();
 app.MapAeroLinkQualityIntelligenceEndpoints();
+app.MapWorkflowEndpoints();
 
 // Unsubscribe is reachable without signing in, because it is followed from a mail client. The signed
 // token is what proves the link came from this deployment; without it anyone could silence anyone else's
@@ -579,11 +580,20 @@ app.MapPost("/api/scrs/{id:guid}/submit", async (Guid id, SubmitReviewRequest re
     {
         var actor = http.UserAccount();
         if (scr.AuthorId != actor.UserName && !actor.IsAdministrator) return Results.Forbid();
-        var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.UserName, x.DisplayName }).ToListAsync(ct);
+        var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
         if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every approver must be an active AeroLink user." });
         var directory = known.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
-        var selections = request.Approvers.Select(x => new ApproverSelection(directory[x.UserId].UserName, directory[x.UserId].DisplayName)).ToList();
-        var cycle = scr.SubmitForReview(actor.UserName, selections, now, request.Mode);
+        // The authority each approver holds is resolved here, where program membership lives, and travels
+        // with the selection so the domain can enforce a recorded procedure without reaching for it.
+        var authorities = await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, known.Select(x => x.Id).ToList(), ct);
+        var selections = request.Approvers.Select(x =>
+        {
+            var account = directory[x.UserId];
+            authorities.TryGetValue(account.Id, out var role);
+            return new ApproverSelection(account.UserName, account.DisplayName, role);
+        }).ToList();
+        var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, scr.ProjectId, scr.Type, ct);
+        var cycle = scr.SubmitForReview(actor.UserName, selections, now, request.Mode, workflow);
         foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
             db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"scr:{scr.Id}", scr.Id, now));
         await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
