@@ -67,6 +67,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ArtifactAssignment> ArtifactAssignments => Set<ArtifactAssignment>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<ReviewWorkflow> ReviewWorkflows => Set<ReviewWorkflow>();
+    public DbSet<JiraConnection> JiraConnections => Set<JiraConnection>();
+    public DbSet<JiraIssueLink> JiraIssueLinks => Set<JiraIssueLink>();
     public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
     public DbSet<RequirementImportMapping> RequirementImportMappings => Set<RequirementImportMapping>();
@@ -517,6 +519,34 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<UserNotification>(b =>
         {
             b.ToTable("user_notifications");b.HasKey(x=>x.Id);b.Property(x=>x.Recipient).HasMaxLength(100).IsRequired();b.Property(x=>x.Type).HasMaxLength(60).IsRequired();b.Property(x=>x.Title).HasMaxLength(300).IsRequired();b.Property(x=>x.Detail).HasMaxLength(2000);b.Property(x=>x.Route).HasMaxLength(300);b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.HasIndex(x=>new{x.Recipient,x.State,x.CreatedAt});b.HasIndex(x=>x.ProjectId);
+        });
+        modelBuilder.Entity<JiraConnection>(b =>
+        {
+            b.ToTable("jira_connections"); b.HasKey(x => x.Id);
+            b.Property(x => x.BaseUrl).HasMaxLength(500).IsRequired();
+            b.Property(x => x.ProjectKey).HasMaxLength(50).IsRequired();
+            b.Property(x => x.IssueType).HasMaxLength(80).IsRequired();
+            b.Property(x => x.UserName).HasMaxLength(320);
+            b.Property(x => x.ProtectedApiToken).IsRequired();
+            b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.LastError).HasMaxLength(1000);
+            // One connection per project. Two would mean the product choosing which tracker a push went to.
+            b.HasIndex(x => x.ProjectId).IsUnique();
+        });
+        modelBuilder.Entity<JiraIssueLink>(b =>
+        {
+            b.ToTable("jira_issue_links"); b.HasKey(x => x.Id);
+            b.Property(x => x.ArtifactType).HasMaxLength(60).IsRequired();
+            b.Property(x => x.ArtifactNumber).HasMaxLength(60);
+            b.Property(x => x.IssueKey).HasMaxLength(60);
+            b.Property(x => x.IssueUrl).HasMaxLength(600);
+            b.Property(x => x.IssueStatus).HasMaxLength(120);
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
+            b.Property(x => x.LastError).HasMaxLength(1000);
+            b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
+            // One issue per artifact: a second push must find the existing link, not create a duplicate.
+            b.HasIndex(x => new { x.ArtifactType, x.ArtifactId }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.State });
         });
         modelBuilder.Entity<ReviewWorkflow>(b =>
         {

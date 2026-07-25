@@ -1,0 +1,13 @@
+/* The change request's tracker issue. */
+
+.scrJira { display: grid; gap: 12px; }
+.scrJiraError { margin: 0; color: #a4262c; font-size: 13px; }
+.scrJiraEmpty { margin: 0; color: #7f8d9c; font-size: 13px; }
+
+.scrJiraLinked {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 11px 14px; border: 1px solid #e5eaf0; border-radius: 10px; background: #f7f9fb;
+}
+.scrJiraLinked a { color: #2e74b5; font: 700 16px/1 "DM Sans", sans-serif; }
+.scrJiraLinked strong { display: block; color: #1c3044; font: 600 13px/1.3 "DM Sans", sans-serif; text-align: right; }
+.scrJiraLinked small { display: block; max-width: 380px; color: #7f8d9c; font-size: 11px; text-align: right; }
