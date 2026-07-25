@@ -157,11 +157,9 @@ public sealed class VerificationImpactReadinessGateTests
 
             await using (var assert = new AeroLinkDbContext(seed.Options))
             {
-                // The same item still holds release approval.
+                // The same item still holds release approval, which is the gate's job and nothing else's.
                 var service = new VerificationImpactService(assert);
                 Assert.Single(await service.OutstandingForReleaseAsync(seed.ReleaseId, default));
-                await Assert.ThrowsAsync<Domain.Common.DomainException>(
-                    () => service.EnsureReleaseMayBeApprovedAsync(seed.ReleaseId, default));
                 var gate = await GateAsync(seed.Options, seed.CampaignId);
                 Assert.False(gate.Complete);
             }

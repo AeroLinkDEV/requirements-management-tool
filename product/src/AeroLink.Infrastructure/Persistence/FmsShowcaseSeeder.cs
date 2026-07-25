@@ -41,7 +41,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var baseline15 = new CandidateBaseline("SWBL-00000015", 0, project.Id, release15.Id, null, "FMS 1.5 Released Product Baseline", "cm.fms", start.AddDays(150));
         foreach (var request in historical) baseline15.Select(request, "cm.fms", start.AddDays(150));
         baseline15.Freeze("cm.fms", start.AddDays(151)); db.CandidateBaselines.Add(baseline15); await db.SaveChangesAsync(ct);
-        await new RequirementBaselineMaterializer(db).MaterializeAsync(baseline15.Id, "cm.fms", start.AddDays(152), ct);
+        await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(baseline15.Id, "cm.fms", start.AddDays(152), ct);
 
         var currentRows = await (from member in db.BaselineRequirements.Where(x => x.BaselineId == baseline15.Id)
                                  join artifact in db.Requirements on member.ArtifactId equals artifact.Id

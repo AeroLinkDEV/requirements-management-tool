@@ -93,11 +93,18 @@ Verification impact: approving a change request raises an item for every require
 modifies, and for any procedure a retirement leaves covering nothing. A Test Lead distributes items;
 a Test Engineer resolves each one either by naming an approved procedure or by recording that no test is
 required — a requirement the author declared verifiable by analysis still needs that confirmation.
-Modified requirements carry their coverage forward marked **suspect** until it is reconfirmed. Undecided
-items hold the `verification_impact` release-readiness gate, so they block release approval; they
+Undecided items hold the `verification_impact` release-readiness gate, so they block release approval; they
 deliberately do **not** block the baseline freeze, because freezing and materializing is what creates the
 requirement revisions a procedure is written against. "Decided" means the procedures are authored and
 approved — it says nothing about whether they have been executed.
+
+Materialization is where the loop closes, because it is the first moment requirement revisions exist. Each
+item binds to the exact revision its change produced; coverage on a modified requirement carries forward
+onto the new revision marked **suspect**; a decision that named a procedure becomes the real coverage link,
+clearing the suspect flag rather than duplicating it; and a procedure a retirement left covering nothing
+raises its own item. **Suspect coverage is not coverage**: the `coverage` readiness gate counts only
+confirmed links, so a requirement cannot reach release on the strength of a procedure written against its
+previous wording.
 
 Presentation: one design system across every surface — a 12px readability floor, four radii, one type
 scale, one focus treatment — with **comfortable and compact information density** expressed as spacing
@@ -239,6 +246,16 @@ reason the document set can be trusted.
   the user agent's 0.8333em — silently fell from 12.5px to 11.67px, under the readability floor. The
   floor had never been measured in compact because nothing exercised compact. Relative font sizes make a
   floor unpredictable; pin the element instead of trusting inheritance.
+- **A method nothing calls is a claim nothing keeps.** The verification feature shipped with
+  `LinkRequirementRevision`, `CarriedForward`, `MarkSuspect` and `ConfirmStillValid` fully written, tested
+  at the domain level, and never called from production code. The documentation described suspect
+  carry-forward as product behaviour while no code path produced a suspect link. Domain tests pass happily
+  against methods no caller reaches; before believing a capability exists, follow it from an endpoint.
+- **Look for the mechanism that already exists before adding one.** Release reconciliation had been
+  carrying coverage forward across baselines for as long as it existed — silently, and unmarked, which
+  asserted that a procedure written against previous wording still verified the new one. Adding a second,
+  safer carry-forward simply produced two mechanisms; the fix was to delete the unmarked one. A failing
+  test in an unrelated area is often the first sign that the behaviour you are adding is already there.
 - **An on-premises product must be measured on a hostile network, not a good one.** The client fetched
   its webfonts from a public CDN. On a fast connection this was invisible; when the request hung rather
   than failing fast — the normal behaviour of a firewall that drops packets instead of rejecting them —

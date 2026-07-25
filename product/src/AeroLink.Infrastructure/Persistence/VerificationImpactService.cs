@@ -1,9 +1,26 @@
 using AeroLink.Domain.ChangeControl;
-using AeroLink.Domain.Common;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
+
+/// <summary>
+/// One requirement change, as it looked once a baseline materialised it into an exact revision.
+/// <paramref name="PriorRevisionId"/> is the revision this one supersedes, absent for an introduction.
+/// </summary>
+public sealed record MaterializedRequirementChange(
+    Guid ChangeRequestId,
+    Guid RequirementChangeId,
+    RequirementChangeKind Kind,
+    Guid? PriorRevisionId,
+    Guid RevisionId,
+    string DisplayNumber);
+
+/// <summary>What materialisation settled: items bound to revisions, coverage carried forward and confirmed,
+/// and procedures a retirement left covering nothing.</summary>
+public sealed record MaterializationImpactResult(int BoundToRevision, int CoverageCarriedForward,
+    int CoverageConfirmed, int ProceduresOrphaned);
 
 /// <summary>
 /// Raises verification work when an approved change alters what must be tested, and keeps that work
@@ -68,17 +85,167 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
     }
 
     /// <summary>
-    /// Raises an item for every procedure left covering no requirement after a retirement was materialised.
-    /// A procedure that still covers something else stays quiet.
+    /// Completes the loop at materialisation, which is the first moment requirement revisions exist.
+    ///
+    /// Three things become possible only here. Items anchored to an approved requirement change bind to the
+    /// exact revision that change produced. Coverage on a modified requirement carries forward onto the new
+    /// revision marked suspect, because the procedure was written against the previous wording and nobody has
+    /// yet said it still holds. A procedure left covering nothing by a retirement raises its own item.
+    ///
+    /// Runs inside the materialisation transaction and does not save; the caller owns the unit of work.
     /// </summary>
-    public async Task<int> RaiseOrphanedProceduresAsync(Guid projectId, Guid releaseId, Guid changeRequestId,
+    public async Task<MaterializationImpactResult> ApplyMaterializationAsync(Guid projectId, Guid releaseId,
+        IReadOnlyList<MaterializedRequirementChange> changes, DateTimeOffset now, CancellationToken ct)
+    {
+        if (changes.Count == 0) return new MaterializationImpactResult(0, 0, 0, 0);
+
+        var changeIds = changes.Select(x => x.RequirementChangeId).ToList();
+        var items = await db.VerificationImpactItems
+            .Where(x => x.RequirementChangeId != null && changeIds.Contains(x.RequirementChangeId!.Value))
+            .ToListAsync(ct);
+        var itemByChange = items
+            .GroupBy(x => x.RequirementChangeId!.Value)
+            .ToDictionary(x => x.Key, x => x.First());
+
+        var bound = 0;
+        foreach (var change in changes)
+        {
+            if (!itemByChange.TryGetValue(change.RequirementChangeId, out var item)) continue;
+            if (item.Trigger == VerificationImpactTrigger.ProcedureOrphaned) continue;
+            item.LinkRequirementRevision(change.RevisionId, now);
+            bound++;
+        }
+
+        var carried = await CarryCoverageForwardAsync(changes, now, ct);
+        var confirmed = await ConfirmDecidedCoverageAsync(changes, itemByChange, carried, now, ct);
+        var orphaned = await RaiseOrphanedProceduresAsync(projectId, releaseId, changes, carried, now, ct);
+        return new MaterializationImpactResult(bound, carried.Count, confirmed, orphaned);
+    }
+
+    /// <summary>
+    /// Copies every coverage link on the previous revision of a modified requirement onto the new revision,
+    /// marked suspect. Without this the new revision would silently have no coverage at all, which reads as
+    /// "nothing to verify" rather than "verification needs rechecking".
+    /// </summary>
+    private async Task<List<TestRequirementCoverage>> CarryCoverageForwardAsync(
+        IReadOnlyList<MaterializedRequirementChange> changes, DateTimeOffset now, CancellationToken ct)
+    {
+        var modified = changes
+            .Where(x => x.Kind == RequirementChangeKind.Modify && x.PriorRevisionId is not null)
+            .ToList();
+        if (modified.Count == 0) return [];
+
+        var priorIds = modified.Select(x => x.PriorRevisionId!.Value).Distinct().ToList();
+        var priorCoverage = await db.TestCoverage.AsNoTracking()
+            .Where(x => priorIds.Contains(x.RequirementRevisionId))
+            .ToListAsync(ct);
+        if (priorCoverage.Count == 0) return [];
+
+        var carried = new List<TestRequirementCoverage>();
+        foreach (var change in modified)
+        {
+            foreach (var coverage in priorCoverage.Where(x => x.RequirementRevisionId == change.PriorRevisionId!.Value))
+            {
+                var link = TestRequirementCoverage.CarriedForward(coverage.ProcedureRevisionId, change.RevisionId,
+                    $"{change.DisplayNumber} changed under this procedure, which was written against the previous wording.", now);
+                db.TestCoverage.Add(link);
+                carried.Add(link);
+            }
+        }
+        return carried;
+    }
+
+    /// <summary>
+    /// Turns a resolved "this procedure covers it" decision into the exact link it always meant. A
+    /// carried-forward link to the same procedure is confirmed rather than duplicated, so the decision
+    /// clears the suspect flag it was made about.
+    /// </summary>
+    private async Task<int> ConfirmDecidedCoverageAsync(IReadOnlyList<MaterializedRequirementChange> changes,
+        IReadOnlyDictionary<Guid, VerificationImpactItem> itemByChange,
+        List<TestRequirementCoverage> carried, DateTimeOffset now, CancellationToken ct)
+    {
+        var decided = changes
+            .Select(change => itemByChange.TryGetValue(change.RequirementChangeId, out var item) ? (change, item) : default)
+            .Where(x => x.item is not null
+                && x.item.Outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed
+                && x.item.ResolvedProcedureId is not null)
+            .ToList();
+        if (decided.Count == 0) return 0;
+
+        // The named procedure's approved revision is what a link may point at; the endpoint already refused
+        // to record the decision against a procedure without one. Procedures pre-date materialisation, so a
+        // plain query is enough — nothing here was created in this transaction.
+        var procedureIds = decided.Select(x => x.item.ResolvedProcedureId!.Value).Distinct().ToList();
+        var approvedRevisions = (await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => procedureIds.Contains(x.ProcedureId) && x.State == TestProcedureState.Approved)
+                .Select(x => new { x.Id, x.ProcedureId, x.Revision })
+                .ToListAsync(ct))
+            .GroupBy(x => x.ProcedureId)
+            .ToDictionary(x => x.Key, x => x.OrderByDescending(r => r.Revision).First().Id);
+
+        var confirmed = 0;
+        foreach (var (change, item) in decided)
+        {
+            if (!approvedRevisions.TryGetValue(item.ResolvedProcedureId!.Value, out var procedureRevisionId)) continue;
+            var existing = carried.SingleOrDefault(x =>
+                x.RequirementRevisionId == change.RevisionId && x.ProcedureRevisionId == procedureRevisionId);
+            if (existing is not null)
+            {
+                existing.ConfirmStillValid(item.ResolvedBy ?? "verification", now);
+            }
+            else
+            {
+                db.TestCoverage.Add(new TestRequirementCoverage(procedureRevisionId, change.RevisionId));
+            }
+            confirmed++;
+        }
+        return confirmed;
+    }
+
+    /// <summary>
+    /// Raises an item for a procedure a retirement left covering nothing.
+    ///
+    /// Only procedures touched by this materialisation's retirements are considered, and only those with no
+    /// remaining link to an active requirement revision. A procedure that still covers something else stays
+    /// quiet, and a newly authored procedure that has never been linked is not an orphan — it is unfinished
+    /// work, which is a different thing and not this signal's business.
+    /// </summary>
+    private async Task<int> RaiseOrphanedProceduresAsync(Guid projectId, Guid releaseId,
+        IReadOnlyList<MaterializedRequirementChange> changes, List<TestRequirementCoverage> carried,
         DateTimeOffset now, CancellationToken ct)
     {
-        var linkedProcedureRevisions = await db.TestCoverage.AsNoTracking()
-            .Select(x => x.ProcedureRevisionId).Distinct().ToListAsync(ct);
+        var retired = changes
+            .Where(x => x.Kind == RequirementChangeKind.Retire && x.PriorRevisionId is not null)
+            .ToList();
+        if (retired.Count == 0) return 0;
+
+        var retiredRevisionIds = retired.Select(x => x.PriorRevisionId!.Value).Distinct().ToHashSet();
+        var strandedProcedureRevisions = await db.TestCoverage.AsNoTracking()
+            .Where(x => retiredRevisionIds.Contains(x.RequirementRevisionId))
+            .Select(x => x.ProcedureRevisionId)
+            .Distinct()
+            .ToListAsync(ct);
+        if (strandedProcedureRevisions.Count == 0) return 0;
+
+        // Coverage that survives: a link from the same procedure revision to a requirement revision that is
+        // still active. Links added earlier in this same transaction count, hence the pending set.
+        var survivingLinks = await db.TestCoverage.AsNoTracking()
+            .Where(x => strandedProcedureRevisions.Contains(x.ProcedureRevisionId)
+                && !retiredRevisionIds.Contains(x.RequirementRevisionId))
+            .Join(db.RequirementRevisions.AsNoTracking().Where(r => r.State == RequirementRevisionState.Active),
+                coverage => coverage.RequirementRevisionId, revision => revision.Id,
+                (coverage, _) => coverage.ProcedureRevisionId)
+            .Distinct()
+            .ToListAsync(ct);
+        var stillCovering = survivingLinks
+            .Concat(carried.Select(x => x.ProcedureRevisionId))
+            .ToHashSet();
+
+        var orphanedRevisionIds = strandedProcedureRevisions.Where(x => !stillCovering.Contains(x)).ToList();
+        if (orphanedRevisionIds.Count == 0) return 0;
 
         var orphanedProcedures = await db.TestProcedureRevisions.AsNoTracking()
-            .Where(revision => !linkedProcedureRevisions.Contains(revision.Id))
+            .Where(revision => orphanedRevisionIds.Contains(revision.Id))
             .Join(db.TestProcedures.AsNoTracking().Where(p => p.ProjectId == projectId),
                 revision => revision.ProcedureId, procedure => procedure.Id,
                 (revision, procedure) => new { procedure.Id, procedure.BaseNumber })
@@ -90,11 +257,12 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
             .Where(x => x.Trigger == VerificationImpactTrigger.ProcedureOrphaned && x.State != VerificationImpactState.Resolved)
             .Select(x => x.ProcedureId).ToListAsync(ct);
         var covered = alreadyRaised.Where(x => x is not null).Select(x => x!.Value).ToHashSet();
+        var changeRequestId = retired[0].ChangeRequestId;
 
         var raised = 0;
         foreach (var procedure in orphanedProcedures)
         {
-            if (covered.Contains(procedure.Id)) continue;
+            if (!covered.Add(procedure.Id)) continue;
             db.VerificationImpactItems.Add(VerificationImpactItem.ForOrphanedProcedure(
                 projectId, releaseId, changeRequestId, procedure.Id, procedure.BaseNumber, now));
             raised++;
@@ -115,23 +283,9 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
             .OrderBy(x => x.State).ThenBy(x => x.Trigger).ThenBy(x => x.SubjectDisplayNumber)
             .ToListAsync(ct);
 
-    /// <summary>
-    /// The release-approval gate. Nobody may authorize a release while a decision is still owed about how one
-    /// of its new or changed requirements will be verified. This is enforced as the verification_impact
-    /// readiness gate in <see cref="ReleaseReadinessService"/>, so the blockers are visible in the release
-    /// workbench rather than surfacing only as a refusal at the final step; this method is the direct check
-    /// for callers that need to fail closed without computing the whole readiness picture.
-    /// </summary>
-    public async Task EnsureReleaseMayBeApprovedAsync(Guid releaseId, CancellationToken ct)
-    {
-        var outstanding = await OutstandingForReleaseAsync(releaseId, ct);
-        if (outstanding.Count == 0) return;
-        var subjects = string.Join(", ", outstanding.Take(5).Select(x => x.SubjectDisplayNumber));
-        var more = outstanding.Count > 5 ? $" and {outstanding.Count - 5} more" : "";
-        throw new DomainException(
-            $"{outstanding.Count} verification impact item(s) are unresolved for this release ({subjects}{more}). " +
-            "Every new or modified requirement needs an approved procedure or a recorded decision that no test is required before the release can be approved.");
-    }
+    // The release-approval rule lives in exactly one place: the verification_impact gate in
+    // ReleaseReadinessService, which /api/release-campaigns/{id}/release refuses to proceed without. A second
+    // direct check here would be a second copy of the same rule to keep in step, so there isn't one.
 
     /// <summary>
     /// Confirms the named procedure exists in the Project and has an approved revision. Coverage may only be

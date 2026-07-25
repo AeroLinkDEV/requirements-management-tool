@@ -459,6 +459,26 @@ Future entries use:
   and reported rather than assumed conformant, since their effective background cannot be resolved from
   computed style; 94 such elements remain unverified by machine and would need visual review.
 
+### DEC-050 - Suspect Coverage Is Not Coverage, and Materialization Owns Carry-Forward
+
+- **Date:** 2026-07-25
+- **Status:** Accepted
+- **Decision:** Coverage is carried forward onto a new requirement revision at **materialization**, marked
+  suspect whenever the requirement changed under the procedure. Suspect links do not count toward the
+  `coverage` release-readiness gate. Release reconciliation no longer creates coverage links; it reports how
+  many revisions carry suspect coverage and how many still need confirmed coverage.
+- **Rationale:** Reconciliation had been carrying coverage forward since it was written, leaving the new
+  links unmarked. That silently asserted the thing nobody had said — that a procedure written against the
+  previous wording still verifies the new one — and the readiness gate then counted it as verified. Two
+  carry-forward mechanisms would have been worse than one, so the unmarked one was removed rather than
+  duplicated. Materialization is the correct owner because it is the only place that knows both the prior
+  and the new revision of a changed requirement.
+- **Consequences:** A modified requirement whose procedure has not been reconfirmed now holds both the
+  `coverage` and `verification_impact` gates, which is the intended behaviour and a stricter release bar
+  than before. `ReleaseReconciliationResult.CoverageLinksCreated` is replaced by `SuspectCoverage`; the
+  release workbench reports the new wording. Existing baselines materialized before this change keep
+  whatever links they already had — nothing retroactively marks historical coverage suspect.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

@@ -21,7 +21,11 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         var members = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct); var revisionIds = members.Select(x => x.RevisionId).ToList();
         var derivedIds = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id where artifact.Level != RequirementLevel.System select member.RevisionId).ToListAsync(ct);
         var tracedDerivedIds = await db.RequirementTraces.AsNoTracking().Where(x => derivedIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId)).Select(x => x.SourceRevisionId).Distinct().ToListAsync(ct);
-        var coverage = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct); var coveredIds = coverage.Select(x => x.RequirementRevisionId).Distinct().ToHashSet();
+        // Suspect coverage is a link carried across a change that nobody has reconfirmed, so it is deliberately
+        // not counted as covered. Treating it as coverage would let a requirement reach release on the strength
+        // of a procedure written against its previous wording.
+        var coverage = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
+        var coveredIds = coverage.Where(x => !x.IsSuspect).Select(x => x.RequirementRevisionId).Distinct().ToHashSet();
         var procedureIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList(); var executions = await db.TestExecutions.AsNoTracking().Where(x => procedureIds.Contains(x.ProcedureRevisionId) && (campaign.SoftwareBuildId == null || x.SoftwareBuildId == campaign.SoftwareBuildId)).ToListAsync(ct);
         var latestRuns = executions.GroupBy(x => x.ProcedureRevisionId).Select(x => x.OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).First()).ToList();
         var runIds = latestRuns.Select(x => x.Id).ToList(); var evidenceRunIds = await db.TestExecutionEvidence.AsNoTracking().Where(x => runIds.Contains(x.TestExecutionId)).Select(x => x.TestExecutionId).Distinct().ToListAsync(ct);
