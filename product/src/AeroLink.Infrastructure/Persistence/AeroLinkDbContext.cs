@@ -8,6 +8,7 @@ using AeroLink.Domain.Verification;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Notifications;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -65,6 +66,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ArtifactWatch> ArtifactWatches => Set<ArtifactWatch>();
     public DbSet<ArtifactAssignment> ArtifactAssignments => Set<ArtifactAssignment>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
+    public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
+    public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
     public DbSet<RequirementImportMapping> RequirementImportMappings => Set<RequirementImportMapping>();
     public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();
     public DbSet<ProblemReport> ProblemReports => Set<ProblemReport>();
@@ -509,6 +512,25 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("user_notifications");b.HasKey(x=>x.Id);b.Property(x=>x.Recipient).HasMaxLength(100).IsRequired();b.Property(x=>x.Type).HasMaxLength(60).IsRequired();b.Property(x=>x.Title).HasMaxLength(300).IsRequired();b.Property(x=>x.Detail).HasMaxLength(2000);b.Property(x=>x.Route).HasMaxLength(300);b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.HasIndex(x=>new{x.Recipient,x.State,x.CreatedAt});b.HasIndex(x=>x.ProjectId);
         });
+        modelBuilder.Entity<NotificationDelivery>(b =>
+        {
+            b.ToTable("notification_deliveries"); b.HasKey(x => x.Id);
+            b.Property(x => x.Channel).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Recipient).HasMaxLength(100).IsRequired();
+            b.Property(x => x.Address).HasMaxLength(320);
+            b.Property(x => x.LastError).HasMaxLength(1000);
+            // The dispatcher reads exactly this: oldest pending first.
+            b.HasIndex(x => new { x.State, x.Channel, x.Sequence });
+            b.HasIndex(x => x.NotificationId);
+            b.HasOne<UserNotification>().WithMany().HasForeignKey(x => x.NotificationId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<NotificationPreference>(b =>
+        {
+            b.ToTable("notification_preferences"); b.HasKey(x => x.Id);
+            b.Property(x => x.Recipient).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => x.Recipient).IsUnique();
+        });
         modelBuilder.Entity<RequirementImportMapping>(b =>
         {
             b.ToTable("requirement_import_mappings");b.HasKey(x=>x.Id);b.Property(x=>x.Name).HasMaxLength(200).IsRequired();b.Property(x=>x.MappingJson).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.Name}).IsUnique();
@@ -649,7 +671,26 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             if (entry.State == EntityState.Modified) entry.Property(x => x.Version).CurrentValue = entry.Property(x => x.Version).OriginalValue + 1;
         }
         await AddLifecycleEventsAsync(cancellationToken);
+        await QueueNotificationDeliveriesAsync(cancellationToken);
         return await base.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Queues an outbound delivery for every notification being written, in the same unit of work.
+    ///
+    /// This lives here rather than at each of the endpoints that raise a notification, and that is the
+    /// whole point: there are several such endpoints today, someone will add another, and a notification
+    /// that quietly reaches nobody is indistinguishable from one that was never raised. Attaching to the
+    /// save means the delivery cannot be forgotten, and cannot survive a rollback of the work it announces.
+    /// </summary>
+    private async Task QueueNotificationDeliveriesAsync(CancellationToken ct)
+    {
+        var raised = ChangeTracker.Entries<UserNotification>()
+            .Where(x => x.State == EntityState.Added)
+            .Select(x => x.Entity)
+            .ToList();
+        if (raised.Count == 0) return;
+        await new Notifications.NotificationOutbox(this).QueueEmailAsync(raised, DateTimeOffset.UtcNow, ct);
     }
 
     private async Task AddLifecycleEventsAsync(CancellationToken ct)

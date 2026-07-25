@@ -1,3 +1,4 @@
+using AeroLink.Infrastructure.Notifications;
 using AeroLink.Domain.Contracts;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,11 @@ public static class DependencyInjection
         services.AddScoped<IBaselineRepository, BaselineRepository>();
         services.AddScoped<RequirementBaselineMaterializer>();
         services.AddScoped<FmsShowcaseSeeder>();
+        services.AddScoped<NotificationOutbox>();
+        services.AddScoped<NotificationLinkBuilder>();
+        services.AddSingleton<UnsubscribeTokenService>();
+        services.AddScoped<IEmailSender, SmtpEmailSender>();
+        services.AddHostedService<NotificationDispatchWorker>();
         services.AddSingleton<EvidenceFileStore>();
         services.AddHostedService<EnterpriseJobWorker>();
         services.AddDataProtection();
