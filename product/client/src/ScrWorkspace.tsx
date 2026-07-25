@@ -10,6 +10,7 @@ import type {
   RequirementLevel,
 } from "./ControlledRequirementEditor";
 import PersonPicker from "./PersonPicker";
+import ControlledAttachments from "./ControlledAttachments";
 import { RichCaseField, RichContentView } from "./RichContent";
 import { emptyRichContent, fromPlainText, toPlainText } from "./richContent";
 import "./ScrWorkspace.css";
@@ -839,6 +840,21 @@ export default function ScrWorkspace({
                   </div></article>
                 ))}
               </div>
+            </section>
+
+            <section className="workspaceCard">
+              <div className="workspaceTitle">
+                <div><h2>Supporting files</h2><p>Evidence an approver needs alongside the change case</p></div>
+              </div>
+              {/* Attached where the change is decided, not in a separate vault. The datasheet that justifies
+                  a change request belongs beside the change request. */}
+              <ControlledAttachments
+                api={api}
+                projectId={scr.projectId}
+                artifactType="ChangeRequest"
+                artifactId={scr.id}
+                canAttach={scr.state === "Draft" && isAuthor}
+              />
             </section>
 
             <section className="workspaceCard">

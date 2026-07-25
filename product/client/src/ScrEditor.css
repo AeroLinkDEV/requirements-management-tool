@@ -496,7 +496,8 @@
 
    Prose is still one textarea — the common case pays nothing for the capability. The button below it is the
    whole affordance: one click and the field becomes the block editor, where tables and figures live. */
-.pasField { min-width: 0; }
+.pasField { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.pasField > label { color: #4b5f74; font-size: 12px; font-weight: 700; }
 .pasStructure {
   align-self: start;
   min-height: 30px;

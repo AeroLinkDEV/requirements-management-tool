@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useId, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   fromPlainText,
   hasStructure,
@@ -362,17 +362,23 @@ export function RichCaseField({
   placeholder: string;
   onChange: (value: string) => void;
 }) {
-  const structured = hasStructure(value);
-  if (structured)
+  const id = useId();
+  if (hasStructure(value))
     return (
       <div className="pasField">
         <RichContentEditor api={api} projectId={projectId} label={label} value={value} onChange={onChange} />
       </div>
     );
+  // The label names the textarea by reference rather than by wrapping it. Wrapping would fold the button
+  // below into the field's accessible name, so a screen reader would announce this as "Analysis Add a table
+  // or figure" — one control claiming to be two.
   return (
-    <label className="pasField">
-      <b>{label}</b>
+    <div className="pasField">
+      <label htmlFor={id}>
+        <b>{label}</b>
+      </label>
       <textarea
+        id={id}
         value={toPlainText(value)}
         onChange={(event) => onChange(fromPlainText(event.target.value))}
         placeholder={placeholder}
@@ -392,6 +398,6 @@ export function RichCaseField({
       >
         Add a table or figure
       </button>
-    </label>
+    </div>
   );
 }
