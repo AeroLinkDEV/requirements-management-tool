@@ -260,6 +260,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     public static string Snapshot(SystemChangeRequest item, long? versionOverride = null) =>
         JsonSerializer.Serialize(new { scrVersion = versionOverride ?? item.Version, title = item.Title,
             problem = item.Problem, analysis = item.Analysis, solution = item.Solution,
+            problemRich = item.ProblemRich, analysisRich = item.AnalysisRich, solutionRich = item.SolutionRich,
             requirementChanges = item.RequirementChanges.Select(x => new { baseNumber = x.BaseNumber,
                 revision = x.Revision, level = x.Level.ToString(), kind = x.Kind.ToString(),
                 statement = x.Statement, rationale = x.Rationale, verificationMethod = x.VerificationMethod,
@@ -276,7 +277,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             throw new JsonException("The latest autosaved SCR draft does not contain requirement changes.");
         var changes = await NormalizeAsync(item, draft.RequirementChanges, ct);
         item.UpdateDraft(actor, draft.Title ?? "", draft.Problem ?? "", draft.Analysis ?? "",
-            draft.Solution ?? "", changes, now);
+            draft.Solution ?? "", changes, now, draft.ProblemRich, draft.AnalysisRich, draft.SolutionRich);
     }
 
     private async Task<IReadOnlyList<RequirementChangeDraft>> NormalizeAsync(SystemChangeRequest scr,
@@ -343,7 +344,8 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     }
 
     private sealed record SystemChangeRequestDraft(string? Title, string? Problem, string? Analysis,
-        string? Solution, List<SystemChangeRequestRequirementDraft>? RequirementChanges);
+        string? Solution, List<SystemChangeRequestRequirementDraft>? RequirementChanges,
+        string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null);
     private sealed record SystemChangeRequestRequirementDraft(string? BaseNumber, int Revision,
         string? Level, string? Kind, string? Statement, string? Rationale, string? VerificationMethod,
         string? RichText, string? AttributesJson, string? ImpactDispositionJson, bool IsDerived = false);
@@ -400,7 +402,8 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
             : new RequirementChangeDraft(item.BaseNumber, item.Revision, item.Level, item.Kind, item.Statement,
                 item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson,
                 item.ImpactDispositionJson)).ToList();
-        parent.UpdateDraft(actor, parent.Title, parent.Problem, parent.Analysis, parent.Solution, changes, now);
+        parent.UpdateDraft(actor, parent.Title, parent.Problem, parent.Analysis, parent.Solution, changes, now,
+            parent.ProblemRich, parent.AnalysisRich, parent.SolutionRich);
         return Task.CompletedTask;
     }
 

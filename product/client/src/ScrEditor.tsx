@@ -8,6 +8,8 @@ import type {
   RequirementKind,
   RequirementLevel,
 } from "./ControlledRequirementEditor";
+import { RichCaseField } from "./RichContent";
+import { fromPlainText, toPlainText } from "./richContent";
 import "./ScrEditor.css";
 import "./ScrEditorEnhancements.css";
 
@@ -35,6 +37,11 @@ type SavedDraft = {
   analysis: string;
   solution: string;
   changes: ControlledRequirementDraft[];
+  // Autosaved drafts written before the change case could carry structure hold only the plain fields
+  // above. They restore as paragraphs rather than being discarded.
+  problemRich?: string;
+  analysisRich?: string;
+  solutionRich?: string;
 };
 
 const pendingImpact = JSON.stringify({
@@ -131,9 +138,14 @@ export default function ScrEditor({
   }, [defaultLevel, storageKey]);
   const [context, setContext] = useState<AuthoringContext>();
   const [title, setTitle] = useState(restored?.title || "");
-  const [problem, setProblem] = useState(restored?.problem || "");
-  const [analysis, setAnalysis] = useState(restored?.analysis || "");
-  const [solution, setSolution] = useState(restored?.solution || "");
+  const [problemRich, setProblemRich] = useState(restored?.problemRich || fromPlainText(restored?.problem || ""));
+  const [analysisRich, setAnalysisRich] = useState(restored?.analysisRich || fromPlainText(restored?.analysis || ""));
+  const [solutionRich, setSolutionRich] = useState(restored?.solutionRich || fromPlainText(restored?.solution || ""));
+  // The plain form is derived, never typed alongside. Keeping two independently editable copies of the
+  // change case is how a document ends up saying something its record does not.
+  const problem = toPlainText(problemRich);
+  const analysis = toPlainText(analysisRich);
+  const solution = toPlainText(solutionRich);
   const [changes, setChanges] = useState<ControlledRequirementDraft[]>(
     restored?.changes?.length
       ? restored.changes
@@ -220,12 +232,12 @@ export default function ScrEditor({
     const timer = window.setTimeout(() => {
       localStorage.setItem(
         storageKey,
-        JSON.stringify({ title, problem, analysis, solution, changes } satisfies SavedDraft),
+        JSON.stringify({ title, problem, analysis, solution, changes, problemRich, analysisRich, solutionRich } satisfies SavedDraft),
       );
       setSavedAt(new Date());
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [analysis, changes, problem, solution, storageKey, title]);
+  }, [analysis, analysisRich, changes, problem, problemRich, solution, solutionRich, storageKey, title]);
 
   const nextIdentifier = (level: RequirementLevel) => {
     const prefix = prefixFor(level);
@@ -248,8 +260,10 @@ export default function ScrEditor({
       items.map((item, position) => {
         if (position !== index) return item;
         const next = { ...item, [key]: value } as ControlledRequirementDraft;
-        if (key === "statement" && (!item.richText || item.richText === item.statement)) {
-          next.richText = String(value);
+        // While supporting content is nothing more than a restatement of the statement, it follows the
+        // statement. The moment an author writes a table or a figure, it stops following and is theirs.
+        if (key === "statement" && (!item.richText || toPlainText(item.richText) === item.statement)) {
+          next.richText = fromPlainText(String(value));
         }
         return next;
       }),
@@ -287,6 +301,9 @@ export default function ScrEditor({
           problem,
           analysis,
           solution,
+          problemRich,
+          analysisRich,
+          solutionRich,
           type: scope,
           requirementChanges: changes,
         }),
@@ -395,18 +412,12 @@ export default function ScrEditor({
             </label>
           </div>
           <div className="pas">
-            <label>
-              <b>Problem</b>
-              <textarea value={problem} onChange={(event) => setProblem(event.target.value)} placeholder="What need, defect, or risk exists?" required />
-            </label>
-            <label>
-              <b>Analysis</b>
-              <textarea value={analysis} onChange={(event) => setAnalysis(event.target.value)} placeholder="What is affected and what alternatives were considered?" required />
-            </label>
-            <label>
-              <b>Solution</b>
-              <textarea value={solution} onChange={(event) => setSolution(event.target.value)} placeholder="What controlled outcome is proposed?" required />
-            </label>
+            <RichCaseField api={api} projectId={projectId} label="Problem" value={problemRich} onChange={setProblemRich}
+              placeholder="What need, defect, or risk exists?" />
+            <RichCaseField api={api} projectId={projectId} label="Analysis" value={analysisRich} onChange={setAnalysisRich}
+              placeholder="What is affected and what alternatives were considered?" />
+            <RichCaseField api={api} projectId={projectId} label="Solution" value={solutionRich} onChange={setSolutionRich}
+              placeholder="What controlled outcome is proposed?" />
           </div>
         </section>
 
@@ -508,3 +519,4 @@ export default function ScrEditor({
     </main>
   );
 }
+

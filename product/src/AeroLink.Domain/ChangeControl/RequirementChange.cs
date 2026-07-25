@@ -26,7 +26,12 @@ public sealed class RequirementChange
         Statement = statement.Trim();
         Rationale = rationale.Trim();
         VerificationMethod = verificationMethod.Trim();
-        RichText = string.IsNullOrWhiteSpace(richText) ? statement.Trim() : richText.Trim();
+        // Supporting content is stored as canonical structure, whatever form it arrived in. Content written
+        // before this model existed, and content arriving from a ReqIF exchange, is plain text; it becomes a
+        // single paragraph rather than being rejected. Anything the product cannot render is rejected here,
+        // where the author can still be told, rather than silently dropped on the way to an approver.
+        RichText = Content.RichContent.Canonicalize(
+            string.IsNullOrWhiteSpace(richText) ? statement.Trim() : richText.Trim());
         AttributesJson = string.IsNullOrWhiteSpace(attributesJson) ? "{}" : attributesJson;
         ImpactDispositionJson = string.IsNullOrWhiteSpace(impactDispositionJson) ? "{}" : impactDispositionJson;
     }

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { stateLabel } from './presentation'
+import { RichContentEditor, RichContentView } from "./RichContent";
+import { emptyRichContent, fromPlainText } from "./richContent";
 import "./ControlledRequirementEditor.css";
 
 export type RequirementLevel = "System" | "HighLevel" | "LowLevel";
@@ -92,8 +94,6 @@ export default function ControlledRequirementEditor({
     onChange("attributesJson", JSON.stringify({ ...attributes, [key]: value }));
   const setImpact = (key: string, value: string) =>
     onChange("impactDispositionJson", JSON.stringify({ ...impact, [key]: value }));
-  const insert = (value: string) =>
-    onChange("richText", `${item.richText}${item.richText ? "\n" : ""}${value}`);
 
   useEffect(() => {
     if (identityLocked || item.kind === "Introduce") {
@@ -139,7 +139,7 @@ export default function ControlledRequirementEditor({
     onChange("statement", item.kind === "Retire" ? "" : selected.statement);
     onChange("rationale", selected.rationale);
     onChange("verificationMethod", selected.verificationMethod);
-    onChange("richText", item.kind === "Retire" ? "" : selected.statement);
+    onChange("richText", item.kind === "Retire" ? emptyRichContent : fromPlainText(selected.statement));
     setQuery(selected.displayNumber);
     setResults([]);
   };
@@ -297,25 +297,23 @@ export default function ControlledRequirementEditor({
               <em>Show / hide</em>
             </summary>
             <div className="supportingBody">
-              <div className="richToolbar" aria-label="Supporting content helpers">
-                <button type="button" onClick={() => insert("**emphasized technical term**")}>Bold</button>
-                <button type="button" onClick={() => insert("- controlled list item")}>List</button>
-                <button type="button" onClick={() => insert("| Parameter | Value |\n| --- | --- |\n| Mode | Defined |")}>Table</button>
-                <button type="button" onClick={() => insert("≤ ≥ ± ° Δ")}>Symbols</button>
-                <button type="button" onClick={() => insert("[[REQ-000001]]")}>Reference</button>
-              </div>
-              <label>
-                Formatted supporting content
-                <textarea
-                  className="richEditor"
-                  value={item.richText}
-                  onChange={(event) => onChange("richText", event.target.value)}
-                  placeholder="Add structured context, lists, tables, symbols, and controlled [[references]]."
-                />
-              </label>
+              <RichContentEditor
+                api={api}
+                projectId={projectId}
+                label="Formatted supporting content"
+                placeholder="Add the tables, figures, and context an approver needs alongside the statement."
+                value={item.richText}
+                onChange={(value) => onChange("richText", value)}
+              />
               <div className="controlledPreview">
                 <small>CONTROLLED PREVIEW</small>
-                <pre>{item.richText || item.statement || "No supporting content recorded."}</pre>
+                {/* What the approver will read, and what the generated Word and PDF documents will carry.
+                    The old preview showed the authored source, which is the one thing nobody signs. */}
+                <RichContentView
+                  api={api}
+                  value={item.richText}
+                  empty={item.statement || "No supporting content recorded."}
+                />
               </div>
               <div className="editorMetadata classificationMetadata">
                 <label>

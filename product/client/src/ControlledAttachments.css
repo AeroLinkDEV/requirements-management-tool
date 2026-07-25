@@ -1,0 +1,78 @@
+/* Files attached beside a controlled artifact. */
+
+.attachmentPanel { display: grid; gap: 12px; }
+
+.attachmentUpload {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr) minmax(0, 1.2fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+.attachmentUpload label { display: grid; gap: 4px; min-width: 0; color: #4b5f74; font-size: 12px; font-weight: 700; }
+.attachmentUpload input {
+  box-sizing: border-box; width: 100%;
+  min-height: var(--control-height-sm, 36px);
+  padding: 0 10px;
+  border: 1px solid #ccd7e0; border-radius: 8px; background: white;
+  color: #1c3044; font: 400 13px/1.4 "DM Sans", sans-serif;
+}
+.attachmentUpload input[type="file"] { padding: 6px 8px; }
+.attachmentUpload input:focus { border-color: #369384; outline: 3px solid rgb(54 147 132 / 14%); }
+.attachmentUpload button {
+  min-height: var(--control-height-sm, 36px); padding: 0 16px;
+  border: 0; border-radius: 8px; background: #168578; color: white;
+  font: 700 13px/1 "DM Sans", sans-serif; cursor: pointer;
+}
+.attachmentUpload button:disabled { opacity: 0.6; cursor: progress; }
+
+@media (width <= 900px) {
+  .attachmentUpload { grid-template-columns: minmax(0, 1fr); }
+}
+
+.attachmentError { margin: 0; color: #a4262c; font-size: 13px; }
+.attachmentMessage { margin: 0; color: #1f6f63; font-size: 13px; }
+.attachmentEmpty { margin: 0; color: #7f8d9c; font-size: 13px; }
+
+.attachmentList { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.attachmentList > li {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-height: var(--row-min-height, 86px);
+  padding-block: var(--space-row-block, 16px);
+  padding-inline: 12px;
+  border: 1px solid #dfe7ee; border-radius: 10px; background: white;
+}
+/* A superseded version stays listed and downloadable — an approver may have signed having read it. */
+.attachmentList > li.superseded { background: #f7f9fb; }
+
+.attachmentIcon {
+  display: grid; place-items: center;
+  width: 44px; height: 44px;
+  border-radius: 9px; background: #eef2f7;
+  color: #4b5f74; font: 700 11px/1 "DM Sans", sans-serif;
+}
+.attachmentDetail { display: grid; gap: 3px; min-width: 0; }
+.attachmentDetail b { color: #1c3044; font-size: 14px; }
+.attachmentDetail b i { color: #4b5f74; font-size: 12px; font-style: normal; }
+.attachmentDetail p { margin: 0; color: #4b5f74; font-size: 12px; overflow-wrap: anywhere; }
+.attachmentDetail .attachmentWhy { color: #7f8d9c; }
+.attachmentDetail code { color: #4b5f74; font-size: 11px; overflow-wrap: anywhere; }
+.attachmentDetail small { color: #7f8d9c; font-size: 11px; }
+
+.attachmentActions { display: grid; gap: 5px; justify-items: stretch; }
+.attachmentActions a,
+.attachmentActions button,
+.attachmentActions label {
+  /* 30px clears the 24px minimum target size WCAG 2.2 SC 2.5.8 requires, in both densities. */
+  display: grid; place-items: center;
+  min-height: 30px; padding: 0 11px;
+  border: 1px solid #ccd7e0; border-radius: 7px; background: white;
+  color: #1c3044; font: 600 12px/1 "DM Sans", sans-serif;
+  text-decoration: none; cursor: pointer; white-space: nowrap;
+}
+.attachmentActions a:hover,
+.attachmentActions button:hover,
+.attachmentActions label:hover { border-color: #369384; }
+.attachmentActions label input { display: none; }

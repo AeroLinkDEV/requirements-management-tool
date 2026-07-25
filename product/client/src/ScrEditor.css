@@ -491,3 +491,22 @@
   cursor: not-allowed;
   opacity: 0.55;
 }
+
+/* The change case, once it can carry structure.
+
+   Prose is still one textarea — the common case pays nothing for the capability. The button below it is the
+   whole affordance: one click and the field becomes the block editor, where tables and figures live. */
+.pasField { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.pasField > label { color: #4b5f74; font-size: 12px; font-weight: 700; }
+.pasStructure {
+  align-self: start;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px dashed #ccd7e0;
+  border-radius: 7px;
+  background: white;
+  color: #4b5f74;
+  font: 600 12px/1 "DM Sans", sans-serif;
+  cursor: pointer;
+}
+.pasStructure:hover { border-style: solid; border-color: #369384; color: #1c3044; }

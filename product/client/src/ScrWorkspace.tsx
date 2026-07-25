@@ -10,6 +10,9 @@ import type {
   RequirementLevel,
 } from "./ControlledRequirementEditor";
 import PersonPicker from "./PersonPicker";
+import ControlledAttachments from "./ControlledAttachments";
+import { RichCaseField, RichContentView } from "./RichContent";
+import { emptyRichContent, fromPlainText, toPlainText } from "./richContent";
 import "./ScrWorkspace.css";
 import "./ReviewMode.css";
 
@@ -60,6 +63,9 @@ type ScrDetail = {
   problem: string;
   analysis: string;
   solution: string;
+  problemRich: string;
+  analysisRich: string;
+  solutionRich: string;
   authorId: string;
   version: number;
   state: string;
@@ -91,7 +97,10 @@ type LockStatus = {
   expiresAt?: string;
   mine?: boolean;
 };
-type ScrDraft = { title: string; problem: string; analysis: string; solution: string };
+type ScrDraft = {
+  title: string; problem: string; analysis: string; solution: string;
+  problemRich: string; analysisRich: string; solutionRich: string;
+};
 type AuthoringContext = {
   type: "System" | "Software";
   changeRequestNumber: string;
@@ -223,7 +232,10 @@ export default function ScrWorkspace({
   const [lock, setLock] = useState<EditLock>();
   const [lockStatus, setLockStatus] = useState<LockStatus>();
   const [autosaveStatus, setAutosaveStatus] = useState<"Saved" | "Saving" | "Error" | "Conflict">("Saved");
-  const [draft, setDraft] = useState<ScrDraft>({ title: "", problem: "", analysis: "", solution: "" });
+  const [draft, setDraft] = useState<ScrDraft>({
+    title: "", problem: "", analysis: "", solution: "",
+    problemRich: emptyRichContent, analysisRich: emptyRichContent, solutionRich: emptyRichContent,
+  });
   const [requirements, setRequirements] = useState<DraftRequirement[]>([]);
   const [approvers, setApprovers] = useState<Approver[]>([]);
   const lockRef = useRef<EditLock | undefined>(undefined);
@@ -247,6 +259,9 @@ export default function ScrWorkspace({
           problem: detail.problem,
           analysis: detail.analysis,
           solution: detail.solution,
+          problemRich: detail.problemRich || fromPlainText(detail.problem),
+          analysisRich: detail.analysisRich || fromPlainText(detail.analysis),
+          solutionRich: detail.solutionRich || fromPlainText(detail.solution),
         });
         setRequirements(mapRequirements(detail.requirementChanges));
       }
@@ -312,6 +327,11 @@ export default function ScrWorkspace({
         problem: recovered.problem,
         analysis: recovered.analysis,
         solution: recovered.solution,
+        // A recovery snapshot written before the change case could carry structure holds only the plain
+        // fields. It reopens as paragraphs rather than as an empty form.
+        problemRich: recovered.problemRich || fromPlainText(recovered.problem),
+        analysisRich: recovered.analysisRich || fromPlainText(recovered.analysis),
+        solutionRich: recovered.solutionRich || fromPlainText(recovered.solution),
       });
       if (recovered.requirementChanges)
         setRequirements(
@@ -486,8 +506,8 @@ export default function ScrWorkspace({
       items.map((item, position) => {
         if (position !== index) return item;
         const next = { ...item, [key]: value } as DraftRequirement;
-        if (key === "statement" && (!item.richText || item.richText === item.statement))
-          next.richText = String(value);
+        if (key === "statement" && (!item.richText || toPlainText(item.richText) === item.statement))
+          next.richText = fromPlainText(String(value));
         return next;
       }),
     );
@@ -640,18 +660,15 @@ export default function ScrWorkspace({
                 Title
                 <input name="title" value={draft.title} onChange={(event) => setDraft((value) => ({ ...value, title: event.target.value }))} required />
               </label>
-              <label>
-                Problem
-                <textarea name="problem" value={draft.problem} onChange={(event) => setDraft((value) => ({ ...value, problem: event.target.value }))} required />
-              </label>
-              <label>
-                Analysis
-                <textarea name="analysis" value={draft.analysis} onChange={(event) => setDraft((value) => ({ ...value, analysis: event.target.value }))} required />
-              </label>
-              <label>
-                Solution
-                <textarea name="solution" value={draft.solution} onChange={(event) => setDraft((value) => ({ ...value, solution: event.target.value }))} required />
-              </label>
+              <RichCaseField api={api} projectId={scr.projectId} label="Problem" value={draft.problemRich}
+                placeholder="What need, defect, or risk exists?"
+                onChange={(value) => setDraft((current) => ({ ...current, problemRich: value, problem: toPlainText(value) }))} />
+              <RichCaseField api={api} projectId={scr.projectId} label="Analysis" value={draft.analysisRich}
+                placeholder="What is affected and what alternatives were considered?"
+                onChange={(value) => setDraft((current) => ({ ...current, analysisRich: value, analysis: toPlainText(value) }))} />
+              <RichCaseField api={api} projectId={scr.projectId} label="Solution" value={draft.solutionRich}
+                placeholder="What controlled outcome is proposed?"
+                onChange={(value) => setDraft((current) => ({ ...current, solutionRich: value, solution: toPlainText(value) }))} />
             </div>
           </section>
 
@@ -813,10 +830,31 @@ export default function ScrWorkspace({
                 <div className="readOnlyLock"><b>Read-only while checked out</b><span>{lockStatus.holder} · active {lockStatus.lastActivityAt && new Date(lockStatus.lastActivityAt).toLocaleString()} · expires {lockStatus.expiresAt && new Date(lockStatus.expiresAt).toLocaleTimeString()}</span></div>
               )}
               <div className="pasView">
-                {[["P", "Problem", scr.problem], ["A", "Analysis", scr.analysis], ["S", "Solution", scr.solution]].map((item) => (
-                  <article key={item[0]}><span>{item[0]}</span><div><b>{item[1]}</b><p>{item[2] || "Not yet provided"}</p></div></article>
+                {/* Rendered as the author wrote it, tables and figures included. An approver signing for a
+                    change must read what the change actually says, not a flattened copy of it. */}
+                {([["P", "Problem", scr.problemRich || fromPlainText(scr.problem)],
+                   ["A", "Analysis", scr.analysisRich || fromPlainText(scr.analysis)],
+                   ["S", "Solution", scr.solutionRich || fromPlainText(scr.solution)]] as const).map((item) => (
+                  <article key={item[0]}><span>{item[0]}</span><div><b>{item[1]}</b>
+                    <RichContentView api={api} value={item[2]} empty="Not yet provided" />
+                  </div></article>
                 ))}
               </div>
+            </section>
+
+            <section className="workspaceCard">
+              <div className="workspaceTitle">
+                <div><h2>Supporting files</h2><p>Evidence an approver needs alongside the change case</p></div>
+              </div>
+              {/* Attached where the change is decided, not in a separate vault. The datasheet that justifies
+                  a change request belongs beside the change request. */}
+              <ControlledAttachments
+                api={api}
+                projectId={scr.projectId}
+                artifactType="ChangeRequest"
+                artifactId={scr.id}
+                canAttach={scr.state === "Draft" && isAuthor}
+              />
             </section>
 
             <section className="workspaceCard">

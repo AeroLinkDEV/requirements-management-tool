@@ -46,11 +46,24 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await expect(
     page.getByRole("heading", { name: "Controlled requirement authoring" }),
   ).toBeVisible();
-  await page
-    .locator(".richEditor")
-    .fill(
-      "**Controlled update**\n- preserve deterministic sequencing\n- verify the affected route mode\n\n[[SYSR-000150]]",
-    );
+  // Supporting content is structure, not markup: a paragraph and a table, authored the way an engineer
+  // actually reaches them, and shown back as what the approver will read rather than as authored source.
+  const supporting = page.locator(".supportingBody .richEditor");
+  // Supporting content opens holding the statement as one paragraph, so there is something to edit rather
+  // than an empty box the author has to work out how to start.
+  await supporting
+    .locator("textarea")
+    .fill("Preserve deterministic sequencing and verify the affected route mode.");
+  await supporting.getByRole("button", { name: "Table", exact: true }).click();
+  await supporting.getByLabel("Column 1 heading").fill("Mode");
+  await supporting.getByLabel("Column 2 heading").fill("Sequencing");
+  await supporting.getByLabel("Row 1, column 1").fill("Oceanic");
+  await supporting.getByLabel("Row 1, column 2").fill("Round robin");
+
+  const preview = page.locator(".controlledPreview");
+  await expect(preview.getByRole("columnheader", { name: "Mode" })).toBeVisible();
+  await expect(preview.getByRole("cell", { name: "Round robin" })).toBeVisible();
+
   const dispositions = page.locator(".editorColumns aside select");
   expect(await dispositions.count()).toBe(5);
   for (let i = 0; i < 5; i++)

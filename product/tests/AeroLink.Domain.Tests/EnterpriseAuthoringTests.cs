@@ -1,6 +1,7 @@
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Content;
 
 namespace AeroLink.Domain.Tests;
 
@@ -29,7 +30,9 @@ public sealed class EnterpriseAuthoringTests
     {
         var now=DateTimeOffset.UtcNow;var scr=new SystemChangeRequest("SWCR-00000001",0,Guid.NewGuid(),Guid.NewGuid(),"Controlled proposal","Problem","Analysis","Solution","author",now,ChangeRequestType.Software);var pending="{\"trace\":\"Pending\",\"verification\":\"Affected\",\"documents\":\"Not Affected\",\"baseline\":\"Affected\",\"collaboration\":\"Not Affected\"}";
         scr.AddRequirementChange("author","HLR-00000001",1,RequirementLevel.HighLevel,RequirementChangeKind.Modify,"The FMS software shall navigate.","Controlled rationale.","Test",now,"**The FMS software** shall navigate.","{\"criticality\":\"Safety Significant\"}",pending);
-        Assert.Equal("**The FMS software** shall navigate.",scr.RequirementChanges.Single().RichText);Assert.Throws<DomainException>(()=>scr.SubmitForReview("author",[new("reviewer","Reviewer")],now));
+        // Supporting content that arrives as plain text is adopted as a single paragraph rather than
+        // rejected, so nothing an author already wrote is lost to the storage format changing under them.
+        Assert.Equal("**The FMS software** shall navigate.",RichContent.ToPlainText(scr.RequirementChanges.Single().RichText));Assert.Throws<DomainException>(()=>scr.SubmitForReview("author",[new("reviewer","Reviewer")],now));
         var complete=pending.Replace("\"Pending\"","\"Affected\"");scr.UpdateDraft("author",scr.Title,scr.Problem,scr.Analysis,scr.Solution,[new("HLR-00000001",1,RequirementLevel.HighLevel,RequirementChangeKind.Modify,"The FMS software shall navigate.","Controlled rationale.","Test","**The FMS software** shall navigate.","{}",complete)],now.AddMinutes(1));
         var cycle=scr.SubmitForReview("author",[new("reviewer","Reviewer")],now.AddMinutes(2));Assert.Equal(64,cycle.SnapshotHash.Length);
     }
