@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import type { AuthUser } from "./IdentityCenter";
 import "./ProblemReportCenter.css";
@@ -14,7 +15,7 @@ export default function ProblemReportCenter({api,projectId,user,onBack,onOpenVer
  const refresh=async(selectId?:string)=>{try{setError("");const [list,summary]=await Promise.all([call(api,`/api/problem-reports?projectId=${projectId}&search=${encodeURIComponent(search)}`),call(api,`/api/problem-reports/dashboard?projectId=${projectId}`)]);setReports(list.items);setDashboard(summary);const id=selectId??selected?.id;if(id){const detail=await call(api,`/api/problem-reports/${id}`);setSelected(detail)}else setSelected(list.items[0])}catch(e){setError(e instanceof Error?e.message:"Unable to load problem reports.")}};
  // oxlint-disable-next-line react-hooks/exhaustive-deps -- local selection and search must not reload the workspace.
  useEffect(()=>{void refresh()},[api,projectId]);
- const visible=useMemo(()=>reports.filter(x=>!search.trim()||`${x.displayNumber} ${x.title} ${x.state}`.toLowerCase().includes(search.toLowerCase())),[reports,search]);
+ const visible=useMemo(()=>reports.filter(x=>!search.trim()||`${x.displayNumber} ${x.title} ${stateLabel(x.state)}`.toLowerCase().includes(search.toLowerCase())),[reports,search]);
  const createReport=async(e:FormEvent)=>{e.preventDefault();try{setBusy(true);const created=await call(api,"/api/problem-reports","POST",{projectId,title:create.title,problem:create.problem,severity:create.severity,priority:create.priority,classification:"Engineering anomaly",origin:"Manual report"});setShowCreate(false);setCreate({title:"",problem:"",severity:"Major",priority:"High"});await refresh(created.id)}catch(e){setError(e instanceof Error?e.message:"Unable to create report.")}finally{setBusy(false)}};
  const action=async(path:string,payload:Record<string,unknown>)=>{if(!selected)return;try{setBusy(true);await call(api,`/api/problem-reports/${selected.id}/${path}`,"POST",{expectedVersion:selected.version,...payload});setNote("");await refresh(selected.id)}catch(e){setError(e instanceof Error?e.message:"Controlled action failed.")}finally{setBusy(false)}};
  const open=async(id:string)=>{try{setSelected(await call(api,`/api/problem-reports/${id}`))}catch(e){setError(e instanceof Error?e.message:"Unable to open report.")}};

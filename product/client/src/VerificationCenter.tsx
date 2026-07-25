@@ -56,7 +56,7 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
    <div className="cardTitle"><h2>Change impact</h2><p>Verification owed by approved changes to this release. Raised on approval, before any baseline exists.</p></div>
    {outstandingImpact.length>0&&<div className="impactGate" role="status">
     <b>{outstandingImpact.length} decision{outstandingImpact.length===1?'':'s'} outstanding</b>
-    <span>The candidate baseline cannot be frozen until every new or modified requirement has an approved procedure or a recorded decision that no test is required.</span>
+    <span>The release cannot be approved until every new or modified requirement has an approved procedure or a recorded decision that no test is required. Freezing and materializing the baseline is unaffected — that is what creates the requirement revisions a procedure is written against.</span>
    </div>}
    {impact.map(x=><article className={`impactRow ${x.blocksBaselineApproval?'open':'resolved'}`} key={x.id}>
     <div className="impactHead">

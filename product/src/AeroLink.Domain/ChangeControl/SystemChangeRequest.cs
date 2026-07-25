@@ -152,6 +152,11 @@ public sealed class SystemChangeRequest
     {
         EnsureAuthor(actorId);
         EnsureInReview();
+        // Cancelling an in-flight review discards recorded approval authority, so it is exactly the kind of
+        // act that must carry an attributable reason. Every other controlled action here demands one.
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A reason is required to cancel and restart a review.");
+        if (correctedApprovers is null || correctedApprovers.Count == 0)
+            throw new DomainException("At least one corrected approver is required.");
         var prior = ActiveReviewCycle!;
         prior.Cancel(reason, now);
         var replacement = new ReviewCycle(Id, _reviewCycles.Count + 1, prior.SnapshotHash, correctedApprovers, now, prior.Mode);

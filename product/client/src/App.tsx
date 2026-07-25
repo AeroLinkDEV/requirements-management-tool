@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import ScrEditor from "./ScrEditor";
 import ScrWorkspace from "./ScrWorkspace";
@@ -418,7 +419,6 @@ function App() {
         scope={discipline === "software" ? "Software" : "System"}
         initialViewId={initialRoute.savedViewId}
         initialArtifactId={view === "requirements" ? selectedArtifactId || undefined : undefined}
-        onScopeChange={(nextScope) => navigate("requirements",nextScope==="Software"?"software":"system")}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}
         onProposeChange={(id) => navigate(discipline === "software" ? "createSoftwareChange" : "createSystemScr", discipline, id)}
@@ -686,7 +686,7 @@ function App() {
                     <p>{scr.requirementCount} requirement change{scr.requirementCount === 1 ? "" : "s"} · <span className="personMeta"><i>{identityInitials(scr.authorId)}</i>{identityLabel(scr.authorId)}</span></p>
                   </div>
                   <span className={`state ${scr.state.toLowerCase()}`}>
-                    {scr.state}
+                    {stateLabel(scr.state)}
                   </span>
                   <time>{new Date(scr.updatedAt).toLocaleDateString()}</time>
                 </div>

@@ -93,6 +93,15 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
 
         var activeRequests = BuildActive16Requests(project.Id, release16.Id, current, start.AddDays(300));
         db.SystemChangeRequests.AddRange(activeRequests); await db.SaveChangesAsync(ct);
+
+        // Approval is what raises verification work, and these change requests were approved directly rather
+        // than through the endpoint that normally does it. Without this the showcase presents an empty change
+        // impact queue while simultaneously showing approved changes that introduce and modify requirements —
+        // the one state the product says is impossible.
+        var verificationImpact = new VerificationImpactService(db);
+        foreach (var request in activeRequests.Where(x => x.State is ScrState.Approved or ScrState.SelectedForBaseline))
+            await verificationImpact.RaiseForApprovedChangeRequestAsync(request, start.AddDays(305), ct);
+        await db.SaveChangesAsync(ct);
         var baseline16 = new CandidateBaseline("SWBL-00000016", 0, project.Id, release16.Id, baseline15.Id, "FMS 1.6 Working Candidate", "cm.fms", start.AddDays(310));
         foreach (var request in activeRequests.Where(x => x.State == ScrState.Approved).Take(2)) baseline16.Select(request, "cm.fms", start.AddDays(311));
         db.CandidateBaselines.Add(baseline16); await db.SaveChangesAsync(ct);

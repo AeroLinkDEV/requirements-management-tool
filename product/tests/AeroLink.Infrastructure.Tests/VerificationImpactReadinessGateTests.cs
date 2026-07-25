@@ -1,6 +1,7 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -163,6 +164,71 @@ public sealed class VerificationImpactReadinessGateTests
                 var gate = await GateAsync(seed.Options, seed.CampaignId);
                 Assert.False(gate.Complete);
             }
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    private static async Task<ReadinessGate> CoverageGateAsync(DbContextOptions<AeroLinkDbContext> options, Guid campaignId)
+    {
+        await using var db = new AeroLinkDbContext(options);
+        var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaignId, default);
+        return readiness.Gates.Single(x => x.Code == "coverage");
+    }
+
+    /// <summary>
+    /// A procedure under change has to be modified, reviewed and approved before anything relying on it counts
+    /// as approved. Coverage naming a draft procedure revision used to count as covered, and a procedure with a
+    /// revision in flight still counted on the strength of its superseded revision.
+    /// </summary>
+    [Fact]
+    public async Task Coverage_does_not_count_while_the_procedure_it_names_is_being_changed()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            Guid procedureId, approvedRevisionId;
+            await using (var arrange = new AeroLinkDbContext(seed.Options))
+            {
+                var baseline = await arrange.CandidateBaselines.SingleAsync();
+                var artifact = new RequirementArtifact(seed.ProjectId, "SYSR-00000101", RequirementLevel.System, Now);
+                var revision = new RequirementRevision(artifact.Id, 0, "The FMS shall sequence oceanic waypoints.",
+                    "R", "Test", RequirementRevisionState.Active, seed.ScrId, baseline.Id, Now);
+                var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", Now);
+                var approved = new TestProcedureRevision(procedure.Id, 0, "Verify sequencing", "On ground",
+                    "Sequence", "Sequenced", TestProcedureState.Approved, "test.engineer", Now);
+                arrange.AddRange(artifact, revision, procedure, approved);
+                arrange.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, artifact.Id, revision.Id));
+                arrange.TestCoverage.Add(new TestRequirementCoverage(approved.Id, revision.Id));
+                await arrange.SaveChangesAsync();
+                procedureId = procedure.Id; approvedRevisionId = approved.Id;
+            }
+
+            var settled = await CoverageGateAsync(seed.Options, seed.CampaignId);
+            Assert.Equal(1, settled.Completed);
+
+            // Someone starts revising the procedure. Nothing about the requirement or the link changed.
+            await using (var revise = new AeroLinkDbContext(seed.Options))
+            {
+                revise.TestProcedureRevisions.Add(new TestProcedureRevision(procedureId, 1, "Verify sequencing",
+                    "On ground", "Sequence more carefully", "Sequenced", TestProcedureState.Draft, "test.engineer", Now));
+                await revise.SaveChangesAsync();
+            }
+
+            var inFlight = await CoverageGateAsync(seed.Options, seed.CampaignId);
+            Assert.Equal(0, inFlight.Completed);
+            Assert.False(inFlight.Complete);
+
+            // Approving the new revision settles it again.
+            await using (var approve = new AeroLinkDbContext(seed.Options))
+            {
+                var draft = await approve.TestProcedureRevisions.SingleAsync(x => x.ProcedureId == procedureId && x.Revision == 1);
+                draft.Approve("test.lead");
+                await approve.SaveChangesAsync();
+            }
+
+            var reapproved = await CoverageGateAsync(seed.Options, seed.CampaignId);
+            Assert.Equal(1, reapproved.Completed);
+            Assert.NotEqual(Guid.Empty, approvedRevisionId);
         }
         finally { File.Delete(seed.Path); }
     }

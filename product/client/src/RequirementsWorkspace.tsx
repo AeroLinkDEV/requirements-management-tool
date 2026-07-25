@@ -138,7 +138,6 @@ type Props = {
   scope: "System" | "Software";
   initialViewId?: string;
   initialArtifactId?: string;
-  onScopeChange: (scope: "System" | "Software") => void;
   onBack: () => void;
   onOpenScr: (id: string) => void;
   onProposeChange: (requirementId: string) => void;
@@ -161,7 +160,6 @@ export default function RequirementsWorkspace({
   scope,
   initialViewId,
   initialArtifactId,
-  onScopeChange,
   onBack,
   onOpenScr,
   onProposeChange,
@@ -560,26 +558,9 @@ export default function RequirementsWorkspace({
           </p>
         </div>
         <div className="reqHeaderActions">
-          <div
-            className="pageScopeSwitch"
-            role="group"
-            aria-label="Requirement scope"
-          >
-            <button
-              className={scope === "System" ? "active" : ""}
-              aria-pressed={scope === "System"}
-              onClick={() => onScopeChange("System")}
-            >
-              System
-            </button>
-            <button
-              className={scope === "Software" ? "active" : ""}
-              aria-pressed={scope === "Software"}
-              onClick={() => onScopeChange("Software")}
-            >
-              Software
-            </button>
-          </div>
+          {/* The System/Software switch belongs to the context bar, beside program, project and release,
+              because discipline is part of what you are looking at rather than a setting of this page. It was
+              repeated here as well, roughly 140px below its own copy and setting exactly the same thing. */}
           <span className="explorerBoundary">
             <i aria-hidden="true">◈</i>
             <span><b>Authoritative view</b><small>Requirement content is read-only here</small></span>
