@@ -11,6 +11,7 @@ import type {
 } from "./ControlledRequirementEditor";
 import PersonPicker from "./PersonPicker";
 import ControlledAttachments from "./ControlledAttachments";
+import ScrJiraLink from "./ScrJiraLink";
 import { RichCaseField, RichContentView } from "./RichContent";
 import { emptyRichContent, fromPlainText, toPlainText } from "./richContent";
 import "./ScrWorkspace.css";
@@ -841,6 +842,8 @@ export default function ScrWorkspace({
                 ))}
               </div>
             </section>
+
+            <ScrJiraLink api={api} scrId={scr.id} displayNumber={scr.displayNumber} />
 
             <section className="workspaceCard">
               <div className="workspaceTitle">

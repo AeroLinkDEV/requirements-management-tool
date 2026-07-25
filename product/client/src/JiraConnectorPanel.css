@@ -1,0 +1,40 @@
+/* The Jira connector panel, inside the Integration Command Center. */
+
+.jiraPanel { display: grid; gap: 14px; align-content: start; }
+.jiraMessage { margin: 0; color: #1f6f63; font-size: 13px; }
+
+.jiraConnection { display: grid; gap: 10px; }
+.jiraState {
+  display: grid; grid-template-columns: 12px minmax(0, 1fr); align-items: start; gap: 12px;
+  padding: 12px 14px; border: 1px solid #e5eaf0; border-radius: 10px; background: #f7f9fb;
+}
+.jiraState > i { width: 10px; height: 10px; margin-top: 5px; border-radius: 50%; }
+.jiraState.healthy > i { background: #168578; }
+.jiraState.attention > i { background: #c98a00; }
+.jiraState b { display: block; color: #1c3044; font-size: 14px; }
+.jiraState code { display: block; margin: 2px 0; color: #4b5f74; font-size: 12px; overflow-wrap: anywhere; }
+.jiraState small { color: #7f8d9c; font-size: 12px; }
+
+.jiraActions { display: flex; gap: 8px; flex-wrap: wrap; }
+.jiraActions button {
+  /* 34px clears the 24px minimum target size WCAG 2.2 SC 2.5.8 requires, in both densities. */
+  min-height: var(--control-height-sm, 36px); padding: 0 13px;
+  border: 1px solid #ccd7e0; border-radius: 8px; background: white;
+  color: #1c3044; font: 600 12px/1 "DM Sans", sans-serif; cursor: pointer;
+}
+.jiraActions button:hover:not(:disabled) { border-color: #369384; }
+.jiraActions button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.jiraLinks { display: grid; gap: 6px; }
+.jiraLinks > div {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  padding: 9px 12px; border: 1px solid #e5eaf0; border-radius: 9px;
+}
+/* A failed push is kept and shown, not hidden: somebody has to be able to see it was attempted and why it
+   did not land. */
+.jiraLinks > div.failed { border-color: #f0c2c4; background: #fdf7f7; }
+.jiraLinks b { color: #1c3044; font-size: 13px; margin-right: 9px; }
+.jiraLinks a { color: #2e74b5; font: 600 13px/1 "DM Sans", sans-serif; }
+.jiraLinks em { color: #a4262c; font-size: 12px; font-style: normal; }
+.jiraLinks strong { display: block; color: #4b5f74; font: 600 12px/1.3 "DM Sans", sans-serif; text-align: right; }
+.jiraLinks time { display: block; color: #7f8d9c; font-size: 11px; text-align: right; }

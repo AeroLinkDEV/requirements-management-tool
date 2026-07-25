@@ -113,6 +113,7 @@ app.MapAeroLinkOperationsEndpoints();
 app.MapAeroLinkPublicationEndpoints();
 app.MapAeroLinkQualityIntelligenceEndpoints();
 app.MapWorkflowEndpoints();
+app.MapJiraEndpoints();
 
 // Unsubscribe is reachable without signing in, because it is followed from a mail client. The signed
 // token is what proves the link came from this deployment; without it anyone could silence anyone else's

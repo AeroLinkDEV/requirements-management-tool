@@ -34,6 +34,10 @@ public static class DependencyInjection
         services.AddHttpClient("AeroLinkWebhooks", client => client.Timeout = TimeSpan.FromSeconds(15));
         services.AddHostedService<WebhookDeliveryWorker>();
         services.AddScoped<IntegrationSecurityService>();
+        services.AddHttpClient("jira", client => client.Timeout = TimeSpan.FromSeconds(20));
+        services.AddScoped<IJiraClient, JiraClient>();
+        services.AddScoped<JiraConnectorService>();
+        services.AddHostedService<JiraStatusWorker>();
         services.AddScoped<IntegrationEventPublisher>();
         services.AddScoped<ReleaseReadinessService>();
         services.AddScoped<RichContentPublisher>();
