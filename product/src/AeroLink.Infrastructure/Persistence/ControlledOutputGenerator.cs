@@ -11,7 +11,7 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed record GeneratedOutput(byte[] Content, string ContentType, string FileName);
 internal sealed record OutputRow(string Number, string Level, string Text, string Source);
 
-public sealed class ControlledOutputGenerator(AeroLinkDbContext db)
+public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentPublisher richContent)
 {
     public async Task<GeneratedOutput?> GenerateTraceabilityAsync(Guid baselineId,string format,CancellationToken ct)
     {
@@ -59,8 +59,31 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db)
 
     private async Task<List<PublicationRecord>> RequirementPublicationRows(Guid baselineId, RequirementLevel level, CancellationToken ct)
     {
-        var rows = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId) join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceScrId equals scr.Id orderby artifact.BaseNumber select new { artifact.BaseNumber, revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, Scr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision }).ToListAsync(ct);
-        return rows.Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), level.ToString(), "", x.Statement, new[] { ("Rationale", x.Rationale), ("Verification method", x.VerificationMethod), ("Source change request", x.Scr) })).ToList();
+        var rows = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId) join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceScrId equals scr.Id orderby artifact.BaseNumber select new { RevisionId = revision.Id, artifact.BaseNumber, revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, Scr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision }).ToListAsync(ct);
+
+        // The tables, figures, and symbols an author wrote belong in the document that carries the
+        // requirement. Publishing only the plain statement would put a requirement in front of an approver
+        // in a form its author never wrote, and a document that disagrees with the record it came from is
+        // worse than no document.
+        var revisionIds = rows.Select(x => x.RevisionId).ToList();
+        var authored = await db.RequirementRevisionProfiles.AsNoTracking()
+            .Where(x => revisionIds.Contains(x.RevisionId))
+            .ToDictionaryAsync(x => x.RevisionId, x => x.RichText, ct);
+        var images = await richContent.ResolveImagesAsync(authored.Values, ct);
+
+        return rows.Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), level.ToString(), "", x.Statement,
+            new[] { ("Rationale", x.Rationale), ("Verification method", x.VerificationMethod), ("Source change request", x.Scr) },
+            Supplementary(x.RevisionId, x.Statement))).ToList();
+
+        // Supporting content defaults to the statement itself when an author wrote none, and printing the
+        // statement twice reads as a defect in the document rather than as completeness.
+        string Supplementary(Guid revisionId, string statement)
+        {
+            if (!authored.TryGetValue(revisionId, out var content)) return "";
+            var adds = AeroLink.Domain.Content.RichContent.HasStructure(content)
+                || AeroLink.Domain.Content.RichContent.ToPlainText(content) != statement;
+            return adds ? RichContentPublisher.ForPublication(content, images) : "";
+        }
     }
     private async Task<List<PublicationRecord>> TraceAnnexRows(Guid baselineId, RequirementLevel level, DateTimeOffset generatedAt, CancellationToken ct)
     {

@@ -25,10 +25,10 @@ public static class ProfessionalPublicationRenderer
         var images=Images(publication);
         using var output = new MemoryStream(); using (var zip = new ZipArchive(output, ZipArchiveMode.Create, true))
         {
-            Entry(zip, "[Content_Types].xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"jpg\" ContentType=\"image/jpeg\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/word/header1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\"/><Override PartName=\"/word/footer1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/></Types>");
+            Entry(zip, "[Content_Types].xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"jpg\" ContentType=\"image/jpeg\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/word/header1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\"/><Override PartName=\"/word/footer1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/></Types>");
             Entry(zip, "_rels/.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>");
-            Entry(zip, "word/_rels/document.xml.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/header\" Target=\"header1.xml\"/><Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer1.xml\"/>"+string.Join("",images.Select(x=>$"<Relationship Id=\"rId{x.Index+3}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image{x.Index}.jpg\"/>"))+"</Relationships>");
-            foreach(var image in images)BinaryEntry(zip,$"word/media/image{image.Index}.jpg",image.Bytes);
+            Entry(zip, "word/_rels/document.xml.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/header\" Target=\"header1.xml\"/><Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer1.xml\"/>"+string.Join("",images.Select(x=>$"<Relationship Id=\"rId{x.Index+3}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image{x.Index}.{x.Extension}\"/>"))+"</Relationships>");
+            foreach(var image in images)BinaryEntry(zip,$"word/media/image{image.Index}.{image.Extension}",image.Bytes);
             Entry(zip, "word/styles.xml", Styles()); Entry(zip, "word/header1.xml", Header(publication)); Entry(zip, "word/footer1.xml", Footer(publication));
             var body = new StringBuilder();
             body.Append(P("CONTROLLED LIFECYCLE PUBLICATION", "CoverKicker")).Append(P(publication.Title, "CoverTitle")).Append(P(publication.Subtitle, "CoverSubtitle"));
@@ -86,9 +86,34 @@ public static class ProfessionalPublicationRenderer
     private static void Entry(ZipArchive zip, string name, string content) { var entry = zip.CreateEntry(name, CompressionLevel.Optimal);entry.LastWriteTime=DeterministicArchiveTime; using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)); writer.Write(content); }
     private static void BinaryEntry(ZipArchive zip,string name,byte[] content){var entry=zip.CreateEntry(name,CompressionLevel.Optimal);entry.LastWriteTime=DeterministicArchiveTime;using var stream=entry.Open();stream.Write(content);}
 
-    private sealed record PublicationImage(int Index,string Key,byte[] Bytes,string Alt,string Caption,int Width,int Height);
+    private sealed record PublicationImage(int Index,string Key,byte[] Bytes,string Alt,string Caption,int Width,int Height,bool IsPng)
+    {
+        public string Extension => IsPng ? "png" : "jpg";
+    }
+
+    /// <summary>
+    /// Decodes the images an authored record carries, once each. The same diagram referenced from three
+    /// requirements is embedded once and pointed at three times, so a document does not grow with how often
+    /// somebody reused a picture.
+    /// </summary>
     private static List<PublicationImage> Images(ProfessionalPublication publication)
-    {var result=new List<PublicationImage>();foreach(var record in publication.Sections.SelectMany(x=>x.Records))foreach(var block in Blocks(record)){if(BlockType(block)!="image"||!block.TryGetProperty("dataUri",out var data)||data.ValueKind!=JsonValueKind.String)continue;var uri=data.GetString()??"";const string prefix="data:image/jpeg;base64,";if(!uri.StartsWith(prefix,StringComparison.OrdinalIgnoreCase))continue;try{var bytes=Convert.FromBase64String(uri[prefix.Length..]);var key=Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();if(result.Any(x=>x.Key==key))continue;var size=JpegSize(bytes);result.Add(new(result.Count+1,key,bytes,Text(block,"alt","Controlled inline image"),Text(block,"caption",""),size.Width,size.Height));}catch(FormatException){/* Invalid controlled image data is represented by its authored alt text. */}}return result;}
+    {var result=new List<PublicationImage>();foreach(var record in publication.Sections.SelectMany(x=>x.Records))foreach(var block in Blocks(record)){if(BlockType(block)!="image"||!block.TryGetProperty("dataUri",out var data)||data.ValueKind!=JsonValueKind.String)continue;var bytes=ImageBytes(data.GetString()??"");if(bytes is null)continue;var key=Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();if(result.Any(x=>x.Key==key))continue;var isPng=PngImage.IsPng(bytes);var size=isPng?PngImage.Size(bytes):JpegSize(bytes);result.Add(new(result.Count+1,key,bytes,Text(block,"alt","Controlled inline image"),Text(block,"caption",""),size.Width,size.Height,isPng));}return result;}
+
+    /// <summary>
+    /// Only the two formats every renderer here can produce, and only as data this deployment already holds.
+    /// A remote reference would be an outbound call from a controlled tool and a document that renders
+    /// differently once somebody else's server changes.
+    /// </summary>
+    private static byte[]? ImageBytes(string uri)
+    {
+        foreach (var prefix in new[] { "data:image/png;base64,", "data:image/jpeg;base64," })
+        {
+            if (!uri.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            // Invalid controlled image data is represented by its authored alt text rather than by nothing.
+            try { return Convert.FromBase64String(uri[prefix.Length..]); } catch (FormatException) { return null; }
+        }
+        return null;
+    }
     private static IEnumerable<JsonElement> Blocks(PublicationRecord record)
     {if(string.IsNullOrWhiteSpace(record.RichContentJson))yield break;JsonDocument? document=null;try{document=JsonDocument.Parse(record.RichContentJson);var root=document.RootElement;if(root.TryGetProperty("blocks",out var blocks)&&blocks.ValueKind==JsonValueKind.Array)foreach(var block in blocks.EnumerateArray())yield return block.Clone();}finally{document?.Dispose();}}
     private static string BlockType(JsonElement block)=>Text(block,"type","").ToLowerInvariant();
@@ -96,14 +121,40 @@ public static class ProfessionalPublicationRenderer
     private static string RichDocx(PublicationRecord record,IReadOnlyList<PublicationImage> images)
     {var body=new StringBuilder();foreach(var block in Blocks(record)){switch(BlockType(block)){case "paragraph":body.Append(P(Text(block,"text",""),"Normal"));break;case "symbol":body.Append(P("Controlled symbol: "+Text(block,"value",""),"Callout"));break;case "reference":body.Append(P("Reference: "+Text(block,"label","")+" — "+Text(block,"target",""),"RecordMeta"));break;case "table":if(block.TryGetProperty("rows",out var rows)&&rows.ValueKind==JsonValueKind.Array){var values=rows.EnumerateArray().Where(x=>x.ValueKind==JsonValueKind.Array).Select(x=>(IReadOnlyList<string>)x.EnumerateArray().Select(v=>v.ToString()).ToList()).ToList();if(values.Count>0){var count=values.Max(x=>x.Count);var widths=Enumerable.Repeat(9360/Math.Max(1,count),count).ToList();body.Append(Table(values[0],values.Skip(1).ToList(),widths,false));}}break;case "image":if(block.TryGetProperty("dataUri",out var data)){var uri=data.GetString()??"";var comma=uri.IndexOf(',');if(comma>0){try{var key=Convert.ToHexString(SHA256.HashData(Convert.FromBase64String(uri[(comma+1)..]))).ToLowerInvariant();var image=images.FirstOrDefault(x=>x.Key==key);if(image is not null)body.Append(ImageDrawing(image));}catch(FormatException){body.Append(P(Text(block,"alt","Invalid controlled image"),"Callout"));}}}break;}}return body.ToString();}
     private static string ImageDrawing(PublicationImage image)
-    {var cx=5_400_000L;var cy=Math.Clamp((long)(cx*Math.Max(1,image.Height)/(double)Math.Max(1,image.Width)),1_800_000L,4_000_000L);var alt=SecurityElement.Escape(image.Alt);return $"<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{100+image.Index}\" name=\"ControlledImage{image.Index}\" descr=\"{alt}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"{image.Index}\" name=\"image{image.Index}.jpg\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rId{image.Index+3}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"+P(image.Caption.Length>0?image.Caption:image.Alt,"RecordMeta");}
+    {var cx=5_400_000L;var cy=Math.Clamp((long)(cx*Math.Max(1,image.Height)/(double)Math.Max(1,image.Width)),1_800_000L,4_000_000L);var alt=SecurityElement.Escape(image.Alt);return $"<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{100+image.Index}\" name=\"ControlledImage{image.Index}\" descr=\"{alt}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"{image.Index}\" name=\"image{image.Index}.{image.Extension}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rId{image.Index+3}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"+P(image.Caption.Length>0?image.Caption:image.Alt,"RecordMeta");}
     private static (int Width,int Height) JpegSize(byte[] bytes)
     {for(var i=2;i+9<bytes.Length;){if(bytes[i]!=0xFF){i++;continue;}var marker=bytes[i+1];if(marker is >=0xC0 and <=0xC3 or >=0xC5 and <=0xC7 or >=0xC9 and <=0xCB or >=0xCD and <=0xCF)return((bytes[i+7]<<8)+bytes[i+8],(bytes[i+5]<<8)+bytes[i+6]);if(i+3>=bytes.Length)break;var length=(bytes[i+2]<<8)+bytes[i+3];if(length<2)break;i+=2+length;}return(640,360);}
 
     private sealed record PdfLine(string Text, int Size, bool Bold, string Color = "25364D", int Indent = 0, int After = 4);
+    /// <summary>
+    /// The images a PDF can actually carry, renumbered to be contiguous.
+    ///
+    /// PDF has no PNG filter, so a PNG has to arrive as pixels. Word needs no such thing and embeds the
+    /// original file, which is why the two formats are selected separately: a PNG this decoder cannot read
+    /// still belongs in the Word document, and only the PDF has to fall back to the image's alt text.
+    /// </summary>
+    private static List<(PublicationImage Image, byte[] Payload, string Filter)> PdfImages(ProfessionalPublication publication)
+    {
+        var result = new List<(PublicationImage, byte[], string)>();
+        foreach (var image in Images(publication))
+        {
+            if (!image.IsPng) { result.Add((image with { Index = result.Count + 1 }, image.Bytes, "DCTDecode")); continue; }
+            if (!PngImage.TryDecodeRgb(image.Bytes, out var width, out var height, out var rgb)) continue;
+            result.Add((image with { Index = result.Count + 1, Width = width, Height = height }, Deflate(rgb), "FlateDecode"));
+        }
+        return result;
+    }
+
+    private static byte[] Deflate(byte[] raw)
+    {
+        using var output = new MemoryStream();
+        using (var zlib = new ZLibStream(output, CompressionLevel.Optimal, true)) zlib.Write(raw);
+        return output.ToArray();
+    }
+
     private static byte[] BuildPdf(ProfessionalPublication p)
     {
-        var images = Images(p);
+        var images = PdfImages(p);
         var pageStreams = new List<string> { PdfCover(p) };
         var control = new List<PdfLine> { new("DOCUMENT CONTROL", 18, true, "2E74B5", 0, 10) };
         var metadata = new List<(string Label, string Value)> { ("Document type",p.DocumentType),("Document number",p.DocumentNumber),("Revision",p.Revision),("Status",p.Status),("Release",p.Release),("Baseline",p.Baseline),("Prepared by",p.PreparedBy),("Generated",p.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm UTC")),("Manifest SHA-256",p.ManifestHash) }; metadata.AddRange(p.Metadata);
@@ -116,7 +167,7 @@ public static class ProfessionalPublicationRenderer
         {
             pageStreams.AddRange(PaginateSection(section, p));
         }
-        pageStreams.AddRange(images.Select(image => PdfImagePage(image, p)));
+        pageStreams.AddRange(images.Select(image => PdfImagePage(image.Image, p)));
         return AssemblePdf(pageStreams, images);
     }
     private static string PdfCover(ProfessionalPublication p)
@@ -178,13 +229,13 @@ public static class ProfessionalPublicationRenderer
         var width=480d;var height=Math.Clamp(width*Math.Max(1,image.Height)/Math.Max(1d,image.Width),180d,540d);var y=680-height;
         var s=new StringBuilder("0.086 0.522 0.471 RG 1.3 w 54 760 m 558 760 l S\nBT\n");Text(s,p.Product+" | CONTROLLED INLINE IMAGE",54,772,8,true,"102A43");Text(s,image.Caption.Length>0?image.Caption:image.Alt,66,730,13,true,"2E74B5");s.Append("ET\n").Append($"q {width:0.###} 0 0 {height:0.###} 66 {y:0.###} cm /Im{image.Index} Do Q\nBT\n");Text(s,image.Alt,66,(int)Math.Max(52,y-22),8,false,"526274");return s.Append("ET").ToString();
     }
-    private static byte[] AssemblePdf(IReadOnlyList<string> streams,IReadOnlyList<PublicationImage> images)
+    private static byte[] AssemblePdf(IReadOnlyList<string> streams,IReadOnlyList<(PublicationImage Image,byte[] Payload,string Filter)> images)
     {
         static byte[] A(string value)=>Encoding.ASCII.GetBytes(value);
         var imageStart=5;var pageStart=imageStart+images.Count;var pageNumbers=Enumerable.Range(0,streams.Count).Select(i=>pageStart+i*2).ToList();
         var objects=new List<byte[]>{A("<< /Type /Catalog /Pages 2 0 R >>"),A($"<< /Type /Pages /Kids [{string.Join(" ",pageNumbers.Select(x=>x+" 0 R"))}] /Count {streams.Count} >>"),A("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),A("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>")};
-        foreach(var image in images){using var item=new MemoryStream();var head=A($"<< /Type /XObject /Subtype /Image /Width {image.Width} /Height {image.Height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {image.Bytes.Length} >>\nstream\n");item.Write(head);item.Write(image.Bytes);item.Write(A("\nendstream"));objects.Add(item.ToArray());}
-        var xobjects=images.Count==0?"":$" /XObject << {string.Join(" ",images.Select(x=>$"/Im{x.Index} {imageStart+x.Index-1} 0 R"))} >>";
+        foreach(var (image,payload,filter) in images){using var item=new MemoryStream();var head=A($"<< /Type /XObject /Subtype /Image /Width {image.Width} /Height {image.Height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /{filter} /Length {payload.Length} >>\nstream\n");item.Write(head);item.Write(payload);item.Write(A("\nendstream"));objects.Add(item.ToArray());}
+        var xobjects=images.Count==0?"":$" /XObject << {string.Join(" ",images.Select(x=>$"/Im{x.Image.Index} {imageStart+x.Image.Index-1} 0 R"))} >>";
         for(var i=0;i<streams.Count;i++){var stream=streams[i]+$"\nBT /F1 7 Tf 0.443 0.502 0.565 rg 1 0 0 1 500 28 Tm (Page {i+1} of {streams.Count}) Tj ET";var contentNumber=pageNumbers[i]+1;objects.Add(A($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>{xobjects} >> /Contents {contentNumber} 0 R >>"));objects.Add(A($"<< /Length {Encoding.ASCII.GetByteCount(stream)} >>\nstream\n{stream}\nendstream"));}
         using var output=new MemoryStream();output.Write(A("%PDF-1.4\n%----\n"));var offsets=new List<long>{0};for(var i=0;i<objects.Count;i++){offsets.Add(output.Position);output.Write(A($"{i+1} 0 obj\n"));output.Write(objects[i]);output.Write(A("\nendobj\n"));}var xref=output.Position;output.Write(A($"xref\n0 {objects.Count+1}\n0000000000 65535 f \n"));foreach(var offset in offsets.Skip(1))output.Write(A($"{offset:D10} 00000 n \n"));output.Write(A($"trailer\n<< /Size {objects.Count+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF"));return output.ToArray();
     }

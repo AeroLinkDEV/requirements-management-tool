@@ -498,7 +498,8 @@ app.MapPost("/api/scrs", async (CreateScrRequest request, HttpContext http, IScr
     {
         var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, ct);
         var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
-            request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, DateTimeOffset.UtcNow, request.Type);
+            request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, DateTimeOffset.UtcNow, request.Type,
+            request.ProblemRich, request.AnalysisRich, request.SolutionRich);
         await repository.AddAsync(scr, ct); await repository.SaveAsync(ct);
         return Results.Created($"/api/scrs/{scr.Id}", ApiMap.ScrDetail(scr));
     }
@@ -515,7 +516,8 @@ app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, HttpContext
         var actor = http.UserAccount().UserName;
         var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, ct);
         var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
-            request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, now, request.Type);
+            request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, now, request.Type,
+            request.ProblemRich, request.AnalysisRich, request.SolutionRich);
         var nextNumbers = new Dictionary<string, int>();
         foreach (var change in request.RequirementChanges)
         {
@@ -1529,11 +1531,61 @@ app.MapPost("/api/enterprise-hardening/attachments",async(HttpRequest request,Ht
     if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});var form=await request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
     if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty file."});if(!Guid.TryParse(form["projectId"],out var projectId)||!Guid.TryParse(form["artifactId"],out var artifactId))return Results.BadRequest(new{error="Project and artifact identifiers are required."});
     if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();var artifactType=string.IsNullOrWhiteSpace(form["artifactType"])?"Requirement":form["artifactType"].ToString();
-    if(artifactType!="Requirement"||!await db.Requirements.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct))return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
-    Guid? revisionId=Guid.TryParse(form["revisionId"],out var parsedRevision)?parsedRevision:null;if(revisionId is not null&&!await db.RequirementRevisions.AnyAsync(x=>x.Id==revisionId&&x.ArtifactId==artifactId,ct))return Results.BadRequest(new{error="The selected revision does not belong to this requirement."});
+    // A diagram belongs beside whatever it explains. Restricting attachments to requirements meant the
+    // supplier datasheet that justifies a change request had nowhere to live except somebody's email.
+    var artifactExists=artifactType switch
+    {
+        "Requirement"=>await db.Requirements.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
+        "ChangeRequest"=>await db.SystemChangeRequests.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
+        "ProblemReport"=>await db.ProblemReports.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
+        _=>false,
+    };
+    if(!artifactExists)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
+    Guid? revisionId=Guid.TryParse(form["revisionId"],out var parsedRevision)?parsedRevision:null;if(revisionId is not null&&artifactType=="Requirement"&&!await db.RequirementRevisions.AnyAsync(x=>x.Id==revisionId&&x.ArtifactId==artifactId,ct))return Results.BadRequest(new{error="The selected revision does not belong to this requirement."});
     var logicalId=Guid.TryParse(form["logicalId"],out var parsedLogical)?parsedLogical:Guid.NewGuid();var previous=await db.ControlledAttachments.Where(x=>x.ProjectId==projectId&&x.ArtifactId==artifactId&&x.LogicalId==logicalId&&x.State==ControlledAttachmentState.Active).OrderByDescending(x=>x.Version).FirstOrDefaultAsync(ct);
     var stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,file.ContentType,ct);try{previous?.Supersede();var attachment=new ControlledAttachment(projectId,artifactType,artifactId,revisionId,logicalId,(previous?.Version??0)+1,form["label"].ToString(),form["description"].ToString(),stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256,stored.StorageKey,previous?.Id,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-hardening/attachments/{attachment.Id}",new{attachment.Id,attachment.LogicalId,attachment.Version,attachment.Sha256});}catch{store.Delete(stored.StorageKey);throw;}
 }).DisableAntiforgery();
+
+// Inline images are their own surface rather than a use of the attachment vault.
+//
+// An image inside a requirement statement is not a document somebody attached; it is part of what the
+// statement says, and it has to be storable before the record that references it exists, because an author
+// writes the figure into the paragraph as they are drafting it. Uploading here stores and hashes the file
+// against the project, and the authored content then references it by identifier. The file is never
+// duplicated into the record, so one diagram used in five requirements is stored once and stays one thing.
+app.MapPost("/api/content/images",async(HttpRequest request,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
+{
+    if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});
+    var form=await request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
+    if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty image."});
+    if(!Guid.TryParse(form["projectId"],out var projectId))return Results.BadRequest(new{error="A project identifier is required."});
+    if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
+    // Only formats every renderer here can produce. An image the workspace shows but the generated Word
+    // document cannot would make a controlled document disagree with the record it came from.
+    var contentType=(file.ContentType??"").ToLowerInvariant();
+    if(contentType is not("image/png" or "image/jpeg"))return Results.BadRequest(new{error="Inline images must be PNG or JPEG so every generated document can render them."});
+    if(file.Length>12*1024*1024)return Results.BadRequest(new{error="Inline images are limited to 12 MB. Attach larger files as controlled attachments instead."});
+    var stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,contentType,ct);
+    try
+    {
+        var attachment=new ControlledAttachment(projectId,"InlineImage",projectId,null,Guid.NewGuid(),1,
+            string.IsNullOrWhiteSpace(form["alt"])?stored.OriginalFileName:form["alt"].ToString(),"",
+            stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256,stored.StorageKey,null,
+            http.UserAccount().UserName,DateTimeOffset.UtcNow);
+        db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);
+        return Results.Created($"/api/content/images/{attachment.Id}",new{attachment.Id,attachment.OriginalFileName,attachment.Size,attachment.Sha256});
+    }
+    catch{store.Delete(stored.StorageKey);throw;}
+}).DisableAntiforgery();
+
+app.MapGet("/api/content/images/{id:guid}",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
+{
+    var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id&&x.ArtifactType=="InlineImage",ct);
+    if(item is null)return Results.NotFound();
+    if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();
+    if(!store.Exists(item.StorageKey))return Results.NotFound();
+    return Results.File(store.OpenRead(item.StorageKey),item.ContentType,enableRangeProcessing:true);
+});
 
 app.MapGet("/api/enterprise-hardening/attachments/{id:guid}/download",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
 {var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();return Results.File(store.OpenRead(item.StorageKey),item.ContentType,item.OriginalFileName,enableRangeProcessing:true);});
@@ -1714,9 +1766,9 @@ record ConfirmMfaRequest(string Code);
 record DisableMfaRequest(string Password,string Code);
 record ResetPasswordRequest(string TemporaryPassword,string Reason);
 record BootstrapAdministratorRequest(string DisplayName, string Email, string Password);
-record CreateScrRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, ChangeRequestType Type = ChangeRequestType.System);
+record CreateScrRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, ChangeRequestType Type = ChangeRequestType.System, string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null);
 record DraftRequirementRequest(string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod,string RichText="",string AttributesJson="{}",string ImpactDispositionJson="{}",bool IsDerived=false);
-record CreateScrDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, List<DraftRequirementRequest> RequirementChanges, ChangeRequestType Type = ChangeRequestType.System);
+record CreateScrDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, string AuthorId, List<DraftRequirementRequest> RequirementChanges, ChangeRequestType Type = ChangeRequestType.System, string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null);
 record CreateWorkspaceRequest(string ProgramName, string ProgramCode, string ProjectName, string SoftwareProduct, string InitialRelease, bool InitialReleaseIsReleased);
 record CreateReleaseRequest(Guid ProjectId, string Version, Guid? PredecessorReleaseId);
 record RetargetScrRequest(Guid TargetReleaseId, string Reason);
@@ -1884,6 +1936,7 @@ static class ApiMap
     public static object ScrDetail(SystemChangeRequest x) => new
     {
         x.Id, x.BaseNumber, x.Revision, x.DisplayNumber, x.ProjectId, x.TargetReleaseId, type = x.Type.ToString(), x.Title, x.Problem, x.Analysis, x.Solution, x.AuthorId, x.Version,
+        x.ProblemRich, x.AnalysisRich, x.SolutionRich,
         state = x.State.ToString(), x.CreatedAt, x.UpdatedAt,
         requirementChanges = x.RequirementChanges.Select(r => new { r.Id, r.BaseNumber, r.Revision, r.DisplayNumber, level = r.Level.ToString(), kind = r.Kind.ToString(), r.Statement, r.Rationale, r.VerificationMethod,r.RichText,r.AttributesJson,r.ImpactDispositionJson }),
         reviewCycles = x.ReviewCycles.OrderBy(c => c.Sequence).Select(c => new { c.Id, c.Sequence, mode=c.Mode.ToString(), state = c.State.ToString(), c.SnapshotHash, c.StartedAt, c.CompletedAt, c.ClosureReason, steps = c.Steps.OrderBy(s => s.Position).Select(s => new { s.Position, s.ApproverId, s.ApproverName, state = s.State.ToString(), s.DecidedAt }) }),

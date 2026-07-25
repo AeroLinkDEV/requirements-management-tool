@@ -187,6 +187,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Problem).HasMaxLength(8000).IsRequired();
             b.Property(x => x.Analysis).HasMaxLength(8000).IsRequired();
             b.Property(x => x.Solution).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.ProblemRich).HasMaxLength(200000).IsRequired();
+            b.Property(x => x.AnalysisRich).HasMaxLength(200000).IsRequired();
+            b.Property(x => x.SolutionRich).HasMaxLength(200000).IsRequired();
             b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired();
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.Type).HasConversion<string>().HasMaxLength(30);
@@ -208,7 +211,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Statement).HasMaxLength(8000).IsRequired();
             b.Property(x => x.Rationale).HasMaxLength(4000);
             b.Property(x => x.VerificationMethod).HasMaxLength(100);
-            b.Property(x => x.RichText).HasMaxLength(32000);
+            b.Property(x => x.RichText).HasMaxLength(200000);
             b.Property(x => x.AttributesJson).IsRequired();
             b.Property(x => x.ImpactDispositionJson).IsRequired();
             b.Ignore(x => x.DisplayNumber);

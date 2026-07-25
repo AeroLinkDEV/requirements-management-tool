@@ -17,7 +17,8 @@ public sealed class SystemChangeRequest
 
     public SystemChangeRequest(string baseNumber, int revision, Guid projectId, Guid targetReleaseId,
         string title, string problem, string analysis, string solution, string authorId, DateTimeOffset now,
-        ChangeRequestType type = ChangeRequestType.System)
+        ChangeRequestType type = ChangeRequestType.System,
+        string? problemRich = null, string? analysisRich = null, string? solutionRich = null)
     {
         Id = Guid.NewGuid();
         BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
@@ -25,9 +26,7 @@ public sealed class SystemChangeRequest
         ProjectId = projectId;
         TargetReleaseId = targetReleaseId;
         Title = title.Trim();
-        Problem = problem.Trim();
-        Analysis = analysis.Trim();
-        Solution = solution.Trim();
+        SetCase(problem, analysis, solution, problemRich, analysisRich, solutionRich);
         AuthorId = authorId;
         Type = type;
         State = ScrState.Draft;
@@ -46,6 +45,14 @@ public sealed class SystemChangeRequest
     public string Problem { get; private set; } = string.Empty;
     public string Analysis { get; private set; } = string.Empty;
     public string Solution { get; private set; } = string.Empty;
+
+    // The rich forms are what the author wrote; the plain forms above are their readable projection, derived
+    // here rather than supplied, so the two can never disagree about what the change case says. Everything
+    // that predates rich authoring — and every consumer that cannot render structure — keeps reading the
+    // plain form and is unaffected.
+    public string ProblemRich { get; private set; } = Content.RichContent.Empty;
+    public string AnalysisRich { get; private set; } = Content.RichContent.Empty;
+    public string SolutionRich { get; private set; } = Content.RichContent.Empty;
     public string AuthorId { get; private set; } = string.Empty;
     public ChangeRequestType Type { get; private set; }
     public ScrState State { get; private set; }
@@ -75,15 +82,14 @@ public sealed class SystemChangeRequest
     }
 
     public void UpdateDraft(string actorId, string title, string problem, string analysis, string solution,
-        IReadOnlyList<RequirementChangeDraft> changes, DateTimeOffset now)
+        IReadOnlyList<RequirementChangeDraft> changes, DateTimeOffset now,
+        string? problemRich = null, string? analysisRich = null, string? solutionRich = null)
     {
         EnsureAuthor(actorId);
         EnsureDraft();
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException("An SCR title is required.");
         Title = title.Trim();
-        Problem = problem.Trim();
-        Analysis = analysis.Trim();
-        Solution = solution.Trim();
+        SetCase(problem, analysis, solution, problemRich, analysisRich, solutionRich);
         _requirementChanges.Clear();
         foreach (var item in changes)
         {
@@ -172,7 +178,7 @@ public sealed class SystemChangeRequest
         EnsureAuthor(actorId);
         if (State != ScrState.Approved) throw new DomainException("Only an approved SCR can advance to its next revision.");
         var next = new SystemChangeRequest(BaseNumber, Revision + 1, ProjectId, TargetReleaseId,
-            Title, Problem, Analysis, Solution, AuthorId, now, Type);
+            Title, Problem, Analysis, Solution, AuthorId, now, Type, ProblemRich, AnalysisRich, SolutionRich);
         foreach (var item in _requirementChanges)
             next.AddRequirementChange(actorId, item.BaseNumber, item.Revision, item.Level, item.Kind,
                 item.Statement, item.Rationale, item.VerificationMethod, now, item.RichText, item.AttributesJson, item.ImpactDispositionJson);
@@ -232,9 +238,36 @@ public sealed class SystemChangeRequest
         }
     }
 
+    /// <summary>
+    /// Sets the change case from whichever form the author supplied.
+    ///
+    /// When rich content is given it is authoritative and the plain text is derived from it; when it is not,
+    /// the plain text is what was written and the rich form is that same text as a single paragraph. Either
+    /// way both are populated and both say the same thing, so no reader has to know which one the author
+    /// used.
+    /// </summary>
+    private void SetCase(string problem, string analysis, string solution,
+        string? problemRich, string? analysisRich, string? solutionRich)
+    {
+        (Problem, ProblemRich) = Resolve(problem, problemRich);
+        (Analysis, AnalysisRich) = Resolve(analysis, analysisRich);
+        (Solution, SolutionRich) = Resolve(solution, solutionRich);
+
+        static (string Plain, string Rich) Resolve(string plain, string? rich)
+        {
+            if (string.IsNullOrWhiteSpace(rich)) return (plain.Trim(), Content.RichContent.FromPlainText(plain));
+            var canonical = Content.RichContent.Canonicalize(rich);
+            return (Content.RichContent.ToPlainText(canonical), canonical);
+        }
+    }
+
     private string ComputeSnapshotHash()
     {
+        // The rich forms are in the hash in their own right. Two different structures can reduce to the same
+        // readable text — a table and a list of lines, say — and hashing only the projection would let the
+        // thing an approver actually looked at change underneath a recorded signature.
         var content = string.Join("|", DisplayNumber, Title, Problem, Analysis, Solution,
+            ProblemRich, AnalysisRich, SolutionRich,
             string.Join(";", _requirementChanges.OrderBy(x => x.DisplayNumber).Select(x =>
                 $"{x.DisplayNumber}:{x.Level}:{x.Kind}:{x.Statement}:{x.Rationale}:{x.VerificationMethod}:{x.RichText}:{x.AttributesJson}:{x.ImpactDispositionJson}")));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();

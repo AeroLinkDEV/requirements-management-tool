@@ -28,7 +28,7 @@ public sealed class ReleaseCampaignPersistenceTests
             blocker.SetReleaseBlocker("verification.engineer", true, "", DateTimeOffset.UtcNow); db.ProblemReports.Add(blocker); await db.SaveChangesAsync(); db.ChangeTracker.Clear();
             readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default);
             Assert.Contains(readiness.Gates, x => x.Code == "problem_reports" && !x.Complete && x.Total == 1 && x.Detail.Contains("PR-00001.00"));
-            var documentId = await db.ControlledDocuments.Where(x => x.BaselineId == summary.ReleasedBaselineId).Select(x => x.Id).FirstAsync(); var generator = new ControlledOutputGenerator(db);
+            var documentId = await db.ControlledDocuments.Where(x => x.BaselineId == summary.ReleasedBaselineId).Select(x => x.Id).FirstAsync(); var generator = new ControlledOutputGenerator(db, new RichContentPublisher(db, new EvidenceFileStore(Path.Combine(Path.GetTempPath(), $"aerolink-evidence-{Guid.NewGuid():N}"))));
             var docx = await generator.GenerateAsync(documentId, "docx", default); var pdf = await generator.GenerateAsync(documentId, "pdf", default); Assert.NotNull(docx); Assert.NotNull(pdf); Assert.StartsWith("%PDF-1.4", System.Text.Encoding.ASCII.GetString(pdf!.Content, 0, 8));
             using (var archive = new ZipArchive(new MemoryStream(docx!.Content), ZipArchiveMode.Read))
             {

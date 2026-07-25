@@ -1,0 +1,126 @@
+using System.Text;
+using System.Text.Json;
+using AeroLink.Domain.Content;
+using AeroLink.Domain.Requirements;
+using Microsoft.EntityFrameworkCore;
+
+namespace AeroLink.Infrastructure.Persistence;
+
+/// <summary>
+/// Prepares authored content for a generated document.
+///
+/// Authored content references an image by the attachment that holds it, so the bytes live in one place, are
+/// hashed once, and carry the record of who uploaded them. A generated Word or PDF file cannot follow a
+/// reference — it has to contain the picture — so the bytes are read out of the content-addressed store and
+/// inlined here, at the moment of generation, rather than being duplicated into every record that mentions
+/// them.
+///
+/// This is also the only place a document can quietly lose content, so it does not: an image whose file is
+/// missing becomes a line of text naming what should have been there. A document with a visible gap is
+/// recoverable; a document with an invisible one is not.
+/// </summary>
+public sealed class RichContentPublisher(AeroLinkDbContext db, EvidenceFileStore store)
+{
+    /// <summary>A single inline image beyond this size is a scan, not a diagram, and would bloat every copy.</summary>
+    private const long MaximumInlineBytes = 12 * 1024 * 1024;
+
+    public async Task<IReadOnlyDictionary<Guid, string>> ResolveImagesAsync(
+        IEnumerable<string?> contents, CancellationToken ct)
+    {
+        var wanted = contents.SelectMany(RichContent.ReferencedAttachments).Distinct().ToList();
+        if (wanted.Count == 0) return new Dictionary<Guid, string>();
+
+        var attachments = await db.ControlledAttachments.AsNoTracking()
+            .Where(x => wanted.Contains(x.Id) && x.State != ControlledAttachmentState.Withdrawn)
+            .ToListAsync(ct);
+
+        var resolved = new Dictionary<Guid, string>();
+        foreach (var attachment in attachments)
+        {
+            var mediaType = attachment.ContentType.ToLowerInvariant();
+            if (mediaType is not ("image/png" or "image/jpeg")) continue;
+            if (attachment.Size > MaximumInlineBytes || !store.Exists(attachment.StorageKey)) continue;
+            try
+            {
+                await using var source = store.OpenRead(attachment.StorageKey);
+                using var buffer = new MemoryStream();
+                await source.CopyToAsync(buffer, ct);
+                resolved[attachment.Id] = $"data:{mediaType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+            }
+            catch (IOException)
+            {
+                // A file the store cannot read is reported by its absence from this map, which the rewrite
+                // below turns into visible text rather than a silently missing figure.
+            }
+        }
+        return resolved;
+    }
+
+    /// <summary>
+    /// Rewrites stored content into the shape the publication renderer reads: images carry their bytes, and
+    /// an image that could not be resolved is replaced by what it was described as.
+    /// </summary>
+    public static string ForPublication(string? stored, IReadOnlyDictionary<Guid, string> images)
+    {
+        var blocks = RichContent.Read(stored);
+        if (blocks.Count == 0) return RichContent.Empty;
+
+        var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteStartArray("blocks");
+            foreach (var block in blocks)
+            {
+                writer.WriteStartObject();
+                switch (block.Kind)
+                {
+                    case RichBlockKind.Image when block.AttachmentId is { } id && images.TryGetValue(id, out var uri):
+                        writer.WriteString("type", "image");
+                        writer.WriteString("dataUri", uri);
+                        writer.WriteString("alt", block.Alt);
+                        writer.WriteString("caption", block.Caption);
+                        break;
+                    case RichBlockKind.Image:
+                        {
+                            var described = string.IsNullOrWhiteSpace(block.Caption) ? block.Alt : block.Caption;
+                            writer.WriteString("type", "paragraph");
+                            writer.WriteString("text", string.IsNullOrWhiteSpace(described)
+                                ? "[An inline image referenced here could not be retrieved.]"
+                                : $"[Image not retrieved: {described}]");
+                            break;
+                        }
+                    case RichBlockKind.Table:
+                        writer.WriteString("type", "table");
+                        writer.WriteString("caption", block.Caption);
+                        writer.WriteStartArray("rows");
+                        foreach (var row in block.Rows ?? [])
+                        {
+                            writer.WriteStartArray();
+                            foreach (var cell in row) writer.WriteStringValue(cell);
+                            writer.WriteEndArray();
+                        }
+                        writer.WriteEndArray();
+                        break;
+                    case RichBlockKind.Symbol:
+                        writer.WriteString("type", "symbol");
+                        writer.WriteString("value", block.Text);
+                        break;
+                    case RichBlockKind.Reference:
+                        writer.WriteString("type", "reference");
+                        writer.WriteString("label", block.Text);
+                        writer.WriteString("target", block.Target);
+                        break;
+                    default:
+                        writer.WriteString("type", "paragraph");
+                        writer.WriteString("text", block.Text);
+                        break;
+                }
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(buffer.ToArray());
+    }
+}
