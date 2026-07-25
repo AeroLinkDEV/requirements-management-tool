@@ -43,16 +43,78 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         var approvals = await ApprovalBasis(document.BaselineId, document.ReleaseId, document.GeneratedAt, ct); var createdBy = (await db.BaselineEvents.AsNoTracking().Where(x => x.BaselineId == baseline.Id && x.EventType == "CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x => x.OccurredAt).Select(x => x.ActorId).FirstOrDefault() ?? "system";
         var releasedWhenGenerated = release.IsReleased && (release.ReleasedAt is null || release.ReleasedAt <= document.GeneratedAt);
         var status = releasedWhenGenerated ? "Approved and Released" : "Controlled Draft"; var type = DocumentTypeName(document.Type);
-        var sections = new List<PublicationSection> { new("Controlled Records", $"This section contains {records.Count:N0} exact, revision-controlled records rendered from baseline {baseline.DisplayNumber}.", records) };
-        if (document.Type is ControlledDocumentType.Sysrd or ControlledDocumentType.SwrdHighLevel or ControlledDocumentType.SwrdLowLevel)
+
+        // The layout that produced this document, if one was recorded against it. Resolved by the exact
+        // template revision stored on the record rather than by whatever is current, so a document
+        // regenerated after the template was revised still comes out as the document that was approved.
+        var templateRevision = document.TemplateRevisionId is null
+            ? null
+            : await db.DocumentTemplateRevisions.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == document.TemplateRevisionId, ct);
+        var templateName = templateRevision is null
+            ? null
+            : await db.DocumentTemplates.AsNoTracking().Where(x => x.Id == templateRevision.TemplateId)
+                .Select(x => x.TemplateNumber + " " + x.Title).SingleOrDefaultAsync(ct);
+        var layout = PublicationLayout.TryRead(templateRevision?.BodyJson);
+
+        var level = document.Type == ControlledDocumentType.Sysrd ? RequirementLevel.System
+            : document.Type == ControlledDocumentType.SwrdHighLevel ? RequirementLevel.HighLevel
+            : RequirementLevel.LowLevel;
+        var isRequirementDocument = document.Type is ControlledDocumentType.Sysrd or ControlledDocumentType.SwrdHighLevel or ControlledDocumentType.SwrdLowLevel;
+
+        List<PublicationSection> sections;
+        string title = document.Title;
+        string subtitle = $"Authoritative {type.ToLowerInvariant()} for {project.SoftwareProduct}";
+        if (layout is null)
         {
-            var level = document.Type == ControlledDocumentType.Sysrd ? RequirementLevel.System : document.Type == ControlledDocumentType.SwrdHighLevel ? RequirementLevel.HighLevel : RequirementLevel.LowLevel;
-            var traces = await TraceAnnexRows(document.BaselineId, level, document.GeneratedAt, ct);
-            sections.Add(new("Annex A - Upward Requirement Traceability", "This annex identifies the exact parent requirement revision(s) for every published requirement. Top-level System requirements are explicitly identified.", traces));
+            sections = [new("Controlled Records", $"This section contains {records.Count:N0} exact, revision-controlled records rendered from baseline {baseline.DisplayNumber}.", records)];
+            if (isRequirementDocument)
+                sections.Add(new("Annex A - Upward Requirement Traceability", "This annex identifies the exact parent requirement revision(s) for every published requirement. Top-level System requirements are explicitly identified.", await TraceAnnexRows(document.BaselineId, level, document.GeneratedAt, ct)));
         }
-        var publication = new ProfessionalPublication(project.SoftwareProduct, program.Name + " (" + program.Code + ")", project.Name, type, document.Title,
-            $"Authoritative {type.ToLowerInvariant()} for {project.SoftwareProduct}", document.DocumentNumber, document.Revision.ToString("D2"), status, release.Version, baseline.DisplayNumber, createdBy, document.GeneratedAt, document.ContentHash,
-            new[] { ("Controlled records", records.Count.ToString("N0")), ("Baseline content hash", baseline.ContentHash ?? "Not frozen"), ("Requirement manifest hash", baseline.RequirementsHash ?? "Not materialized"), ("Approval basis", "Named approvers from exact approved change requests and completed release approvals recorded by generation time") }, approvals,
+        else
+        {
+            var values = new Dictionary<string, string>
+            {
+                ["product"] = project.SoftwareProduct, ["project"] = project.Name,
+                ["program"] = program.Name, ["release"] = release.Version,
+                ["baseline"] = baseline.DisplayNumber, ["documentType"] = type,
+                ["documentTitle"] = document.Title, ["documentNumber"] = document.DocumentNumber,
+                ["recordCount"] = records.Count.ToString("N0"),
+            };
+            title = PublicationLayout.Fill(layout.TitlePattern, values);
+            if (title.Length == 0) title = document.Title;
+            subtitle = PublicationLayout.Fill(layout.SubtitlePattern, values);
+
+            sections = [];
+            foreach (var section in layout.Sections)
+            {
+                var heading = PublicationLayout.Fill(section.Heading, values);
+                var introduction = PublicationLayout.Fill(section.Introduction, values);
+                sections.Add(section.Content switch
+                {
+                    PublicationSectionContent.ControlledRecords => new(heading, introduction, records),
+                    PublicationSectionContent.UpwardTraceAnnex when isRequirementDocument =>
+                        new(heading, introduction, await TraceAnnexRows(document.BaselineId, level, document.GeneratedAt, ct)),
+                    PublicationSectionContent.VerificationAnnex when isRequirementDocument =>
+                        new(heading, introduction, await VerificationAnnexRows(document.BaselineId, level, ct)),
+                    // A trace or verification annex has no meaning in a procedure document. The heading is
+                    // still rendered, because the programme's layout said it belongs there; what would be
+                    // wrong is a heading in a controlled document with nothing under it and no explanation.
+                    PublicationSectionContent.UpwardTraceAnnex or PublicationSectionContent.VerificationAnnex =>
+                        new(heading,
+                            introduction.Length > 0 ? introduction : "This annex applies to requirement documents and is not applicable to this document type.",
+                            []),
+                    _ => new(heading, introduction, []),
+                });
+            }
+        }
+
+        var publication = new ProfessionalPublication(project.SoftwareProduct, program.Name + " (" + program.Code + ")", project.Name, type, title,
+            subtitle, document.DocumentNumber, document.Revision.ToString("D2"), status, release.Version, baseline.DisplayNumber, createdBy, document.GeneratedAt, document.ContentHash,
+            [("Controlled records", records.Count.ToString("N0")), ("Baseline content hash", baseline.ContentHash ?? "Not frozen"), ("Requirement manifest hash", baseline.RequirementsHash ?? "Not materialized"),
+             // Named in the front matter so a reader can tell which layout produced what they are holding.
+             ("Document template", templateRevision is null ? "Built-in layout" : $"{templateName} revision {templateRevision.Revision} (approved {templateRevision.ApprovedAt.UtcDateTime:yyyy-MM-dd} by {templateRevision.ApprovedBy}, manifest {templateRevision.ManifestHash[..Math.Min(12, templateRevision.ManifestHash.Length)]})"),
+             ("Approval basis", "Named approvers from exact approved change requests and completed release approvals recorded by generation time")], approvals,
             new[] { (document.Revision.ToString("D2"), status, document.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd"), createdBy) }, sections);
         return ProfessionalPublicationRenderer.Render(publication, format, $"{document.DocumentNumber}.{document.Revision:D2}_{release.Version}");
     }
@@ -92,6 +154,35 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         var targets=await(from revision in db.RequirementRevisions.AsNoTracking().Where(x=>targetIds.Contains(x.Id)) join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id select new{revision.Id,display=artifact.BaseNumber+"."+revision.Revision.ToString("D2"),level=artifact.Level.ToString()}).ToDictionaryAsync(x=>x.Id,ct);
         return sources.Select(source=>{var parents=links.Where(x=>x.SourceRevisionId==source.Id).Select(x=>targets.TryGetValue(x.TargetRevisionId,out var target)?$"{target.display} ({target.level}, {x.Type})":x.TargetRevisionId.ToString()).ToList();return new PublicationRecord(source.display,level.ToString(),"Parent trace",parents.Count==0?(level==RequirementLevel.System?"Top-level System requirement - no upward requirement parent applies.":"No parent trace recorded."):string.Join("; ",parents),new[]{("Parent count",parents.Count.ToString())});}).ToList();
     }
+    /// <summary>
+    /// Verification coverage for every published requirement, for programmes whose standard puts that annex
+    /// in the requirement document rather than in a separate report.
+    /// </summary>
+    private async Task<List<PublicationRecord>> VerificationAnnexRows(Guid baselineId, RequirementLevel level, CancellationToken ct)
+    {
+        var sources = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
+                             join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == level) on member.ArtifactId equals artifact.Id
+                             join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id
+                             orderby artifact.BaseNumber
+                             select new { revision.Id, display = artifact.BaseNumber + "." + revision.Revision.ToString("D2"), revision.VerificationMethod }).ToListAsync(ct);
+        var ids = sources.Select(x => x.Id).ToList();
+        var coverage = await (from link in db.TestCoverage.AsNoTracking().Where(x => ids.Contains(x.RequirementRevisionId))
+                              join revision in db.TestProcedureRevisions.AsNoTracking() on link.ProcedureRevisionId equals revision.Id
+                              join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                              select new { link.RequirementRevisionId, link.IsSuspect, display = procedure.BaseNumber + "." + revision.Revision.ToString("D2"), procedure.Title }).ToListAsync(ct);
+        return sources.Select(source =>
+        {
+            var covering = coverage.Where(x => x.RequirementRevisionId == source.Id).ToList();
+            // A gap is stated as a gap. A blank cell where coverage should be reads as an oversight in the
+            // document rather than as a fact about the product.
+            var body = covering.Count == 0
+                ? "Coverage gap - no approved verification procedure covers this requirement revision."
+                : string.Join("; ", covering.Select(x => $"{x.display} - {x.Title}{(x.IsSuspect ? " (suspect)" : "")}"));
+            return new PublicationRecord(source.display, level.ToString(), "Verification coverage", body,
+                new[] { ("Verification method", source.VerificationMethod), ("Covering procedure revisions", covering.Count.ToString()), ("Suspect links", covering.Count(x => x.IsSuspect).ToString()) });
+        }).ToList();
+    }
+
     private async Task<List<PublicationRecord>> ProcedurePublicationRows(Guid projectId, TestProcedureLevel level, DateTimeOffset generatedAt, CancellationToken ct)
     {
         var rows = await (from procedure in db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == level)
