@@ -1,6 +1,6 @@
 # Project State — Start Here
 
-**Last updated: 2026-07-24.**
+**Last updated: 2026-07-25.**
 
 This is the orientation record for anyone — human or model — picking up AeroLink. It answers *what
 exists, what is true today, what is deliberately not being built, and where to start*. Every other
@@ -77,7 +77,8 @@ electronic signatures → candidate baseline assembly with SHA-256 freeze → de
 materialization → generated SYSRD/SWRD and test-procedure documents in DOCX and PDF with approval
 provenance and document control → versioned test procedures → external execution import with evidence
 and immutable retest chains → typed, version-aware traceability with suspect links and impact
-analysis → a governed release campaign with computed readiness gates and ordered release approval.
+analysis → a verification-impact queue that raises test work when an approved change alters what must be
+verified → a governed release campaign with computed readiness gates and ordered release approval.
 
 Around that core: enterprise requirements workspace, configurable artifact schemas, saved views and
 structured queries, governed bulk operations, visual redlines, CSV/XLSX onboarding that lands in a
@@ -87,6 +88,22 @@ and variants, backup with integrity manifests, and isolated restore drills.
 
 Identity: local accounts, Program-scoped roles, sessions, MFA with recovery codes, mandatory
 temporary-password rotation, scoped service accounts, and security audit.
+
+Verification impact: approving a change request raises an item for every requirement it introduces or
+modifies, and for any procedure a retirement leaves covering nothing. A Test Lead distributes items;
+a Test Engineer resolves each one either by naming an approved procedure or by recording that no test is
+required — a requirement the author declared verifiable by analysis still needs that confirmation.
+Modified requirements carry their coverage forward marked **suspect** until it is reconfirmed. Undecided
+items hold the `verification_impact` release-readiness gate, so they block release approval; they
+deliberately do **not** block the baseline freeze, because freezing and materializing is what creates the
+requirement revisions a procedure is written against. "Decided" means the procedures are authored and
+approved — it says nothing about whether they have been executed.
+
+Presentation: one design system across every surface — a 12px readability floor, four radii, one type
+scale, one focus treatment — with **comfortable and compact information density** expressed as spacing
+tokens applied through the workspace shell, and **WCAG 2.2 AA as a commitment**: 4.5:1 body contrast,
+3:1 large text, and 24x24 minimum target sizes, all measured on rendered pixels by
+`product/client/tests/accessibility-contrast.spec.ts` and `design-system.spec.ts` in both densities.
 
 ## The demonstration dataset
 
@@ -151,6 +168,13 @@ Developer path and the test commands are in [product/README.md](product/README.m
 `START_AEROLINK.bat` runs the Vite **dev** server; a production build is served differently and is the
 better choice for demonstrations.
 
+The browser journeys run on Linux, macOS and Windows: `cd product/client && npx playwright test`, after
+`npx playwright install chromium` once. They were Windows-only until the Playwright configuration stopped
+launching its servers through a PowerShell prologue. Set `AEROLINK_E2E_SKIP_BUILD=true` to reuse an
+already-built API and cut about a minute per run. CI runs them on Linux for pull requests and pushes, plus
+one unsharded Windows pass on the nightly schedule, because Windows remains a supported deployment
+platform.
+
 Local demonstration identities (`admin`, `systems.author`, `software.author`, `systems.reviewer`,
 `release.manager`) share a local-only password documented in `product/README.md`. Production
 deployment uses the one-time protected administrator bootstrap instead.
@@ -194,6 +218,27 @@ reason the document set can be trusted.
   Making the client faster removed the race and the assertion started failing, correctly. When a test
   starts failing after an unrelated performance change, suspect the test was never really exercising
   its subject.
+- **A suite that cannot run where the work happens does not run.** The browser journeys launched both
+  their servers through a PowerShell prologue, so they were Windows-only: they could not be executed on a
+  Linux development machine at all, and CI paid the Windows rate to run them. Two real defects sat behind
+  that wall — a flexbox row that overflowed the page and a release gate wired to the wrong transition —
+  and neither was findable locally. The config now passes configuration through `webServer.env` and the
+  same suite runs on either platform. Before trusting a gate, check that you can run it yourself.
+- **A gate belongs on the transition the workflow can actually satisfy.** The verification-impact queue
+  was first wired to block *baseline freeze*. Freezing and then materializing is what creates the
+  requirement revisions a test engineer needs before a procedure can exist, so the gate withheld the test
+  team's own inputs and deadlocked the release. It is now the `verification_impact` readiness gate on
+  release approval, which is what was actually asked for. The gate also shipped with no test of its own;
+  an existing journey caught it, and only once that journey could run.
+- **Auditing default states is auditing the easy case.** The design contract was checked on each surface
+  as it first rendered. A surface can be contained at rest and overflow the moment a panel opens — the
+  requirements workspace did exactly that — and a queue with no rows in it hides every colour its rows
+  use. Two contrast failures on My Work appeared only once other journeys had created work items. Audits
+  now cover both densities, an opened inspector, and populated surfaces.
+- **Density is spacing, not type.** Compact reduced body text to 14px, and every unstyled `<small>` — at
+  the user agent's 0.8333em — silently fell from 12.5px to 11.67px, under the readability floor. The
+  floor had never been measured in compact because nothing exercised compact. Relative font sizes make a
+  floor unpredictable; pin the element instead of trusting inheritance.
 - **An on-premises product must be measured on a hostile network, not a good one.** The client fetched
   its webfonts from a public CDN. On a fast connection this was invisible; when the request hung rather
   than failing fast — the normal behaviour of a firewall that drops packets instead of rejecting them —

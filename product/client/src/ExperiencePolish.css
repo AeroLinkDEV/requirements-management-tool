@@ -2,7 +2,7 @@
 html { scroll-behavior: smooth; }
 .appBoot { min-height: 100vh; display: grid; grid-template-columns: auto minmax(0,480px); place-content: center; align-items: start; gap: 22px; padding: 40px; background: radial-gradient(circle at 72% 30%,#173f59 0,transparent 30%),linear-gradient(145deg,#071427,#0e2944); color: white; }
 .bootMark { width: 58px; height: 58px; display: grid; place-items: center; border: 1px solid #3f657a; border-radius: 16px; background: #15354d; color: #78d9c9; font-size: 24px; }
-.appBoot p { margin: 2px 0 6px; color: #79d6c7; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+.appBoot p { margin: 2px 0 6px; color: #79d6c7; font-size: 12px; font-weight: 800; letter-spacing: .12em; }
 .appBoot h1 { margin: 0 0 8px; color: white; font: 700 25px var(--font-display); }
 .appBoot span { color: #aebfd0; font-size: 14px; }
 .appBoot i { display: block; width: 100%; height: 3px; margin-top: 21px; overflow: hidden; border-radius: 2px; background: #1e3b54; }
@@ -32,105 +32,83 @@ html[data-motion="reduced"] *::after { scroll-behavior: auto !important; transit
   text-align: left;
 }
 .workspaceDisplay:hover { background: #162c49; border-color: #3a587b; }
-.workspaceDisplay > span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: #1c3a57; color: #75d7c8; font: 700 12px var(--font-display); }
+.workspaceDisplay > span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: #1c3a57; color: #75d7c8; font: 700 12px var(--font-display); }
 .workspaceDisplay > div { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 .workspaceDisplay b { font-size: 12px; }
-.workspaceDisplay small { color: #8fa1b9; font-size: 11px; text-transform: capitalize; }
-.workspaceDisplay > i { color: #6f849d; font-style: normal; }
+.workspaceDisplay small { color: #8fa1b9; font-size: 12px; text-transform: capitalize; }
+.workspaceDisplay > i { color: #758ba5; font-style: normal; }
 
 .experienceBackdrop { position: fixed; inset: 0; z-index: 1200; background: rgba(5,14,30,.48); backdrop-filter: blur(3px); animation: veilIn .18s ease both; }
 .experienceDrawer { position: absolute; inset: 0 0 0 auto; width: min(470px,100vw); display: flex; flex-direction: column; overflow: auto; background: #f7f9fb; box-shadow: -24px 0 70px rgba(4,15,30,.3); animation: drawerIn .24s cubic-bezier(.2,.72,.25,1) both; }
 .experienceDrawer > header { position: relative; padding: 31px 31px 26px; background: radial-gradient(circle at 90% 0,#215a65 0,transparent 42%),linear-gradient(145deg,#0b1d35,#112d48); color: white; }
-.experienceDrawer > header span { color: #78d9c9; font-size: 11px; font-weight: 800; letter-spacing: .11em; }
+.experienceDrawer > header span { color: #78d9c9; font-size: 12px; font-weight: 800; letter-spacing: .11em; }
 .experienceDrawer > header h2 { margin: 8px 0 7px; color: white; font: 700 27px var(--font-display); letter-spacing: -.025em; }
 .experienceDrawer > header p { max-width: 350px; margin: 0; color: #b7c6d6; font-size: 14px; line-height: 1.55; }
-.experienceClose { position: absolute; top: 18px; right: 18px; width: 40px; border: 1px solid #ffffff26; border-radius: 10px; background: #ffffff0c; color: white; font-size: 25px; }
+.experienceClose { position: absolute; top: 18px; right: 18px; width: 40px; border: 1px solid #ffffff26; border-radius: 8px; background: #ffffff0c; color: white; font-size: 24px; }
 .experienceDrawer > section { padding: 24px 28px; border-bottom: 1px solid var(--line); background: white; }
 .experienceSectionTitle { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 15px; }
 .experienceSectionTitle h3 { margin: 0 0 4px; font: 700 16px var(--font-display); }
 .experienceSectionTitle p { margin: 0; color: var(--ink-500); font-size: 13px; line-height: 1.45; }
-.experienceSectionTitle > b { flex: 0 0 auto; border-radius: 14px; background: #e8f4f2; color: var(--teal-700); padding: 4px 8px; font-size: 11px; text-transform: uppercase; }
+.experienceSectionTitle > b { flex: 0 0 auto; border-radius: 12px; background: #e8f4f2; color: var(--teal-700); padding: 4px 8px; font-size: 12px; text-transform: uppercase; }
 .experienceChoice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.experienceChoice > button { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-height: 145px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: #f8fafb; color: var(--ink-900); text-align: left; }
+.experienceChoice > button { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-height: 145px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #f8fafb; color: var(--ink-900); text-align: left; }
 .experienceChoice > button[aria-pressed="true"] { border-color: #62aaa2; background: #f0f9f7; box-shadow: 0 0 0 3px rgba(35,135,125,.1); }
 .experienceChoice > button b { margin-top: 6px; font-size: 13px; }
 .experienceChoice > button small { color: var(--ink-500); font-size: 12px; }
-.densityPreview { height: 73px; display: flex; flex-direction: column; gap: 7px; padding: 10px; border: 1px solid #dce4eb; border-radius: 7px; background: white; }
+.densityPreview { height: 73px; display: flex; flex-direction: column; gap: 7px; padding: 10px; border: 1px solid #dce4eb; border-radius: 8px; background: white; }
 .densityPreview span { display: block; height: 9px; border-radius: 3px; background: linear-gradient(90deg,#255b73 0 28%,#dce5ea 28%); }
 .densityPreview.compact { gap: 4px; padding-block: 8px; }
 .densityPreview.compact span { height: 7px; }
 .motionChoice { display: grid; gap: 8px; }
-.motionChoice button { display: flex; align-items: center; gap: 12px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: #f8fafb; color: var(--ink-900); text-align: left; }
+.motionChoice button { display: flex; align-items: center; gap: 12px; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafb; color: var(--ink-900); text-align: left; }
 .motionChoice button[aria-pressed="true"] { border-color: #62aaa2; background: #f0f9f7; box-shadow: inset 3px 0 var(--teal-600); }
 .motionChoice button > div { display: flex; flex-direction: column; }
 .motionChoice button b { font-size: 13px; }
 .motionChoice button small { color: var(--ink-500); font-size: 12px; }
-.motionGlyph { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; background: #dff2ee; color: var(--teal-700); font-size: 20px; }
-.motionGlyph.quiet { background: #e9eef3; color: #65758a; }
+.motionGlyph { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; background: #dff2ee; color: var(--teal-700); font-size: 20px; }
+.motionGlyph.quiet { background: #e9eef3; color: #627186; }
 .experienceDrawer > footer { display: flex; align-items: center; gap: 11px; margin-top: auto; padding: 20px 28px; color: var(--ink-500); }
 .experienceDrawer > footer > span { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: #e5f5ef; color: #258063; }
 .experienceDrawer > footer div { display: flex; flex-direction: column; }
 .experienceDrawer > footer b { color: var(--ink-900); font-size: 12px; }
-.experienceDrawer > footer small { font-size: 11px; }
+.experienceDrawer > footer small { font-size: 12px; }
 @keyframes veilIn { from { opacity: 0; } }
 @keyframes drawerIn { from { opacity: .7; transform: translateX(28px); } }
 
-.experienceToast { position: fixed; right: 24px; bottom: 24px; z-index: 1300; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 11px 15px; border: 1px solid #2f5664; border-radius: 11px; background: #102a42; color: white; box-shadow: 0 15px 45px rgba(6,21,39,.28); animation: toastIn .24s ease both; }
+.experienceToast { position: fixed; right: 24px; bottom: 24px; z-index: 1300; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 11px 15px; border: 1px solid #2f5664; border-radius: 12px; background: #102a42; color: white; box-shadow: 0 15px 45px rgba(6,21,39,.28); animation: toastIn .24s ease both; }
 .experienceToast span { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: #2c8c79; font-weight: 800; }
 .experienceToast b { font-size: 13px; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } }
 
 .dashboardSkeleton { position: relative; overflow: hidden; border-color: #e1e7ed !important; background: #f8fafb !important; pointer-events: none; }
 .dashboardSkeleton::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg,transparent,rgba(255,255,255,.85),transparent); animation: skeletonSweep 1.25s infinite; }
-.skeletonLine { display: block; height: 11px; margin: 7px 0; border-radius: 5px; background: #e3e9ee; }
+.skeletonLine { display: block; height: 11px; margin: 7px 0; border-radius: 8px; background: #e3e9ee; }
 .skeletonLine.short { width: 42%; }
 .skeletonLine.medium { width: 68%; }
-.skeletonMetric { display: block; width: 64px; height: 38px; margin: 12px 0; border-radius: 7px; background: #dce4ea; }
+.skeletonMetric { display: block; width: 64px; height: 38px; margin: 12px 0; border-radius: 8px; background: #dce4ea; }
 .metrics > .dashboardSkeleton { min-height: 132px; padding: 19px 21px; border: 1px solid var(--line); border-radius: var(--radius-md); }
 .dashboardRowSkeletons .row { cursor: default; }
 .dashboardRowSkeletons .row > div { min-width: 0; }
-.skeletonAvatar { width: 38px; height: 38px; border-radius: 9px; background: #dce5eb; }
-.skeletonPill { width: 72px; height: 24px; border-radius: 14px; background: #e2e8ed; }
+.skeletonAvatar { width: 38px; height: 38px; border-radius: 8px; background: #dce5eb; }
+.skeletonPill { width: 72px; height: 24px; border-radius: 12px; background: #e2e8ed; }
 @keyframes skeletonSweep { to { transform: translateX(100%); } }
 
 .personMeta { display: inline-flex; align-items: center; gap: 6px; }
 /* Initials sit at the readable minimum rather than 9px; the circle grows to keep two characters centred. */
 .personMeta > i { width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: 50%; background: #dceeea; color: #256d65; font-size: 12px; font-style: normal; font-weight: 800; }
 .reqHeaderActions .activeAuthor { display: grid; grid-template-columns: 34px minmax(0,auto); align-items: center; gap: 8px; min-width: 158px; margin: 0; text-align: left; }
-.reqHeaderActions .activeAuthor > i { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: #dceeea; color: #256d65; font-size: 11px; font-style: normal; font-weight: 800; }
+.reqHeaderActions .activeAuthor > i { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: #dceeea; color: #256d65; font-size: 12px; font-style: normal; font-weight: 800; }
 .reqHeaderActions .activeAuthor > span { display: flex; flex-direction: column; min-width: 0; }
 .reqHeaderActions .activeAuthor b { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.reqHeaderActions .activeAuthor small { font-size: 10px; }
+.reqHeaderActions .activeAuthor small { font-size: 12px; }
 
 /* Keep frequently used filters visible while records move beneath them. */
 .historyTools { position: sticky; top: 59px; z-index: 8; box-shadow: 0 8px 20px rgba(17,35,58,.055); }
 .historyTable .tableHead { position: sticky; top: 187px; z-index: 6; }
 .lifeTabs, .verificationTabs { position: sticky; top: 48px; z-index: 7; background: rgba(243,246,249,.96); backdrop-filter: blur(9px); }
 
-html[data-density="compact"] { --text-body: 14px; --text-control: 13px; }
-html[data-density="compact"] .commandCenterPage,
-html[data-density="compact"] .historyPage,
-html[data-density="compact"] .lifecyclePage,
-html[data-density="compact"] .verificationPage,
-html[data-density="compact"] .campaignPage,
-html[data-density="compact"] .identityPage,
-html[data-density="compact"] .enterprisePage { padding-top: 27px !important; padding-bottom: 42px !important; }
-html[data-density="compact"] .metrics button { min-height: 108px; padding: 14px 17px; }
-html[data-density="compact"] .panel,
-html[data-density="compact"] .campaignCard,
-html[data-density="compact"] .verificationCard { padding: 14px; }
-html[data-density="compact"] .historyTabs button { padding: 12px 18px; }
-html[data-density="compact"] .historyFilters { padding-block: 9px; }
-html[data-density="compact"] .historyRow { padding-block: 10px; }
-html[data-density="compact"] .reqTable article { min-height: 54px; padding-block: 7px; }
-html[data-density="compact"] .traceList > article { padding: 13px 16px; }
-html[data-density="compact"] .coverageRow,
-html[data-density="compact"] .procedureRow,
-html[data-density="compact"] .executionRow { padding-block: 10px; }
-html[data-density="compact"] .gateGrid article { padding: 12px; }
-html[data-density="compact"] .contextBar { height: 44px; min-height: 44px; }
-html[data-density="compact"] .lifeTabs,
-html[data-density="compact"] .verificationTabs { top: 44px; }
+/* Density now lives in Density.css, expressed once as tokens rather than as a per-selector list of
+   hard-coded compact pixel values that reached only a handful of the product's surfaces. */
 
 @media (max-width: 1050px) {
   .workspaceDisplay { display: none; }

@@ -19,7 +19,7 @@
 
 .workMetrics small,
 .queueTitle > span {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .adminSummary span {
@@ -53,7 +53,7 @@
 .qualificationGrid article small,
 .integrityEvidence p,
 .integrityEvidence small {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -89,12 +89,12 @@
 .jobTable small,
 .concurrencyFlow code,
 .mergeBoard pre {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 @media (max-width: 1360px) {
   .reqCommand .pageSizeControl { display: none; }
-  .enterprisePage { padding: 28px 28px 64px; }
+  
   .enterpriseMetrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 

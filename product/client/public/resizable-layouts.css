@@ -53,10 +53,12 @@
   transition: opacity 140ms ease, transform 140ms ease, border-color 140ms ease;
 }
 
+/* 24px, not the 18px this shipped with: WCAG 2.2 SC 2.5.8 sets 24x24 as the minimum target size.
+   Only the hit area grows — the visible line is the 2px ::before, so nothing looks different. */
 .workspaceSplitter--horizontal {
   top: 0;
   bottom: 0;
-  width: 18px;
+  width: 24px;
   transform: translateX(-50%);
   cursor: col-resize;
 }
@@ -70,7 +72,7 @@
 .workspaceSplitter--vertical {
   left: 0;
   right: 0;
-  height: 18px;
+  height: 24px;
   transform: translateY(-50%);
   cursor: row-resize;
 }

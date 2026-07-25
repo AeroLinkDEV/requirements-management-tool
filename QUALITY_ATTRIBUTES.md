@@ -110,6 +110,20 @@ The interface must make identity, revision, state, baseline, approval, applicabi
 
 Bulk operations and imports require preview, validation, clear error reporting, and an auditable result.
 
+## Accessibility
+
+AeroLink targets **WCAG 2.2 Level AA**. This is a commitment, not an aspiration, and it is measured on rendered pixels rather than asserted:
+
+- text contrast of at least 4.5:1, and 3:1 for large text (>=24px, or >=18.66px bold), per SC 1.4.3;
+- interactive targets of at least 24x24 CSS pixels, per SC 2.5.8;
+- a visible focus indicator on every interactive element;
+- no information conveyed by colour alone; and
+- a 12px floor for any text a person is expected to read.
+
+Every criterion above is enforced across all routed surfaces, in both information densities, by `product/client/tests/design-system.spec.ts` and `product/client/tests/accessibility-contrast.spec.ts`. Elements whose effective background is a gradient or image cannot be resolved from computed style; the contrast audit counts and reports them rather than treating them as passes, and they require visual review.
+
+Not yet covered by automated checks, and therefore not claimed: screen-reader semantics beyond roles and labels already in use, reflow at 320px (the client sets a 960px minimum width), and text spacing overrides per SC 1.4.12.
+
 ## Validation Strategy
 
 Quality will be demonstrated with known reference projects and adverse scenarios, including:

@@ -20,6 +20,7 @@ public static class OperationsEndpoints
         group.MapPost("/alerts",OpenAlertAsync);
         group.MapPost("/alerts/{id:guid}/resolve",ResolveAlertAsync);
         app.MapAeroLinkExternalIdentityAdminEndpoints();
+        app.MapAeroLinkVerificationImpactEndpoints();
         return app;
     }
 

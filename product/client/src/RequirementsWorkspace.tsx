@@ -1007,6 +1007,7 @@ export default function RequirementsWorkspace({
                 <p>Controlled current revision</p>
               </div>
               <button
+                className="inspectorClose"
                 aria-label="Close requirement inspector"
                 onClick={() => {
                   autoSelected.current = true;

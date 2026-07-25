@@ -18,17 +18,28 @@
   font-synthesis: none;
   --font-display: 'Manrope', sans-serif;
   --font-body: 'DM Sans', sans-serif;
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-body: 15px;
-  --text-control: 14px;
-  --text-title: 32px;
+  /* Type scale. 12px is the floor for any text a person is expected to read — the readability contract
+     in SHOWCASE_USABILITY_REFRESH_REPORT.md — and there is deliberately nothing smaller to reach for. */
+  --text-xs: 12px;      /* micro-labels, eyebrows, table metadata */
+  --text-sm: 13px;      /* secondary content */
+  --text-control: 14px; /* controls and dense table content */
+  --text-body: 15px;    /* ordinary content */
+  --text-lg: 17px;      /* card and panel headings */
+  --text-xl: 22px;      /* section headings, metric values */
+  --text-2xl: 26px;     /* page sub-headings */
+  --text-title: 32px;   /* page titles */
+
+  /* Weights. Display faces carry 600/700; body text stays 400/500. */
+  --weight-body: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
+  --weight-bold: 700;
   --navy-950: #08162b;
   --navy-900: #0c1b34;
   --navy-800: #142b49;
   --ink-900: #142139;
   --ink-700: #42526a;
-  --ink-500: #6f7d91;
+  --ink-500: #606c7e;
   --line: #dce3eb;
   --surface: #ffffff;
   --surface-subtle: #f6f8fb;
@@ -36,18 +47,21 @@
   --teal-700: #176f68;
   --teal-600: #23877d;
   --teal-100: #dff3ee;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  /* Four radii, and nothing between them. */
+  --radius-sm: 8px;     /* inputs, chips, small controls */
+  --radius-md: 12px;    /* cards, panels, dialogs */
+  --radius-lg: 16px;    /* hero surfaces */
+  --radius-pill: 999px; /* status pills and avatars */
   --shadow-soft: 0 10px 30px rgba(17, 35, 58, .08);
 }
 
 * { box-sizing: border-box; }
 html { font-size: 16px; background: var(--canvas); }
-body { margin: 0; min-width: 960px; font-size: var(--text-body); line-height: 1.5; }
+/* Line height and control height are density tokens; Density.css defines both settings. */
+body { margin: 0; min-width: 960px; font-size: var(--text-body); line-height: var(--leading-body); }
 button, input, select, textarea { font: inherit; }
 button, a, summary, select { cursor: pointer; }
-button, input, select, textarea { min-height: 40px; }
+button, input, select, textarea { min-height: var(--control-height); }
 button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 3px solid rgba(35, 135, 125, .28);
   outline-offset: 2px;

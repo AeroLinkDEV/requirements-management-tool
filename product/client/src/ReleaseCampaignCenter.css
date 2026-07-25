@@ -7,13 +7,13 @@
   border-radius: 16px;
   background: #e8f1ff;
   color: #3168ac;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 .readinessHero {
   background: linear-gradient(120deg, #10223f, #1c5260);
   color: white;
-  border-radius: 15px;
+  border-radius: 12px;
   padding: 22px 25px;
   display: flex;
   gap: 20px;
@@ -52,7 +52,7 @@
   font: 700 20px Manrope;
 }
 .readinessDial span {
-  font-size: 8px;
+  font-size: 12px;
 }
 .readinessSummary {
   margin-left: auto;
@@ -63,7 +63,7 @@
   font: 700 24px Manrope;
 }
 .readinessSummary span {
-  font-size: 9px;
+  font-size: 12px;
   color: #adbdcc;
 }
 .readinessHero > button {
@@ -90,7 +90,7 @@
 .gateGrid article {
   background: white;
   border: 1px solid #dfe5ec;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 13px;
 }
 .gateGrid article.complete {
@@ -111,13 +111,13 @@
   float: right;
 }
 .gateGrid p {
-  font-size: 9px;
+  font-size: 12px;
   color: #607086;
   margin: 7px 0;
 }
 .gateGrid small {
   color: #8994a4;
-  font-size: 8px;
+  font-size: 12px;
 }
 .campaignGrid {
   display: grid;
@@ -146,7 +146,7 @@
   margin: 0;
 }
 .campaignTitle p {
-  font-size: 9px;
+  font-size: 12px;
   color: #8893a3;
   margin: 3px 0;
 }
@@ -159,12 +159,12 @@
   justify-content: space-between;
 }
 .impacts span {
-  font-size: 9px;
+  font-size: 12px;
   color: #3a6c95;
 }
 .impacts i {
   font-style: normal;
-  font-size: 8px;
+  font-size: 12px;
   padding: 4px 7px;
   border-radius: 8px;
   background: #fff4d9;
@@ -175,7 +175,7 @@
   color: #28765e;
 }
 .impacts p {
-  font-size: 10px;
+  font-size: 12px;
   color: #58667a;
 }
 .impacts small {
@@ -187,7 +187,7 @@
   border: 0;
   background: #e8f3f1;
   color: #257e70;
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 6px 8px;
   margin-top: 6px;
 }
@@ -195,7 +195,7 @@
   width: 100%;
   padding: 9px;
   border: 1px solid #d7dee7;
-  border-radius: 7px;
+  border-radius: 8px;
 }
 .releaseApprover {
   display: flex;
@@ -209,14 +209,14 @@
   background: #e8f1ff;
   display: grid;
   place-items: center;
-  font-size: 9px;
+  font-size: 12px;
 }
 .releaseApprover div {
   display: flex;
   flex-direction: column;
 }
 .releaseApprover b {
-  font-size: 10px;
+  font-size: 12px;
 }
 .releaseApprover small {
   color: #8994a4;
@@ -235,11 +235,11 @@
   margin-top: 4px;
 }
 .campaignEvent b {
-  font-size: 9px;
+  font-size: 12px;
 }
 .campaignEvent p,
 .campaignEvent small {
-  font-size: 8px;
+  font-size: 12px;
   color: #718096;
   margin: 2px 0;
 }
@@ -263,7 +263,7 @@
   font: 700 18px Manrope;
 }
 .comparisonStats span {
-  font-size: 8px;
+  font-size: 12px;
   color: #718096;
   text-transform: capitalize;
 }
@@ -276,19 +276,19 @@
 }
 .proposedChange span {
   grid-row: 1/4;
-  font-size: 9px;
+  font-size: 12px;
   color: #3f6d93;
 }
 .proposedChange b {
-  font-size: 10px;
+  font-size: 12px;
 }
 .proposedChange p {
-  font-size: 9px;
+  font-size: 12px;
   margin: 2px 0;
   color: #59667a;
 }
 .proposedChange small {
-  color: #8792a3;
+  color: #6d7684;
 }
 .campaignModal {
   position: fixed;
@@ -302,7 +302,7 @@
   background: white;
   width: min(600px, 90vw);
   padding: 25px;
-  border-radius: 14px;
+  border-radius: 12px;
 }
 .campaignModal textarea {
   width: 100%;
@@ -372,20 +372,20 @@
 }
 .campaignGateRail article span {
   color: #8391a1;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
 }
 .campaignGateRail article b {
   color: var(--ink-900);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.3;
 }
 .campaignGateRail article small {
   max-height: 28px;
   overflow: hidden;
   color: var(--ink-500);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.4;
 }
 .releaseCommandGrid {
@@ -424,11 +424,11 @@
   font-size: 15px;
 }
 .evidencePulseTitle > span {
-  border-radius: 13px;
+  border-radius: 12px;
   background: #e4f4ee;
   padding: 5px 8px;
   color: #28745f;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 750;
 }
 .evidencePulseScore {
@@ -454,11 +454,11 @@
   margin: 0;
 }
 .evidencePulseScore > p b {
-  font-size: 11px;
+  font-size: 12px;
 }
 .evidencePulseScore > p span {
   color: var(--ink-500);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.4;
 }
 .evidencePulseStats {
@@ -470,7 +470,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid #e1e7ec;
-  border-radius: 9px;
+  border-radius: 8px;
   background: #f8fafb;
   padding: 9px;
 }
@@ -479,7 +479,7 @@
 }
 .evidencePulseStats span {
   color: var(--ink-500);
-  font-size: 8px;
+  font-size: 12px;
 }
 .releasePackagePulse {
   margin: 14px 0 0;
@@ -492,7 +492,7 @@
   gap: 12px;
   border-bottom: 1px solid #edf0f3;
   padding: 8px 0;
-  font-size: 9px;
+  font-size: 12px;
 }
 .releasePackagePulse dt {
   color: var(--ink-500);

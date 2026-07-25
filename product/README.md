@@ -104,6 +104,19 @@ npm.cmd run test:focused -- tests\lifecycle-decision-room.spec.ts
 npm.cmd run test:smoke
 ```
 
+The commands above are shown for PowerShell because that is the operator platform, but the browser
+journeys are not Windows-only. On Linux or macOS the same scripts work unchanged:
+
+```bash
+cd product/client
+npx playwright install chromium   # once
+npm run test:fast
+AEROLINK_E2E_SKIP_BUILD=true npx playwright test
+```
+
+`AEROLINK_E2E_SKIP_BUILD=true` reuses an API you have already built in Release and saves about a minute
+per run. If `dotnet` is not on `PATH`, set `AEROLINK_DOTNET` to its full path.
+
 - `test:fast` runs lint and TypeScript checks without starting the product.
 - `test:focused -- <spec>` starts an isolated product and runs only the named Playwright journey.
 - `test:smoke` exercises login recovery and the showcase-critical UI path.

@@ -1,6 +1,6 @@
 .reviewModePicker { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 18px; }
-.reviewModePicker > button { display: flex; flex-direction: column; gap: 3px; text-align: left; border: 1px solid #d5dee8; background: #f7f9fb; color: #4e5f75; border-radius: 10px; padding: 13px 15px; }
+.reviewModePicker > button { display: flex; flex-direction: column; gap: 3px; text-align: left; border: 1px solid #d5dee8; background: #f7f9fb; color: #4e5f75; border-radius: 8px; padding: 13px 15px; }
 .reviewModePicker > button b { font-size: 12px; }
-.reviewModePicker > button span { font-size: 10px; color: #7c899a; }
+.reviewModePicker > button span { font-size: 12px; color: #7c899a; }
 .reviewModePicker > button.active { border-color: #48a99a; background: #eaf7f4; box-shadow: inset 3px 0 #48a99a; color: #176b61; }
 .approverRow button:disabled { opacity: .3; }

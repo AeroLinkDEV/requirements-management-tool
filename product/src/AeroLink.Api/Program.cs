@@ -560,14 +560,18 @@ app.MapPost("/api/scrs/{id:guid}/submit", async (Guid id, SubmitReviewRequest re
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
     if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
     var actor = http.UserAccount(); if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
     var programId = await db.Projects.Where(x => x.Id == scr.ProjectId).Join(db.Programs, x => x.ProgramId, x => x.Id, (_, p) => p.Id).SingleAsync(ct);
     if (!await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct)) return Results.Forbid();
-    try { var now = DateTimeOffset.UtcNow; var snapshotHash = scr.ActiveReviewCycle?.SnapshotHash ?? ""; var activeBefore=scr.ActiveReviewCycle!.Steps.Where(x=>x.State==ApprovalStepState.Active).Select(x=>x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase); scr.ApproveActiveStage(actor.UserName, now); var activated=scr.ActiveReviewCycle?.Steps.Where(x=>x.State==ApprovalStepState.Active&&!activeBefore.Contains(x.ApproverId)).ToList()??[];foreach(var step in activated)db.UserNotifications.Add(new(scr.ProjectId,step.ApproverId,"ReviewActivated",$"Review {scr.DisplayNumber}",$"The prior stage is complete. You are now authorized to review {scr.DisplayNumber}: {scr.Title}",$"scr:{scr.Id}",scr.Id,now)); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "SCR", scr.Id, scr.DisplayNumber, "Approve", request.Meaning, snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now)); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
+    try { var now = DateTimeOffset.UtcNow; var snapshotHash = scr.ActiveReviewCycle?.SnapshotHash ?? ""; var activeBefore=scr.ActiveReviewCycle!.Steps.Where(x=>x.State==ApprovalStepState.Active).Select(x=>x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase); scr.ApproveActiveStage(actor.UserName, now); var activated=scr.ActiveReviewCycle?.Steps.Where(x=>x.State==ApprovalStepState.Active&&!activeBefore.Contains(x.ApproverId)).ToList()??[];foreach(var step in activated)db.UserNotifications.Add(new(scr.ProjectId,step.ApproverId,"ReviewActivated",$"Review {scr.DisplayNumber}",$"The prior stage is complete. You are now authorized to review {scr.DisplayNumber}: {scr.Title}",$"scr:{scr.Id}",scr.Id,now)); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "SCR", scr.Id, scr.DisplayNumber, "Approve", request.Meaning, snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
+        // Approval is what settles the engineering decision, so verification work is raised here rather than
+        // waiting for baseline inclusion. Saved in the same unit of work as the approval itself.
+        await verificationImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct);
+        await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
@@ -652,6 +656,10 @@ app.MapDelete("/api/baselines/{id:guid}/selections/{scrId:guid}", async (Guid id
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
+// Freezing is deliberately not gated on verification decisions. Freezing then materializing is what
+// creates the requirement revisions a test engineer needs in order to write a procedure at all, so
+// blocking the freeze would withhold the test team's own inputs and deadlock the release. The gate the
+// verification queue belongs to is release approval, where it appears as a named readiness gate.
 app.MapPost("/api/baselines/{id:guid}/freeze", async (Guid id, BaselineActorRequest request, HttpContext http, IBaselineRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
 {
     var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
@@ -1161,13 +1169,18 @@ app.MapGet("/api/my-work", async (Guid? projectId, HttpContext http, AeroLinkDbC
                                 join cycle in db.ReviewCycles.AsNoTracking() on step.ReviewCycleId equals cycle.Id
                                 join scr in db.SystemChangeRequests.AsNoTracking() on cycle.ScrId equals scr.Id
                                 where projectId == null || scr.ProjectId == projectId
-                                orderby cycle.StartedAt select new { id = scr.Id, type = "SCR approval", artifact = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, title = scr.Title, priority = "High", dueAt = cycle.StartedAt.AddDays(5), ageDays = (int)(now - cycle.StartedAt).TotalDays, route = "scr" }).ToListAsync(ct);
+                                select new { id = scr.Id, type = "SCR approval", artifact = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, title = scr.Title, priority = "High", dueAt = cycle.StartedAt.AddDays(5), ageDays = (int)(now - cycle.StartedAt).TotalDays, route = "scr" }).ToListAsync(ct);
+    activeScrSteps = activeScrSteps.OrderBy(x => x.dueAt).ToList();
     var releaseSteps = await (from step in db.ReleaseApprovals.AsNoTracking().Where(x => x.ApproverId == actor.UserName && x.State == ReleaseApprovalState.Active)
                               join campaign in db.ReleaseCampaigns.AsNoTracking() on step.CampaignId equals campaign.Id
                               where projectId == null || campaign.ProjectId == projectId
-                              orderby campaign.CreatedAt select new { id = campaign.Id, type = "Release approval", artifact = campaign.Name, title = "Authorize the controlled release package", priority = "Critical", dueAt = campaign.CreatedAt.AddDays(10), ageDays = (int)(now - campaign.CreatedAt).TotalDays, route = "release" }).ToListAsync(ct);
-    var authoredDrafts = await db.SystemChangeRequests.AsNoTracking().Where(x => x.AuthorId == actor.UserName && x.State == ScrState.Draft && (projectId == null || x.ProjectId == projectId)).OrderByDescending(x => x.UpdatedAt)
-        .Select(x => new { id = x.Id, type = "Draft to complete", artifact = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, title = x.Title, priority = "Normal", dueAt = x.UpdatedAt.AddDays(10), ageDays = (int)(now - x.UpdatedAt).TotalDays, route = "scr" }).ToListAsync(ct);
+                              select new { id = campaign.Id, type = "Release approval", artifact = campaign.Name, title = "Authorize the controlled release package", priority = "Critical", dueAt = campaign.CreatedAt.AddDays(10), ageDays = (int)(now - campaign.CreatedAt).TotalDays, route = "release" }).ToListAsync(ct);
+    releaseSteps = releaseSteps.OrderBy(x => x.dueAt).ToList();
+    // Ordered after materialisation: SQLite cannot ORDER BY a DateTimeOffset, and this set is bounded by
+    // the drafts one person authored, so sorting in memory costs nothing and works on every provider.
+    var authoredDrafts = (await db.SystemChangeRequests.AsNoTracking().Where(x => x.AuthorId == actor.UserName && x.State == ScrState.Draft && (projectId == null || x.ProjectId == projectId))
+        .Select(x => new { id = x.Id, type = "Draft to complete", artifact = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, title = x.Title, priority = "Normal", dueAt = x.UpdatedAt.AddDays(10), ageDays = (int)(now - x.UpdatedAt).TotalDays, route = "scr" }).ToListAsync(ct))
+        .OrderByDescending(x => x.dueAt).ToList();
     var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).ToList();
     return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now), drafts = authoredDrafts.Count }, tasks });
 });

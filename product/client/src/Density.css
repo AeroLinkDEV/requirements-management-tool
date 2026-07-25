@@ -1,0 +1,143 @@
+/* Information density.
+   Loaded after every page stylesheet so these tokens are the single place vertical rhythm is decided.
+
+   The previous implementation was a hand-written list of about fifteen selectors, each carrying its own
+   hard-coded compact pixel value. It reached six of the twenty-eight row and card families in the
+   product, so most surfaces looked identical in both settings, and every new panel silently opted out.
+   Density is now expressed once as tokens, and applied through the workspace shell so a new page is
+   covered the moment it renders inside it.
+
+   Only the block axis is compressed. Inline padding is left as each surface authored it: several record
+   rows sit inside an already-padded container and carry 3px of inline padding on purpose, so imposing a
+   shared horizontal value here would break their alignment. Vertical rhythm is also what density is
+   actually for — the question a compact setting answers is how many records fit on the screen. */
+
+:root {
+  /* Comfortable reproduces the spacing the product shipped with, so anyone who never opens the control
+     sees no change. */
+  --page-pad-block-start: 34px;
+  --page-pad-block-end: 64px;
+  --page-pad-inline: 44px;
+  --space-card-block: 17px;
+  --space-row-block: 16px;
+  /* Record rows carry a min-height as well as padding. Compressing only the padding leaves the row at its
+     floor and compact achieves nothing, which is what happened on the requirements table: 4.3% shorter
+     when the padding moved but the 86px floor did not. */
+  --row-min-height: 86px;
+  --history-row-min-height: 88px;
+  --space-section: 22px;
+  --control-height: 40px;
+  --control-height-sm: 36px;
+  --leading-body: 1.5;
+  --leading-tight: 1.35;
+}
+
+html[data-density="compact"] {
+  --page-pad-block-start: 20px;
+  --page-pad-block-end: 36px;
+  --page-pad-inline: 26px;
+  --space-card-block: 11px;
+  --space-row-block: 9px;
+  --row-min-height: 54px;
+  --history-row-min-height: 54px;
+  --space-section: 14px;
+  /* 34px and 30px both clear the 24px minimum target size that WCAG 2.2 SC 2.5.8 requires, so compact
+     stays conformant rather than trading accessibility for rows. */
+  --control-height: 34px;
+  --control-height-sm: 30px;
+  --leading-body: 1.4;
+  --leading-tight: 1.3;
+  --text-body: 14px;
+  --text-control: 13px;
+}
+
+/* The page frame. Every workspace page is a <main> inside .workspaceView, so this covers all of them
+   without naming any, including pages added later. */
+.workspaceView > main {
+  padding-block: var(--page-pad-block-start) var(--page-pad-block-end);
+  padding-inline: var(--page-pad-inline);
+}
+
+/* Record rows: the vertical rhythm of the lists people read all day. */
+.approverRow,
+.auditRow,
+.coverageRow,
+.executionRow,
+.historyRow,
+.impactRow,
+.integrationTableRow,
+.procedureRow,
+.restoreRow,
+.signalRow,
+.reqTable article,
+.traceList > article,
+.userTable > article,
+.workQueue > article {
+  padding-block: var(--space-row-block);
+}
+
+.reqTable article { min-height: var(--row-min-height); }
+/* Its own token only because the history row shipped at 88px and the requirement row at 86px; comfortable
+   is meant to be pixel-identical to what the product already looked like. */
+.historyRow { min-height: var(--history-row-min-height); }
+
+/* Cards and panels. */
+.activeChangeCard,
+.affectedCard,
+.attentionCard,
+.baselineCard,
+.campaignCard,
+.comparisonCard,
+.editorCard,
+.libraryCard,
+.panel,
+.releaseCard,
+.revisionCard,
+.verificationCard,
+.workspaceCard,
+.gateGrid article,
+.metrics button,
+.workMetrics article {
+  padding-block: var(--space-card-block);
+}
+
+.historyTabs button { padding-block: calc(var(--space-card-block) - 1px); }
+.historyFilters { padding-block: calc(var(--space-row-block) - 2px); }
+
+/* The context bar and the tab strips that stick beneath it have to move together, or compact leaves a
+   gap between them. */
+.contextBar {
+  height: calc(var(--control-height) + 8px);
+  min-height: calc(var(--control-height) + 8px);
+}
+
+.lifeTabs,
+.verificationTabs { top: calc(var(--control-height) + 8px); }
+
+@media (max-width: 900px) {
+  :root {
+    --page-pad-block-start: 26px;
+    --page-pad-block-end: 44px;
+    --page-pad-inline: 24px;
+  }
+
+  html[data-density="compact"] {
+    --page-pad-block-start: 18px;
+    --page-pad-block-end: 32px;
+    --page-pad-inline: 18px;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --page-pad-block-start: 22px;
+    --page-pad-block-end: 36px;
+    --page-pad-inline: 16px;
+  }
+
+  html[data-density="compact"] {
+    --page-pad-block-start: 16px;
+    --page-pad-block-end: 28px;
+    --page-pad-inline: 14px;
+  }
+}
