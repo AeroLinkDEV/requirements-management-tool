@@ -57,7 +57,7 @@
   border-radius: 999px;
   background: #fff5da;
   color: #836016;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
 }
@@ -71,7 +71,7 @@
   overflow: hidden;
   margin-bottom: 20px;
   border: 1px solid #d8e2e9;
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgb(255 255 255 / 94%);
   box-shadow: 0 14px 35px rgb(16 42 68 / 9%);
   backdrop-filter: blur(16px);
@@ -140,7 +140,7 @@
 
 .authoringStages small {
   color: #7a8999;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .editorForm {
@@ -173,10 +173,10 @@
   place-items: center;
   width: 32px;
   height: 32px;
-  border-radius: 9px;
+  border-radius: 8px;
   background: #e4f3f0;
   color: #237d70;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -204,7 +204,7 @@
   border-radius: 999px;
   background: #fff8e8;
   color: #86631d;
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 800;
   letter-spacing: 0.05em;
@@ -245,7 +245,7 @@
   min-height: 42px;
   padding: 10px 12px;
   border: 1px solid #ccd7e0;
-  border-radius: 9px;
+  border-radius: 8px;
   background: white;
   color: #1c3044;
   font: 400 14px/1.5 "DM Sans", sans-serif;
@@ -267,7 +267,7 @@
 
 .fields small {
   color: #7f8d9c;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1.35;
 }
@@ -298,7 +298,7 @@
   gap: 8px;
   padding: 12px 14px;
   border: 1px solid #dbe5eb;
-  border-radius: 11px;
+  border-radius: 12px;
   background: #f5f8fa;
 }
 
@@ -361,7 +361,7 @@
   min-height: 78px;
   padding: 14px;
   border: 1px solid #e0e6eb;
-  border-radius: 11px;
+  border-radius: 12px;
   background: #f8fafb;
 }
 
@@ -408,7 +408,7 @@
   margin-top: 14px;
   padding: 15px 17px;
   border-left: 4px solid #d19b35;
-  border-radius: 9px;
+  border-radius: 8px;
   background: #fff8e9;
 }
 
@@ -431,7 +431,7 @@
 .nextAction > span {
   flex-shrink: 0;
   color: #8b671f;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
 }
@@ -443,7 +443,7 @@
 .formError {
   padding: 13px 15px;
   border: 1px solid #efc8cf;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #fff0f2;
   color: #973c4b;
   font-size: 13px;
@@ -481,7 +481,7 @@
   min-height: 42px;
   padding: 10px 17px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   background: #153b5e;
   color: white;
   font: 700 13px Manrope, sans-serif;

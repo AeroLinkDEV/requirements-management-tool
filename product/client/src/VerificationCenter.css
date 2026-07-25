@@ -5,7 +5,7 @@
 
 .verificationPage header > button {
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #176b62;
   color: #fff;
   padding: 12px 18px;
@@ -49,7 +49,7 @@
 .resultForm select {
   min-height: 42px;
   border: 1px solid #cbd6e1;
-  border-radius: 9px;
+  border-radius: 8px;
   background: #fff;
   padding: 10px 12px;
   color: #1e3348;
@@ -89,7 +89,7 @@
 .procedureForm,
 .resultForm {
   border: 1px solid #dfe5ec;
-  border-radius: 13px;
+  border-radius: 12px;
   background: #fff;
   padding: 20px;
 }
@@ -101,7 +101,7 @@
 
 .cardTitle h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .cardTitle p {
@@ -150,7 +150,7 @@
   align-self: flex-start;
   border-radius: 999px;
   padding: 5px 9px;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 750;
 }
@@ -193,22 +193,22 @@
 .procedureEditorBackdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(7, 22, 39, .55); backdrop-filter: blur(4px); }
 .procedureEditor { width: min(760px, 100%); max-height: min(860px, calc(100vh - 48px)); overflow: auto; border: 1px solid #a8c3ca; border-radius: 16px; background: #fff; box-shadow: 0 26px 70px rgba(6, 23, 40, .32); }
 .procedureEditor > header { display: flex; justify-content: space-between; gap: 20px; padding: 24px 26px 18px; border-bottom: 1px solid #dfebed; background: linear-gradient(115deg, #0d304d, #155e65); color: #fff; }
-.procedureEditor > header .eyebrow { margin: 0; color: #83ded2; font-size: 10px; letter-spacing: .11em; font-weight: 800; }
+.procedureEditor > header .eyebrow { margin: 0; color: #83ded2; font-size: 12px; letter-spacing: .11em; font-weight: 800; }
 .procedureEditor > header h2 { margin: 7px 0 3px; font: 650 26px Manrope, sans-serif; }
 .procedureEditor > header p:last-child { margin: 0; color: #cae0e7; font-size: 12px; }
-.procedureEditor .modalClose { width: 35px; height: 35px; border: 1px solid rgba(255,255,255,.38); border-radius: 9px; background: transparent; color: #fff; font-size: 25px; line-height: 1; }
+.procedureEditor .modalClose { width: 35px; height: 35px; border: 1px solid rgba(255,255,255,.38); border-radius: 8px; background: transparent; color: #fff; font-size: 24px; line-height: 1; }
 .procedureEditor form { display: grid; gap: 14px; padding: 22px 26px 25px; }
 .procedureEditor label { display: flex; flex-direction: column; gap: 7px; color: #52677a; font-size: 12px; font-weight: 750; }
-.procedureEditor input, .procedureEditor textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd8e0; border-radius: 9px; padding: 10px 12px; color: #19354d; font: inherit; font-size: 14px; }
+.procedureEditor input, .procedureEditor textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd8e0; border-radius: 8px; padding: 10px 12px; color: #19354d; font: inherit; font-size: 14px; }
 .procedureEditor textarea { min-height: 76px; resize: vertical; }
 .procedureEditorGrid { display: grid; grid-template-columns: .75fr 1.25fr; gap: 14px; }
-.procedureEditorMeta { display: flex; justify-content: space-between; align-items: center; border-radius: 9px; background: #edf7f5; padding: 9px 11px; color: #1b7468; font-size: 12px; font-weight: 750; }
+.procedureEditorMeta { display: flex; justify-content: space-between; align-items: center; border-radius: 8px; background: #edf7f5; padding: 9px 11px; color: #1b7468; font-size: 12px; font-weight: 750; }
 .procedureEditorMeta small { color: #61798a; font-weight: 600; }
 .procedureEditor footer { display: flex; justify-content: flex-end; gap: 9px; margin-top: 4px; }
-.procedureEditor footer button { border: 0; border-radius: 9px; background: #176f65; padding: 11px 14px; color: #fff; font-weight: 750; }
+.procedureEditor footer button { border: 0; border-radius: 8px; background: #176f65; padding: 11px 14px; color: #fff; font-weight: 750; }
 .procedureEditor footer .outline { border: 1px solid #c6d4dd; background: #fff; color: #496477; }
 .procedureEditor footer button:disabled { opacity: .56; cursor: not-allowed; }
-.procedureEditorError { margin: 18px 26px -4px; border-left: 3px solid #bd5260; border-radius: 7px; background: #fff0f1; padding: 10px 12px; color: #974150; font-size: 13px; }
+.procedureEditorError { margin: 18px 26px -4px; border-left: 3px solid #bd5260; border-radius: 8px; background: #fff0f1; padding: 10px 12px; color: #974150; font-size: 13px; }
 .procedureEditorLoading { min-height: 200px; display: grid; place-items: center; padding: 30px; color: #65778a; }
 
 .procedureForm,
@@ -269,7 +269,7 @@
 
 .procedureForm fieldset {
   border: 1px solid #dfe5ec;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 12px;
 }
 

@@ -8,7 +8,7 @@
   margin-bottom: 20px;
 }
 .reqHeader h1 {
-  font-size: 30px;
+  font-size: 28px;
 }
 .reqHeaderActions {
   display: flex;
@@ -22,7 +22,7 @@
   background: #176f77;
   color: #fff;
   padding: 10px 13px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 750;
 }
 .reqHeaderActions .secondary,
@@ -35,7 +35,7 @@
   height: 58px;
   background: #fff;
   border: 1px solid #dce3ea;
-  border-radius: 12px 12px 0 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   display: flex;
   align-items: center;
   padding: 9px 12px;
@@ -62,17 +62,17 @@
   color: #8090a3;
   background: white;
   border: 1px solid #dde4ea;
-  border-radius: 5px;
+  border-radius: 8px;
   padding: 3px 6px;
 }
 .reqCommand select,
 .reqCommand > .tagFilter {
   height: 38px;
   border: 1px solid #d9e1e9;
-  border-radius: 7px;
+  border-radius: 8px;
   background: white;
   padding: 0 9px;
-  font-size: 10px;
+  font-size: 12px;
   color: #4e5f73;
 }
 .reqCommand .clear {
@@ -83,14 +83,14 @@
 .modeSwitch {
   display: flex;
   background: #eef2f5;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 3px;
 }
 .modeSwitch button {
   border: 0;
   background: transparent;
   padding: 7px 9px;
-  border-radius: 5px;
+  border-radius: 8px;
 }
 .modeSwitch button.active {
   background: white;
@@ -120,7 +120,7 @@
   display: flex;
   justify-content: space-between;
   color: #68778b;
-  font-size: 9px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   padding: 7px 8px;
@@ -146,12 +146,12 @@
 }
 .specRail button > i {
   height: 27px;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #e6edf4;
   display: grid;
   place-items: center;
   font-style: normal;
-  font-size: 9px;
+  font-size: 12px;
 }
 .specRail button div {
   display: flex;
@@ -159,11 +159,11 @@
   overflow: hidden;
 }
 .specRail button b {
-  font-size: 10px;
+  font-size: 12px;
   color: #26374c;
 }
 .specRail button small {
-  font-size: 8px;
+  font-size: 12px;
   color: #8794a4;
   white-space: nowrap;
   overflow: hidden;
@@ -185,7 +185,7 @@
   display: flex;
   align-items: center;
   position: relative;
-  font-size: 8px;
+  font-size: 12px;
   padding: 5px;
   color: #708095;
 }
@@ -220,14 +220,14 @@
   flex-direction: column;
 }
 .resultSummary b {
-  font-size: 11px;
+  font-size: 12px;
 }
 .resultSummary span {
-  font-size: 8px;
+  font-size: 12px;
   color: #8491a2;
 }
 .confidence {
-  font-size: 8px;
+  font-size: 12px;
   color: #468373;
 }
 .confidence i {
@@ -251,7 +251,7 @@
   border-bottom: 1px solid #dfe5eb;
   padding: 9px 12px;
   color: #7d8999;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -272,12 +272,12 @@
   min-width: 0;
 }
 .reqTable article > button b {
-  font-size: 10px;
+  font-size: 12px;
   color: #176a75;
 }
 .reqTable article p {
   margin: 3px 0;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.35;
   color: #314156;
   white-space: nowrap;
@@ -285,12 +285,12 @@
   text-overflow: ellipsis;
 }
 .reqTable article > span {
-  font-size: 9px;
+  font-size: 12px;
   color: #617185;
 }
 .reqTable article > i {
   font-style: normal;
-  font-size: 8px;
+  font-size: 12px;
   color: #258067;
   background: #e7f5ef;
   padding: 4px 6px;
@@ -310,8 +310,8 @@
   background: #e9f0f6;
   color: #536c81;
   padding: 2px 5px;
-  border-radius: 5px;
-  font-size: 7px;
+  border-radius: 8px;
+  font-size: 12px;
 }
 .hasComments {
   color: #93651b !important;
@@ -320,7 +320,7 @@
   display: block;
   font-style: normal;
   color: #bb7425;
-  font-size: 7px;
+  font-size: 12px;
 }
 .documentMode {
   padding: 22px 6%;
@@ -341,10 +341,10 @@
 }
 .documentMode article b {
   color: #176d78;
-  font-size: 11px;
+  font-size: 12px;
 }
 .documentMode article span {
-  font-size: 8px;
+  font-size: 12px;
   color: #8290a1;
 }
 .documentMode article p {
@@ -369,12 +369,12 @@
 .pager button {
   border: 1px solid #d6dee7;
   background: white;
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 7px 10px;
   color: #476378;
 }
 .pager span {
-  font-size: 9px;
+  font-size: 12px;
   color: #7c8999;
 }
 .requirementInspector {
@@ -390,20 +390,20 @@
   color: white;
 }
 .inspectorTop span {
-  font-size: 8px;
+  font-size: 12px;
   letter-spacing: 0.1em;
   color: #70ccbd;
 }
 .inspectorTop h2 {
   color: white;
   margin: 5px 0 0;
-  font-size: 19px;
+  font-size: 20px;
 }
 .inspectorTop button {
   border: 0;
   background: transparent;
   color: white;
-  font-size: 22px;
+  font-size: 20px;
 }
 .inspectorTabs {
   display: grid;
@@ -414,7 +414,7 @@
   border: 0;
   background: white;
   padding: 11px;
-  font-size: 9px;
+  font-size: 12px;
   color: #718094;
 }
 .inspectorTabs button.active {
@@ -432,18 +432,18 @@
 .controlledBanner {
   background: #eaf6f2;
   border-left: 3px solid #2ca17c;
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 10px;
   display: flex;
   flex-direction: column;
-  font-size: 9px;
+  font-size: 12px;
   color: #277660;
 }
 .controlledBanner span {
   color: #718a83;
 }
 .inspectorBody h3 {
-  font-size: 9px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #7c8999;
@@ -455,7 +455,7 @@
     serif;
   background: #f8fafc;
   border: 1px solid #e0e6ec;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 14px;
   color: #24354a;
 }
@@ -467,7 +467,7 @@
   justify-content: space-between;
   border-bottom: 1px solid #edf0f3;
   padding: 8px 0;
-  font-size: 9px;
+  font-size: 12px;
 }
 .inspectorBody dt {
   color: #7b8898;
@@ -494,7 +494,7 @@
   padding: 6px 9px;
   background: #f5f8fa;
   margin-bottom: 5px;
-  font-size: 9px;
+  font-size: 12px;
 }
 .placement span {
   color: #748397;
@@ -506,14 +506,14 @@
 .historyLead div {
   display: flex;
   flex-direction: column;
-  font-size: 9px;
+  font-size: 12px;
 }
 .historyLead button {
   border: 1px solid #cddae3;
   background: white;
   color: #23717b;
-  border-radius: 6px;
-  font-size: 8px;
+  border-radius: 8px;
+  font-size: 12px;
 }
 .revisionCard {
   border: 1px solid #dfe5eb;
@@ -527,17 +527,17 @@
 }
 .revisionCard i {
   font-style: normal;
-  font-size: 7px;
+  font-size: 12px;
   background: #e8f3ef;
   padding: 3px 5px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 .revisionCard p {
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.4;
 }
 .revisionCard small {
-  font-size: 7px;
+  font-size: 12px;
   color: #8290a1;
 }
 .discussionPane {
@@ -547,19 +547,19 @@
   width: 100%;
   min-height: 80px;
   border: 1px solid #d7e0e8;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 10px;
   resize: vertical;
-  font-size: 10px;
+  font-size: 12px;
 }
 .discussionPane form button {
   float: right;
   border: 0;
   background: #176f77;
   color: white;
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 7px 10px;
-  font-size: 8px;
+  font-size: 12px;
 }
 .discussionPane article {
   clear: both;
@@ -575,14 +575,14 @@
 .discussionPane article > div {
   display: flex;
   justify-content: space-between;
-  font-size: 8px;
+  font-size: 12px;
 }
 .discussionPane article p {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
 }
 .discussionPane article small {
-  font-size: 8px;
+  font-size: 12px;
   color: #66778a;
 }
 .discussionPane article footer {
@@ -592,14 +592,14 @@
 }
 .discussionPane article footer i {
   font-style: normal;
-  font-size: 7px;
+  font-size: 12px;
   color: #2d856c;
 }
 .discussionPane article footer button {
   border: 0;
   background: transparent;
   color: #197783;
-  font-size: 8px;
+  font-size: 12px;
 }
 .bulkBar {
   position: fixed;
@@ -617,17 +617,17 @@
   box-shadow: 0 15px 45px #0b1b2f55;
 }
 .bulkBar b {
-  font-size: 11px;
+  font-size: 12px;
 }
 .bulkBar span {
-  font-size: 8px;
+  font-size: 12px;
   color: #aab9ca;
 }
 .bulkBar input {
   border: 1px solid #456079;
   background: #183753;
   color: white;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 8px;
 }
 .bulkBar .quiet {
@@ -659,7 +659,7 @@
   margin: 5px 0;
 }
 .reqModal p {
-  font-size: 11px;
+  font-size: 12px;
   color: #6e7c8e;
   line-height: 1.5;
 }
@@ -667,7 +667,7 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   margin: 12px 0;
 }
@@ -675,7 +675,7 @@
 .reqModal select,
 .reqModal textarea {
   border: 1px solid #d5dde6;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 10px;
 }
 .reqModal label.check {
@@ -709,7 +709,7 @@
 }
 .schemaModal article {
   border: 1px solid #dfe5eb;
-  border-radius: 9px;
+  border-radius: 8px;
   padding: 12px;
   margin: 8px 0;
 }
@@ -724,7 +724,7 @@
 }
 .schemaModal article small {
   background: #edf3f6;
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -739,7 +739,7 @@
   top: 15px !important;
   background: transparent !important;
   color: #4f6072 !important;
-  font-size: 22px !important;
+  font-size: 20px !important;
 }
 .importModal > div {
   width: min(850px, 94vw);
@@ -755,7 +755,7 @@
   position: relative;
 }
 .dropZone span {
-  font-size: 27px;
+  font-size: 28px;
   color: #16817d;
 }
 .dropZone input {
@@ -778,7 +778,7 @@
   align-items: flex-start;
 }
 .importIdentity small {
-  font-size: 7px;
+  font-size: 12px;
   color: #7e8a98;
 }
 .importIdentity .bad {
@@ -801,18 +801,18 @@
   background: #fff7f8;
 }
 .importRows article span {
-  font-size: 8px;
+  font-size: 12px;
   color: #8b96a5;
 }
 .importRows article b {
-  font-size: 9px;
+  font-size: 12px;
 }
 .importRows article p {
   margin: 2px 0;
-  font-size: 9px;
+  font-size: 12px;
 }
 .importRows article small {
-  font-size: 7px;
+  font-size: 12px;
 }
 .importFields {
   display: grid;
@@ -838,7 +838,7 @@
   width: min(800px, 94vw);
 }
 .redlineModal h3 {
-  font-size: 9px;
+  font-size: 12px;
   text-transform: uppercase;
   color: #7d8998;
   margin-top: 18px;
@@ -927,14 +927,14 @@
   flex-direction: column;
   align-items: flex-end;
   margin-right: 6px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   color: #26384d;
   line-height: 1.25;
 }
 .activeAuthor small {
   display: block;
-  font-size: 7px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -944,7 +944,7 @@
   border: 1px solid #d7e0e8;
   background: white;
   color: #53687b;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 9px;
 }
 .reqCommand .advanced.active {
@@ -965,7 +965,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 7px;
+  font-size: 12px;
   font-weight: 750;
   text-transform: uppercase;
   color: #718093;
@@ -974,10 +974,10 @@
 .advancedQuery select {
   height: 32px;
   border: 1px solid #d2dde5;
-  border-radius: 6px;
+  border-radius: 8px;
   background: white;
   padding: 0 8px;
-  font-size: 9px;
+  font-size: 12px;
 }
 .advancedQuery .advancedCheck {
   flex-direction: row;
@@ -991,7 +991,7 @@
 .advancedQuery > span {
   margin-left: auto;
   padding-bottom: 8px;
-  font-size: 8px;
+  font-size: 12px;
   color: #2d7a72;
 }
 .impactLaunch {
@@ -999,10 +999,10 @@
   border: 0;
   background: #102f4d;
   color: white;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 10px;
   margin-top: 9px;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 750;
 }
 .impactLaunch:hover {
@@ -1035,25 +1035,25 @@
 }
 .specRail button b,
 .reqTable article > button b {
-  font-size: 11px;
+  font-size: 12px;
 }
 .specRail button small,
 .sectionTree span {
-  font-size: 9px;
+  font-size: 12px;
 }
 .reqTable article p {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 .reqTable article > span {
-  font-size: 10px;
+  font-size: 12px;
 }
 .resultSummary b {
   font-size: 12px;
 }
 .resultSummary span,
 .confidence {
-  font-size: 9px;
+  font-size: 12px;
 }
 .inspectorTop {
   padding: 20px;
@@ -1062,17 +1062,17 @@
 .inspectorTop p {
   margin: 5px 0 0;
   color: #bcd0da;
-  font-size: 10px;
+  font-size: 12px;
 }
 .inspectorTabs button {
-  font-size: 10px;
+  font-size: 12px;
 }
 .inspectorBody {
   padding: 18px;
 }
 .inspectorBody h3 {
   margin-top: 20px;
-  font-size: 10px;
+  font-size: 12px;
 }
 .richRequirement {
   background: white;
@@ -1086,7 +1086,7 @@
   align-items: center;
   gap: 4px;
   border: 1px solid #d5e5e5;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #f5faf9;
   padding: 10px 8px;
   color: #244156;
@@ -1106,21 +1106,21 @@
   border-radius: 8px;
   background: #dcefeb;
   color: #176f68;
-  font-size: 9px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 800;
 }
 .threadPreview span b {
   margin-top: 5px;
-  font-size: 9px;
+  font-size: 12px;
 }
 .threadPreview span small {
   color: #718195;
-  font-size: 8px;
+  font-size: 12px;
 }
 .threadPreview em {
   color: #70a89f;
-  font-size: 17px;
+  font-size: 16px;
   font-style: normal;
 }
 .threadPreview:hover {
@@ -1139,12 +1139,12 @@
   background: #fff7e8;
 }
 .impactSignal b {
-  font-size: 10px;
+  font-size: 12px;
 }
 .impactSignal p {
   margin: 3px 0 0;
   color: #65758a;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.45;
 }
 .savedViews > summary {
@@ -1153,7 +1153,7 @@
   padding: 8px;
   color: #68778b;
   cursor: pointer;
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -1181,3 +1181,19 @@
   color: #176f68;
   font-style: normal;
 }
+
+/* Sits on the dark inspector header, so it must not inherit the light default-control treatment. */
+.inspectorClose {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 8%);
+  color: white;
+  font-size: 18px;
+  line-height: 1;
+}
+.inspectorClose:hover { background: rgb(255 255 255 / 16%); }

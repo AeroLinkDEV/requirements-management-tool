@@ -18,11 +18,22 @@
   font-synthesis: none;
   --font-display: 'Manrope', sans-serif;
   --font-body: 'DM Sans', sans-serif;
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-body: 15px;
-  --text-control: 14px;
-  --text-title: 32px;
+  /* Type scale. 12px is the floor for any text a person is expected to read — the readability contract
+     in SHOWCASE_USABILITY_REFRESH_REPORT.md — and there is deliberately nothing smaller to reach for. */
+  --text-xs: 12px;      /* micro-labels, eyebrows, table metadata */
+  --text-sm: 13px;      /* secondary content */
+  --text-control: 14px; /* controls and dense table content */
+  --text-body: 15px;    /* ordinary content */
+  --text-lg: 17px;      /* card and panel headings */
+  --text-xl: 22px;      /* section headings, metric values */
+  --text-2xl: 26px;     /* page sub-headings */
+  --text-title: 32px;   /* page titles */
+
+  /* Weights. Display faces carry 600/700; body text stays 400/500. */
+  --weight-body: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
+  --weight-bold: 700;
   --navy-950: #08162b;
   --navy-900: #0c1b34;
   --navy-800: #142b49;
@@ -36,9 +47,11 @@
   --teal-700: #176f68;
   --teal-600: #23877d;
   --teal-100: #dff3ee;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  /* Four radii, and nothing between them. */
+  --radius-sm: 8px;     /* inputs, chips, small controls */
+  --radius-md: 12px;    /* cards, panels, dialogs */
+  --radius-lg: 16px;    /* hero surfaces */
+  --radius-pill: 999px; /* status pills and avatars */
   --shadow-soft: 0 10px 30px rgba(17, 35, 58, .08);
 }
 

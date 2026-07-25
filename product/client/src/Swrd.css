@@ -1,12 +1,12 @@
 .swrdPanel { margin: 18px; }
 .swrdPanel .eyebrow { margin: 0 0 5px; }
 .swrdHash { background: #10223f; color: #b9c6d5; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
-.swrdHash span { display: block; font-size: 9px; letter-spacing: 1px; color: #69d4c4; }
-.swrdHash code { display: block; margin-top: 6px; overflow-wrap: anywhere; color: white; font-size: 10px; }
+.swrdHash span { display: block; font-size: 12px; letter-spacing: 1px; color: #69d4c4; }
+.swrdHash code { display: block; margin-top: 6px; overflow-wrap: anywhere; color: white; font-size: 12px; }
 .changeKind.active { background: #e3f4ed; color: #28765e; }
 .changeKind.retired { background: #fbe8eb; color: #a04b5d; }
-.effectiveSet { margin: 18px 0; border: 1px solid #dfe5ec; border-radius: 10px; padding: 15px; }
+.effectiveSet { margin: 18px 0; border: 1px solid #dfe5ec; border-radius: 8px; padding: 15px; }
 .effectiveSet h3 { margin: 0 0 10px; font-size: 13px; }
 .effectiveSet article { padding: 9px 0; border-top: 1px solid #edf0f4; }
-.effectiveSet article p { margin: 4px 0; font-size: 11px; color: #566275; }
+.effectiveSet article p { margin: 4px 0; font-size: 12px; color: #566275; }
 .effectiveSet article small { color: #8792a3; }

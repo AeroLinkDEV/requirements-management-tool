@@ -19,7 +19,7 @@
 
 .controlledEditor > header span {
   color: #92d7ce;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.13em;
 }
@@ -44,7 +44,7 @@
   border-radius: 999px;
   background: rgb(255 255 255 / 10%);
   color: #e7f5f4;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 700;
 }
@@ -129,7 +129,7 @@
 
 .controlledEditor input[readonly] + small {
   color: #748597;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -192,7 +192,7 @@
 .proposalLookupResults button small,
 .proposalLookupResults button em {
   color: #718195;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -267,7 +267,7 @@
   border-radius: 999px;
   background: #e7f4f0;
   color: #247565;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 700;
 }
@@ -291,7 +291,7 @@
 .supportingDetails {
   margin-top: 16px;
   border: 1px solid #d9e3e9;
-  border-radius: 10px;
+  border-radius: 8px;
   background: white;
 }
 
@@ -324,7 +324,7 @@
 .supportingDetails > summary small,
 .supportingDetails > summary em {
   color: #748597;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -344,7 +344,7 @@
   min-height: 34px;
   padding: 6px 10px;
   border: 1px solid #cbd8e1;
-  border-radius: 7px;
+  border-radius: 8px;
   background: #f8fafb;
   color: #405970;
   font-size: 12px;
@@ -366,7 +366,7 @@
 
 .controlledPreview small {
   color: #177c70;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.1em;
 }
@@ -407,7 +407,7 @@
 .derivedControl button i {
   grid-row: 1 / 3;
   color: #2d8e7e;
-  font-size: 19px;
+  font-size: 20px;
   font-style: normal;
 }
 
@@ -421,7 +421,7 @@
 }
 
 .derivedControl button small {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
 }
 
@@ -458,7 +458,7 @@
   gap: 4px;
   margin-top: 14px;
   padding: 12px;
-  border-radius: 9px;
+  border-radius: 8px;
   color: white;
   background: #153653;
 }
@@ -477,7 +477,7 @@
 
 .impactGate span {
   color: rgb(255 255 255 / 78%);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
 }
 

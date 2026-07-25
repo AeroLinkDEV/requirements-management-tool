@@ -5,7 +5,7 @@
   width: min(430px, 100%);
   padding: 42px;
   border: 1px solid #dfe5ed;
-  border-radius: 20px;
+  border-radius: 16px;
   background: white;
   box-shadow: 0 30px 80px #07152b22;
 }
@@ -30,7 +30,7 @@
   margin: 16px 0;
   padding: 11px 12px;
   border: 1px solid #bfe1d5;
-  border-radius: 9px;
+  border-radius: 8px;
   background: #eaf8f3;
   color: #246f58;
   font-size: 13px;
@@ -41,7 +41,7 @@
 .setupBlocked .eyebrow {
   margin: 20px 0 5px;
   color: #168270;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .12em;
 }

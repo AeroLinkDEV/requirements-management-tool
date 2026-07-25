@@ -68,11 +68,11 @@
   gap: 3px;
   margin-top: 14px;
   border: 1px solid #b9dad4;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #edf8f5;
   padding: 11px 13px;
   color: #245c55;
 }
 
 .sourceHandoff b { font-size: 12px; }
-.sourceHandoff span { color: #55766f; font-size: 11px; line-height: 1.45; }
+.sourceHandoff span { color: #55766f; font-size: 12px; line-height: 1.45; }

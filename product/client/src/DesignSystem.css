@@ -1,0 +1,45 @@
+/* Shared control and focus contract.
+   Loaded last so it settles what page CSS leaves undecided, while every explicit page rule still wins.
+   Selectors are deliberately narrow: :not([class]) touches only controls that were never styled, so this
+   file cannot quietly restyle a component someone designed on purpose. */
+
+/* Controls that shipped with the browser's default appearance. Before this, the audit found buttons
+   rendering as grey 1990s chrome inside otherwise designed pages — 29 of them on the requirements
+   workspace alone. */
+main button:not([class]),
+.workspaceStage button:not([class]) {
+  min-height: 36px;
+  padding: 8px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--teal-700);
+  font: var(--weight-strong) var(--text-control) var(--font-body);
+  transition: background .14s ease, border-color .14s ease;
+}
+main button:not([class]):hover,
+.workspaceStage button:not([class]):hover {
+  border-color: #b7cdd3;
+  background: var(--surface-subtle);
+}
+main button:not([class]):disabled,
+.workspaceStage button:not([class]):disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* One visible focus treatment for keyboard users, everywhere. Pages that define their own keep it. */
+:where(button, a, select, input, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--teal-600);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* The 12px readability floor is enforced two ways that actually work: every sub-12px declaration was
+   raised at source, and showcase-usability.spec.ts fails the build if visible text drops below it on any
+   audited surface. A CSS floor is deliberately not attempted here — max(1em, 12px) would force a small
+   inside a 15px paragraph up to 15px and destroy the type hierarchy it was meant to protect. */
+
+@media (prefers-reduced-motion: reduce) {
+  main button:not([class]) { transition: none; }
+}
