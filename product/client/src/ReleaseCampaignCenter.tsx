@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { stateLabel } from './presentation'
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import ReleaseExecutionWorkbench from "./ReleaseExecutionWorkbench";
@@ -341,7 +342,7 @@ export default function ReleaseCampaignCenter({
         <button className="impactScr" onClick={() => onOpenScr(item.scrId)}>
           {item.scr}
         </button>
-        <i className={item.state.toLowerCase()}>{item.state}</i>
+        <i className={item.state.toLowerCase()}>{stateLabel(item.state)}</i>
       </div>
       <b>
         {item.kind} · {item.artifactReference}

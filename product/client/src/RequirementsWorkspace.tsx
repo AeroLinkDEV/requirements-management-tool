@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import "./RequirementsWorkspace.css";
 
@@ -922,7 +923,7 @@ export default function RequirementsWorkspace({
                         : "System"}
                   </span>
                   <span>{item.verificationMethod}</span>
-                  <i className={item.state.toLowerCase()}>{item.state}</i>
+                  <i className={item.state.toLowerCase()}>{stateLabel(item.state)}</i>
                   <span className={item.openCommentCount ? "hasComments" : ""}>
                     ◌ {item.commentCount}
                     {item.openCommentCount > 0 && (
@@ -952,7 +953,7 @@ export default function RequirementsWorkspace({
                     <footer>
                       <span>Verification: {item.verificationMethod}</span>
                       <span>{item.commentCount} comments</span>
-                      <span>{item.state}</span>
+                      <span>{stateLabel(item.state)}</span>
                     </footer>
                   </button>
                 </article>
@@ -1084,7 +1085,7 @@ export default function RequirementsWorkspace({
                   </div>
                   <div>
                     <dt>State</dt>
-                    <dd>{selected.state}</dd>
+                    <dd>{stateLabel(selected.state)}</dd>
                   </div>
                   <div>
                     <dt>Source authority</dt>
@@ -1134,7 +1135,7 @@ export default function RequirementsWorkspace({
                 <h3>Active controlled changes</h3>
                 {impact?.activeChanges.length ? impact.activeChanges.map((item) => (
                   <button className="activeChangeCard" key={item.id} onClick={() => onOpenScr(item.id)}>
-                    <span><b>{item.displayNumber}</b><i>{item.state}</i></span>
+                    <span><b>{item.displayNumber}</b><i>{stateLabel(item.state)}</i></span>
                     <p>{item.title}</p>
                     <small>{item.kind} · proposed revision {item.proposedRevision}</small>
                   </button>
@@ -1146,7 +1147,7 @@ export default function RequirementsWorkspace({
                 {impact?.children.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
                 {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
                 <h3>Verification coverage</h3>
-                {impact?.tests.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {item.state}</small></article>)}
+                {impact?.tests.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)}</small></article>)}
                 {!impact?.tests.length && <div className="traceEmpty attention"><span>No verification procedure currently covers this revision.</span></div>}
               </div>
             )}
@@ -1168,7 +1169,7 @@ export default function RequirementsWorkspace({
                   <article className="revisionCard" key={x.id}>
                     <div>
                       <b>{x.displayNumber}</b>
-                      <i>{x.state}</i>
+                      <i>{stateLabel(x.state)}</i>
                     </div>
                     <p>{x.statement}</p>
                     <small>
@@ -1200,7 +1201,7 @@ export default function RequirementsWorkspace({
                       <small>Disposition: {c.disposition}</small>
                     )}
                     <footer>
-                      <i>{c.state}</i>
+                      <i>{stateLabel(c.state)}</i>
                       {c.state === "Open" && (
                         <button onClick={() => resolveComment(c.id)}>
                           Resolve / disposition

@@ -72,7 +72,9 @@ test('Software Draft closes impacts before an explicitly selected reviewer signs
   await page.getByLabel('Approver 1 search').fill('AeroLink Administrator')
   await page.getByRole('button',{name:/AeroLink Administrator.*Administrator/}).click()
   await page.getByRole('button',{name:'Submit for Review'}).click()
-  await expect(page.getByText('InReview',{exact:true}).first()).toBeVisible()
+  // The lifecycle state is spelled for a reader; the raw enum stays available to tooling as data-state.
+  await expect(page.getByText('In review',{exact:true}).first()).toBeVisible()
+  await expect(page.locator('[data-state="InReview"]').first()).toBeVisible()
   await page.getByRole('button',{name:'Review & electronically approve'}).click()
   await page.getByLabel('Re-enter your password').fill('AeroLink!2026')
   await page.getByRole('button',{name:'Sign & approve'}).click()

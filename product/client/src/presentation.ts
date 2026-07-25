@@ -33,7 +33,7 @@ const stateLabels: Record<string, string> = {
   mustchangepassword: 'Must change password',
 }
 
-export const stateLabel = (state: string) => {
+export const stateLabel = (state?: string) => {
   if (!state) return ''
   return stateLabels[state.toLowerCase()]
     ?? state.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, first => first.toUpperCase())
