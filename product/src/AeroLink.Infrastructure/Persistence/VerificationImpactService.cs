@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
@@ -21,7 +22,10 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
     /// </summary>
     public async Task<int> RaiseForApprovedChangeRequestAsync(SystemChangeRequest request, DateTimeOffset now, CancellationToken ct)
     {
-        if (request.State != ScrState.Approved) return 0;
+        // Selecting an approved change into a candidate baseline moves it to SelectedForBaseline, so both
+        // states mean "approved". Testing only for Approved would make a retried raise silently do nothing
+        // once the change had been selected.
+        if (request.State is not (ScrState.Approved or ScrState.SelectedForBaseline)) return 0;
 
         var alreadyRaised = await db.VerificationImpactItems
             .Where(x => x.ChangeRequestId == request.Id)
@@ -104,6 +108,38 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
             .Where(x => x.ReleaseId == releaseId && x.State != VerificationImpactState.Resolved)
             .OrderBy(x => x.Trigger).ThenBy(x => x.SubjectDisplayNumber)
             .ToListAsync(ct);
+
+    public Task<List<VerificationImpactItem>> ForReleaseAsync(Guid releaseId, CancellationToken ct)
+        => db.VerificationImpactItems.AsNoTracking()
+            .Where(x => x.ReleaseId == releaseId)
+            .OrderBy(x => x.State).ThenBy(x => x.Trigger).ThenBy(x => x.SubjectDisplayNumber)
+            .ToListAsync(ct);
+
+    /// <summary>
+    /// The baseline-approval gate. A configuration must not be frozen while anyone still owes a decision
+    /// about how its new or changed requirements will be verified.
+    /// </summary>
+    public async Task EnsureReleaseMayFreezeAsync(Guid releaseId, CancellationToken ct)
+    {
+        var outstanding = await OutstandingForReleaseAsync(releaseId, ct);
+        if (outstanding.Count == 0) return;
+        var subjects = string.Join(", ", outstanding.Take(5).Select(x => x.SubjectDisplayNumber));
+        var more = outstanding.Count > 5 ? $" and {outstanding.Count - 5} more" : "";
+        throw new DomainException(
+            $"{outstanding.Count} verification impact item(s) are unresolved for this release ({subjects}{more}). " +
+            "Every new or modified requirement needs an approved procedure or a recorded decision that no test is required before the baseline can be frozen.");
+    }
+
+    /// <summary>
+    /// Confirms the named procedure exists in the Project and has an approved revision. Coverage may only be
+    /// claimed against a procedure that is actually approved.
+    /// </summary>
+    public async Task<bool> HasApprovedProcedureAsync(Guid projectId, Guid procedureId, CancellationToken ct)
+        => await db.TestProcedureRevisions.AsNoTracking()
+            .Where(revision => revision.ProcedureId == procedureId && revision.State == TestProcedureState.Approved)
+            .Join(db.TestProcedures.AsNoTracking().Where(p => p.ProjectId == projectId),
+                revision => revision.ProcedureId, procedure => procedure.Id, (revision, _) => revision.Id)
+            .AnyAsync(ct);
 
     private static string ArtifactNumberDisplay(RequirementChange change) =>
         $"{change.BaseNumber}.{change.Revision:00}";

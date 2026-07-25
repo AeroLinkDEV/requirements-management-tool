@@ -127,6 +127,8 @@ public sealed class VerificationImpactItem
     public DateTimeOffset? AssignedAt { get; private set; }
 
     public VerificationImpactOutcome? Outcome { get; private set; }
+    /// <summary>The procedure named when coverage was confirmed; the exact link is bound at materialisation.</summary>
+    public Guid? ResolvedProcedureId { get; private set; }
     public string ResolutionRationale { get; private set; } = "";
     public string? ResolvedBy { get; private set; }
     public DateTimeOffset? ResolvedAt { get; private set; }
@@ -152,13 +154,23 @@ public sealed class VerificationImpactItem
     /// <summary>
     /// Records the verification engineer's judgement. A rationale is always required: this record is the
     /// evidence that a qualified person decided what the change means for verification.
+    ///
+    /// Confirming procedure coverage must name the procedure. The exact coverage link cannot be created
+    /// yet — it binds a requirement revision, and revisions exist only once the baseline is materialised —
+    /// so naming the procedure keeps the claim checkable instead of leaving it as prose.
     /// </summary>
-    public void Resolve(string actorId, VerificationImpactOutcome outcome, string rationale, DateTimeOffset now)
+    public void Resolve(string actorId, VerificationImpactOutcome outcome, string rationale, DateTimeOffset now,
+        Guid? procedureId = null)
     {
         EnsureUnresolved();
         if (!Enum.IsDefined(outcome)) throw new DomainException("An unknown verification outcome cannot be recorded.");
         if (!IsOutcomeValidForTrigger(outcome))
             throw new DomainException($"{outcome} does not apply to a {Trigger} item.");
+        if (outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed && (procedureId is null || procedureId == Guid.Empty))
+            throw new DomainException("Confirming coverage requires the approved procedure that covers the requirement.");
+        if (outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed && procedureId is not null)
+            throw new DomainException("Only confirmed coverage names a procedure.");
+        ResolvedProcedureId = procedureId;
         Outcome = outcome;
         ResolutionRationale = Required(rationale, "resolution rationale");
         ResolvedBy = Required(actorId, "resolving verification engineer");

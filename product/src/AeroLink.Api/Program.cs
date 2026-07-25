@@ -656,11 +656,13 @@ app.MapDelete("/api/baselines/{id:guid}/selections/{scrId:guid}", async (Guid id
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/baselines/{id:guid}/freeze", async (Guid id, BaselineActorRequest request, HttpContext http, IBaselineRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+app.MapPost("/api/baselines/{id:guid}/freeze", async (Guid id, BaselineActorRequest request, HttpContext http, IBaselineRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
 {
     var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
     if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-    try { baseline.Freeze(http.UserAccount().UserName, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
+    // A configuration must not be frozen while anyone still owes a decision about how its new or changed
+    // requirements will be verified.
+    try { await verificationImpact.EnsureReleaseMayFreezeAsync(baseline.ReleaseId, ct); baseline.Freeze(http.UserAccount().UserName, DateTimeOffset.UtcNow); await repository.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 

@@ -68,18 +68,20 @@ public sealed class VerificationImpactTests
     public void Resolution_always_records_who_decided_and_why()
     {
         var item = Introduced();
+        var procedure = Guid.NewGuid();
         Assert.Throws<DomainException>(() =>
-            item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed, "   ", Now));
+            item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed, "   ", Now, procedure));
         Assert.Throws<DomainException>(() =>
-            item.Resolve("", VerificationImpactOutcome.ProcedureCoverageConfirmed, "Covered by SYSTP-000001.00.", Now));
+            item.Resolve("", VerificationImpactOutcome.ProcedureCoverageConfirmed, "Covered by SYSTP-000001.00.", Now, procedure));
 
         item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
-            "Covered by SYSTP-000001.00 revision 02.", Now.AddHours(2));
+            "Covered by SYSTP-000001.00 revision 02.", Now.AddHours(2), procedure);
 
         Assert.Equal(VerificationImpactState.Resolved, item.State);
         Assert.Equal(VerificationImpactOutcome.ProcedureCoverageConfirmed, item.Outcome);
         Assert.Equal("Covered by SYSTP-000001.00 revision 02.", item.ResolutionRationale);
         Assert.Equal(Now.AddHours(2), item.ResolvedAt);
+        Assert.Equal(procedure, item.ResolvedProcedureId);
         Assert.False(item.BlocksBaselineApproval);
     }
 
@@ -90,7 +92,7 @@ public sealed class VerificationImpactTests
         item.Resolve("test.engineer", VerificationImpactOutcome.NoTestRequired, "Covered by inspection.", Now);
 
         Assert.Throws<DomainException>(() =>
-            item.Resolve("someone.else", VerificationImpactOutcome.ProcedureCoverageConfirmed, "Changed my mind.", Now));
+            item.Resolve("someone.else", VerificationImpactOutcome.ProcedureCoverageConfirmed, "Changed my mind.", Now, Guid.NewGuid()));
         Assert.Throws<DomainException>(() => item.AssignToEngineer("test.lead", "other.engineer", Now));
         Assert.Equal("test.engineer", item.ResolvedBy);
     }
@@ -110,7 +112,8 @@ public sealed class VerificationImpactTests
     public void Orphaned_procedure_items_reject_requirement_only_outcomes(VerificationImpactOutcome outcome)
     {
         var item = Orphaned();
-        Assert.Throws<DomainException>(() => item.Resolve("test.engineer", outcome, "Not applicable here.", Now));
+        var procedure = outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed ? Guid.NewGuid() : (Guid?)null;
+        Assert.Throws<DomainException>(() => item.Resolve("test.engineer", outcome, "Not applicable here.", Now, procedure));
     }
 
     [Fact]
@@ -244,5 +247,40 @@ public sealed class VerificationImpactRevisionBindingTests
             Guid.NewGuid(), "SYSTP-000009.00", Now);
 
         Assert.Throws<DomainException>(() => item.LinkRequirementRevision(Guid.NewGuid(), Now));
+    }
+}
+
+public sealed class VerificationImpactProcedureNamingTests
+{
+    private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
+
+    private static VerificationImpactItem Item() => VerificationImpactItem.ForIntroducedRequirement(
+        Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "SYSR-000010.00", "Test", Now);
+
+    [Fact]
+    public void Confirming_coverage_must_name_a_procedure()
+    {
+        // The exact coverage link cannot exist yet — it binds a revision that only materialisation creates —
+        // so naming the procedure is what keeps the claim checkable rather than prose.
+        var item = Item();
+        Assert.Throws<DomainException>(() => item.Resolve("test.engineer",
+            VerificationImpactOutcome.ProcedureCoverageConfirmed, "Covered somewhere.", Now));
+        Assert.Throws<DomainException>(() => item.Resolve("test.engineer",
+            VerificationImpactOutcome.ProcedureCoverageConfirmed, "Covered somewhere.", Now, Guid.Empty));
+
+        var procedure = Guid.NewGuid();
+        item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed, "Covered by SYSTP-000012.", Now, procedure);
+        Assert.Equal(procedure, item.ResolvedProcedureId);
+    }
+
+    [Fact]
+    public void Outcomes_other_than_confirmed_coverage_must_not_name_a_procedure()
+    {
+        Assert.Throws<DomainException>(() => Item().Resolve("test.engineer",
+            VerificationImpactOutcome.NoTestRequired, "By analysis.", Now, Guid.NewGuid()));
+
+        var ok = Item();
+        ok.Resolve("test.engineer", VerificationImpactOutcome.NoTestRequired, "By analysis.", Now);
+        Assert.Null(ok.ResolvedProcedureId);
     }
 }

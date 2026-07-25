@@ -167,12 +167,52 @@ public sealed class VerificationImpactServiceTests
                 var items = await resolve.VerificationImpactItems.OrderBy(x => x.SubjectDisplayNumber).ToListAsync();
                 items[0].AssignToEngineer("test.lead", "test.engineer", Now);
                 items[0].Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
-                    "Covered by SYSTP-00000501 revision 00.", Now.AddHours(1));
+                    "Covered by SYSTP-00000501 revision 00.", Now.AddHours(1), Guid.NewGuid());
                 await resolve.SaveChangesAsync();
 
                 var remaining = await service.OutstandingForReleaseAsync(releaseId, default);
                 Assert.Single(remaining);
                 Assert.Equal("Analysis", remaining[0].DeclaredVerificationMethod);
+            }
+        }
+        finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Work_is_still_raised_after_the_change_has_been_selected_into_a_candidate_baseline()
+    {
+        // Selecting an approved change moves it to SelectedForBaseline. A raise attempted at that point must
+        // still work, or a retry after selection would silently drop the verification team's work.
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-vimpact-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            Guid scrId;
+            await using (var setup = new AeroLinkDbContext(options))
+            {
+                await setup.Database.EnsureCreatedAsync();
+                var program = new ProgramRecord("Verification Program", "VFP4");
+                var project = new ProjectRecord(program.Id, "Software", "Verification Software");
+                var release = new SoftwareRelease(project.Id, "1.6", false);
+                var scr = new SystemChangeRequest("SCR-00000013", 0, project.Id, release.Id, "Selected", "P", "A", "S", "author", Now);
+                scr.AddRequirementChange("author", "SYSR-00000401", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
+                    "Selected requirement.", "New", "Test", Now);
+                scr.SubmitForReview("author", [new("reviewer", "Reviewer")], Now);
+                scr.ApproveActiveStage("reviewer", Now);
+                var baseline = new AeroLink.Domain.Baselines.CandidateBaseline("SWBL-00000013", 0, project.Id, release.Id, null, "Candidate", "cm", Now);
+                baseline.Select(scr, "cm", Now);
+                Assert.Equal(ScrState.SelectedForBaseline, scr.State);
+                setup.AddRange(program, project, release, scr, baseline);
+                await setup.SaveChangesAsync();
+                scrId = scr.Id;
+            }
+
+            await using (var raise = new AeroLinkDbContext(options))
+            {
+                var scr = await raise.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == scrId);
+                Assert.Equal(1, await new VerificationImpactService(raise).RaiseForApprovedChangeRequestAsync(scr, Now, default));
+                await raise.SaveChangesAsync();
+                Assert.Equal(1, await raise.VerificationImpactItems.CountAsync());
             }
         }
         finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
