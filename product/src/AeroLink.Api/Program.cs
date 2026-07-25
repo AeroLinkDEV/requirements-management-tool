@@ -569,6 +569,31 @@ app.MapPost("/api/scrs/{id:guid}/submit", async (Guid id, SubmitReviewRequest re
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
+// Recovering from a misrouted review. Without this the only way out of a review sent to the wrong approver
+// was for that approver to act, which is exactly what cannot happen when they are the wrong person, on leave,
+// or no longer with the organization. The domain has always supported it; nothing exposed it.
+app.MapPost("/api/scrs/{id:guid}/restart-review", async (Guid id, RestartReviewRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+{
+    var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+    if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before restarting the review.", code = "stale_version" });
+    try
+    {
+        var actor = http.UserAccount();
+        // The domain restricts this to the author; an administrator may also act, matching submission.
+        if (scr.AuthorId != actor.UserName && !actor.IsAdministrator) return Results.Forbid();
+        var now = DateTimeOffset.UtcNow;
+        var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.UserName, x.DisplayName }).ToListAsync(ct);
+        if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every corrected approver must be an active AeroLink user." });
+        var directory = known.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
+        var corrected = request.Approvers.Select(x => new ApproverSelection(directory[x.UserId].UserName, directory[x.UserId].DisplayName)).ToList();
+        var cycle = scr.CancelAndRestartForWrongApprover(scr.AuthorId, request.Reason, corrected, now);
+        foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
+            db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"scr:{scr.Id}", scr.Id, now));
+        await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
+    }
+    catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
 app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
 {
     var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
@@ -1678,6 +1703,7 @@ record RetargetScrRequest(Guid TargetReleaseId, string Reason);
 record RequirementChangeRequest(string ActorId, string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
 record ApproverRequest(string UserId, string Name);
 record SubmitReviewRequest(string ActorId, long? ExpectedVersion, List<ApproverRequest> Approvers, ReviewMode Mode=ReviewMode.Sequential);
+record RestartReviewRequest(long? ExpectedVersion, string Reason, List<ApproverRequest> Approvers, ReviewMode Mode=ReviewMode.Sequential);
 record ActorRequest(string ActorId, long? ExpectedVersion);
 record SignatureRequest(string Password, string Meaning, long? ExpectedVersion);
 record RequestChangesRequest(string ActorId, long? ExpectedVersion, string Reason);

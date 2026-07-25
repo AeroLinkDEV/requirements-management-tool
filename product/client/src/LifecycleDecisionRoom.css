@@ -57,17 +57,15 @@
 .decisionCardTitle h2 { font-size: 20px; margin: 0; letter-spacing: -.015em; }
 .decisionCardTitle p { margin: 4px 0 0; color: var(--dr-muted); font-size: 13px; }
 .decisionCardTitle > b { color: #0a6e6e; background: #e9f7f4; border-radius: 999px; padding: 5px 10px; font-size: 12px; }
-.attentionCard > article { display: grid; grid-template-columns: 34px minmax(210px, 1.4fr) minmax(150px, .7fr) 92px 68px auto; align-items: center; gap: 12px; min-height: 74px; padding: 11px 18px; border-top: 1px solid #edf1f5; }
+.attentionCard > article { display: grid; grid-template-columns: 34px minmax(210px, 1.5fr) 110px minmax(190px, 1fr) auto; align-items: center; gap: 12px; min-height: 74px; padding: 11px 18px; border-top: 1px solid #edf1f5; }
 .attentionIcon { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid #f2c27c; border-radius: 50%; background: #fff8ed; color: var(--dr-amber); font-weight: 900; }
 .attentionCopy { min-width: 0; }
 .attentionCopy b, .attentionCopy small { display: block; }
 .attentionCopy small { color: var(--dr-muted); margin-top: 4px; line-height: 1.35; }
-.attentionOwner, .attentionDue { display: grid; gap: 5px; color: #344c66; font-size: 12px; }
+.attentionRemaining, .attentionAction { display: grid; gap: 5px; min-width: 0; color: #344c66; font-size: 12px; }
 .attentionMeta { color: #667483; font-size: 12px; font-weight: 700; }
-.ownerLine { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
-.attentionDue b { font-size: 12px; white-space: nowrap; }
-.attentionCard article > em { color: #a85c05; background: #fff5e5; border-radius: 8px; padding: 6px 9px; font-style: normal; font-size: 12px; }
-.attentionCard article:first-of-type > em { color: #bc4a1d; background: #fff0ea; }
+.attentionRemaining b { font-size: 12px; white-space: nowrap; }
+.attentionAction small { color: var(--dr-muted); font-size: 12px; line-height: 1.35; }
 .attentionCard article > button, .comparisonCard > button, .decisionContext > button, .revisionPreview > button, .releaseNarrative > button, .controlledOutputs > button { border: 0; background: transparent; color: #06766f; font-weight: 800; cursor: pointer; }
 .decisionEmpty { display: grid; gap: 6px; place-content: center; min-height: 190px; text-align: center; color: var(--dr-green); }
 .decisionEmpty span { color: var(--dr-muted); }
@@ -172,7 +170,7 @@
 .controlledOutputs { margin-top: 16px; padding-bottom: 14px; }.controlledOutputs > div:nth-child(2) { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 0 18px 12px; }.controlledOutputs > div:nth-child(2) button { display: grid; grid-template-columns: 31px 1fr; gap: 10px; align-items: center; min-height: 67px; padding: 10px; border: 1px solid #d5e0e8; border-radius: 8px; background: #fff; color: inherit; text-align: left; cursor: pointer; }.controlledOutputs button > i { grid-row: 1 / 3; color: var(--dr-green); font-size: 24px; font-style: normal; }.controlledOutputs button > span { display: grid; gap: 3px; }.controlledOutputs button > span b { font-size: 12px; }.controlledOutputs button > span small { color: var(--dr-muted); font-size: 12px; }.controlledOutputs button > em { grid-column: 2; color: var(--dr-green); font-size: 12px; font-style: normal; }.controlledOutputs .pendingOutput > i, .controlledOutputs .pendingOutput > em { color: var(--dr-blue); }.controlledOutputs > button { display: block; margin-left: auto; margin-right: 18px; }
 
 @media (max-width: 1280px) {
-  .attentionCard > article { grid-template-columns: 34px minmax(190px, 1.3fr) minmax(135px, .7fr) 68px auto; }.attentionDue { display: none; }
+  .attentionCard > article { grid-template-columns: 34px minmax(190px, 1.4fr) 96px auto; }.attentionAction { display: none; }
   .changeSummary { grid-template-columns: auto 1fr auto; }.changeCounts { border-right: 0; }.impactBadge { grid-column: 2 / -1; justify-self: end; }
   .impactGrid { grid-template-columns: minmax(230px, .75fr) minmax(420px, 1.4fr); }.decisionContext { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }.decisionContext > h2, .decisionContext > button { grid-column: 1 / -1; }.decisionContext section { border-bottom: 0; }
   .evidenceGrid { grid-template-columns: minmax(500px, 1.6fr) minmax(260px, .8fr); grid-template-areas: "check approvals" "narrative approvals" "side side"; }.decisionSide { grid-template-columns: 1fr 1fr; }

@@ -12,7 +12,11 @@ test("Lifecycle Decision Room connects readiness, impact, evidence, people, and 
   await page.getByRole("link", { name: "Lifecycle Decision Room" }).click();
   await expect(page.getByRole("heading", { name: "Release Readiness" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Release lifecycle" })).toBeVisible();
-  await expect(page.getByRole("img", { name: /Maya Patel, Systems Lead/ })).toBeVisible();
+  // The attention panel must show what the server computed, not organisational facts invented in the
+  // browser. It previously rendered an owner, a due date and a priority keyed by position in the list;
+  // this assertion used to require that fabrication to be present.
+  await expect(page.getByText("To clear this").first()).toBeVisible();
+  await expect(page.getByText("Remaining").first()).toBeVisible();
   await expect(page.getByRole("button", { name: /Explore changes vs 1\.5/ })).toBeVisible();
 
   await page.getByRole("button", { name: "Explore baseline changes →" }).click();
