@@ -7,6 +7,8 @@ using AeroLink.Domain.Verification;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Notifications;
+using AeroLink.Infrastructure.Notifications;
 using AeroLink.Domain.Requirements;
 using AeroLink.Api;
 using System.Security.Cryptography;
@@ -110,6 +112,24 @@ app.MapGet("/health/ready", async (AeroLinkDbContext db,CancellationToken ct) =>
 app.MapAeroLinkOperationsEndpoints();
 app.MapAeroLinkPublicationEndpoints();
 app.MapAeroLinkQualityIntelligenceEndpoints();
+
+// Unsubscribe is reachable without signing in, because it is followed from a mail client. The signed
+// token is what proves the link came from this deployment; without it anyone could silence anyone else's
+// approval notices. Always answers the same way, so the endpoint cannot be used to discover who exists.
+app.MapGet("/api/notifications/unsubscribe", async (string? recipient, string? token, AeroLinkDbContext db, UnsubscribeTokenService tokens, CancellationToken ct) =>
+{
+    const string answer = "If that link was valid, email notification is now off for that account. Sign in to AeroLink to turn it back on.";
+    if (string.IsNullOrWhiteSpace(recipient) || string.IsNullOrWhiteSpace(token) || !tokens.Validate(recipient, token))
+        return Results.Text(answer);
+    var name = recipient.Trim().ToLowerInvariant();
+    var now = DateTimeOffset.UtcNow;
+    var preference = await db.NotificationPreferences.SingleOrDefaultAsync(x => x.Recipient == name, ct);
+    if (preference is null) { preference = new NotificationPreference(name, now); db.NotificationPreferences.Add(preference); }
+    preference.SetEmailEnabled(false, now);
+    db.SecurityAuditEvents.Add(new("NotificationEmailDisabled", name, name, "Success", "Email notification turned off from an unsubscribe link.", "local", now));
+    await db.SaveChangesAsync(ct);
+    return Results.Text(answer);
+}).AllowAnonymous();
 
 app.MapGet("/api/setup/status", async (AeroLinkDbContext db, IConfiguration configuration, CancellationToken ct) =>
 {
