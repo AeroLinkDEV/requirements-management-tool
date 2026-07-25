@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    [Migration("20260725232512_AddWorkspaceSynchronizationWatermark")]
+    [Migration("20260725234817_AddWorkspaceSynchronizationWatermark")]
     partial class AddWorkspaceSynchronizationWatermark
     {
         /// <inheritdoc />
