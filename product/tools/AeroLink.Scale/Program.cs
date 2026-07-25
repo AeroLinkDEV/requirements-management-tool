@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Http.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
@@ -19,7 +20,8 @@ if (command == "generate") await Generate();
 else if (command == "workspace") await GenerateWorkspace();
 else if (command == "benchmark") await Benchmark();
 else if (command == "load") await ConcurrentLoad();
-else Console.WriteLine("Usage: dotnet run -- generate|workspace|benchmark|load [--profile smoke|small|medium] [--reset] [--users 150] [--iterations 8]");
+else if (command == "session-load") await ConcurrentSessions();
+else Console.WriteLine("Usage: dotnet run -- generate|workspace|benchmark|load|session-load [--profile smoke|small|medium] [--reset] [--users 150] [--iterations 8] [--api http://127.0.0.1:5175]");
 
 string? Option(string name) { var index = Array.IndexOf(args, name); return index >= 0 && index + 1 < args.Length ? args[index + 1] : null; }
 
@@ -124,4 +126,173 @@ async Task ConcurrentLoad()
     total.Stop();var ordered=samples.Order().ToArray();long Percentile(double p)=>ordered.Length==0?0:ordered[Math.Min(ordered.Length-1,(int)Math.Ceiling(ordered.Length*p)-1)];
     var result=new{users,iterations,operations=ordered.Length,failures=failures.Count,totalSeconds=Math.Round(total.Elapsed.TotalSeconds,2),throughputPerSecond=total.Elapsed.TotalSeconds==0?0:Math.Round(ordered.Length/total.Elapsed.TotalSeconds,1),p50Ms=Percentile(.50),p95Ms=Percentile(.95),p99Ms=Percentile(.99),targetP95Ms=2000,passed=failures.IsEmpty&&Percentile(.95)<=2000};
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(result,new System.Text.Json.JsonSerializerOptions{WriteIndented=true}));if(!result.passed)Environment.ExitCode=1;
+}
+
+
+/// <summary>
+/// What 150 people using the product actually costs.
+///
+/// The `load` command above measures 150 concurrent database clients: EF queries issued straight at
+/// PostgreSQL. That is a real measurement and it is why the product's scale claim has always been worded as
+/// "database clients" — but it is not what a person does. A person signs in, holds a session, and makes HTTP
+/// requests that carry authentication, authorization, project scoping, JSON serialization, and the whole
+/// middleware pipeline before any query runs. Every one of those costs something, and none of them appear in
+/// a direct-to-database measurement.
+///
+/// So this drives the product the way a browser does: each simulated user authenticates once, keeps its own
+/// cookie container and connection pool, and then works — reading the dashboard, paging change requests,
+/// searching requirements, opening one. If the HTTP path cannot carry 150 of those, the claim cannot be
+/// stated in terms of users, however good the database numbers look.
+/// </summary>
+async Task ConcurrentSessions()
+{
+    var api = (Option("--api") ?? "http://127.0.0.1:5175").TrimEnd('/');
+    var users = int.TryParse(Option("--users"), out var u) ? Math.Clamp(u, 1, 500) : 150;
+    var iterations = int.TryParse(Option("--iterations"), out var i) ? Math.Clamp(i, 1, 200) : 8;
+    var password = Environment.GetEnvironmentVariable("AEROLINK_SCALE_PASSWORD") ?? "AeroLink!2026";
+    var userName = Environment.GetEnvironmentVariable("AEROLINK_SCALE_USER") ?? "admin";
+    // One account per simulated person. Signing 150 sessions in as the same account measures a scenario
+    // nobody has, and it collides with the sign-in rate limiter — which is keyed per account precisely
+    // because that is what stops one account being guessed at, not what stops a team arriving at work.
+    var accounts = await EnsureLoadAccountsAsync(users, password);
+    var targetP95 = int.TryParse(Option("--target-p95"), out var t) ? t : 2000;
+
+    using var discovery = new HttpClient { BaseAddress = new Uri(api), Timeout = TimeSpan.FromSeconds(60) };
+    var workspace = await SignInAsync(discovery);
+
+    if (workspace is null) { Console.Error.WriteLine("Could not sign in to the API. Is it running, and is AEROLINK_SCALE_USER correct?"); Environment.ExitCode = 1; return; }
+    var (projectId, releaseId) = workspace.Value;
+
+    var samples = new System.Collections.Concurrent.ConcurrentBag<(string Route, long Ms)>();
+    var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
+    var signInSamples = new System.Collections.Concurrent.ConcurrentBag<long>();
+
+    // Every user is started before any of them works, so the measurement is of 150 sessions in flight
+    // rather than of a queue that drains as it fills.
+    var ready = new SemaphoreSlim(0, users);
+    var go = new TaskCompletionSource();
+
+    var total = Stopwatch.StartNew();
+    await Task.WhenAll(Enumerable.Range(0, users).Select(async worker =>
+    {
+        // A cookie container per user, because a shared one would make this one session used 150 times.
+        using var handler = new HttpClientHandler { UseCookies = true, CookieContainer = new System.Net.CookieContainer() };
+        using var client = new HttpClient(handler) { BaseAddress = new Uri(api), Timeout = TimeSpan.FromSeconds(60) };
+        try
+        {
+            var signIn = Stopwatch.StartNew();
+            var session = await SignInAsync(client, accounts[worker]);
+            signIn.Stop();
+            signInSamples.Add(signIn.ElapsedMilliseconds);
+            if (session is null) { failures.Add("sign-in refused"); ready.Release(); return; }
+            ready.Release();
+            await go.Task;
+
+            for (var turn = 0; turn < iterations; turn++)
+            {
+                var route = ((worker + turn) % 5) switch
+                {
+                    0 => $"/api/dashboard?projectId={projectId}&releaseId={releaseId}",
+                    1 => $"/api/scrs?projectId={projectId}&page=1&pageSize=25",
+                    2 => $"/api/enterprise-requirements/workspace?projectId={projectId}&page={(worker % 8) + 1}&pageSize=50",
+                    3 => $"/api/enterprise-requirements/workspace?projectId={projectId}&page=1&pageSize=25&search={(worker % 100) + 1:D4}",
+                    _ => $"/api/my-work",
+                };
+                var sw = Stopwatch.StartNew();
+                using var response = await client.GetAsync(route);
+                await response.Content.ReadAsByteArrayAsync();
+                sw.Stop();
+                if (!response.IsSuccessStatusCode) failures.Add($"{(int)response.StatusCode} {route}");
+                else samples.Add((route.Split('?')[0], sw.ElapsedMilliseconds));
+            }
+        }
+        catch (Exception ex) { failures.Add(ex.GetType().Name + ": " + ex.Message); }
+    }).Prepend(Task.Run(async () =>
+    {
+        for (var n = 0; n < users; n++) await ready.WaitAsync();
+        go.SetResult();
+    })));
+    total.Stop();
+
+    var ordered = samples.Select(x => x.Ms).Order().ToArray();
+    long Percentile(double p) => ordered.Length == 0 ? 0 : ordered[Math.Min(ordered.Length - 1, (int)Math.Ceiling(ordered.Length * p) - 1)];
+    var byRoute = samples.GroupBy(x => x.Route).Select(g =>
+    {
+        var values = g.Select(x => x.Ms).Order().ToArray();
+        return new { route = g.Key, count = values.Length, p50Ms = values[values.Length / 2], p95Ms = values[Math.Min(values.Length - 1, (int)Math.Ceiling(values.Length * .95) - 1)] };
+    }).OrderByDescending(x => x.p95Ms).ToList();
+
+    var signIns = signInSamples.Order().ToArray();
+    var result = new
+    {
+        surface = "HTTP session",
+        users,
+        iterations,
+        requests = ordered.Length,
+        failures = failures.Count,
+        // Distinct failures only: 150 copies of one message is one fact, and printing it 150 times buries
+        // the one that is different.
+        failureKinds = failures.Distinct().Take(8).ToArray(),
+        totalSeconds = Math.Round(total.Elapsed.TotalSeconds, 2),
+        requestsPerSecond = total.Elapsed.TotalSeconds == 0 ? 0 : Math.Round(ordered.Length / total.Elapsed.TotalSeconds, 1),
+        signInP95Ms = signIns.Length == 0 ? 0 : signIns[Math.Min(signIns.Length - 1, (int)Math.Ceiling(signIns.Length * .95) - 1)],
+        p50Ms = Percentile(.50),
+        p95Ms = Percentile(.95),
+        p99Ms = Percentile(.99),
+        maxMs = ordered.Length == 0 ? 0 : ordered[^1],
+        targetP95Ms = targetP95,
+        byRoute,
+        passed = failures.IsEmpty && Percentile(.95) <= targetP95,
+    };
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(result, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+    if (!result.passed) Environment.ExitCode = 1;
+
+    async Task<(Guid ProjectId, Guid ReleaseId)?> SignInAsync(HttpClient client, string? asUser = null)
+    {
+        using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName = asUser ?? userName, password });
+        if (!login.IsSuccessStatusCode) return null;
+        using var workspaces = await client.GetAsync("/api/workspaces");
+        if (!workspaces.IsSuccessStatusCode) return null;
+        var payload = await workspaces.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        // The largest project wins, because measuring against a small one would flatter the result: what is
+        // being asked is what 150 people cost on the repository they actually work in.
+        foreach (var program in payload.EnumerateArray())
+        foreach (var entry in program.GetProperty("projects").EnumerateArray())
+        foreach (var release in entry.GetProperty("releases").EnumerateArray())
+            if (entry.GetProperty("project").GetProperty("name").GetString()?.Contains("Qualification", StringComparison.OrdinalIgnoreCase) == true)
+                return (entry.GetProperty("project").GetProperty("id").GetGuid(), release.GetProperty("id").GetGuid());
+        foreach (var program in payload.EnumerateArray())
+        foreach (var entry in program.GetProperty("projects").EnumerateArray())
+        foreach (var release in entry.GetProperty("releases").EnumerateArray())
+            return (entry.GetProperty("project").GetProperty("id").GetGuid(), release.GetProperty("id").GetGuid());
+        return null;
+    }
+}
+
+
+/// <summary>
+/// Provisions the load accounts, and grants each of them access to every program.
+///
+/// Written straight to the database rather than through the administration API, because creating a hundred
+/// and fifty accounts through the sign-in-protected surface is itself a load test of a different thing. The
+/// accounts are idempotent, so a repeat run reuses them.
+/// </summary>
+async Task<string[]> EnsureLoadAccountsAsync(int count, string password)
+{
+    var names = Enumerable.Range(0, count).Select(i => $"load.user.{i:D3}").ToArray();
+    var existing = (await db.UserAccounts.Where(x => names.Contains(x.UserName)).ToListAsync())
+        .ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
+    var programs = await db.Programs.Select(x => x.Id).ToListAsync();
+    var now = DateTimeOffset.UtcNow;
+    var hash = IdentityService.HashPassword(password);
+    foreach (var name in names)
+    {
+        if (existing.ContainsKey(name)) continue;
+        var account = new AeroLink.Domain.Identity.UserAccount(name, $"Load User {name[^3..]}", $"{name}@example.test", hash, now);
+        db.UserAccounts.Add(account);
+        foreach (var program in programs)
+            db.ProgramMemberships.Add(new AeroLink.Domain.Identity.ProgramMembership(account.Id, program, AeroLink.Domain.Identity.ProgramRole.Engineer, "scale.harness", now));
+    }
+    await db.SaveChangesAsync();
+    return names;
 }

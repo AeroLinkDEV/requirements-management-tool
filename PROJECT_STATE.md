@@ -261,3 +261,22 @@ reason the document set can be trusted.
   than failing fast — the normal behaviour of a firewall that drops packets instead of rejecting them —
   first paint took 12,994 ms instead of 147 ms. Fixed by self-hosting (DEC-047). Before shipping
   anything that loads a resource, ask what happens when that resource is unreachable *slowly*.
+- **A benchmark measures what it drives, not what it is named after.** The scale harness had always
+  reported 150 concurrent clients, and the documentation was careful to call them *database* clients —
+  correctly, because the harness issued EF queries straight at PostgreSQL. Nobody had driven the HTTP
+  path. Doing so found that sign-in refused 121 of 150 users, because the rate limiter partitioned on
+  network address and an on-premises site reaches the product through one proxy: the product denied
+  service to its own users, and no database-level measurement could ever have shown it. When a number is
+  quoted in a unit, check that something actually measures that unit.
+- **A read that writes will be slow, and the cost hides in a method that looks idempotent.** The
+  requirements explorer called a project-wide backfill on every GET. It was correct, it was idempotent,
+  and it loaded every requirement, revision, profile and specification node in the project before
+  returning fifty rows — nine seconds a page at fifty thousand requirements. "Idempotent" says nothing
+  about what it costs to discover there is nothing to do. The first guard was itself a join through
+  fifty thousand rows and barely helped; the fix was to make the check one indexed count.
+- **The control existed; the thing it controlled did not.** Document templates were numbered, approved by
+  a named person, versioned, and hashed at approval — and their body was JSON that no generator ever
+  opened. Every ceremony was real and none of it changed a document. The same shape appeared twice more
+  in one week: a rich-text field nothing rendered, and an attachment vault reachable only from a screen
+  nobody working on a change request would open. Before building a control, check whether the last one is
+  wired to anything.

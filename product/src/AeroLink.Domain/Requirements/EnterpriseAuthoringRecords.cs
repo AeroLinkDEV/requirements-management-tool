@@ -210,3 +210,47 @@ public sealed class RequirementInterchangeJob
     public DateTimeOffset? CompletedAt { get; private set; }
     public void Commit(Guid scrId,DateTimeOffset now){if(State!=EnterpriseJobState.Preview)throw new DomainException("Only previewed imports can be committed.");State=EnterpriseJobState.Completed;CreatedScrId=scrId;CompletedAt=now;}
 }
+
+/// <summary>
+/// How much of a project the enterprise workspace has already backfilled.
+///
+/// The workspace has to give every requirement a schema profile and a place in its specification. That is a
+/// backfill — it converts records created before the workspace existed, or created by a path that does not
+/// place them — and it is idempotent, so it was simply run on every read of the requirements explorer.
+///
+/// At fifty thousand requirements and a hundred and fifty people that cost nine seconds a page: every
+/// request loaded every requirement, every revision, every profile and every specification node in the
+/// project before returning the fifty rows somebody asked for. This watermark is what lets the read path
+/// find out there is nothing to do without loading everything to discover it. Only two things can create
+/// work — and new revisions already get their profile from baseline materialization — so recording how many
+/// requirements existed when the backfill last completed answers the question with one indexed count.
+/// </summary>
+public sealed class ProjectWorkspaceSynchronization
+{
+    private ProjectWorkspaceSynchronization() { }
+
+    public ProjectWorkspaceSynchronization(Guid projectId, int artifactCount, DateTimeOffset now)
+    {
+        Id = Guid.NewGuid();
+        ProjectId = projectId;
+        Record(artifactCount, now);
+    }
+
+    public Guid Id { get; private set; }
+    public Guid ProjectId { get; private set; }
+    public int ArtifactCount { get; private set; }
+    public DateTimeOffset SynchronizedAt { get; private set; }
+
+    public void Record(int artifactCount, DateTimeOffset now)
+    {
+        ArtifactCount = artifactCount;
+        SynchronizedAt = now;
+    }
+
+    /// <summary>
+    /// True when no requirement has been added since the backfill last ran. Deliberately conservative: any
+    /// doubt resolves to running the backfill, because a requirement with no profile is invisible in the
+    /// workspace, and a slow page is a far better failure than a missing requirement.
+    /// </summary>
+    public bool IsCurrent(int artifactCount) => ArtifactCount == artifactCount;
+}
