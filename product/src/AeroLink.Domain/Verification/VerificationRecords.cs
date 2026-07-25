@@ -123,17 +123,12 @@ public sealed class TestRequirementCoverage
         ConfirmedAt = now;
     }
 
-    /// <summary>Marks existing coverage suspect because its requirement changed under it.</summary>
-    public void MarkSuspect(string reason, DateTimeOffset now)
-    {
-        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("Marking coverage suspect requires a reason.");
-        if (IsSuspect) return;
-        IsSuspect = true;
-        SuspectReason = reason.Trim();
-        SuspectSince = now;
-        ConfirmedBy = null;
-        ConfirmedAt = null;
-    }
+    // There is deliberately no method for marking an existing link suspect. A requirement changing under a
+    // procedure produces a new revision, and materialisation creates a fresh carried-forward link already
+    // marked suspect rather than mutating the old one, which must stay exactly as it was approved. A
+    // procedure changing under a requirement is caught by the coverage gate, which refuses to count a link
+    // whose procedure has any revision still in draft or review. Nothing is left for this to do, and an
+    // unreachable method is a claim nothing keeps.
 }
 
 public sealed class TestExecution

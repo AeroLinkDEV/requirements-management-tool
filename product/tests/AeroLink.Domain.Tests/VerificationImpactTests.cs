@@ -200,21 +200,6 @@ public sealed class SuspectCoverageTests
         Assert.Equal("", carried.SuspectReason);
         Assert.Throws<DomainException>(() => carried.ConfirmStillValid("", Now));
     }
-
-    [Fact]
-    public void Confirmed_coverage_becomes_suspect_again_when_the_requirement_changes_under_it()
-    {
-        var coverage = new TestRequirementCoverage(Guid.NewGuid(), Guid.NewGuid());
-        coverage.ConfirmStillValid("test.engineer", Now);
-
-        coverage.MarkSuspect("SCR-00000031.00 modified the requirement statement.", Now.AddDays(1));
-
-        Assert.True(coverage.IsSuspect);
-        Assert.Null(coverage.ConfirmedBy);
-        Assert.Null(coverage.ConfirmedAt);
-        Assert.Equal(Now.AddDays(1), coverage.SuspectSince);
-        Assert.Throws<DomainException>(() => coverage.MarkSuspect("  ", Now));
-    }
 }
 
 public sealed class VerificationImpactRevisionBindingTests

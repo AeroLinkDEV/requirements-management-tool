@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
@@ -597,7 +598,7 @@ export default function ScrWorkspace({
           <p>Revision-controlled change case, requirement proposals, and review authority.</p>
         </div>
         <div className="headerState">
-          <span className={`stateBadge ${scr.state.toLowerCase()}`}>{scr.state}</span>
+          <span className={`stateBadge ${scr.state.toLowerCase()}`} data-state={scr.state}>{stateLabel(scr.state)}</span>
           <small>Record version {scr.version}</small>
         </div>
       </header>
@@ -844,7 +845,7 @@ export default function ScrWorkspace({
             <section className="workspaceCard controlStatusCard">
               <div className="workspaceTitle"><div><h2>Control status</h2><p>{scr.displayNumber}</p></div></div>
               <dl>
-                <div><dt>State</dt><dd>{scr.state}</dd></div>
+                <div><dt>State</dt><dd data-state={scr.state}>{stateLabel(scr.state)}</dd></div>
                 <div><dt>Author</dt><dd>{scr.authorId}</dd></div>
                 <div><dt>Revision</dt><dd>{scr.revision}</dd></div>
                 <div><dt>Updated</dt><dd>{new Date(scr.updatedAt).toLocaleDateString()}</dd></div>
@@ -863,10 +864,10 @@ export default function ScrWorkspace({
 
             {latest && (
               <section className="workspaceCard">
-                <div className="workspaceTitle"><div><h2>Review cycle {latest.sequence}</h2><p>{latest.state} · {latest.snapshotHash.slice(0, 12)}…</p></div></div>
+                <div className="workspaceTitle"><div><h2>Review cycle {latest.sequence}</h2><p>{stateLabel(latest.state)} · {latest.snapshotHash.slice(0, 12)}…</p></div></div>
                 <div className="approvalPath">
                   {latest.steps.map((step) => (
-                    <div className={`approvalStep ${step.state.toLowerCase()}`} key={step.position}><span>{step.state === "Approved" ? "✓" : step.position + 1}</span><div><b>{step.approverName}</b><small>{step.approverId} · {step.state}</small></div></div>
+                    <div className={`approvalStep ${step.state.toLowerCase()}`} key={step.position}><span>{step.state === "Approved" ? "✓" : step.position + 1}</span><div><b>{step.approverName}</b><small>{step.approverId} · {stateLabel(step.state)}</small></div></div>
                   ))}
                 </div>
                 {latest.closureReason && <div className="closure"><b>Closure reason</b><p>{latest.closureReason}</p></div>}
