@@ -66,6 +66,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ArtifactWatch> ArtifactWatches => Set<ArtifactWatch>();
     public DbSet<ArtifactAssignment> ArtifactAssignments => Set<ArtifactAssignment>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
+    public DbSet<ReviewWorkflow> ReviewWorkflows => Set<ReviewWorkflow>();
     public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
     public DbSet<RequirementImportMapping> RequirementImportMappings => Set<RequirementImportMapping>();
@@ -225,6 +226,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.Mode).HasConversion<string>().HasMaxLength(20);
             b.Property(x => x.ClosureReason).HasMaxLength(2000);
+            b.Property(x => x.WorkflowName).HasMaxLength(200);
             b.Ignore(x => x.ActivePosition);
             b.HasIndex(x => new { x.ScrId, x.Sequence }).IsUnique();
             b.HasMany(x => x.Steps).WithOne().HasForeignKey(x => x.ReviewCycleId).OnDelete(DeleteBehavior.Cascade);
@@ -234,6 +236,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("approval_steps"); b.HasKey(x => x.Id);
             b.Property(x => x.ApproverId).HasMaxLength(100).IsRequired();
             b.Property(x => x.ApproverName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.StageName).HasMaxLength(120);
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.HasIndex(x => new { x.ReviewCycleId, x.Position }).IsUnique();
         });
@@ -514,6 +517,27 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<UserNotification>(b =>
         {
             b.ToTable("user_notifications");b.HasKey(x=>x.Id);b.Property(x=>x.Recipient).HasMaxLength(100).IsRequired();b.Property(x=>x.Type).HasMaxLength(60).IsRequired();b.Property(x=>x.Title).HasMaxLength(300).IsRequired();b.Property(x=>x.Detail).HasMaxLength(2000);b.Property(x=>x.Route).HasMaxLength(300);b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.HasIndex(x=>new{x.Recipient,x.State,x.CreatedAt});b.HasIndex(x=>x.ProjectId);
+        });
+        modelBuilder.Entity<ReviewWorkflow>(b =>
+        {
+            b.ToTable("review_workflows"); b.HasKey(x => x.Id);
+            b.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            b.Property(x => x.AppliesTo).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Mode).HasConversion<string>().HasMaxLength(20);
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
+            b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
+            // One active procedure per change-request type per project. Two would mean the product silently
+            // choosing which rules a review was judged by.
+            b.HasIndex(x => new { x.ProjectId, x.AppliesTo, x.State });
+            b.HasIndex(x => new { x.LogicalId, x.Version }).IsUnique();
+            b.HasMany(x => x.Stages).WithOne().HasForeignKey(x => x.WorkflowId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ReviewWorkflowStage>(b =>
+        {
+            b.ToTable("review_workflow_stages"); b.HasKey(x => x.Id);
+            b.Property(x => x.Name).HasMaxLength(120).IsRequired();
+            b.Property(x => x.RequiredRole).HasConversion<string>().HasMaxLength(40);
+            b.HasIndex(x => new { x.WorkflowId, x.Position }).IsUnique();
         });
         modelBuilder.Entity<NotificationDelivery>(b =>
         {

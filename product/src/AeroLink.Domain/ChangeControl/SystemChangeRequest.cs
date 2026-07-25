@@ -102,16 +102,19 @@ public sealed class SystemChangeRequest
         Audit("ScrDraftUpdated", actorId, $"Updated {DisplayNumber} Draft with {changes.Count} proposed requirement changes.", now);
     }
 
-    public ReviewCycle SubmitForReview(string actorId, IReadOnlyList<ApproverSelection> approvers, DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential)
+    public ReviewCycle SubmitForReview(string actorId, IReadOnlyList<ApproverSelection> approvers,
+        DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null)
     {
         EnsureAuthor(actorId);
         EnsureDraft();
         ValidateReadyForReview();
-        var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(), approvers, now, mode);
+        var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(), approvers, now, mode, workflow);
         _reviewCycles.Add(cycle);
         State = ScrState.InReview;
         UpdatedAt = now;
-        Audit("ReviewStarted", actorId, $"Started {mode.ToString().ToLowerInvariant()} review cycle {cycle.Sequence} with {approvers.Count} approvers.", now);
+        Audit("ReviewStarted", actorId,
+            $"Started {cycle.Mode.ToString().ToLowerInvariant()} review cycle {cycle.Sequence} with {approvers.Count} approvers" +
+            (workflow is null ? "." : $" following {workflow.Name} v{workflow.Version}."), now);
         return cycle;
     }
 
@@ -142,19 +145,21 @@ public sealed class SystemChangeRequest
         Audit("ChangesRequested", actorId, $"Returned {DisplayNumber} to Draft at the same revision: {reason}", now);
     }
 
-    public void ReplaceFutureApprover(string actorId, int position, ApproverSelection replacement, DateTimeOffset now)
+    public void ReplaceFutureApprover(string actorId, int position, ApproverSelection replacement,
+        DateTimeOffset now, ReviewWorkflowSpecification? workflow = null)
     {
         EnsureAuthor(actorId);
         EnsureInReview();
         var cycle = ActiveReviewCycle!;
         var previous = cycle.Steps.Single(x => x.Position == position).ApproverName;
-        cycle.ReplaceFutureApprover(position, replacement);
+        cycle.ReplaceFutureApprover(position, replacement, workflow);
         UpdatedAt = now;
         Audit("FutureApproverReplaced", actorId, $"Replaced position {position + 1}: {previous} -> {replacement.Name}.", now);
     }
 
     public ReviewCycle CancelAndRestartForWrongApprover(string actorId, string reason,
-        IReadOnlyList<ApproverSelection> correctedApprovers, DateTimeOffset now)
+        IReadOnlyList<ApproverSelection> correctedApprovers, DateTimeOffset now,
+        ReviewWorkflowSpecification? workflow = null)
     {
         EnsureAuthor(actorId);
         EnsureInReview();
@@ -165,7 +170,7 @@ public sealed class SystemChangeRequest
             throw new DomainException("At least one corrected approver is required.");
         var prior = ActiveReviewCycle!;
         prior.Cancel(reason, now);
-        var replacement = new ReviewCycle(Id, _reviewCycles.Count + 1, prior.SnapshotHash, correctedApprovers, now, prior.Mode);
+        var replacement = new ReviewCycle(Id, _reviewCycles.Count + 1, prior.SnapshotHash, correctedApprovers, now, prior.Mode, workflow);
         _reviewCycles.Add(replacement);
         UpdatedAt = now;
         Audit("ReviewCancelledAndRestarted", actorId,
