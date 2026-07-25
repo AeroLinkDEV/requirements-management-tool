@@ -64,6 +64,37 @@ These must be rehearsed verbatim, because precision is the whole argument with t
   organization-specific work that has not been done.
 - **How would we get off DOORS?** ReqIF 1.2 round-trip exists. Migration itself is real, unestimated work.
 - **Who maintains it?** An honest answer is owed here and has not yet been decided.
+- **Would people sign in with their corporate account, or yet another password?** Corporate account, by
+  design, though not yet by working code. What exists and is tested today: external identity provider
+  definitions with canonicalized issuer trust anchors, Program-scoped mappings from an external directory
+  group to an AeroLink role, fail-closed matching, and an administration API whose every authority change
+  is saved together with its audit evidence. The PostgreSQL smoke gate exercises those tables on every run.
+  What does not exist: the sign-in path itself — OpenID Connect discovery, the authorization-code exchange
+  with PKCE, token validation, and the start and callback endpoints. That work is designed and drafted in
+  pull request #53, and deliberately left as a draft.
+
+  This is a good answer to give rather than one to dodge, because it is the shape of the whole product
+  argument: the controlled, auditable half is built and evidenced, the half that needs a real deployment
+  decision is designed and honestly unbuilt. Say it in that order.
+
+  Two design points worth offering if the quality group presses, since they are what a security reviewer
+  actually checks. An external identity must be **explicitly bound** to an existing account — no account is
+  created from an email claim, which is what turns federation into an account-takeover route. And no tokens,
+  secrets or raw claims are persisted, with directory-derived roles calculated at sign-in rather than
+  written as durable memberships, so removing someone from a group removes their access.
+
+  Do not offer to demonstrate this. It cannot be shown without a live identity provider.
+
+## Deliberately out of scope for this demonstration
+
+Identity federation (pull request #53) stays a draft and is not worked before the demonstration. Finishing
+it means the genuinely difficult security work — PKCE, token and signature validation, key rotation — none
+of which the room is deciding next week, and none of which can be shown without a live identity provider.
+The deferral is recorded in DEC-046, whose trigger to resume is the first commitment to deploy AeroLink for
+an organization authenticating against its own directory. That commitment has not been made.
+
+Rebasing that branch can wait until it is genuinely picked up; rebasing an unscheduled draft only means
+doing it twice.
 
 ## Preparation that cannot be skipped
 
