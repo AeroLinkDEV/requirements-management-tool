@@ -419,7 +419,6 @@ function App() {
         scope={discipline === "software" ? "Software" : "System"}
         initialViewId={initialRoute.savedViewId}
         initialArtifactId={view === "requirements" ? selectedArtifactId || undefined : undefined}
-        onScopeChange={(nextScope) => navigate("requirements",nextScope==="Software"?"software":"system")}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}
         onProposeChange={(id) => navigate(discipline === "software" ? "createSoftwareChange" : "createSystemScr", discipline, id)}
