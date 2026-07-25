@@ -34,11 +34,16 @@ public sealed class ControlledDocument
 {
     private ControlledDocument() { }
     public ControlledDocument(Guid projectId, Guid releaseId, Guid baselineId, ControlledDocumentType type,
-        string documentNumber, string title, int revision, string contentHash, int artifactCount, DateTimeOffset generatedAt)
+        string documentNumber, string title, int revision, string contentHash, int artifactCount, DateTimeOffset generatedAt,
+        Guid? templateRevisionId = null)
     {
         Id = Guid.NewGuid(); ProjectId = projectId; ReleaseId = releaseId; BaselineId = baselineId; Type = type;
         DocumentNumber = ArtifactNumber.ValidateBase(documentNumber); Title = title.Trim(); Revision = revision;
         ContentHash = contentHash; ArtifactCount = artifactCount; GeneratedAt = generatedAt;
+        // The exact approved template revision that produced this document. Without it, revising a template
+        // would silently change every document generated afterwards, a document regenerated next year would
+        // no longer match the one somebody signed, and the hash recorded here would be evidence of nothing.
+        TemplateRevisionId = templateRevisionId;
     }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
@@ -51,4 +56,5 @@ public sealed class ControlledDocument
     public string ContentHash { get; private set; } = string.Empty;
     public int ArtifactCount { get; private set; }
     public DateTimeOffset GeneratedAt { get; private set; }
+    public Guid? TemplateRevisionId { get; private set; }
 }
