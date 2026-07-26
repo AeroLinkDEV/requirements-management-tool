@@ -1,0 +1,320 @@
+using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
+using AeroLink.Domain.Contracts;
+using AeroLink.Domain.Identity;
+using AeroLink.Domain.Releases;
+using AeroLink.Domain.Requirements;
+using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using System.Data;
+using System.Text.Json;
+
+namespace AeroLink.Api;
+
+/// <summary>
+/// The controlled change request: the record that carries a proposed change through review to
+/// approval.
+///
+/// Nothing here mutates a requirement. A change request states what should change, and the requirement only
+/// moves when a baseline is materialized — which is what makes the decision reconstructable afterwards.
+/// </summary>
+public static class ChangeRequestEndpoints
+{
+    public static void MapChangeRequestEndpoints(this WebApplication app)
+    {
+        app.MapPost("/api/scrs/{id:guid}/retarget", async (Guid id, RetargetScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!await db.Releases.AnyAsync(x => x.Id == request.TargetReleaseId && x.ProjectId == scr.ProjectId && !x.IsReleased, ct)) return Results.BadRequest(new { error = "Choose an unreleased target release in this project." });
+            // Verification work follows its change request. Left behind, it would hold a release the change no longer
+            // belongs to and go missing from the one it does.
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                scr.Retarget(http.UserAccount().UserName, request.TargetReleaseId, request.Reason, now);
+                await verificationImpact.RetargetAsync(scr.Id, request.TargetReleaseId, now, ct);
+                await repository.SaveAsync(ct);
+                return Results.Ok(ApiMap.ScrDetail(scr));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/scrs/{id:guid}/next-revision", async (Guid id, ActorRequest request, HttpContext http, IScrRepository repository, CancellationToken ct) =>
+        {
+            var approved = await repository.GetAsync(id, ct); if (approved is null) return Results.NotFound();
+            if (request.ExpectedVersion is not null && approved.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This approved request changed after it was opened. Refresh before revising.", code = "stale_version" });
+            try
+            {
+                var next = approved.StartNextRevision(http.UserAccount().UserName, DateTimeOffset.UtcNow);
+                await repository.AddAsync(next, ct); await repository.SaveAsync(ct);
+                return Results.Created($"/api/scrs/{next.Id}", ApiMap.ScrDetail(next));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (DbUpdateException) { return Results.Conflict(new { error = $"A later revision of {approved.BaseNumber} already exists." }); }
+        });
+
+        app.MapGet("/api/scrs", async (Guid projectId, Guid? releaseId, int? page, int? pageSize, string? search, ScrState? state, IScrRepository repository, CancellationToken ct) =>
+        {
+            var result = await repository.QueryAsync(new ScrQuery(projectId, page is null or 0 ? 1 : page.Value, pageSize is null or 0 ? 50 : pageSize.Value, search, state, releaseId), ct);
+            return Results.Ok(new { result.Page, result.PageSize, result.TotalCount, result.TotalPages, items = result.Items.Select(ApiMap.ScrSummary) });
+        });
+
+        app.MapGet("/api/scrs/{id:guid}", async (Guid id, IScrRepository repository, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct);
+            return scr is null ? Results.NotFound() : Results.Ok(ApiMap.ScrDetail(scr));
+        });
+
+        app.MapGet("/api/authoring/context", async (Guid projectId, ChangeRequestType type, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var prefixes = type == ChangeRequestType.System ? new[] { "SYSR" } : new[] { "HLR", "LLR" };
+            var numbers = new Dictionary<string, string>();
+            foreach (var prefix in prefixes) numbers[prefix] = await IdentifierAllocator.NextRequirementAsync(db, prefix, ct);
+            return Results.Ok(new
+            {
+                type = type.ToString(),
+                changeRequestNumber = await IdentifierAllocator.NextChangeRequestAsync(db, type, ct),
+                author = new { http.UserAccount().UserName, http.UserAccount().DisplayName },
+                requirementNumbers = numbers
+            });
+        });
+
+        app.MapGet("/api/authoring/requirements", async (Guid projectId, string scope, string? search, int? limit, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var artifacts = db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId);
+            artifacts = scope.Equals("System", StringComparison.OrdinalIgnoreCase)
+                ? artifacts.Where(x => x.Level == RequirementLevel.System)
+                : artifacts.Where(x => x.Level == RequirementLevel.HighLevel || x.Level == RequirementLevel.LowLevel);
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim().ToLower();
+                artifacts = artifacts.Where(x => x.BaseNumber.ToLower().Contains(term));
+            }
+            var rows = await (from artifact in artifacts
+                              join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId
+                              where revision.Revision == db.RequirementRevisions.Where(x => x.ArtifactId == artifact.Id).Max(x => x.Revision)
+                              orderby artifact.BaseNumber
+                              select new { artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(), revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, state = revision.State.ToString() })
+                .Take(Math.Clamp(limit ?? 12, 1, 50)).ToListAsync(ct);
+            return Results.Ok(rows.Select(x => new { x.Id, x.BaseNumber, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.level, x.Revision, nextRevision = x.Revision + 1, x.Statement, x.Rationale, x.VerificationMethod, x.state }));
+        });
+
+        app.MapGet("/api/scrs/{id:guid}/download", async (Guid id, string? format, ChangeRequestOutputGenerator generator, CancellationToken ct) =>
+        {
+            var output = await generator.GenerateAsync(id, format ?? "docx", ct); return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
+        });
+
+        app.MapPut("/api/scrs/{id:guid}/draft", (Guid id) => Results.Json(new
+        {
+            error = "Direct controlled-content updates are retired. Autosave the edit session and use the universal check-in endpoint.",
+            code = "universal_check_in_required",
+            artifactId = id,
+            checkInRoute = "/api/controlled-editing/sessions/{sessionId}/check-in"
+        }, statusCode: StatusCodes.Status410Gone));
+
+        app.MapGet("/api/requirement-changes", async (Guid projectId, int page, int pageSize, string? search, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            page = Math.Max(1, page == 0 ? 1 : page);
+            pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
+            var source = db.RequirementChanges.AsNoTracking()
+                .Where(x => db.SystemChangeRequests.Any(scr => scr.Id == x.ScrId && scr.ProjectId == projectId));
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim();
+                source = source.Where(x => EF.Functions.ILike(x.BaseNumber, $"%{term}%") || EF.Functions.ILike(x.Statement, $"%{term}%"));
+            }
+            var totalCount = await source.CountAsync(ct);
+            var items = await source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
+                .Skip((page - 1) * pageSize).Take(pageSize)
+                .Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + x.Revision, level = x.Level.ToString(), kind = x.Kind.ToString(), x.Statement, x.VerificationMethod, x.ScrId })
+                .ToListAsync(ct);
+            return Results.Ok(new { page, pageSize, totalCount, totalPages = (int)Math.Ceiling(totalCount / (double)pageSize), items });
+        });
+
+        // Historical discovery endpoints deliberately include every revision and lifecycle state.
+
+        app.MapPost("/api/scrs", async (CreateScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
+            try
+            {
+                var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, ct);
+                var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
+                    request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, DateTimeOffset.UtcNow, request.Type,
+                    request.ProblemRich, request.AnalysisRich, request.SolutionRich);
+                await repository.AddAsync(scr, ct); await repository.SaveAsync(ct);
+                return Results.Created($"/api/scrs/{scr.Id}", ApiMap.ScrDetail(scr));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                var actor = http.UserAccount().UserName;
+                var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, ct);
+                var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
+                    request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, now, request.Type,
+                    request.ProblemRich, request.AnalysisRich, request.SolutionRich);
+                var nextNumbers = new Dictionary<string, int>();
+                foreach (var change in request.RequirementChanges)
+                {
+                    if (request.Type == ChangeRequestType.System && change.Level != RequirementLevel.System)
+                        return Results.BadRequest(new { error = "A System SCR can contain only System requirement changes." });
+                    if (request.Type == ChangeRequestType.Software && change.Level == RequirementLevel.System)
+                        return Results.BadRequest(new { error = "A Software SWCR can contain only HLR and LLR changes." });
+                    if (change.IsDerived && string.IsNullOrWhiteSpace(change.Rationale))
+                        return Results.BadRequest(new { error = "Every derived software requirement requires an explicit engineering rationale." });
+                    string requirementNumber; int revision;
+                    if (change.Kind == RequirementChangeKind.Introduce)
+                    {
+                        var prefix = change.Level switch { RequirementLevel.System => "SYSR", RequirementLevel.HighLevel => "HLR", _ => "LLR" };
+                        if (!nextNumbers.TryGetValue(prefix, out var next))
+                            next = IdentifierAllocator.Sequence(await IdentifierAllocator.NextRequirementAsync(db, prefix, ct));
+                        requirementNumber = IdentifierAllocator.Format(prefix, next);
+                        revision = 0;
+                        nextNumbers[prefix] = next + 1;
+                    }
+                    else
+                    {
+                        var artifact = await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x => x.ProjectId == request.ProjectId && x.BaseNumber == change.BaseNumber.Trim().ToUpper(), ct);
+                        if (artifact is null) return Results.BadRequest(new { error = $"Select an existing controlled requirement before proposing a {change.Kind.ToString().ToLowerInvariant()}." });
+                        if (artifact.Level != change.Level) return Results.BadRequest(new { error = $"{artifact.BaseNumber} is not a {change.Level} requirement." });
+                        requirementNumber = artifact.BaseNumber;
+                        revision = await db.RequirementRevisions.Where(x => x.ArtifactId == artifact.Id).MaxAsync(x => x.Revision, ct) + 1;
+                    }
+                    var attributes = JsonSerializer.Serialize(new { derived = change.Level != RequirementLevel.System && change.IsDerived });
+                    scr.AddRequirementChange(actor, requirementNumber, revision, change.Level, change.Kind,
+                        change.Statement, change.Rationale, change.VerificationMethod, now, change.RichText, attributes, change.ImpactDispositionJson);
+                }
+                await repository.AddAsync(scr, ct);
+                await repository.SaveAsync(ct);
+                await transaction.CommitAsync(ct);
+                return Results.Created($"/api/scrs/{scr.Id}", ApiMap.ScrDetail(scr));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (DbUpdateException) { return Results.Conflict(new { error = "Another author created an artifact at the same instant. No duplicate was saved; submit again to receive the next available numbers." }); }
+        });
+
+        app.MapPost("/api/scrs/{id:guid}/requirements", async (Guid id, RequirementChangeRequest request, HttpContext http, IScrRepository repository, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            try
+            {
+                scr.AddRequirementChange(http.UserAccount().UserName, request.BaseNumber, request.Revision, request.Level, request.Kind,
+                    request.Statement, request.Rationale, request.VerificationMethod, DateTimeOffset.UtcNow);
+                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/scrs/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before submitting.", code = "stale_version" });
+            var now=DateTimeOffset.UtcNow;var editSessions=await db.ArtifactEditSessions.Where(x=>x.ArtifactId==id&&x.ArtifactType=="SCR"&&x.IsExclusive&&x.State==EditSessionState.Active).ToListAsync(ct);foreach(var expired in editSessions.Where(x=>x.ExpiresAt<=now))expired.Expire(now);if(db.ChangeTracker.HasChanges())await db.SaveChangesAsync(ct);var activeEdit=editSessions.FirstOrDefault(x=>x.State==EditSessionState.Active);if(activeEdit is not null)return Results.Conflict(new{error=$"Review cannot begin while {activeEdit.UserName} has the Draft checked out.",code="active_edit_session",activeEdit.ExpiresAt});
+            try
+            {
+                var actor = http.UserAccount();
+                if (scr.AuthorId != actor.UserName && !actor.IsAdministrator) return Results.Forbid();
+                var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
+                if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every approver must be an active AeroLink user." });
+                var directory = known.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
+                // The authority each approver holds is resolved here, where program membership lives, and travels
+                // with the selection so the domain can enforce a recorded procedure without reaching for it.
+                var authorities = await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, known.Select(x => x.Id).ToList(), ct);
+                var selections = request.Approvers.Select(x =>
+                {
+                    var account = directory[x.UserId];
+                    authorities.TryGetValue(account.Id, out var role);
+                    return new ApproverSelection(account.UserName, account.DisplayName, role);
+                }).ToList();
+                var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, scr.ProjectId, scr.Type, ct);
+                var cycle = scr.SubmitForReview(actor.UserName, selections, now, request.Mode, workflow);
+                foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
+                    db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"scr:{scr.Id}", scr.Id, now));
+                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        // Recovering from a misrouted review. Without this the only way out of a review sent to the wrong approver
+        // was for that approver to act, which is exactly what cannot happen when they are the wrong person, on leave,
+        // or no longer with the organization. The domain has always supported it; nothing exposed it.
+
+        // Recovering from a misrouted review. Without this the only way out of a review sent to the wrong approver
+        // was for that approver to act, which is exactly what cannot happen when they are the wrong person, on leave,
+        // or no longer with the organization. The domain has always supported it; nothing exposed it.
+        app.MapPost("/api/scrs/{id:guid}/restart-review", async (Guid id, RestartReviewRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before restarting the review.", code = "stale_version" });
+            try
+            {
+                var actor = http.UserAccount();
+                // The domain restricts this to the author; an administrator may also act, matching submission.
+                if (scr.AuthorId != actor.UserName && !actor.IsAdministrator) return Results.Forbid();
+                var now = DateTimeOffset.UtcNow;
+                var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.UserName, x.DisplayName }).ToListAsync(ct);
+                if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every corrected approver must be an active AeroLink user." });
+                var directory = known.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
+                var corrected = request.Approvers.Select(x => new ApproverSelection(directory[x.UserId].UserName, directory[x.UserId].DisplayName)).ToList();
+                var cycle = scr.CancelAndRestartForWrongApprover(scr.AuthorId, request.Reason, corrected, now);
+                foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
+                    db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"scr:{scr.Id}", scr.Id, now));
+                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
+            var actor = http.UserAccount(); if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+            var programId = await db.Projects.Where(x => x.Id == scr.ProjectId).Join(db.Programs, x => x.ProgramId, x => x.Id, (_, p) => p.Id).SingleAsync(ct);
+            if (!await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct)) return Results.Forbid();
+            try { var now = DateTimeOffset.UtcNow; var snapshotHash = scr.ActiveReviewCycle?.SnapshotHash ?? ""; var activeBefore=scr.ActiveReviewCycle!.Steps.Where(x=>x.State==ApprovalStepState.Active).Select(x=>x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase); scr.ApproveActiveStage(actor.UserName, now); var activated=scr.ActiveReviewCycle?.Steps.Where(x=>x.State==ApprovalStepState.Active&&!activeBefore.Contains(x.ApproverId)).ToList()??[];foreach(var step in activated)db.UserNotifications.Add(new(scr.ProjectId,step.ApproverId,"ReviewActivated",$"Review {scr.DisplayNumber}",$"The prior stage is complete. You are now authorized to review {scr.DisplayNumber}: {scr.Title}",$"scr:{scr.Id}",scr.Id,now)); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "SCR", scr.Id, scr.DisplayNumber, "Approve", request.Meaning, snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
+                // Approval is what settles the engineering decision, so verification work is raised here rather than
+                // waiting for baseline inclusion. Saved in the same unit of work as the approval itself.
+                await verificationImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct);
+                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/scrs/{id:guid}/request-changes", async (Guid id, RequestChangesRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
+            try { var now=DateTimeOffset.UtcNow;scr.RequestChanges(http.UserAccount().UserName, request.Reason, now);db.UserNotifications.Add(new(scr.ProjectId,scr.AuthorId,"ReviewChangesRequested",$"Changes requested for {scr.DisplayNumber}",request.Reason,$"scr:{scr.Id}",scr.Id,now)); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPut("/api/impact-dispositions/{id:guid}", async (Guid id, DispositionImpactRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var impact = await db.ImpactDispositions.SingleOrDefaultAsync(x => x.Id == id, ct); if (impact is null) return Results.NotFound();
+            var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleAsync(x => x.Id == impact.CampaignId, ct);
+            if (!await http.HasProjectAccessAsync(db, campaign.ProjectId, ct)) return Results.Forbid();
+            if (campaign.State == ReleaseCampaignState.InReview) return Results.Conflict(new { error = "The release package is frozen while approval is in progress.", code = "release_package_frozen" });
+            if (campaign.State == ReleaseCampaignState.Released) return Results.BadRequest(new { error = "A released campaign is immutable." });
+            try { impact.Disposition(request.State, request.Rationale, http.UserAccount().UserName, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapGet("/api/signatures", async (Guid? artifactId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var actor=http.UserAccount();var query = db.ElectronicSignatures.AsNoTracking().AsQueryable();
+            if(!actor.IsAdministrator){var allowed=actor.Programs.Select(x=>x.ProgramId).ToList();query=query.Where(x=>allowed.Contains(x.ProgramId));}
+            if (artifactId is not null) query = query.Where(x => x.ArtifactId == artifactId);
+            var projected=query.Select(x => new { x.Id, x.ArtifactType, x.ArtifactId, x.ArtifactRevision, x.Action, x.Meaning, x.ContentHash, x.UserName, x.DisplayName, x.SignedAt });
+            if(db.Database.IsSqlite()){var rows=await projected.ToListAsync(ct);return Results.Ok(rows.OrderByDescending(x=>x.SignedAt).Take(500));}
+            return Results.Ok(await projected.OrderByDescending(x => x.SignedAt).Take(500).ToListAsync(ct));
+        });
+    }
+}
