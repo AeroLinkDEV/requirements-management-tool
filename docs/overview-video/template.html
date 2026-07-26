@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AeroLink — an overview</title>
+<!--
+  Layout and player only. All content lives in slides.js — edit that, not this.
+
+  Open this file in a browser to review: it plays through on its own, arrow keys step, space pauses,
+  and ?still=N renders one slide frozen (which is how build.mjs captures frames).
+-->
+<style>
+  :root {
+    --teal: #4ED8C4;
+    --teal-deep: #1F8C7E;
+    --amber: #F5B93B;
+    --text: #EAF2F8;
+    --muted: #94ABBF;
+    --dim: #5E7C96;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #000; overflow: hidden; }
+  body { display: grid; place-items: center; }
+
+  #stage {
+    position: relative; width: 1920px; height: 1080px; flex: none;
+    background:
+      radial-gradient(1100px 640px at 82% 8%, rgba(31,140,126,.18) 0%, transparent 62%),
+      linear-gradient(155deg, #061426 0%, #0a1f38 54%, #050f1d 100%);
+    color: var(--text); font-family: var(--sans); overflow: hidden; transform-origin: center center;
+  }
+  #stage::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(120,180,200,.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120,180,200,.04) 1px, transparent 1px);
+    background-size: 80px 80px;
+    mask-image: radial-gradient(1000px 620px at 50% 40%, #000 0%, transparent 88%);
+  }
+
+  .slide { position: absolute; inset: 0; opacity: 0; visibility: hidden; }
+  .slide.on { opacity: 1; visibility: visible; }
+
+  /* Heading band. Fixed height and clipped, so an over-long title can never bleed onto the screenshot. */
+  .head { position: absolute; left: 118px; top: 58px; width: 1500px; height: 142px; overflow: hidden; }
+  .chapter {
+    font-family: var(--mono); font-size: 18px; letter-spacing: .26em; text-transform: uppercase;
+    color: var(--teal); display: flex; align-items: center; gap: 13px;
+  }
+  .chapter::before { content: ""; width: 30px; height: 2px; background: var(--teal); flex: none; }
+  .head h2 {
+    font-size: 46px; font-weight: 700; letter-spacing: -.022em; line-height: 1.1;
+    margin-top: 13px; max-width: 34ch;
+  }
+
+  .shotwrap {
+    position: absolute; left: 140px; top: 214px; width: 1640px; height: 690px;
+    border-radius: 9px; overflow: hidden; background: #fff;
+    box-shadow: 0 34px 78px rgba(0,0,0,.55), 0 0 0 1px rgba(150,200,220,.20);
+  }
+  .shotwrap img { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+
+  .box {
+    position: absolute; border: 3px solid var(--teal); border-radius: 6px;
+    background: rgba(78,216,196,.09); box-shadow: 0 0 0 3px rgba(78,216,196,.15);
+  }
+  .box.b2 { border-color: var(--amber); background: rgba(245,185,59,.10); box-shadow: 0 0 0 3px rgba(245,185,59,.15); }
+  .box > i {
+    position: absolute; left: -19px; top: -19px; width: 38px; height: 38px; border-radius: 50%;
+    background: var(--teal); color: #05101f; font-style: normal; font-weight: 800; font-size: 21px;
+    display: grid; place-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.4);
+  }
+  .box.b2 > i { background: var(--amber); }
+
+  /* Captions sit below the frame, so a note can never cover the thing it describes. */
+  .caps { position: absolute; left: 140px; top: 930px; width: 1640px; display: grid; grid-template-columns: 1fr 1fr; gap: 46px; }
+  .caps.one { grid-template-columns: 1fr; }
+  .cap { display: grid; grid-template-columns: 40px 1fr; gap: 16px; align-items: start; }
+  .cap > i {
+    width: 34px; height: 34px; border-radius: 50%; background: var(--teal); color: #05101f;
+    font-style: normal; font-weight: 800; font-size: 19px; display: grid; place-items: center; margin-top: 2px;
+  }
+  .cap.b2 > i { background: var(--amber); }
+  .cap b { display: block; font-size: 25px; line-height: 1.22; letter-spacing: -.01em; }
+  .cap span { display: block; margin-top: 6px; font-size: 21px; line-height: 1.35; color: var(--muted); }
+
+  .center { position: absolute; inset: 0; display: grid; align-content: center; padding: 0 150px; }
+  .kicker { font-family: var(--mono); font-size: 20px; letter-spacing: .3em; text-transform: uppercase; color: var(--teal); }
+  h1 { font-size: 106px; font-weight: 800; letter-spacing: -.038em; line-height: .98; margin-top: 20px; }
+  .center h2 { font-size: 58px; font-weight: 700; letter-spacing: -.025em; line-height: 1.08; margin-top: 16px; max-width: 30ch; }
+  .lede { margin-top: 24px; font-size: 32px; line-height: 1.35; color: var(--muted); max-width: 32ch; }
+  .meta { margin-top: 44px; font-family: var(--mono); font-size: 18px; letter-spacing: .13em; text-transform: uppercase; color: var(--dim); }
+
+  .qlist { margin-top: 38px; display: grid; gap: 18px; max-width: 1480px; }
+  .q { display: grid; grid-template-columns: 50px 1fr; gap: 20px; align-items: baseline; }
+  .q i { font-family: var(--mono); font-style: normal; font-size: 20px; color: var(--teal-deep); }
+  .q p { font-size: 31px; line-height: 1.26; letter-spacing: -.012em; }
+  .qfoot { margin-top: 42px; font-size: 25px; line-height: 1.45; color: var(--muted); max-width: 80ch; }
+  .qfoot em { color: var(--text); font-style: normal; }
+
+  .cols { margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 26px 60px; max-width: 1560px; }
+  .col h3 { font-size: 26px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 11px; }
+  .col h3 .yes { color: var(--teal); font-size: 28px; }
+  .col h3 .no { color: #FF9384; font-size: 28px; }
+  .col li { list-style: none; font-size: 22px; line-height: 1.42; color: var(--muted); padding-left: 24px; position: relative; margin-bottom: 10px; }
+  .col li::before { content: ""; position: absolute; left: 0; top: .66em; width: 10px; height: 2px; background: var(--dim); }
+
+  .stats { margin-top: 48px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; max-width: 1540px; }
+  .stat { border-top: 3px solid rgba(78,216,196,.42); padding-top: 18px; }
+  .stat b { display: block; font-size: 64px; font-weight: 700; letter-spacing: -.03em; line-height: 1; }
+  .stat span { display: block; margin-top: 11px; font-size: 21px; line-height: 1.35; color: var(--muted); }
+
+  .ask { margin-top: 38px; border-left: 4px solid var(--teal); padding: 4px 0 4px 26px; max-width: 1320px; }
+  .ask p { font-size: 35px; line-height: 1.28; letter-spacing: -.015em; }
+  .ask p + p { margin-top: 14px; font-size: 26px; color: var(--muted); }
+
+  .hud { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: rgba(255,255,255,.07); }
+  .hud > i { display: block; height: 100%; background: var(--teal); width: 0; }
+  .wm {
+    position: absolute; right: 118px; top: 62px; text-align: right;
+    font-family: var(--mono); font-size: 16px; letter-spacing: .19em; text-transform: uppercase; color: var(--dim);
+  }
+  .wm b { display: block; font-size: 19px; letter-spacing: -.01em; text-transform: none; color: rgba(234,242,248,.66); font-weight: 700; }
+  .wm b s { text-decoration: none; color: var(--teal); }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<script type="module">
+import { slides, branding } from './slides.js';
+
+const SHOT_W = 3200, FRAME_W = 1640, FRAME_TOP = 214, FRAME_BAND = 690;
+const stage = document.getElementById('stage');
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/* One renderer per slide shape. Adding a shape means adding a function here and a `kind` in slides.js. */
+const render = {
+  title: s => `<div class="center">
+      <p class="kicker">${esc(s.kicker)}</p>
+      <h1>${esc(s.name)}</h1>
+      <p class="lede">${esc(s.lede)}</p>
+      <p class="meta">${esc(s.meta)}</p>
+    </div>`,
+
+  questions: s => `<div class="center">
+      <p class="kicker">${esc(s.kicker)}</p>
+      <h2 style="max-width:26ch">${esc(s.title)}</h2>
+      <div class="qlist">${s.items.map((q, n) =>
+        `<div class="q"><i>${String(n + 1).padStart(2, '0')}</i><p>${esc(q)}</p></div>`).join('')}</div>
+      <p class="qfoot">${s.footnote}</p>
+    </div>`,
+
+  twoColumn: s => `<div class="center">
+      <p class="kicker">${esc(s.kicker)}</p>
+      <h2 style="max-width:32ch">${esc(s.title)}</h2>
+      <div class="cols">${[s.left, s.right].map(col => `<div class="col">
+          <h3><span class="${col.tone}">${col.tone === 'yes' ? '✓' : '✕'}</span> ${esc(col.heading)}</h3>
+          <ul>${col.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>
+        </div>`).join('')}</div>
+    </div>`,
+
+  stats: s => `<div class="center">
+      <p class="kicker">${esc(s.kicker)}</p>
+      <h2 style="max-width:26ch">${esc(s.title)}</h2>
+      <div class="stats">${s.items.map(i =>
+        `<div class="stat"><b>${esc(i.value)}</b><span>${esc(i.label)}</span></div>`).join('')}</div>
+      <p class="qfoot" style="margin-top:42px">${s.footnote}</p>
+    </div>`,
+
+  close: s => `<div class="center">
+      <p class="kicker">${esc(s.kicker)}</p>
+      <h2 style="max-width:24ch">${esc(s.title)}</h2>
+      <p class="lede" style="max-width:74ch; font-size:28px">${esc(s.body)}</p>
+      <div class="ask"><p>${esc(s.ask)}</p><p>${esc(s.next)}</p></div>
+    </div>`,
+
+  /* A screenshot slide. Highlights are given in source-image pixels and converted here, so a mark always
+     lands on the pixels it describes rather than on a guessed percentage of the frame. */
+  shot: s => {
+    const [cx, cy, cw] = s.crop;
+    const fh = s.frameHeight || FRAME_BAND;
+    const scale = FRAME_W / cw;
+    const marks = s.marks || [];
+
+    const boxes = marks.map((m, n) => {
+      const [bx, by, bw, bh] = m.box;
+      return `<div class="box${n ? ' b2' : ''}" style="left:${(bx - cx) * scale}px;top:${(by - cy) * scale}px;` +
+             `width:${bw * scale}px;height:${bh * scale}px"><i>${n + 1}</i></div>`;
+    }).join('');
+
+    const caps = marks.map((m, n) =>
+      `<div class="cap${n ? ' b2' : ''}"><i>${n + 1}</i><div><b>${esc(m.title)}</b><span>${esc(m.note)}</span></div></div>`
+    ).join('');
+
+    return `<div class="head">
+        <p class="chapter">${esc(s.chapter)}</p>
+        <h2>${esc(s.title)}</h2>
+      </div>
+      <div class="shotwrap" style="height:${fh}px;top:${FRAME_TOP + (FRAME_BAND - fh) / 2}px">
+        <img src="shots/${s.shot}.png" alt="" style="width:${SHOT_W}px;transform:scale(${scale}) translate(${-cx}px, ${-cy}px)">
+        ${boxes}
+      </div>
+      <div class="caps${marks.length < 2 ? ' one' : ''}">${caps}</div>`;
+  },
+};
+
+stage.innerHTML =
+  slides.map(s => `<section class="slide" data-dur="${s.seconds}">${render[s.kind || 'shot'](s)}</section>`).join('') +
+  `<p class="wm"><b><s>▲</s> ${esc(branding.wordmark)}</b>${esc(branding.footer)}</p>` +
+  `<div class="hud"><i id="bar"></i></div>`;
+
+const fit = () => { stage.style.transform = `scale(${Math.min(innerWidth / 1920, innerHeight / 1080)})`; };
+addEventListener('resize', fit); fit();
+
+const nodes = [...document.querySelectorAll('.slide')];
+const bar = document.getElementById('bar');
+const still = new URLSearchParams(location.search).get('still');
+
+if (still !== null) {
+  // Frozen single slide: how build.mjs captures a frame.
+  nodes.forEach((s, i) => s.classList.toggle('on', i === Number(still)));
+  bar.style.width = ((Number(still) + 1) / nodes.length * 100) + '%';
+  document.documentElement.dataset.ready = '1';
+} else {
+  let index = 0, timer, paused = false;
+  const show = i => {
+    index = i;
+    nodes.forEach((s, n) => s.classList.toggle('on', n === i));
+    const dur = Number(nodes[i].dataset.dur) * 1000;
+    bar.style.transition = 'none';
+    bar.style.width = (i / nodes.length * 100) + '%';
+    requestAnimationFrame(() => {
+      bar.style.transition = `width ${dur}ms linear`;
+      bar.style.width = ((i + 1) / nodes.length * 100) + '%';
+    });
+    clearTimeout(timer);
+    if (!paused) timer = setTimeout(() => { if (i + 1 < nodes.length) show(i + 1); }, dur);
+  };
+  addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') show(Math.min(index + 1, nodes.length - 1));
+    if (e.key === 'ArrowLeft') show(Math.max(index - 1, 0));
+    if (e.key === ' ') { e.preventDefault(); paused = !paused; if (paused) clearTimeout(timer); else show(index); }
+  });
+  addEventListener('click', () => show(Math.min(index + 1, nodes.length - 1)));
+  show(0);
+}
+</script>
+</body>
+</html>
