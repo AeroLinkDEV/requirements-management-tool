@@ -3,6 +3,7 @@ using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Xml;
 using System.Xml.Linq;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Requirements;
@@ -140,11 +141,29 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
     }
     private static List<string[]> ParseXlsx(Stream stream)
     {
-        using var zip=new ZipArchive(stream,ZipArchiveMode.Read,true);if(zip.Entries.Sum(x=>x.Length)>100L*1024*1024)throw new InvalidOperationException("The workbook expands beyond the 100 MB safety limit.");XNamespace ns="http://schemas.openxmlformats.org/spreadsheetml/2006/main";var shared=new List<string>();var sharedEntry=zip.GetEntry("xl/sharedStrings.xml");
-        if(sharedEntry is not null){using var s=sharedEntry.Open();shared=XDocument.Load(s).Descendants(ns+"si").Select(x=>string.Concat(x.Descendants(ns+"t").Select(t=>t.Value))).ToList();}
-        var sheet=zip.GetEntry("xl/worksheets/sheet1.xml")??throw new InvalidOperationException("The workbook must contain a first worksheet.");using var ss=sheet.Open();var doc=XDocument.Load(ss);var output=new List<string[]>();
+        using var zip=new ZipArchive(stream,ZipArchiveMode.Read,true);if(zip.Entries.Sum(x=>x.Length)>WorkbookLimit)throw new InvalidOperationException("The workbook expands beyond the 100 MB safety limit.");XNamespace ns="http://schemas.openxmlformats.org/spreadsheetml/2006/main";var shared=new List<string>();var sharedEntry=zip.GetEntry("xl/sharedStrings.xml");
+        if(sharedEntry is not null){using var s=sharedEntry.Open();shared=ReadWorkbookXml(s).Descendants(ns+"si").Select(x=>string.Concat(x.Descendants(ns+"t").Select(t=>t.Value))).ToList();}
+        var sheet=zip.GetEntry("xl/worksheets/sheet1.xml")??throw new InvalidOperationException("The workbook must contain a first worksheet.");using var ss=sheet.Open();var doc=ReadWorkbookXml(ss);var output=new List<string[]>();
         foreach(var r in doc.Descendants(ns+"row")){var cells=new SortedDictionary<int,string>();foreach(var c in r.Elements(ns+"c")){var reference=(string?)c.Attribute("r")??"A1";var col=ColumnIndex(reference);var raw=c.Element(ns+"v")?.Value??c.Element(ns+"is")?.Value??"";var value=(string?)c.Attribute("t")=="s"&&int.TryParse(raw,out var idx)&&idx<shared.Count?shared[idx]:raw;cells[col]=value;}if(cells.Count>0){var row=new string[cells.Keys.Max()+1];foreach(var cell in cells)row[cell.Key]=cell.Value;output.Add(row);}}return output;
     }
+    private const long WorkbookLimit=100L*1024*1024;
+
+    /// <summary>
+    /// Reads one part of an uploaded workbook.
+    ///
+    /// The size check above reads the uncompressed lengths a zip file declares about itself, and a crafted
+    /// archive can declare a small number and then expand without bound — so on its own that check is a
+    /// control over a number the attacker chose. The ceiling here applies to characters actually read, which
+    /// is what stops the expansion. The resolver is closed off as well: nothing in a spreadsheet somebody
+    /// uploaded should be able to make this server fetch a document.
+    /// </summary>
+    private static XDocument ReadWorkbookXml(Stream part)
+    {
+        var settings=new XmlReaderSettings{DtdProcessing=DtdProcessing.Prohibit,XmlResolver=null,MaxCharactersInDocument=WorkbookLimit,MaxCharactersFromEntities=0};
+        using var reader=XmlReader.Create(part,settings);
+        return XDocument.Load(reader,LoadOptions.None);
+    }
+
     private static int ColumnIndex(string reference){var n=0;foreach(var c in reference.TakeWhile(char.IsLetter))n=n*26+(char.ToUpperInvariant(c)-'A'+1);return n-1;}
 }
 
