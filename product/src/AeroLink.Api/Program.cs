@@ -83,14 +83,39 @@ await using (var scope = app.Services.CreateAsyncScope())
     await scope.ServiceProvider.GetRequiredService<EnterpriseWorkspaceSeeder>().EnsureAllAsync();
 }
 
+// Security headers on every API response.
+//
+// The client is served by whatever reverse proxy the deployment runs, so the headers protecting the HTML
+// document are that proxy's responsibility, recorded in SECURITY_AND_IDENTITY_MODEL.md. These are the ones
+// this process owns — and they matter most on the endpoints that stream stored files, where the content type
+// was chosen by whoever uploaded the bytes.
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    // Never let a browser second-guess the content type of a file somebody uploaded.
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["X-Frame-Options"] = "DENY";
+    headers["Referrer-Policy"] = "no-referrer";
+    // An API returns data, never a document. Nothing it serves should be able to load or run anything.
+    headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; sandbox";
+    await next();
+});
+
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? "";
     var isApi = path.Equals("/api", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase);
+    // This list is the only thing that makes an endpoint reachable without a session. `.AllowAnonymous()`
+    // on the endpoint itself does nothing here, because this middleware runs before endpoint routing and
+    // has no endpoint metadata to read — which is exactly how the unsubscribe link in every notification
+    // email came to return 401 to anybody who clicked it.
     var isAnonymous = path.StartsWith("/health", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/setup/status", StringComparison.OrdinalIgnoreCase)
-        || path.Equals("/api/setup/bootstrap", StringComparison.OrdinalIgnoreCase);
+        || path.Equals("/api/setup/bootstrap", StringComparison.OrdinalIgnoreCase)
+        // Reached from a mail client, where the reader is not authenticated. The link proves it was issued
+        // by this deployment through an HMAC over the recipient, so anonymity here is the design.
+        || path.Equals("/api/notifications/unsubscribe", StringComparison.OrdinalIgnoreCase);
     if (!isApi || isAnonymous) { await next(); return; }
     if(path.StartsWith("/api/v1",StringComparison.OrdinalIgnoreCase))
     {
@@ -1592,6 +1617,17 @@ app.MapPost("/api/content/images",async(HttpRequest request,HttpContext http,Aer
     var contentType=(file.ContentType??"").ToLowerInvariant();
     if(contentType is not("image/png" or "image/jpeg"))return Results.BadRequest(new{error="Inline images must be PNG or JPEG so every generated document can render them."});
     if(file.Length>12*1024*1024)return Results.BadRequest(new{error="Inline images are limited to 12 MB. Attach larger files as controlled attachments instead."});
+    // The declared content type is a claim by whoever uploaded the file. This image is streamed back inline
+    // from this deployment's own origin, so the claim has to be checked against the bytes: a file that says
+    // PNG and contains markup would otherwise be stored, referenced from a requirement, and served to an
+    // approver by us.
+    var signature=new byte[8];
+    await using(var probe=file.OpenReadStream())
+    {
+        var read=await probe.ReadAtLeastAsync(signature,signature.Length,throwOnEndOfStream:false,ct);
+        if(read<signature.Length||!PngImage.IsDeclaredImage(signature,contentType))
+            return Results.BadRequest(new{error="That file is not the image type it claims to be."});
+    }
     var stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,contentType,ct);
     try
     {

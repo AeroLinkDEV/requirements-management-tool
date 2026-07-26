@@ -18,6 +18,22 @@ namespace AeroLink.Infrastructure.Persistence;
 /// </summary>
 public static class PngImage
 {
+    /// <summary>
+    /// Whether these bytes really are the image they claim to be.
+    ///
+    /// The content type on an upload is chosen by whoever sent it, so it is a claim and not a fact. A file
+    /// that says PNG and contains markup would be stored, referenced from an approved requirement, and then
+    /// streamed back to an approver from this deployment's own origin. Checking the signature is what makes
+    /// the stored type true rather than asserted.
+    /// </summary>
+    public static bool IsDeclaredImage(byte[] bytes, string contentType) => contentType.ToLowerInvariant() switch
+    {
+        "image/png" => IsPng(bytes),
+        // JPEG begins with the start-of-image marker and ends with end-of-image.
+        "image/jpeg" => bytes.Length > 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF,
+        _ => false,
+    };
+
     private static ReadOnlySpan<byte> Signature => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
     public static bool IsPng(byte[] bytes) => bytes.Length >= 8 && bytes.AsSpan(0, 8).SequenceEqual(Signature);
