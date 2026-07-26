@@ -149,6 +149,61 @@ workspace query, and the harness is now in the repository so the next person mea
 
 Measured on 4 cores with PostgreSQL, the API, and the harness all sharing them, which flatters nothing.
 
+#### The path to 150 simultaneous users — held until the project is green-lit
+
+**Not started deliberately.** The work below is understood and costed but is not worth doing before the
+programme is approved. It is recorded here so it can be picked up cold, without re-deriving any of it.
+
+**The bottleneck is one query, not the hardware.** `/api/enterprise-requirements/workspace` resolves the
+current revision of each requirement with a correlated aggregate — the greatest-n-per-group anti-pattern:
+
+```csharp
+where revision.Revision == db.RequirementRevisions
+    .Where(r => r.ArtifactId == artifact.Id).Max(r => r.Revision)
+```
+
+and then immediately runs `current.CountAsync(ct)` over it. The count forces that correlated aggregate
+across all fifty thousand requirements on **every page load**, to render a "50 of 50,000" label. The fifty
+rows anybody actually asked for are cheap; the count is not. Indexes are not the problem — both
+`requirements(ProjectId, BaseNumber)` and `requirement_revisions(ArtifactId, Revision)` already exist. It is
+fifty thousand index probes plus a full aggregate, per request, per user.
+
+**In order:**
+
+1. **Confirm before optimising.** `EXPLAIN (ANALYZE, BUFFERS)` on that query at fifty thousand
+   requirements. Stated first because it was got wrong twice already in one evening: the first watermark
+   guard was itself a fifty-thousand-row join and barely moved the number. Infer nothing here; measure.
+2. **Denormalise the current revision.** `CurrentRevisionId` on `RequirementArtifact`, maintained by
+   baseline materialization, which already writes every revision and is therefore the single place that has
+   to change. The correlated aggregate becomes an indexed join. This is the large win — expected to take
+   the page from ~380ms to tens of milliseconds.
+3. **Stop counting the world.** Serve a cached project total when no filter is applied; count only when a
+   search or filter narrows the set. Or return the page first and let the total follow.
+4. **Fix the search path.** `ToLower().Contains(...)` over `Statement` and `Rationale` cannot use an index
+   and sequentially scans every requirement. Needs `pg_trgm` with a GIN index, or a `tsvector` column. This
+   matters as soon as anybody searches a real repository rather than pages through one.
+5. **Re-measure at 150, then tune the ordinary things** — connection pool size, Kestrel limits, output
+   caching. Those matter only once the per-request O(n) work is gone. Sizing hardware around a bad query
+   moves the cliff rather than removing it.
+
+**Estimate.** Steps 2 and 3 are the bulk and are roughly a day with tests; they alone are expected to bring
+the workspace under the 2s p95 target at 150 sessions. Step 4 is a further half-day. Nothing else in the
+product needs work: dashboard, change requests and my-work never exceeded 120ms from 10 to 50 sessions.
+
+**How to re-measure.** Seed and drive from the repository, no external tooling:
+
+```
+dotnet run --project product/tools/AeroLink.Scale -- workspace --profile medium --reset
+dotnet run --project product/tools/AeroLink.Scale -- session-load --users 150 --iterations 8 --api <url>
+```
+
+`session-load` provisions one account per simulated person and signs them all in before any of them works.
+Do not shortcut that: driving 150 sessions from one account measures a scenario nobody has, and collides
+with the sign-in limiter, which is keyed per account on purpose.
+
+**Only then may the claim change.** Until these numbers exist, the documentation says 150 simultaneous
+*database clients* and 50,000 requirements on one workstation, and says nothing about users.
+
 ## Deferred, deliberately
 
 ### 4. Word round-trip
