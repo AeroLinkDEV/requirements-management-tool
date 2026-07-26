@@ -1,24 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { stateLabel } from './presentation'
-import type { FormEvent } from "react";
-import ScrEditor from "./ScrEditor";
-import ScrWorkspace from "./ScrWorkspace";
-import BaselineCenter from "./BaselineCenter";
-import HistoryExplorer from "./HistoryExplorer";
-import VerificationCenter from "./VerificationCenter";
-import ProblemReportCenter from "./ProblemReportCenter";
-import LifecycleExplorer from "./LifecycleExplorer";
-import ReleaseCampaignCenter from "./ReleaseCampaignCenter";
-import LifecycleDecisionRoom from "./LifecycleDecisionRoom";
-import ReleasePlanningCenter from "./ReleasePlanningCenter";
-import RequirementsWorkspace from "./RequirementsWorkspace";
-import EnterpriseControlCenter from "./EnterpriseControlCenter";
-import IntegrationCommandCenter from "./IntegrationCommandCenter";
-import ReviewWorkflowCenter from "./ReviewWorkflowCenter";
+import type { ComponentType, FormEvent } from "react";
 import CommandPalette from "./CommandPalette";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
-import ArtifactRecordPage from "./ArtifactRecordPage";
 import { identityInitials, identityLabel } from "./presentation";
 import { readRoute, routePath } from "./routing";
 import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
@@ -31,6 +16,8 @@ import {
 } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import { PersonAvatar } from "./People";
+// Eager, unlike the other fourteen workspaces. See the note above `lazyView`.
+import EnterpriseControlCenter from "./EnterpriseControlCenter";
 import "./App.css";
 import "./Onboarding.css";
 import "./DashboardInteractions.css";
@@ -40,7 +27,82 @@ import "./ShowcaseRefresh.css";
 import "./ExperiencePolish.css";
 import "./People.css";
 import "./CohesionPass.css";
-import "./ProblemReportCenter.css";
+
+/**
+ * Each workspace is fetched the first time somebody opens it, rather than every time anybody signs in.
+ *
+ * Nobody uses all fifteen of these in one sitting. A test engineer recording determinations never opens the
+ * integration center; an approver reading a change request never opens the requirements explorer. Loading
+ * every one of them up front means the whole product must be parsed and executed before the Command Center
+ * paints, and on the modest workstation this is specified to run on that is CPU time, not bandwidth — which
+ * is why it costs the same on a fast local network as on a slow one.
+ *
+ * A route arriving a moment late would be a poor trade, so `warm` fetches a workspace's code the instant a
+ * navigation entry is hovered or focused, well before the click lands.
+ *
+ * System Operations is deliberately not in this list. Splitting a workspace out also moves its stylesheet,
+ * which then arrives after everything already on the page instead of in its usual place — and CohesionPass.css
+ * corrects the type size on thirty-seven of that surface's selectors by being loaded later, not by being more
+ * specific. Split it and every one of those reverts to 7–9 px production text, which is the defect the
+ * cohesion pass was written to fix. Untangling that means the rules belong to the surface rather than to a
+ * catch-all file, which is on the roadmap; until then this one workspace is worth 40 kB.
+ */
+function lazyView<P>(load: () => Promise<{ default: ComponentType<P> }>) {
+  return Object.assign(lazy(load), { warm: () => { void load(); } });
+}
+
+const ScrEditor = lazyView(() => import("./ScrEditor"));
+const ScrWorkspace = lazyView(() => import("./ScrWorkspace"));
+const BaselineCenter = lazyView(() => import("./BaselineCenter"));
+const HistoryExplorer = lazyView(() => import("./HistoryExplorer"));
+const VerificationCenter = lazyView(() => import("./VerificationCenter"));
+const ProblemReportCenter = lazyView(() => import("./ProblemReportCenter"));
+const LifecycleExplorer = lazyView(() => import("./LifecycleExplorer"));
+const ReleaseCampaignCenter = lazyView(() => import("./ReleaseCampaignCenter"));
+const LifecycleDecisionRoom = lazyView(() => import("./LifecycleDecisionRoom"));
+const ReleasePlanningCenter = lazyView(() => import("./ReleasePlanningCenter"));
+const RequirementsWorkspace = lazyView(() => import("./RequirementsWorkspace"));
+const IntegrationCommandCenter = lazyView(() => import("./IntegrationCommandCenter"));
+const ReviewWorkflowCenter = lazyView(() => import("./ReviewWorkflowCenter"));
+const ArtifactRecordPage = lazyView(() => import("./ArtifactRecordPage"));
+
+/** Which code a navigation target needs, so hovering the entry can start fetching it. */
+const viewCode: Partial<Record<View, { warm: () => void }>> = {
+  scr: ScrWorkspace,
+  createSystemScr: ScrEditor,
+  createSoftwareChange: ScrEditor,
+  baselines: BaselineCenter,
+  history: HistoryExplorer,
+  requirements: RequirementsWorkspace,
+  verification: VerificationCenter,
+  problemReports: ProblemReportCenter,
+  lifecycle: LifecycleExplorer,
+  release: LifecycleDecisionRoom,
+  releaseImpact: LifecycleDecisionRoom,
+  releaseDecision: LifecycleDecisionRoom,
+  releaseOperations: ReleaseCampaignCenter,
+  planning: ReleasePlanningCenter,
+  reviewWorkflows: ReviewWorkflowCenter,
+  integrations: IntegrationCommandCenter,
+  artifact: ArtifactRecordPage,
+};
+
+/**
+ * Shown while a workspace's code is on its way. It holds the shape of a page rather than announcing a wait,
+ * because on a local network this is visible for a few milliseconds and a spinner appearing and vanishing
+ * reads as a fault. The label is for anybody who cannot see the shape.
+ */
+function WorkspaceLoading() {
+  // A <main>, because the density rules frame every workspace page by that element rather than by name, and
+  // a fallback that skipped the frame would shift the page as the real workspace arrived. `aria-busy` rather
+  // than role="status", so the landmark stays a landmark.
+  return (
+    <main className="workspaceLoading" aria-busy="true" aria-label="Opening workspace">
+      <div className="dashboardSkeleton"><span className="skeletonLine medium"/><i className="skeletonMetric"/><span className="skeletonLine short"/></div>
+      <div className="dashboardSkeleton"><span className="skeletonLine"/><span className="skeletonLine medium"/><span className="skeletonLine short"/></div>
+    </main>
+  );
+}
 
 type Scr = {
   id: string;
@@ -96,7 +158,10 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   const release = project?.releases.find(x => x.id === selectedReleaseId) ?? project?.releases.at(-1);
   const item = (label:string,target:View,icon:string,area:Discipline="system",accessibleLabel=label) => {
     const activeItem = (view===target || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area;
-    return <a href={context ? routePath(context,target,area) : "#"} className={activeItem?"active":""} aria-label={accessibleLabel} aria-current={activeItem?"page":undefined} onClick={event=>{event.preventDefault();onNavigate(target,area)}}>
+    // Fetched on hover or keyboard focus, so the workspace's code is usually already here by the time the
+    // click is. Both events, because a keyboard user never hovers anything.
+    const warm = () => viewCode[target]?.warm();
+    return <a href={context ? routePath(context,target,area) : "#"} className={activeItem?"active":""} aria-label={accessibleLabel} aria-current={activeItem?"page":undefined} onPointerEnter={warm} onFocus={warm} onClick={event=>{event.preventDefault();onNavigate(target,area)}}>
       <i aria-hidden="true">{icon}</i><span>{label}</span>
     </a>;
   };
@@ -341,7 +406,7 @@ function App() {
   const experience=<ExperienceControls open={displayOpen} density={density} motion={motion} onDensityChange={next=>{setDensity(next);setToast(`${next==='compact'?'Compact':'Comfortable'} density applied`)}} onMotionChange={next=>{setMotion(next);setToast(`${next==='reduced'?'Reduced':'Purposeful'} motion applied`)}} onClose={()=>setDisplayOpen(false)}/>;
   const feedback=toast?<div className="experienceToast" role="status" aria-live="polite"><span>✓</span><b>{toast}</b></div>:null;
   const overlays=<>{palette}{experience}{feedback}</>;
-  const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{contextBar}<div className="workspaceView" key={`${view}-${discipline}`}>{content}</div></div>{overlays}</div>;
+  const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{contextBar}<div className="workspaceView" key={`${view}-${discipline}`}><Suspense fallback={<WorkspaceLoading/>}>{content}</Suspense></div></div>{overlays}</div>;
   if(view==="notFound")return inShell(<main className="artifactState"><div><span>?</span><h1>Page not found</h1><p>This AeroLink route is not recognized. Use quick navigation to find an authorized workspace or artifact.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
   if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} onBack={()=>navigate("dashboard")} onOpen={(kind,id)=>{if(kind==="change-request")navigate("scr","system",id);else if(kind==="requirement")navigate("requirements","system",id);else navigate("artifact","system",id,kind)}}/>);
   if ((view === "createSystemScr" || view === "createSoftwareChange") && project && release)

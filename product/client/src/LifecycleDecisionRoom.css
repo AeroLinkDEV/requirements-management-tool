@@ -82,7 +82,10 @@
 .comparisonCard dt { color: #50647b; font-size: 13px; }
 .comparisonCard dd { order: -1; margin: 0 10px 0 0; color: #0e2948; font-weight: 900; font-size: 20px; }
 .comparisonCard > button { display: block; margin: 12px auto 0; }
-.comparisonPending { margin: -2px 18px 10px; color: #73869a; font-size: 12px; line-height: 1.35; text-align: center; }
+/* --ink-500 rather than a grey of its own: this sentence sits at 12px on white, where #73869a measured
+   3.75:1 and WCAG 2.2 AA asks for 4.5:1. It only ever appears while a candidate baseline is unmaterialized,
+   which is why the contrast audit had not caught it. */
+.comparisonPending { margin: -2px 18px 10px; color: var(--ink-500); font-size: 12px; line-height: 1.35; text-align: center; }
 .healthStrip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
 .healthStrip article { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 17px 18px; border: 1px solid var(--dr-line); border-radius: 12px; background: #fff; }
 .healthStrip span { color: #53687f; font-size: 13px; }
