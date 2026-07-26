@@ -6,10 +6,16 @@ import {
   toPlainText,
   writeBlocks,
   type RichBlock,
-} from "./richContent";
+} from "./richContentModel";
 import "./RichContent.css";
 
-/** The rendering and editing surfaces for authored content. The model itself is in ./richContent. */
+/**
+ * The rendering and editing surfaces for authored content. The model itself is in ./richContentModel.
+ *
+ * That module is not named `richContent` — differing from this file only in case — because Windows and macOS
+ * resolve both spellings to one file. TypeScript then collapses the two modules and reports every export of
+ * whichever it discarded as missing, so the client compiled on Linux and nowhere else.
+ */
 
 export function RichContentView({ api, value, empty }: { api: string; value: string; empty?: string }) {
   const blocks = useMemo(() => readBlocks(value), [value]);
