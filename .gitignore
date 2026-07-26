@@ -18,3 +18,9 @@ rendered/
 *.db-shm
 *.db-wal
 product/.local/
+
+# Rendered output of the overview video. docs/overview-video carries its own rule for this, but a nested
+# rule only applies while that directory is checked out — from any other branch the leftover build folder,
+# 24 MB of frames and an MP4, is reported as untracked. Generated output should be ignored from wherever
+# you happen to be standing.
+docs/overview-video/build/
