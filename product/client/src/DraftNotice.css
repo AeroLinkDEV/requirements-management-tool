@@ -1,0 +1,32 @@
+/* Draft state and draft recovery. */
+
+.draftState {
+  display: inline-flex; align-items: center; gap: 7px;
+  /* 26px clears the 24px minimum target size WCAG 2.2 SC 2.5.8 requires in both densities; this is a
+     status, not a control, but it sits in rows of controls and should not shrink below them. */
+  min-height: 26px; padding: 0 10px;
+  border: 1px solid #dfe7ee; border-radius: 999px; background: white;
+  color: #4b5f74; font: 600 12px/1 "DM Sans", sans-serif; white-space: nowrap;
+}
+.draftState i { width: 8px; height: 8px; border-radius: 50%; background: #a8b6c4; flex: none; }
+.draftState.saving i { background: #c98a00; }
+.draftState.saved i { background: #168578; }
+.draftState.error i, .draftState.conflict i { background: #a4262c; }
+.draftState.error, .draftState.conflict { border-color: #f0c2c4; color: #a4262c; }
+.draftState small { color: #7f8d9c; font-weight: 400; font-size: 11px; }
+
+.draftRestore {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 12px 15px; margin-bottom: 14px;
+  border: 1px solid #f0d9a8; border-radius: 10px; background: #fdf8ec;
+}
+.draftRestore b { display: block; color: #1c3044; font-size: 14px; }
+.draftRestore span { color: #6b5a2f; font-size: 13px; }
+.draftRestoreActions { display: flex; gap: 8px; }
+.draftRestoreActions button {
+  min-height: var(--control-height-sm, 36px); padding: 0 14px;
+  border: 1px solid #ccd7e0; border-radius: 8px; background: white;
+  color: #4b5f74; font: 600 13px/1 "DM Sans", sans-serif; cursor: pointer;
+}
+.draftRestoreActions button.primary { border-color: #168578; background: #168578; color: white; }
+.draftRestoreActions button:hover { border-color: #369384; }

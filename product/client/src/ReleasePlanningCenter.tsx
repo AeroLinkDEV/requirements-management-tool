@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { AutosaveState, DraftRestore } from "./DraftNotice";
+import { useFormDraft } from "./autosave";
 import "./ReleasePlanningCenter.css";
 
 type Release = {
@@ -112,6 +114,11 @@ export default function ReleasePlanningCenter({
     (data?.changes ?? [])
       .filter((x) => x.releaseId === releaseId && (!state || x.state === state))
       .reduce((n, x) => n + x.count, 0);
+  const releaseForm = useRef<HTMLFormElement>(null);
+  const campaignForm = useRef<HTMLFormElement>(null);
+  const releaseDraft = useFormDraft(releaseForm, `aerolink:new-release:${projectId}`);
+  const campaignDraft = useFormDraft(campaignForm, `aerolink:new-campaign:${projectId}`);
+
   const createRelease = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -134,6 +141,7 @@ export default function ReleasePlanningCenter({
       return;
     }
     const created = await response.json();
+    releaseDraft.clear();
     await onChanged();
     await load();
     onSelectRelease(created.id);
@@ -163,6 +171,7 @@ export default function ReleasePlanningCenter({
       setBusy(false);
       return;
     }
+    campaignDraft.clear();
     onSelectRelease(campaignBaseline.releaseId);
     await load();
     setCampaignBaseline(undefined);
@@ -331,9 +340,15 @@ export default function ReleasePlanningCenter({
       </section>
       {creating && (
         <div className="planningModal">
-          <form onSubmit={createRelease}>
+          <form onSubmit={createRelease} ref={releaseForm}>
             <p className="eyebrow">NEW IN-WORK VERSION</p>
             <h2>Plan successor release</h2>
+            {releaseDraft.offered && (
+              <DraftRestore savedAt={releaseDraft.offered.savedAt}
+                description="An unfinished release plan was left in this browser. Nothing was created."
+                onRestore={releaseDraft.apply} onDiscard={releaseDraft.discard} />
+            )}
+            <AutosaveState status={releaseDraft.status} savedAt={releaseDraft.savedAt} where="this browser" />
             <label>
               New version
               <input
@@ -376,9 +391,15 @@ export default function ReleasePlanningCenter({
       )}
       {campaignBaseline && (
         <div className="planningModal">
-          <form onSubmit={createCampaign}>
+          <form onSubmit={createCampaign} ref={campaignForm}>
             <p className="eyebrow">FORMAL RELEASE CONTROL</p>
             <h2>Create release campaign</h2>
+            {campaignDraft.offered && (
+              <DraftRestore savedAt={campaignDraft.offered.savedAt}
+                description="An unfinished campaign was left in this browser. Nothing was created."
+                onRestore={campaignDraft.apply} onDiscard={campaignDraft.discard} />
+            )}
+            <AutosaveState status={campaignDraft.status} savedAt={campaignDraft.savedAt} where="this browser" />
             <p>
               {campaignBaseline.displayNumber} · {campaignBaseline.name}
             </p>

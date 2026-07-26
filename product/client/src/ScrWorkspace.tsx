@@ -13,6 +13,7 @@ import PersonPicker from "./PersonPicker";
 import ControlledAttachments from "./ControlledAttachments";
 import ScrJiraLink from "./ScrJiraLink";
 import { RichCaseField, RichContentView } from "./RichContent";
+import { useDebouncedSave } from "./autosave";
 import { emptyRichContent, fromPlainText, toPlainText } from "./richContent";
 import "./ScrWorkspace.css";
 import "./ReviewMode.css";
@@ -301,6 +302,7 @@ export default function ScrWorkspace({
     draftRef.current = JSON.stringify({ ...draft, requirementChanges: requirements });
   }, [draft, requirements]);
 
+
   const beginEdit = async () => {
     setBusy(true);
     setError("");
@@ -399,9 +401,18 @@ export default function ScrWorkspace({
     }
   }, [api]);
 
+  // Saved a second after typing stops rather than on a fixed timer. A timer either fires on an idle form,
+  // wasting a write, or leaves the last seconds of typing unprotected; a pause after the last keystroke is
+  // what a person means by "saved as I go". The ten-second ceiling covers writing a long paragraph without
+  // pausing, which is the case somebody actually loses work in.
+  useDebouncedSave(draftRef.current, async () => { await autosave(); }, {
+    delaySeconds: 1,
+    maximumSeconds: 10,
+    enabled: mode === "edit",
+  });
+
   useEffect(() => {
     if (mode !== "edit" || !lockRef.current) return;
-    const saveTimer = window.setInterval(() => void autosave(), 2500);
     const heartbeat = window.setInterval(async () => {
       const current = lockRef.current;
       if (!current || savingRef.current) return;
@@ -429,7 +440,6 @@ export default function ScrWorkspace({
       }
     }, 60_000);
     return () => {
-      window.clearInterval(saveTimer);
       window.clearInterval(heartbeat);
     };
   }, [api, autosave, mode]);

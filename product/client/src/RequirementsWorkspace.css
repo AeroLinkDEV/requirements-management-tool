@@ -1203,3 +1203,6 @@
   line-height: 1;
 }
 .inspectorClose:hover { background: rgb(255 255 255 / 16%); }
+
+/* Draft state sits with the action it protects. */
+.commentFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }

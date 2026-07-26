@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { AuthUser } from "./IdentityCenter";
 import ControlledRequirementEditor from "./ControlledRequirementEditor";
@@ -9,6 +9,8 @@ import type {
   RequirementLevel,
 } from "./ControlledRequirementEditor";
 import { RichCaseField } from "./RichContent";
+import { AutosaveState, DraftRestore } from "./DraftNotice";
+import { useLocalDraft } from "./autosave";
 import { fromPlainText, toPlainText } from "./richContent";
 import "./ScrEditor.css";
 import "./ScrEditorEnhancements.css";
@@ -125,37 +127,41 @@ export default function ScrEditor({
   const defaultLevel: RequirementLevel = scope === "System" ? "System" : "HighLevel";
   const storageKey = `aerolink:new-${scope.toLowerCase()}-change:${projectId}:${releaseId}`;
   const seededSource = useRef("");
-  const restored = useMemo<SavedDraft | undefined>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(storageKey) || "") as SavedDraft;
-      return {
-        ...saved,
-        changes: (saved.changes || []).map((item) => normalizeProposal(item, defaultLevel)),
-      };
-    } catch {
-      return undefined;
-    }
-  }, [defaultLevel, storageKey]);
   const [context, setContext] = useState<AuthoringContext>();
-  const [title, setTitle] = useState(restored?.title || "");
-  const [problemRich, setProblemRich] = useState(restored?.problemRich || fromPlainText(restored?.problem || ""));
-  const [analysisRich, setAnalysisRich] = useState(restored?.analysisRich || fromPlainText(restored?.analysis || ""));
-  const [solutionRich, setSolutionRich] = useState(restored?.solutionRich || fromPlainText(restored?.solution || ""));
+  // Nothing is seeded from a stored draft. It is offered below, and applied only if the author says so.
+  const [title, setTitle] = useState("");
+  const [problemRich, setProblemRich] = useState(fromPlainText(""));
+  const [analysisRich, setAnalysisRich] = useState(fromPlainText(""));
+  const [solutionRich, setSolutionRich] = useState(fromPlainText(""));
   // The plain form is derived, never typed alongside. Keeping two independently editable copies of the
   // change case is how a document ends up saying something its record does not.
   const problem = toPlainText(problemRich);
   const analysis = toPlainText(analysisRich);
   const solution = toPlainText(solutionRich);
   const [changes, setChanges] = useState<ControlledRequirementDraft[]>(
-    restored?.changes?.length
-      ? restored.changes
-      : sourceRequirementId
-        ? []
-        : [createProposal(defaultLevel, "Introduce")],
+    sourceRequirementId ? [] : [createProposal(defaultLevel, "Introduce")],
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [savedAt, setSavedAt] = useState<Date>();
+
+  // Held in this browser, because the change request does not exist on the server yet and reserving one
+  // would consume an identifier for something nobody submitted.
+  const draft = useLocalDraft<SavedDraft>(
+    storageKey,
+    { title, problem, analysis, solution, changes, problemRich, analysisRich, solutionRich },
+    { isEmpty: (value) => !value.title.trim() && !value.problem.trim() && !value.analysis.trim() && !value.solution.trim() },
+  );
+
+  const applyDraft = () => {
+    const saved = draft.offered?.value;
+    draft.restore();
+    if (!saved) return;
+    setTitle(saved.title || "");
+    setProblemRich(saved.problemRich || fromPlainText(saved.problem || ""));
+    setAnalysisRich(saved.analysisRich || fromPlainText(saved.analysis || ""));
+    setSolutionRich(saved.solutionRich || fromPlainText(saved.solution || ""));
+    if (saved.changes?.length) setChanges(saved.changes.map((item) => normalizeProposal(item, defaultLevel)));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -227,17 +233,6 @@ export default function ScrEditor({
       });
     });
   }, [context]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      localStorage.setItem(
-        storageKey,
-        JSON.stringify({ title, problem, analysis, solution, changes, problemRich, analysisRich, solutionRich } satisfies SavedDraft),
-      );
-      setSavedAt(new Date());
-    }, 450);
-    return () => window.clearTimeout(timer);
-  }, [analysis, analysisRich, changes, problem, problemRich, solution, solutionRich, storageKey, title]);
 
   const nextIdentifier = (level: RequirementLevel) => {
     const prefix = prefixFor(level);
@@ -313,7 +308,8 @@ export default function ScrEditor({
         throw new Error(body.error || `Unable to save the ${abbreviation} Draft.`);
       }
       const created = (await response.json()) as { id: string };
-      localStorage.removeItem(storageKey);
+      // The record exists now, so the browser copy has nothing left to protect.
+      draft.clear();
       onSaved(created.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : `Unable to save the ${abbreviation} Draft.`);
@@ -342,11 +338,18 @@ export default function ScrEditor({
         </div>
         <div className="editorStatus">
           <span className="draftPill">DRAFT</span>
-          <small>
-            {savedAt ? `Recovery copy saved ${savedAt.toLocaleTimeString()}` : "Browser recovery ready"}
-          </small>
+          <AutosaveState status={draft.status} savedAt={draft.savedAt} where="this browser" />
         </div>
       </header>
+
+      {draft.offered && (
+        <DraftRestore
+          savedAt={draft.offered.savedAt}
+          description={`An unfinished ${abbreviation} was left in this browser. Nothing was submitted.`}
+          onRestore={applyDraft}
+          onDiscard={draft.discard}
+        />
+      )}
 
       <RequirementsImportPanel
         api={api}
@@ -354,7 +357,7 @@ export default function ScrEditor({
         releaseId={releaseId}
         scope={scope}
         onCreated={(id) => {
-          localStorage.removeItem(storageKey);
+          draft.clear();
           onSaved(id);
         }}
       />

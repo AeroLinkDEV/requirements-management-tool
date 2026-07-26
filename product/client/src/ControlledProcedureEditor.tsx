@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
+import { useDebouncedSave } from './autosave'
 
 type Procedure = { revisionId: string; displayNumber: string }
 type Session = { id: string; version: number; expiresAt: string; draftJson: string }
@@ -91,9 +92,12 @@ export default function ControlledProcedureEditor({ api, procedure, onClose, onC
     finally { savingRef.current = false }
   }, [api])
 
+  // A second after typing stops, rather than on a fixed timer: a timer either fires on an idle form or
+  // leaves the last seconds of typing unprotected. The ceiling covers writing without pausing.
+  useDebouncedSave(draftRef.current, async () => { await autosave() }, { delaySeconds: 1, maximumSeconds: 10, enabled: !!session })
+
   useEffect(() => {
     if (!session?.id) return
-    const saveTimer = window.setInterval(() => { void autosave() }, 2500)
     const heartbeat = window.setInterval(() => {
       const current = sessionRef.current
       if (!current || savingRef.current) return
@@ -107,7 +111,7 @@ export default function ControlledProcedureEditor({ api, procedure, onClose, onC
         sessionRef.current = next; setSession(next)
       })
     }, 60_000)
-    return () => { window.clearInterval(saveTimer); window.clearInterval(heartbeat) }
+    return () => { window.clearInterval(heartbeat) }
   }, [api, autosave, session?.id])
 
   const discard = async () => {
