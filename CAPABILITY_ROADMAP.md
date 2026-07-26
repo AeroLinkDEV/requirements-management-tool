@@ -245,6 +245,37 @@ the type size on thirty-seven of that surface's selectors by being loaded later,
 Splitting it reverts all thirty-seven to 7–9 px production text, which is the defect the cohesion pass was
 written to fix. Worth 40 kB until those rules belong to the surface instead of to a catch-all file.
 
+## The API composition root — **split**
+
+`Program.cs` was 2,019 lines: the whole composition root and 154 endpoints in one file. Both questions people
+actually bring to it — *what does startup do?* and *where is this route handled?* — could only be answered by
+reading all of it.
+
+It is now 197 lines and holds only the order things happen in: services, the middleware every request passes
+through, then the route table. The 154 endpoints moved into nine modules named after the part of the lifecycle
+they serve, in the same shape as the thirteen modules that had already been split out:
+
+| module | endpoints |
+|---|---|
+| `RequirementsEndpoints` | 32 |
+| `EditSessionEndpoints` | 19 |
+| `ChangeRequestEndpoints` | 18 |
+| `BaselineEndpoints` | 17 |
+| `ReleaseCampaignEndpoints` | 15 |
+| `WorkspaceEndpoints` | 14 |
+| `AuthEndpoints` | 13 |
+| `VerificationEndpoints` | 13 |
+| `AdministrationEndpoints` | 9 |
+
+The 65 request records moved to `ApiContracts.cs`, and the helpers that more than one module needs — reading
+the actor off a request, allocating the next controlled identifier, and `ApiMap` — to `ApiSupport.cs`. `ApiMap`
+is why those are shared rather than private: a change request rendered by the change-request endpoints, by the
+baseline endpoints, and by search has to be the same object in all three.
+
+Nothing was rewritten; every handler moved verbatim, and the move was checked by comparing the route table
+before and after — 154 routes, none missing, none duplicated. The one stray endpoint, `/api/quality/
+metric-contracts`, went into the module that already owned the `/api/quality` group.
+
 ## Deferred, deliberately
 
 ### 4. Word round-trip

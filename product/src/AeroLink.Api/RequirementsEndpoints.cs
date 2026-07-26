@@ -1,0 +1,314 @@
+using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
+using AeroLink.Domain.Contracts;
+using AeroLink.Domain.Identity;
+using AeroLink.Domain.Requirements;
+using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+
+namespace AeroLink.Api;
+
+/// <summary>
+/// The requirements workspace: schemas, specifications, saved views, comments, imports, and the
+/// bulk operations a team of engineers spends its day in.
+///
+/// Requirements are read-only here by design. Every change to one arrives through a controlled change
+/// request, so these endpoints author the structure and the discussion around requirements rather than the
+/// requirements themselves.
+/// </summary>
+public static class RequirementsEndpoints
+{
+    public static void MapRequirementsEndpoints(this WebApplication app)
+    {
+        app.MapGet("/api/requirements", async (Guid projectId, string? search, Guid? releaseId, Guid? baselineId, string? scope, bool? includeRetired, int? page, int? pageSize, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var resolvedPage=Math.Max(1,page??1);var resolvedPageSize=Math.Clamp(pageSize??50,1,200);
+            var source = from artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId)
+                         join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId
+                         join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceScrId equals scr.Id
+                         select new { artifact, revision, scr };
+            if(string.Equals(scope,"System",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.artifact.Level==RequirementLevel.System);
+            else if(string.Equals(scope,"Software",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.artifact.Level==RequirementLevel.HighLevel||x.artifact.Level==RequirementLevel.LowLevel);
+            if (baselineId is not null) source = source.Where(x => db.BaselineRequirements.Any(m => m.BaselineId == baselineId && m.RevisionId == x.revision.Id));
+            else if (includeRetired != true) source = source.Where(x => x.revision.State == AeroLink.Domain.Requirements.RequirementRevisionState.Active);
+            if (releaseId is not null) source = source.Where(x => db.CandidateBaselines.Any(b => b.Id == x.revision.EffectiveBaselineId && b.ReleaseId == releaseId));
+            if (!string.IsNullOrWhiteSpace(search)) { var q = search.Trim().ToLower(); source = source.Where(x => x.artifact.BaseNumber.ToLower().Contains(q) || x.revision.Statement.ToLower().Contains(q) || x.revision.Rationale.ToLower().Contains(q)); }
+            var total = await source.CountAsync(ct);
+            var items = await source.OrderBy(x => x.artifact.BaseNumber).ThenByDescending(x => x.revision.Revision).Skip((resolvedPage - 1) * resolvedPageSize).Take(resolvedPageSize)
+                .Select(x => new { x.artifact.Id, x.artifact.BaseNumber, level = x.artifact.Level.ToString(), revisionId = x.revision.Id, x.revision.Revision,
+                    displayNumber = x.artifact.BaseNumber + "." + (x.revision.Revision < 10 ? "0" : "") + x.revision.Revision, x.revision.Statement, x.revision.Rationale,
+                    x.revision.VerificationMethod, state = x.revision.State.ToString(), x.revision.EffectiveBaselineId, sourceScrId = x.scr.Id,
+                    sourceScr = x.scr.BaseNumber + "." + (x.scr.Revision < 10 ? "0" : "") + x.scr.Revision, x.revision.CreatedAt }).ToListAsync(ct);
+            return Results.Ok(new { page=resolvedPage, pageSize=resolvedPageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)resolvedPageSize), items });
+        });
+
+        app.MapGet("/api/requirements/{id:guid}/history", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var artifact = await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (artifact is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, artifact.ProjectId, ct)) return Results.Forbid();
+            var revisions = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x => x.ArtifactId == id)
+                                   join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceScrId equals scr.Id
+                                   join baseline in db.CandidateBaselines.AsNoTracking() on revision.EffectiveBaselineId equals baseline.Id
+                                   orderby revision.Revision descending select new { revision.Id, revision.Revision, displayNumber = artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
+                                       revision.Statement, revision.Rationale, revision.VerificationMethod, state = revision.State.ToString(), revision.CreatedAt,
+                                       sourceScrId = scr.Id, sourceScr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision,
+                                       baselineId = baseline.Id, baseline = baseline.BaseNumber + "." + (baseline.Revision < 10 ? "0" : "") + baseline.Revision }).ToListAsync(ct);
+            return Results.Ok(new { artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(), revisions });
+        });
+
+        // Enterprise Requirements Workspace: configurable schemas, structured specifications,
+        // collaboration, saved views, governed bulk operations, redlines, and onboarding.
+        app.MapGet("/api/enterprise-requirements/workspace", async (Guid projectId, Guid? specificationId, string? search, string? level, string? verification, string? tag,string? state,string? owner,string? sourceScr,Guid? baselineId,bool? openComments,string? sort,int page, int pageSize,
+            HttpContext http, AeroLinkDbContext db, EnterpriseRequirementsService enterprise, CancellationToken ct) =>
+        {
+            if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
+            var timer=Stopwatch.StartNew();
+            await enterprise.SynchronizeProjectAsync(projectId,http.UserAccount().UserName,ct);page=Math.Max(1,page==0?1:page);pageSize=Math.Clamp(pageSize==0?100:pageSize,1,250);
+            var artifacts=db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId);
+            if(string.Equals(level,"Software",StringComparison.OrdinalIgnoreCase))artifacts=artifacts.Where(x=>x.Level==RequirementLevel.HighLevel||x.Level==RequirementLevel.LowLevel);
+            else if(!string.IsNullOrWhiteSpace(level)&&Enum.TryParse<RequirementLevel>(level,true,out var parsedLevel))artifacts=artifacts.Where(x=>x.Level==parsedLevel);
+            if(specificationId is not null)artifacts=artifacts.Where(x=>db.SpecificationNodes.Any(n=>n.SpecificationId==specificationId&&n.RequirementArtifactId==x.Id));
+            var current=from artifact in artifacts
+                        join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId
+                        where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)
+                        select new{artifact,revision};
+            if(!string.IsNullOrWhiteSpace(search)){var q=search.Trim().ToLower();current=current.Where(x=>x.artifact.BaseNumber.ToLower().Contains(q)||x.revision.Statement.ToLower().Contains(q)||x.revision.Rationale.ToLower().Contains(q));}
+            if(!string.IsNullOrWhiteSpace(verification)){var v=verification.Trim().ToLower();current=current.Where(x=>x.revision.VerificationMethod.ToLower()==v);}
+            if(!string.IsNullOrWhiteSpace(tag)){var t=tag.Trim().ToLower();current=current.Where(x=>db.RequirementRevisionProfiles.Any(p=>p.RevisionId==x.revision.Id&&p.TagsJson.ToLower().Contains(t)));}
+            if(!string.IsNullOrWhiteSpace(state)&&Enum.TryParse<RequirementRevisionState>(state,true,out var parsedState))current=current.Where(x=>x.revision.State==parsedState);
+            if(!string.IsNullOrWhiteSpace(owner)){var o=owner.Trim().ToLower();current=current.Where(x=>db.RequirementRevisionProfiles.Any(p=>p.RevisionId==x.revision.Id&&p.AttributesJson.ToLower().Contains(o)));}
+            if(!string.IsNullOrWhiteSpace(sourceScr)){var s=sourceScr.Trim().ToLower();current=current.Where(x=>db.SystemChangeRequests.Any(scr=>scr.Id==x.revision.SourceScrId&&(scr.BaseNumber.ToLower().Contains(s)||scr.Title.ToLower().Contains(s))));}
+            if(baselineId is not null)current=current.Where(x=>db.BaselineRequirements.Any(b=>b.BaselineId==baselineId&&b.RevisionId==x.revision.Id));
+            if(openComments==true)current=current.Where(x=>db.ArtifactComments.Any(c=>c.ArtifactId==x.artifact.Id&&c.ArtifactType=="Requirement"&&c.State==CollaborationState.Open));
+            var ordered=sort?.ToLowerInvariant() switch{"updated" when !db.Database.IsSqlite()=>current.OrderByDescending(x=>x.revision.CreatedAt).ThenBy(x=>x.artifact.BaseNumber),"verification"=>current.OrderBy(x=>x.revision.VerificationMethod).ThenBy(x=>x.artifact.BaseNumber),"state"=>current.OrderBy(x=>x.revision.State).ThenBy(x=>x.artifact.BaseNumber),_=>current.OrderBy(x=>x.artifact.BaseNumber)};
+            var total=await current.CountAsync(ct);var rows=await ordered.Skip((page-1)*pageSize).Take(pageSize)
+                .Select(x=>new{x.artifact.Id,x.artifact.BaseNumber,level=x.artifact.Level.ToString(),revisionId=x.revision.Id,x.revision.Revision,x.revision.Statement,x.revision.Rationale,x.revision.VerificationMethod,state=x.revision.State.ToString(),x.revision.SourceScrId,x.revision.CreatedAt}).ToListAsync(ct);
+            var revisionIds=rows.Select(x=>x.revisionId).ToList();var profiles=await db.RequirementRevisionProfiles.AsNoTracking().Where(x=>revisionIds.Contains(x.RevisionId)).ToDictionaryAsync(x=>x.RevisionId,ct);
+            var commentCounts=await db.ArtifactComments.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.ArtifactType=="Requirement"&&rows.Select(r=>r.Id).Contains(x.ArtifactId)).GroupBy(x=>x.ArtifactId).Select(x=>new{x.Key,Count=x.Count(),Open=x.Count(c=>c.State==CollaborationState.Open)}).ToDictionaryAsync(x=>x.Key,ct);
+            var schemas=await db.ArtifactSchemas.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.IsActive).OrderBy(x=>x.Name).Select(x=>new{x.Id,x.Key,x.Name,x.AppliesTo,x.Description,x.Version,fields=x.Fields.OrderBy(f=>f.SortOrder).Select(f=>new{f.Id,f.Key,f.Label,type=f.Type.ToString(),f.IsRequired,f.SortOrder,f.OptionsJson})}).ToListAsync(ct);
+            var specificationRows=await db.RequirementSpecifications.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderBy(x=>x.Level).Select(x=>new{x.Id,x.DocumentNumber,x.Title,x.Level,x.Description,nodeCount=db.SpecificationNodes.Count(n=>n.SpecificationId==x.Id&&n.Type==SpecificationNodeType.Requirement)}).ToListAsync(ct);
+            var specificationIds=specificationRows.Select(x=>x.Id).ToList();var sectionRows=await db.SpecificationNodes.AsNoTracking().Where(n=>specificationIds.Contains(n.SpecificationId)&&n.Type==SpecificationNodeType.Section).OrderBy(n=>n.Position).Select(n=>new{n.Id,n.SpecificationId,n.Heading,n.Position,count=db.SpecificationNodes.Count(c=>c.ParentId==n.Id)}).ToListAsync(ct);
+            var specifications=specificationRows.Select(x=>new{x.Id,x.DocumentNumber,x.Title,x.Level,x.Description,x.nodeCount,sections=sectionRows.Where(s=>s.SpecificationId==x.Id).Select(s=>new{s.Id,s.Heading,s.Position,s.count})}).ToList();
+            var views=await db.SavedRequirementViews.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.OwnerId==http.UserAccount().Id||x.IsShared)).OrderBy(x=>x.Name).Select(x=>new{x.Id,x.Name,x.QueryJson,x.ColumnsJson,x.IsShared,owned=x.OwnerId==http.UserAccount().Id}).ToListAsync(ct);
+            timer.Stop();return Results.Ok(new{page,pageSize,totalCount=total,totalPages=(int)Math.Ceiling(total/(double)pageSize),queryElapsedMs=timer.ElapsedMilliseconds,schemas,specifications,views,items=rows.Select(x=>{profiles.TryGetValue(x.revisionId,out var profile);commentCounts.TryGetValue(x.Id,out var comments);return new{x.Id,x.BaseNumber,displayNumber=$"{x.BaseNumber}.{x.Revision:D2}",x.level,x.revisionId,x.Revision,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceScrId,x.CreatedAt,richText=profile?.RichText??x.Statement,attributesJson=profile?.AttributesJson??"{}",tagsJson=profile?.TagsJson??"[]",commentCount=comments?.Count??0,openCommentCount=comments?.Open??0};})});
+        });
+
+        app.MapGet("/api/enterprise-requirements/{artifactId:guid}", async (Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
+        {
+            var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();
+            if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();
+            var history=await (from r in db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId) join s in db.SystemChangeRequests.AsNoTracking() on r.SourceScrId equals s.Id orderby r.Revision descending select new{r.Id,r.Revision,displayNumber=artifact.BaseNumber+"."+(r.Revision<10?"0":"")+r.Revision,r.Statement,r.Rationale,r.VerificationMethod,state=r.State.ToString(),r.SourceScrId,sourceScr=s.BaseNumber+"."+(s.Revision<10?"0":"")+s.Revision,r.CreatedAt}).ToListAsync(ct);
+            var revisionIds=history.Select(x=>x.Id).ToList();var profiles=await db.RequirementRevisionProfiles.AsNoTracking().Where(x=>revisionIds.Contains(x.RevisionId)).ToListAsync(ct);
+            var placements=await (from n in db.SpecificationNodes.AsNoTracking().Where(x=>x.RequirementArtifactId==artifactId) join spec in db.RequirementSpecifications.AsNoTracking() on n.SpecificationId equals spec.Id join parent in db.SpecificationNodes.AsNoTracking() on n.ParentId equals parent.Id select new{spec.Id,spec.DocumentNumber,spec.Title,section=parent.Heading,n.Position}).ToListAsync(ct);
+            var traces=await db.RequirementTraces.AsNoTracking().CountAsync(x=>revisionIds.Contains(x.SourceRevisionId)||revisionIds.Contains(x.TargetRevisionId),ct);var tests=await db.TestCoverage.AsNoTracking().CountAsync(x=>revisionIds.Contains(x.RequirementRevisionId),ct);
+            return Results.Ok(new{artifact.Id,artifact.BaseNumber,level=artifact.Level.ToString(),history=history.Select(x=>new{x.Id,x.Revision,x.displayNumber,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceScrId,x.sourceScr,x.CreatedAt,richText=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.RichText,attributesJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.AttributesJson??"{}",tagsJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.TagsJson??"[]"}),placements,traceCount=traces,testCoverageCount=tests});
+        });
+
+        app.MapGet("/api/enterprise-requirements/{artifactId:guid}/redline",async(Guid artifactId,Guid fromRevisionId,Guid toRevisionId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            var projectId=await db.Requirements.Where(x=>x.Id==artifactId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(ct);if(projectId is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,projectId.Value,ct))return Results.Forbid();
+            var revisions=await db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId&&(x.Id==fromRevisionId||x.Id==toRevisionId)).ToListAsync(ct);if(revisions.Count!=2)return Results.BadRequest(new{error="Select two revisions of the same requirement."});var from=revisions.Single(x=>x.Id==fromRevisionId);var to=revisions.Single(x=>x.Id==toRevisionId);
+            var profiles=await db.RequirementRevisionProfiles.AsNoTracking().Where(x=>x.RevisionId==fromRevisionId||x.RevisionId==toRevisionId).ToListAsync(ct);var fromProfile=profiles.SingleOrDefault(x=>x.RevisionId==fromRevisionId);var toProfile=profiles.SingleOrDefault(x=>x.RevisionId==toRevisionId);
+            var files=await db.ControlledAttachments.AsNoTracking().Where(x=>x.ArtifactId==artifactId&&(x.RevisionId==fromRevisionId||x.RevisionId==toRevisionId)).ToListAsync(ct);var attachmentChanges=files.Select(x=>new{x.Id,x.LogicalId,x.Version,x.Label,x.OriginalFileName,x.Sha256,kind=x.RevisionId==toRevisionId?"added":"removed"}).ToList();
+            return Results.Ok(new{from=from.Revision,to=to.Revision,statement=EnterpriseRequirementsService.Diff(from.Statement,to.Statement),rationale=EnterpriseRequirementsService.Diff(from.Rationale,to.Rationale),richText=EnterpriseRequirementsService.Diff(fromProfile?.RichText??from.Statement,toProfile?.RichText??to.Statement),attributesChanged=(fromProfile?.AttributesJson??"{}")!=(toProfile?.AttributesJson??"{}"),fromAttributes=fromProfile?.AttributesJson??"{}",toAttributes=toProfile?.AttributesJson??"{}",verificationChanged=from.VerificationMethod!=to.VerificationMethod,fromVerification=from.VerificationMethod,toVerification=to.VerificationMethod,attachmentChanges});
+        });
+
+        app.MapGet("/api/enterprise-requirements/{artifactId:guid}/impact",async(Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();
+            var revisions=await db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId).ToListAsync(ct);var current=revisions.OrderByDescending(x=>x.Revision).First();
+            var parents=await (from link in db.RequirementTraces.AsNoTracking().Where(x=>x.SourceRevisionId==current.Id) join revision in db.RequirementRevisions.AsNoTracking() on link.TargetRevisionId equals revision.Id join related in db.Requirements.AsNoTracking() on revision.ArtifactId equals related.Id select new{related.Id,displayNumber=related.BaseNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,level=related.Level.ToString(),revision.Statement,type=link.Type.ToString(),link.Rationale}).ToListAsync(ct);
+            var children=await (from link in db.RequirementTraces.AsNoTracking().Where(x=>x.TargetRevisionId==current.Id) join revision in db.RequirementRevisions.AsNoTracking() on link.SourceRevisionId equals revision.Id join related in db.Requirements.AsNoTracking() on revision.ArtifactId equals related.Id select new{related.Id,displayNumber=related.BaseNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,level=related.Level.ToString(),revision.Statement,type=link.Type.ToString(),link.Rationale}).ToListAsync(ct);
+            var tests=await (from coverage in db.TestCoverage.AsNoTracking().Where(x=>x.RequirementRevisionId==current.Id) join revision in db.TestProcedureRevisions.AsNoTracking() on coverage.ProcedureRevisionId equals revision.Id join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id select new{procedure.Id,displayNumber=procedure.BaseNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,procedure.Title,level=procedure.Level.ToString(),state=revision.State.ToString()}).ToListAsync(ct);
+            var baselines=await (from selection in db.BaselineRequirements.AsNoTracking().Where(x=>x.ArtifactId==artifactId) join baseline in db.CandidateBaselines.AsNoTracking() on selection.BaselineId equals baseline.Id join release in db.Releases.AsNoTracking() on baseline.ReleaseId equals release.Id select new{baseline.Id,baseline=baseline.BaseNumber+"."+(baseline.Revision<10?"0":"")+baseline.Revision,baseline.Name,state=baseline.State.ToString(),release=release.Version,selection.RevisionId}).ToListAsync(ct);
+            var baselineIds=baselines.Select(x=>x.Id).ToList();var builds=await db.SoftwareBuilds.AsNoTracking().Where(x=>baselineIds.Contains(x.BaselineId)).Select(x=>new{x.Id,x.BuildNumber,x.Description,state=x.State.ToString()}).ToListAsync(ct);var documents=await db.ControlledDocuments.AsNoTracking().Where(x=>baselineIds.Contains(x.BaselineId)).Select(x=>new{x.Id,x.DocumentNumber,x.Revision,x.Title,type=x.Type.ToString(),x.ContentHash}).ToListAsync(ct);
+            var activeChanges=await (from change in db.RequirementChanges.AsNoTracking().Where(x=>x.BaseNumber==artifact.BaseNumber) join scr in db.SystemChangeRequests.AsNoTracking() on change.ScrId equals scr.Id where scr.State==ScrState.Draft||scr.State==ScrState.InReview||scr.State==ScrState.Approved select new{scr.Id,displayNumber=scr.BaseNumber+"."+(scr.Revision<10?"0":"")+scr.Revision,scr.Title,state=scr.State.ToString(),kind=change.Kind.ToString(),proposedRevision=change.Revision}).ToListAsync(ct);
+            var openComments=await db.ArtifactComments.AsNoTracking().CountAsync(x=>x.ArtifactId==artifactId&&x.State==CollaborationState.Open,ct);var openAssignments=await db.ArtifactAssignments.AsNoTracking().CountAsync(x=>x.ArtifactId==artifactId&&x.State==AssignmentState.Open,ct);
+            var categories=new[]{new{key="trace",label="Trace relationships",count=parents.Count+children.Count,needsAction=parents.Count+children.Count==0},new{key="verification",label="Verification coverage",count=tests.Count,needsAction=tests.Count==0},new{key="baseline",label="Baselines and builds",count=baselines.Count+builds.Count,needsAction=false},new{key="document",label="Controlled documents",count=documents.Count,needsAction=false},new{key="collaboration",label="Open collaboration",count=openComments+openAssignments,needsAction=openComments+openAssignments>0}};
+            return Results.Ok(new{artifact.Id,artifact.BaseNumber,currentRevision=current.Revision,displayNumber=artifact.BaseNumber+"."+(current.Revision<10?"0":"")+current.Revision,parents,children,tests,baselines,builds,documents,activeChanges,openComments,openAssignments,categories});
+        });
+
+        app.MapPost("/api/enterprise-requirements/{artifactId:guid}/propose",async(Guid artifactId,ProposeRequirementChangeRequest request,HttpContext http,AeroLinkDbContext db,IScrRepository repository,IdentityService identity,CancellationToken ct)=>
+        {
+            var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();if(request.Kind is not (RequirementChangeKind.Modify or RequirementChangeKind.Retire))return Results.BadRequest(new{error="An existing requirement can only be modified or retired."});if(!await http.HasProjectRoleAsync(db,identity,artifact.ProjectId,ct,ProgramRole.Engineer))return Results.Forbid();if(!await db.Releases.AnyAsync(x=>x.Id==request.TargetReleaseId&&x.ProjectId==artifact.ProjectId&&!x.IsReleased,ct))return Results.BadRequest(new{error="Select an unreleased target release from this Project."});
+            var actor=http.UserAccount().UserName;var current=await db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId).OrderByDescending(x=>x.Revision).FirstAsync(ct);var profile=await db.RequirementRevisionProfiles.AsNoTracking().SingleOrDefaultAsync(x=>x.RevisionId==current.Id,ct);SystemChangeRequest scr;
+            if(request.ExistingScrId is not null){var existing=await repository.GetAsync(request.ExistingScrId.Value,ct);if(existing is null)return Results.NotFound(new{error="The selected Draft SCR/SWCR was not found."});scr=existing;if(scr.ProjectId!=artifact.ProjectId||scr.TargetReleaseId!=request.TargetReleaseId)return Results.BadRequest(new{error="The selected change request has a different Project or release."});}
+            else{var type=artifact.Level==RequirementLevel.System?ChangeRequestType.System:ChangeRequestType.Software;var prefix=type==ChangeRequestType.System?"SCR":"SWCR";var numbers=await db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==artifact.ProjectId&&x.BaseNumber.StartsWith(prefix+"-")).Select(x=>x.BaseNumber).ToListAsync(ct);var next=numbers.Select(x=>int.TryParse(x[(x.IndexOf('-')+1)..],out var n)?n:0).DefaultIfEmpty().Max()+1;scr=new SystemChangeRequest($"{prefix}-{next:D8}",0,artifact.ProjectId,request.TargetReleaseId,string.IsNullOrWhiteSpace(request.Title)?$"{request.Kind} {artifact.BaseNumber}":request.Title,$"A controlled change is proposed for {artifact.BaseNumber}.",$"Assess parent/child traceability, verification coverage, specifications, baselines, builds, and open collaboration for {artifact.BaseNumber}.",$"Implement the approved {request.Kind.ToString().ToLowerInvariant()} through this exact {prefix} revision.",actor,DateTimeOffset.UtcNow,type);await repository.AddAsync(scr,ct);}
+            if(scr.AuthorId!=actor)return Results.Forbid();if(scr.State!=ScrState.Draft)return Results.BadRequest(new{error="Requirement proposals can be added only to a Draft SCR/SWCR."});if(scr.RequirementChanges.Any(x=>x.BaseNumber==artifact.BaseNumber))return Results.Conflict(new{error="This Draft already contains a proposal for the selected requirement."});var dispositions=JsonSerializer.Serialize(new{trace="Pending",verification="Pending",documents="Pending",baseline="Pending",collaboration="Pending"});scr.AddRequirementChange(actor,artifact.BaseNumber,current.Revision+1,artifact.Level,request.Kind,request.Kind==RequirementChangeKind.Retire?"":current.Statement,current.Rationale,current.VerificationMethod,DateTimeOffset.UtcNow,profile?.RichText??current.Statement,profile?.AttributesJson??"{}",dispositions);
+            if(!await db.ArtifactWatches.AnyAsync(x=>x.ArtifactId==artifactId&&x.UserName==actor,ct))db.ArtifactWatches.Add(new(artifact.ProjectId,"Requirement",artifactId,actor,actor,DateTimeOffset.UtcNow));try{await repository.SaveAsync(ct);}catch(DbUpdateException){return Results.Conflict(new{error="Another controlled change was created concurrently. Refresh and retry."});}return Results.Created($"/api/scrs/{scr.Id}",new{scr.Id,scr.DisplayNumber,scr.Title});
+        });
+
+        app.MapPost("/api/enterprise-requirements/schemas",async(CreateArtifactSchemaRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+        {
+            if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.Administrator))return Results.Forbid();try{var schema=new ArtifactSchemaDefinition(request.ProjectId,request.Key,request.Name,request.AppliesTo,request.Description,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.ArtifactSchemas.Add(schema);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/schemas/{schema.Id}",new{schema.Id});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+        });
+
+        app.MapPost("/api/enterprise-requirements/schemas/{id:guid}/fields",async(Guid id,CreateSchemaFieldRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            var schema=await db.ArtifactSchemas.Include(x=>x.Fields).SingleOrDefaultAsync(x=>x.Id==id,ct);if(schema is null)return Results.NotFound();if(!http.UserAccount().IsAdministrator)return Results.Forbid();try{schema.AddField(request.Key,request.Label,request.Type,request.IsRequired,request.SortOrder,request.OptionsJson,http.UserAccount().UserName,DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+        });
+
+        app.MapPost("/api/enterprise-requirements/specifications",async(CreateSpecificationRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+        {
+            if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();try{var spec=new RequirementSpecification(request.ProjectId,request.DocumentNumber,request.Title,request.Level,request.Description,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.RequirementSpecifications.Add(spec);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/specifications/{spec.Id}",new{spec.Id});}catch(Exception ex)when(ex is DomainException or ArgumentException){return Results.BadRequest(new{error=ex.Message});}
+        });
+
+        app.MapPost("/api/enterprise-requirements/specifications/{id:guid}/sections",async(Guid id,CreateSectionRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+        {
+            var projectId=await db.RequirementSpecifications.Where(x=>x.Id==id).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(ct);if(projectId is null)return Results.NotFound();if(!await http.HasProjectRoleAsync(db,identity,projectId.Value,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();var node=new SpecificationNode(id,request.ParentId,request.Position,SpecificationNodeType.Section,request.Heading,null,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.SpecificationNodes.Add(node);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/specifications/{id}/sections/{node.Id}",new{node.Id});
+        });
+
+        app.MapGet("/api/enterprise-requirements/{artifactId:guid}/comments",async(Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            var projectId=await db.Requirements.Where(x=>x.Id==artifactId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(ct);if(projectId is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,projectId.Value,ct))return Results.Forbid();
+            var comments=await db.ArtifactComments.AsNoTracking().Where(x=>x.ArtifactId==artifactId&&x.ArtifactType=="Requirement").ToListAsync(ct);
+            return Results.Ok(comments.OrderBy(x=>x.CreatedAt).Select(x=>new{x.Id,x.RevisionId,x.ParentCommentId,x.Body,x.MentionsJson,state=x.State.ToString(),x.CreatedBy,x.CreatedAt,x.ResolvedBy,x.ResolvedAt,x.Disposition}));
+        });
+
+        app.MapPost("/api/enterprise-requirements/{artifactId:guid}/comments",async(Guid artifactId,CreateCommentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();if(request.RevisionId is not null&&!await db.RequirementRevisions.AnyAsync(x=>x.Id==request.RevisionId&&x.ArtifactId==artifactId,ct))return Results.BadRequest(new{error="The comment revision is not part of this requirement."});if(request.ParentCommentId is not null&&!await db.ArtifactComments.AnyAsync(x=>x.Id==request.ParentCommentId&&x.ArtifactId==artifactId,ct))return Results.BadRequest(new{error="The parent comment is not part of this requirement."});try{var actor=http.UserAccount().UserName;var now=DateTimeOffset.UtcNow;var comment=new ArtifactComment(artifact.ProjectId,"Requirement",artifactId,request.RevisionId,request.ParentCommentId,request.Body,JsonSerializer.Serialize(request.Mentions??[]),actor,now);db.ArtifactComments.Add(comment);var requested=(request.Mentions??[]).Select(x=>x.Trim().ToLowerInvariant()).ToHashSet();var watchers=await db.ArtifactWatches.AsNoTracking().Where(x=>x.ArtifactId==artifactId).Select(x=>x.UserName).ToListAsync(ct);requested.UnionWith(watchers);if(request.ParentCommentId is not null){var parentAuthor=await db.ArtifactComments.Where(x=>x.Id==request.ParentCommentId).Select(x=>x.CreatedBy).SingleAsync(ct);requested.Add(parentAuthor.ToLowerInvariant());}var recipients=await db.UserAccounts.AsNoTracking().Where(x=>requested.Contains(x.UserName)&&x.UserName!=actor).Select(x=>x.UserName).ToListAsync(ct);foreach(var recipient in recipients)db.UserNotifications.Add(new(artifact.ProjectId,recipient,"RequirementComment",$"Discussion on {artifact.BaseNumber}",$"{actor}: {request.Body}",$"requirement:{artifactId}",artifactId,now));await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/{artifactId}/comments/{comment.Id}",new{comment.Id,notified=recipients.Count});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+        });
+
+        app.MapPost("/api/enterprise-requirements/comments/{id:guid}/resolve",async(Guid id,ResolveCommentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {var comment=await db.ArtifactComments.SingleOrDefaultAsync(x=>x.Id==id,ct);if(comment is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,comment.ProjectId,ct))return Results.Forbid();try{comment.Resolve(http.UserAccount().UserName,request.Disposition??"",DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}});
+
+        app.MapGet("/api/enterprise-requirements/{artifactId:guid}/collaboration",async(Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();var actor=http.UserAccount().UserName;
+            var watchers=await db.ArtifactWatches.AsNoTracking().Where(x=>x.ArtifactId==artifactId).OrderBy(x=>x.UserName).Select(x=>new{x.UserName,x.CreatedAt,isCurrent=x.UserName==actor}).ToListAsync(ct);var assignments=await db.ArtifactAssignments.AsNoTracking().Where(x=>x.ArtifactId==artifactId).ToListAsync(ct);
+            return Results.Ok(new{watching=watchers.Any(x=>x.isCurrent),watchers,assignments=assignments.OrderBy(x=>x.State).ThenBy(x=>x.DueAt).Select(x=>new{x.Id,x.CommentId,x.AssignedTo,x.Title,x.Description,x.DueAt,state=x.State.ToString(),x.CreatedBy,x.CreatedAt,x.UpdatedAt,x.Version,x.CompletedBy})});
+        });
+
+        app.MapPost("/api/enterprise-requirements/{artifactId:guid}/watch",async(Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();var actor=http.UserAccount().UserName;var existing=await db.ArtifactWatches.SingleOrDefaultAsync(x=>x.ArtifactId==artifactId&&x.UserName==actor,ct);if(existing is null)db.ArtifactWatches.Add(new(artifact.ProjectId,"Requirement",artifactId,actor,actor,DateTimeOffset.UtcNow));else db.ArtifactWatches.Remove(existing);await db.SaveChangesAsync(ct);return Results.Ok(new{watching=existing is null});
+        });
+
+        app.MapPost("/api/enterprise-requirements/{artifactId:guid}/assignments",async(Guid artifactId,CreateAssignmentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();var assignee=request.AssignedTo.Trim().ToLowerInvariant();if(!await db.UserAccounts.AnyAsync(x=>x.UserName==assignee,ct))return Results.BadRequest(new{error="The assigned AeroLink user does not exist."});if(request.CommentId is not null&&!await db.ArtifactComments.AnyAsync(x=>x.Id==request.CommentId&&x.ArtifactId==artifactId,ct))return Results.BadRequest(new{error="The linked comment is not part of this requirement."});try{var actor=http.UserAccount().UserName;var now=DateTimeOffset.UtcNow;var assignment=new ArtifactAssignment(artifact.ProjectId,"Requirement",artifactId,request.CommentId,assignee,request.Title,request.Description,request.DueAt,actor,now);db.ArtifactAssignments.Add(assignment);db.UserNotifications.Add(new(artifact.ProjectId,assignee,"RequirementAssignment",request.Title,$"{actor} assigned work on {artifact.BaseNumber}.",$"requirement:{artifactId}",artifactId,now));await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/assignments/{assignment.Id}",new{assignment.Id});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+        });
+
+        app.MapPost("/api/enterprise-requirements/assignments/{id:guid}/complete",async(Guid id,CompleteAssignmentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            var assignment=await db.ArtifactAssignments.SingleOrDefaultAsync(x=>x.Id==id,ct);if(assignment is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,assignment.ProjectId,ct))return Results.Forbid();var actor=http.UserAccount().UserName;if(assignment.AssignedTo!=actor&&!http.UserAccount().IsAdministrator)return Results.Forbid();try{assignment.Complete(actor,request.ExpectedVersion,DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.Conflict(new{error=ex.Message});}
+        });
+
+        app.MapGet("/api/enterprise-requirements/work-queue",async(Guid projectId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();var actor=http.UserAccount().UserName;var assignments=await db.ArtifactAssignments.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.AssignedTo==actor&&x.State==AssignmentState.Open).ToListAsync(ct);var ids=assignments.Select(x=>x.ArtifactId).ToList();var artifacts=await db.Requirements.AsNoTracking().Where(x=>ids.Contains(x.Id)).ToDictionaryAsync(x=>x.Id,ct);var notifications=await db.UserNotifications.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.Recipient==actor&&x.State==NotificationState.Unread).Take(100).ToListAsync(ct);return Results.Ok(new{assignments=assignments.OrderBy(x=>x.DueAt).Select(x=>new{x.Id,x.ArtifactId,requirement=artifacts.TryGetValue(x.ArtifactId,out var a)?a.BaseNumber:"Requirement",x.Title,x.Description,x.DueAt,x.Version,overdue=x.DueAt<DateTimeOffset.UtcNow}),notifications=notifications.OrderByDescending(x=>x.CreatedAt).Select(x=>new{x.Id,x.Type,x.Title,x.Detail,x.Route,x.ArtifactId,x.CreatedAt})});
+        });
+
+        app.MapPost("/api/enterprise-requirements/notifications/{id:guid}/read",async(Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {var notification=await db.UserNotifications.SingleOrDefaultAsync(x=>x.Id==id&&x.Recipient==http.UserAccount().UserName,ct);if(notification is null)return Results.NotFound();notification.MarkRead(DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();});
+
+        app.MapPost("/api/enterprise-requirements/views",async(CreateSavedViewRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {if(!await http.HasProjectAccessAsync(db,request.ProjectId,ct))return Results.Forbid();var view=new SavedRequirementView(request.ProjectId,http.UserAccount().Id,request.Name,request.QueryJson,request.ColumnsJson,request.IsShared,DateTimeOffset.UtcNow);db.SavedRequirementViews.Add(view);try{await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/views/{view.Id}",new{view.Id});}catch(DbUpdateException){return Results.Conflict(new{error="A saved view with that name already exists."});}});
+
+        app.MapDelete("/api/enterprise-requirements/views/{id:guid}",async(Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>{var view=await db.SavedRequirementViews.SingleOrDefaultAsync(x=>x.Id==id&&x.OwnerId==http.UserAccount().Id,ct);if(view is null)return Results.NotFound();db.Remove(view);await db.SaveChangesAsync(ct);return Results.NoContent();});
+
+        app.MapPost("/api/enterprise-requirements/bulk/preview",async(BulkRequirementRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+        {
+            if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();
+            if(request.SpecificationId is not null&&!await db.RequirementSpecifications.AnyAsync(x=>x.Id==request.SpecificationId&&x.ProjectId==request.ProjectId,ct))return Results.BadRequest(new{error="The target specification is not part of this Project."});
+            if(request.SectionId is not null&&!await db.SpecificationNodes.AnyAsync(x=>x.Id==request.SectionId&&x.SpecificationId==request.SpecificationId&&x.Type==SpecificationNodeType.Section,ct))return Results.BadRequest(new{error="The target section is not part of this specification."});
+            var valid=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==request.ProjectId&&request.ArtifactIds.Contains(x.Id)).Select(x=>x.Id).ToListAsync(ct);var payload=JsonSerializer.Serialize(new BulkJobPayload(valid,request.Tag,request.SpecificationId,request.SectionId));var job=new EnterpriseOperationJob(request.ProjectId,"RequirementBulkClassify",payload,valid.Count,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.EnterpriseOperationJobs.Add(job);await db.SaveChangesAsync(ct);return Results.Ok(new{job.Id,requested=request.ArtifactIds.Count,valid=valid.Count,rejected=request.ArtifactIds.Count-valid.Count,operation=$"Add tag '{request.Tag}'"+(request.SpecificationId is null?"":" and place in specification")});
+        });
+
+        app.MapPost("/api/enterprise-requirements/bulk/{id:guid}/commit",async(Guid id,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+        {
+            var job=await db.EnterpriseOperationJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();if(job.State!=EnterpriseJobState.Preview)return Results.BadRequest(new{error="This bulk job is no longer awaiting commit."});var payload=JsonSerializer.Deserialize<BulkJobPayload>(job.RequestJson)!;var revisions=await db.RequirementRevisions.Where(x=>payload.ArtifactIds.Contains(x.ArtifactId)).OrderByDescending(x=>x.Revision).ToListAsync(ct);var current=revisions.GroupBy(x=>x.ArtifactId).Select(x=>x.First()).ToList();var revisionIds=current.Select(x=>x.Id).ToList();var profiles=await db.RequirementRevisionProfiles.Where(x=>revisionIds.Contains(x.RevisionId)).ToListAsync(ct);foreach(var profile in profiles)profile.AddTag(payload.Tag,http.UserAccount().UserName,DateTimeOffset.UtcNow);
+            if(payload.SpecificationId is not null){var parent=payload.SectionId;var existing=(await db.SpecificationNodes.Where(x=>x.SpecificationId==payload.SpecificationId&&x.RequirementArtifactId!=null).Select(x=>x.RequirementArtifactId!.Value).ToListAsync(ct)).ToHashSet();var position=await db.SpecificationNodes.Where(x=>x.SpecificationId==payload.SpecificationId&&x.ParentId==parent).Select(x=>(int?)x.Position).MaxAsync(ct)??0;foreach(var artifactId in payload.ArtifactIds.Where(x=>!existing.Contains(x)))db.SpecificationNodes.Add(new(payload.SpecificationId.Value,parent,++position,SpecificationNodeType.Requirement,"",artifactId,http.UserAccount().UserName,DateTimeOffset.UtcNow));}
+            job.Complete(profiles.Count,0,JsonSerializer.Serialize(new{tagged=profiles.Count,placed=payload.SpecificationId is not null}),DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.Ok(new{job.Id,state=job.State.ToString(),job.SucceededCount,job.ResultJson});
+        });
+
+        app.MapGet("/api/enterprise-requirements/interchange",async(Guid projectId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();var jobs=await db.RequirementInterchangeJobs.AsNoTracking().Where(x=>x.ProjectId==projectId).ToListAsync(ct);var mappings=await db.RequirementImportMappings.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderBy(x=>x.Name).ToListAsync(ct);return Results.Ok(new{mappings=mappings.Select(x=>new{x.Id,x.Name,x.MappingJson,x.Version,x.UpdatedAt}),jobs=jobs.OrderByDescending(x=>x.CreatedAt).Take(50).Select(x=>new{x.Id,x.FileName,x.Sha256,x.ValidRows,x.InvalidRows,state=x.State.ToString(),x.CreatedBy,x.CreatedAt,x.CreatedScrId,x.CompletedAt})});
+        });
+
+        app.MapPost("/api/enterprise-requirements/import-mappings",async(CreateImportMappingRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {if(!await http.HasProjectAccessAsync(db,request.ProjectId,ct))return Results.Forbid();try{using var _=JsonDocument.Parse(request.MappingJson);var mapping=new RequirementImportMapping(request.ProjectId,request.Name,request.MappingJson,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.RequirementImportMappings.Add(mapping);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/import-mappings/{mapping.Id}",new{mapping.Id});}catch(Exception ex)when(ex is DomainException or DbUpdateException or JsonException){return Results.BadRequest(new{error=ex.Message});}});
+
+        app.MapGet("/api/enterprise-requirements/import/{id:guid}/errors.csv",async(Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            var job=await db.RequirementInterchangeJobs.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,job.ProjectId,ct))return Results.Forbid();var rows=JsonSerializer.Deserialize<List<InterchangeRequirementRow>>(job.RowsJson)??[];static string Csv(string value){if(value.Length>0&&"=+-@".Contains(value[0]))value="'"+value;return "\""+value.Replace("\"","\"\"")+"\"";}var text="Row,Identifier,Level,Statement,Errors\r\n"+string.Join("\r\n",rows.Where(x=>!x.Valid).Select(x=>$"{x.RowNumber},{Csv(x.Identifier)},{Csv(x.Level)},{Csv(x.Statement)},{Csv(string.Join("; ",x.Errors))}"));return Results.Text(text,"text/csv",Encoding.UTF8,200);
+        });
+
+        app.MapGet("/api/enterprise-requirements/performance",async(Guid projectId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();var total=await db.Requirements.AsNoTracking().CountAsync(x=>x.ProjectId==projectId,ct);var samples=new List<PerformanceSample>();async Task Measure(string name,long target,Func<Task> action){await action();var timings=new List<long>();for(var i=0;i<3;i++){var sw=Stopwatch.StartNew();await action();sw.Stop();timings.Add(sw.ElapsedMilliseconds);}var p95=timings.Max();samples.Add(new(name,target,p95,p95<=target,timings));}await Measure("page_100",500,async()=>{_=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderBy(x=>x.BaseNumber).Take(100).Select(x=>new{x.Id,x.BaseNumber}).ToListAsync(ct);});await Measure("exact_identifier",300,async()=>{_=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.BaseNumber=="SYSR-000001").Select(x=>x.Id).FirstOrDefaultAsync(ct);});await Measure("open_collaboration",500,async()=>{_=await db.ArtifactComments.AsNoTracking().CountAsync(x=>x.ProjectId==projectId&&x.State==CollaborationState.Open,ct);});return Results.Ok(new{totalRequirements=total,scaleTarget=50_000,measuredAt=DateTimeOffset.UtcNow,allPassed=samples.All(x=>x.Passed),samples});
+        });
+
+        app.MapPost("/api/enterprise-requirements/import/preview",async(Guid projectId,Guid? mappingId,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+        {
+            if(!await http.HasProjectRoleAsync(db,identity,projectId,ct,ProgramRole.Engineer))return Results.Forbid();if(!http.Request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data with a CSV or XLSX file."});var form=await http.Request.ReadFormAsync(ct);var file=form.Files.GetFile("file");if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty CSV or XLSX file."});if(file.Length>25*1024*1024)return Results.BadRequest(new{error="Import files are limited to 25 MB."});if(!file.FileName.EndsWith(".csv",StringComparison.OrdinalIgnoreCase)&&!file.FileName.EndsWith(".xlsx",StringComparison.OrdinalIgnoreCase))return Results.BadRequest(new{error="Only CSV and XLSX files are supported."});
+            await using var stream=file.OpenReadStream();using var memory=new MemoryStream();await stream.CopyToAsync(memory,ct);var bytes=memory.ToArray();memory.Position=0;IReadOnlyList<InterchangeRequirementRow> parsed;try{parsed=EnterpriseRequirementsService.ParseImport(memory,file.FileName);}catch(Exception ex){return Results.BadRequest(new{error=$"The workbook could not be read: {ex.Message}"});}
+            var existing=(await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId).Select(x=>x.BaseNumber).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);var duplicates=parsed.GroupBy(x=>x.Identifier,StringComparer.OrdinalIgnoreCase).Where(x=>x.Count()>1).Select(x=>x.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);var rows=parsed.Select(x=>{var errors=x.Errors.ToList();if(existing.Contains(x.Identifier))errors.Add("Identifier already exists in this Project; use an SCR modification workflow.");if(duplicates.Contains(x.Identifier))errors.Add("Identifier is duplicated in this import.");return x with{Valid=errors.Count==0,Errors=errors};}).ToList();var mapping=mappingId is null?"{\"mode\":\"standard-columns\"}":await db.RequirementImportMappings.Where(x=>x.Id==mappingId&&x.ProjectId==projectId).Select(x=>x.MappingJson).SingleOrDefaultAsync(ct)??"{\"mode\":\"standard-columns\"}";var job=new RequirementInterchangeJob(projectId,file.FileName,EnterpriseRequirementsService.Hash(bytes),mapping,JsonSerializer.Serialize(rows),rows.Count(x=>x.Valid),rows.Count(x=>!x.Valid),http.UserAccount().UserName,DateTimeOffset.UtcNow);db.RequirementInterchangeJobs.Add(job);await db.SaveChangesAsync(ct);return Results.Ok(new{job.Id,job.FileName,job.Sha256,total=rows.Count,job.ValidRows,job.InvalidRows,rows=rows.Take(200)});
+        }).DisableAntiforgery();
+
+        app.MapPost("/api/enterprise-requirements/import/{id:guid}/commit",async(Guid id,CommitImportRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
+        {
+            var job=await db.RequirementInterchangeJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(job.InvalidRows>0)return Results.BadRequest(new{error="Resolve every invalid row before committing this import."});if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer))return Results.Forbid();var rows=JsonSerializer.Deserialize<List<InterchangeRequirementRow>>(job.RowsJson)??[];try{var now=DateTimeOffset.UtcNow;var baseNumber=await IdentifierAllocator.NextChangeRequestAsync(db,request.Type,ct);var scr=new SystemChangeRequest(baseNumber,0,job.ProjectId,request.TargetReleaseId,request.Title,request.Problem,request.Analysis,request.Solution,http.UserAccount().UserName,now,request.Type);foreach(var row in rows){EnterpriseRequirementsService.TryLevel(row.Level,out var reqLevel);scr.AddRequirementChange(http.UserAccount().UserName,row.Identifier,0,reqLevel,RequirementChangeKind.Introduce,row.Statement,row.Rationale,row.VerificationMethod,now);}db.SystemChangeRequests.Add(scr);job.Commit(scr.Id,now);await db.SaveChangesAsync(ct);return Results.Created($"/api/scrs/{scr.Id}",new{scr.Id,scr.DisplayNumber,imported=rows.Count});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+        });
+
+        // Enterprise hardening: controlled content, durable operations, merge protection,
+        // integrity qualification, and operator-facing health evidence.
+
+        // Inline images are their own surface rather than a use of the attachment vault.
+        //
+        // An image inside a requirement statement is not a document somebody attached; it is part of what the
+        // statement says, and it has to be storable before the record that references it exists, because an author
+        // writes the figure into the paragraph as they are drafting it. Uploading here stores and hashes the file
+        // against the project, and the authored content then references it by identifier. The file is never
+        // duplicated into the record, so one diagram used in five requirements is stored once and stays one thing.
+        app.MapPost("/api/content/images",async(HttpRequest request,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
+        {
+            if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});
+            var form=await request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
+            if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty image."});
+            if(!Guid.TryParse(form["projectId"],out var projectId))return Results.BadRequest(new{error="A project identifier is required."});
+            if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
+            // Only formats every renderer here can produce. An image the workspace shows but the generated Word
+            // document cannot would make a controlled document disagree with the record it came from.
+            var contentType=(file.ContentType??"").ToLowerInvariant();
+            if(contentType is not("image/png" or "image/jpeg"))return Results.BadRequest(new{error="Inline images must be PNG or JPEG so every generated document can render them."});
+            if(file.Length>12*1024*1024)return Results.BadRequest(new{error="Inline images are limited to 12 MB. Attach larger files as controlled attachments instead."});
+            // The declared content type is a claim by whoever uploaded the file. This image is streamed back inline
+            // from this deployment's own origin, so the claim has to be checked against the bytes: a file that says
+            // PNG and contains markup would otherwise be stored, referenced from a requirement, and served to an
+            // approver by us.
+            var signature=new byte[8];
+            await using(var probe=file.OpenReadStream())
+            {
+                var read=await probe.ReadAtLeastAsync(signature,signature.Length,throwOnEndOfStream:false,ct);
+                if(read<signature.Length||!PngImage.IsDeclaredImage(signature,contentType))
+                    return Results.BadRequest(new{error="That file is not the image type it claims to be."});
+            }
+            var stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,contentType,ct);
+            try
+            {
+                var attachment=new ControlledAttachment(projectId,"InlineImage",projectId,null,Guid.NewGuid(),1,
+                    string.IsNullOrWhiteSpace(form["alt"])?stored.OriginalFileName:form["alt"].ToString(),"",
+                    stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256,stored.StorageKey,null,
+                    http.UserAccount().UserName,DateTimeOffset.UtcNow);
+                db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);
+                return Results.Created($"/api/content/images/{attachment.Id}",new{attachment.Id,attachment.OriginalFileName,attachment.Size,attachment.Sha256});
+            }
+            catch{store.Delete(stored.StorageKey);throw;}
+        }).DisableAntiforgery();
+
+        app.MapGet("/api/content/images/{id:guid}",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
+        {
+            var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id&&x.ArtifactType=="InlineImage",ct);
+            if(item is null)return Results.NotFound();
+            if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();
+            if(!store.Exists(item.StorageKey))return Results.NotFound();
+            return Results.File(store.OpenRead(item.StorageKey),item.ContentType,enableRangeProcessing:true);
+        });
+    }
+}
