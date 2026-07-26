@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AutosaveState, DraftRestore } from "./DraftNotice";
+import { useFormDraft } from "./autosave";
 import { stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import "./BaselineCenter.css";
@@ -141,6 +143,11 @@ export default function BaselineCenter({
   useEffect(() => {
     loadDetail();
   }, [loadDetail]);
+  const createForm = useRef<HTMLFormElement>(null);
+  // A baseline is named and numbered by hand; losing that to a stray navigation is the kind of small
+  // annoyance that makes people distrust a tool.
+  const createDraft = useFormDraft(createForm, `aerolink:new-baseline:${projectId}:${releaseId}`);
+
   const create = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -168,6 +175,8 @@ export default function BaselineCenter({
       return;
     }
     const created = await response.json();
+    // The baseline exists now, so the browser copy has nothing left to protect.
+    createDraft.clear();
     setSelectedId(created.id);
     setCreating(false);
     await loadList();
@@ -216,10 +225,19 @@ export default function BaselineCenter({
       </header>
       {error && <div className="workspaceError">{error}</div>}
       {creating ? (
-        <form className="createBaseline" onSubmit={create}>
+        <form className="createBaseline" onSubmit={create} ref={createForm}>
           <div>
             <p className="eyebrow">NEW RELEASE MANIFEST</p>
             <h2>Create candidate baseline</h2>
+            {createDraft.offered && (
+              <DraftRestore
+                savedAt={createDraft.offered.savedAt}
+                description="An unfinished baseline was left in this browser. Nothing was created."
+                onRestore={createDraft.apply}
+                onDiscard={createDraft.discard}
+              />
+            )}
+            <AutosaveState status={createDraft.status} savedAt={createDraft.savedAt} where="this browser" />
             <p>
               {productName} · release {releaseVersion}
             </p>

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { stateLabel } from './presentation'
 import type { FormEvent } from "react";
+import { AutosaveState, DraftRestore } from "./DraftNotice";
+import { useFormDraft } from "./autosave";
 import "./RequirementsWorkspace.css";
 
 type Field = {
@@ -424,6 +426,11 @@ export default function RequirementsWorkspace({
     setShowSave(false);
     await load();
   };
+  const commentForm = useRef<HTMLFormElement>(null);
+  // Keyed to the requirement, so a comment drafted against one is never offered against another.
+  const commentDraft = useFormDraft(commentForm, `aerolink:requirement-comment:${selected?.id ?? "none"}`,
+    { enabled: !!selected });
+
   const addComment = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selected) return;
@@ -449,6 +456,8 @@ export default function RequirementsWorkspace({
       return;
     }
     form.reset();
+    // The comment is on the record now; the browser copy has nothing left to protect.
+    commentDraft.clear();
     setInspectorTab("discussion");
     await loadComments(artifactId);
     await load();
@@ -1182,13 +1191,24 @@ export default function RequirementsWorkspace({
             )}
             {inspectorTab === "discussion" && (
               <div className="discussionPane">
-                <form onSubmit={addComment}>
+                <form onSubmit={addComment} ref={commentForm}>
+                  {commentDraft.offered && (
+                    <DraftRestore
+                      savedAt={commentDraft.offered.savedAt}
+                      description="A comment you were writing was left unsent."
+                      onRestore={commentDraft.apply}
+                      onDiscard={commentDraft.discard}
+                    />
+                  )}
                   <textarea
                     name="body"
                     placeholder="Add an attributable comment. Use @username to mention someone."
                     required
                   />
-                  <button>Add comment</button>
+                  <div className="commentFoot">
+                    <AutosaveState status={commentDraft.status} savedAt={commentDraft.savedAt} where="this browser" />
+                    <button>Add comment</button>
+                  </div>
                 </form>
                 {comments.map((c) => (
                   <article key={c.id} className={c.state.toLowerCase()}>
