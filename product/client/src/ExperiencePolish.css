@@ -87,6 +87,13 @@ html[data-motion="reduced"] *::after { scroll-behavior: auto !important; transit
 .skeletonLine.medium { width: 68%; }
 .skeletonMetric { display: block; width: 64px; height: 38px; margin: 12px 0; border-radius: 8px; background: #dce4ea; }
 .metrics > .dashboardSkeleton { min-height: 132px; padding: 19px 21px; border: 1px solid var(--line); border-radius: var(--radius-md); }
+/* Held while a workspace's code arrives. Reuses the dashboard's skeleton so a wait looks the same wherever
+   it happens, and reserves height so the page does not jump when the real workspace replaces it. */
+.workspaceLoading { display: grid; gap: 14px; }
+.workspaceLoading > .dashboardSkeleton {
+  min-height: 116px; padding: 19px 21px;
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+}
 .dashboardRowSkeletons .row { cursor: default; }
 .dashboardRowSkeletons .row > div { min-width: 0; }
 .skeletonAvatar { width: 38px; height: 38px; border-radius: 8px; background: #dce5eb; }

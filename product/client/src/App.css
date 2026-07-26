@@ -211,3 +211,15 @@ main > header p { margin: 0; color: var(--ink-500); font-size: 15px; max-width: 
   main { padding: 34px 32px 64px; }
   .grid { grid-template-columns: 1fr; }
 }
+
+/* Three surfaces in three different bundles render a .formError, so it lives here rather than in whichever
+   one happened to define it. It used to sit in ScrEditor.css, which meant the requirements import panel's
+   error box was styled only when the change-request editor's stylesheet had also been loaded. */
+.formError {
+  padding: 13px 15px;
+  border: 1px solid #efc8cf;
+  border-radius: 8px;
+  background: #fff0f2;
+  color: #973c4b;
+  font-size: 13px;
+}

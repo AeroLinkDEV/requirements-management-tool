@@ -440,14 +440,6 @@
   color: #247466;
 }
 
-.formError {
-  padding: 13px 15px;
-  border: 1px solid #efc8cf;
-  border-radius: 8px;
-  background: #fff0f2;
-  color: #973c4b;
-  font-size: 13px;
-}
 
 .editorActions {
   position: sticky;

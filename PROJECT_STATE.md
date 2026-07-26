@@ -280,3 +280,16 @@ reason the document set can be trusted.
   in one week: a rich-text field nothing rendered, and an attachment vault reachable only from a screen
   nobody working on a change request would open. Before building a control, check whether the last one is
   wired to anything.
+- **A rule that wins by being loaded last is a rule with no owner.** Splitting the client so each workspace
+  arrives when somebody opens it also moves its stylesheet, which then lands after everything already on the
+  page. Twenty row and card families immediately lost their density spacing, because Density.css set
+  `padding-block` and each component set `padding` — identical specificity, decided purely by order, and the
+  order had been an accident of the module graph. The same shape appeared twice more: two unrelated forms
+  sharing the class `.buildForm`, and a setup-form rule imposing its grid placement on every error box in the
+  product. None of the three was caused by the split; the split only removed the accident that had been
+  hiding them. Before relying on a rule, ask what makes it win — and if the answer is "it happens to be last",
+  it will stop being last.
+- **Verify the mechanism, not just the failure.** The contrast audit began failing on a colour that had been
+  wrong all along; the split had merely changed the timing enough for the element to be on screen when the
+  audit sampled. Running the same test on an untouched checkout is what separated "I broke this" from "this
+  was always broken" — two findings that look identical and need opposite responses.

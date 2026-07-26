@@ -1,5 +1,11 @@
 /* Information density.
-   Loaded after every page stylesheet so these tokens are the single place vertical rhythm is decided.
+
+   These tokens are the single place vertical rhythm is decided, and every rule below is written `html .x`
+   rather than `.x` so that stays true no matter when a page's own stylesheet arrives. It used to rely on
+   being loaded last, which held only while every stylesheet was loaded up front: a workspace fetched on
+   demand brings its stylesheet with it, appended after this one, and a component's `padding` shorthand then
+   beats this file's `padding-block` at equal specificity. Compact silently stopped compressing anything.
+   One extra element in the selector costs nothing and removes the dependency on order.
 
    The previous implementation was a hand-written list of about fifteen selectors, each carrying its own
    hard-coded compact pixel value. It reached six of the twenty-eight row and card families in the
@@ -53,66 +59,66 @@ html[data-density="compact"] {
 
 /* The page frame. Every workspace page is a <main> inside .workspaceView, so this covers all of them
    without naming any, including pages added later. */
-.workspaceView > main {
+html .workspaceView > main {
   padding-block: var(--page-pad-block-start) var(--page-pad-block-end);
   padding-inline: var(--page-pad-inline);
 }
 
 /* Record rows: the vertical rhythm of the lists people read all day. */
-.approverRow,
-.auditRow,
-.coverageRow,
-.executionRow,
-.historyRow,
-.impactRow,
-.integrationTableRow,
-.procedureRow,
-.restoreRow,
-.signalRow,
-.reqTable article,
-.traceList > article,
-.userTable > article,
-.workQueue > article {
+html .approverRow,
+html .auditRow,
+html .coverageRow,
+html .executionRow,
+html .historyRow,
+html .impactRow,
+html .integrationTableRow,
+html .procedureRow,
+html .restoreRow,
+html .signalRow,
+html .reqTable article,
+html .traceList > article,
+html .userTable > article,
+html .workQueue > article {
   padding-block: var(--space-row-block);
 }
 
-.reqTable article { min-height: var(--row-min-height); }
+html .reqTable article { min-height: var(--row-min-height); }
 /* Its own token only because the history row shipped at 88px and the requirement row at 86px; comfortable
    is meant to be pixel-identical to what the product already looked like. */
-.historyRow { min-height: var(--history-row-min-height); }
+html .historyRow { min-height: var(--history-row-min-height); }
 
 /* Cards and panels. */
-.activeChangeCard,
-.affectedCard,
-.attentionCard,
-.baselineCard,
-.campaignCard,
-.comparisonCard,
-.editorCard,
-.libraryCard,
-.panel,
-.releaseCard,
-.revisionCard,
-.verificationCard,
-.workspaceCard,
-.gateGrid article,
-.metrics button,
-.workMetrics article {
+html .activeChangeCard,
+html .affectedCard,
+html .attentionCard,
+html .baselineCard,
+html .campaignCard,
+html .comparisonCard,
+html .editorCard,
+html .libraryCard,
+html .panel,
+html .releaseCard,
+html .revisionCard,
+html .verificationCard,
+html .workspaceCard,
+html .gateGrid article,
+html .metrics button,
+html .workMetrics article {
   padding-block: var(--space-card-block);
 }
 
-.historyTabs button { padding-block: calc(var(--space-card-block) - 1px); }
-.historyFilters { padding-block: calc(var(--space-row-block) - 2px); }
+html .historyTabs button { padding-block: calc(var(--space-card-block) - 1px); }
+html .historyFilters { padding-block: calc(var(--space-row-block) - 2px); }
 
 /* The context bar and the tab strips that stick beneath it have to move together, or compact leaves a
    gap between them. */
-.contextBar {
+html .contextBar {
   height: calc(var(--control-height) + 8px);
   min-height: calc(var(--control-height) + 8px);
 }
 
-.lifeTabs,
-.verificationTabs { top: calc(var(--control-height) + 8px); }
+html .lifeTabs,
+html .verificationTabs { top: calc(var(--control-height) + 8px); }
 
 @media (max-width: 900px) {
   :root {

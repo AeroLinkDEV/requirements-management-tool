@@ -204,6 +204,47 @@ with the sign-in limiter, which is keyed per account on purpose.
 **Only then may the claim change.** Until these numbers exist, the documentation says 150 simultaneous
 *database clients* and 50,000 requirements on one workstation, and says nothing about users.
 
+## First-load cost — **halved; one part deferred**
+
+Signing in used to download and execute the entire product: a single 583 kB script holding all fifteen
+workspaces, whether or not anybody opened them. Each workspace is now fetched when it is first opened, and
+warmed the moment its navigation entry is hovered or focused, so the code is usually already there when the
+click lands.
+
+| | before | after |
+|---|---|---|
+| First-load JavaScript | 583.2 kB (150.8 kB gzip) | 309.2 kB (89.3 kB gzip) |
+| First-load stylesheet | 287.0 kB (64.4 kB gzip) | 287.4 kB (64.5 kB gzip) |
+
+On a local network this is not about bandwidth. It is parse and execute time on the workstation, which costs
+the same however fast the link is.
+
+**Deferred: splitting the stylesheet, and the cascade work it needs.** Splitting CSS the same way takes the
+first stylesheet from 287 kB to 98 kB — measured, then reverted. A chunk's stylesheet is appended when the
+chunk loads, so on-demand stylesheets land in an order that depends on which page the reader opened first,
+and this client has rules that win only by being loaded last. Three such reversals against the
+always-loaded stylesheets were found and fixed properly rather than worked around:
+
+- **Density.css** decided vertical rhythm for twenty row and card families with `padding-block`, and lost
+  every one of them to a component's `padding` shorthand at equal specificity. Its selectors are now written
+  `html .x`, so the density system wins by specificity instead of by luck. Without this, compact density
+  silently stopped compressing anything — which the browser journeys caught.
+- **`.formError`** was defined in the change-request editor's stylesheet and used by three surfaces in three
+  different bundles. It now lives in App.css. The setup form's own version, which imposed a grid placement
+  that made sense only inside that form, is scoped to `.setup`.
+- **`.buildForm`** names two unrelated forms, in History and in the release execution workbench, styled
+  differently. The workbench's rules are scoped to `.executionWorkbench`.
+
+What remains are chunk-against-chunk pairs, where neither stylesheet is always present. Fixing those means
+putting component rules in a cascade layer that the density and cohesion layers outrank, so order stops
+mattering anywhere — a change to every stylesheet in the client, and the prerequisite for the remaining
+190 kB.
+
+**System Operations is also still eager**, for the same reason at a smaller scale: CohesionPass.css corrects
+the type size on thirty-seven of that surface's selectors by being loaded later, not by being more specific.
+Splitting it reverts all thirty-seven to 7–9 px production text, which is the defect the cohesion pass was
+written to fix. Worth 40 kB until those rules belong to the surface instead of to a catch-all file.
+
 ## Deferred, deliberately
 
 ### 4. Word round-trip
