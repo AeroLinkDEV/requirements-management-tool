@@ -402,6 +402,28 @@
 .impactActions { display: flex; gap: 8px; align-items: center; }
 .impactHint { font-size: 12px; color: var(--ink-500); }
 
+/* These were browser-default grey buttons, and had been since the queue was written. Nothing caught it
+   because the design audit only ever saw this surface on its coverage tab, where no impact row — and so no
+   action — is rendered. Making the queue the landing page put them in front of the audit, and it failed
+   immediately. The same shape as the two contrast defects PROJECT_STATE records: a control nobody had looked
+   at because nothing had ever drawn it. */
+html .impactActions > button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #14666a;
+  color: #fff;
+  font: 700 12px "DM Sans", sans-serif;
+  cursor: pointer;
+}
+html .impactActions > button.outline {
+  border: 1px solid #c6d4dd;
+  background: #fff;
+  color: #3d5f70;
+}
+html .impactActions > button:disabled { cursor: not-allowed; opacity: .55; }
+
 .impactDialog {
   position: fixed;
   inset: 0;
