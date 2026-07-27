@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PersonName } from "./People";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useFormDraft } from "./autosave";
 import { stateLabel } from './presentation'
@@ -582,7 +583,7 @@ export default function BaselineCenter({
                             </b>
                             <p>{event.detail}</p>
                             <small>
-                              {event.actorId} ·{" "}
+                              <PersonName userName={event.actorId} /> ·{" "}
                               {new Date(event.occurredAt).toLocaleString()}
                             </small>
                           </div>

@@ -11,3 +11,9 @@
 .personAvatar.medium { width: 38px; height: 38px; }
 .personAvatar.large { width: 48px; height: 48px; }
 .personInitials { display: inline-grid; place-items: center; color: #123653; background: #78dbcd; font-weight: 800; font-size: 12px; }
+
+/* Inherits its surroundings on purpose: a name replaces an account handle wherever one was printed, in an
+   audit row, a definition list or an approval step, and each of those already decided how its text should
+   look. `html` for specificity, because these land inside components that style their own descendants. */
+html .personName { font: inherit; color: inherit; }
+html .personName small { font-size: inherit; color: inherit; opacity: .82; }

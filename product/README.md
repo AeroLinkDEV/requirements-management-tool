@@ -104,6 +104,12 @@ Local demonstration identities include `admin`, `systems.author`, `software.auth
 
 ## Verify
 
+**Stop AeroLink before running anything that builds.** On Windows a running API holds
+`AeroLink.Domain.dll` and `AeroLink.Infrastructure.dll` open, and the build fails with `MSB3027 … the file is
+locked by AeroLink.Api`. Both launchers leave the API running after their window closes — deliberately — so
+this is the normal state of a machine somebody has been demonstrating from, and the error names a copy step
+rather than the cause. `STOP_AEROLINK.bat` first. Linux has no such problem, which is why nothing catches it.
+
 Use the smallest trustworthy loop while developing:
 
 ```powershell
