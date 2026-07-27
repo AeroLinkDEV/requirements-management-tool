@@ -1,0 +1,104 @@
+.documentOutputs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid #dbe4ec;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.documentOutputs h3 {
+  margin: 0;
+  color: #24384e;
+  font: 700 14px Manrope, sans-serif;
+}
+
+.documentOutput {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid #e3eaf1;
+  border-radius: 10px;
+  background: white;
+}
+
+.documentOutput > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.documentOutput b {
+  color: #1d3348;
+  font: 700 13px Manrope, sans-serif;
+}
+
+.documentOutput small {
+  color: #66768b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.documentLinks {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+html .documentLinks a {
+  padding: 8px 11px;
+  border: 1px solid #ccd8e3;
+  border-radius: 8px;
+  background: white;
+  color: #2c688f;
+  font: 700 12px Manrope, sans-serif;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+html .documentLinks a:hover {
+  border-color: #2c688f;
+  background: #f1f7fb;
+}
+
+.documentUnavailable {
+  flex-shrink: 0;
+  color: #8a97a8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .documentOutput {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+/* A draft is styled provisional next to an approved one: lighter surface, amber edge, and the word DRAFT doing
+   the work in the label. The visual difference is deliberate — the two are not the same kind of record, and
+   this is the moment somebody could mistake one for the other. */
+.documentOutputs[data-kind="draft"] {
+  border-color: #e6d3ae;
+  border-left: 4px solid #d9a441;
+  background: #fdf8ee;
+}
+
+.documentOutputs[data-kind="draft"] h3 { color: #6f4c12; }
+.documentOutputs[data-kind="draft"] .documentOutput { border-color: #ecdcbc; }
+.documentOutputs[data-kind="draft"] .documentOutput small { color: #7b6741; }
+
+html .documentOutputs[data-kind="draft"] .documentLinks a {
+  border-color: #ddc79b;
+  color: #7a5716;
+}
+
+html .documentOutputs[data-kind="draft"] .documentLinks a:hover {
+  border-color: #b98d2d;
+  background: #fdf3e0;
+}
