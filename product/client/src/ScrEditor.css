@@ -502,3 +502,48 @@
   cursor: pointer;
 }
 .pasStructure:hover { border-style: solid; border-color: #369384; color: #1c3044; }
+
+/* Shown where the editor would be when the selected build has already been released. Deliberately shaped like
+   the editor page it replaces, so switching build lands you in the same place rather than somewhere new. */
+.closedReleaseNotice {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 36px 48px 84px;
+}
+
+.closedReleaseNotice .back {
+  margin: 0 0 21px;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: #326d8f;
+  font: 700 13px Manrope, sans-serif;
+  cursor: pointer;
+}
+
+.closedReleaseNotice h1 {
+  margin: 7px 0 14px;
+  color: #102a44;
+  font: 700 clamp(25px, 2.6vw, 33px)/1.15 Manrope, sans-serif;
+  letter-spacing: -0.03em;
+}
+
+.closedReleaseNotice p {
+  margin: 0 0 14px;
+  color: #4d5c72;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+html .closedReleaseNotice button.primary {
+  margin-top: 8px;
+  padding: 11px 18px;
+  border: 0;
+  border-radius: 10px;
+  background: #176c76;
+  color: white;
+  font: 700 14px Manrope, sans-serif;
+  cursor: pointer;
+}
+
+html .closedReleaseNotice button.primary:hover { background: #135e67; }
