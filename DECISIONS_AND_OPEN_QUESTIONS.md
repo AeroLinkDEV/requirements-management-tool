@@ -479,6 +479,50 @@ Future entries use:
   release workbench reports the new wording. Existing baselines materialized before this change keep
   whatever links they already had — nothing retroactively marks historical coverage suspect.
 
+### DEC-051 - Identity Federation Is Deferred Until an Organization Commits to Deploying It
+
+- **Date:** 2026-07-24 (recorded here 2026-07-26)
+- **Status:** Accepted
+- **Decision:** The remainder of Workstream 4 — OIDC and SAML sign-in, SCIM, break-glass, step-up, account
+  recovery, administrator session inventory, provider health and the identity administration UI — is
+  deferred, not in progress and not scheduled. Pull request #53 stays a draft. The full record, with the
+  reasoning, the resume trigger and the order to resume in, is the *Deferred scope — decision record* in
+  [AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md); this entry
+  does not restate it.
+- **Rationale:** No organization yet signs in to AeroLink with a corporate directory, so federation has no
+  user, and most of the deferred list exists only to serve it. Security-critical code maintained against no
+  real usage is how such code silently rots.
+- **Consequences:** Issue #34 stays open as the tracking record and must not be closed as though the gate
+  were met. The trigger to resume is the first commitment to deploy AeroLink for an organization
+  authenticating against its own directory; that commitment has not been made.
+- **Why this entry exists at all:** the deferral was recorded only inside the workstream contract, so it had
+  no `DEC-nnn` to cite — and `DEMO_BRIEF.md` cited DEC-046, which is the retirement of the concept showcase
+  and says nothing about identity. The demonstration brief is the script for answering the software quality
+  group on exactly this question, and it pointed them at the wrong record. This project's own convention is
+  that decisions carry stable identifiers; the worked example of a deferral had not followed it.
+
+### DEC-052 - The API Serves the Built Client
+
+- **Date:** 2026-07-26
+- **Status:** Accepted
+- **Decision:** When given a built client through `Client:StaticFiles` or a published `wwwroot`, the API
+  serves it: static files, immutable caching for content-hashed assets, and a fallback to the entry document
+  so a deep link reloads. One process, one port, one origin. Where no client is supplied the API behaves
+  exactly as before, so a deployment serving the client through its own reverse proxy is unaffected. The
+  repository's `product/client/dist` is deliberately never discovered automatically.
+- **Rationale:** Nothing in the repository had ever served the built client. Both launchers and every gate
+  ran the Vite development server, so the production bundle was compiled on every pull request and never
+  rendered in a browser on any platform — while `DEMO_BRIEF.md` named a dry run from a production build as
+  the one preparation that could not be skipped. Serving from the API is also the correct on-premises shape:
+  no CORS policy joining two servers, one place to terminate TLS, one service to supervise.
+- **Consequences:** A document and an API need opposite content security policies, and the API's
+  `default-src 'none'; sandbox` applied to a document serves a blank page. Both policies are now explicit in
+  `ClientHosting`, and the document policy's `'self'` throughout makes [DEC-047](#dec-047---the-client-has-no-external-runtime-dependency)
+  something the browser enforces rather than something people remember. `START_AEROLINK_PRODUCTION.bat` is
+  the demonstration path; `START_AEROLINK.bat` remains the development one. Auto-discovering `client/dist`
+  was rejected because an ordinary `dotnet run` would then serve whatever build was left in the working
+  tree, and a stale bundle served silently is worse than none.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

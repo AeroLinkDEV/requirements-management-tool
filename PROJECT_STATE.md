@@ -1,6 +1,6 @@
 # Project State — Start Here
 
-**Last updated: 2026-07-25.**
+**Last updated: 2026-07-26.**
 
 This is the orientation record for anyone — human or model — picking up AeroLink. It answers *what
 exists, what is true today, what is deliberately not being built, and where to start*. Every other
@@ -86,6 +86,15 @@ Draft SCR rather than bypassing approval, ReqIF 1.2 round trip, a versioned REST
 service identities, webhooks with HMAC signing and dead-letter replay, OSLC RM, product-line libraries
 and variants, backup with integrity manifests, and isolated restore drills.
 
+Delivered since, and not to be omitted when describing the product: **email notification of required
+approvals** through an outbox over the existing in-app notification record; **rich authored content** —
+tables, figures and symbols stored as structure rather than markup, so nothing ever becomes HTML — in
+requirement statements and change-request narrative, reproduced in the generated DOCX and PDF; **configurable
+review workflows**, where a project records who signs a change request, in what authority and in what order,
+versioned and never edited in place; a **Jira connector** with field mapping and link-back; and **approved
+document templates that decide what a generated document contains**, rather than being numbered and approved
+while a generator ignored them.
+
 Identity: local accounts, Program-scoped roles, sessions, MFA with recovery codes, mandatory
 temporary-password rotation, scoped service accounts, and security audit.
 
@@ -147,12 +156,20 @@ implementation status document when it is chosen.
 
 Understating these is a product-integrity failure, not a marketing choice.
 
-- **Scale is proven at the database layer only.** 150 simultaneous *database clients* and 50,000
-  requirements on one workstation, with zero failures. This is **not** 150 rendered browser sessions
-  on production topology, and must never be described as such. See
-  [product/docs/SCALE_FOUNDATION.md](product/docs/SCALE_FOUNDATION.md).
-- **No email transport exists.** Notifications are in-app only. Any feature needing outbound mail —
-  self-service account recovery in particular — carries this as a hard dependency.
+- **The scale claim is 150 simultaneous *database clients* and 50,000 requirements on one workstation,**
+  with zero failures. This is **not** 150 rendered browser sessions on production topology, and must never
+  be described as such. The HTTP path has since been measured too — the `session-load` harness signs in 150
+  real authenticated sessions — and that measurement is what found the sign-in limiter refusing 121 of 150
+  users. But per-page latency was measured from 10 to 50 concurrent sessions, and one query still caps the
+  requirements workspace, so the *claim* does not change. Say "database clients", and say the HTTP path is
+  measured but the user number is not yet supported. See
+  [product/docs/SCALE_FOUNDATION.md](product/docs/SCALE_FOUNDATION.md) and the path to 150 users in
+  [CAPABILITY_ROADMAP.md](CAPABILITY_ROADMAP.md), which is costed and deliberately not started.
+- **Email delivery exists but no mail server is configured.** An outbox writes a delivery row in the same
+  transaction as the domain change and a background dispatcher sends it over the organization's SMTP relay.
+  With no relay configured, deliveries stay Pending and inspectable rather than being dropped. Nothing has
+  been proved against a real relay, so treat "notifications reach people by email" as built and unexercised.
+  This removed the hard dependency that self-service account recovery was blocked on.
 - **Production deployment is not complete.** TLS, certificate and secret management, reverse-proxy
   topology, scheduled off-device backups, monitoring, retention enforcement and an independent
   security review remain organization-specific work. See
@@ -165,22 +182,36 @@ first paint for seconds on a restricted network. See DEC-047.
 
 ## How to run it
 
-Windows operator path: double-click `START_AEROLINK.bat`, which starts or verifies PostgreSQL, the API
-and the website, then opens `http://127.0.0.1:5173`. `STOP_AEROLINK.bat`,
-`AEROLINK_DIAGNOSTICS.bat`, `BACKUP_AEROLINK.bat`, `VERIFY_AEROLINK_BACKUP.bat` and
-`RESTORE_AEROLINK.bat` cover the rest. Full procedures in
-[product/docs/OPERATIONS.md](product/docs/OPERATIONS.md).
+PostgreSQL must be installed once on a new machine — `product\scripts\Setup-Postgres.ps1`, which downloads
+roughly 360 MB from `enterprisedb.com`. Neither launcher does this, and on a restricted network it is the
+step most likely to fail.
 
-Developer path and the test commands are in [product/README.md](product/README.md). Note that
-`START_AEROLINK.bat` runs the Vite **dev** server; a production build is served differently and is the
-better choice for demonstrations.
+**To demonstrate AeroLink, or to see what a deployment serves:** `START_AEROLINK_PRODUCTION.bat`. It builds
+the client and serves it from the API on one origin at `http://127.0.0.1:5080` — one process, one port, no
+CORS. This is the on-premises shape and the only path that runs the built client (DEC-052).
+
+**To work on AeroLink:** `START_AEROLINK.bat`, which runs the Vite **dev** server on `http://127.0.0.1:5173`
+against the API on 5080. `STOP_AEROLINK.bat`, `AEROLINK_DIAGNOSTICS.bat`, `BACKUP_AEROLINK.bat`,
+`VERIFY_AEROLINK_BACKUP.bat` and `RESTORE_AEROLINK.bat` cover the rest. Full procedures in
+[product/docs/OPERATIONS.md](product/docs/OPERATIONS.md); developer path and test commands in
+[product/README.md](product/README.md).
+
+Both launchers wait on `/health/ready`, which opens a database connection. They previously waited on
+`/health`, which answers "is the process listening" and is true with no database at all.
 
 The browser journeys run on Linux, macOS and Windows: `cd product/client && npx playwright test`, after
 `npx playwright install chromium` once. They were Windows-only until the Playwright configuration stopped
 launching its servers through a PowerShell prologue. Set `AEROLINK_E2E_SKIP_BUILD=true` to reuse an
-already-built API and cut about a minute per run. CI runs them on Linux for pull requests and pushes, plus
-one unsharded Windows pass on the nightly schedule, because Windows remains a supported deployment
-platform.
+already-built API and cut about a minute per run.
+
+`npm run test:production` runs a separate set of journeys against the **built** client served by the API.
+Everything else serves the client with `vite dev`, which is a different artifact — unbundled modules with
+stylesheets injected as they evaluate, rather than chunked code and one extracted, hashed stylesheet. Expect
+it to catch things the dev journeys structurally cannot; it found three defects on its first runs.
+
+CI runs the dev journeys and the production journeys on Linux for pull requests, plus one unsharded Windows
+pass on the schedule, because Windows remains a supported deployment platform. The Windows job also runs
+lint, typecheck and build — it did not until 2026-07-26, and the client had been failing to compile there.
 
 Local demonstration identities (`admin`, `systems.author`, `software.author`, `systems.reviewer`,
 `release.manager`) share a local-only password documented in `product/README.md`. Production
@@ -293,3 +324,26 @@ reason the document set can be trusted.
   wrong all along; the split had merely changed the timing enough for the element to be on screen when the
   audit sampled. Running the same test on an untouched checkout is what separated "I broke this" from "this
   was always broken" — two findings that look identical and need opposite responses.
+- **A gate that cannot run on the deployment platform is not a gate for that platform.** The journeys were
+  freed from Windows so they could run on Linux, and every check that could observe a Windows-only failure
+  stayed on Linux with them. `RichContent.tsx` and `richContent.ts` differ only in case: two modules on
+  Linux, one file on Windows, so `npm run build` and `npm run typecheck` failed on the platform this product
+  is deployed to, for as long as both files existed. The Windows job ran only `npx playwright test`, and
+  Playwright serves the journeys through `vite dev`, which transpiles each file without checking types — so
+  the one job on the right platform was structurally incapable of seeing it. Moving a suite to where it runs
+  easily is not the same as covering where the product runs.
+- **Running a thing is not the same as running the thing you ship.** Every gate, both launchers and every
+  journey served the client with `vite dev`. The production bundle was compiled on every pull request and
+  never once rendered in a browser, on any platform — while the demonstration brief named a dry run from a
+  production build as the one preparation that could not be skipped. It was not untested; the environment
+  did not exist. Its first four runs found a page that scrolled sideways, an 11px label under the readability
+  floor, and a content security policy that blocked eight self-hosted typefaces. Ask what artifact the gate
+  is actually exercising, and whether anybody ships that one.
+- **A hardcoded list of surfaces stops being a list of surfaces.** The design audit named twelve. Review
+  Procedures and New Change Request arrived later and were never added, so neither had ever been measured,
+  and both were breaking the contract. The production journey reads the navigation instead — it cannot go
+  stale, because the product tells it what exists. Prefer enumerating the thing over describing it.
+- **Specificity is the other way a rule loses.** `.richFileInput` set a visually-hidden control to one pixel
+  and lost to `.controlledEditor input { width: 100% }` — (0,1,0) against (0,1,1) — so the input rendered at
+  1160px and pushed the page 106px off screen. The cascade lesson above is about load order; this is the same
+  failure through the other mechanism, and the same fix applies. When a rule matters, make it win on purpose.

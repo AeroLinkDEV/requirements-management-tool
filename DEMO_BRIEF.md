@@ -90,14 +90,32 @@ These must be rehearsed verbatim, because precision is the whole argument with t
 Identity federation (pull request #53) stays a draft and is not worked before the demonstration. Finishing
 it means the genuinely difficult security work — PKCE, token and signature validation, key rotation — none
 of which the room is deciding next week, and none of which can be shown without a live identity provider.
-The deferral is recorded in DEC-046, whose trigger to resume is the first commitment to deploy AeroLink for
-an organization authenticating against its own directory. That commitment has not been made.
+The deferral is recorded in **DEC-051**, and in full in the Workstream 4 decision record in
+`AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md`. Its trigger to resume is the first commitment to deploy
+AeroLink for an organization authenticating against its own directory. That commitment has not been made.
 
 Rebasing that branch can wait until it is genuinely picked up; rebasing an unscheduled draft only means
 doing it twice.
 
 ## Preparation that cannot be skipped
 
-A dry run on the presenting machine, from a **production build** — not the Vite dev server that
-`START_AEROLINK.bat` launches. This is the single highest-risk untested path, because it is the only
-environment the demonstration actually depends on.
+A dry run on the presenting machine, from a **production build**. This was recorded as the single
+highest-risk untested path, and it turned out to be worse than untested: no production-serving path existed
+at all. Both launchers and every gate ran the Vite development server, so the built client had never been
+rendered in a browser on any platform.
+
+That is now closed. `START_AEROLINK_PRODUCTION.bat` builds the client and serves it from the API on one
+origin at `http://127.0.0.1:5080`, four browser journeys run against that artifact on every pull request
+(DEC-052), and the path has been exercised on Windows against PostgreSQL with the FMSLIVE dataset rendering.
+
+**Still do the dry run on the presenting machine**, because that is a different machine. Two things it must
+confirm, both of which have bitten this project already:
+
+- **PostgreSQL is installed there.** `START_AEROLINK_PRODUCTION.bat` will not install it;
+  `product\scripts\Setup-Postgres.ps1` does, once, and it downloads roughly 360 MB from `enterprisedb.com`.
+  On a locked-down corporate machine that download is the thing most likely to fail, and it is not something
+  to discover on the morning.
+- **Sign in, and open each of the four demonstration beats.** A workspace arrives as its own chunk when it
+  is first opened; the journeys cover that, but the journeys are not the presenting machine.
+
+Run it far enough ahead that a failure leaves time to fix it.

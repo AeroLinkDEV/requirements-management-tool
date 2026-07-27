@@ -8,7 +8,11 @@ Items are numbered as they were in the analysis, so the numbering is not sequent
 
 ## Accepted, in build order
 
-### 1. Email notification of required approvals — **first**
+**Status as of 2026-07-26: items 1, 2, 3, 5, 8 and 9 are built.** The designs below are retained as the
+record of what was decided and why, not as a queue. Item 10 is measured with its claim deliberately
+unchanged, and the path beyond it is costed and deliberately not started.
+
+### 1. Email notification of required approvals — **built**
 
 Every event that makes an approval someone's responsibility must reach them by email, with a link to the
 exact page: change-request review activation, document approval, test-procedure approval, verification
@@ -31,7 +35,7 @@ drift.
 - Nothing is emailed that the recipient could not already see in the product, and no token, credential or
   raw claim ever appears in a message.
 
-### 2. Rich content in requirements and change-request narrative
+### 2. Rich content in requirements and change-request narrative — **built**
 
 Images, tables and formatted content in requirement statements, and in the change request's problem,
 analysis and solution fields. Must be easy to author, not a markup language people fight.
@@ -43,7 +47,7 @@ image storage reusing the evidence-store pattern, and — the hard part — **de
 generated DOCX and PDF**. A document that cannot reproduce its embedded table byte-for-byte breaks the
 reproducibility claim the product rests on.
 
-### 3. Attachments on requirements
+### 3. Attachments on requirements — **built**
 
 Evidence upload exists but is bound to test executions and release campaigns. Requirements need their own
 attachments (an ICD extract, a diagram). Reuses the evidence store and its integrity manifest.
@@ -105,13 +109,13 @@ rationale, and belongs in the audit record next to the approval it follows.
 This behaviour is preserved unchanged by configurable workflows. Workflows configure *who signs and in what
 order*; they do not configure away the separation between approving a change and shipping it.
 
-### 8. Jira integration
+### 8. Jira integration — **built**
 
 Outbound webhooks with HMAC signing and dead-letter replay already exist, as does OSLC. What is missing is
 a *named* connector: field mapping, link-back to the AeroLink artifact, and status reflection. Begin with
 the hook and mapping, not a full bidirectional sync.
 
-### 9. Controlled document templates
+### 9. Controlled document templates — **built**
 
 Document generation is fixed-form. Programs need to define their own SYSRD/SWRD layout, and the template
 itself must be a controlled, approved, versioned artifact — otherwise changing a template silently changes
@@ -251,7 +255,8 @@ written to fix. Worth 40 kB until those rules belong to the surface instead of t
 actually bring to it — *what does startup do?* and *where is this route handled?* — could only be answered by
 reading all of it.
 
-It is now 197 lines and holds only the order things happen in: services, the middleware every request passes
+It is now 222 lines — 209 when the split landed, plus the client-hosting composition added by DEC-052 — and
+holds only the order things happen in: services, the middleware every request passes
 through, then the route table. The 154 endpoints moved into nine modules named after the part of the lifecycle
 they serve, in the same shape as the thirteen modules that had already been split out:
 
