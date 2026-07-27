@@ -14,6 +14,13 @@ $websiteUrl = 'http://127.0.0.1:5173'
 
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 
+# Prerequisites first. See the same block in Start-AeroLinkProduction.ps1.
+. (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
+Write-Host '[0/4] Checking prerequisites...' -ForegroundColor Cyan
+$dotnet = Resolve-AeroLinkDotnet
+Assert-AeroLinkNode
+Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green
+
 function Test-HttpEndpoint {
     param([Parameter(Mandatory)][string]$Uri)
     try {
@@ -84,7 +91,7 @@ if (-not (Test-HttpEndpoint -Uri "$apiUrl/health/ready")) {
     # Windows PowerShell flattens ArgumentList into a single command line, so
     # paths containing spaces must be quoted explicitly.
     $apiArguments = "run --project `"$apiProject`" --urls `"$apiUrl`""
-    Start-Process -FilePath 'dotnet' `
+    Start-Process -FilePath $dotnet `
         -ArgumentList $apiArguments `
         -WorkingDirectory $repositoryRoot `
         -WindowStyle Hidden `
