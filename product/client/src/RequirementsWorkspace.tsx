@@ -4,6 +4,7 @@ import { stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useFormDraft } from "./autosave";
+import DocumentActions, { targetsFor } from "./DocumentActions";
 import "./RequirementsWorkspace.css";
 
 type Field = {
@@ -140,6 +141,12 @@ type Props = {
   api: string;
   projectId: string;
   scope: "System" | "Software";
+  /**
+   * The build being read. It decides which document these requirements belong to — the approved one for a
+   * released build, a stamped draft for an in-work one — so the reader does not have to leave the requirements
+   * to go and find it on the Digital Thread.
+   */
+  release?: { id: string; version: string; isReleased: boolean };
   initialViewId?: string;
   initialArtifactId?: string;
   onBack: () => void;
@@ -162,6 +169,7 @@ export default function RequirementsWorkspace({
   api,
   projectId,
   scope,
+  release,
   initialViewId,
   initialArtifactId,
   onBack,
@@ -619,6 +627,18 @@ export default function RequirementsWorkspace({
         </div>
       </header>
       {error && <div className="workspaceError">{error}</div>}
+      {/* The document these requirements belong to, offered where they are read. Which one you get follows the
+          build: approved for a released one, a stamped draft for an in-work one. Level-aware, so the Software
+          explorer filtered to HLR offers the high-level document and nothing else. */}
+      {release && (
+        <DocumentActions
+          api={api}
+          projectId={projectId}
+          release={release}
+          targets={targetsFor(scope, level)}
+          heading={release.isReleased ? `Approved documents for ${release.version}` : `Draft documents for ${release.version}`}
+        />
+      )}
       <section className="reqCommand">
         <div className="reqSearch">
           <span>⌕</span>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./LifecycleExplorer.css";
 import "./ControlledDownloads.css";
+import DocumentActions from "./DocumentActions";
 
 type Baseline = { id: string; releaseId: string; releaseVersion: string; displayNumber: string; name: string; requirementsMaterializedAt?: string };
 type Document = { id: string; type: string; displayNumber: string; title: string; contentHash: string; artifactCount: number; release: string; baselineId: string; baseline: string; generatedAt: string };
@@ -9,10 +10,14 @@ type TraceExecution = { id: string; outcome: string; executedBy: string; execute
 type TraceTest = { procedureId: string; revisionId: string; displayNumber: string; title: string; level: string; executions: TraceExecution[] };
 type TraceRelation = { id: string; displayNumber: string; level: string; type: string };
 type Trace = { id: string; revisionId: string; displayNumber: string; level: string; statement: string; testCount: number; parents: TraceRelation[]; children: TraceRelation[]; tests: TraceTest[] };
-type Props = { api: string; projectId: string; activeReleaseId: string; releases: { id: string; version: string }[]; onBack: () => void };
+type Props = { api: string; projectId: string; activeReleaseId: string; releases: { id: string; version: string; isReleased?: boolean }[]; onBack: () => void };
 
 export default function LifecycleExplorer({ api, projectId, activeReleaseId, releases, onBack }: Props) {
   const [tab, setTab] = useState<"thread" | "documents">("thread");
+  // Released and draft documents are different kinds of thing, so the tab asks which you came for rather than
+  // mixing a controlled record that carries a content hash in among generated-on-the-spot drafts that
+  // deliberately carry none. Released first: it is the answer to "what did we ship".
+  const [documentKind, setDocumentKind] = useState<"released" | "draft">("released");
   const [threadMode, setThreadMode] = useState<"map" | "evidence">("map");
   const [baselines, setBaselines] = useState<Baseline[]>([]);
   const [baselineId, setBaselineId] = useState("");
@@ -92,6 +97,9 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
     setQuery(relation.displayNumber.replace(/\.\d{2}$/, ""));
     setThreadMode("map");
   };
+  // Named for the reader, not for the URL. The draft header says which build it is a draft of, and "Draft
+  // documents for " followed by a bare identifier is worse than saying nothing.
+  const activeVersion = releases.find((item) => item.id === activeReleaseId)?.version ?? "the release in work";
   const focus = traces.find((item) => item.revisionId === focusId) ?? traces[0];
   const selectedBaseline = baselines.find((item) => item.id === baselineId);
   const executions = useMemo(() => focus?.tests.flatMap((test) => test.executions) ?? [], [focus]);
@@ -177,27 +185,31 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
           </details>
         </article>)}</section>}
       </> : <>
-        {/* A draft of the document this release is heading towards, before anything is frozen. It reads the
-            released baseline with every approved change folded in, carries the revision the released document
-            will carry, and is stamped DRAFT on every page. Nothing is stored: the content is still moving, and
-            a controlled record of that would be a record of nothing. */}
-        <section className="draftDocuments">
-          <div>
-            <b>Draft for the release in work</b>
-            <span>Released content plus every approved change, at the revision this document will carry when it is released. Watermarked, and not a controlled record.</span>
-          </div>
-          <div className="draftDocumentActions">
-            {([["Sysrd", "System requirements"], ["SwrdHighLevel", "Software HLR"], ["SwrdLowLevel", "Software LLR"]] as const).map(([type, label]) => (
-              <span key={type}>
-                <b>{label}</b>
-                <a href={`${api}/api/releases/${activeReleaseId}/draft-document?type=${type}&format=docx`}>DOCX</a>
-                <a href={`${api}/api/releases/${activeReleaseId}/draft-document?type=${type}&format=pdf`}>PDF</a>
-              </span>
-            ))}
-          </div>
-        </section>
+        {/* Two different kinds of thing, so the reader says which they came for instead of finding both mixed
+            together. A released document is a controlled record with a content hash. A draft is generated on
+            request from the released baseline with every approved change folded in, carries the revision the
+            released document will carry, is stamped DRAFT on every page, and is deliberately never stored —
+            the content is still moving, and a controlled record of that would be a record of nothing. */}
+        <div className="documentKindSwitch" role="group" aria-label="Which documents">
+          <button type="button" aria-pressed={documentKind === "released"} onClick={() => setDocumentKind("released")}>Released documents</button>
+          <button type="button" aria-pressed={documentKind === "draft"} onClick={() => setDocumentKind("draft")}>Draft documents</button>
+        </div>
+        {documentKind === "draft" ? (
+          <DocumentActions
+            api={api}
+            projectId={projectId}
+            release={{ id: activeReleaseId, version: activeVersion, isReleased: false }}
+            targets={[
+              { type: "Sysrd", label: "System Requirements Document" },
+              { type: "SwrdHighLevel", label: "Software Requirements Document — High-Level" },
+              { type: "SwrdLowLevel", label: "Software Requirements Document — Low-Level" },
+            ]}
+            heading={`Draft documents for ${activeVersion}`}
+          />
+        ) : <>
         <div className="documentActions"><select value={baselineId} onChange={(event) => setBaselineId(event.target.value)}>{baselines.map((item) => <option value={item.id} key={item.id}>{item.displayNumber} · {item.name}</option>)}</select><button onClick={generate}>Generate / refresh outputs</button></div>
         <section className="documentGrid">{documents.map((item) => <article key={item.id}><div><span>{item.type.replace(/([A-Z])/g, " $1").trim()}</span><i>CONTROLLED</i></div><h2>{item.displayNumber}</h2><h3>{item.title}</h3><dl><div><dt>Release</dt><dd>{item.release}</dd></div><div><dt>Baseline</dt><dd>{item.baseline}</dd></div><div><dt>Artifacts</dt><dd>{item.artifactCount.toLocaleString()}</dd></div><div><dt>Generated</dt><dd>{new Date(item.generatedAt).toLocaleDateString()}</dd></div></dl><code>{item.contentHash}</code><div className="downloadLinks"><a href={`${api}/api/documents/${item.id}/download?format=docx`}>Download DOCX</a><a href={`${api}/api/documents/${item.id}/download?format=pdf`}>Download PDF</a></div></article>)}{!loading && !documents.length && <div className="traceEmpty"><b>No outputs for this baseline</b><p>Generate controlled documents only after the selected requirement baseline has been materialized.</p></div>}</section>
+        </>}
       </>}
     </main>
   );

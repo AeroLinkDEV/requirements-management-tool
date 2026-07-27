@@ -536,6 +536,7 @@ function App() {
         api={API}
         projectId={project.project.id}
         scope={discipline === "software" ? "Software" : "System"}
+        release={release}
         initialViewId={initialRoute.savedViewId}
         initialArtifactId={view === "requirements" ? selectedArtifactId || undefined : undefined}
         onBack={() => navigate("dashboard")}
