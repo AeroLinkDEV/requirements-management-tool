@@ -133,7 +133,35 @@ public static class ChangeRequestEndpoints
                               orderby artifact.BaseNumber
                               select new { artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(), revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, state = revision.State.ToString() })
                 .Take(Math.Clamp(limit ?? 12, 1, 50)).ToListAsync(ct);
-            return Results.Ok(rows.Select(x => new { x.Id, x.BaseNumber, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.level, x.Revision, nextRevision = x.Revision + 1, x.Statement, x.Rationale, x.VerificationMethod, x.state }));
+            // The section each requirement is currently in, so a modification can offer to keep it. Without this
+            // the author is asked to choose a section for a requirement that already has one, which invites
+            // moving it by accident — the commonest way structure gets quietly rearranged.
+            var found = rows.Select(x => x.Id).ToList();
+            var placements = await (from node in db.SpecificationNodes.AsNoTracking()
+                                    where node.RequirementArtifactId != null && found.Contains(node.RequirementArtifactId.Value)
+                                       && node.ParentId != null
+                                    select new { ArtifactId = node.RequirementArtifactId!.Value, SectionId = node.ParentId!.Value })
+                .ToListAsync(ct);
+            var sectionByArtifact = placements.GroupBy(x => x.ArtifactId)
+                .ToDictionary(x => x.Key, x => x.First().SectionId);
+            return Results.Ok(rows.Select(x => new { x.Id, x.BaseNumber, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.level, x.Revision, nextRevision = x.Revision + 1, x.Statement, x.Rationale, x.VerificationMethod, x.state,
+                currentSectionId = sectionByArtifact.TryGetValue(x.Id, out var sectionId) ? sectionId : (Guid?)null }));
+        });
+
+        /// The sections a requirement of a given level can be placed in, for the picker on a proposal.
+        app.MapGet("/api/authoring/sections", async (Guid projectId, RequirementLevel level, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            // Scoped by level, because a requirement's level fixes which specification it belongs to. Offering
+            // every section in the project would let an author file a low-level requirement in the system
+            // document, which nothing downstream would accept and nothing here would have refused.
+            var rows = await (from node in db.SpecificationNodes.AsNoTracking()
+                              join spec in db.RequirementSpecifications.AsNoTracking() on node.SpecificationId equals spec.Id
+                              where spec.ProjectId == projectId && spec.Level == level.ToString()
+                                 && node.Type == SpecificationNodeType.Section
+                              orderby node.Position
+                              select new { node.Id, node.Heading, node.Position, specification = spec.DocumentNumber }).ToListAsync(ct);
+            return Results.Ok(rows);
         });
 
         app.MapGet("/api/scrs/{id:guid}/download", async (Guid id, string? format, ChangeRequestOutputGenerator generator, CancellationToken ct) =>
@@ -230,7 +258,8 @@ public static class ChangeRequestEndpoints
                     }
                     var attributes = JsonSerializer.Serialize(new { derived = change.Level != RequirementLevel.System && change.IsDerived });
                     scr.AddRequirementChange(actor, requirementNumber, revision, change.Level, change.Kind,
-                        change.Statement, change.Rationale, change.VerificationMethod, now, change.RichText, attributes, change.ImpactDispositionJson);
+                        change.Statement, change.Rationale, change.VerificationMethod, now, change.RichText, attributes, change.ImpactDispositionJson,
+                        change.TargetSectionId);
                 }
                 await repository.AddAsync(scr, ct);
                 await repository.SaveAsync(ct);

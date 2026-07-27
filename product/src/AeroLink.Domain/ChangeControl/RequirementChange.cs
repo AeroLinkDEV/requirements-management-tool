@@ -7,7 +7,8 @@ public enum RequirementChangeKind { Introduce, Modify, Retire }
 
 public sealed record RequirementChangeDraft(string BaseNumber, int Revision, RequirementLevel Level,
     RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod,
-    string RichText = "", string AttributesJson = "{}", string ImpactDispositionJson = "{}");
+    string RichText = "", string AttributesJson = "{}", string ImpactDispositionJson = "{}",
+    Guid? TargetSectionId = null);
 
 public sealed class RequirementChange
 {
@@ -15,7 +16,8 @@ public sealed class RequirementChange
 
     internal RequirementChange(Guid scrId, string baseNumber, int revision, RequirementLevel level,
         RequirementChangeKind kind, string statement, string rationale, string verificationMethod,
-        string richText = "", string attributesJson = "{}", string impactDispositionJson = "{}")
+        string richText = "", string attributesJson = "{}", string impactDispositionJson = "{}",
+        Guid? targetSectionId = null)
     {
         Id = Guid.NewGuid();
         ScrId = scrId;
@@ -34,6 +36,7 @@ public sealed class RequirementChange
             string.IsNullOrWhiteSpace(richText) ? statement.Trim() : richText.Trim());
         AttributesJson = string.IsNullOrWhiteSpace(attributesJson) ? "{}" : attributesJson;
         ImpactDispositionJson = string.IsNullOrWhiteSpace(impactDispositionJson) ? "{}" : impactDispositionJson;
+        TargetSectionId = targetSectionId;
     }
 
     public Guid Id { get; private set; }
@@ -49,4 +52,18 @@ public sealed class RequirementChange
     public string RichText { get; private set; } = string.Empty;
     public string AttributesJson { get; private set; } = "{}";
     public string ImpactDispositionJson { get; private set; } = "{}";
+
+    /// <summary>
+    /// Which section of the specification this requirement belongs in, as the author chose it.
+    ///
+    /// A requirement's place in a document is part of what is being proposed, and until now nothing carried it:
+    /// section membership existed only as a `SpecificationNode` row created after the fact, so an introduced
+    /// requirement landed wherever a backfill put it and a modification could not move one. An author writing
+    /// "the FMS shall sequence oceanic waypoints" knows it belongs under Navigation, and had nowhere to say so.
+    ///
+    /// Null means unchanged: for a modification, leave the requirement where it is; for an introduction, let the
+    /// existing placement rule decide. That keeps it optional, which matters because a proposal is worth saving
+    /// before every field is settled.
+    /// </summary>
+    public Guid? TargetSectionId { get; private set; }
 }
