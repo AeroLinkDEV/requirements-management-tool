@@ -61,7 +61,7 @@ public static class RequirementsEndpoints
 
         // Enterprise Requirements Workspace: configurable schemas, structured specifications,
         // collaboration, saved views, governed bulk operations, redlines, and onboarding.
-        app.MapGet("/api/enterprise-requirements/workspace", async (Guid projectId, Guid? specificationId, string? search, string? level, string? verification, string? tag,string? state,string? owner,string? sourceScr,Guid? baselineId,bool? openComments,string? sort,int page, int pageSize,
+        app.MapGet("/api/enterprise-requirements/workspace", async (Guid projectId, Guid? specificationId, Guid? sectionId, string? search, string? level, string? verification, string? tag,string? state,string? owner,string? sourceScr,Guid? baselineId,bool? openComments,string? sort,int page, int pageSize,
             HttpContext http, AeroLinkDbContext db, EnterpriseRequirementsService enterprise, CancellationToken ct) =>
         {
             if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
@@ -71,6 +71,10 @@ public static class RequirementsEndpoints
             if(string.Equals(level,"Software",StringComparison.OrdinalIgnoreCase))artifacts=artifacts.Where(x=>x.Level==RequirementLevel.HighLevel||x.Level==RequirementLevel.LowLevel);
             else if(!string.IsNullOrWhiteSpace(level)&&Enum.TryParse<RequirementLevel>(level,true,out var parsedLevel))artifacts=artifacts.Where(x=>x.Level==parsedLevel);
             if(specificationId is not null)artifacts=artifacts.Where(x=>db.SpecificationNodes.Any(n=>n.SpecificationId==specificationId&&n.RequirementArtifactId==x.Id));
+            // A section is a node inside a specification, and a requirement sits under it as a child node. The
+            // headings were rendered as labels with counts beside them and could not be acted on, so a reader
+            // could see that a section held forty requirements and had no way to see which forty.
+            if(sectionId is not null)artifacts=artifacts.Where(x=>db.SpecificationNodes.Any(n=>n.ParentId==sectionId&&n.RequirementArtifactId==x.Id));
             var current=from artifact in artifacts
                         join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId
                         where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)

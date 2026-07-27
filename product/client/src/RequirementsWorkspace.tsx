@@ -188,6 +188,7 @@ export default function RequirementsWorkspace({
     [sort, setSort] = useState("identifier"),
     [showAdvanced, setShowAdvanced] = useState(false),
     [specificationId, setSpecificationId] = useState(""),
+    [sectionId, setSectionId] = useState(""),
     [page, setPage] = useState(1),
     [pageSize, setPageSize] = useState(25),
     [mode, setMode] = useState<"table" | "document">("table"),
@@ -214,6 +215,7 @@ export default function RequirementsWorkspace({
     autoSelected.current = false;
     setLevel(scope);
     setSpecificationId("");
+    setSectionId("");
     setPage(1);
     setSelected(undefined);
   }, [scope]);
@@ -240,6 +242,7 @@ export default function RequirementsWorkspace({
     if (sourceScr) p.set("sourceScr", sourceScr);
     if (openComments) p.set("openComments", "true");
     if (specificationId) p.set("specificationId", specificationId);
+    if (sectionId) p.set("sectionId", sectionId);
     return p;
   }, [
     projectId,
@@ -256,6 +259,7 @@ export default function RequirementsWorkspace({
     openComments,
     sort,
     specificationId,
+    sectionId,
   ]);
   /**
    * Only the specifications this explorer is about.
@@ -387,6 +391,7 @@ export default function RequirementsWorkspace({
     setOpenComments(false);
     setSort("identifier");
     setSpecificationId("");
+    setSectionId("");
     setPage(1);
   };
   const applyView = (view: SavedView) => {
@@ -809,9 +814,10 @@ export default function RequirementsWorkspace({
             <span>{scopedSpecifications.length}</span>
           </div>
           <button
-            className={!specificationId ? "active" : ""}
+            className={!specificationId && !sectionId ? "active" : ""}
             onClick={() => {
               setSpecificationId("");
+              setSectionId("");
               setPage(1);
             }}
           >
@@ -827,6 +833,9 @@ export default function RequirementsWorkspace({
                 className={specificationId === spec.id ? "active" : ""}
                 onClick={() => {
                   setSpecificationId(spec.id);
+                  // A section belongs to one specification, so choosing a different document cannot leave the
+                  // previous document's section applied — that combination matches nothing and reads as a bug.
+                  setSectionId("");
                   setLevel("");
                   setPage(1);
                 }}
@@ -847,12 +856,25 @@ export default function RequirementsWorkspace({
               </button>
               {specificationId === spec.id && (
                 <div className="sectionTree">
+                  {/* Buttons, not labels. A heading that reports "40" and cannot be pressed tells a reader
+                      there are forty requirements in Navigation and Guidance and gives them no way to see
+                      which forty — the count is an invitation the control refused to accept. */}
                   {spec.sections.map((x) => (
-                    <span key={x.id}>
+                    <button
+                      type="button"
+                      key={x.id}
+                      className={sectionId === x.id ? "active" : ""}
+                      aria-pressed={sectionId === x.id}
+                      onClick={() => {
+                        setSectionId(sectionId === x.id ? "" : x.id);
+                        setSpecificationId(spec.id);
+                        setPage(1);
+                      }}
+                    >
                       <i />
                       {x.heading}
                       <small>{x.count}</small>
-                    </span>
+                    </button>
                   ))}
                 </div>
               )}

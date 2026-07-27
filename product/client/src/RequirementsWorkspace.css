@@ -187,15 +187,26 @@
   border-left: 1px solid #d7e0e7;
   padding-left: 12px;
 }
-.sectionTree span {
+/* These headings became buttons so a reader can filter to a section instead of only being told how many
+   requirements it holds. They keep the appearance they had as labels — the tree still has to read as a tree —
+   and gain the affordances a control needs: a hover, a pressed state, and a focus ring. */
+html .sectionTree button {
   display: flex;
   align-items: center;
   position: relative;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   font-size: 12px;
   padding: 5px;
+  text-align: left;
   color: #708095;
+  cursor: pointer;
 }
-.sectionTree span > i {
+html .sectionTree button:hover { background: #eef3f8; color: #40546b; }
+html .sectionTree button.active { background: #e2edf7; color: #1d4a72; font-weight: 700; }
+.sectionTree button > i {
   position: absolute;
   left: -13px;
   width: 8px;
@@ -1044,7 +1055,7 @@
   font-size: 12px;
 }
 .specRail button small,
-.sectionTree span {
+.sectionTree button {
   font-size: 12px;
 }
 .reqTable article p {
