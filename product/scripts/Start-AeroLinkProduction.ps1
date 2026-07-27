@@ -53,8 +53,20 @@ function Wait-HttpEndpoint {
 }
 
 Write-Host '[1/4] Checking PostgreSQL...' -ForegroundColor Cyan
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Start-Postgres.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL could not be started.' }
+# Installs it if this machine has never had it, rather than failing with an instruction to go and run another
+# script. A launcher whose first step is "now run a different script" is a launcher that does not launch, and
+# the repository is cloned to a different path on every machine — so there is nothing to configure here, only
+# something to do. Setup is idempotent and returns immediately once PostgreSQL is present.
+$catalogue = Join-Path $productRoot '.local\postgresql\pgsql\share\postgres.bki'
+if (-not (Test-Path $catalogue)) {
+    Write-Host '      PostgreSQL is not installed on this machine yet. Installing it once (about 320 MB).' -ForegroundColor Yellow
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Setup-Postgres.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL could not be installed. The output above says why.' }
+}
+else {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Start-Postgres.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL could not be started.' }
+}
 
 Write-Host '[2/4] Building the client...' -ForegroundColor Cyan
 if ($SkipClientBuild) {

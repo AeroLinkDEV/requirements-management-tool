@@ -3,7 +3,15 @@ $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $bin = Join-Path $root '.local\postgresql\pgsql\bin'
 $data = Join-Path $root '.local\pgdata'
 $log = Join-Path $root '.local\postgresql.log'
-if (-not (Test-Path (Join-Path $bin 'postgres.exe'))) { throw 'Local PostgreSQL binaries are missing. Run Setup-Postgres.ps1 first.' }
+# postgres.bki as well as postgres.exe, because either can be present without the other and only one of them
+# is checked by the thing that runs next. An interrupted download leaves bin/ extracted and share/ not, so a
+# guard that looks only for the executable passes a half-install straight into initdb — which then reports a
+# corrupted installation, naming a file the operator has never heard of instead of the step they missed.
+$catalogue = Join-Path $root '.local\postgresql\pgsql\share\postgres.bki'
+if (-not (Test-Path (Join-Path $bin 'postgres.exe')) -or -not (Test-Path $catalogue)) {
+    throw "PostgreSQL is not completely installed under $($root)\.local\postgresql. Run " +
+          "product\scripts\Setup-Postgres.ps1, which installs it and repairs a partial download."
+}
 & (Join-Path $bin 'pg_isready.exe') -h 127.0.0.1 -p 54329 -U postgres -d postgres *> $null
 if ($LASTEXITCODE -eq 0) { Write-Host 'PostgreSQL is already accepting connections on 127.0.0.1:54329.'; return }
 if (-not (Test-Path (Join-Path $data 'PG_VERSION'))) { & (Join-Path $bin 'initdb.exe') -D $data -U postgres -A trust --encoding=UTF8 --no-locale }
