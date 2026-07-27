@@ -142,6 +142,8 @@ public static class ChangeRequestEndpoints
         app.MapPost("/api/scrs", async (CreateScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
+            var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
+            if (closed is not null) return Results.BadRequest(new { error = closed, code = "release_is_closed" });
             try
             {
                 var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, ct);
@@ -157,6 +159,8 @@ public static class ChangeRequestEndpoints
         app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
+            var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
+            if (closed is not null) return Results.BadRequest(new { error = closed, code = "release_is_closed" });
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
             try
             {
@@ -320,5 +324,31 @@ public static class ChangeRequestEndpoints
             if(db.Database.IsSqlite()){var rows=await projected.ToListAsync(ct);return Results.Ok(rows.OrderByDescending(x=>x.SignedAt).Take(500));}
             return Results.Ok(await projected.OrderByDescending(x => x.SignedAt).Take(500).ToListAsync(ct));
         });
+    }
+
+    /// <summary>
+    /// Why a released build takes no new change requests, or null when it will.
+    ///
+    /// A released build is closed. Its content was fixed when it shipped, and a change request allocated to it
+    /// afterwards belongs to nothing: it cannot reach a baseline, cannot be incorporated, and cannot be revised
+    /// — it is a record filed against a decision already made. `retarget` has always refused to *move* a change
+    /// request onto a released build; nothing stopped one being *created* there, so the product offered an
+    /// action whose result was a change request with no future.
+    ///
+    /// It is also the likely mechanism behind a report of a saved draft that never appeared: created while the
+    /// released build was selected, it was allocated to that build, and the list the author then looked at was
+    /// filtered to the in-work one. Refusing at the point of creation removes the whole class.
+    ///
+    /// Checked here rather than in the aggregate because a change request cannot know what its target build has
+    /// done since; the same reason `StartNextRevision` is told rather than asked.
+    /// </summary>
+    private static async Task<string?> ReleasedBuildRefusalAsync(AeroLinkDbContext db, Guid targetReleaseId,
+        CancellationToken ct)
+    {
+        var release = await db.Releases.AsNoTracking().Where(x => x.Id == targetReleaseId)
+            .Select(x => new { x.Version, x.IsReleased }).SingleOrDefaultAsync(ct);
+        if (release is null) return "The target build does not exist.";
+        if (!release.IsReleased) return null;
+        return $"{release.Version} has been released and takes no new change requests. Switch to the in-work build and raise it there.";
     }
 }

@@ -570,6 +570,26 @@ Future entries use:
   the lists, closing the half of [DEC-052](#dec-052---the-api-serves-the-built-client)-era work that reached
   the list and missed the detail rail.
 
+### DEC-055 - A Released Build Takes No New Change Requests
+
+- **Date:** 2026-07-27
+- **Status:** Accepted
+- **Decision:** Both change request creation endpoints refuse a target build that has been released, naming the
+  build and where to raise the change instead. The client shows that explanation in place of the editor, with a
+  one-press switch to the in-work build. The navigation action stays visible rather than disappearing.
+- **Rationale:** `retarget` has always refused to *move* a change request onto a released build. Nothing stopped
+  one being *created* there, so the product offered an action whose result was a record with no future: it could
+  not reach a baseline, be incorporated, or be revised, because none of those are things a build that has
+  shipped will do again. It is also the most likely mechanism behind a report of a draft that saved and then
+  could not be found — created while the released build was selected, it was allocated to that build while the
+  list being searched was filtered to the in-work one, so the record existed, was correct, and was nowhere the
+  author looked.
+- **Consequences:** Enforced server-side on both endpoints, which are separate code paths, and asserted there
+  rather than only in the browser — the panel is a courtesy, not the rule. The action is not hidden when the
+  build is closed, because somebody looking for how to raise a change needs to be told where to raise it, and a
+  menu item that vanishes when you switch build teaches nothing. The refusal names the version, since "bad
+  request" would leave an author auditing a dozen fields none of which were wrong.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

@@ -437,6 +437,38 @@ function App() {
   const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{contextBar}<div className="workspaceView" key={`${view}-${discipline}`}><Suspense fallback={<WorkspaceLoading/>}>{content}</Suspense></div></div>{overlays}</div>;
   if(view==="notFound")return inShell(<main className="artifactState"><div><span>?</span><h1>Page not found</h1><p>This AeroLink route is not recognized. Use quick navigation to find an authorized workspace or artifact.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
   if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} onBack={()=>navigate("dashboard")} onOpen={(kind,id)=>{if(kind==="change-request")navigate("scr","system",id);else if(kind==="requirement")navigate("requirements","system",id);else navigate("artifact","system",id,kind)}}/>);
+  // A released build is closed, so this says so instead of opening an editor whose save the server will refuse.
+  // The action stays visible on the navigation rather than disappearing: somebody looking for how to raise a
+  // change needs to be told where to raise it, and a menu item that vanishes when you switch build teaches
+  // nothing. Enforced server-side too — see ReleasedBuildRefusalAsync — because this panel is a courtesy.
+  if ((view === "createSystemScr" || view === "createSoftwareChange") && project && release?.isReleased) {
+    const inWork = [...project.releases].reverse().find((item) => !item.isReleased);
+    return inShell(
+      <main className="closedReleaseNotice">
+        <button className="back" type="button" onClick={() => navigate("dashboard")}>← Command Center</button>
+        <p className="eyebrow">CHANGE CONTROL / {release.version}</p>
+        <h1>{release.version} has been released</h1>
+        <p>
+          A released build is closed. Its content was fixed when it shipped, so a change request raised against
+          it could never reach a baseline or be incorporated — it would be a record filed against a decision
+          already made.
+        </p>
+        {inWork ? (
+          <>
+            <p>Raise this change against {inWork.version}, the in-work build.</p>
+            <button type="button" className="primary" onClick={() => { changeRelease(inWork.id); }}>
+              Switch to {inWork.version} and continue
+            </button>
+          </>
+        ) : (
+          <p>
+            This product has no in-work build yet. Plan the next version under Product Versions, then raise the
+            change against it.
+          </p>
+        )}
+      </main>,
+    );
+  }
   if ((view === "createSystemScr" || view === "createSoftwareChange") && project && release)
     return inShell(
       <ScrEditor
