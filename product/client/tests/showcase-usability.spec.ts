@@ -62,6 +62,10 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   await expect(traceDetails.first()).not.toHaveAttribute('open','')
 
   await page.getByRole('link',{name:'System Verification'}).click()
+  // Verification opens on the work an approved change created, not on the coverage inventory. The inventory
+  // is one tab across, which is the right distance for a question asked occasionally.
+  await expect(page.getByRole('heading',{name:'Change impact'})).toBeVisible()
+  await page.getByRole('button',{name:/Requirement coverage/}).click()
   await expect(page.getByRole('heading',{name:'Requirement coverage'})).toBeVisible()
   await expect(page.getByRole('heading',{name:'Test procedures'})).toBeHidden()
   await page.getByRole('button',{name:/Test procedures/}).click()

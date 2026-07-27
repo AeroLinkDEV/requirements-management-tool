@@ -13,15 +13,20 @@ type Requirement={revisionId:string;displayNumber:string;statement:string}
 type Procedure={id:string;revisionId:string;displayNumber:string;title:string;ownerId:string;state:string;objective:string;requirementCount:number;lastOutcome?:string}
 type Execution={id:string;procedureRevisionId:string;displayNumber:string;title:string;outcome:string;executedBy:string;determination:string;evidenceReference:string;executedAt:string;retestOfExecutionId?:string;evidence:{id:string;originalFileName:string;size:number;sha256:string}[]}
 type Coverage={total:number;covered:number;verified:number;uncovered:number;items:{revisionId:string;displayNumber:string;statement:string;covered:boolean;verified:boolean;coveredBy:{revisionId:string;displayNumber:string;title:string;latestOutcome?:string;latestExecutionId?:string}[]}[]}
-type ImpactItem={id:string;trigger:string;state:string;subjectDisplayNumber:string;declaredVerificationMethod:string;assignedEngineerId?:string;assignedByLeadId?:string;outcome?:string;resolutionRationale:string;resolvedBy?:string;raisedAt:string;blocksBaselineApproval:boolean}
+type ImpactItem={id:string;trigger:string;state:string;subjectDisplayNumber:string;declaredVerificationMethod:string;procedureId?:string;assignedEngineerId?:string;assignedByLeadId?:string;outcome?:string;resolutionRationale:string;resolvedBy?:string;raisedAt:string;blocksBaselineApproval:boolean}
 type Props={api:string;programId:string;projectId:string;releaseId:string;scope:'System'|'Software';user:AuthUser;onBack:()=>void}
 
 export default function VerificationCenter({api,programId,projectId,releaseId,scope,user,onBack}:Props){
  const [baselines,setBaselines]=useState<Baseline[]>([]),[baselineId,setBaselineId]=useState(''),[builds,setBuilds]=useState<Build[]>([]),[buildId,setBuildId]=useState(''),[requirements,setRequirements]=useState<Requirement[]>([]),[procedures,setProcedures]=useState<Procedure[]>([]),[executions,setExecutions]=useState<Execution[]>([]),[coverage,setCoverage]=useState<Coverage>(),[creating,setCreating]=useState(false),[recording,setRecording]=useState<Procedure>(),[approving,setApproving]=useState<Procedure>(),[editing,setEditing]=useState<Procedure>(),[retest,setRetest]=useState<Execution>(),[error,setError]=useState('')
- // Change impact leads the tab strip and carries a count, which is what signals the outstanding work.
- // The workspace still opens on coverage, because that is the orientation view people expect to land on
- // and the badge does the signalling without moving the ground under them.
- const [workspaceTab,setWorkspaceTab]=useState<'impact'|'coverage'|'procedures'|'executions'>('coverage')
+ // This used to open on coverage, on the reasoning that it is the orientation view and the tab badge would do
+ // the signalling. The badge was not enough: somebody arriving to do verification work saw a table of
+ // everything in the release and no sign of the items the last approval had just made their problem.
+ //
+ // Opens on the work an approved change created, not on the coverage inventory. The inventory answers "what
+ // does this release contain"; the queue answers "what has to happen next, and whose job is it" — and only the
+ // second is a reason to come here on a Tuesday morning. Landing on coverage meant a verification engineer saw
+ // a table of everything and no sign of the four things the last approval had just made their problem.
+ const [workspaceTab,setWorkspaceTab]=useState<'impact'|'coverage'|'procedures'|'executions'>('impact')
  const [impact,setImpact]=useState<ImpactItem[]>([]),[resolving,setResolving]=useState<ImpactItem>(),[assigning,setAssigning]=useState<ImpactItem>()
  const [requirementQuery,setRequirementQuery]=useState(''),[selectedRequirementIds,setSelectedRequirementIds]=useState<string[]>([])
  const [outcome,setOutcome]=useState<'Pass'|'Fail'|'Blocked'>('Pass')
@@ -42,7 +47,29 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
  const approve=async(password:string,meaning:string)=>{if(!approving||!canApprove){setError('Approver authority is required in the selected Program.');return}const response=await fetch(`${api}/api/test-procedures/${approving.revisionId}/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password,meaning})});if(!response.ok){setError((await response.json()).error||'Procedure approval could not be recorded.');return}setApproving(undefined);await load();await loadCoverage()}
  const assignImpact=async(item:ImpactItem,engineerId:string)=>{setError('');const response=await fetch(`${api}/api/verification-impact/${item.id}/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({engineerId})});if(!response.ok){setError((await response.json()).error||'The item could not be assigned.');return}setAssigning(undefined);await loadImpact()}
  const resolveImpact=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!resolving)return;setError('');const form=new FormData(e.currentTarget);const outcomeValue=String(form.get('outcome'));const procedureId=String(form.get('procedureId')||'');const response=await fetch(`${api}/api/verification-impact/${resolving.id}/resolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({outcome:outcomeValue,rationale:form.get('rationale'),procedureId:outcomeValue==='ProcedureCoverageConfirmed'?procedureId:null})});if(!response.ok){setError((await response.json()).error||'The decision could not be recorded.');return}setResolving(undefined);await loadImpact();await loadCoverage()}
+ // Which procedure the reader was sent to look at, so it can be marked when the procedures tab opens.
+ const [procedureFocus,setProcedureFocus]=useState('')
  const outstandingImpact=impact.filter(x=>x.blocksBaselineApproval)
+ const mineImpact=outstandingImpact.filter(x=>x.assignedEngineerId===user.userName)
+ /**
+  * The queue, grouped by the thing that created it.
+  *
+  * Every item here exists because an approved change made it exist, and the three causes need different work:
+  * a new requirement needs a procedure written, a changed one needs its existing procedure reconfirmed against
+  * new wording, and a retirement leaves a procedure covering nothing. Ordered so the group that blocks the
+  * release soonest reads first.
+  */
+ const impactGroups=[
+  {trigger:'RequirementIntroduced',heading:'New requirements need a procedure',
+   hint:'An approved change introduced these. Nothing verifies them yet.',
+   items:impact.filter(x=>x.trigger==='RequirementIntroduced')},
+  {trigger:'RequirementModified',heading:'Changed requirements — coverage is suspect until reconfirmed',
+   hint:'The wording moved under an existing procedure. Open the procedure and judge whether it still verifies the requirement.',
+   items:impact.filter(x=>x.trigger==='RequirementModified')},
+  {trigger:'ProcedureOrphaned',heading:'Retired requirements leave procedures covering nothing',
+   hint:'The requirement these verified is no longer effective in this release.',
+   items:impact.filter(x=>x.trigger==='ProcedureOrphaned')},
+ ]
  const impactLabels:Record<string,string>={RequirementIntroduced:'New requirement',RequirementModified:'Modified requirement',ProcedureOrphaned:'Orphaned procedure'}
  const visibleRequirements=requirements.filter(x=>!requirementQuery.trim()||`${x.displayNumber} ${x.statement}`.toLowerCase().includes(requirementQuery.trim().toLowerCase())).slice(0,40)
  return <main className="verificationPage"><header><div><button className="back" onClick={onBack}>← Command Center</button><p className="eyebrow">VERIFICATION CONTROL / EXTERNAL EXECUTION</p><h1>Verification & Evidence</h1><p>Control procedures, coverage, human result determinations, evidence, and retest history.</p></div><button disabled={!canTest} title={canTest?undefined:'Test Engineer authority is required in this Program.'} onClick={()=>setCreating(true)}>+ New Test Procedure</button></header>{error&&<div className="workspaceError">{error}</div>}
@@ -55,11 +82,26 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
  <div className="verificationFocus">
   {workspaceTab==='impact'&&<section className="verificationCard">
    <div className="cardTitle"><h2>Change impact</h2><p>Verification owed by approved changes to this release. Raised on approval, before any baseline exists.</p></div>
+   <div className="impactSummary">
+    <article><b>{outstandingImpact.length}</b><span>Undecided</span></article>
+    <article><b>{mineImpact.length}</b><span>Assigned to you</span></article>
+    <article><b>{impact.length-outstandingImpact.length}</b><span>Decided</span></article>
+    <article className={outstandingImpact.length?'held':'clear'}><b>{outstandingImpact.length?'Held':'Clear'}</b><span>Release gate</span></article>
+   </div>
    {outstandingImpact.length>0&&<div className="impactGate" role="status">
     <b>{outstandingImpact.length} decision{outstandingImpact.length===1?'':'s'} outstanding</b>
     <span>The release cannot be approved until every new or modified requirement has an approved procedure or a recorded decision that no test is required. Freezing and materializing the baseline is unaffected — that is what creates the requirement revisions a procedure is written against.</span>
    </div>}
-   {impact.map(x=><article className={`impactRow ${x.blocksBaselineApproval?'open':'resolved'}`} key={x.id}>
+   {/* Grouped by what created the work, because the three causes need different things done to them: a new
+       requirement needs a procedure written, a changed one needs its existing procedure reconfirmed, and a
+       retired one needs a link taken away. A flat list made a reader sort that out per row. */}
+   {impactGroups.map(group=>group.items.length>0&&<div className="impactGroup" key={group.trigger}>
+    <div className="impactGroupHead" data-trigger={group.trigger}>
+     <b>{group.heading}</b>
+     <span>{group.items.length}</span>
+    </div>
+    <p className="impactGroupHint">{group.hint}</p>
+   {group.items.map(x=><article className={`impactRow ${x.blocksBaselineApproval?'open':'resolved'}`} key={x.id}>
     <div className="impactHead">
      <b>{x.subjectDisplayNumber}</b>
      <i className={x.trigger==='RequirementIntroduced'?'new':x.trigger==='RequirementModified'?'modified':'orphan'}>{impactLabels[x.trigger]??x.trigger}</i>
@@ -70,14 +112,19 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
     {x.resolutionRationale&&<p className="impactRationale">{x.resolutionRationale}<small><PersonName userName={x.resolvedBy} /></small></p>}
     {x.blocksBaselineApproval&&<div className="impactActions">
      {canLead&&<button className="outline" onClick={()=>setAssigning(x)}>Assign…</button>}
+     {/* The procedure is opened and read before anything is confirmed. Judging whether a procedure still
+         verifies a requirement whose wording has moved is not a decision anybody should make from a row in a
+         list, so this takes the engineer to the procedure rather than offering a shortcut past it. */}
+     {x.procedureId&&<button className="outline" onClick={()=>{setWorkspaceTab('procedures');setProcedureFocus(x.procedureId??'')}}>Open procedure →</button>}
      {canDecideImpact&&<button onClick={()=>setResolving(x)}>Record decision…</button>}
      {!canDecideImpact&&<span className="impactHint">Verification authority is required to decide this.</span>}
     </div>}
    </article>)}
+   </div>)}
    {!impact.length&&<div className="verificationEmpty"><b>No verification impact for this release</b><span>Approving a change that introduces or modifies a requirement raises work here.</span></div>}
   </section>}
   {workspaceTab==='coverage'&&<section className="verificationCard"><div className="cardTitle"><h2>Requirement coverage</h2><p>Exact, version-aware links for the selected configuration.</p></div>{coverage?.items.map(x=><article className="coverageRow" key={x.revisionId}><div><b>{x.displayNumber}</b><i className={x.verified?'pass':x.covered?'covered':'gap'}>{x.verified?'Verified':x.covered?'Covered':'Gap'}</i></div><p>{x.statement}</p>{x.coveredBy.map(p=><small key={p.revisionId}>{p.displayNumber} · {p.title} · {p.latestOutcome||'Not executed'}</small>)}</article>)}{coverage&&!coverage.items.length&&<div className="verificationEmpty"><b>No effective requirements in this view</b><span>Choose a materialized baseline or another verification scope.</span></div>}</section>}
-  {workspaceTab==='procedures'&&<section className="verificationCard"><div className="cardTitle"><h2>Test procedures</h2><p>Reusable controlled revisions and their latest result.</p></div>{procedures.map(x=><article className="procedureRow" key={x.id}><div><b>{x.displayNumber}</b><i className={x.state==='Draft'?'draft':''}>{x.state==='Draft'?'Awaiting approval':x.lastOutcome||'Not run'}</i></div><p>{x.title}</p><small>{x.requirementCount} exact requirement links · {x.state} · authored by {x.ownerId}</small>{x.state==='Approved'?(canTest?<button onClick={()=>startRecording(x)}>Record result</button>:<span className="procedureHold">Test Engineer authority is required to record results in this Program.</span>):canApprove&&x.ownerId!==user.userName?<button onClick={()=>setApproving(x)}>Review & approve</button>:<span className="procedureHold">{x.ownerId===user.userName?'Independent approval is required before execution.':'Approver authority is required in this Program.'}</span>}</article>)}{!procedures.length&&<div className="verificationEmpty"><b>No {scope.toLowerCase()} procedures</b><span>{canTest?'Create the first procedure from an exact requirement revision.':'Test Engineer authority is required to create procedures in this Program.'}</span></div>}</section>}
+  {workspaceTab==='procedures'&&<section className="verificationCard"><div className="cardTitle"><h2>Test procedures</h2><p>Reusable controlled revisions and their latest result.</p></div>{procedures.map(x=><article className={`procedureRow ${procedureFocus===x.id?"focused":""}`} key={x.id}><div><b>{x.displayNumber}</b><i className={x.state==='Draft'?'draft':''}>{x.state==='Draft'?'Awaiting approval':x.lastOutcome||'Not run'}</i></div><p>{x.title}</p><small>{x.requirementCount} exact requirement links · {x.state} · authored by {x.ownerId}</small>{x.state==='Approved'?(canTest?<button onClick={()=>startRecording(x)}>Record result</button>:<span className="procedureHold">Test Engineer authority is required to record results in this Program.</span>):canApprove&&x.ownerId!==user.userName?<button onClick={()=>setApproving(x)}>Review & approve</button>:<span className="procedureHold">{x.ownerId===user.userName?'Independent approval is required before execution.':'Approver authority is required in this Program.'}</span>}</article>)}{!procedures.length&&<div className="verificationEmpty"><b>No {scope.toLowerCase()} procedures</b><span>{canTest?'Create the first procedure from an exact requirement revision.':'Test Engineer authority is required to create procedures in this Program.'}</span></div>}</section>}
   {workspaceTab==='executions'&&<section className="verificationCard"><div className="cardTitle"><h2>Execution history</h2><p>Immutable determinations, evidence, and retest lineage.</p></div>{executions.map(x=><article className="executionRow" key={x.id}><div><b>{x.displayNumber}</b><i className={x.outcome.toLowerCase()}>{x.outcome}</i></div><p>{x.determination}</p><small><PersonName userName={x.executedBy} /> · {new Date(x.executedAt).toLocaleString()}</small><small>Reference: {x.evidenceReference||'Blocked before evidence produced'}</small>{x.evidence.map(e=><small key={e.id}>✓ {e.originalFileName} · SHA-256 {e.sha256.slice(0,12)}…</small>)}{canTest&&<label className="evidenceUpload">Upload evidence<input type="file" onChange={e=>{const file=e.target.files?.[0];if(file)upload(x,file)}}/></label>}{canTest&&x.outcome!=='Pass'&&<button onClick={()=>startRecording(procedures.find(p=>p.revisionId===x.procedureRevisionId),x)}>Record retest</button>}</article>)}{!executions.length&&<div className="verificationEmpty"><b>No recorded executions</b><span>Choose a procedure and record its first external result.</span></div>}</section>}
  </div>
  {approving&&<SignatureDialog title={`Approve ${approving.displayNumber}`} meaning="I approve this exact test procedure revision for controlled verification use." onCancel={()=>setApproving(undefined)} onSign={approve}/>}
