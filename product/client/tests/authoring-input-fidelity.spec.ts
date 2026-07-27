@@ -111,6 +111,47 @@ test('modifying a requirement shows the approved wording beside the proposed wor
   await expect(proposal.getByRole('textbox', { name: 'Author' })).toBeVisible()
 })
 
+test('a specification section filters to the requirements it holds', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  await apiLogin(request)
+  await login(page)
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
+  await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
+  await expect(page.getByRole('heading', { name: /System Requirements Explorer/ })).toBeVisible({ timeout: 30_000 })
+
+  const rail = page.locator('.specRail')
+  await rail.getByRole('button', { name: /SYSRD-/ }).click()
+  await page.waitForTimeout(1200)
+
+  // The reported total, not a digit-scrape of the whole summary block — that also swallowed the page numbers
+  // beside it and produced a number belonging to nothing.
+  const total = async () =>
+    Number(((await page.locator('.resultSummary b').first().innerText()).match(/[\d,]+/)?.[0] ?? '0').replace(/,/g, ''))
+  const beforeFilter = await total()
+  expect(beforeFilter, 'the specification should list its requirements').toBeGreaterThan(0)
+
+  // The heading reported a count and could not be pressed, so a reader could see that a section held forty
+  // requirements and had no way to reach them.
+  const sections = page.locator('.sectionTree button')
+  await expect(sections.first()).toBeVisible({ timeout: 30_000 })
+  const sectionCount = Number((await sections.first().innerText()).match(/(\d+)\s*$/)?.[1] ?? '0')
+  expect(sectionCount, 'the section should report how many requirements it holds').toBeGreaterThan(0)
+
+  await sections.first().click()
+  await page.waitForTimeout(1500)
+  await expect(sections.first()).toHaveAttribute('aria-pressed', 'true')
+
+  const afterFilter = await total()
+  expect(afterFilter, 'selecting a section must narrow the list').toBeLessThan(beforeFilter)
+  expect(afterFilter, 'and it should show exactly the number the heading promised').toBe(sectionCount)
+
+  // Pressing it again returns to the whole specification, so the control is a toggle rather than a trap.
+  await sections.first().click()
+  await page.waitForTimeout(1500)
+  expect(await total()).toBe(beforeFilter)
+})
+
 test('the System explorer never lists software requirements, whatever else is filtered', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)
