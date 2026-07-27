@@ -39,13 +39,17 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/scrs/{id:guid}/next-revision", async (Guid id, ActorRequest request, HttpContext http, IScrRepository repository, CancellationToken ct) =>
+        app.MapPost("/api/scrs/{id:guid}/next-revision", async (Guid id, ActorRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var approved = await repository.GetAsync(id, ct); if (approved is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && approved.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This approved request changed after it was opened. Refresh before revising.", code = "stale_version" });
             try
             {
-                var next = approved.StartNextRevision(http.UserAccount().UserName, DateTimeOffset.UtcNow);
+                // Whether the build has shipped is a fact about the release, so it is read here and handed to
+                // the aggregate, which owns the rule about what that fact forbids.
+                var released = await db.Releases.AsNoTracking()
+                    .Where(x => x.Id == approved.TargetReleaseId).Select(x => x.IsReleased).SingleOrDefaultAsync(ct);
+                var next = approved.StartNextRevision(http.UserAccount().UserName, DateTimeOffset.UtcNow, released);
                 await repository.AddAsync(next, ct); await repository.SaveAsync(ct);
                 return Results.Created($"/api/scrs/{next.Id}", ApiMap.ScrDetail(next));
             }

@@ -111,7 +111,13 @@
 .contextActions .contextScopeSwitch button { min-height: 28px; padding: 3px 9px; border-radius: 8px; color: var(--ink-500); font-size: 12px; }
 .contextActions .contextScopeSwitch button[aria-pressed="true"] { background: white; color: var(--teal-700); box-shadow: 0 1px 4px rgba(17,35,58,.12); }
 .appNavigation footer { background: var(--navy-950); }
-.appNavigation .signOut { grid-column: 2; justify-self: start; color: #a9b8cb; border: 0; background: transparent; font-size: 12px; padding: 3px 0; min-height: 26px; }
+/* Looks like something you can press. It was bare transparent text with 3px of vertical padding, visually
+   identical to the account handle above it, so there was nothing to say it was a control or that a click had
+   landed anywhere — reported as "sign out doesn't seem to do anything". */
+html .appNavigation .signOut { grid-column: 2; justify-self: start; color: #c2d0e0; border: 1px solid #2c4360; background: #14273d; border-radius: 8px; font-size: 12px; font-weight: 700; padding: 6px 11px; min-height: 30px; cursor: pointer; }
+html .appNavigation .signOut:hover { background: #1b3450; border-color: #3a587b; color: white; }
+html .appNavigation .signOut:active { background: #23405f; }
+html .appNavigation .signOut[aria-busy="true"] { color: #8fa1b9; }
 
 @media (max-width: 1050px) {
   .shell { grid-template-columns: 230px minmax(0, 1fr); }

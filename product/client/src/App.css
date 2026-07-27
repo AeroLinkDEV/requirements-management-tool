@@ -214,7 +214,9 @@ main > header p { margin: 0; color: var(--ink-500); font-size: 15px; max-width: 
 .blue { background: #eef5ff; border-left: 4px solid #4d8edd; }
 .green { background: #ecf8f4; border-left: 4px solid #3da986; }
 
-.scrPublicationTools { position: fixed; right: 38px; top: 58px; z-index: 8; display: flex; align-items: center; gap: 8px; color: var(--ink-500); font-size: 12px; }
+/* In flow inside the change request header, never over it. This was `position: fixed; right: 38px; top: 58px`,
+   which put it on top of the state badge and record version that live in that exact spot. */
+.scrPublicationTools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 10px; color: var(--ink-500); font-size: 12px; }
 .scrPublicationTools a { border: 1px solid #ccd8e3; background: white; color: #2c688f; border-radius: 8px; padding: 8px 11px; text-decoration: none; font-size: 12px; font-weight: 700; box-shadow: 0 2px 7px rgba(23,50,77,.07); }
 
 @media (max-width: 1250px) {
