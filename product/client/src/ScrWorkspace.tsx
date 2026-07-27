@@ -12,7 +12,7 @@ import type {
 import PersonPicker from "./PersonPicker";
 import ControlledAttachments from "./ControlledAttachments";
 import ScrJiraLink from "./ScrJiraLink";
-import { PersonName } from "./People";
+import { PersonName, personLabel } from "./People";
 import { demoPerson } from "./PeopleRegistry";
 import { RichCaseField, RichContentView } from "./RichContent";
 import { useDebouncedSave } from "./autosave";
@@ -871,7 +871,7 @@ export default function ScrWorkspace({
                     mechanism rather than the intent, and nobody found it. */}
                 {scr.state === "Draft" && isAuthor && (
                   <button className="outline" type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>
-                    {busy ? "Checking lock…" : lockStatus?.locked && !lockStatus.mine ? `Read only · ${lockStatus.holder}` : "Check out & edit"}
+                    {busy ? "Checking lock…" : lockStatus?.locked && !lockStatus.mine ? `Read only · ${personLabel(lockStatus.holder)}` : "Check out & edit"}
                   </button>
                 )}
                 {scr.state === "Approved" && isAuthor && (
@@ -882,7 +882,7 @@ export default function ScrWorkspace({
                 )}
               </div>
               {lockStatus?.locked && !lockStatus.mine && (
-                <div className="readOnlyLock"><b>Read-only while checked out</b><span>{lockStatus.holder} · active {lockStatus.lastActivityAt && new Date(lockStatus.lastActivityAt).toLocaleString()} · expires {lockStatus.expiresAt && new Date(lockStatus.expiresAt).toLocaleTimeString()}</span></div>
+                <div className="readOnlyLock"><b>Read-only while checked out</b><span><PersonName userName={lockStatus.holder} /> · active {lockStatus.lastActivityAt && new Date(lockStatus.lastActivityAt).toLocaleString()} · expires {lockStatus.expiresAt && new Date(lockStatus.expiresAt).toLocaleTimeString()}</span></div>
               )}
               <div className="pasView">
                 {/* Rendered as the author wrote it, tables and figures included. An approver signing for a

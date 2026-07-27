@@ -67,7 +67,7 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
       :<span className="impactState done">{x.outcome==='NoTestRequired'?'No test required':x.outcome==='ProcedureCoverageConfirmed'?'Coverage confirmed':x.outcome==='ProcedureRetired'?'Procedure retired':'Procedure retained'}</span>}
     </div>
     {x.declaredVerificationMethod&&<p className="impactMethod">Author declared <b>{x.declaredVerificationMethod}</b> — a verification engineer still confirms what testing this needs.</p>}
-    {x.resolutionRationale&&<p className="impactRationale">{x.resolutionRationale}<small>{x.resolvedBy}</small></p>}
+    {x.resolutionRationale&&<p className="impactRationale">{x.resolutionRationale}<small><PersonName userName={x.resolvedBy} /></small></p>}
     {x.blocksBaselineApproval&&<div className="impactActions">
      {canLead&&<button className="outline" onClick={()=>setAssigning(x)}>Assign…</button>}
      {canDecideImpact&&<button onClick={()=>setResolving(x)}>Record decision…</button>}

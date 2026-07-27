@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { PersonName } from "./People";
 import { stateLabel } from "./presentation";
 import "./ControlledAttachments.css";
 
@@ -164,7 +165,7 @@ export default function ControlledAttachments({
                 {item.description && <p className="attachmentWhy">{item.description}</p>}
                 <code>SHA-256 {item.sha256.slice(0, 24)}…</code>
                 <small>
-                  {stateLabel(item.state)} · {item.uploadedBy} · {new Date(item.uploadedAt).toLocaleDateString()}
+                  {stateLabel(item.state)} · <PersonName userName={item.uploadedBy} /> · {new Date(item.uploadedAt).toLocaleDateString()}
                 </small>
               </div>
               <div className="attachmentActions">
