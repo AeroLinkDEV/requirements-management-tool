@@ -152,6 +152,13 @@ Open issues: **#29** (program parent), **#34** (identity — deferred remainder)
 operations and qualification). The next active focus is deliberately unselected; record it in the
 implementation status document when it is chosen.
 
+**[PRODUCT_REVIEW_2026_07_26.md](PRODUCT_REVIEW_2026_07_26.md)** holds the findings from the first evening of
+using the product as an engineer would, and is the best short list of what to do next. Six defects from it
+are fixed; two reports turned out to be correct behaviour; nine items are written up with the specific
+question each one turns on, because each needs a product decision rather than an implementation. Several are
+small and visible — the verification surface opening on the work a release actually created is the one that
+most affects the demonstration.
+
 ## Known limitations — state these accurately
 
 Understating these is a product-integrity failure, not a marketing choice.
