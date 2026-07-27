@@ -132,6 +132,43 @@ export default function ControlledRequirementEditor({
     };
   }, [api, identityLocked, item.kind, projectId, query, scope]);
 
+  /**
+   * The approved wording this proposal is changing, held separately from the proposal itself.
+   *
+   * Selecting a requirement copies its statement into the editable field, so the author starts from the
+   * current text — which is right, and also means the original is gone the moment they type. A reviewer
+   * cannot see what changed without leaving the page, and neither can the author.
+   *
+   * Read from the server rather than kept in the draft on purpose: a draft reopened tomorrow, or recovered
+   * from an autosave snapshot, still knows what it is changing. Storing it in the draft would put a second
+   * copy of controlled text inside an uncontrolled record, and the two would drift.
+   */
+  const [approvedWording, setApprovedWording] = useState<string>();
+  useEffect(() => {
+    if (item.kind !== "Modify" || !item.baseNumber) {
+      setApprovedWording(undefined);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(
+          `${api}/api/authoring/requirements?projectId=${projectId}&scope=${scope}&search=${encodeURIComponent(item.baseNumber)}&limit=5`,
+        );
+        if (!response.ok) return;
+        const rows = (await response.json()) as ExistingRequirement[];
+        const match = rows.find((row) => row.baseNumber === item.baseNumber);
+        if (!cancelled) setApprovedWording(match?.statement);
+      } catch {
+        // A missing original is shown as unavailable rather than as an error: it must never block authoring.
+        if (!cancelled) setApprovedWording(undefined);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, item.baseNumber, item.kind, projectId, scope]);
+
   const selectExisting = (selected: ExistingRequirement) => {
     onChange("baseNumber", selected.baseNumber);
     onChange("revision", selected.nextRevision);
@@ -247,8 +284,23 @@ export default function ControlledRequirementEditor({
             </div>
             <em>{item.kind === "Retire" ? "History retained" : "Draft content"}</em>
           </div>
+          {item.kind === "Modify" && (
+            <label className="approvedWording">
+              Existing requirement wording
+              <textarea
+                className="statementEditor"
+                value={approvedWording ?? "Loading the approved wording…"}
+                readOnly
+                aria-readonly="true"
+                tabIndex={-1}
+              />
+              <small>
+                {item.baseNumber} as approved today. Read-only — the change goes in the field below.
+              </small>
+            </label>
+          )}
           <label>
-            Requirement statement
+            {item.kind === "Modify" ? "Modified requirement wording" : "Requirement statement"}
             <textarea
               className="statementEditor"
               value={item.statement}
@@ -292,7 +344,7 @@ export default function ControlledRequirementEditor({
             <summary>
               <span>
                 <b>Supporting content and classification</b>
-                <small>Formatted context, controlled references, criticality, and ownership</small>
+                <small>Formatted context, controlled references, and the responsible author</small>
               </span>
               <em>Show / hide</em>
             </summary>
@@ -315,20 +367,17 @@ export default function ControlledRequirementEditor({
                   empty={item.statement || "No supporting content recorded."}
                 />
               </div>
+              {/* Criticality was asked of the author on every proposal and used by nothing. It remains a
+                  Program-configurable schema field for a programme that wants it, but it is no longer a
+                  question this form puts to somebody writing a change.
+
+                  Author, not Owner: a requirement has an author, and the change request already records who
+                  wrote it — two words for one idea invited the reader to look for a distinction that does not
+                  exist. The stored attribute key stays `owner`, because the workspace's owner filter reads it
+                  and renaming the key would silently break every saved view that uses it. */}
               <div className="editorMetadata classificationMetadata">
                 <label>
-                  Criticality
-                  <select
-                    value={String(attributes.criticality || "Normal")}
-                    onChange={(event) => setAttribute("criticality", event.target.value)}
-                  >
-                    <option>Normal</option>
-                    <option>Safety Significant</option>
-                    <option>Mission Critical</option>
-                  </select>
-                </label>
-                <label>
-                  Owner
+                  Author
                   <input
                     value={String(attributes.owner || "")}
                     onChange={(event) => setAttribute("owner", event.target.value)}

@@ -64,6 +64,53 @@ test('the change case keeps every space the author types', async ({ page, reques
   await expect(analysis).toHaveValue('Two options were considered')
 })
 
+test('modifying a requirement shows the approved wording beside the proposed wording', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  await apiLogin(request)
+  await login(page)
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
+  await page.getByRole('link', { name: 'New System SCR' }).click()
+
+  // Introduce has nothing to compare against, so the read-only field must not be there.
+  await expect(page.getByLabel('Change type')).toHaveValue('Introduce')
+  await expect(page.getByRole('textbox', { name: 'Existing requirement wording' })).toHaveCount(0)
+  await expect(page.getByRole('textbox', { name: 'Requirement statement' })).toBeVisible()
+
+  // A proposal's kind is fixed when it is added, not switched afterwards, because the kind decides what the
+  // rest of the form means.
+  await page.getByRole('button', { name: 'Modify existing' }).first().click()
+  const search = page.getByRole('textbox', { name: /Find controlled requirement/ }).last()
+  await expect(search).toBeVisible({ timeout: 30_000 })
+  await search.fill('SYSR-000001')
+  const candidate = page.locator('.proposalLookupResults button').first()
+  await expect(candidate).toBeVisible({ timeout: 30_000 })
+  await candidate.click()
+
+  // Both fields, and the reader can tell which is which: the approved text is not editable, the proposal is.
+  const existing = page.getByRole('textbox', { name: 'Existing requirement wording' })
+  const modified = page.getByRole('textbox', { name: 'Modified requirement wording' })
+  await expect(existing).toBeVisible({ timeout: 30_000 })
+  await expect(modified).toBeVisible()
+  await expect(existing).not.toBeEditable()
+  await expect(modified).toBeEditable()
+  await expect(existing).not.toHaveValue(/Loading the approved wording/)
+
+  // The proposal starts as a copy of the approved text, and editing it must not disturb the original — that
+  // is the whole point of showing them together.
+  const approved = await existing.inputValue()
+  expect(approved.length).toBeGreaterThan(10)
+  expect(await modified.inputValue()).toBe(approved)
+  await modified.fill(`${approved} The sequencing shall additionally be configurable.`)
+  expect(await existing.inputValue()).toBe(approved)
+
+  // Criticality is no longer asked of the author, and Owner is called Author.
+  const proposal = page.locator('.controlledEditor').first()
+  await expect(page.getByLabel('Criticality')).toHaveCount(0)
+  await expect(proposal.getByRole('textbox', { name: 'Owner' })).toHaveCount(0)
+  await expect(proposal.getByRole('textbox', { name: 'Author' })).toBeVisible()
+})
+
 test('the System explorer never lists software requirements, whatever else is filtered', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)

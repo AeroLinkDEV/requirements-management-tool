@@ -306,6 +306,22 @@
   margin-top: 14px;
 }
 
+/* Revise is the only thing you can do to an approved change request, so it is filled rather than outlined —
+   the same weight the page gives Submit for Review on a Draft. It sits where Check out & edit sits, because
+   they are the same decision at two different points in the life of the record. */
+html .reviseAction {
+  min-height: 36px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: #153b5e;
+  color: white;
+  font: 700 13px Manrope, sans-serif;
+  cursor: pointer;
+}
+
+html .reviseAction:disabled { cursor: not-allowed; opacity: .5; }
+
 .primaryFull:disabled,
 .workspaceActions button:disabled,
 .reviewActions button:disabled {

@@ -73,6 +73,13 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByText('Approved', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('Scr Approved')).toBeVisible()
 
+  // Once approved, the only thing you can do to a change request is supersede it. The action that does that
+  // is Revise, and it must be where Check out & edit was — the same position holding whatever applies now,
+  // rather than a differently-worded button in the rail that nobody found.
+  await expect(page.getByRole('button', { name: 'Revise', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Check out & edit/ })).toHaveCount(0)
+  await expect(page.getByText(/This approved revision is immutable/)).toBeVisible()
+
   await page.getByRole('link', { name: /Command Center/ }).first().click()
   await openNavigationGroup(page,'RELEASE & CONFIGURATION')
   await page.getByRole('link', { name: /Baselines/ }).click()
