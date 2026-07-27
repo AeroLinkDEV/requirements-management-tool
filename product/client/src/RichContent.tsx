@@ -3,7 +3,7 @@ import {
   fromPlainText,
   hasStructure,
   readBlocks,
-  toPlainText,
+  toEditableText,
   writeBlocks,
   type RichBlock,
 } from "./richContentModel";
@@ -385,7 +385,7 @@ export function RichCaseField({
       </label>
       <textarea
         id={id}
-        value={toPlainText(value)}
+        value={toEditableText(value)}
         onChange={(event) => onChange(fromPlainText(event.target.value))}
         placeholder={placeholder}
         required

@@ -17,13 +17,30 @@ const loadCsrf = async (url: string) => {
   if (!response.ok) throw new Error('Unable to establish a protected browser session.')
   return (await response.json() as { token: string }).token
 }
+
+/**
+ * Caches the token, not the attempt.
+ *
+ * `csrfToken ??= loadCsrf(url)` stored the promise, so a single failed fetch became a *rejected* promise that
+ * `??=` would never replace — it is neither null nor undefined. Every later mutation in that tab then awaited
+ * the same old rejection and threw before reaching the network, permanently, until the page was reloaded. One
+ * momentary blip and the product stopped accepting work. The reset on line 32 below could not help: it keys
+ * off a 400 response, and no request was ever sent to be answered.
+ */
+const csrfFor = (url: string) => {
+  csrfToken ??= loadCsrf(url).catch(error => {
+    csrfToken = undefined
+    throw error
+  })
+  return csrfToken
+}
+
 window.fetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
   const url = address(input), method = (init.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
   const next: RequestInit = { ...init, credentials: init.credentials ?? 'include' }
   if (unsafe.has(method) && url.includes('/api/') && !csrfExempt(url)) {
-    csrfToken ??= loadCsrf(url)
     const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined))
-    headers.set('X-AeroLink-CSRF', await csrfToken)
+    headers.set('X-AeroLink-CSRF', await csrfFor(url))
     next.headers = headers
   }
   const response = await nativeFetch(input, next)

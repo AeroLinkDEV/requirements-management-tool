@@ -71,6 +71,17 @@
   font-size: 13px;
 }
 
+/* The dropdown list is a surface the platform draws, and it inherits the control's background but not its
+   text colour — so both of these selects sit in the dark sidebar and opened a dark popup with the platform's
+   dark default text. Every option was invisible except the one under the cursor, which the system highlight
+   made readable: "1.5 · Released" could only be found by hovering blindly over where it should be. A control
+   whose choices cannot be read is a control that only offers the choice already made. */
+.program select option {
+  background: #ffffff;
+  color: #10233c;
+  font-weight: 600;
+}
+
 .appNavigation footer {
   margin-top: auto;
   border-top: 1px solid #263954;

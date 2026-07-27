@@ -90,6 +90,19 @@
   font-size: 13px;
 }
 
+/* The other half of the same conversation. A failure said so and a success said nothing, so the only way to
+   learn a save had worked was to notice the form had changed mode. */
+.workspaceSaved {
+  margin-bottom: 16px;
+  padding: 13px 15px;
+  border: 1px solid #bfe3dc;
+  border-radius: 8px;
+  background: #f2faf8;
+  color: #1f6f63;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .workspaceGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 350px;
