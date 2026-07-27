@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { stateLabel } from './presentation'
+import { PersonName } from "./People";
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import ReleaseExecutionWorkbench from "./ReleaseExecutionWorkbench";
@@ -756,7 +757,7 @@ export default function ReleaseCampaignCenter({
                         <b>{x.eventType.replace(/([A-Z])/g, " $1").trim()}</b>
                         <p>{x.detail}</p>
                         <small>
-                          {x.actorId} ·{" "}
+                          <PersonName userName={x.actorId} /> ·{" "}
                           {new Date(x.occurredAt).toLocaleString()}
                         </small>
                       </div>

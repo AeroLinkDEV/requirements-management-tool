@@ -12,6 +12,8 @@ import type {
 import PersonPicker from "./PersonPicker";
 import ControlledAttachments from "./ControlledAttachments";
 import ScrJiraLink from "./ScrJiraLink";
+import { PersonName } from "./People";
+import { demoPerson } from "./PeopleRegistry";
 import { RichCaseField, RichContentView } from "./RichContent";
 import { useDebouncedSave } from "./autosave";
 import { emptyRichContent, fromPlainText, toPlainText } from "./richContentModel";
@@ -917,7 +919,7 @@ export default function ScrWorkspace({
             <section className="workspaceCard">
               <div className="workspaceTitle"><div><h2>Audit history</h2><p>Append-only material events</p></div></div>
               {scr.audit.map((event, index) => (
-                <div className="auditRow" key={`${event.occurredAt}-${index}`}><i /><div><b>{event.eventType.replace(/([A-Z])/g, " $1").trim()}</b><p>{event.detail}</p><small>{event.actorId} · {new Date(event.occurredAt).toLocaleString()}</small></div></div>
+                <div className="auditRow" key={`${event.occurredAt}-${index}`}><i /><div><b>{event.eventType.replace(/([A-Z])/g, " $1").trim()}</b><p>{event.detail}</p><small><PersonName userName={event.actorId} /> · {new Date(event.occurredAt).toLocaleString()}</small></div></div>
               ))}
             </section>
           </div>
@@ -927,7 +929,7 @@ export default function ScrWorkspace({
               <div className="workspaceTitle"><div><h2>Control status</h2><p>{scr.displayNumber}</p></div></div>
               <dl>
                 <div><dt>State</dt><dd data-state={scr.state}>{stateLabel(scr.state)}</dd></div>
-                <div><dt>Author</dt><dd>{scr.authorId}</dd></div>
+                <div><dt>Author</dt><dd><PersonName userName={scr.authorId} withRole /></dd></div>
                 <div><dt>Revision</dt><dd>{scr.revision}</dd></div>
                 <div><dt>Updated</dt><dd>{new Date(scr.updatedAt).toLocaleDateString()}</dd></div>
               </dl>
@@ -948,7 +950,7 @@ export default function ScrWorkspace({
                 <div className="workspaceTitle"><div><h2>Review cycle {latest.sequence}</h2><p>{stateLabel(latest.state)} · {latest.snapshotHash.slice(0, 12)}…</p></div></div>
                 <div className="approvalPath">
                   {latest.steps.map((step) => (
-                    <div className={`approvalStep ${step.state.toLowerCase()}`} key={step.position}><span>{step.state === "Approved" ? "✓" : step.position + 1}</span><div><b>{step.approverName}</b><small>{step.approverId} · {stateLabel(step.state)}</small></div></div>
+                    <div className={`approvalStep ${step.state.toLowerCase()}`} key={step.position}><span>{step.state === "Approved" ? "✓" : step.position + 1}</span><div><b><PersonName userName={step.approverId} displayName={step.approverName} /></b><small>{demoPerson(step.approverId, step.approverName)?.role ?? step.approverId} · {stateLabel(step.state)}</small></div></div>
                   ))}
                 </div>
                 {latest.closureReason && <div className="closure"><b>Closure reason</b><p>{latest.closureReason}</p></div>}

@@ -1,5 +1,34 @@
 import { demoPerson } from "./PeopleRegistry";
 
+/**
+ * A person's name, where the product would otherwise print the account they sign in with.
+ *
+ * `PeopleRegistry` already maps every seeded account to a name, a role and a portrait, and two surfaces used
+ * it. Everywhere else — audit histories, approval steps, control status, evidence provenance — rendered
+ * `cm.fms` and `assurance.reviewer` at the reader. An audit trail exists to say who did something, and a
+ * login handle is a worse answer to that than a name.
+ *
+ * Falls back to the account name, so an unmapped or real account still identifies itself rather than
+ * disappearing.
+ */
+export function PersonName({ userName, displayName, role, withRole = false }: {
+  userName: string;
+  displayName?: string;
+  role?: string;
+  withRole?: boolean;
+}) {
+  const person = demoPerson(userName, displayName, role);
+  const name = person?.name ?? displayName ?? userName;
+  // The account stays available to anyone who needs it — an auditor reconciling against the identity
+  // provider should not have to guess which login "Maya Patel" was.
+  return (
+    <span className="personName" title={userName}>
+      {name}
+      {withRole && person?.role ? <small> · {person.role}</small> : null}
+    </span>
+  );
+}
+
 export function PersonAvatar({ userName, displayName, role, size = "medium" }: {
   userName: string;
   displayName?: string;
