@@ -277,6 +277,25 @@
   font: 400 16px/1.65 Georgia, serif !important;
 }
 
+/* The approved wording, shown above the field that changes it. Greyed and shorter than the editable one, so
+   the pair reads as "this is what it says" then "this is what it will say" rather than as two equal fields
+   the author has to work out the difference between. */
+html .approvedWording > textarea {
+  min-height: 84px !important;
+  background: #f4f6f8;
+  color: #4a5a6b;
+  border-color: #dbe3ea;
+  cursor: default;
+  resize: none;
+}
+
+html .approvedWording > small {
+  display: block;
+  margin-top: 5px;
+  color: #6d7b8a;
+  font-size: 12px;
+}
+
 .primaryMetadata {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(180px, 0.7fr);

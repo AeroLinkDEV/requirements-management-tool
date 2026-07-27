@@ -863,9 +863,21 @@ export default function ScrWorkspace({
             <section className="workspaceCard">
               <div className="workspaceTitle">
                 <div><h2>Change case</h2><p>Problem, analysis, and proposed solution</p></div>
+                {/* One position holds whatever you do to this change request, so it is always the same place
+                    on the page and its label says which of the two applies. A Draft is checked out and
+                    edited in place. An approved revision is immutable and cannot be — it is superseded, and
+                    the action that does that is Revise. It was previously buried in the rail below a
+                    definition list and labelled "Create SCR-00000031.01 Draft", which describes the
+                    mechanism rather than the intent, and nobody found it. */}
                 {scr.state === "Draft" && isAuthor && (
                   <button className="outline" type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>
                     {busy ? "Checking lock…" : lockStatus?.locked && !lockStatus.mine ? `Read only · ${lockStatus.holder}` : "Check out & edit"}
+                  </button>
+                )}
+                {scr.state === "Approved" && isAuthor && (
+                  <button className="reviseAction" type="button" disabled={busy} onClick={revise}
+                    title={`Creates ${scr.baseNumber}.${String(scr.revision + 1).padStart(2, "0")} as a Draft. This approved revision stays unchanged.`}>
+                    {busy ? "Creating revision…" : "Revise"}
                   </button>
                 )}
               </div>
@@ -939,10 +951,15 @@ export default function ScrWorkspace({
               {scr.state === "Draft" && isAuthor && !reviewReady && (
                 <div className="railReadiness"><b>Draft needs authoring</b><span>{!caseComplete ? "Complete the change case." : !proposalsComplete ? "Complete requirement proposals." : `Close impact decisions on ${requirements.length - impactCount} proposal${requirements.length - impactCount === 1 ? "" : "s"}.`}</span><button type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>Complete Draft readiness</button></div>
               )}
-              {scr.state === "Approved" && isAuthor && (
-                <button type="button" className="primaryFull" disabled={busy} onClick={revise}>{busy ? "Creating revision…" : `Create ${scr.baseNumber}.${String(scr.revision + 1).padStart(2, "0")} Draft`}</button>
+              {/* No second Revise button here. The action lives in the Change case header with Check out &
+                  edit, so there is one place to act; this only explains what it will do. */}
+              {scr.state === "Approved" && (
+                <p className="snapshotNote">
+                  This approved revision is immutable. <b>Revise</b> creates{" "}
+                  {scr.baseNumber}.{String(scr.revision + 1).padStart(2, "0")} as a Draft with the same
+                  content, and leaves this revision and its signatures untouched.
+                </p>
               )}
-              {scr.state === "Approved" && <p className="snapshotNote">The approved revision remains immutable. A new Draft copies its exact content into the next revision.</p>}
             </section>
 
             {latest && (
