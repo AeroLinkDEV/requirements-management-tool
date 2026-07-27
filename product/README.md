@@ -69,14 +69,25 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 
 ## Run locally
 
-Two paths, and the difference matters.
+Three paths, and the difference matters.
 
 **For a demonstration, or to see what a deployment serves:** `START_AEROLINK_PRODUCTION.bat`. It builds the
 client, then serves it from the API on a single origin at `http://127.0.0.1:5080` — one process, one port, no
 CORS. That is the shape an on-premises install has, and it is the only path that exercises the built client.
 
+**To let other people on the network open it:** `START_AEROLINK_SHARED.bat`, which is the same thing with
+`-Shared`. Reaching this machine from another one takes two changes and not one, and the second is the one
+nobody expects. Binding Kestrel to `0.0.0.0` makes the socket accept connections from off the box; ASP.NET
+Core's host filtering then compares the `Host` header against `AllowedHosts`, which `appsettings.json` sets to
+`localhost;127.0.0.1`. Change only the binding and a colleague reaches a server that is listening perfectly
+well and gets a bare HTTP 400 with no body — which reads exactly like a binding fault and is not one. The
+switch moves both together. Windows Firewall is a third thing again, outside this process's gift: it drops
+inbound connections on 5080 until an administrator allows them, and the launcher checks and prints the command
+rather than changing a firewall rule on somebody's machine by itself.
+
 **For development:** `START_AEROLINK.bat`, or the manual steps below. Both run the Vite dev server, which
-recompiles on save and is the wrong thing to show anybody.
+recompiles on save and is the wrong thing to show anybody. It is deliberately not shareable — two ports, a
+CORS policy joining them, and a bundle that rebuilds mid-demonstration.
 
 Run the PostgreSQL setup once, then use two PowerShell terminals from the repository root.
 

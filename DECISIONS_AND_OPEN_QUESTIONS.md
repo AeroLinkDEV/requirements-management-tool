@@ -523,6 +523,31 @@ Future entries use:
   was rejected because an ordinary `dotnet run` would then serve whatever build was left in the working
   tree, and a stale bundle served silently is worse than none.
 
+### DEC-053 - Sharing on the Local Network Is Opt-In, and Moves Two Settings Together
+
+- **Date:** 2026-07-27
+- **Status:** Accepted
+- **Decision:** `START_AEROLINK_SHARED.bat` runs the production launcher with `-Shared`, which binds Kestrel
+  to `0.0.0.0:5080` **and** sets `AllowedHosts` to `*` for that run, then prints the machine's own network
+  address to hand out. Without the switch the launcher binds loopback and leaves `AllowedHosts` at
+  `localhost;127.0.0.1`, exactly as before. Nothing in `appsettings.json` changes, so a deployment is
+  unaffected either way.
+- **Rationale:** The obvious change is the binding, and on its own it does not work. ASP.NET Core's host
+  filtering compares the `Host` header against `AllowedHosts`, so a colleague typing this machine's address
+  reaches a socket that accepted their connection and receives a bare HTTP 400 with no body — a symptom that
+  reads as a binding fault and is not one. Coupling the two in one switch means the failure cannot be
+  reproduced by getting half of it right. Opt-in rather than default because the same run prints a known
+  administrator password, seeds demonstration accounts and data, and carries sessions over plain HTTP; a
+  launcher somebody double-clicks by habit should not put that on an office network unasked.
+- **Consequences:** Windows Firewall is a third gate and deliberately not automated — the launcher checks for
+  an enabled inbound allow rule and prints the `New-NetFirewallRule` command when there is none, because
+  editing a firewall rule is the machine owner's decision. The development launcher is not shareable and will
+  not be: two ports, a CORS policy joining them, and a bundle that rebuilds mid-demonstration. Verified in
+  both modes by sending a foreign `Host` header over loopback — 200 shared, 400 default — rather than by
+  checking only that the port was open, which is the check that would have passed while the feature was
+  broken. Sharing over plain HTTP remains a demonstration convenience and is not the TLS story owed by
+  [DEC-052](#dec-052---the-api-serves-the-built-client) and `SECURITY_AND_IDENTITY_MODEL.md`.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

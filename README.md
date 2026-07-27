@@ -13,13 +13,15 @@ Release evolution is user-controlled: authorized users plan an in-work successor
 
 ## One-click local startup
 
-Two launchers, for two different purposes.
+Three launchers, for three different purposes.
 
 **Showing AeroLink to somebody:** double-click [`START_AEROLINK_PRODUCTION.bat`](START_AEROLINK_PRODUCTION.bat). It builds the website and serves it from the API on one origin at `http://127.0.0.1:5080`, which is how an on-premises install runs and the only path that exercises the built client.
 
+**Letting colleagues open it from their own machines:** double-click [`START_AEROLINK_SHARED.bat`](START_AEROLINK_SHARED.bat). Same build, listening on every network interface instead of loopback, and it prints the `http://<this-machine>:5080` address to hand out. Windows Firewall drops inbound connections on that port until an administrator allows it in, once per machine; the launcher checks and prints the command if it is missing. Sharing is opt-in because the same run prints a known administrator password, loads demonstration data, and carries everything over plain HTTP.
+
 **Working on AeroLink:** double-click [`START_AEROLINK.bat`](START_AEROLINK.bat). It starts or verifies PostgreSQL, the API, and the Vite development server; waits for the API to report the database reachable; opens `http://127.0.0.1:5173`; and writes diagnostic logs under `product/.local/logs/`.
 
-Both are safe to run again while AeroLink is already running. Note that PostgreSQL must be installed once first — `product\scripts\Setup-Postgres.ps1`, described in [the product README](product/README.md).
+All three are safe to run again while AeroLink is already running. Note that PostgreSQL must be installed once first — `product\scripts\Setup-Postgres.ps1`, described in [the product README](product/README.md).
 
 Run [`BACKUP_AEROLINK.bat`](BACKUP_AEROLINK.bat) manually or through Windows Task Scheduler for a complete local backup. It captures PostgreSQL, controlled evidence, and runtime configuration into an integrity-manifested archive under `product/.local/backups/`, with 30-day retention by default. Production IT must copy these archives to protected storage and periodically prove restore.
 
