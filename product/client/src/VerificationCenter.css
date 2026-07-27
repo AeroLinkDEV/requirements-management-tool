@@ -434,3 +434,66 @@
   .impactState { margin-left: 0; }
   .impactActions { flex-wrap: wrap; }
 }
+
+/* The queue leads this surface now, so it needs the shape of a queue: a count you can read at a glance, and
+   the work separated by what created it. A flat list made a reader work out per row whether they were being
+   asked to write a procedure, reconfirm one, or take a link away. */
+.impactSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 0 0 18px;
+}
+.impactSummary article {
+  background: #f5f8fa;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.impactSummary b { font: 650 22px var(--font-display); color: #17324b; }
+.impactSummary span { font-size: 12px; color: #61707f; }
+.impactSummary article.held b { color: #8a5a12; }
+.impactSummary article.held { background: #fdf4e6; }
+.impactSummary article.clear b { color: #17765b; }
+.impactSummary article.clear { background: #eaf7f1; }
+
+.impactGroup { margin-bottom: 20px; }
+.impactGroupHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px 8px 0 0;
+  background: #eef2f6;
+}
+.impactGroupHead b { font: 600 13px var(--font-display); color: #21384f; }
+.impactGroupHead span {
+  margin-left: auto;
+  background: white;
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #4d6072;
+}
+/* Colour carries the cause, so the three groups are distinguishable before the words are read. */
+.impactGroupHead[data-trigger="RequirementIntroduced"] { background: #e3f4ee; }
+.impactGroupHead[data-trigger="RequirementIntroduced"] b { color: #0f6a52; }
+.impactGroupHead[data-trigger="RequirementModified"] { background: #fbf0dc; }
+.impactGroupHead[data-trigger="RequirementModified"] b { color: #7d5310; }
+.impactGroupHint {
+  margin: 0;
+  padding: 7px 12px 10px;
+  font-size: 12px;
+  color: #61707f;
+  border-bottom: 1px solid #e7ecf1;
+}
+
+/* Marks the procedure somebody was sent here to read, so arriving on a list of forty does not mean hunting
+   for the one the previous screen was talking about. */
+html .procedureRow.focused {
+  outline: 2px solid #1d7f74;
+  outline-offset: 2px;
+  background: #f1faf8;
+}

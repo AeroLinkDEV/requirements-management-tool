@@ -174,6 +174,17 @@ change-request authoring flow does not ask which section a new requirement belon
 The clickable filter is small. The authoring change is not, because it makes section a required attribute of
 a proposed requirement and therefore part of the review snapshot.
 
+**Decided 2026-07-27: the filter was built; the allocation was not, and deliberately.** Requirements keep the
+placement they have — `(digits of the identifier) % 5`, spread evenly across five headings the product
+invents. The reasoning is that there is no real programme yet, so allocating into a structure AeroLink made
+up would be building something to be replaced the moment a real SYSRD arrives.
+
+Worth being exact about one word, because it decides whether this is safe: the placement is **stable, not
+random**. `SYSR-000042` lands in the same section on every machine and every seed, so a demonstration behaves
+the same tomorrow as today and the same on the presenting machine as on the author's. A genuinely random
+assignment would reshuffle and would not be acceptable. Revisit when a programme's own SYSRD structure
+exists; until then the sections navigate correctly and mean nothing, and nobody should claim otherwise.
+
 ### 5. "Selected for baseline", and a place for unassigned changes
 
 > *"'Selected for baseline' doesn't make sense. A change request should automatically be assigned to the
