@@ -39,6 +39,24 @@ export function readBlocks(stored: string | undefined | null): RichBlock[] {
 
 export const writeBlocks = (blocks: RichBlock[]) => JSON.stringify({ blocks });
 
+/**
+ * The text exactly as it was typed, for a plain-text editor bound to this model.
+ *
+ * Distinct from `toPlainText` because an editor and a summary want opposite things. A summary should be
+ * tidied; an editor must return every character or the author fights it. Pairing `toPlainText` with
+ * `fromPlainText` around a controlled textarea meant each keystroke was normalised and written straight back
+ * into the field: a trailing space was trimmed away before the next letter arrived, so `im testing the site`
+ * was stored and redisplayed as `imtestingthesite`. Nobody could type a space at all.
+ */
+export function toEditableText(stored: string | undefined | null): string {
+  const blocks = readBlocks(stored)
+  if (blocks.length === 0) return ''
+  // One paragraph is what `fromPlainText` writes, and its text is returned untouched. Anything else is
+  // structured content, which this editor does not own — fall back to the readable form.
+  const [first] = blocks
+  return blocks.length === 1 && first.type === 'paragraph' ? first.text : toPlainText(stored)
+}
+
 /** The readable text, used for word counts, summaries, and anywhere structure cannot be shown. */
 export function toPlainText(stored: string | undefined | null): string {
   return readBlocks(stored)
@@ -60,6 +78,14 @@ export function hasStructure(stored: string | undefined | null): boolean {
   return blocks.length > 1 || blocks.some((block) => block.type !== "paragraph");
 }
 
+/**
+ * Stores text exactly as given. Deliberately does not trim.
+ *
+ * This is written on every keystroke of a controlled textarea, so trimming here is not tidying — it is
+ * editing the author's input while they are still typing it. Only genuinely empty text becomes empty
+ * content; a single space is content, because it is how the next word gets separated from the last.
+ * Tidying belongs in `toPlainText`, which is read at the boundaries where a tidy value is wanted.
+ */
 export function fromPlainText(text: string): string {
-  return text.trim() ? writeBlocks([{ type: "paragraph", text: text.trim() }]) : emptyRichContent;
+  return text === "" ? emptyRichContent : writeBlocks([{ type: "paragraph", text }]);
 }

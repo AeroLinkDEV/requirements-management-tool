@@ -224,7 +224,14 @@ export default function RequirementsWorkspace({
       sort,
     });
     if (search) p.set("search", search);
-    if (level) p.set("level", level);
+    // The scope is which explorer this is, not a filter somebody chose, so it is a floor rather than a
+    // default. Two paths cleared `level` to empty — applying a saved view that carried none, and selecting a
+    // specification — and an empty level means *no* level constraint, so the System Requirements Explorer
+    // listed all 1,250 requirements with HLR-000001 at the top. Nothing looked wrong: the level control is a
+    // disabled select holding one option, and a select whose value matches no option still displays the
+    // first, so it went on reading "System requirements" while sending nothing of the kind.
+    const effectiveLevel = level || scope;
+    if (effectiveLevel) p.set("level", effectiveLevel);
     if (verification) p.set("verification", verification);
     if (tag) p.set("tag", tag);
     if (stateFilter) p.set("state", stateFilter);
@@ -239,6 +246,7 @@ export default function RequirementsWorkspace({
     pageSize,
     search,
     level,
+    scope,
     verification,
     tag,
     stateFilter,
@@ -248,6 +256,20 @@ export default function RequirementsWorkspace({
     sort,
     specificationId,
   ]);
+  /**
+   * Only the specifications this explorer is about.
+   *
+   * The rail listed every specification in the project, so the System explorer offered HLRD-000001 and
+   * LLRD-000001 — documents it cannot show a single requirement from. Selecting one also cleared the level,
+   * which is how the explorer ended up listing all three levels at once.
+   */
+  const scopedSpecifications = useMemo(
+    () =>
+      (data?.specifications ?? []).filter((spec) =>
+        scope === "System" ? spec.level === "System" : spec.level === "HighLevel" || spec.level === "LowLevel",
+      ),
+    [data?.specifications, scope],
+  );
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
     setLoading(true);
@@ -783,7 +805,7 @@ export default function RequirementsWorkspace({
         <aside className="specRail">
           <div className="railTitle">
             <b>Specifications</b>
-            <span>{data?.specifications.length ?? 0}</span>
+            <span>{scopedSpecifications.length}</span>
           </div>
           <button
             className={!specificationId ? "active" : ""}
@@ -798,7 +820,7 @@ export default function RequirementsWorkspace({
               <small>{data?.totalCount.toLocaleString() ?? 0} visible</small>
             </div>
           </button>
-          {data?.specifications.map((spec) => (
+          {scopedSpecifications.map((spec) => (
             <div className="specGroup" key={spec.id}>
               <button
                 className={specificationId === spec.id ? "active" : ""}

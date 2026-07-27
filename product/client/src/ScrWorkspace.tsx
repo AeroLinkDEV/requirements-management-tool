@@ -234,6 +234,9 @@ export default function ScrWorkspace({
   const [lock, setLock] = useState<EditLock>();
   const [lockStatus, setLockStatus] = useState<LockStatus>();
   const [autosaveStatus, setAutosaveStatus] = useState<"Saved" | "Saving" | "Error" | "Conflict">("Saved");
+  // Pressing a button that saves should say so. Without this the only signal that a check-in worked was the
+  // form changing mode, which is easy to miss and indistinguishable from nothing having happened.
+  const [saved, setSaved] = useState("");
   const [draft, setDraft] = useState<ScrDraft>({
     title: "", problem: "", analysis: "", solution: "",
     problemRich: emptyRichContent, analysisRich: emptyRichContent, solutionRich: emptyRichContent,
@@ -303,15 +306,39 @@ export default function ScrWorkspace({
   }, [draft, requirements]);
 
 
-  const beginEdit = async () => {
+  /**
+   * Runs work that disables the toolbar, and always gives the toolbar back.
+   *
+   * `busy` drives both the disabled state and the "Checking lock…" label, and every handler used to clear it
+   * on the paths it thought of. A throw was not one of them — so a request that failed before it reached the
+   * network left the change request looking frozen: no error, no spinner finishing, every button dead until
+   * the page was reloaded. A control that can enter a state it cannot leave is worse than one that fails.
+   */
+  const withBusy = async <T,>(work: () => Promise<T>, whenItFails: string): Promise<T | undefined> => {
     setBusy(true);
     setError("");
-    const response = await fetch(`${api}/api/controlled-editing/checkout`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ artifactType: "SCR", artifactId: scrId, leaseMinutes: 15 }),
-    });
-    setBusy(false);
+    setSaved("");
+    try {
+      return await work();
+    } catch (failure) {
+      setError(failure instanceof Error ? `${whenItFails} ${failure.message}` : whenItFails);
+      return undefined;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const beginEdit = async () => {
+    const response = await withBusy(
+      () =>
+        fetch(`${api}/api/controlled-editing/checkout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ artifactType: "SCR", artifactId: scrId, leaseMinutes: 15 }),
+        }),
+      "This Draft could not be checked out.",
+    );
+    if (!response) return;
     if (!response.ok) {
       const body = (await response.json()) as { error?: string };
       setError(body.error || "This Draft could not be checked out.");
@@ -467,45 +494,43 @@ export default function ScrWorkspace({
   };
 
   const call = async (path: string, body: unknown) => {
-    setBusy(true);
-    setError("");
-    const response = await fetch(`${api}/api/scrs/${scrId}/${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      const value = (await response.json()) as { error?: string };
-      setError(value.error || "The operation could not be completed.");
-      setBusy(false);
-      return false;
-    }
-    await load();
-    await onChanged();
-    setBusy(false);
-    setMode("view");
-    return true;
+    const outcome = await withBusy(async () => {
+      const response = await fetch(`${api}/api/scrs/${scrId}/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const value = (await response.json()) as { error?: string };
+        setError(value.error || "The operation could not be completed.");
+        return false;
+      }
+      await load();
+      await onChanged();
+      setMode("view");
+      return true;
+    }, "The operation could not be completed.");
+    return outcome === true;
   };
 
   const revise = async () => {
     if (!scr) return;
-    setBusy(true);
-    setError("");
-    const response = await fetch(`${api}/api/scrs/${scr.id}/next-revision`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expectedVersion: scr.version }),
-    });
-    if (!response.ok) {
-      const value = (await response.json()) as { error?: string };
-      setError(value.error || "The next controlled revision could not be created.");
-      setBusy(false);
-      return;
-    }
-    const next = (await response.json()) as { id: string };
-    await onChanged();
-    setBusy(false);
-    onOpenScr(next.id);
+    const next = await withBusy(async () => {
+      const response = await fetch(`${api}/api/scrs/${scr.id}/next-revision`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: scr.version }),
+      });
+      if (!response.ok) {
+        const value = (await response.json()) as { error?: string };
+        setError(value.error || "The next controlled revision could not be created.");
+        return undefined;
+      }
+      const created = (await response.json()) as { id: string };
+      await onChanged();
+      return created;
+    }, "The next controlled revision could not be created.");
+    if (next) onOpenScr(next.id);
   };
 
   const updateRequirement = (
@@ -552,36 +577,40 @@ export default function ScrWorkspace({
       setError("Complete the change case and every requirement proposal before checking in.");
       return;
     }
-    setBusy(true);
-    setError("");
-    while (savingRef.current)
-      await new Promise((resolve) => window.setTimeout(resolve, 25));
-    const current = await autosave();
-    if (!current) {
-      setError("The latest recovery snapshot could not be saved for check-in.");
-      setBusy(false);
-      return;
-    }
-    savingRef.current = true;
-    const response = await fetch(`${api}/api/controlled-editing/sessions/${current.id}/check-in`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        expectedVersion: current.version,
-      }),
-    });
-    savingRef.current = false;
-    if (!response.ok) {
-      const value = (await response.json()) as { error?: string };
-      setError(value.error || "Draft could not be saved.");
-      setBusy(false);
-      return;
-    }
-    setLock(undefined);
-    setMode("view");
-    await load();
-    await onChanged();
-    setBusy(false);
+    await withBusy(async () => {
+      while (savingRef.current)
+        await new Promise((resolve) => window.setTimeout(resolve, 25));
+      const current = await autosave();
+      if (!current) {
+        setError("The latest recovery snapshot could not be saved for check-in.");
+        return;
+      }
+      savingRef.current = true;
+      let response: Response;
+      try {
+        response = await fetch(`${api}/api/controlled-editing/sessions/${current.id}/check-in`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            expectedVersion: current.version,
+          }),
+        });
+      } finally {
+        // Its own finally: a throw here used to leave this set, and every later autosave then waited on a
+        // save that had already failed.
+        savingRef.current = false;
+      }
+      if (!response.ok) {
+        const value = (await response.json()) as { error?: string };
+        setError(value.error || "Draft could not be saved.");
+        return;
+      }
+      setLock(undefined);
+      setMode("view");
+      await load();
+      await onChanged();
+      setSaved("Draft checked in.");
+    }, "Draft could not be saved.");
   };
 
   const move = (index: number, direction: number) =>
@@ -635,6 +664,7 @@ export default function ScrWorkspace({
       </header>
 
       {error && <div className="workspaceError" role="alert">{error}</div>}
+      {saved && <div className="workspaceSaved" role="status">✓ {saved}</div>}
 
       {mode === "edit" ? (
         <form onSubmit={save} className="workspaceStack">

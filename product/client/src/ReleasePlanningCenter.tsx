@@ -270,7 +270,12 @@ export default function ReleasePlanningCenter({
                     <small>baseline manifests</small>
                   </div>
                   <div>
-                    <b>{campaign?.state ?? "Not started"}</b>
+                    {/* A released version has no campaign to start. FMS 1.5 is locked, immutable and shipped,
+                        and this cell read "Not started" — the fallback for a missing campaign record, shown
+                        without asking whether a campaign could still be pending. It cannot: the release
+                        already happened, and the campaign that carried it belongs to history rather than to
+                        the work queue. */}
+                    <b>{campaign?.state ?? (release.isReleased ? "Released" : "Not started")}</b>
                     <small>release campaign</small>
                   </div>
                 </div>
