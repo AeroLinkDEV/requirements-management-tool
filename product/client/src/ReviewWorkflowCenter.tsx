@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { PersonName } from "./People";
 import { stateLabel } from "./presentation";
 import "./ReviewWorkflowCenter.css";
 
@@ -188,7 +189,7 @@ export default function ReviewWorkflowCenter({
                         </b>
                         <small>
                           {stateLabel(item.state)} · {item.stages.length} stage
-                          {item.stages.length === 1 ? "" : "s"} · {item.createdBy} ·{" "}
+                          {item.stages.length === 1 ? "" : "s"} · <PersonName userName={item.createdBy} /> ·{" "}
                           {new Date(item.createdAt).toLocaleDateString()}
                         </small>
                       </div>

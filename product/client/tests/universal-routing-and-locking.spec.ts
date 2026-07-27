@@ -29,7 +29,9 @@ test('deep links survive refresh, universal search resolves fragments, and check
 
  const second=await browser.newContext();const reader=await second.newPage();await reader.goto(lockedUrl)
  await reader.getByLabel('Username').fill('admin');await reader.getByLabel('Password').fill('AeroLink!2026');await reader.getByRole('button',{name:/Sign in securely/}).click()
- await expect(reader.getByText('Read-only while checked out')).toBeVisible();await expect(reader.getByRole('button',{name:/Read only · software\.author/})).toBeDisabled()
+ // The holder is named, not identified by the account they signed in with: software.author is Daniel Reyes.
+ // The point of the assertion is unchanged — a reader sees who holds the lock and cannot take it.
+ await expect(reader.getByText('Read-only while checked out')).toBeVisible();await expect(reader.getByRole('button',{name:/Read only · Daniel Reyes/})).toBeDisabled()
  await second.close()
  await page.getByRole('button',{name:'Discard checkout'}).click();await expect(page.getByRole('button',{name:'Check out & edit'})).toBeVisible()
 })

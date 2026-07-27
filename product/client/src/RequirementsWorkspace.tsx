@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PersonName } from "./People";
 import { stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
@@ -1235,7 +1236,7 @@ export default function RequirementsWorkspace({
                 {comments.map((c) => (
                   <article key={c.id} className={c.state.toLowerCase()}>
                     <div>
-                      <b>{c.createdBy}</b>
+                      <b><PersonName userName={c.createdBy} /></b>
                       <span>{new Date(c.createdAt).toLocaleString()}</span>
                     </div>
                     <p>{c.body}</p>
