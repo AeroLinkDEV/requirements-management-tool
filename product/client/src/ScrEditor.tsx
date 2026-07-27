@@ -138,9 +138,10 @@ export default function ScrEditor({
   const problem = toPlainText(problemRich);
   const analysis = toPlainText(analysisRich);
   const solution = toPlainText(solutionRich);
-  const [changes, setChanges] = useState<ControlledRequirementDraft[]>(
-    sourceRequirementId ? [] : [createProposal(defaultLevel, "Introduce")],
-  );
+  // Nothing is assumed. A pre-seeded Introduce proposal decided what this change was before the author had
+  // said, and because it arrived with an identifier already allocated it counted as identity-locked — so it
+  // could not be turned into a Modify or a Retire either. The author chooses the first change.
+  const [changes, setChanges] = useState<ControlledRequirementDraft[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -246,6 +247,34 @@ export default function ScrEditor({
       ...items,
       createProposal(level, kind, kind === "Introduce" ? nextIdentifier(level) : ""),
     ]);
+
+  /**
+   * Changes what a proposal *does* to a requirement, after the card exists.
+   *
+   * The identifier means a different thing for each kind, which is why this is not a field update. An
+   * introduced requirement is allocated the next free number here and now; a modified or retired one names a
+   * requirement that already exists and has to be chosen from the repository. Carrying the identifier across a
+   * kind change would either claim to modify a number nothing has been given yet, or silently keep an
+   * allocation nobody asked for — so the identity is re-derived from the new kind, and clearing it is what
+   * makes the requirement lookup appear.
+   *
+   * Retiring keeps no statement: the wording that stands is the one already in the baseline, and a proposal
+   * that both retires a requirement and restates it is two different intentions in one row.
+   */
+  const changeKind = (index: number, kind: RequirementKind) =>
+    setChanges((items) =>
+      items.map((item, position) => {
+        if (position !== index || item.kind === kind) return item;
+        return {
+          ...item,
+          kind,
+          baseNumber: kind === "Introduce" ? nextIdentifier(item.level) : "",
+          revision: 0,
+          statement: kind === "Retire" ? "" : item.statement,
+          richText: kind === "Retire" ? "" : item.richText,
+        };
+      }),
+    );
   const updateProposal = (
     index: number,
     key: keyof ControlledRequirementDraft,
@@ -479,14 +508,18 @@ export default function ScrEditor({
                 key={`${index}-${change.kind}`}
                 identityLocked={Boolean(change.baseNumber)}
                 onChange={(key, value) => updateProposal(index, key, value)}
+                onKindChange={(kind) => changeKind(index, kind)}
                 onRemove={() => setChanges((items) => items.filter((_, position) => position !== index))}
               />
             ))}
           </div>
           {!changes.length && (
             <div className="emptyProposals">
-              <b>No requirement proposals yet</b>
-              <p>Add the smallest controlled set needed to deliver this change.</p>
+              <b>Choose the first requirement change</b>
+              <p>
+                Introduce a new requirement, modify one that exists, or retire one. Add the smallest controlled
+                set needed to deliver this change — you can change what a proposal does after adding it.
+              </p>
             </div>
           )}
         </section>

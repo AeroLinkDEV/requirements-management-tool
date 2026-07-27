@@ -33,13 +33,29 @@ test('System proposal identity and stages are controlled from the first screen',
   await expect(stages.getByText('Change case',{exact:true})).toBeVisible()
   await expect(stages.getByText('Requirement changes',{exact:true})).toBeVisible()
   await expect(stages.getByText('Impact & readiness',{exact:true})).toBeVisible()
+
+  // Nothing is assumed about what this change does. The editor used to pre-seed an Introduce proposal, which
+  // decided that before the author had said — and because it arrived with an identifier already allocated it
+  // counted as identity-locked, so the first proposal on every new change request could not be changed either.
+  await expect(page.getByText('Choose the first requirement change')).toBeVisible()
+  await expect(page.getByLabel('Identifier')).toHaveCount(0)
+  await page.getByRole('button',{name:'+ Introduce System requirement'}).click()
+
   await expect(page.getByLabel('Identifier')).toHaveValue(/^SYSR-\d{6}$/)
   await expect(page.getByRole('textbox',{name:'Level',exact:true})).toHaveValue('System')
   await expect(page.getByLabel('Change type')).toHaveValue('Introduce')
   await expect(page.getByLabel('Identifier')).not.toBeEditable()
   await expect(page.getByLabel('Revision')).not.toBeEditable()
   await expect(page.getByRole('textbox',{name:'Level',exact:true})).not.toBeEditable()
-  await expect(page.getByLabel('Change type')).not.toBeEditable()
+
+  // Change type is the one thing in that row the author decides, so it is the one thing that is editable.
+  // Switching to Modify re-issues the identity, because a modification names a requirement that already
+  // exists rather than being allocated a fresh number — which is what makes the repository lookup appear.
+  await page.getByLabel('Change type').selectOption('Modify')
+  await expect(page.getByLabel('Identifier')).toHaveValue('Awaiting controlled selection')
+  await expect(page.getByText('Select the requirement to modify')).toBeVisible()
+  await page.getByLabel('Change type').selectOption('Introduce')
+  await expect(page.getByLabel('Identifier')).toHaveValue(/^SYSR-\d{6}$/)
 })
 
 test('Software Draft closes impacts before an explicitly selected reviewer signs',async ({page,request})=>{
@@ -47,6 +63,7 @@ test('Software Draft closes impacts before an explicitly selected reviewer signs
   await selectProgram(page,programName)
   await openPageFromPalette(page,'New Software SWCR')
 
+  await page.getByRole('button',{name:'+ Introduce HLR'}).click()
   await expect(page.getByLabel('Identifier')).toHaveValue(/^HLR-\d{6}$/)
   await expect(page.getByRole('textbox',{name:'Level',exact:true})).toHaveValue('Software HLR')
   await expect(page.getByText('SWR-000001')).toHaveCount(0)

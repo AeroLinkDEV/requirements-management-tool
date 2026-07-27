@@ -576,6 +576,25 @@ export default function ScrWorkspace({
       createRequirement(level, kind, kind === "Introduce" ? nextIdentifier(level) : ""),
     ]);
 
+  // What a proposal does to a requirement, changed after the card exists. Not a field update: the kind decides
+  // what the identifier means, so the identity is re-derived rather than carried across. Same rule as the new
+  // change request editor, and here for the same reason — an author editing a checked-out Draft changes their
+  // mind about a proposal as readily as one writing it for the first time.
+  const changeRequirementKind = (index: number, kind: RequirementKind) =>
+    setRequirements((items) =>
+      items.map((item, position) => {
+        if (position !== index || item.kind === kind) return item;
+        return {
+          ...item,
+          kind,
+          baseNumber: kind === "Introduce" ? nextIdentifier(item.level) : "",
+          revision: 0,
+          statement: kind === "Retire" ? "" : item.statement,
+          richText: kind === "Retire" ? "" : item.richText,
+        };
+      }),
+    );
+
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!scr || !lockRef.current) return;
@@ -773,6 +792,7 @@ export default function ScrWorkspace({
                 key={`${index}-${item.kind}`}
                 identityLocked={Boolean(item.baseNumber)}
                 onChange={(key, value) => updateRequirement(index, key, value)}
+                onKindChange={(kind) => changeRequirementKind(index, kind)}
                 onRemove={() => setRequirements((items) => items.filter((_, position) => position !== index))}
               />
             ))}

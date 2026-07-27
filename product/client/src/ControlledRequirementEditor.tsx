@@ -44,8 +44,20 @@ type Props = {
     key: keyof ControlledRequirementDraft,
     value: string | number | boolean,
   ) => void;
+  /**
+   * Changes what this proposal does to a requirement. Separate from `onChange` because the kind decides what
+   * the identifier means, so it cannot be set as an ordinary field — the owner re-derives identity from it.
+   * Omitted where a proposal's kind is fixed by the surface it appears on.
+   */
+  onKindChange?: (kind: RequirementKind) => void;
   onRemove: () => void;
 };
+
+const kindOptions: { value: RequirementKind; label: string }[] = [
+  { value: "Introduce", label: "Introduce a new requirement" },
+  { value: "Modify", label: "Modify an existing requirement" },
+  { value: "Retire", label: "Retire an existing requirement" },
+];
 
 const impactAreas = [
   ["trace", "Trace relationships"],
@@ -78,6 +90,7 @@ export default function ControlledRequirementEditor({
   index,
   identityLocked,
   onChange,
+  onKindChange,
   onRemove,
 }: Props) {
   const attributes = useMemo(() => parse(item.attributesJson), [item.attributesJson]);
@@ -269,9 +282,34 @@ export default function ControlledRequirementEditor({
           Level
           <input value={levelLabel(item.level)} readOnly aria-readonly="true" />
         </label>
+        {/* The one thing in this row the author decides, and it was readOnly.
+            A proposal added as one kind could only be turned into another by removing it and starting again —
+            and the editor pre-seeded an Introduce proposal whose identifier was already allocated, which counted
+            as identity-locked, so the first proposal on every new change request could not be changed at all.
+            It sits here rather than beside the badges above because it governs the Identifier next to it:
+            changing it re-derives that identity, since an introduced requirement is allocated a number now
+            while a modified or retired one names one that already exists. */}
         <label>
           Change type
-          <input value={item.kind} readOnly aria-readonly="true" />
+          {onKindChange ? (
+            <>
+              {/* Named explicitly. The hint below is inside the label, as the readonly fields' hints are, so
+                  without this the computed name would swallow it — and it mentions the identifier, which made
+                  the select answer to a search for the Identifier field as well as this one. */}
+              <select
+                aria-label="Change type"
+                value={item.kind}
+                onChange={(event) => onKindChange(event.target.value as RequirementKind)}
+              >
+                {kindOptions.map((option) => (
+                  <option value={option.value} key={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <small>Changing this re-issues the identifier above.</small>
+            </>
+          ) : (
+            <input value={item.kind} readOnly aria-readonly="true" />
+          )}
         </label>
       </div>
 

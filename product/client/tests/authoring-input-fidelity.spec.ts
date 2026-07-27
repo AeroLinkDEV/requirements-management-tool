@@ -73,13 +73,15 @@ test('modifying a requirement shows the approved wording beside the proposed wor
   await page.getByRole('link', { name: 'New System SCR' }).click()
 
   // Introduce has nothing to compare against, so the read-only field must not be there.
+  await page.getByRole('button', { name: '+ Introduce System requirement' }).click()
   await expect(page.getByLabel('Change type')).toHaveValue('Introduce')
   await expect(page.getByRole('textbox', { name: 'Existing requirement wording' })).toHaveCount(0)
   await expect(page.getByRole('textbox', { name: 'Requirement statement' })).toBeVisible()
 
-  // A proposal's kind is fixed when it is added, not switched afterwards, because the kind decides what the
-  // rest of the form means.
-  await page.getByRole('button', { name: 'Modify existing' }).first().click()
+  // A proposal's kind used to be fixed once added, on the reasoning that the kind decides what the rest of the
+  // form means. It does — which is an argument for re-deriving the identity when it changes, not for making the
+  // author delete the card and start again. Switched in place here, on the proposal that already exists.
+  await page.getByLabel('Change type').selectOption('Modify')
   const search = page.getByRole('textbox', { name: /Find controlled requirement/ }).last()
   await expect(search).toBeVisible({ timeout: 30_000 })
   await search.fill('SYSR-000001')

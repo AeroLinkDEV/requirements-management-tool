@@ -29,14 +29,17 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
 
   await openPageFromPalette(page,'New Software SWCR')
   await expect(page.getByRole('navigation', { name: 'Change authoring progress' })).toBeVisible()
+  // The author chooses the first change; the editor no longer assumes one.
+  await page.getByRole('button',{name:'+ Introduce HLR'}).click()
   await expect(page.getByLabel('Identifier')).toHaveValue(/^HLR-\d{6}$/)
   await expect(page.getByLabel('Identifier')).not.toBeEditable()
   await expect(page.getByLabel('Revision')).toHaveValue('00')
   await expect(page.getByLabel('Revision')).not.toBeEditable()
   await expect(page.getByRole('textbox',{name:'Level',exact:true})).toHaveValue('Software HLR')
   await expect(page.getByRole('textbox',{name:'Level',exact:true})).not.toBeEditable()
+  // Change type is chosen, not reported — the identifier above it is what is server-issued and fixed.
   await expect(page.getByLabel('Change type')).toHaveValue('Introduce')
-  await expect(page.getByLabel('Change type')).not.toBeEditable()
+  await expect(page.getByLabel('Change type')).toBeEditable()
   await expect(page.getByText('SWR-000001')).toHaveCount(0)
   await page.getByLabel('Title').fill('Introduce controlled browser workflow')
   await page.getByLabel('Problem').fill('The workflow is not yet controlled end to end.')
