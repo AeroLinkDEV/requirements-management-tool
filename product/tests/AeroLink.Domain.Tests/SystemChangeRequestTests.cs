@@ -208,6 +208,53 @@ public sealed class SystemChangeRequestTests
         Assert.Throws<DomainException>(() => scr.Retarget("someone.else", Guid.NewGuid(), "Unauthorized move.", Now.AddMinutes(2)));
     }
 
+    [Fact]
+    public void A_change_request_can_be_deferred_from_draft_review_or_approved()
+    {
+        var draft = CreateDraftWithRequirement();
+        draft.Defer("author", "Descoped from 1.6.", Now);
+        Assert.Equal(ScrState.Deferred, draft.State);
+
+        var approved = FullyApprove();
+        approved.Defer("author", "Correct, but not shipping in 1.6.", Now);
+        Assert.Equal(ScrState.Deferred, approved.State);
+
+        // The case that had nowhere to go. A change request under review that the programme drops had to be
+        // rejected — discarding a review that raised no objection — or left in review holding a release gate
+        // that would never clear.
+        var inReview = CreateDraftWithRequirement();
+        inReview.SubmitForReview("author", Approvers(), Now);
+        inReview.ApproveActiveStage("systems", Now);
+        inReview.Defer("author", "Programme cut the scope mid-review.", Now);
+        Assert.Equal(ScrState.Deferred, inReview.State);
+
+        // The cycle in flight is closed with the deferral as its reason, not abandoned mid-flight.
+        var cycle = Assert.Single(inReview.ReviewCycles);
+        Assert.Equal(ReviewCycleState.Cancelled, cycle.State);
+        Assert.Equal("Programme cut the scope mid-review.", cycle.ClosureReason);
+        // The approval already given keeps its decision and its attribution; what it loses is force.
+        Assert.Equal(ApprovalStepState.Approved, cycle.Steps.Single(x => x.ApproverId == "systems").State);
+        Assert.Contains(inReview.AuditEvents, x => x.EventType == "ChangeRequestDeferred");
+    }
+
+    [Fact]
+    public void Deferral_requires_a_reason_and_will_not_silently_leave_a_candidate_baseline()
+    {
+        var approved = FullyApprove();
+        Assert.Throws<DomainException>(() => approved.Defer("author", "   ", Now));
+
+        approved.MarkSelectedForBaseline("cm", Now);
+        // Taking a change request out of a candidate baseline is its own attributable act, not a side effect.
+        var refused = Assert.Throws<DomainException>(() => approved.Defer("author", "Changed our minds.", Now));
+        Assert.Contains("candidate baseline", refused.Message);
+
+        approved.UnmarkSelectedForBaseline("cm", Now);
+        approved.Defer("author", "Now it can be put away.", Now);
+        Assert.Equal(ScrState.Deferred, approved.State);
+
+        Assert.Throws<DomainException>(() => approved.Defer("author", "Twice.", Now));
+    }
+
     private static SystemChangeRequest CreateDraft() =>
         new("SCR-00001049", 1, ProjectId, ReleaseId, "Introduce Round Robin",
             "Round Robin is not available.", "The existing sequence is linear.",

@@ -9,6 +9,9 @@ export type HistoryStateIntent =
   | "InReview"
   | "Approved"
   | "SelectedForBaseline"
+  // Work put away for another release. Reachable as its own view because that is the whole point of it —
+  // shelved work nobody can find has not been shelved, it has been lost.
+  | "Deferred"
   | "ApprovedOrSelected";
 
 export type HistoryTypeIntent = "System" | "Software" | "All";
@@ -18,6 +21,7 @@ const historyStateIntents: readonly HistoryStateIntent[] = [
   "InReview",
   "Approved",
   "SelectedForBaseline",
+  "Deferred",
   "ApprovedOrSelected",
 ];
 

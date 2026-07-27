@@ -38,3 +38,30 @@ export const stateLabel = (state?: string) => {
   return stateLabels[state.toLowerCase()]
     ?? state.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, first => first.toUpperCase())
 }
+
+/**
+ * A change request's state, said the way the programme says it.
+ *
+ * "Selected for baseline" describes the mechanism — a row was picked into a candidate — and says nothing a
+ * reader wants to know, which is *which build is this going into, and has that build shipped*. Those are two
+ * different facts and the stored state only carries the first:
+ *
+ *   Approved                     the engineering is signed for
+ *   Allocated to 1.6             signed for, and going into this build
+ *   Incorporated in 1.6          that build has been released, so it is in the product
+ *
+ * `Incorporated` is derived rather than stored, deliberately. It becomes true when the *build* is released, so
+ * it is a fact about the release and not a transition somebody has to remember to perform — it can never
+ * disagree with reality, and no new value has to be threaded through the readiness gates, the browser
+ * journeys, the history filters and the seeded showcase that `ScrState` already reaches.
+ */
+export const changeRequestStateLabel = (
+  state: string | undefined,
+  targetRelease?: { version: string; isReleased: boolean },
+) => {
+  if (state !== 'SelectedForBaseline') return stateLabel(state)
+  if (!targetRelease) return 'Allocated to a build'
+  return targetRelease.isReleased
+    ? `Incorporated in ${targetRelease.version}`
+    : `Allocated to ${targetRelease.version}`
+}

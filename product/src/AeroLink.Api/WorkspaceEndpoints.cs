@@ -149,11 +149,19 @@ public static class WorkspaceEndpoints
             if (projectId is not null && !await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
             var allowedProjects = actor.IsAdministrator ? null : await db.Projects.AsNoTracking().Where(x => actor.Programs.Select(p => p.ProgramId).Contains(x.ProgramId)).Select(x => x.Id).ToListAsync(ct);
             var source = db.SystemChangeRequests.AsNoTracking().Where(x => (allowedProjects == null || allowedProjects.Contains(x.ProjectId)) && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.TargetReleaseId == releaseId));
+            // Deferred is counted across the project rather than within the selected release, and split by
+            // discipline. A change request that has been put away is precisely one that is not part of the
+            // build being worked on, so scoping the count to that build would hide the records this collection
+            // exists to hold — and systems and software keep their own, because they are worked by different
+            // people who should not be reading each other's shelved work.
+            var everywhere = db.SystemChangeRequests.AsNoTracking().Where(x => (allowedProjects == null || allowedProjects.Contains(x.ProjectId)) && (projectId == null || x.ProjectId == projectId));
             return Results.Ok(new {
                 totalScrs = await source.CountAsync(ct),
                 draft = await source.CountAsync(x => x.State == ScrState.Draft, ct),
                 inReview = await source.CountAsync(x => x.State == ScrState.InReview, ct),
-                approved = await source.CountAsync(x => x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline, ct)
+                approved = await source.CountAsync(x => x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline, ct),
+                deferredSystem = await everywhere.CountAsync(x => x.State == ScrState.Deferred && x.Type == ChangeRequestType.System, ct),
+                deferredSoftware = await everywhere.CountAsync(x => x.State == ScrState.Deferred && x.Type == ChangeRequestType.Software, ct)
             });
         });
 
