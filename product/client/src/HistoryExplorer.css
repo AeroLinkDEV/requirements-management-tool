@@ -576,3 +576,70 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Allocation and state as two columns. The grid is unchanged in shape — the old "Target build" column now holds
+   the allocation, which is the same fact said usefully: a build version, or Deferred. */
+.allocationCell {
+  color: #2c4054;
+  font-weight: 700;
+}
+
+.allocationCell.deferred {
+  width: max-content;
+  border-radius: 999px;
+  background: #f3ecdd;
+  padding: 4px 9px;
+  color: #7c5f1f;
+  font-size: 12px;
+}
+
+/* A change request and the revisions behind it, as one block. */
+.historyGroup {
+  border-top: 1px solid #edf0f4;
+}
+
+.historyGroup .historyRow {
+  border-top: 0;
+}
+
+html .revisionToggle {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-top: 1px dashed #e4e9ef;
+  background: #fbfcfd;
+  padding: 8px 20px;
+  color: #37698c;
+  font: 700 12px Manrope, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+html .revisionToggle:hover { background: #f2f7fa; color: #245272; }
+
+/* Indented and quieter, because these are the same work read at an earlier moment. Visible when asked for and
+   never in the way of the revision that supersedes them. */
+.revisionHistory {
+  border-top: 1px solid #eef1f5;
+  background: #fafbfc;
+  padding: 4px 0 4px 22px;
+}
+
+.revisionHistory > span {
+  display: block;
+  padding: 10px 20px;
+  color: #7c8798;
+  font-size: 12px;
+}
+
+html .revisionHistory .historyRow.superseded {
+  background: transparent;
+  opacity: .78;
+}
+
+html .revisionHistory .historyRow.superseded:hover { background: #f4f7f9; opacity: 1; }
+
+html .historyState.superseded[data-state="Superseded"] {
+  background: #eceff3;
+  color: #5c6a7c;
+}

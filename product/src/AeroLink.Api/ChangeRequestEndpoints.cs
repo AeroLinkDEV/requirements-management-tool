@@ -39,6 +39,37 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        // Putting a change request away for another day, and taking it back off the shelf.
+        //
+        // The domain has had `Defer` since the allocation states were reworked, and nothing exposed it — so the
+        // dashboard counted deferred change requests, the history explorer filtered for them, and the only way
+        // one could exist was for the demonstration seeder to create it. The shelf was visible and unreachable.
+        //
+        // Deferring is the author's decision about their own work, so it takes the same authority as editing it.
+        app.MapPost("/api/scrs/{id:guid}/defer", async (Guid id, DeferScrRequest request, HttpContext http, IScrRepository repository, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            try
+            {
+                scr.Defer(http.UserAccount().UserName, request.Reason ?? "", DateTimeOffset.UtcNow);
+                await repository.SaveAsync(ct);
+                return Results.Ok(ApiMap.ScrDetail(scr));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/scrs/{id:guid}/reinstate", async (Guid id, HttpContext http, IScrRepository repository, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            try
+            {
+                scr.Reinstate(http.UserAccount().UserName, DateTimeOffset.UtcNow);
+                await repository.SaveAsync(ct);
+                return Results.Ok(ApiMap.ScrDetail(scr));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         app.MapPost("/api/scrs/{id:guid}/next-revision", async (Guid id, ActorRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var approved = await repository.GetAsync(id, ct); if (approved is null) return Results.NotFound();

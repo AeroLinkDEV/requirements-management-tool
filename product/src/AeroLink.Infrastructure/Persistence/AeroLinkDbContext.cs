@@ -196,6 +196,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.SolutionRich).HasMaxLength(200000).IsRequired();
             b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired();
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
+            // Nullable: only a deferred change request has one, and rows deferred before this existed have none.
+            b.Property(x => x.DeferredFromState).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.Type).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.Version).IsConcurrencyToken();
             b.Ignore(x => x.DisplayNumber); b.Ignore(x => x.ActiveReviewCycle);

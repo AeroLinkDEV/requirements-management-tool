@@ -20,6 +20,16 @@ public sealed class ScrRepository(AeroLinkDbContext db) : IScrRepository
             source = source.Where(x => EF.Functions.ILike(x.BaseNumber, $"%{search}%") || EF.Functions.ILike(x.Title, $"%{search}%"));
         }
         if (query.State is not null) source = source.Where(x => x.State == query.State);
+        if (!string.IsNullOrWhiteSpace(query.BaseNumber))
+            source = source.Where(x => x.BaseNumber == query.BaseNumber);
+        // One row per change request, showing where it has got to, rather than one row per revision. A revision
+        // that has been superseded is the same piece of work read at an earlier moment, and listing it beside its
+        // successor puts the stale copy in the reader's way. Compared against the max revision of the same base
+        // number rather than by grouping, so paging and counting still work on a plain queryable.
+        if (query.LatestRevisionOnly && string.IsNullOrWhiteSpace(query.BaseNumber))
+            source = source.Where(x => x.Revision == db.SystemChangeRequests
+                .Where(other => other.ProjectId == x.ProjectId && other.BaseNumber == x.BaseNumber)
+                .Max(other => other.Revision));
         var total = await source.CountAsync(cancellationToken);
         var ordered = db.Database.IsSqlite()
             ? source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
@@ -27,7 +37,10 @@ public sealed class ScrRepository(AeroLinkDbContext db) : IScrRepository
         var items = await ordered
             .Skip((page - 1) * pageSize).Take(pageSize)
             .Select(x => new ScrListItem(x.Id, x.BaseNumber, x.Revision, x.Title, x.State, x.Type, x.AuthorId,
-                x.TargetReleaseId, x.RequirementChanges.Count, x.UpdatedAt)).ToListAsync(cancellationToken);
+                x.TargetReleaseId, x.RequirementChanges.Count, x.UpdatedAt, x.DeferredFromState,
+                // Counted here so a collapsed row can say there is history behind it without a request per row.
+                db.SystemChangeRequests.Count(other => other.ProjectId == x.ProjectId && other.BaseNumber == x.BaseNumber)))
+            .ToListAsync(cancellationToken);
         return new PagedResult<ScrListItem>(items, page, pageSize, total);
     }
 
