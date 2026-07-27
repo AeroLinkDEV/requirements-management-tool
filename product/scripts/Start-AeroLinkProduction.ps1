@@ -29,6 +29,15 @@ $url = 'http://127.0.0.1:5080'
 
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 
+# Prerequisites first, before anything that takes minutes. Without this the launcher installed npm packages,
+# compiled the client, started the API and waited two minutes for a health endpoint that could never answer,
+# then reported "No .NET SDKs were found" — the right diagnosis, four minutes after it was knowable.
+. (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
+Write-Host '[0/4] Checking prerequisites...' -ForegroundColor Cyan
+$dotnet = Resolve-AeroLinkDotnet
+Assert-AeroLinkNode
+Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green
+
 function Test-HttpEndpoint {
     param([Parameter(Mandatory)][string]$Uri)
     try {
@@ -115,7 +124,7 @@ $environment = @{
     Client__StaticFiles    = $distRoot
 }
 foreach ($entry in $environment.GetEnumerator()) { [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process') }
-Start-Process -FilePath 'dotnet' `
+Start-Process -FilePath $dotnet `
     -ArgumentList $arguments `
     -WorkingDirectory $repositoryRoot `
     -WindowStyle Hidden `
