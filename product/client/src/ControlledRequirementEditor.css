@@ -127,7 +127,8 @@
   color: #435a70;
 }
 
-.controlledEditor input[readonly] + small {
+.controlledEditor input[readonly] + small,
+.controlledEditor select + small {
   color: #748597;
   font-size: 12px;
   font-weight: 500;
@@ -541,3 +542,4 @@ html .approvedWording > small {
     grid-template-columns: 1fr;
   }
 }
+
