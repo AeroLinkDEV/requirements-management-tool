@@ -42,6 +42,14 @@ public sealed class SystemChangeRequest
     public Guid ProjectId { get; private set; }
     public Guid TargetReleaseId { get; private set; }
     public string Title { get; private set; } = string.Empty;
+    /// <summary>
+    /// How far this change request had got when it was deferred, or null when it is not on the shelf.
+    ///
+    /// State and allocation are two different facts and `ScrState` was carrying both. "Which build is this going
+    /// into" and "how far has it got" are answered separately now: Deferred is where the work sits, and this is
+    /// how far it got before it went there.
+    /// </summary>
+    public ScrState? DeferredFromState { get; private set; }
     public string Problem { get; private set; } = string.Empty;
     public string Analysis { get; private set; } = string.Empty;
     public string Solution { get; private set; } = string.Empty;
@@ -248,7 +256,38 @@ public sealed class SystemChangeRequest
             throw new DomainException("Remove the change request from its candidate baseline before deferring it.");
         if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A deferral reason is required.");
         if (State == ScrState.InReview) ActiveReviewCycle?.Cancel(reason.Trim(), now);
+        // Remembered, because deferring changes where the work sits and not how far it got. A change request put
+        // away while approved is still approved work; one put away as a Draft still needs writing. Storing only
+        // "Deferred" loses that, and a shelf that cannot tell a signed-off change from an unwritten one is a
+        // shelf nobody can plan from. Reinstate puts it back exactly where it was.
+        DeferredFromState = State;
         State = ScrState.Deferred; UpdatedAt = now; Audit("ChangeRequestDeferred", actorId, reason.Trim(), now);
+    }
+
+    /// <summary>
+    /// Takes a deferred change request off the shelf, back to the state it was in when it went on.
+    ///
+    /// The review cycle is not resumed. Deferring from InReview cancels the cycle, which is right — the
+    /// approvers were asked about work that has since been put away — so a change request that was In Review
+    /// comes back as a Draft and its author submits it again. Anything else would restore signatures against a
+    /// snapshot nobody has looked at since.
+    /// </summary>
+    public void Reinstate(string actorId, DateTimeOffset now)
+    {
+        EnsureAuthor(actorId);
+        if (State != ScrState.Deferred) throw new DomainException("Only a deferred change request can be reinstated.");
+        var restored = DeferredFromState switch
+        {
+            ScrState.InReview => ScrState.Draft,
+            // Deferred rows that predate the state being remembered come back as Drafts. That is the safe
+            // direction: an author can resubmit a Draft, where claiming approval nobody gave cannot be undone.
+            null => ScrState.Draft,
+            var value => value.Value,
+        };
+        State = restored;
+        DeferredFromState = null;
+        UpdatedAt = now;
+        Audit("ChangeRequestReinstated", actorId, $"Reinstated {DisplayNumber} as {restored}.", now);
     }
 
     public void Retarget(string actorId, Guid targetReleaseId, string reason, DateTimeOffset now)

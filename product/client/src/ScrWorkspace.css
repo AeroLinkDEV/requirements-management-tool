@@ -1154,3 +1154,28 @@ html .reviseAction:disabled { cursor: not-allowed; opacity: .5; }
     grid-column: 2 / -1;
   }
 }
+
+/* Putting work down, next to the actions that pick it up. Quieter than Revise on purpose: deferring is a
+   reasonable thing to do and not the thing this page is for. */
+html .deferAction {
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid #d8c9a4;
+  border-radius: 8px;
+  background: #fdf9f0;
+  color: #7c5f1f;
+  font: 700 13px Manrope, sans-serif;
+  cursor: pointer;
+}
+
+html .deferAction:hover { border-color: #bfa96f; background: #faf2e2; }
+html .deferAction:disabled { cursor: not-allowed; opacity: .5; }
+
+/* Deferred reads as put-away rather than as a failure, in the rail and in the header badge. */
+.controlStatusCard dd[data-allocation="Deferred"] {
+  width: max-content;
+  border-radius: 999px;
+  background: #f3ecdd;
+  padding: 3px 9px;
+  color: #7c5f1f;
+}

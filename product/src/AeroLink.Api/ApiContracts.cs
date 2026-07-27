@@ -27,6 +27,8 @@ record CreateScrDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetRelea
 record CreateWorkspaceRequest(string ProgramName, string ProgramCode, string ProjectName, string SoftwareProduct, string InitialRelease, bool InitialReleaseIsReleased);
 record CreateReleaseRequest(Guid ProjectId, string Version, Guid? PredecessorReleaseId);
 record RetargetScrRequest(Guid TargetReleaseId, string Reason);
+/// <summary>A reason is required by the domain: a shelf whose entries do not say why is a shelf nobody trusts.</summary>
+record DeferScrRequest(string? Reason);
 record RequirementChangeRequest(string ActorId, string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod);
 record ApproverRequest(string UserId, string Name);
 record SubmitReviewRequest(string ActorId, long? ExpectedVersion, List<ApproverRequest> Approvers, ReviewMode Mode=ReviewMode.Sequential);

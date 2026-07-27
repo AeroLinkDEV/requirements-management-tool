@@ -65,3 +65,46 @@ export const changeRequestStateLabel = (
     ? `Incorporated in ${targetRelease.version}`
     : `Allocated to ${targetRelease.version}`
 }
+
+/**
+ * Allocation and state, as two separate answers.
+ *
+ * `ScrState` was carrying both, and the two questions have different answers: *which build is this going into*
+ * and *how far has it got*. Two of the five stored values were really allocations — `Deferred` says where the
+ * work sits, `SelectedForBaseline` says which build it was picked into — so a reader asking either question got
+ * a word that half answered the other.
+ *
+ *   allocation   1.6  ·  Deferred
+ *   state        Draft · In review · Approved · Incorporated · Superseded
+ *
+ * `Incorporated` and `Superseded` are both derived rather than stored, and deliberately. Incorporated becomes
+ * true when the *build* is released, which is a fact about the release; superseded becomes true when a later
+ * revision of the same change request exists, which is a fact about the set. Storing either would mean a
+ * transition somebody has to remember to perform, and a stored flag that disagrees with reality is worse than
+ * no flag. Neither can disagree with reality when it is read from it.
+ */
+export type ChangeRequestFacts = {
+  state?: string
+  deferredFromState?: string | null
+  targetRelease?: { version: string; isReleased: boolean }
+  /** A later revision of this change request exists, so this one is history. */
+  superseded?: boolean
+}
+
+export const changeRequestAllocation = (facts: ChangeRequestFacts) => {
+  if (facts.state === 'Deferred') return 'Deferred'
+  if (!facts.targetRelease) return 'No build'
+  return facts.targetRelease.version
+}
+
+export const changeRequestState = (facts: ChangeRequestFacts) => {
+  // Superseded first. A superseded revision may be Approved, and reading "Approved" against a revision that a
+  // later one has replaced is the one wrong answer here: it invites somebody to work from stale content.
+  if (facts.superseded) return 'Superseded'
+  // A deferred change request reports how far it got, not that it is away — that is the allocation's job. Rows
+  // deferred before this was remembered fall back to the plain label rather than inventing a state for them.
+  if (facts.state === 'Deferred') return facts.deferredFromState ? stateLabel(facts.deferredFromState) : 'Deferred'
+  if (facts.state !== 'SelectedForBaseline') return stateLabel(facts.state)
+  // Approved and allocated is still approved work until the build it is in actually ships.
+  return facts.targetRelease?.isReleased ? 'Incorporated' : 'Approved'
+}

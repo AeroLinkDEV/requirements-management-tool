@@ -287,6 +287,67 @@ public sealed class SystemChangeRequestTests
         Assert.Contains(inReview.AuditEvents, x => x.EventType == "ChangeRequestDeferred");
     }
 
+    /// <summary>
+    /// Deferring changes where the work sits, not how far it got.
+    ///
+    /// Storing only "Deferred" lost the difference between a signed-off change put away and an unwritten one, and
+    /// a shelf that cannot tell those apart is a shelf nobody can plan from. Allocation and state are two facts
+    /// and `ScrState` was carrying both.
+    /// </summary>
+    [Fact]
+    public void Deferring_remembers_how_far_the_work_had_got()
+    {
+        var draft = CreateDraftWithRequirement();
+        draft.Defer("author", "Descoped from 1.6.", Now);
+        Assert.Equal(ScrState.Draft, draft.DeferredFromState);
+
+        var approved = FullyApprove();
+        approved.Defer("author", "Correct, but not shipping in 1.6.", Now);
+        Assert.Equal(ScrState.Approved, approved.DeferredFromState);
+    }
+
+    [Fact]
+    public void Reinstating_puts_a_change_request_back_where_it_was()
+    {
+        var approved = FullyApprove();
+        approved.Defer("author", "Not shipping in 1.6.", Now);
+
+        approved.Reinstate("author", Now.AddDays(30));
+
+        Assert.Equal(ScrState.Approved, approved.State);
+        Assert.Null(approved.DeferredFromState);
+        Assert.Contains(approved.AuditEvents, x => x.EventType == "ChangeRequestReinstated");
+    }
+
+    /// <summary>
+    /// Except from review, which cannot be resumed. Deferring cancels the cycle in flight — the approvers were
+    /// asked about work that has since been put away — so it comes back as a Draft and is submitted again.
+    /// Restoring InReview would mean signatures standing against a snapshot nobody has looked at since.
+    /// </summary>
+    [Fact]
+    public void A_change_request_deferred_mid_review_comes_back_as_a_draft()
+    {
+        var inReview = CreateDraftWithRequirement();
+        inReview.SubmitForReview("author", Approvers(), Now);
+        inReview.Defer("author", "Programme cut the scope mid-review.", Now);
+        Assert.Equal(ScrState.InReview, inReview.DeferredFromState);
+
+        inReview.Reinstate("author", Now.AddDays(30));
+
+        Assert.Equal(ScrState.Draft, inReview.State);
+        Assert.Equal(ReviewCycleState.Cancelled, Assert.Single(inReview.ReviewCycles).State);
+    }
+
+    [Fact]
+    public void Only_a_deferred_change_request_can_be_reinstated()
+    {
+        var approved = FullyApprove();
+        Assert.Throws<DomainException>(() => approved.Reinstate("author", Now));
+
+        approved.Defer("author", "Shelved.", Now);
+        Assert.Throws<DomainException>(() => approved.Reinstate("someone.else", Now));
+    }
+
     [Fact]
     public void Deferral_requires_a_reason_and_will_not_silently_leave_a_candidate_baseline()
     {

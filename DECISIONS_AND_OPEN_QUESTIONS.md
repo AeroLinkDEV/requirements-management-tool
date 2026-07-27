@@ -590,6 +590,32 @@ Future entries use:
   menu item that vanishes when you switch build teaches nothing. The refusal names the version, since "bad
   request" would leave an author auditing a dozen fields none of which were wrong.
 
+### DEC-056 - Allocation and State Are Two Questions, Answered Separately
+
+- **Date:** 2026-07-27
+- **Status:** Accepted
+- **Decision:** A change request reports an **allocation** — the build it is going into, or `Deferred` — and a
+  **state** — Draft, In review, Approved, Incorporated, or Superseded. Deferring records the state the work had
+  reached in a new `DeferredFromState` column, and `Reinstate` puts it back there; a change request deferred
+  mid-review returns as a Draft because deferral cancels the cycle. `Incorporated` and `Superseded` stay derived:
+  the first from whether the target build has been released, the second from a later revision existing. Listings
+  collapse to each change request's newest revision, with the count of superseded revisions on the row and
+  `baseNumber` to expand them.
+- **Rationale:** `ScrState` was carrying both facts and two of its five values were really allocations. A reader
+  asking "which build is this going into" or "how far has it got" got a single word that half answered the other,
+  and "Selected for baseline" answered neither. Storing only `Deferred` also lost the difference between a
+  signed-off change put away and an unwritten one — a shelf that cannot tell those apart is a shelf nobody can
+  plan from. The two derived values are derived on purpose: each is read from the thing that makes it true, so
+  neither can drift, and neither needs a transition somebody has to remember to perform.
+- **Consequences:** `Defer` had existed in the domain since the states were reworked and **nothing exposed it** —
+  the dashboard counted deferred change requests and the history explorer filtered for them while the only way
+  one could exist was the demonstration seeder. The endpoints and the buttons are part of this change; a shelf
+  that is visible and unreachable is the same defect class as
+  [DEC-054](#dec-054---approved-and-allocated-are-one-fact-and-a-released-build-freezes-it)'s Revise gate.
+  Collapsing revisions without a way to expand them would be hiding the record, so nothing is hidden: the row
+  states what is behind it. Superseded is shown ahead of the stored state because reading "Approved" against a
+  revision a later one has replaced invites somebody to work from stale content.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

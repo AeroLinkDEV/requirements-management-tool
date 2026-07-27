@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { changeRequestStateLabel, stateLabel } from './presentation'
+import { changeRequestAllocation, changeRequestState, stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
@@ -74,6 +74,8 @@ type ScrDetail = {
   authorId: string;
   version: number;
   state: string;
+  /** How far it had got when it was shelved. Present only while State is Deferred. */
+  deferredFromState?: string | null;
   createdAt: string;
   updatedAt: string;
   requirementChanges: Requirement[];
@@ -522,6 +524,48 @@ export default function ScrWorkspace({
     return outcome === true;
   };
 
+  /**
+   * Putting this change request away for another day, and taking it back off the shelf.
+   *
+   * The reason is required by the domain and asked for here rather than defaulted, because a shelf whose entries
+   * do not say why they are on it is a shelf nobody can plan from. Reinstating needs no reason: coming back to
+   * work is the expected end of a deferral, not an exception to explain.
+   */
+  const defer = async () => {
+    if (!scr) return;
+    const reason = window.prompt(`Why is ${scr.displayNumber} being put away for another day?`);
+    if (reason === null) return;
+    if (!reason.trim()) { setError("A deferral reason is required."); return; }
+    await withBusy(async () => {
+      const response = await fetch(`${api}/api/scrs/${scr.id}/defer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      if (!response.ok) {
+        setError(((await response.json()) as { error?: string }).error || "The change request could not be deferred.");
+        return;
+      }
+      await load();
+      await onChanged();
+      setSaved("Put away for another day.");
+    }, "The change request could not be deferred.");
+  };
+
+  const reinstate = async () => {
+    if (!scr) return;
+    await withBusy(async () => {
+      const response = await fetch(`${api}/api/scrs/${scr.id}/reinstate`, { method: "POST" });
+      if (!response.ok) {
+        setError(((await response.json()) as { error?: string }).error || "The change request could not be reinstated.");
+        return;
+      }
+      await load();
+      await onChanged();
+      setSaved("Back off the shelf.");
+    }, "The change request could not be reinstated.");
+  };
+
   const revise = async () => {
     if (!scr) return;
     const next = await withBusy(async () => {
@@ -662,6 +706,12 @@ export default function ScrWorkspace({
   // both count, and why a released target build takes the action away again.
   const isSignedFor = scr.state === "Approved" || scr.state === "SelectedForBaseline";
   const revisable = isSignedFor && targetRelease?.isReleased === false;
+  const scrFacts = { state: scr.state, deferredFromState: scr.deferredFromState, targetRelease };
+  // Any state can go on the shelf except one already picked into a candidate baseline, which has to be taken out
+  // of it first — an explicit, attributable act rather than a side effect of deferring. A released build's work is
+  // history and cannot be shelved either.
+  const deferrable = isAuthor && scr.state !== "Deferred" && scr.state !== "SelectedForBaseline"
+    && targetRelease?.isReleased === false;
   const caseComplete = [draft.title, draft.problem, draft.analysis, draft.solution].every((value) =>
     value.trim(),
   );
@@ -691,7 +741,9 @@ export default function ScrWorkspace({
           <p>Revision-controlled change case, requirement proposals, and review authority.</p>
         </div>
         <div className="headerState">
-          <span className={`stateBadge ${scr.state.toLowerCase()}`} data-state={scr.state}>{changeRequestStateLabel(scr.state, targetRelease)}</span>
+          {/* Both facts in the header badge, in the order somebody reads them: where the work sits, then how far
+              it got. "Deferred · Approved" is a sentence; "Deferred" alone loses that it was signed off. */}
+          <span className={`stateBadge ${scr.state.toLowerCase()}`} data-state={scr.state}>{changeRequestAllocation(scrFacts)} · {changeRequestState(scrFacts)}</span>
           <small>Record version {scr.version}</small>
           {/* In the header, in flow. These download links used to be a `position: fixed` overlay pinned to
               the viewport's top right, which is the same place this state badge and record version sit — so
@@ -920,6 +972,23 @@ export default function ScrWorkspace({
                     {busy ? "Creating revision…" : "Revise"}
                   </button>
                 )}
+                {/* Alongside the other actions, so putting work down is as reachable as picking it up. Available
+                    from Draft, In Review and Approved alike: what gets shelved is the work, at whatever stage it
+                    reached, and the state it reached is remembered so reinstating puts it back there. */}
+                {deferrable && (
+                  <button className="deferAction" type="button" disabled={busy} onClick={defer}
+                    title="Puts this change request away for another day. Its state is remembered.">
+                    {busy ? "Deferring…" : "Defer"}
+                  </button>
+                )}
+                {scr.state === "Deferred" && isAuthor && (
+                  <button className="reviseAction" type="button" disabled={busy} onClick={reinstate}
+                    title={scr.deferredFromState === "InReview"
+                      ? "Comes back as a Draft: the review was cancelled when it was deferred."
+                      : `Comes back as ${stateLabel(scr.deferredFromState ?? "Draft")}.`}>
+                    {busy ? "Reinstating…" : "Reinstate"}
+                  </button>
+                )}
               </div>
               {lockStatus?.locked && !lockStatus.mine && (
                 <div className="readOnlyLock"><b>Read-only while checked out</b><span><PersonName userName={lockStatus.holder} /> · active {lockStatus.lastActivityAt && new Date(lockStatus.lastActivityAt).toLocaleString()} · expires {lockStatus.expiresAt && new Date(lockStatus.expiresAt).toLocaleTimeString()}</span></div>
@@ -979,8 +1048,12 @@ export default function ScrWorkspace({
           <aside className="reviewRail">
             <section className="workspaceCard controlStatusCard">
               <div className="workspaceTitle"><div><h2>Control status</h2><p>{scr.displayNumber}</p></div></div>
+              {/* Two rows, because they are two questions. Allocation says which build this is going into, or
+                  that it has been put away; State says how far it has got. One stored value used to answer both
+                  and served neither — a reader asking either got a word that half answered the other. */}
               <dl>
-                <div><dt>State</dt><dd data-state={scr.state}>{changeRequestStateLabel(scr.state, targetRelease)}</dd></div>
+                <div><dt>Allocation</dt><dd data-allocation={scr.state === "Deferred" ? "Deferred" : "Build"}>{changeRequestAllocation(scrFacts)}</dd></div>
+                <div><dt>State</dt><dd data-state={scr.state}>{changeRequestState(scrFacts)}</dd></div>
                 <div><dt>Author</dt><dd><PersonName userName={scr.authorId} withRole /></dd></div>
                 <div><dt>Revision</dt><dd>{scr.revision}</dd></div>
                 <div><dt>Updated</dt><dd>{new Date(scr.updatedAt).toLocaleDateString()}</dd></div>

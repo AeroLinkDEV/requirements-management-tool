@@ -26,8 +26,12 @@ public static class BaselineEndpoints
     public static void MapBaselineEndpoints(this WebApplication app)
     {
         // Historical discovery endpoints deliberately include every revision and lifecycle state.
+        // `baseNumber` asks for one change request's whole revision history; without it the listing collapses to
+        // each change request's newest revision. A programme's history is a list of change requests and not of
+        // revisions — .00 superseded by .01 is one piece of work read twice, and showing both puts the stale copy
+        // in the reader's way. Nothing is hidden: every collapsed row carries its revision count and expands.
         app.MapGet("/api/history/scrs", async (Guid projectId, string? search, Guid? releaseId, Guid? baselineId, Guid? buildId, ChangeRequestType? type, string? state,
-            int page, int pageSize, AeroLinkDbContext db, CancellationToken ct) =>
+            string? baseNumber, int page, int pageSize, AeroLinkDbContext db, CancellationToken ct) =>
         {
             page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
             var source = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId);
@@ -46,11 +50,19 @@ public static class BaselineEndpoints
             var selectedBaselineId = baselineId;
             if (buildId is not null) selectedBaselineId = await db.SoftwareBuilds.Where(x => x.Id == buildId && x.ProjectId == projectId).Select(x => (Guid?)x.BaselineId).SingleOrDefaultAsync(ct);
             if (selectedBaselineId is not null) source = source.Where(x => db.BaselineSelections.Any(s => s.BaselineId == selectedBaselineId && s.ScrId == x.Id));
+            if (!string.IsNullOrWhiteSpace(baseNumber))
+                source = source.Where(x => x.BaseNumber == baseNumber);
+            else
+                source = source.Where(x => x.Revision == db.SystemChangeRequests
+                    .Where(other => other.ProjectId == projectId && other.BaseNumber == x.BaseNumber)
+                    .Max(other => other.Revision));
             var total = await source.CountAsync(ct);
             var ordered = db.Database.IsSqlite() ? source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision) : source.OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.BaseNumber).ThenByDescending(x => x.Revision);
             var items = await ordered
                 .Skip((page - 1) * pageSize).Take(pageSize).Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision,
-                    x.BaseNumber, x.Revision, x.Title, state = x.State.ToString(), x.AuthorId, x.TargetReleaseId, requirementCount = x.RequirementChanges.Count, x.CreatedAt, x.UpdatedAt }).ToListAsync(ct);
+                    x.BaseNumber, x.Revision, x.Title, state = x.State.ToString(), deferredFromState = x.DeferredFromState == null ? null : x.DeferredFromState.ToString(),
+                    x.AuthorId, x.TargetReleaseId, requirementCount = x.RequirementChanges.Count, x.CreatedAt, x.UpdatedAt,
+                    revisionCount = db.SystemChangeRequests.Count(other => other.ProjectId == projectId && other.BaseNumber == x.BaseNumber) }).ToListAsync(ct);
             return Results.Ok(new { page, pageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)pageSize), items });
         });
 
