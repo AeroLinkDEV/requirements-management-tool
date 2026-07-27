@@ -75,14 +75,14 @@ public sealed class SystemChangeRequest
     public RequirementChange AddRequirementChange(string actorId, string baseNumber, int revision,
         RequirementLevel level, RequirementChangeKind kind, string statement, string rationale,
         string verificationMethod, DateTimeOffset now, string richText = "", string attributesJson = "{}",
-        string impactDispositionJson = "{}")
+        string impactDispositionJson = "{}", Guid? targetSectionId = null)
     {
         EnsureAuthor(actorId);
         EnsureDraft();
         if (string.IsNullOrWhiteSpace(statement) && kind != RequirementChangeKind.Retire)
             throw new DomainException("A requirement statement is required.");
         var change = new RequirementChange(Id, baseNumber, revision, level, kind, statement, rationale, verificationMethod,
-            richText, attributesJson, impactDispositionJson);
+            richText, attributesJson, impactDispositionJson, targetSectionId);
         _requirementChanges.Add(change);
         UpdatedAt = now;
         Audit("RequirementChangeAdded", actorId, $"Added {change.Kind} {change.DisplayNumber}.", now);
@@ -104,7 +104,8 @@ public sealed class SystemChangeRequest
             if (string.IsNullOrWhiteSpace(item.Statement) && item.Kind != RequirementChangeKind.Retire)
                 throw new DomainException("A requirement statement is required unless the requirement is being retired.");
             _requirementChanges.Add(new RequirementChange(Id, item.BaseNumber, item.Revision, item.Level, item.Kind,
-                item.Statement, item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson));
+                item.Statement, item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
+                item.TargetSectionId));
         }
         UpdatedAt = now;
         Audit("ScrDraftUpdated", actorId, $"Updated {DisplayNumber} Draft with {changes.Count} proposed requirement changes.", now);
@@ -211,7 +212,8 @@ public sealed class SystemChangeRequest
             Title, Problem, Analysis, Solution, AuthorId, now, Type, ProblemRich, AnalysisRich, SolutionRich);
         foreach (var item in _requirementChanges)
             next.AddRequirementChange(actorId, item.BaseNumber, item.Revision, item.Level, item.Kind,
-                item.Statement, item.Rationale, item.VerificationMethod, now, item.RichText, item.AttributesJson, item.ImpactDispositionJson);
+                item.Statement, item.Rationale, item.VerificationMethod, now, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
+                item.TargetSectionId);
         return next;
     }
 

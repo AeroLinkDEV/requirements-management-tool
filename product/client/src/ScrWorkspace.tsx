@@ -175,6 +175,8 @@ const createRequirement = (
   attributesJson: JSON.stringify({ criticality: "Normal", owner: "" }),
   impactDispositionJson: pendingImpact,
   isDerived: false,
+  // Empty means unchanged, as in the new change request editor.
+  targetSectionId: "",
 });
 const normalizeRequirement = (
   item: Partial<DraftRequirement>,

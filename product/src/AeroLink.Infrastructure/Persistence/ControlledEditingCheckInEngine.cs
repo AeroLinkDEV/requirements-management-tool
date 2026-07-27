@@ -395,13 +395,17 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
             !Enum.TryParse<RequirementChangeKind>(draft.Kind, true, out var kind) || kind != current.Kind)
             throw new DomainException($"The controlled identity of {current.DisplayNumber} cannot change.");
 
+        // Every proposal is rewritten from these drafts, so anything not carried here is lost. The chosen section
+        // of the untouched proposals comes from the stored change, and of the edited one from the draft — falling
+        // back to what was stored, because a draft written before the field existed does not mean "no section".
         var changes = parent.RequirementChanges.Select(item => item.Id == current.Id
             ? new RequirementChangeDraft(current.BaseNumber, current.Revision, current.Level, current.Kind,
                 draft.Statement ?? "", draft.Rationale ?? "", draft.VerificationMethod ?? "",
-                draft.RichText ?? "", draft.AttributesJson ?? "{}", draft.ImpactDispositionJson ?? "{}")
+                draft.RichText ?? "", draft.AttributesJson ?? "{}", draft.ImpactDispositionJson ?? "{}",
+                draft.TargetSectionId ?? current.TargetSectionId)
             : new RequirementChangeDraft(item.BaseNumber, item.Revision, item.Level, item.Kind, item.Statement,
                 item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson,
-                item.ImpactDispositionJson)).ToList();
+                item.ImpactDispositionJson, item.TargetSectionId)).ToList();
         parent.UpdateDraft(actor, parent.Title, parent.Problem, parent.Analysis, parent.Solution, changes, now,
             parent.ProblemRich, parent.AnalysisRich, parent.SolutionRich);
         return Task.CompletedTask;
@@ -412,9 +416,14 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
         (x.BaseNumber.Equals(state.BaseNumber, StringComparison.OrdinalIgnoreCase) && x.Revision == state.Revision));
 
     private sealed record State(SystemChangeRequest Parent, Guid ProposalId, string BaseNumber, int Revision);
+    /// <param name="TargetSectionId">
+    /// The section chosen for this requirement. Null in a draft written before the field existed, and in that case
+    /// the stored value is kept rather than cleared — check-in replaces the whole proposal set, so a field the
+    /// draft does not mention would otherwise be erased by saving an unrelated edit.
+    /// </param>
     private sealed record ProposalDraft(string? BaseNumber, int Revision, string? Level, string? Kind,
         string? Statement, string? Rationale, string? VerificationMethod, string? RichText,
-        string? AttributesJson, string? ImpactDispositionJson);
+        string? AttributesJson, string? ImpactDispositionJson, Guid? TargetSectionId = null);
 }
 
 public sealed class SpecificationStructureControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter

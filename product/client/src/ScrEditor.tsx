@@ -95,6 +95,9 @@ const createProposal = (
   attributesJson: JSON.stringify({ criticality: "Normal", owner: "" }),
   impactDispositionJson: pendingImpact,
   isDerived: false,
+  // Empty means unchanged: leave a modified requirement where it is, and let the existing placement rule decide
+  // where a newly introduced one goes.
+  targetSectionId: "",
 });
 const normalizeProposal = (
   value: Partial<ControlledRequirementDraft>,
@@ -345,7 +348,9 @@ export default function ScrEditor({
           analysisRich,
           solutionRich,
           type: scope,
-          requirementChanges: started,
+          // An unset section is sent as null, not as "". A Guid? will not bind an empty string, and the failure
+          // would be a 400 on the whole change request because one optional field was left alone.
+          requirementChanges: started.map((item) => ({ ...item, targetSectionId: item.targetSectionId || null })),
         }),
       });
       if (!response.ok) {

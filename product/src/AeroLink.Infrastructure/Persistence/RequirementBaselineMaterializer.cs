@@ -73,6 +73,8 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         // verification work can bind to them, coverage can carry forward, and a stranded procedure is visible.
         await verificationImpact.ApplyMaterializationAsync(baseline.ProjectId, baseline.ReleaseId, materialized, now, ct);
 
+        await PlaceInChosenSectionsAsync(baseline.ProjectId, scrs, artifactByBase, actorId, now, ct);
+
         var artifactById = artifactByBase.Values.ToDictionary(x => x.Id);
         foreach (var item in current.OrderBy(x => artifactById[x.Key].BaseNumber))
             db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, item.Key, item.Value.Id));
@@ -82,6 +84,75 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         baseline.MarkRequirementsMaterialized(actorId, hash, current.Count, now);
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
         return new MaterializationResult(hash, current.Count, created);
+    }
+
+    /// <summary>
+    /// Puts each requirement where its author said it belongs.
+    ///
+    /// Section membership is a `SpecificationNode` row, and until now nothing created one on the authoring path:
+    /// an introduced requirement was placed by a backfill that assigns a section from a hash of its number, and a
+    /// modification could not move one at all. So a change request could say what a requirement means and not
+    /// where it goes, which is half of what an author is deciding.
+    ///
+    /// Applied here rather than at approval because this is where the requirement first exists to be placed. A
+    /// change with no chosen section is left alone: for a modification that means staying put, and for an
+    /// introduction it means the existing placement rule still decides — so this is additive and no proposal has
+    /// to name a section to be valid.
+    ///
+    /// Ignores a section belonging to another project's specification. A stale identifier from a copied draft
+    /// would otherwise place a requirement into a document it has nothing to do with.
+    /// </summary>
+    private async Task PlaceInChosenSectionsAsync(Guid projectId, IReadOnlyList<SystemChangeRequest> scrs,
+        IReadOnlyDictionary<string, RequirementArtifact> artifactByBase, string actorId, DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var chosen = scrs.SelectMany(scr => scr.RequirementChanges)
+            .Where(change => change.TargetSectionId is not null && change.Kind != RequirementChangeKind.Retire)
+            .ToList();
+        if (chosen.Count == 0) return;
+
+        var sectionIds = chosen.Select(x => x.TargetSectionId!.Value).Distinct().ToList();
+        var sections = await (from node in db.SpecificationNodes.AsNoTracking()
+                              join spec in db.RequirementSpecifications.AsNoTracking() on node.SpecificationId equals spec.Id
+                              where sectionIds.Contains(node.Id) && spec.ProjectId == projectId
+                                 && node.Type == SpecificationNodeType.Section
+                              select new { node.Id, node.SpecificationId }).ToListAsync(ct);
+
+        var artifactIds = chosen.Select(x => artifactByBase.TryGetValue(x.BaseNumber, out var a) ? a.Id : Guid.Empty)
+            .Where(x => x != Guid.Empty).ToList();
+        // Tracked, not AsNoTracking: an existing placement is moved rather than duplicated, and a requirement in
+        // two sections at once would appear twice in the generated document.
+        var existing = await db.SpecificationNodes
+            .Where(x => x.RequirementArtifactId != null && artifactIds.Contains(x.RequirementArtifactId.Value))
+            .ToListAsync(ct);
+
+        foreach (var change in chosen)
+        {
+            var section = sections.SingleOrDefault(x => x.Id == change.TargetSectionId!.Value);
+            if (section is null) continue;
+            if (!artifactByBase.TryGetValue(change.BaseNumber, out var artifact)) continue;
+            var placement = existing.SingleOrDefault(x => x.RequirementArtifactId == artifact.Id);
+            if (placement is null)
+                db.SpecificationNodes.Add(new SpecificationNode(section.SpecificationId, section.Id,
+                    StablePosition(artifact.BaseNumber), SpecificationNodeType.Requirement, "", artifact.Id, actorId, now));
+            else if (placement.SpecificationId == section.SpecificationId)
+                // Only the parent section moves. A requirement's level fixes which specification it belongs to,
+                // and a modification cannot change its level, so a chosen section in a different document would
+                // be a stale identifier rather than an intention — left alone rather than acted on.
+                placement.UpdateDraft(section.Id, placement.Position, placement.Heading, actorId, now);
+        }
+    }
+
+    /// <summary>
+    /// Where in the section a requirement sits, derived from its number so it is the same on every machine.
+    ///
+    /// The same rule the workspace backfill uses, for the same reason: an ordering that depends on when a row
+    /// happened to be written would put the same requirements in a different order in two copies of one document.
+    /// </summary>
+    private static int StablePosition(string baseNumber)
+    {
+        var digits = new string(baseNumber.Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out var value) ? value : Math.Abs(baseNumber.GetHashCode() % 100000);
     }
 
     private static RequirementRevision CreateRevision(RequirementArtifact artifact, RequirementChange change, Guid scrId,

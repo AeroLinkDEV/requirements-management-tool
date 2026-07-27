@@ -19,6 +19,18 @@ export type ControlledRequirementDraft = {
   attributesJson: string;
   impactDispositionJson: string;
   isDerived?: boolean;
+  /**
+   * Which section of the specification this requirement goes in. Empty means unchanged — leave a modified
+   * requirement where it is, and let the existing placement rule decide for a new one.
+   */
+  targetSectionId?: string;
+};
+
+type SpecificationSection = {
+  id: string;
+  heading: string;
+  position: number;
+  specification: string;
 };
 
 type ExistingRequirement = {
@@ -27,6 +39,8 @@ type ExistingRequirement = {
   displayNumber: string;
   level: RequirementLevel;
   nextRevision: number;
+  /** The section it is in today, so a modification can offer to keep it rather than silently move it. */
+  currentSectionId?: string | null;
   statement: string;
   rationale: string;
   verificationMethod: string;
@@ -190,9 +204,23 @@ export default function ControlledRequirementEditor({
     onChange("rationale", selected.rationale);
     onChange("verificationMethod", selected.verificationMethod);
     onChange("richText", item.kind === "Retire" ? emptyRichContent : fromPlainText(selected.statement));
+    // Its existing section comes with it, so choosing a requirement to modify does not quietly relocate it.
+    onChange("targetSectionId", selected.currentSectionId ?? "");
     setQuery(selected.displayNumber);
     setResults([]);
   };
+
+  // Which sections this requirement could go in. Keyed by level, because the level fixes which specification the
+  // requirement belongs to — a low-level requirement cannot be filed in the system document.
+  const [sections, setSections] = useState<SpecificationSection[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${api}/api/authoring/sections?projectId=${projectId}&level=${item.level}`)
+      .then((response) => (response.ok ? (response.json() as Promise<SpecificationSection[]>) : []))
+      .then((rows) => { if (!cancelled) setSections(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (!cancelled) setSections([]); });
+    return () => { cancelled = true; };
+  }, [api, projectId, item.level]);
 
   const pendingImpacts = impactAreas.filter(
     ([key]) => !impact[key] || impact[key] === "Pending",
@@ -278,6 +306,33 @@ export default function ControlledRequirementEditor({
             aria-readonly="true"
           />
         </label>
+        {/* Where this requirement goes in the document, chosen by the author.
+            A requirement's place in a specification is part of what a change request proposes, and nothing used
+            to carry it: an introduced requirement landed wherever a backfill put it, and a modification could
+            not move one at all. Hidden when the change is a retirement, which removes a requirement from future
+            baselines and so has no section to be in. */}
+        {item.kind !== "Retire" && sections.length > 0 && (
+          <label>
+            Section
+            <select
+              aria-label={`Section for proposal ${index + 1}`}
+              value={item.targetSectionId ?? ""}
+              onChange={(event) => onChange("targetSectionId", event.target.value)}
+            >
+              <option value="">
+                {item.kind === "Modify" ? "Leave where it is" : "Decide when the baseline is assembled"}
+              </option>
+              {sections.map((section) => (
+                <option value={section.id} key={section.id}>{section.heading}</option>
+              ))}
+            </select>
+            <small>
+              {item.kind === "Modify"
+                ? "Changing this moves the requirement when the baseline is materialized."
+                : "Applied when the baseline is materialized and the requirement first exists."}
+            </small>
+          </label>
+        )}
         <label>
           Level
           <input value={levelLabel(item.level)} readOnly aria-readonly="true" />

@@ -615,6 +615,26 @@ Future entries use:
   Collapsing revisions without a way to expand them would be hiding the record, so nothing is hidden: the row
   states what is behind it. Superseded is shown ahead of the stored state because reading "Approved" against a
   revision a later one has replaced invites somebody to work from stale content.
+### DEC-057 - Where a Requirement Goes Is Part of What Is Proposed
+
+- **Date:** 2026-07-27
+- **Status:** Accepted
+- **Decision:** A requirement change carries an optional `TargetSectionId`. Materialization places an introduced
+  requirement in that section, and moves a modified one if it has changed; null changes nothing, so the existing
+  placement rule still decides for anything that does not name a section. The picker offers only the sections
+  belonging to the specification for that requirement's level, and a requirement chosen for modification arrives
+  with the section it is already in.
+- **Rationale:** Section membership existed only as a `SpecificationNode` row created after the fact, by a
+  backfill that derives a section from a hash of the requirement's number. So a change request could say what a
+  requirement means and not where it goes — half of what an author is deciding — and the requirements explorer
+  had section filtering that no authoring path could ever aim. Applied at materialization because that is the
+  first moment the requirement exists to be placed.
+- **Consequences:** Null-means-unchanged keeps this additive: no proposal has to name a section to be valid, which
+  matters because a proposal is worth saving before every field is settled. A section belonging to another
+  project's specification is ignored rather than acted on, since a stale identifier from a copied draft would
+  otherwise file a requirement into an unrelated document and look deliberate afterwards. Check-in rewrites every
+  proposal from its draft, so the section had to be carried through `ProposalDraft` explicitly — without that,
+  saving an unrelated edit would have silently erased the chosen section of every proposal in the change request.
 
 ## Working Assumptions
 
