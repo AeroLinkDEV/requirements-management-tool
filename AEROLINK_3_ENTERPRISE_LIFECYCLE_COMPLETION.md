@@ -210,8 +210,11 @@ faked afterwards, so it should start before that commitment is due, not after.
 3. break-glass local administrator, before any federated deployment goes live;
 4. privileged step-up authentication;
 5. SCIM provisioning;
-6. account recovery and password expiration, which additionally require an email transport the product
-   does not yet have;
+6. account recovery and password expiration. These required an email transport the product did not have;
+   one now exists — an outbox over the in-app notification record, delivering through the organization's own
+   SMTP relay — so the dependency is met in code but has never been exercised against a real relay. Prove
+   that before relying on it for a recovery path, because a recovery email that silently fails is worse than
+   no recovery path at all;
 7. administrator session inventory and single-session revocation; and
 8. provider health and the identity administration UI.
 
