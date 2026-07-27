@@ -548,6 +548,28 @@ Future entries use:
   broken. Sharing over plain HTTP remains a demonstration convenience and is not the TLS story owed by
   [DEC-052](#dec-052---the-api-serves-the-built-client) and `SECURITY_AND_IDENTITY_MODEL.md`.
 
+### DEC-054 - Approved and Allocated Are One Fact, and a Released Build Freezes It
+
+- **Date:** 2026-07-27
+- **Status:** Accepted
+- **Decision:** A change request can be revised from `Approved` **or** `SelectedForBaseline`, and from neither
+  once its target build has been released. `StartNextRevision` takes the target release's released state as an
+  argument so the rule stays inside the aggregate; the endpoint reads that fact and passes it in.
+- **Rationale:** Gating the action on exactly `Approved` reads correctly in the enum and was unreachable in the
+  product. Allocating an approved change request to a candidate baseline moves it to `SelectedForBaseline`, and
+  there it stays — across the demonstration programme's 113 change requests, **not one** was in `Approved` and
+  107 were `SelectedForBaseline`. The Revise action was therefore correct code that could never appear on any
+  record anybody opened, reported twice as missing. To the person asking, both states say the same thing: the
+  engineering is signed for. What must not happen is revising a change request already incorporated in a
+  released build, because a `.02` of it would claim the release said something it never said.
+- **Consequences:** The state a gate admits must be a state the product rests in, which is a question about
+  transitions and not about the enum — so the tests are written against `MarkSelectedForBaseline` rather than
+  against `ScrState`. The refusal is enforced in the domain and asserted at the endpoint, not only in the
+  browser, because a UI-only gate would have let the released case through to an unexplained 400. The wording
+  of a change request's state now comes from `changeRequestStateLabel` on the record's own page as well as in
+  the lists, closing the half of [DEC-052](#dec-052---the-api-serves-the-built-client)-era work that reached
+  the list and missed the detail rail.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

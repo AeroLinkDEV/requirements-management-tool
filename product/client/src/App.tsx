@@ -415,7 +415,16 @@ function App() {
   const changeProject=(id:string)=>{const next=active?.projects.find(x=>x.project.id===id),nextRelease=[...(next?.releases??[])].reverse().find(x=>!x.isReleased)??next?.releases.at(-1);if(!next||!nextRelease)return;setSelectedProjectId(id);setSelectedReleaseId(nextRelease.id);history.pushState({},"",routePath({programId:active!.program.id,projectId:id,releaseId:nextRelease.id},view,discipline,selectedArtifactId,selectedArtifactKind,view==="history"?historyStateIntent:undefined,view==="history"?historyTypeIntent:undefined))};
   const changeRelease=(id:string)=>{setSelectedReleaseId(id);if(active&&project)history.pushState({},"",routePath({programId:active.program.id,projectId:project.project.id,releaseId:id},view,discipline,selectedArtifactId,selectedArtifactKind,view==="history"?historyStateIntent:undefined,view==="history"?historyTypeIntent:undefined))};
   if(context&&location.pathname==="/")history.replaceState({},"",routePath(context,"dashboard"));
-  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} context={context} density={density} onProgram={changeProgram} onProject={changeProject} onRelease={changeRelease} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onSignOut={async()=>{await fetch(`${API}/api/auth/logout`,{method:"POST"});setUser(null)}}/>;
+  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} context={context} density={density} onProgram={changeProgram} onProject={changeProject} onRelease={changeRelease} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onSignOut={async()=>{
+    // Signing out must not be able to fail. Logout is a mutation, so the patched fetch first fetches a CSRF
+    // token from /api/auth/csrf — which is itself behind the session gate and answers 401 once a session has
+    // gone. The token fetch then throws, the await rejects, and this handler used to end right there with
+    // `setUser(null)` never reached: the shell stayed exactly as it was and Sign out did nothing. An expired
+    // session is precisely when somebody reaches for that button, so the local session is cleared whatever
+    // the server says. The server side is already correct — it revokes the session and deletes the cookie.
+    try { await fetch(`${API}/api/auth/logout`,{method:"POST"}) } catch { /* the session is gone either way */ }
+    setUser(null);
+  }}/>;
   const labels:Record<View,string>={dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const scopedLabel=view==="history"?`${historyTypeIntent==="All"?"All":discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
   const scopeSwitch=view==="history"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={historyTypeIntent==="All"} onClick={()=>navigate("history",discipline,undefined,undefined,false,historyStateIntent,"All")}>All</button><button aria-pressed={historyTypeIntent!=="All"&&discipline!=="software"} onClick={()=>navigate("history","system",undefined,undefined,false,historyStateIntent,"System")}>System</button><button aria-pressed={historyTypeIntent!=="All"&&discipline==="software"} onClick={()=>navigate("history","software",undefined,undefined,false,historyStateIntent,"Software")}>Software</button></div>:view==="requirements"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={discipline!=="software"} onClick={()=>navigate(view,"system")}>System</button><button aria-pressed={discipline==="software"} onClick={()=>navigate(view,"software")}>Software</button></div>:view==="verification"?<div className="contextScopeSwitch" role="group" aria-label="Verification scope"><button aria-pressed={discipline!=="softwareTest"} onClick={()=>navigate("verification","systemTest")}>System</button><button aria-pressed={discipline==="softwareTest"} onClick={()=>navigate("verification","softwareTest")}>Software</button></div>:null;
@@ -439,33 +448,26 @@ function App() {
         user={user}
         sourceRequirementId={selectedArtifactId || undefined}
         onCancel={() => navigate("dashboard")}
-        onSaved={async (scrId) => {
+        onSaved={async (scrId, displayNumber) => {
           await loadData();
+          // Said out loud, because landing on a new page is not the same as being told the save worked —
+          // it was asked for twice. The toast outlives this navigation because it is held up here.
+          setToast(`${displayNumber} saved as a Draft.`);
           navigate("scr",view === "createSoftwareChange" ? "software" : "system",scrId);
         }}
       />
     );
   if (view === "scr" && selectedScrId)
     return inShell(
-      <>
-        <div className="scrPublicationTools">
-          <span>Professional controlled publication</span>
-          <a href={`${API}/api/scrs/${selectedScrId}/download?format=docx`}>
-            Download DOCX
-          </a>
-          <a href={`${API}/api/scrs/${selectedScrId}/download?format=pdf`}>
-            Download PDF
-          </a>
-        </div>
-        <ScrWorkspace
-          api={API}
-          scrId={selectedScrId}
-          user={user}
-          onBack={() => navigate("dashboard")}
-          onChanged={loadData}
-          onOpenScr={(id) => navigate("scr", discipline, id)}
-        />
-      </>
+      <ScrWorkspace
+        api={API}
+        scrId={selectedScrId}
+        user={user}
+        onBack={() => navigate("dashboard")}
+        onChanged={loadData}
+        onOpenScr={(id) => navigate("scr", discipline, id)}
+        releases={project?.releases ?? []}
+      />
     );
   if (view === "baselines" && project && release)
     return inShell(

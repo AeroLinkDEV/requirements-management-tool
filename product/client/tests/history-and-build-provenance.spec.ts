@@ -27,8 +27,10 @@ test('searches full history and proves exact software build contents', async ({ 
   await expect(page.getByRole('heading', { name: 'Software Change Requests' })).toBeVisible()
   await page.getByLabel('Search history').fill('round robin')
   await expect(page.getByText(scr.displayNumber)).toBeVisible()
-  await page.getByRole('button', { name: /Requirement History/ }).click()
-  await expect(page.getByText(scr.requirementChanges[0].displayNumber)).toBeVisible()
+  // The Requirement History tab used to be clicked here. It has been removed: it listed requirements as of the
+  // selected build, and every real programme opens on the in-work build, which has no materialized baseline
+  // yet — so it answered nothing for anybody who was not this test, which materializes one deliberately. That
+  // the materialized revision is reachable is still proven below, from the build's own contents.
   await page.getByLabel('Search history').fill('')
 
   await page.getByRole('button', { name: /Software Builds/ }).click()

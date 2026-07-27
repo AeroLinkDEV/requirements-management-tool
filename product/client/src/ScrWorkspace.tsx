@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { stateLabel } from './presentation'
+import { changeRequestStateLabel, stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
@@ -62,6 +62,7 @@ type ScrDetail = {
   revision: number;
   displayNumber: string;
   projectId: string;
+  targetReleaseId: string;
   type: "System" | "Software";
   title: string;
   problem: string;
@@ -118,6 +119,11 @@ type Props = {
   onBack: () => void;
   onChanged: () => Promise<void>;
   onOpenScr: (id: string) => void;
+  /**
+   * The project's builds, so this record's own target can be resolved once it loads. Without them the rail
+   * can only report the stored state, and "Selected for baseline" is the one wording nobody wants to read.
+   */
+  releases: { id: string; version: string; isReleased: boolean }[];
 };
 
 const pendingImpact = JSON.stringify({
@@ -224,6 +230,7 @@ export default function ScrWorkspace({
   onBack,
   onChanged,
   onOpenScr,
+  releases,
 }: Props) {
   const [scr, setScr] = useState<ScrDetail>();
   const [context, setContext] = useState<AuthoringContext>();
@@ -631,6 +638,11 @@ export default function ScrWorkspace({
     latest?.steps.find((step) => step.state === "Active" && step.approverId === user.userName) ??
     latest?.steps.find((step) => step.state === "Active");
   const isAuthor = scr.authorId === user.userName || user.isAdministrator;
+  const targetRelease = releases.find((item) => item.id === scr.targetReleaseId);
+  // Signed for, whichever of the two stored states it sits in. See StartNextRevision in the domain for why
+  // both count, and why a released target build takes the action away again.
+  const isSignedFor = scr.state === "Approved" || scr.state === "SelectedForBaseline";
+  const revisable = isSignedFor && targetRelease?.isReleased === false;
   const caseComplete = [draft.title, draft.problem, draft.analysis, draft.solution].every((value) =>
     value.trim(),
   );
@@ -660,8 +672,16 @@ export default function ScrWorkspace({
           <p>Revision-controlled change case, requirement proposals, and review authority.</p>
         </div>
         <div className="headerState">
-          <span className={`stateBadge ${scr.state.toLowerCase()}`} data-state={scr.state}>{stateLabel(scr.state)}</span>
+          <span className={`stateBadge ${scr.state.toLowerCase()}`} data-state={scr.state}>{changeRequestStateLabel(scr.state, targetRelease)}</span>
           <small>Record version {scr.version}</small>
+          {/* In the header, in flow. These download links used to be a `position: fixed` overlay pinned to
+              the viewport's top right, which is the same place this state badge and record version sit — so
+              on every change request the buttons covered them. Nothing about them needs to float. */}
+          <div className="scrPublicationTools">
+            <span>Professional controlled publication</span>
+            <a href={`${api}/api/scrs/${scr.id}/download?format=docx`}>Download DOCX</a>
+            <a href={`${api}/api/scrs/${scr.id}/download?format=pdf`}>Download PDF</a>
+          </div>
         </div>
       </header>
 
@@ -874,7 +894,7 @@ export default function ScrWorkspace({
                     {busy ? "Checking lock…" : lockStatus?.locked && !lockStatus.mine ? `Read only · ${personLabel(lockStatus.holder)}` : "Check out & edit"}
                   </button>
                 )}
-                {scr.state === "Approved" && isAuthor && (
+                {revisable && isAuthor && (
                   <button className="reviseAction" type="button" disabled={busy} onClick={revise}
                     title={`Creates ${scr.baseNumber}.${String(scr.revision + 1).padStart(2, "0")} as a Draft. This approved revision stays unchanged.`}>
                     {busy ? "Creating revision…" : "Revise"}
@@ -940,7 +960,7 @@ export default function ScrWorkspace({
             <section className="workspaceCard controlStatusCard">
               <div className="workspaceTitle"><div><h2>Control status</h2><p>{scr.displayNumber}</p></div></div>
               <dl>
-                <div><dt>State</dt><dd data-state={scr.state}>{stateLabel(scr.state)}</dd></div>
+                <div><dt>State</dt><dd data-state={scr.state}>{changeRequestStateLabel(scr.state, targetRelease)}</dd></div>
                 <div><dt>Author</dt><dd><PersonName userName={scr.authorId} withRole /></dd></div>
                 <div><dt>Revision</dt><dd>{scr.revision}</dd></div>
                 <div><dt>Updated</dt><dd>{new Date(scr.updatedAt).toLocaleDateString()}</dd></div>
@@ -953,11 +973,17 @@ export default function ScrWorkspace({
               )}
               {/* No second Revise button here. The action lives in the Change case header with Check out &
                   edit, so there is one place to act; this only explains what it will do. */}
-              {scr.state === "Approved" && (
+              {revisable && (
                 <p className="snapshotNote">
                   This approved revision is immutable. <b>Revise</b> creates{" "}
                   {scr.baseNumber}.{String(scr.revision + 1).padStart(2, "0")} as a Draft with the same
                   content, and leaves this revision and its signatures untouched.
+                </p>
+              )}
+              {isSignedFor && targetRelease?.isReleased && (
+                <p className="snapshotNote">
+                  {targetRelease.version} has been released, so this revision is frozen history and cannot be
+                  revised. Raise a new change request against the in-work build instead.
                 </p>
               )}
             </section>

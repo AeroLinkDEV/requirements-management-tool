@@ -178,10 +178,27 @@ public sealed class SystemChangeRequest
         return replacement;
     }
 
-    public SystemChangeRequest StartNextRevision(string actorId, DateTimeOffset now)
+    /// <summary>
+    /// Supersedes this revision with the next one, carrying the same content forward as a Draft.
+    ///
+    /// Approved and SelectedForBaseline are the same fact to the person asking: the engineering is signed for.
+    /// They differ only in whether a candidate baseline has picked the row up yet, and in a working programme
+    /// every approved change request gets picked up — which is why requiring exactly `Approved` made this
+    /// unreachable across a 113-record programme where not one change request sat in that state.
+    ///
+    /// What must not happen is revising a change request already incorporated in a *released* build. That
+    /// content is frozen history, and a `.01` of it would claim the release said something it never said. The
+    /// answer there is a new change request against the in-work build, so the caller passes the release's
+    /// state in rather than the rule living outside the aggregate where a second caller could forget it.
+    /// </summary>
+    public SystemChangeRequest StartNextRevision(string actorId, DateTimeOffset now, bool targetReleaseIsReleased)
     {
         EnsureAuthor(actorId);
-        if (State != ScrState.Approved) throw new DomainException("Only an approved SCR can advance to its next revision.");
+        if (State is not (ScrState.Approved or ScrState.SelectedForBaseline))
+            throw new DomainException("Only an approved SCR can advance to its next revision.");
+        if (targetReleaseIsReleased)
+            throw new DomainException(
+                "This SCR is incorporated in a released build and cannot be revised. Raise a new SCR against the in-work build.");
         var next = new SystemChangeRequest(BaseNumber, Revision + 1, ProjectId, TargetReleaseId,
             Title, Problem, Analysis, Solution, AuthorId, now, Type, ProblemRich, AnalysisRich, SolutionRich);
         foreach (var item in _requirementChanges)

@@ -31,7 +31,7 @@ type Props = {
   user: AuthUser;
   sourceRequirementId?: string;
   onCancel: () => void;
-  onSaved: (scrId: string) => void;
+  onSaved: (scrId: string, displayNumber: string) => void;
 };
 type SavedDraft = {
   title: string;
@@ -279,8 +279,24 @@ export default function ScrEditor({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!caseComplete || !proposalsComplete) {
-      setError("Complete the change case and every requirement proposal before saving this Draft.");
+    if (!title.trim()) {
+      setError("Give this change request a title before saving it as a Draft.");
+      return;
+    }
+    // An untouched proposal card is a blank form row, not a proposal, so it is not sent. A *partly* filled one
+    // is somebody's work: the domain will not accept a requirement change with no statement, so rather than
+    // drop what they typed, say which card needs a statement. Without this split, saving early failed with
+    // "A requirement statement is required" from the pre-seeded empty card and named no card at all.
+    const started = changes.filter((item) =>
+      [item.baseNumber, item.statement, item.rationale, item.verificationMethod].some((value) => value.trim()),
+    );
+    const missingStatement = started.filter(
+      (item) => item.kind !== "Retire" && !item.statement.trim(),
+    );
+    if (missingStatement.length) {
+      setError(
+        `Add a statement to ${missingStatement.map((item) => item.baseNumber || "the new requirement").join(", ")}, or clear the card, before saving this Draft.`,
+      );
       return;
     }
     setSaving(true);
@@ -300,17 +316,17 @@ export default function ScrEditor({
           analysisRich,
           solutionRich,
           type: scope,
-          requirementChanges: changes,
+          requirementChanges: started,
         }),
       });
       if (!response.ok) {
         const body = (await response.json()) as { error?: string };
         throw new Error(body.error || `Unable to save the ${abbreviation} Draft.`);
       }
-      const created = (await response.json()) as { id: string };
+      const created = (await response.json()) as { id: string; displayNumber: string };
       // The record exists now, so the browser copy has nothing left to protect.
       draft.clear();
-      onSaved(created.id);
+      onSaved(created.id, created.displayNumber);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : `Unable to save the ${abbreviation} Draft.`);
       setSaving(false);
@@ -358,7 +374,7 @@ export default function ScrEditor({
         scope={scope}
         onCreated={(id) => {
           draft.clear();
-          onSaved(id);
+          onSaved(id, "The change request");
         }}
       />
 
@@ -513,7 +529,12 @@ export default function ScrEditor({
           </p>
           <div>
             <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
-            <button disabled={saving || !context || !caseComplete || !proposalsComplete}>
+            {/* A title is all this needs, because a Draft is the thing you save when the work is *not*
+                finished — that is what makes it a draft. Requiring a complete change case and every proposal
+                closed meant the button stayed dead through the whole of authoring and only lit up at the point
+                you no longer needed it, so there was nowhere to put work down. Completeness is still required,
+                but by the review gate below, which is the decision it actually belongs to. */}
+            <button disabled={saving || !context || !title.trim()}>
               {saving ? "Saving Draft…" : `Save ${abbreviation} Draft`}
             </button>
           </div>

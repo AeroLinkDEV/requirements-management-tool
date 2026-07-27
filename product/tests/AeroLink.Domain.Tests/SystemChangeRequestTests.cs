@@ -145,13 +145,63 @@ public sealed class SystemChangeRequestTests
     public void Approved_scr_change_creates_next_revision()
     {
         var scr = FullyApprove();
-        var next = scr.StartNextRevision("author", Now.AddHours(1));
+        var next = scr.StartNextRevision("author", Now.AddHours(1), targetReleaseIsReleased: false);
 
         Assert.Equal(ScrState.Approved, scr.State);
         Assert.Equal(ScrState.Draft, next.State);
         Assert.Equal(2, next.Revision);
         Assert.Equal("SCR-00001049.02", next.DisplayNumber);
         Assert.Single(next.RequirementChanges);
+    }
+
+    /// <summary>
+    /// The state every approved change request in a working programme actually sits in.
+    ///
+    /// Requiring exactly `Approved` was defensible reading the enum and wrong in practice: allocating an
+    /// approved change request to a candidate baseline moves it to SelectedForBaseline, which is where it stays.
+    /// Across a 113-record programme not one change request was in `Approved`, so revising was unreachable
+    /// everywhere — a gate that admitted a state the product does not rest in.
+    /// </summary>
+    [Fact]
+    public void Scr_allocated_to_an_unreleased_build_can_still_be_revised()
+    {
+        var scr = FullyApprove();
+        scr.MarkSelectedForBaseline("cm", Now.AddMinutes(30));
+        Assert.Equal(ScrState.SelectedForBaseline, scr.State);
+
+        var next = scr.StartNextRevision("author", Now.AddHours(1), targetReleaseIsReleased: false);
+
+        Assert.Equal(ScrState.Draft, next.State);
+        Assert.Equal(2, next.Revision);
+        Assert.Equal(ScrState.SelectedForBaseline, scr.State);
+    }
+
+    /// <summary>
+    /// Once the build has shipped, the change request that went into it is frozen history. A `.02` of it would
+    /// claim the release said something it never said, so the answer is a new change request against the
+    /// in-work build. Both signed-for states are refused, not just one.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Scr_incorporated_in_a_released_build_cannot_be_revised(bool allocated)
+    {
+        var scr = FullyApprove();
+        if (allocated) scr.MarkSelectedForBaseline("cm", Now.AddMinutes(30));
+
+        var refused = Assert.Throws<DomainException>(() =>
+            scr.StartNextRevision("author", Now.AddHours(1), targetReleaseIsReleased: true));
+
+        Assert.Contains("released build", refused.Message);
+        Assert.Contains("new SCR", refused.Message);
+    }
+
+    [Fact]
+    public void Draft_scr_cannot_skip_review_by_starting_a_revision()
+    {
+        var draft = CreateDraftWithRequirement();
+        Assert.Throws<DomainException>(() =>
+            draft.StartNextRevision("author", Now.AddHours(1), targetReleaseIsReleased: false));
     }
 
     [Fact]
