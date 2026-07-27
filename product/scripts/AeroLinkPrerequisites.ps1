@@ -30,8 +30,20 @@ function Resolve-AeroLinkDotnet {
         throw "AEROLINK_DOTNET is set to '$($env:AEROLINK_DOTNET)', which is not a .NET SDK. Correct it or clear it."
     }
 
+    # Every place a .NET SDK realistically lands on Windows, because there is no single one.
+    #
+    # `dotnet-install.ps1` — the only route on a machine where you are not an administrator — installs to
+    # %LOCALAPPDATA%\Microsoft\dotnet on Windows. It is %USERPROFILE%\.dotnet that is the Linux and macOS
+    # convention, and the first version of this file probed only that, because it was written on a machine
+    # that happened to have the SDK there. It therefore missed the exact case it was written for.
+    #
+    # Neither location is added to PATH permanently: dotnet-install prints "Adding to current process PATH",
+    # which lasts until that window closes. So a machine can have a working SDK that nothing on PATH knows
+    # about, which is why these are probed directly rather than asked of the shell.
     $candidates = @()
+    if ($env:LOCALAPPDATA) { $candidates += (Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe') }
     if ($env:USERPROFILE) { $candidates += (Join-Path $env:USERPROFILE '.dotnet\dotnet.exe') }
+    if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles 'dotnet\dotnet.exe') }
     # Written out rather than with `?.`, because these scripts run under Windows PowerShell 5.1, where the
     # null-conditional operator is a parse error — and a parse error takes the whole file with it, so the
     # launcher fails before it can report anything useful.
@@ -52,8 +64,9 @@ managed machine:
 
   $install
 
-It installs to %USERPROFILE%\.dotnet and this launcher will find it there without any PATH change. If your
-organization publishes the SDK through its own software portal, that works equally well.
+On Windows it installs to %LOCALAPPDATA%\Microsoft\dotnet, and this launcher looks there directly — you do
+not need to change PATH, and the "Adding to current process PATH" line it prints only lasts for that window.
+If your organization publishes the SDK through its own software portal, that works equally well.
 "@
 }
 
