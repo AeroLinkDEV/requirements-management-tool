@@ -69,6 +69,15 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 
 ## Run locally
 
+Two paths, and the difference matters.
+
+**For a demonstration, or to see what a deployment serves:** `START_AEROLINK_PRODUCTION.bat`. It builds the
+client, then serves it from the API on a single origin at `http://127.0.0.1:5080` — one process, one port, no
+CORS. That is the shape an on-premises install has, and it is the only path that exercises the built client.
+
+**For development:** `START_AEROLINK.bat`, or the manual steps below. Both run the Vite dev server, which
+recompiles on save and is the wrong thing to show anybody.
+
 Run the PostgreSQL setup once, then use two PowerShell terminals from the repository root.
 
 ```powershell
@@ -122,6 +131,11 @@ per run. If `dotnet` is not on `PATH`, set `AEROLINK_DOTNET` to its full path.
 - `test:smoke` exercises login recovery and the showcase-critical UI path.
 - `test:e2e:sharded` builds the API once, then runs three Playwright shards against separate ports, SQLite databases, reports, and diagnostics.
 - `test:e2e` preserves the original single-worker serial path for troubleshooting and compatibility.
+- `test:production` builds the client and runs the journeys in `tests/production/` against the **built**
+  client, served by the API on one origin. Everything above serves the client with `vite dev`, which is a
+  different artifact: dev hands over unbundled modules and injects each stylesheet as its module evaluates,
+  while a build chunks the code, extracts every stylesheet into one hashed file, and minifies. Use this before
+  a demonstration, and expect it to catch things the dev journeys structurally cannot.
 - Every browser run prints its five slowest journeys and writes `test-results/test-timings.json` (one file per shard for sharded runs).
 
 Before publishing, run the complete backend and parallel client gates:

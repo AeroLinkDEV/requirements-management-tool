@@ -2,7 +2,21 @@
 
 ## Service lifecycle
 
-From the repository root, double-click `START_AEROLINK.bat`, or run it from PowerShell. It starts PostgreSQL on `127.0.0.1:54329`, applies pending Entity Framework migrations through the API, starts the API on `127.0.0.1:5080`, and starts the React client on `127.0.0.1:5173`.
+There are two launchers, and which one to use is not a matter of taste.
+
+`START_AEROLINK_PRODUCTION.bat` builds the client and serves it **from the API** on a single origin at
+`http://127.0.0.1:5080` — one process, one port, no CORS policy joining two servers. This is the shape an
+on-premises install has, and the only path that runs the built client. Use it for any demonstration, and for
+checking what a deployment will actually behave like. It waits on `/health/ready` and then confirms the
+document it serves references a built bundle, so it cannot report success over a database it cannot reach or a
+client it is not serving. `-SkipClientBuild` reuses the existing build when nothing in the client changed.
+
+`START_AEROLINK.bat` is the development launcher. It starts PostgreSQL on `127.0.0.1:54329`, applies pending
+Entity Framework migrations through the API, starts the API on `127.0.0.1:5080`, and starts the Vite **dev**
+server on `127.0.0.1:5173`. The dev server recompiles on save, which is what makes it right for development and
+wrong for anything anybody else is watching.
+
+Both are safe to run again while AeroLink is already running.
 
 Use `STOP_AEROLINK.bat` for a controlled stop. The script only stops listeners whose command line resolves to this repository, then stops the repository-owned PostgreSQL instance. Use `AEROLINK_DIAGNOSTICS.bat` to check PostgreSQL, API health, a real local sign-in, client response, applied migrations, disk space, backup age, and evidence storage.
 

@@ -16,6 +16,7 @@
     "test:full": "npm run lint && npm run build && npm run test:e2e:sharded",
     "test:e2e": "playwright test",
     "test:e2e:sharded": "node scripts/run-sharded-e2e.mjs",
+    "test:production": "npm run build && playwright test --config=playwright.production.config.ts",
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {

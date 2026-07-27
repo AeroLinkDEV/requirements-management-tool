@@ -25,6 +25,9 @@ process.env.AEROLINK_E2E_API_BASE = `http://127.0.0.1:${e2eApiPort}`
 
 export default defineConfig({
   testDir: './tests',
+  // The production journeys have their own config, because they need the API to serve the built client rather
+  // than Vite to serve modules. Running them here would test dev and assert about a build.
+  testIgnore: 'production/**',
   globalSetup: './tests/global-setup.ts',
   outputDir,
   fullyParallel: false,

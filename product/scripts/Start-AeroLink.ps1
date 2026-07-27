@@ -64,7 +64,11 @@ Write-Host '[1/4] Checking PostgreSQL...' -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL could not be started.' }
 
 Write-Host '[2/4] Checking AeroLink API...' -ForegroundColor Cyan
-if (-not (Test-HttpEndpoint -Uri "$apiUrl/health")) {
+# /health/ready, not /health. Liveness answers "is the process listening", which it is even when PostgreSQL is
+# unreachable — so this launcher used to print "AeroLink is ready" over a database that was not there, and the
+# only sign was an 8 MB log of connection failures. Readiness opens a connection, which is the question being
+# asked. The endpoint already existed and returns 503 until the database answers.
+if (-not (Test-HttpEndpoint -Uri "$apiUrl/health/ready")) {
     Clear-StaleAeroLinkPort -Port 5080 -ExpectedCommandFragments @('AeroLink.Api', $apiProject)
     $apiOut = Join-Path $logs 'api.stdout.log'
     $apiErr = Join-Path $logs 'api.stderr.log'
@@ -77,13 +81,13 @@ if (-not (Test-HttpEndpoint -Uri "$apiUrl/health")) {
         -WindowStyle Hidden `
         -RedirectStandardOutput $apiOut `
         -RedirectStandardError $apiErr | Out-Null
-    try { Wait-HttpEndpoint -Uri "$apiUrl/health" -ServiceName 'AeroLink API' }
+    try { Wait-HttpEndpoint -Uri "$apiUrl/health/ready" -ServiceName 'AeroLink API' -TimeoutSeconds 120 }
     catch {
         $tail = if (Test-Path $apiErr) { (Get-Content $apiErr -Tail 20) -join [Environment]::NewLine } else { 'No API error log was produced.' }
         throw "$($_.Exception.Message)`nAPI error log:`n$tail"
     }
 }
-Write-Host '      API healthy on 127.0.0.1:5080.' -ForegroundColor Green
+Write-Host '      API ready on 127.0.0.1:5080, database reachable.' -ForegroundColor Green
 
 Write-Host '[3/4] Checking website...' -ForegroundColor Cyan
 if (-not (Test-HttpEndpoint -Uri $websiteUrl)) {

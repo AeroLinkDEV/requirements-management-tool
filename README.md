@@ -13,7 +13,13 @@ Release evolution is user-controlled: authorized users plan an in-work successor
 
 ## One-click local startup
 
-After a reboot—or whenever the local site is unavailable—double-click [`START_AEROLINK.bat`](START_AEROLINK.bat) in the repository root. It starts or verifies PostgreSQL, the API, and the website; waits for the authentication endpoint; opens `http://127.0.0.1:5173`; and writes diagnostic logs under `product/.local/logs/`. It is safe to run again while AeroLink is already running.
+Two launchers, for two different purposes.
+
+**Showing AeroLink to somebody:** double-click [`START_AEROLINK_PRODUCTION.bat`](START_AEROLINK_PRODUCTION.bat). It builds the website and serves it from the API on one origin at `http://127.0.0.1:5080`, which is how an on-premises install runs and the only path that exercises the built client.
+
+**Working on AeroLink:** double-click [`START_AEROLINK.bat`](START_AEROLINK.bat). It starts or verifies PostgreSQL, the API, and the Vite development server; waits for the API to report the database reachable; opens `http://127.0.0.1:5173`; and writes diagnostic logs under `product/.local/logs/`.
+
+Both are safe to run again while AeroLink is already running. Note that PostgreSQL must be installed once first — `product\scripts\Setup-Postgres.ps1`, described in [the product README](product/README.md).
 
 Run [`BACKUP_AEROLINK.bat`](BACKUP_AEROLINK.bat) manually or through Windows Task Scheduler for a complete local backup. It captures PostgreSQL, controlled evidence, and runtime configuration into an integrity-manifested archive under `product/.local/backups/`, with 30-day retention by default. Production IT must copy these archives to protected storage and periodically prove restore.
 

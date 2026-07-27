@@ -178,6 +178,65 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The journeys against the artifact a demonstration or a deployment actually serves: the built client, hosted
+  # by the API on one origin. Every other gate serves the client with `vite dev`, which meant the production
+  # bundle was compiled on every pull request and never once rendered in a browser. `vite dev` hands over
+  # unbundled modules and injects each stylesheet when its module evaluates; a build chunks, extracts, hashes
+  # and minifies. Its first run found two design-contract defects and one blocked webfont.
+  #
+  # On pull requests, because it is the environment the demonstration depends on and it costs one build. Not on
+  # push: a squash merge of a green pull request puts an identical tree on main, which is the same reason
+  # browser-full skips push.
+  browser-production:
+    name: Browser journeys on the production build
+    needs: changes
+    if: github.event_name != 'push' && needs.changes.outputs.browser == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - name: Restore and build the API
+        run: |
+          dotnet restore product/src/AeroLink.Api/AeroLink.Api.csproj
+          dotnet build product/src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
+      - name: Install client and Chromium
+        working-directory: product/client
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Build the client and run the production journeys
+        working-directory: product/client
+        env:
+          AEROLINK_E2E_SKIP_BUILD: "true"
+        run: npm run test:production
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-production-${{ github.run_attempt }}
+          path: |
+            product/client/playwright-report-production
+            product/client/test-results-production
+          if-no-files-found: ignore
+          retention-days: 7
+
   browser-full:
     name: Full browser journeys (${{ matrix.shard }}/3)
     needs: changes

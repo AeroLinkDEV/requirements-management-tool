@@ -7,7 +7,9 @@
   border: 1px solid #ccd7e0; border-radius: 8px; background: white;
   color: #4b5f74; font: 600 12px/1 "DM Sans", sans-serif; cursor: pointer;
 }
-.workflowPage .eyebrow { margin: 0; color: #168578; font: 700 11px/1.2 "DM Sans", sans-serif; letter-spacing: 0.08em; }
+/* 12px, not 11px, because the readability floor is a commitment and every other surface's eyebrow is 12px.
+   This surface arrived after the design audit's list of surfaces was written, so nothing measured it. */
+.workflowPage .eyebrow { margin: 0; color: #168578; font: 700 12px/1.2 "DM Sans", sans-serif; letter-spacing: 0.08em; }
 .workflowPage h1 { margin: 6px 0 4px; color: #102a43; font-size: 28px; }
 .workflowPage > header p:last-child { margin: 0; max-width: 720px; color: #4b5f74; font-size: 14px; line-height: var(--leading-body, 1.5); }
 

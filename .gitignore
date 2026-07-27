@@ -19,6 +19,13 @@ rendered/
 *.db-wal
 product/.local/
 
+# Playwright output. Both configs write their own reports and traces; the production config keeps separate
+# directories so a production run cannot overwrite the diagnostics of the run that preceded it.
+product/client/test-results/
+product/client/test-results-production/
+product/client/playwright-report/
+product/client/playwright-report-production/
+
 # Rendered output of the overview video. docs/overview-video carries its own rule for this, but a nested
 # rule only applies while that directory is checked out — from any other branch the leftover build folder,
 # 24 MB of frames and an MP4, is reported as untracked. Generated output should be ignored from wherever
