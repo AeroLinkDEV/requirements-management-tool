@@ -12,7 +12,17 @@ public sealed record PublicationSection(string Heading, string Introduction, IRe
 public sealed record ProfessionalPublication(string Product, string Program, string Project, string DocumentType, string Title, string Subtitle,
     string DocumentNumber, string Revision, string Status, string Release, string Baseline, string PreparedBy, DateTimeOffset GeneratedAt,
     string ManifestHash, IReadOnlyList<(string Label, string Value)> Metadata, IReadOnlyList<PublicationApproval> Approvals,
-    IReadOnlyList<(string Revision, string Status, string Date, string Author)> RevisionHistory, IReadOnlyList<PublicationSection> Sections);
+    IReadOnlyList<(string Revision, string Status, string Date, string Author)> RevisionHistory, IReadOnlyList<PublicationSection> Sections)
+{
+    /// <summary>
+    /// Text stamped across every page, or null for a document that stands on its own.
+    ///
+    /// Init-only rather than positional so that a publication which carries no watermark — every approved
+    /// document — needs no change at its construction site, and so that adding one later cannot be done by
+    /// accident at a call that meant something else.
+    /// </summary>
+    public string? Watermark { get; init; }
+}
 
 public static class ProfessionalPublicationRenderer
 {
@@ -79,7 +89,23 @@ public static class ProfessionalPublicationRenderer
         if (headers.Count > 0) body.Append(Row(headers, widths, true, false)); foreach (var row in rows) body.Append(Row(row, widths, false, shadeFirstColumn)); return body.Append("</w:tbl>").ToString();
     }
     private static string Row(IReadOnlyList<string> cells, IReadOnlyList<int> widths, bool header, bool shadeFirstColumn) => "<w:tr>" + string.Join("", cells.Select((x, i) => $"<w:tc><w:tcPr><w:tcW w:w=\"{widths[i]}\" w:type=\"dxa\"/>{(header || shadeFirstColumn && i == 0 ? "<w:shd w:val=\"clear\" w:fill=\"E8EEF5\"/>" : "")}<w:vAlign w:val=\"center\"/></w:tcPr>{P(x, header || shadeFirstColumn && i == 0 ? "TableHeader" : "TableText")}</w:tc>")) + "</w:tr>";
-    private static string Header(ProfessionalPublication p) => $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"168578\"/></w:pBdr></w:pPr><w:r><w:rPr><w:b/><w:color w:val=\"102A43\"/><w:sz w:val=\"18\"/></w:rPr><w:t>{SecurityElement.Escape(p.Product)}  |  {SecurityElement.Escape(p.DocumentType.ToUpperInvariant())}</w:t></w:r></w:p></w:hdr>";
+    private static string Header(ProfessionalPublication p) => $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\"><w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"168578\"/></w:pBdr></w:pPr>{DocxWatermark(p)}<w:r><w:rPr><w:b/><w:color w:val=\"102A43\"/><w:sz w:val=\"18\"/></w:rPr><w:t>{SecurityElement.Escape(p.Product)}  |  {SecurityElement.Escape(p.DocumentType.ToUpperInvariant())}</w:t></w:r></w:p></w:hdr>";
+
+    /// <summary>
+    /// The watermark, as Word expects one: a VML shape anchored in the header.
+    ///
+    /// The header is the only place that repeats on every page without becoming part of the text, so a
+    /// watermark placed anywhere else either appears once or pushes the content it is supposed to sit behind.
+    /// `behindDoc` and the low opacity are what make it a stamp rather than a heading.
+    /// </summary>
+    private static string DocxWatermark(ProfessionalPublication p) =>
+        string.IsNullOrWhiteSpace(p.Watermark) ? "" :
+        "<w:r><w:rPr><w:noProof/></w:rPr><w:pict><v:shape id=\"AeroLinkWatermark\" o:spid=\"_x0000_s2049\" type=\"#_x0000_t136\" " +
+        "style=\"position:absolute;margin-left:0;margin-top:0;width:468pt;height:117pt;rotation:315;z-index:-251658752;" +
+        "mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;" +
+        "mso-position-vertical-relative:margin\" o:allowincell=\"f\" fillcolor=\"#c8d0d8\" stroked=\"f\">" +
+        $"<v:textpath style=\"font-family:&quot;Calibri&quot;;font-size:1pt\" string=\"{SecurityElement.Escape(p.Watermark)}\"/>" +
+        "<v:fill opacity=\".45\"/></v:shape></w:pict></w:r>";
     private static string Footer(ProfessionalPublication p) => $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:ftr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:color w:val=\"718096\"/><w:sz w:val=\"14\"/></w:rPr><w:t>{SecurityElement.Escape(p.DocumentNumber)} Rev {SecurityElement.Escape(p.Revision)} | {SecurityElement.Escape(p.Status)} | Manifest {p.ManifestHash[..Math.Min(12, p.ManifestHash.Length)]} | Page </w:t></w:r><w:fldSimple w:instr=\"PAGE\"><w:r><w:t>1</w:t></w:r></w:fldSimple></w:p></w:ftr>";
     private static string ApprovalDecision(PublicationApproval approval) => approval.State + (approval.DecidedAt is null ? "" : " - " + approval.DecidedAt.Value.UtcDateTime.ToString("yyyy-MM-dd"));
     private static readonly DateTimeOffset DeterministicArchiveTime=new(2000,1,1,0,0,0,TimeSpan.Zero);
@@ -172,7 +198,7 @@ public static class ProfessionalPublicationRenderer
     }
     private static string PdfCover(ProfessionalPublication p)
     {
-        var s = new StringBuilder("0.063 0.165 0.263 rg 0 0 612 792 re f\n0.086 0.522 0.471 rg 0 742 612 50 re f\nBT\n");
+        var s = new StringBuilder("0.063 0.165 0.263 rg 0 0 612 792 re f\n0.086 0.522 0.471 rg 0 742 612 50 re f\n" + PdfWatermark(p, true) + "BT\n");
         Text(s, p.Product.ToUpperInvariant() + "  |  CONTROLLED LIFECYCLE PUBLICATION", 54, 760, 9, true, "FFFFFF"); Text(s, p.DocumentType.ToUpperInvariant(), 64, 650, 10, true, "65D3C3");
         var y = 610; foreach (var line in Wrap(p.Title, 38)) { Text(s, line, 64, y, 25, true, "FFFFFF"); y -= 32; } foreach (var line in Wrap(p.Subtitle, 65)) { Text(s, line, 64, y - 4, 11, false, "B7C5D4"); y -= 17; }
         y -= 20; Text(s, p.DocumentNumber + "  |  REVISION " + p.Revision, 64, y, 12, true, "65D3C3"); Text(s, p.Status.ToUpperInvariant(), 64, y - 24, 10, true, "F0C96A");
@@ -205,11 +231,31 @@ public static class ProfessionalPublicationRenderer
     private static int LineHeight(PdfLine line) => line.Size + line.After;
     private static string PdfContentPage(IReadOnlyList<PdfLine> lines, ProfessionalPublication p, bool control)
     {
-        var s = new StringBuilder("0.086 0.522 0.471 RG 1.3 w 54 760 m 558 760 l S\nBT\n"); Text(s, p.Product + " | " + p.DocumentNumber + " Rev " + p.Revision, 54, 772, 8, true, "102A43"); var y = 738;
+        var s = new StringBuilder(PdfWatermark(p, false) + "0.086 0.522 0.471 RG 1.3 w 54 760 m 558 760 l S\nBT\n"); Text(s, p.Product + " | " + p.DocumentNumber + " Rev " + p.Revision, 54, 772, 8, true, "102A43"); var y = 738;
         foreach (var line in lines) { Text(s, line.Text, 54 + line.Indent, y, line.Size, line.Bold, line.Color); y -= line.Size + line.After; }
         Text(s, p.DocumentNumber + " | " + p.Status + " | Manifest " + p.ManifestHash[..Math.Min(12, p.ManifestHash.Length)], 54, 28, 7, false, "718096"); return s.Append("ET").ToString();
     }
     private static void Text(StringBuilder s, string value, int x, int y, int size, bool bold, string color) { var (r,g,b)=Rgb(color); s.Append($"{r:0.###} {g:0.###} {b:0.###} rg /{(bold ? "F2" : "F1")} {size} Tf 1 0 0 1 {x} {y} Tm ({PdfEscape(value)}) Tj\n"); }
+
+    /// <summary>
+    /// The watermark, drawn diagonally across a page.
+    ///
+    /// Emitted first so everything else is drawn over it — a stamp the reader looks through, not a banner
+    /// covering the text. The two colours are not a decoration: the cover is dark navy and the content pages
+    /// are white, and one grey cannot be faint on both. Faint on the wrong background is either invisible,
+    /// which defeats the purpose, or a solid block over the words.
+    ///
+    /// The matrix is a 45-degree rotation — cos and sin of the angle in the first four operands — with the
+    /// origin placed low-left so the text runs corner to corner.
+    /// </summary>
+    private static string PdfWatermark(ProfessionalPublication p, bool onDark)
+    {
+        if (string.IsNullOrWhiteSpace(p.Watermark)) return "";
+        var (r, g, b) = onDark ? (0.42, 0.50, 0.58) : (0.88, 0.90, 0.92);
+        var s = new StringBuilder("BT\n");
+        s.Append($"{r:0.###} {g:0.###} {b:0.###} rg /F2 96 Tf 0.7071 0.7071 -0.7071 0.7071 96 210 Tm ({PdfEscape(p.Watermark)}) Tj\n");
+        return s.Append("ET\n").ToString();
+    }
     private static (double,double,double) Rgb(string hex) => (Convert.ToInt32(hex[..2],16)/255d,Convert.ToInt32(hex.Substring(2,2),16)/255d,Convert.ToInt32(hex.Substring(4,2),16)/255d);
     private static IEnumerable<PdfLine> RichPdfLines(PublicationRecord record)
     {

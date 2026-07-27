@@ -177,6 +177,25 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
           </details>
         </article>)}</section>}
       </> : <>
+        {/* A draft of the document this release is heading towards, before anything is frozen. It reads the
+            released baseline with every approved change folded in, carries the revision the released document
+            will carry, and is stamped DRAFT on every page. Nothing is stored: the content is still moving, and
+            a controlled record of that would be a record of nothing. */}
+        <section className="draftDocuments">
+          <div>
+            <b>Draft for the release in work</b>
+            <span>Released content plus every approved change, at the revision this document will carry when it is released. Watermarked, and not a controlled record.</span>
+          </div>
+          <div className="draftDocumentActions">
+            {([["Sysrd", "System requirements"], ["SwrdHighLevel", "Software HLR"], ["SwrdLowLevel", "Software LLR"]] as const).map(([type, label]) => (
+              <span key={type}>
+                <b>{label}</b>
+                <a href={`${api}/api/releases/${activeReleaseId}/draft-document?type=${type}&format=docx`}>DOCX</a>
+                <a href={`${api}/api/releases/${activeReleaseId}/draft-document?type=${type}&format=pdf`}>PDF</a>
+              </span>
+            ))}
+          </div>
+        </section>
         <div className="documentActions"><select value={baselineId} onChange={(event) => setBaselineId(event.target.value)}>{baselines.map((item) => <option value={item.id} key={item.id}>{item.displayNumber} · {item.name}</option>)}</select><button onClick={generate}>Generate / refresh outputs</button></div>
         <section className="documentGrid">{documents.map((item) => <article key={item.id}><div><span>{item.type.replace(/([A-Z])/g, " $1").trim()}</span><i>CONTROLLED</i></div><h2>{item.displayNumber}</h2><h3>{item.title}</h3><dl><div><dt>Release</dt><dd>{item.release}</dd></div><div><dt>Baseline</dt><dd>{item.baseline}</dd></div><div><dt>Artifacts</dt><dd>{item.artifactCount.toLocaleString()}</dd></div><div><dt>Generated</dt><dd>{new Date(item.generatedAt).toLocaleDateString()}</dd></div></dl><code>{item.contentHash}</code><div className="downloadLinks"><a href={`${api}/api/documents/${item.id}/download?format=docx`}>Download DOCX</a><a href={`${api}/api/documents/${item.id}/download?format=pdf`}>Download PDF</a></div></article>)}{!loading && !documents.length && <div className="traceEmpty"><b>No outputs for this baseline</b><p>Generate controlled documents only after the selected requirement baseline has been materialized.</p></div>}</section>
       </>}

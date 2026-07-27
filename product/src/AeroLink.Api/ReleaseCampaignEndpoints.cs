@@ -1,6 +1,7 @@
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Traceability;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -32,6 +33,22 @@ public static class ReleaseCampaignEndpoints
             var projectId = await db.ControlledDocuments.Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if (projectId is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
             var output = await generator.GenerateAsync(id, format ?? "docx", ct); return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
+        });
+
+        // The document a release is heading towards, before it is frozen. Generated on demand from the released
+        // baseline plus every approved change, watermarked DRAFT, and never persisted — see DraftDocumentGenerator
+        // for why a controlled record of content that is still moving would be a record of nothing.
+        app.MapGet("/api/releases/{releaseId:guid}/draft-document", async (Guid releaseId, string type, string? format, HttpContext http, AeroLinkDbContext db, DraftDocumentGenerator generator, CancellationToken ct) =>
+        {
+            var projectId = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
+            if (!Enum.TryParse<ControlledDocumentType>(type, true, out var documentType))
+                return Results.BadRequest(new { error = "Unknown document type.", code = "unknown_document_type" });
+            var output = await generator.GenerateAsync(releaseId, documentType, format ?? "docx", http.UserAccount().DisplayName, ct);
+            return output is null
+                ? Results.BadRequest(new { error = "A draft is only produced for a requirements document.", code = "draft_not_available" })
+                : Results.File(output.Content, output.ContentType, output.FileName);
         });
 
         app.MapGet("/api/documents/{id:guid}/manifest",async(Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
