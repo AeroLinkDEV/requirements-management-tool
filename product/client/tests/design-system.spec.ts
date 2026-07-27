@@ -28,6 +28,12 @@ const surfaces = [
   ['Release Planning', '/release-planning'],
   ['People & Authority', '/administration'],
   ['Enterprise Control', '/enterprise-control'],
+  // Added after the production journey — which reads the navigation instead of a list — found both of these
+  // breaking the contract: Review Procedures rendered an 11px eyebrow, and New Change Request pushed the
+  // document 106px past the viewport with a file input that had lost its width to a container's blanket
+  // `input` rule. Neither was ever measured, because a hardcoded list does not grow when the product does.
+  ['Review Procedures', '/review-workflows'],
+  ['New Change Request', '/systems/change-requests/new'],
 ] as const
 
 type Density = 'comfortable' | 'compact'

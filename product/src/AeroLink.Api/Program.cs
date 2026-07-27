@@ -95,12 +95,16 @@ await using (var scope = app.Services.CreateAsyncScope())
     await scope.ServiceProvider.GetRequiredService<EnterpriseWorkspaceSeeder>().EnsureAllAsync();
 }
 
-// Security headers on every API response.
+// Whether this process also serves the built client, decided once at startup. Null means it does not, and
+// every response is an API response — which is what a deployment serving the client through its own reverse
+// proxy relies on, so nothing below changes for it.
+var clientRoot = ClientHosting.ResolveClientRoot(app.Environment, builder.Configuration);
+
+// Security headers on every response.
 //
-// The client is served by whatever reverse proxy the deployment runs, so the headers protecting the HTML
-// document are that proxy's responsibility, recorded in SECURITY_AND_IDENTITY_MODEL.md. These are the ones
-// this process owns — and they matter most on the endpoints that stream stored files, where the content type
-// was chosen by whoever uploaded the bytes.
+// These matter most on the endpoints that stream stored files, where the content type was chosen by whoever
+// uploaded the bytes. Where the client is served by a reverse proxy instead, the headers protecting the HTML
+// document are that proxy's responsibility and are recorded in SECURITY_AND_IDENTITY_MODEL.md.
 app.Use(async (context, next) =>
 {
     var headers = context.Response.Headers;
@@ -108,10 +112,19 @@ app.Use(async (context, next) =>
     headers["X-Content-Type-Options"] = "nosniff";
     headers["X-Frame-Options"] = "DENY";
     headers["Referrer-Policy"] = "no-referrer";
-    // An API returns data, never a document. Nothing it serves should be able to load or run anything.
-    headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; sandbox";
+    // A document and an API need opposite policies, and applying the API's to a document serves a blank page:
+    // `default-src 'none'` forbids the bundle from loading at all. Both are in ClientHosting, with the reason
+    // each directive is what it is.
+    headers["Content-Security-Policy"] = clientRoot is not null && !ClientHosting.IsApiPath(context.Request.Path)
+        ? ClientHosting.DocumentContentSecurityPolicy
+        : ClientHosting.ApiContentSecurityPolicy;
     await next();
 });
+
+// Before the session gate below, so a stylesheet costs no database work. That gate already lets every
+// non-API path through, and the entry document has to be reachable unauthenticated in any case — it is
+// what draws the sign-in form.
+if (clientRoot is not null) app.UseAeroLinkClient(clientRoot);
 
 app.Use(async (context, next) =>
 {

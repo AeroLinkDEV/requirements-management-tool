@@ -146,7 +146,18 @@ type Workspace = {
     releases: Release[];
   }[];
 };
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:5080";
+/**
+ * Where the API is.
+ *
+ * A production build defaults to the empty string, which makes every request relative and therefore
+ * same-origin: the API process serves this bundle, so it is already the right host, whatever address the
+ * workstation answers on. Baking one in would mean a build that only runs on the machine it was built for.
+ *
+ * `npm run dev` serves the client on its own port and has to be told where the API is, so the development
+ * default points at the local one. `VITE_API_URL` overrides either, which is how the browser journeys aim at
+ * their own isolated instance.
+ */
+const API = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://127.0.0.1:5080" : "");
 
 function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, context, density, onProgram, onProject, onRelease, onNavigate, onSearch, onDisplay, onSignOut }:{
   user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;

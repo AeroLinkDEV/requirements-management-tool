@@ -42,8 +42,15 @@
 .richToolbar button:hover:not(:disabled) { background: #eef2f7; }
 .richToolbar button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Kept in the layout rather than display:none so the button that opens it stays reachable from a keyboard. */
-.richFileInput { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+/* Kept in the layout rather than display:none so the button that opens it stays reachable from a keyboard.
+
+   Written `html input.richFileInput` for specificity, not for style. As `.richFileInput` this rule is (0,1,0)
+   and lost its width to `.controlledEditor input { width: 100% }` at (0,1,1) — so a control meant to be one
+   pixel wide rendered at 1160px and pushed the new-change-request page 106px past the viewport. The page
+   scrolled sideways in both densities, and no gate saw it because the design audit's list of surfaces does not
+   include this one. Same shape as the three collisions in CAPABILITY_ROADMAP.md: a rule that decides something
+   important, losing to a container's blanket selector. (0,1,2) wins wherever this file lands in the cascade. */
+html input.richFileInput { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
 .richBlocks { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .richBlocks > li { border: 1px solid var(--line); border-radius: var(--radius-sm, 6px); background: white; padding: 8px 10px; display: grid; gap: 8px; }
