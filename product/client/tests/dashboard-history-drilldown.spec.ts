@@ -18,18 +18,22 @@ test('dashboard lifecycle metrics open shareable, clearable History drill-downs'
   await expect(page.getByLabel('Lifecycle state filter')).toHaveValue('Draft')
   await page.getByLabel('Lifecycle state filter').selectOption('SelectedForBaseline')
   await expect(page).toHaveURL(/[?&]state=SelectedForBaseline(?:&|$)/)
-  await expect(page.getByText('Selected for baseline · System and software', { exact: true })).toBeVisible()
+  // "Selected for baseline" described the mechanism. A reader wants to know which build the change is going
+  // into, so the state now reads "Allocated to <version>" — and "Incorporated in <version>" once that build
+  // has been released. The stored enum is unchanged and still available as data-state.
+  await expect(page.getByText('Allocated to a build · System and software', { exact: true })).toBeVisible()
   const visibleStates = await page.locator('.historyState').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-state')))
   expect(visibleStates.every(state => state === 'SelectedForBaseline')).toBeTruthy()
+  await expect(page.locator('.historyState').first()).toHaveText(/Allocated to 1\.\d|Incorporated in 1\.\d/)
 
-  await page.getByRole('button', { name: 'Clear Selected for baseline lifecycle filter' }).click()
+  await page.getByRole('button', { name: 'Clear Allocated to a build lifecycle filter' }).click()
   await expect(page).not.toHaveURL(/[?&]state=/)
   await expect(page.getByLabel('Lifecycle state filter')).toHaveValue('')
 
   await page.getByRole('button', { name: /Command Center/ }).first().click()
   await page.getByRole('button', { name: 'Open Approved and baseline-selected changes' }).click()
   await expect(page.getByLabel('Lifecycle state filter')).toHaveValue('ApprovedOrSelected')
-  await expect(page.getByText('Approved or selected for baseline · System and software', { exact: true })).toBeVisible()
+  await expect(page.getByText('Approved or allocated · System and software', { exact: true })).toBeVisible()
   const approvedStates = await page.locator('.historyState').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-state')))
   expect(approvedStates.every(state => state === 'Approved' || state === 'SelectedForBaseline')).toBeTruthy()
 })

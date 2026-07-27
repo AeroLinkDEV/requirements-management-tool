@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
-import { stateLabel } from './presentation'
+import { changeRequestStateLabel } from './presentation'
 import type { ComponentType, FormEvent } from "react";
 import CommandPalette from "./CommandPalette";
 import ExperienceControls from "./ExperienceControls";
@@ -110,6 +110,8 @@ type Scr = {
   title: string;
   state: string;
   authorId: string;
+  // Which build this change is allocated to. The state alone cannot say whether it has shipped.
+  targetReleaseId: string;
   requirementCount: number;
   updatedAt: string;
 };
@@ -118,6 +120,10 @@ type Metrics = {
   draft: number;
   inReview: number;
   approved: number;
+  // Counted across the project, not the selected build: work that has been put away is by definition not part
+  // of the build in hand. Systems and software keep separate shelves.
+  deferredSystem: number;
+  deferredSoftware: number;
 };
 type Overview = {
   systemRequirements: number;
@@ -217,6 +223,8 @@ function App() {
       draft: 0,
       inReview: 0,
       approved: 0,
+      deferredSystem: 0,
+      deferredSoftware: 0,
     }),
     [overview, setOverview] = useState<Overview>(),
     [campaigns, setCampaigns] = useState<CampaignSummary[]>([]),
@@ -770,8 +778,11 @@ function App() {
                     </b>
                     <p>{scr.requirementCount} requirement change{scr.requirementCount === 1 ? "" : "s"} · <span className="personMeta"><i>{identityInitials(scr.authorId)}</i>{identityLabel(scr.authorId)}</span></p>
                   </div>
-                  <span className={`state ${scr.state.toLowerCase()}`}>
-                    {stateLabel(scr.state)}
+                  <span className={`state ${scr.state.toLowerCase()}`} data-state={scr.state}>
+                    {changeRequestStateLabel(
+                      scr.state,
+                      project?.releases.find((item) => item.id === scr.targetReleaseId),
+                    )}
                   </span>
                   <time>{new Date(scr.updatedAt).toLocaleDateString()}</time>
                 </div>
@@ -794,7 +805,7 @@ function App() {
                 <p>{metrics.totalScrs?"The decisions and work that need focus now":"Foundation for controlled development"}</p>
               </div>
             </div>
-            {metrics.totalScrs?<><button className={metrics.inReview?"signal amber":"signal green"} onClick={()=>navigate(metrics.inReview?"mywork":"history",dashboardScope,undefined,undefined,false,metrics.inReview?undefined:"InReview",metrics.inReview?undefined:"All")}><b>Awaiting review decisions</b><strong>{metrics.inReview}</strong><p>{metrics.inReview?"Open the accountable review queue":"No change requests are waiting for review"}</p></button><button className={metrics.draft?"signal blue":"signal green"} onClick={()=>navigate("history",dashboardScope,undefined,undefined,false,"Draft","All")}><b>Draft change packages</b><strong>{metrics.draft}</strong><p>{metrics.draft?"Open controlled work in progress":"No draft change packages remain"}</p></button><button className={activeCampaign?.readiness.readyForRelease?"signal green":"signal amber"} onClick={()=>navigate(activeCampaign?"release":"planning")}><b>Release readiness</b><strong>{activeCampaign?.readiness.percent??0}%</strong><p>{activeCampaign?.readiness.readyForRelease?"Review the complete release package":"Open the next release-readiness action"}</p></button></>:<><div className="signal green"><b>Program workspace</b><strong>✓</strong><p>{active?.program.name} is configured</p></div><div className="signal blue"><b>Initial release</b><strong>✓</strong><p>{release?.version} establishes the starting context</p></div><button className="signal amber" onClick={()=>navigate(dashboardScope==="software"?"createSoftwareChange":"createSystemScr",dashboardScope)}><b>Next action</b><strong>1</strong><p>Create the first controlled change request →</p></button></>}
+            {metrics.totalScrs?<><button className={metrics.inReview?"signal amber":"signal green"} onClick={()=>navigate(metrics.inReview?"mywork":"history",dashboardScope,undefined,undefined,false,metrics.inReview?undefined:"InReview",metrics.inReview?undefined:"All")}><b>Awaiting review decisions</b><strong>{metrics.inReview}</strong><p>{metrics.inReview?"Open the accountable review queue":"No change requests are waiting for review"}</p></button><button className={metrics.draft?"signal blue":"signal green"} onClick={()=>navigate("history",dashboardScope,undefined,undefined,false,"Draft","All")}><b>Draft change packages</b><strong>{metrics.draft}</strong><p>{metrics.draft?"Open controlled work in progress":"No draft change packages remain"}</p></button><button className={(dashboardScope==="software"?metrics.deferredSoftware:metrics.deferredSystem)?"signal blue":"signal green"} onClick={()=>navigate("history",dashboardScope,undefined,undefined,false,"Deferred","All")}><b>Deferred {dashboardScope==="software"?"software":"system"} changes</b><strong>{dashboardScope==="software"?metrics.deferredSoftware:metrics.deferredSystem}</strong><p>{(dashboardScope==="software"?metrics.deferredSoftware:metrics.deferredSystem)?"Approved or in-work changes put away for another release":"Nothing is set aside for a later release"}</p></button><button className={activeCampaign?.readiness.readyForRelease?"signal green":"signal amber"} onClick={()=>navigate(activeCampaign?"release":"planning")}><b>Release readiness</b><strong>{activeCampaign?.readiness.percent??0}%</strong><p>{activeCampaign?.readiness.readyForRelease?"Review the complete release package":"Open the next release-readiness action"}</p></button></>:<><div className="signal green"><b>Program workspace</b><strong>✓</strong><p>{active?.program.name} is configured</p></div><div className="signal blue"><b>Initial release</b><strong>✓</strong><p>{release?.version} establishes the starting context</p></div><button className="signal amber" onClick={()=>navigate(dashboardScope==="software"?"createSoftwareChange":"createSystemScr",dashboardScope)}><b>Next action</b><strong>1</strong><p>Create the first controlled change request →</p></button></>}
           </div>
         </section>
       </main></div></div>

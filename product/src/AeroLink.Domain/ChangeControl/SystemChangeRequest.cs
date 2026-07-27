@@ -206,11 +206,31 @@ public sealed class SystemChangeRequest
         Audit("RemovedFromCandidateBaseline", actorId, $"Returned {DisplayNumber} to Approved eligibility.", now);
     }
 
+    /// <summary>
+    /// Puts the change request away for another day, from wherever it currently is.
+    ///
+    /// Deferral used to be reachable only from Draft and Approved, which left the middle of the lifecycle
+    /// with nowhere to go: a change request under review that the programme had decided to drop had to be
+    /// rejected — throwing away a review that raised no engineering objection — or left in review forever,
+    /// holding a release gate that would never clear. Neither is what happened, so neither should be what the
+    /// record says.
+    ///
+    /// From review, the cycle in flight is cancelled rather than abandoned, carrying the deferral reason as
+    /// its closure. Approvals already given keep their decisions and their attribution; what they lose is
+    /// force, because the revision they were given against is no longer heading for this release.
+    ///
+    /// Not reachable from SelectedForBaseline, and that is not an omission: a change request already chosen
+    /// into a candidate baseline has to be taken out of it first, which is an explicit, attributable act with
+    /// its own audit event rather than a side effect of deferring.
+    /// </summary>
     public void Defer(string actorId, string reason, DateTimeOffset now)
     {
         EnsureAuthor(actorId);
-        if (State is not (ScrState.Draft or ScrState.Approved)) throw new DomainException("Only a Draft or Approved change request can be deferred.");
+        if (State == ScrState.Deferred) throw new DomainException("The change request is already deferred.");
+        if (State == ScrState.SelectedForBaseline)
+            throw new DomainException("Remove the change request from its candidate baseline before deferring it.");
         if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A deferral reason is required.");
+        if (State == ScrState.InReview) ActiveReviewCycle?.Cancel(reason.Trim(), now);
         State = ScrState.Deferred; UpdatedAt = now; Audit("ChangeRequestDeferred", actorId, reason.Trim(), now);
     }
 
