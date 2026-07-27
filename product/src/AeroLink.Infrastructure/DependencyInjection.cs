@@ -49,6 +49,7 @@ public static class DependencyInjection
         services.AddScoped<ReleaseReadinessService>();
         services.AddScoped<RichContentPublisher>();
         services.AddScoped<ControlledOutputGenerator>();
+        services.AddScoped<DraftDocumentGenerator>();
         services.AddScoped<VariantConfigurationProjectionService>();
         services.AddScoped<VariantPublicationGenerator>();
         services.AddScoped<ChangeRequestOutputGenerator>();
