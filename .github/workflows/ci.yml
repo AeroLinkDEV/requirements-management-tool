@@ -256,6 +256,17 @@ jobs:
           dotnet build ../src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
           npm ci
           npx playwright install chromium
+      # Windows is the deployment platform, and until this step existed nothing had ever type-checked or
+      # built the client on it. The journeys alone could not: Playwright serves them through `vite dev`,
+      # which transpiles per file without checking types. `RichContent.tsx` and `richContent.ts` were
+      # therefore two modules on Linux and one on Windows for as long as they both existed, and every
+      # Windows build failed while every gate stayed green. Run the same three commands the Linux job runs.
+      - name: Lint, type-check, and build client on Windows
+        working-directory: product/client
+        run: |
+          npm run lint
+          npm run typecheck
+          npm run build
       - name: Run the full suite on Windows
         working-directory: product/client
         env:

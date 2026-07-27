@@ -14,7 +14,7 @@ import ControlledAttachments from "./ControlledAttachments";
 import ScrJiraLink from "./ScrJiraLink";
 import { RichCaseField, RichContentView } from "./RichContent";
 import { useDebouncedSave } from "./autosave";
-import { emptyRichContent, fromPlainText, toPlainText } from "./richContent";
+import { emptyRichContent, fromPlainText, toPlainText } from "./richContentModel";
 import "./ScrWorkspace.css";
 import "./ReviewMode.css";
 

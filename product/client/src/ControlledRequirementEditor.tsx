@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { stateLabel } from './presentation'
 import { RichContentEditor, RichContentView } from "./RichContent";
-import { emptyRichContent, fromPlainText } from "./richContent";
+import { emptyRichContent, fromPlainText } from "./richContentModel";
 import "./ControlledRequirementEditor.css";
 
 export type RequirementLevel = "System" | "HighLevel" | "LowLevel";

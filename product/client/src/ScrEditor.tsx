@@ -11,7 +11,7 @@ import type {
 import { RichCaseField } from "./RichContent";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useLocalDraft } from "./autosave";
-import { fromPlainText, toPlainText } from "./richContent";
+import { fromPlainText, toPlainText } from "./richContentModel";
 import "./ScrEditor.css";
 import "./ScrEditorEnhancements.css";
 
