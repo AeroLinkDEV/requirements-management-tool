@@ -51,7 +51,7 @@ public sealed class FmsShowcaseSeederTests
             var first = await seeder.EnsureSeededAsync();
             await seeder.EnsureSeededAsync();
 
-            var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.BaseNumber == "SYSTP-000001");
+            var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.BaseNumber == "SYSTP-000040");
             var revisions = await db.TestProcedureRevisions.AsNoTracking()
                 .Where(x => x.ProcedureId == procedure.Id).OrderBy(x => x.Revision).ToListAsync();
 

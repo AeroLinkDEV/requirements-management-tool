@@ -15,6 +15,10 @@ test("a verification gap can be filtered to, read, and acted on from the require
   request,
 }) => {
   test.setTimeout(120_000);
+  // Below 1360px the requirement inspector becomes a fixed overlay and covers the right-hand table columns,
+  // including the one this test clicks. The workspace auto-selects a requirement on load, so that overlay is
+  // open before the test touches anything.
+  await page.setViewportSize({ width: 1440, height: 900 });
   await apiLogin(request);
   await login(page);
   await selectProgram(page, "Flight Management System Live Program");
@@ -37,7 +41,7 @@ test("a verification gap can be filtered to, read, and acted on from the require
   // The state is labelled on the row, not buried in a detail panel.
   const suspectBadges = page.locator("button.coverageState.suspect");
   await expect(suspectBadges).toHaveCount(2);
-  await expect(suspectBadges.first()).toHaveText("Suspect coverage");
+  await expect(suspectBadges.first()).toHaveText("Suspect");
 
   // Acting on it opens the trace panel, which is where the procedure that stopped counting actually is.
   await suspectBadges.first().click();
@@ -51,7 +55,7 @@ test("a verification gap can be filtered to, read, and acted on from the require
 
   // The filter chip states the applied constraint and can be cleared back to the full population.
   await page.getByRole("button", { name: "Close requirement inspector" }).click();
-  await expect(page.getByText("Coverage: Suspect coverage")).toBeVisible();
+  await expect(page.getByText("Coverage: Suspect")).toBeVisible();
 
   // The durable answer, not the rendered one. The workspace computes nothing locally, so the API must
   // return the same two requirements and must not report either of them as covered.

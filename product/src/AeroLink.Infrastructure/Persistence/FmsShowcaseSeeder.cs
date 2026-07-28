@@ -111,8 +111,15 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         return await SummarizeAsync(program.Id, ct);
     }
 
-    /// <summary>Procedure whose FMS 1.6 rework creates the showcase's suspect coverage.</summary>
-    private const string GapProcedureNumber = "SYSTP-000001";
+    /// <summary>
+    /// Procedure whose FMS 1.6 rework creates the showcase's suspect coverage.
+    ///
+    /// Deliberately not SYSTP-000001. Procedures are dealt requirements round-robin, so SYSTP-000001 covers
+    /// SYSR-000001 and is therefore the first approved procedure any test that searches for one will find —
+    /// putting it into revision took it out of the covering-procedure list and broke the suspect-coverage
+    /// journey. A fixture that changes what other journeys discover is not an isolated fixture.
+    /// </summary>
+    private const string GapProcedureNumber = "SYSTP-000040";
 
     /// <summary>
     /// A showcase in which all 1,250 requirements are covered can never demonstrate the tool finding a

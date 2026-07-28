@@ -48,7 +48,7 @@ export const stateLabel = (state?: string) => {
 export const coverageLabel = (state?: string) => {
   switch (state?.toLowerCase()) {
     case 'covered': return 'Covered'
-    case 'suspect': return 'Suspect coverage'
+    case 'suspect': return 'Suspect'
     case 'uncovered': return 'Not covered'
     default: return ''
   }

@@ -37,16 +37,19 @@
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   padding: 9px 12px;
   gap: 8px;
 }
-/* min-width: 0 is load-bearing. A flex item defaults to min-width: auto, so this box could not shrink
-   below the intrinsic width of the input it wraps; the command row then overflowed its container and the
-   view-mode switch spilled 12px past the right edge of the document. The search field is the element that
-   should absorb a narrow row, so it is the one told it may. */
+/* This box was originally given min-width: 0 so it could shrink below the intrinsic width of the input it
+   wraps; without that the command row overflowed its container and the view-mode switch spilled 12px past
+   the right edge of the document. The search field is the element that should absorb a narrow row.
+   It was never told how far. Adding the coverage-state filter to this row took the search input to 20px
+   wide — under the 24x24 target minimum, and useless long before that — so "absorb a narrow row" now stops
+   at a usable width and the row wraps beyond it rather than pushing the page sideways. */
 .reqSearch {
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 120px;
   display: flex;
   align-items: center;
   background: #f6f8fb;
@@ -56,7 +59,9 @@
 }
 .reqSearch input {
   flex: 1 1 0;
-  min-width: 0;
+  /* The floor belongs here, not on the wrapper: this is the element that collapses, and it went to 20px
+     wide — under the 24x24 target minimum — when the coverage-state filter joined the row. */
+  min-width: 120px;
   border: 0;
   background: transparent;
   padding: 10px;
@@ -73,6 +78,7 @@
 }
 .reqCommand select,
 .reqCommand > .tagFilter {
+  min-width: 104px;
   height: 38px;
   border: 1px solid #d9e1e9;
   border-radius: 8px;
@@ -257,7 +263,7 @@ html .sectionTree button.active { background: #e2edf7; color: #1d4a72; font-weig
 .reqTableHead,
 .reqTable article {
   display: grid;
-  grid-template-columns: minmax(300px, 1fr) 95px 110px 116px 92px 105px;
+  grid-template-columns: minmax(300px, 1fr) 95px 110px 100px 92px 105px;
   align-items: center;
 }
 .reqTableHead {
@@ -330,6 +336,9 @@ html .sectionTree button.active { background: #e2edf7; color: #1d4a72; font-weig
 .coverageState {
   font-size: 12px;
   line-height: 1.35;
+  /* Two lines here grows the row and costs a requirement off the bottom of the list. The column is sized
+     to hold the longest label on one line. */
+  white-space: nowrap;
   padding: 4px 7px;
   border-radius: 8px;
   width: max-content;

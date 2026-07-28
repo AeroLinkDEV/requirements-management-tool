@@ -727,9 +727,9 @@ export default function RequirementsWorkspace({
             setPage(1);
           }}
         >
-          <option value="">All coverage states</option>
+          <option value="">All coverage</option>
           <option value="covered">Covered</option>
-          <option value="suspect">Suspect coverage</option>
+          <option value="suspect">Suspect</option>
           <option value="uncovered">Not covered</option>
         </select>
         <input
