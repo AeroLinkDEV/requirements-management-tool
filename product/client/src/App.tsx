@@ -18,6 +18,7 @@ import type { AuthUser } from "./IdentityCenter";
 import { PersonAvatar } from "./People";
 // Eager, unlike the other fourteen workspaces. See the note above `lazyView`.
 import EnterpriseControlCenter from "./EnterpriseControlCenter";
+import { apiRequest, operationError, recordClientOperationFailure } from "./apiClient";
 import "./App.css";
 import "./Onboarding.css";
 import "./DashboardInteractions.css";
@@ -316,6 +317,7 @@ function App() {
   }, [loadData]);
   const createWorkspace = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (saving) return;
     setSaving(true);
     setError("");
     const form = new FormData(e.currentTarget),
@@ -323,20 +325,20 @@ function App() {
         ...Object.fromEntries(form),
         initialReleaseIsReleased: form.has("initialReleaseIsReleased"),
       };
-    const response = await fetch(`${API}/api/workspaces`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      setError((await response.json()).error || "Unable to create program.");
+    try {
+      const created = await apiRequest<{ program: { id: string } }>(`${API}/api/workspaces`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      setActiveId(created.program.id);
+      await loadWorkspaces();
+    } catch (reason) {
+      recordClientOperationFailure("workspace.create", reason);
+      setError(operationError(reason, "Unable to create program."));
+    } finally {
       setSaving(false);
-      return;
     }
-    const created = await response.json();
-    setActiveId(created.program.id);
-    await loadWorkspaces();
-    setSaving(false);
   };
   if (user === undefined)
     return <div className="appBoot"><div className="bootMark">▲</div><div><p>AEROLINK CONTROLLED WORKSPACE</p><h1>Establishing your secure session</h1><span>Confirming identity, authority, and active program context…</span><i><b/></i></div></div>;

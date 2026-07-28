@@ -92,9 +92,11 @@ contract — the first commitment to deploy AeroLink for an organization authent
 directory — and in the order given there. Issue #34 may close only when that sequence is either completed
 and evidenced, or formally withdrawn from the program.
 
-The next active focus is not yet selected. The candidates are the workstreams still marked *In progress* in
-the scorecard above, each of which advances against its own published acceptance gate. Record the choice
-here when it is made, so that "what is being built now" has one answer in one place.
+The active focus is the reconciled product-review remediation backlog in issues #99-#139. It is being delivered
+in dependency order: production mutation/test gates; controlled-change correctness and authorization;
+verification/readiness/traceability; content/audit/accessibility/maintainability; then operations, integrity,
+reconciliation and repository governance. This work repairs reachability, correctness and qualification inside
+existing workstreams; it does not by itself move a scorecard boundary or resume Workstream 4 federation.
 
 ## Repository and authority corrections
 

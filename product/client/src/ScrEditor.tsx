@@ -12,6 +12,7 @@ import { RichCaseField } from "./RichContent";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useLocalDraft } from "./autosave";
 import { fromPlainText, toPlainText } from "./richContentModel";
+import { apiRequest, operationError, recordClientOperationFailure } from "./apiClient";
 import "./ScrEditor.css";
 import "./ScrEditorEnhancements.css";
 
@@ -334,7 +335,7 @@ export default function ScrEditor({
     setSaving(true);
     setError("");
     try {
-      const response = await fetch(`${api}/api/scr-drafts`, {
+      const created = await apiRequest<{ id: string; displayNumber: string }>(`${api}/api/scr-drafts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -353,16 +354,12 @@ export default function ScrEditor({
           requirementChanges: started.map((item) => ({ ...item, targetSectionId: item.targetSectionId || null })),
         }),
       });
-      if (!response.ok) {
-        const body = (await response.json()) as { error?: string };
-        throw new Error(body.error || `Unable to save the ${abbreviation} Draft.`);
-      }
-      const created = (await response.json()) as { id: string; displayNumber: string };
       // The record exists now, so the browser copy has nothing left to protect.
       draft.clear();
       onSaved(created.id, created.displayNumber);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : `Unable to save the ${abbreviation} Draft.`);
+      recordClientOperationFailure('change-request.draft.create', reason);
+      setError(operationError(reason, `Unable to save the ${abbreviation} Draft.`));
       setSaving(false);
     }
   };

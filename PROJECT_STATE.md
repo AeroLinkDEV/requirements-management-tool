@@ -175,9 +175,10 @@ the identity administration UI are not in progress and not scheduled. The reason
 resume and the order to resume in are recorded in the contract's Workstream 4 decision record. Do not
 treat that deferral as a backlog to pick up without the trigger being met.
 
-Open issues: **#29** (program parent), **#34** (identity — deferred remainder), **#38** (production
-operations and qualification). The next active focus is deliberately unselected; record it in the
-implementation status document when it is chosen.
+The active focus is the reconciled product-review remediation backlog in issues **#99-#139**, executed in
+dependency-ordered PR batches. Issues **#29** (program parent), **#34** (identity — deferred remainder), and
+**#38** (production operations and qualification) remain the longer-lived program records. The review backlog
+does not reopen the deferred federation scope in #34 or expand into unrelated AeroLink features.
 
 **[PRODUCT_REVIEW_2026_07_26.md](PRODUCT_REVIEW_2026_07_26.md)** holds the findings from the first evening of
 using the product as an engineer would. **Every item in it is now closed** — the six defects, and all nine that
@@ -247,7 +248,10 @@ already-built API and cut about a minute per run.
 `npm run test:production` runs a separate set of journeys against the **built** client served by the API.
 Everything else serves the client with `vite dev`, which is a different artifact — unbundled modules with
 stylesheets injected as they evaluate, rather than chunked code and one extracted, hashed stylesheet. Expect
-it to catch things the dev journeys structurally cannot; it found three defects on its first runs.
+it to catch things the dev journeys structurally cannot. It now performs protected writes immediately after
+deep-linked sign-in, verifies the resulting System SCR and immutable verification result through the API, and
+fault-injects network and conflict responses to prove that failed writes preserve input and create no record
+(DEC-061).
 
 CI runs the dev journeys and the production journeys on Linux for pull requests, plus one unsharded Windows
 pass on the schedule, because Windows remains a supported deployment platform. The Windows job also runs

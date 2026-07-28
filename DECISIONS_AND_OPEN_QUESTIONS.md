@@ -695,6 +695,25 @@ Future entries use:
   removed afterwards. Pull requests from forks require workflow approval, which does not affect branches pushed
   to this repository directly.
 
+### DEC-061 - Browser Mutations Are Session-Bound and Qualified Against the Built Client
+
+- **Date:** 2026-07-28
+- **Status:** Accepted
+- **Decision:** The browser resolves relative and absolute API request addresses against a canonical origin
+  before applying mutation protection. A successful sign-in establishes the CSRF token for that new session
+  before protected controls become actionable; logout, session expiry and credential rotation discard cached
+  mutation state. Only the server's explicit antiforgery rejection may cause one automatic retry, because that
+  rejection proves the controlled operation did not run. Arbitrary failures are never retried.
+- **Rationale:** The compiled single-origin client used relative API addresses, while its fetch wrapper tried to
+  use each relative address as a URL base. Every protected production mutation therefore threw before reaching
+  the server, and the production gate stayed green because it performed reads only. A token cached before
+  sign-in could also survive into the new session and deterministically fail the first protected action.
+- **Consequences:** The compiled-production gate creates a real System SCR and records an immutable verification
+  result, then queries the API to prove both durable outcomes. Mutation surfaces use one error-envelope contract:
+  non-JSON, empty, authorization, conflict and network failures remain visible, release busy state, preserve safe
+  input, and never display success until the server confirms it. Client failure diagnostics record only an
+  operation identifier and transport status/code, never credentials, request bodies or controlled content.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
