@@ -264,7 +264,7 @@ public sealed class JiraConnectorService(AeroLinkDbContext db, IJiraClient clien
         if (baseUrl is not null)
         {
             var discipline = scr.Type == ChangeRequestType.Software ? "software" : "systems";
-            body.AppendLine($"The controlled record is authoritative: {baseUrl}/{discipline}/change-requests/{scr.Id}");
+            body.AppendLine($"The controlled record is authoritative: {baseUrl}/open/{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}/{scr.Id}");
         }
         else
         {

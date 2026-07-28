@@ -36,15 +36,15 @@ public sealed class NotificationLinkBuilder(IConfiguration configuration)
         if (string.IsNullOrWhiteSpace(id)) return "/";
         return kind switch
         {
-            "scr" => $"/systems/change-requests/{id}",
-            "swcr" => $"/software/change-requests/{id}",
-            "requirement" => $"/systems/requirements/{id}",
-            "procedure" => $"/system-verification/procedures/{id}",
+            "scr" => $"/open/scr/{id}",
+            "swcr" => $"/open/swcr/{id}",
+            "requirement" => $"/open/requirement/{id}",
+            "procedure" => $"/open/procedure/{id}",
             "verification-impact" => "/system-verification",
-            "baseline" => $"/baselines/{id}",
+            "baseline" => $"/open/baseline/{id}",
             "release" or "campaign" => "/release-readiness",
-            "document" => $"/documents/{id}",
-            "problem-report" => $"/problem-reports/{id}",
+            "document" => $"/open/document/{id}",
+            "problem-report" => $"/open/problem-report/{id}",
             _ => "/",
         };
     }
