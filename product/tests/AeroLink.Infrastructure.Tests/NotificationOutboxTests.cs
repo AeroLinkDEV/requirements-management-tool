@@ -124,7 +124,7 @@ public sealed class NotificationOutboxTests
             var message = Assert.Single(sender.Sent);
             Assert.Equal("approver@example.test", message.To);
             Assert.Contains("SCR-00000031.00", message.Subject);
-            Assert.Contains("https://aerolink.example.test/systems/change-requests/11111111-1111-1111-1111-111111111111", message.PlainTextBody);
+            Assert.Contains("https://aerolink.example.test/open/scr/11111111-1111-1111-1111-111111111111", message.PlainTextBody);
             Assert.Contains("/api/notifications/unsubscribe", message.PlainTextBody);
             Assert.Equal(NotificationDeliveryState.Sent, (await db.NotificationDeliveries.AsNoTracking().SingleAsync()).State);
         }
@@ -274,12 +274,21 @@ public sealed class NotificationOutboxTests
         Assert.False(tokens.Validate("approver.user", "anything"));
     }
 
+    /// <summary>
+    /// These used to expect paths such as /systems/change-requests/{id}, which the client router cannot
+    /// resolve — it accepts application routes only beneath /programs/{p}/projects/{pr}/releases/{r}/. The
+    /// assertions were green for as long as the links were broken, because comparing a generated string to
+    /// an expected string proves the two agree and nothing about whether either one opens anything.
+    ///
+    /// Artifact routes now address the resolver, which owns the context lookup. `open-link.spec.ts` follows
+    /// one of these through a running product, which is the assertion that could have caught the original.
+    /// </summary>
     [Theory]
-    [InlineData("scr:abc", "/systems/change-requests/abc")]
-    [InlineData("swcr:abc", "/software/change-requests/abc")]
-    [InlineData("requirement:xyz", "/systems/requirements/xyz")]
+    [InlineData("scr:abc", "/open/scr/abc")]
+    [InlineData("swcr:abc", "/open/swcr/abc")]
+    [InlineData("requirement:xyz", "/open/requirement/xyz")]
     [InlineData("verification-impact:1", "/system-verification")]
-    [InlineData("problem-report:7", "/problem-reports/7")]
+    [InlineData("problem-report:7", "/open/problem-report/7")]
     [InlineData("something-new:1", "/")]
     [InlineData("", "/")]
     public void Routes_resolve_to_client_paths_and_never_to_nothing(string route, string expected) =>

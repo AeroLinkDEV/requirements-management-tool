@@ -124,7 +124,7 @@ public sealed class JiraConnectorTests
             Assert.Contains("SCR-00000031.00", summary);
             // The point of the link is that somebody reading the tracker can reach the record that is
             // authoritative — and the tracker is never that record.
-            Assert.Contains($"https://aerolink.example.test/systems/change-requests/{scr.Id}", description);
+            Assert.Contains($"https://aerolink.example.test/open/scr/{scr.Id}", description);
             Assert.Contains("Sequencing drifts on long oceanic legs.", description);
         }
         finally { File.Delete(seed.Path); }

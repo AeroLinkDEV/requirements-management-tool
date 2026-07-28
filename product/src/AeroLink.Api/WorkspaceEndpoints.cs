@@ -201,6 +201,93 @@ public static class WorkspaceEndpoints
             return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now), drafts = authoredDrafts.Count }, tasks });
         });
 
+        // Notifications and Jira emitted paths such as /systems/change-requests/{id}. The client router
+        // accepts application routes only beneath /programs/{p}/projects/{pr}/releases/{r}/, so a recipient
+        // received a valid-looking link to a controlled record and landed on Not Found. One resolver owns
+        // that mapping now, rather than every emitter holding a copy of the URL shape.
+        //
+        // Deliberately not under /api: this is opened from a mail client, and the session gate answers an
+        // unauthenticated /api request with a JSON 401. Missing, unauthorized and unauthenticated all end at
+        // the workspace root, so probing cannot distinguish an artifact that exists from one that does not.
+        app.MapGet("/open/{kind}/{id:guid}", async (string kind, Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var user = await identity.ResolveAsync(http.Request.Cookies[IdentityService.CookieName], DateTimeOffset.UtcNow, ct);
+            if (user is null) return Results.Redirect("/");
+            http.Items["AeroLink.User"] = user;
+
+            var normalized = kind.Trim().ToLowerInvariant();
+            Guid? projectId = null, releaseId = null; var tail = "";
+            switch (normalized)
+            {
+                case "scr" or "swcr" or "change-request":
+                {
+                    var record = await db.SystemChangeRequests.AsNoTracking().Where(x => x.Id == id)
+                        .Select(x => new { x.ProjectId, x.TargetReleaseId, x.Type }).SingleOrDefaultAsync(ct);
+                    if (record is not null)
+                    {
+                        projectId = record.ProjectId; releaseId = record.TargetReleaseId;
+                        tail = $"/{(record.Type == ChangeRequestType.Software ? "software" : "systems")}/change-requests/{id}";
+                    }
+                    break;
+                }
+                case "requirement":
+                {
+                    var record = await db.Requirements.AsNoTracking().Where(x => x.Id == id)
+                        .Select(x => new { x.ProjectId, x.Level }).SingleOrDefaultAsync(ct);
+                    if (record is not null)
+                    {
+                        projectId = record.ProjectId;
+                        tail = $"/requirements/{id}?discipline={(record.Level == RequirementLevel.System ? "system" : "software")}";
+                    }
+                    break;
+                }
+                case "procedure":
+                {
+                    var record = await db.TestProcedures.AsNoTracking().Where(x => x.Id == id)
+                        .Select(x => new { x.ProjectId, x.Level }).SingleOrDefaultAsync(ct);
+                    if (record is not null)
+                    {
+                        projectId = record.ProjectId;
+                        tail = record.Level == TestProcedureLevel.System ? "/system-verification" : "/software-verification";
+                    }
+                    break;
+                }
+                case "baseline":
+                {
+                    var record = await db.CandidateBaselines.AsNoTracking().Where(x => x.Id == id)
+                        .Select(x => new { x.ProjectId, x.ReleaseId }).SingleOrDefaultAsync(ct);
+                    if (record is not null) { projectId = record.ProjectId; releaseId = record.ReleaseId; tail = "/baselines"; }
+                    break;
+                }
+                case "document":
+                {
+                    var record = await db.ControlledDocuments.AsNoTracking().Where(x => x.Id == id)
+                        .Select(x => new { x.ProjectId, x.ReleaseId }).SingleOrDefaultAsync(ct);
+                    if (record is not null) { projectId = record.ProjectId; releaseId = record.ReleaseId; tail = "/traceability"; }
+                    break;
+                }
+                case "problem-report":
+                {
+                    var record = await db.ProblemReports.AsNoTracking().Where(x => x.Id == id)
+                        .Select(x => new { x.ProjectId }).SingleOrDefaultAsync(ct);
+                    if (record is not null) { projectId = record.ProjectId; tail = "/problem-reports"; }
+                    break;
+                }
+            }
+
+            if (projectId is null) return Results.Redirect("/");
+            if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Redirect("/");
+            var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
+            if (programId is null) return Results.Redirect("/");
+            // A record that does not carry a release of its own opens in the one being worked, which is where
+            // the reader would have gone looking for it anyway.
+            releaseId ??= await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
+                .OrderBy(x => x.IsReleased).ThenByDescending(x => x.Version)
+                .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+            if (releaseId is null) return Results.Redirect("/");
+            return Results.Redirect($"/programs/{programId}/projects/{projectId}/releases/{releaseId}{tail}");
+        });
+
         // Bounded, Program-scoped universal search. Results are identifiers plus stable IDs;
         // the client owns the durable URL so every result can be opened in a new tab.
         app.MapGet("/api/search",async(Guid projectId,string query,int? limit,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
