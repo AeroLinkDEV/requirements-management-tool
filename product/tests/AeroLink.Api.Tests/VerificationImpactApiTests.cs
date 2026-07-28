@@ -6,6 +6,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -178,6 +179,105 @@ public sealed class VerificationImpactApiTests
         using var unknownProcedure = await client.PostAsJsonAsync($"/api/verification-impact/{id}/resolve",
             new { outcome = "ProcedureCoverageConfirmed", rationale = "Covered.", procedureId = Guid.NewGuid() });
         Assert.Equal(HttpStatusCode.BadRequest, unknownProcedure.StatusCode);
+    }
+
+    [Fact]
+    public async Task Exact_procedure_evidence_survives_reload_and_reopen_preserves_history()
+    {
+        using var factory = new AeroLinkApiFactory();
+        var fixture = await SeedAsync(factory,
+            ("cm.user", ProgramRole.ConfigurationManager),
+            ("lead.user", ProgramRole.TestLead),
+            ("eng.user", ProgramRole.TestEngineer));
+
+        using (var cm = factory.CreateClient())
+        {
+            await LoginAsync(cm, "cm.user");
+            Assert.Equal(HttpStatusCode.OK,
+                (await cm.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/freeze", new { })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK,
+                (await cm.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/materialize-requirements", new { })).StatusCode);
+        }
+
+        Guid procedureId;
+        Guid procedureRevisionId;
+        Guid requirementRevisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            requirementRevisionId = await db.RequirementRevisions.Select(x => x.Id).SingleAsync();
+            var now = DateTimeOffset.UtcNow;
+            var procedure = new TestProcedure(fixture.ProjectId, "SYSTP-00000999",
+                "Exact retained decision evidence", "procedure.author", now);
+            var revision = new TestProcedureRevision(procedure.Id, 2, "Objective", "Configuration",
+                "Steps", "Expected", TestProcedureState.Approved, "procedure.author", now);
+            db.AddRange(procedure, revision);
+            await db.SaveChangesAsync();
+            procedureId = procedure.Id;
+            procedureRevisionId = revision.Id;
+        }
+
+        Guid itemId;
+        using (var lead = factory.CreateClient())
+        {
+            await LoginAsync(lead, "lead.user");
+            var items = await lead.GetFromJsonAsync<JsonElement>(
+                $"/api/releases/{fixture.ReleaseId}/verification-impact");
+            itemId = items[0].GetProperty("id").GetGuid();
+            using var assigned = await lead.PostAsJsonAsync(
+                $"/api/verification-impact/{itemId}/assign", new { engineerId = "eng.user" });
+            Assert.Equal(HttpStatusCode.OK, assigned.StatusCode);
+        }
+
+        using (var engineer = factory.CreateClient())
+        {
+            await LoginAsync(engineer, "eng.user");
+            using var resolved = await engineer.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve", new
+            {
+                outcome = "ProcedureCoverageConfirmed",
+                rationale = "The exact approved revision covers this materialized configuration.",
+                procedureId
+            });
+            Assert.Equal(HttpStatusCode.OK, resolved.StatusCode);
+            var body = await resolved.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(procedureRevisionId, body.GetProperty("resolvedProcedureRevisionId").GetGuid());
+            var selected = body.GetProperty("resolvedProcedure");
+            Assert.Equal("SYSTP-00000999.02", selected.GetProperty("displayNumber").GetString());
+            Assert.Equal("Exact retained decision evidence", selected.GetProperty("title").GetString());
+            Assert.Equal(requirementRevisionId,
+                selected.GetProperty("configuration").GetProperty("requirementRevisionId").GetGuid());
+            Assert.Equal("eng.user", body.GetProperty("resolvedBy").GetString());
+            Assert.Equal("eng.user", body.GetProperty("assignedEngineerId").GetString());
+            Assert.Equal(1, body.GetProperty("decisionHistory").GetArrayLength());
+
+            var reloaded = await engineer.GetFromJsonAsync<JsonElement>(
+                $"/api/releases/{fixture.ReleaseId}/verification-impact");
+            Assert.Equal(procedureRevisionId,
+                reloaded[0].GetProperty("resolvedProcedure").GetProperty("revisionId").GetGuid());
+
+            using var reopened = await engineer.PostAsJsonAsync($"/api/verification-impact/{itemId}/reopen",
+                new { rationale = "A changed interpretation requires a new verification decision." });
+            Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
+            var open = await reopened.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(open.GetProperty("blocksBaselineApproval").GetBoolean());
+            Assert.Equal("Assigned", open.GetProperty("state").GetString());
+            Assert.Equal(JsonValueKind.Null, open.GetProperty("resolvedProcedure").ValueKind);
+            Assert.Equal(2, open.GetProperty("decisionHistory").GetArrayLength());
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var historyRows = await db.VerificationImpactDecisionHistory.AsNoTracking()
+                .Where(x => x.VerificationImpactItemId == itemId).ToListAsync();
+            var histories = historyRows.OrderBy(x => x.OccurredAt).ToList();
+            Assert.Equal([VerificationImpactHistoryAction.Resolved, VerificationImpactHistoryAction.Reopened],
+                histories.Select(x => x.Action));
+            Assert.Equal(procedureRevisionId, histories[0].ProcedureRevisionId);
+            var coverage = await db.TestCoverage.AsNoTracking().SingleAsync(
+                x => x.RequirementRevisionId == requirementRevisionId && x.ProcedureRevisionId == procedureRevisionId);
+            Assert.True(coverage.IsSuspect);
+        }
     }
 
     [Fact]

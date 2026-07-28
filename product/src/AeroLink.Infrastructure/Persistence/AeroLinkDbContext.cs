@@ -36,6 +36,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<TestRequirementCoverage> TestCoverage => Set<TestRequirementCoverage>();
     public DbSet<TestExecution> TestExecutions => Set<TestExecution>();
     public DbSet<VerificationImpactItem> VerificationImpactItems => Set<VerificationImpactItem>();
+    public DbSet<VerificationImpactDecisionHistory> VerificationImpactDecisionHistory => Set<VerificationImpactDecisionHistory>();
     public DbSet<RequirementTraceLink> RequirementTraces => Set<RequirementTraceLink>();
     public DbSet<ControlledDocument> ControlledDocuments => Set<ControlledDocument>();
     public DbSet<ReleaseCampaign> ReleaseCampaigns => Set<ReleaseCampaign>();
@@ -361,6 +362,23 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasIndex(x => x.AssignedEngineerId);
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestProcedure>().WithMany().HasForeignKey(x => x.ResolvedProcedureId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ResolvedProcedureRevisionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<VerificationImpactDecisionHistory>(b =>
+        {
+            b.ToTable("verification_impact_decision_history"); b.HasKey(x => x.Id);
+            b.Property(x => x.Action).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.ActorId).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.VerificationImpactItemId, x.OccurredAt });
+            b.HasOne<VerificationImpactItem>().WithMany().HasForeignKey(x => x.VerificationImpactItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestProcedure>().WithMany().HasForeignKey(x => x.ProcedureId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<TestExecution>(b =>
         {

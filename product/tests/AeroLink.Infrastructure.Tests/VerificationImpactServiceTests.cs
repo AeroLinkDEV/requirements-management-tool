@@ -166,8 +166,8 @@ public sealed class VerificationImpactServiceTests
 
                 var items = await resolve.VerificationImpactItems.OrderBy(x => x.SubjectDisplayNumber).ToListAsync();
                 items[0].AssignToEngineer("test.lead", "test.engineer", Now);
-                items[0].Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
-                    "Covered by SYSTP-00000501 revision 00.", Now.AddHours(1), Guid.NewGuid());
+                items[0].Resolve("test.engineer", VerificationImpactOutcome.NoTestRequired,
+                    "Verified by an attributable analysis record.", Now.AddHours(1));
                 await resolve.SaveChangesAsync();
 
                 var remaining = await service.OutstandingForReleaseAsync(releaseId, default);

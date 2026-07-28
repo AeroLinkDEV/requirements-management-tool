@@ -14,6 +14,7 @@ public enum VerificationImpactTrigger
 }
 
 public enum VerificationImpactState { Open, Assigned, Resolved }
+public enum VerificationImpactHistoryAction { Resolved, Reopened }
 
 /// <summary>
 /// What a verification engineer decided. Every value is an explicit judgement — there is no outcome that
@@ -129,6 +130,8 @@ public sealed class VerificationImpactItem
     public VerificationImpactOutcome? Outcome { get; private set; }
     /// <summary>The procedure named when coverage was confirmed; the exact link is bound at materialisation.</summary>
     public Guid? ResolvedProcedureId { get; private set; }
+    /// <summary>The immutable approved procedure revision selected by the decision.</summary>
+    public Guid? ResolvedProcedureRevisionId { get; private set; }
     public string ResolutionRationale { get; private set; } = "";
     public string? ResolvedBy { get; private set; }
     public DateTimeOffset? ResolvedAt { get; private set; }
@@ -160,7 +163,7 @@ public sealed class VerificationImpactItem
     /// so naming the procedure keeps the claim checkable instead of leaving it as prose.
     /// </summary>
     public void Resolve(string actorId, VerificationImpactOutcome outcome, string rationale, DateTimeOffset now,
-        Guid? procedureId = null)
+        Guid? procedureId = null, Guid? procedureRevisionId = null)
     {
         EnsureUnresolved();
         if (!Enum.IsDefined(outcome)) throw new DomainException("An unknown verification outcome cannot be recorded.");
@@ -168,14 +171,36 @@ public sealed class VerificationImpactItem
             throw new DomainException($"{outcome} does not apply to a {Trigger} item.");
         if (outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed && (procedureId is null || procedureId == Guid.Empty))
             throw new DomainException("Confirming coverage requires the approved procedure that covers the requirement.");
-        if (outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed && procedureId is not null)
+        if (outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed
+            && (procedureRevisionId is null || procedureRevisionId == Guid.Empty))
+            throw new DomainException("Confirming coverage requires the exact approved procedure revision.");
+        if (outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed
+            && (procedureId is not null || procedureRevisionId is not null))
             throw new DomainException("Only confirmed coverage names a procedure.");
         ResolvedProcedureId = procedureId;
+        ResolvedProcedureRevisionId = procedureRevisionId;
         Outcome = outcome;
         ResolutionRationale = Required(rationale, "resolution rationale");
         ResolvedBy = Required(actorId, "resolving verification engineer");
         ResolvedAt = now;
         State = VerificationImpactState.Resolved;
+        Touch(now);
+    }
+
+    /// <summary>Withdraws the current decision without erasing its separately persisted history.</summary>
+    public void Reopen(string actorId, string rationale, DateTimeOffset now)
+    {
+        if (State != VerificationImpactState.Resolved)
+            throw new DomainException("Only a resolved verification impact item can be reopened.");
+        Required(actorId, "verification engineer reopening the decision");
+        Required(rationale, "reopen rationale");
+        Outcome = null;
+        ResolvedProcedureId = null;
+        ResolvedProcedureRevisionId = null;
+        ResolutionRationale = "";
+        ResolvedBy = null;
+        ResolvedAt = null;
+        State = AssignedEngineerId is null ? VerificationImpactState.Open : VerificationImpactState.Assigned;
         Touch(now);
     }
 
@@ -222,4 +247,41 @@ public sealed class VerificationImpactItem
 
     private static string Required(string value, string name) =>
         string.IsNullOrWhiteSpace(value) ? throw new DomainException($"A {name} is required.") : value.Trim();
+}
+
+/// <summary>An immutable audit entry for a verification-impact decision or its withdrawal.</summary>
+public sealed class VerificationImpactDecisionHistory
+{
+    private VerificationImpactDecisionHistory() { }
+
+    public VerificationImpactDecisionHistory(Guid itemId, VerificationImpactHistoryAction action,
+        VerificationImpactOutcome? outcome, Guid? procedureId, Guid? procedureRevisionId,
+        string rationale, string actorId, DateTimeOffset occurredAt)
+    {
+        if (itemId == Guid.Empty) throw new DomainException("Verification-impact history requires its item.");
+        if (!Enum.IsDefined(action)) throw new DomainException("Verification-impact history requires a known action.");
+        Id = Guid.NewGuid();
+        VerificationImpactItemId = itemId;
+        Action = action;
+        Outcome = outcome;
+        ProcedureId = procedureId;
+        ProcedureRevisionId = procedureRevisionId;
+        Rationale = string.IsNullOrWhiteSpace(rationale)
+            ? throw new DomainException("Verification-impact history requires a rationale.")
+            : rationale.Trim();
+        ActorId = string.IsNullOrWhiteSpace(actorId)
+            ? throw new DomainException("Verification-impact history requires an actor.")
+            : actorId.Trim();
+        OccurredAt = occurredAt;
+    }
+
+    public Guid Id { get; private set; }
+    public Guid VerificationImpactItemId { get; private set; }
+    public VerificationImpactHistoryAction Action { get; private set; }
+    public VerificationImpactOutcome? Outcome { get; private set; }
+    public Guid? ProcedureId { get; private set; }
+    public Guid? ProcedureRevisionId { get; private set; }
+    public string Rationale { get; private set; } = "";
+    public string ActorId { get; private set; } = "";
+    public DateTimeOffset OccurredAt { get; private set; }
 }

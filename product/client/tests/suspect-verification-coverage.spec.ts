@@ -97,6 +97,19 @@ test('modified requirement coverage stays suspect until an exact approved proced
       coverageState: 'Suspect',
     }),
   ]))
+  const impactResponse = await request.get(
+    `${apiBase}/api/releases/${showcase.activeReleaseId}/verification-impact`,
+  )
+  expect(impactResponse.ok(), await impactResponse.text()).toBeTruthy()
+  const impactItem = (await impactResponse.json()).find(
+    (item: any) => item.subjectDisplayNumber === changed.displayNumber,
+  )
+  expect(impactItem).toBeTruthy()
+  const assignmentResponse = await request.post(
+    `${apiBase}/api/verification-impact/${impactItem.id}/assign`,
+    { data: { engineerId: 'admin' } },
+  )
+  expect(assignmentResponse.ok(), await assignmentResponse.text()).toBeTruthy()
 
   await login(page)
   await selectProgram(page, 'Flight Management System Live Program')
@@ -119,7 +132,42 @@ test('modified requirement coverage stays suspect until an exact approved proced
   await decision.getByLabel('Rationale').fill('The exact approved procedure still exercises the clarified deterministic response.')
   await decision.getByRole('button', { name: 'Record decision' }).click()
 
-  await expect(impactRow.getByText('Coverage confirmed')).toBeVisible()
+  await expect(impactRow.locator('.impactState').getByText('Coverage confirmed', { exact: true })).toBeVisible()
+  await expect(impactRow.locator('.impactAssignment')).toContainText('Assigned to')
+  await expect(impactRow.getByText('Exact procedure coverage', { exact: true })).toBeVisible()
+  await expect(impactRow).toContainText(approvedProcedure.displayNumber)
+  await expect(impactRow).toContainText(approvedProcedure.revisionId)
+  await expect(impactRow).toContainText('Decided by')
+  await impactRow.getByRole('button', { name: /Open selected procedure/ }).click()
+  const focusedProcedure = page.locator('.procedureRow.focused')
+  await expect(focusedProcedure).toContainText(approvedProcedure.displayNumber)
+  await expect(focusedProcedure).toContainText(approvedProcedure.title)
+
+  await page.getByRole('button', { name: /^Change impact/ }).click()
+  await impactRow.getByRole('button', { name: /Reopen \/ change decision/ }).click()
+  const reopen = page.getByRole('dialog', { name: 'Reopen verification decision' })
+  await reopen.getByLabel('Reopen rationale').fill(
+    'A second review must preserve the first decision while restoring the release gate.',
+  )
+  await reopen.getByRole('button', { name: 'Reopen decision' }).click()
+  await expect(impactRow.getByText(/Assigned · admin/)).toBeVisible()
+  await expect(impactRow.getByRole('button', { name: /Record decision/ })).toBeVisible()
+
+  await page.getByRole('button', { name: /Requirement coverage/ }).click()
+  await expect(coverageRow.getByText('Suspect', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /^Change impact/ }).click()
+  await impactRow.getByRole('button', { name: /Record decision/ }).click()
+  const replacementDecision = page.getByRole('dialog', { name: 'Record verification decision' })
+  await replacementDecision.getByLabel('Decision').selectOption('ProcedureCoverageConfirmed')
+  await replacementDecision.getByLabel('Covering procedure').selectOption(approvedProcedure.procedureId)
+  await replacementDecision.getByLabel('Rationale').fill(
+    'The repeat review confirms the same exact controlled procedure revision.',
+  )
+  await replacementDecision.getByRole('button', { name: 'Record decision' }).click()
+  await expect(impactRow.locator('.impactState').getByText('Coverage confirmed', { exact: true })).toBeVisible()
+  await impactRow.getByText(/Decision history · 3/).click()
+  await expect(impactRow.getByText('Decision reopened')).toBeVisible()
+
   await page.getByRole('button', { name: /Requirement coverage/ }).click()
   await expect(coverageRow.getByText('Verified', { exact: true })).toBeVisible()
   await expect(selectedProcedureLink).not.toContainText('Suspect applicability')
@@ -139,4 +187,15 @@ test('modified requirement coverage stays suspect until an exact approved proced
       coverageState: 'Confirmed',
     }),
   ]))
+  const finalImpactResponse = await request.get(
+    `${apiBase}/api/releases/${showcase.activeReleaseId}/verification-impact`,
+  )
+  const finalImpact = (await finalImpactResponse.json()).find((item: any) => item.id === impactItem.id)
+  expect(finalImpact.blocksBaselineApproval).toBe(false)
+  expect(finalImpact.resolvedProcedure.revisionId).toBe(approvedProcedure.revisionId)
+  expect(finalImpact.decisionHistory.map((entry: any) => entry.action)).toEqual([
+    'Resolved',
+    'Reopened',
+    'Resolved',
+  ])
 })
