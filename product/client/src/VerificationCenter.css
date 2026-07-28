@@ -190,6 +190,9 @@
 
 .pass { background: #e3f4ed; color: #28765e; }
 .covered { background: #e8f1ff; color: #3168ac; }
+.coverageRow.suspect { border-left: 3px solid #d49a2f; padding-left: 12px; background: #fffaf0; }
+.coverageRow i.suspect { background: #fff0c9; color: #765313; }
+.coverageRow > button { margin-top: 10px; border: 0; border-radius: 7px; background: #805d16; padding: 8px 11px; color: white; font-size: 12px; font-weight: 700; }
 .gap,
 .fail { background: #fbe8eb; color: #a04b5d; }
 .blocked,

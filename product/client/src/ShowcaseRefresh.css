@@ -456,5 +456,7 @@
 .activeChangeCard small, .traceRelation small { color: #758599; font-size: 12px; }
 .traceRelation { border-left: 3px solid #77bcb2; border-radius: 0 8px 8px 0; background: #f7faf9; padding: 10px 11px; }
 .traceRelation b { color: #1a6270; font-size: 12px; }
+.traceRelation.attention { border-left-color: #d49a2f; background: #fff8e9; }
+.traceRelation.attention button { margin-top: 8px; border: 0; border-radius: 7px; background: #805d16; padding: 7px 10px; color: white; font-size: 12px; font-weight: 700; }
 .traceEmpty { display: flex; flex-direction: column; gap: 3px; border: 1px dashed #d4dde4; border-radius: 8px; padding: 12px; color: #738194; font-size: 12px; line-height: 1.45; }
 .traceEmpty.attention { border-color: #e7cf98; background: #fff9ec; color: #836523; }

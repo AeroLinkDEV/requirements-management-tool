@@ -26,16 +26,17 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class AuthoringTracedImpactTests
 {
-    private sealed record Traced(string BaseNumber, bool Known, string? DisplayNumber,
+    private sealed record Traced(string BaseNumber, bool Known, string? DisplayNumber, Guid? RequirementRevisionId,
         TracedRequirement[] DerivedRequirements, TracedProcedure[] CoveringProcedures);
     private sealed record TracedRequirement(Guid Id, string DisplayNumber, string Level, string Statement, string LinkType);
-    private sealed record TracedProcedure(Guid Id, string DisplayNumber, string Title, string Level, string State);
+    private sealed record TracedProcedure(Guid Id, Guid RevisionId, string DisplayNumber, string Title, string Level,
+        string State, bool IsSuspect, string CoverageState);
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>A parent requirement, a child that derives from it, and a procedure that verifies the parent.</summary>
     private static async Task<(Guid ProjectId, string ParentNumber, string ChildNumber, string ProcedureNumber)> SeedAsync(
-        AeroLinkApiFactory factory)
+        AeroLinkApiFactory factory, bool suspectCoverage = false)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -76,7 +77,10 @@ public sealed class AuthoringTracedImpactTests
         var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Purpose", "Configuration", "Steps",
             "Expected", TestProcedureState.Approved, "test.author", now);
         db.AddRange(procedure, procedureRevision);
-        db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, parentRevision.Id));
+        db.TestCoverage.Add(suspectCoverage
+            ? TestRequirementCoverage.CarriedForward(procedureRevision.Id, parentRevision.Id,
+                "The parent requirement wording changed.", now)
+            : new TestRequirementCoverage(procedureRevision.Id, parentRevision.Id));
 
         await db.SaveChangesAsync();
         return (project.Id, parent.BaseNumber, child.BaseNumber, procedure.BaseNumber);
@@ -109,6 +113,27 @@ public sealed class AuthoringTracedImpactTests
         Assert.Equal("HighLevel", traced.DerivedRequirements[0].Level);
         Assert.Equal(procedureNumber, Assert.Single(traced.CoveringProcedures).DisplayNumber[..procedureNumber.Length]);
         Assert.Equal("Approved", traced.CoveringProcedures[0].State);
+        Assert.Equal("Confirmed", traced.CoveringProcedures[0].CoverageState);
+        Assert.False(traced.CoveringProcedures[0].IsSuspect);
+        Assert.NotEqual(Guid.Empty, traced.CoveringProcedures[0].RevisionId);
+        Assert.NotNull(traced.RequirementRevisionId);
+    }
+
+    [Fact]
+    public async Task A_suspect_link_is_reported_separately_from_the_approved_procedure_lifecycle()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var (projectId, parentNumber, _, _) = await SeedAsync(factory, suspectCoverage: true);
+        await SignInAsync(client);
+
+        var traced = await client.GetFromJsonAsync<Traced>(
+            $"/api/authoring/impact?projectId={projectId}&baseNumber={parentNumber}", Json);
+
+        var procedure = Assert.Single(traced!.CoveringProcedures);
+        Assert.Equal("Approved", procedure.State);
+        Assert.True(procedure.IsSuspect);
+        Assert.Equal("Suspect", procedure.CoverageState);
     }
 
     /// <summary>

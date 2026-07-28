@@ -31,7 +31,7 @@ type RequirementImpact = {
   id: string; displayNumber: string;
   parents: { id: string; displayNumber: string; statement: string; type: string }[];
   children: { id: string; displayNumber: string; statement: string; type: string }[];
-  tests: { id: string; displayNumber: string; title: string; state: string }[];
+  tests: { id: string; revisionId: string; displayNumber: string; title: string; state: string; isSuspect: boolean; coverageState: "Confirmed" | "Suspect" }[];
   baselines: { baseline: string; release: string; state: string }[];
   documents: { id: string; documentNumber: string; revision: number; title: string; type: string; contentHash: string }[];
 };
@@ -201,7 +201,7 @@ function ImpactView({ detail, scr, affected, selectedIndex, selected, onSelect, 
   const impact = selected?.impact;
   const tests = impact?.tests.slice(0, 2) ?? [];
   const traceCount = (impact?.parents.length ?? 0) + (impact?.children.length ?? 0);
-  const gapCount = Math.max(0, tests.length ? tests.filter((item) => item.state !== "Approved").length : 1);
+  const gapCount = Math.max(0, tests.length ? tests.filter((item) => item.state !== "Approved" || item.isSuspect).length : 1);
   const visibleAffected = affected.map((item, index) => ({ item, index })).filter(({ item }) => !query.trim() || `${item.displayNumber} ${item.statement} ${item.kind}`.toLowerCase().includes(query.trim().toLowerCase()));
   return <>
     <PageHeader eyebrow={`FMS LIVE / RELEASE ${detail.release} / ${compactNumber(scr.displayNumber)}`} title="Change Impact Review" subtitle="Understand the full lifecycle effect before making a decision." onBack={onBack} backLabel="Back to readiness" actionLabel="Open in Changes" onAction={onOpenScr} />

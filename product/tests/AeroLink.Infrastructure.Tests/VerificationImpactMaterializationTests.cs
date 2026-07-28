@@ -187,6 +187,60 @@ public sealed class VerificationImpactMaterializationTests
     }
 
     [Fact]
+    public async Task Confirming_a_procedure_after_materialisation_clears_the_existing_suspect_link()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            await using var db = new AeroLinkDbContext(seed.Options);
+
+            var introduce = ApprovedScr("SCR-00000001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+                "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
+            var first = FrozenBaseline("SWBL-00000001", seed.ProjectId, seed.ReleaseId, null, introduce, now);
+            db.AddRange(introduce, first);
+            await db.SaveChangesAsync();
+            await MaterializeAsync(db, first.Id, now);
+
+            var firstRevision = await db.RequirementRevisions.SingleAsync();
+            var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", now);
+            var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
+                "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
+                TestProcedureState.Approved, "test.engineer", now);
+            db.AddRange(procedure, procedureRevision);
+            db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
+            await db.SaveChangesAsync();
+
+            var modify = ApprovedScr("SCR-00000002", "SWR-00002375", 1, RequirementChangeKind.Modify,
+                "The FMS shall sequence oceanic waypoints within two seconds.", seed.ProjectId, seed.ReleaseId, now);
+            var second = FrozenBaseline("SWBL-00000002", seed.ProjectId, seed.ReleaseId, first.Id, modify, now);
+            db.AddRange(modify, second);
+            var service = new VerificationImpactService(db);
+            await service.RaiseForApprovedChangeRequestAsync(modify, now, default);
+            await db.SaveChangesAsync();
+            await MaterializeAsync(db, second.Id, now);
+
+            var item = await db.VerificationImpactItems.SingleAsync();
+            Assert.NotNull(item.RequirementRevisionId);
+            Assert.True((await db.TestCoverage.SingleAsync(
+                x => x.RequirementRevisionId == item.RequirementRevisionId)).IsSuspect);
+
+            item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
+                "The procedure still exercises the exact changed requirement.", now.AddHours(1), procedure.Id);
+            Assert.True(await service.ApplyResolvedCoverageAsync(item, now.AddHours(1), default));
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+
+            var links = await db.TestCoverage.AsNoTracking()
+                .Where(x => x.RequirementRevisionId == item.RequirementRevisionId).ToListAsync();
+            Assert.Single(links);
+            Assert.False(links[0].IsSuspect);
+            Assert.Equal("test.engineer", links[0].ConfirmedBy);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
     public async Task Retiring_the_last_requirement_a_procedure_covers_raises_an_orphan_item()
     {
         var seed = await SeedAsync();

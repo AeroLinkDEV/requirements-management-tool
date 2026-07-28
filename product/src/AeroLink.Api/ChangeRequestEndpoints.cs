@@ -201,26 +201,27 @@ public static class ChangeRequestEndpoints
                                      linkType = link.Type.ToString(),
                                  }).ToListAsync(ct);
 
-            var procedures = await (from coverage in db.TestCoverage.AsNoTracking().Where(x => x.RequirementRevisionId == current.Id)
-                                    join revision in db.TestProcedureRevisions.AsNoTracking() on coverage.ProcedureRevisionId equals revision.Id
-                                    join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
-                                    orderby procedure.BaseNumber
-                                    select new
-                                    {
-                                        procedure.Id,
-                                        displayNumber = procedure.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
-                                        procedure.Title,
-                                        level = procedure.Level.ToString(),
-                                        state = revision.State.ToString(),
-                                    }).ToListAsync(ct);
+            var procedures = await VerificationCoverageProjection.ForRequirementRevisionsAsync(
+                db, [current.Id], ct);
 
             return Results.Ok(new
             {
                 baseNumber = artifact.BaseNumber,
                 known = true,
                 displayNumber = artifact.BaseNumber + "." + (current.Revision < 10 ? "0" : "") + current.Revision,
+                requirementRevisionId = current.Id,
                 derivedRequirements = derived,
-                coveringProcedures = procedures,
+                coveringProcedures = procedures.Select(x => new
+                {
+                    id = x.ProcedureId,
+                    revisionId = x.ProcedureRevisionId,
+                    x.DisplayNumber,
+                    x.Title,
+                    x.Level,
+                    state = x.ProcedureState,
+                    x.IsSuspect,
+                    x.CoverageState
+                }),
             });
         });
 

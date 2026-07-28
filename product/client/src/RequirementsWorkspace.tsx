@@ -116,6 +116,9 @@ type ImpactItem = {
   baseline?: string;
   name?: string;
   type?: string;
+  revisionId?: string;
+  isSuspect?: boolean;
+  coverageState?: "Confirmed" | "Suspect";
 };
 type Impact = {
   parents: ImpactItem[];
@@ -156,6 +159,7 @@ type Props = {
   onOpenRequirement: (id: string) => void;
   onCloseRequirement: () => void;
   onOpenTraceability: () => void;
+  onOpenVerification: () => void;
 };
 
 const parseTags = (json: string) => {
@@ -179,6 +183,7 @@ export default function RequirementsWorkspace({
   onOpenRequirement,
   onCloseRequirement,
   onOpenTraceability,
+  onOpenVerification,
 }: Props) {
   const appliedInitialView = useRef(false);
   const autoSelected = useRef(false);
@@ -1202,7 +1207,7 @@ export default function RequirementsWorkspace({
                 <div className="traceSummary">
                   <article><b>{impact?.parents.length ?? 0}</b><span>upstream</span></article>
                   <article><b>{impact?.children.length ?? 0}</b><span>downstream</span></article>
-                  <article><b>{impact?.tests.length ?? 0}</b><span>tests</span></article>
+                  <article><b>{impact?.tests.filter((item) => !item.isSuspect).length ?? 0}</b><span>confirmed tests</span></article>
                 </div>
                 <button className="openDigitalThread" onClick={onOpenTraceability}>
                   Open complete Digital Thread →
@@ -1222,7 +1227,7 @@ export default function RequirementsWorkspace({
                 {impact?.children.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
                 {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
                 <h3>Verification coverage</h3>
-                {impact?.tests.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)}</small></article>)}
+                {impact?.tests.map((item) => <article className={`traceRelation${item.isSuspect ? " attention" : ""}`} key={item.revisionId ?? item.id}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · {item.isSuspect ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{item.isSuspect && <button onClick={onOpenVerification}>Resolve in Verification →</button>}</article>)}
                 {!impact?.tests.length && <div className="traceEmpty attention"><span>No verification procedure currently covers this revision.</span></div>}
               </div>
             )}

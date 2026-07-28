@@ -97,11 +97,8 @@ public static class VerificationEndpoints
             var selectedIds = selected.Select(x => x.revision.Id).ToList(); var links = await db.RequirementTraces.AsNoTracking().Where(x => selectedIds.Contains(x.SourceRevisionId) || selectedIds.Contains(x.TargetRevisionId)).ToListAsync(ct);
             var relatedIds = links.SelectMany(x => new[] { x.SourceRevisionId, x.TargetRevisionId }).Distinct().ToList();
             var related = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x => relatedIds.Contains(x.Id)) join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id select new { revision.Id, artifact.BaseNumber, revision.Revision, level = artifact.Level.ToString() }).ToDictionaryAsync(x => x.Id, ct);
-            var coverage = await db.TestCoverage.AsNoTracking().Where(x => selectedIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
+            var coverage = await VerificationCoverageProjection.ForRequirementRevisionsAsync(db,selectedIds,ct);
             var procedureRevisionIds=coverage.Select(x=>x.ProcedureRevisionId).Distinct().ToList();
-            var procedureRevisions=await db.TestProcedureRevisions.AsNoTracking().Where(x=>procedureRevisionIds.Contains(x.Id)).ToListAsync(ct);
-            var procedureIds=procedureRevisions.Select(x=>x.ProcedureId).Distinct().ToList();
-            var procedures=await db.TestProcedures.AsNoTracking().Where(x=>procedureIds.Contains(x.Id)).ToDictionaryAsync(x=>x.Id,ct);
             var executionQuery=db.TestExecutions.AsNoTracking().Where(x=>procedureRevisionIds.Contains(x.ProcedureRevisionId));
             var executions=await(db.Database.IsSqlite()?executionQuery.OrderByDescending(x=>x.Id):executionQuery.OrderByDescending(x=>x.ExecutedAt)).ToListAsync(ct);
             var executionIds=executions.Select(x=>x.Id).ToList();
@@ -109,8 +106,9 @@ public static class VerificationEndpoints
             var items = selected.Select(x => new { x.artifact.Id, revisionId = x.revision.Id, displayNumber = x.artifact.BaseNumber + "." + x.revision.Revision.ToString("D2"), level = x.artifact.Level.ToString(), x.revision.Statement,
                 parents = links.Where(l => l.SourceRevisionId == x.revision.Id).Select(l => new { id = l.TargetRevisionId, displayNumber = related[l.TargetRevisionId].BaseNumber + "." + related[l.TargetRevisionId].Revision.ToString("D2"), related[l.TargetRevisionId].level, type = l.Type.ToString() }),
                 children = links.Where(l => l.TargetRevisionId == x.revision.Id).Select(l => new { id = l.SourceRevisionId, displayNumber = related[l.SourceRevisionId].BaseNumber + "." + related[l.SourceRevisionId].Revision.ToString("D2"), related[l.SourceRevisionId].level, type = l.Type.ToString() }),
-                testCount = coverage.Count(c => c.RequirementRevisionId == x.revision.Id),
-                tests=coverage.Where(c=>c.RequirementRevisionId==x.revision.Id).Select(c=>{var revision=procedureRevisions.Single(r=>r.Id==c.ProcedureRevisionId);var procedure=procedures[revision.ProcedureId];return new{procedureId=procedure.Id,revisionId=revision.Id,displayNumber=$"{procedure.BaseNumber}.{revision.Revision:D2}",procedure.Title,level=procedure.Level.ToString(),executions=executions.Where(e=>e.ProcedureRevisionId==revision.Id).Select(e=>new{e.Id,outcome=e.Outcome.ToString(),e.ExecutedBy,e.ExecutedAt,e.RecordedAt,e.SoftwareBuildId,e.RetestOfExecutionId,e.Determination,e.EvidenceReference,evidence=evidence.Where(a=>a.TestExecutionId==e.Id).Select(a=>new{a.Id,a.OriginalFileName,a.Sha256,a.Size,a.UploadedAt})})};}) });
+                testCount = coverage.Count(c => c.RequirementRevisionId == x.revision.Id && !c.IsSuspect),
+                suspectTestCount = coverage.Count(c => c.RequirementRevisionId == x.revision.Id && c.IsSuspect),
+                tests=coverage.Where(c=>c.RequirementRevisionId==x.revision.Id).Select(c=>new{procedureId=c.ProcedureId,revisionId=c.ProcedureRevisionId,c.DisplayNumber,c.Title,c.Level,state=c.ProcedureState,c.IsSuspect,c.CoverageState,executions=executions.Where(e=>e.ProcedureRevisionId==c.ProcedureRevisionId).Select(e=>new{e.Id,outcome=e.Outcome.ToString(),e.ExecutedBy,e.ExecutedAt,e.RecordedAt,e.SoftwareBuildId,e.RetestOfExecutionId,e.Determination,e.EvidenceReference,evidence=evidence.Where(a=>a.TestExecutionId==e.Id).Select(a=>new{a.Id,a.OriginalFileName,a.Sha256,a.Size,a.UploadedAt})})}) });
             return Results.Ok(new { baselineId, page, pageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)pageSize), items });
         });
 
@@ -217,11 +215,32 @@ public static class VerificationEndpoints
                                       join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
                                       join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id
                                       orderby artifact.BaseNumber select new { artifact.Id, revisionId = revision.Id, displayNumber = artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, revision.Statement }).ToListAsync(ct);
-            var requirementIds = requirements.Select(x => x.revisionId).ToList(); var links = await db.TestCoverage.AsNoTracking().Where(x => requirementIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
-            var procedureRevisionIds = links.Select(x => x.ProcedureRevisionId).Distinct().ToList(); var revisions = await db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id)).ToListAsync(ct);
-            var procedures = await db.TestProcedures.AsNoTracking().Where(x => revisions.Select(r => r.ProcedureId).Contains(x.Id)).ToListAsync(ct);
+            var requirementIds = requirements.Select(x => x.revisionId).ToList();
+            var coverageLinks = await VerificationCoverageProjection.ForRequirementRevisionsAsync(db, requirementIds, ct);
+            var procedureRevisionIds = coverageLinks.Select(x => x.ProcedureRevisionId).Distinct().ToList();
             var executions = await db.TestExecutions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.ProcedureRevisionId) && (buildId == null || x.SoftwareBuildId == buildId)).ToListAsync(ct);
-            var items = requirements.Select(req => { var coveredBy = links.Where(x => x.RequirementRevisionId == req.revisionId).Select(link => { var rev = revisions.Single(r => r.Id == link.ProcedureRevisionId); var proc = procedures.Single(p => p.Id == rev.ProcedureId); var latest = executions.Where(e => e.ProcedureRevisionId == rev.Id).OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).FirstOrDefault(); return new { revisionId = rev.Id, displayNumber = proc.BaseNumber + "." + rev.Revision.ToString("D2"), proc.Title, latestOutcome = latest?.Outcome.ToString(), latestExecutionId = latest?.Id }; }).ToList(); return new { req.Id, req.revisionId, req.displayNumber, req.Statement, covered = coveredBy.Count > 0, verified = coveredBy.Any(x => x.latestOutcome == "Pass"), coveredBy }; }).ToList();
+            var items = requirements.Select(req =>
+            {
+                var coveredBy = coverageLinks.Where(x => x.RequirementRevisionId == req.revisionId).Select(link =>
+                {
+                    var latest = executions.Where(e => e.ProcedureRevisionId == link.ProcedureRevisionId)
+                        .OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).FirstOrDefault();
+                    return new
+                    {
+                        procedureId = link.ProcedureId,
+                        revisionId = link.ProcedureRevisionId,
+                        link.DisplayNumber,
+                        link.Title,
+                        state = link.ProcedureState,
+                        link.IsSuspect,
+                        link.CoverageState,
+                        latestOutcome = latest?.Outcome.ToString(),
+                        latestExecutionId = latest?.Id
+                    };
+                }).ToList();
+                var covered = coveredBy.Any(x => !x.IsSuspect);
+                return new { req.Id, req.revisionId, req.displayNumber, req.Statement, covered, verified = coveredBy.Any(x => !x.IsSuspect && x.latestOutcome == "Pass"), coveredBy };
+            }).ToList();
             return Results.Ok(new { baselineId, buildId, total = items.Count, covered = items.Count(x => x.covered), verified = items.Count(x => x.verified), uncovered = items.Count(x => !x.covered), items });
         });
     }

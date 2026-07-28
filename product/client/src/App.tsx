@@ -551,6 +551,7 @@ function App() {
         onOpenRequirement={(id) => navigate("requirements",discipline,id)}
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
         onOpenTraceability={() => navigate("lifecycle")}
+        onOpenVerification={() => navigate("verification", discipline === "software" ? "softwareTest" : "systemTest")}
       />
     );
   if (view === "verification" && project && release)

@@ -58,7 +58,9 @@ public static class VerificationImpactEndpoints
                 return Results.BadRequest(new { error = "Coverage can only be confirmed against an approved procedure in this Project." });
             try
             {
-                item.Resolve(http.UserAccount().UserName, request.Outcome, request.Rationale, DateTimeOffset.UtcNow, request.ProcedureId);
+                var now = DateTimeOffset.UtcNow;
+                item.Resolve(http.UserAccount().UserName, request.Outcome, request.Rationale, now, request.ProcedureId);
+                await service.ApplyResolvedCoverageAsync(item, now, ct);
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(Map(item));
             }

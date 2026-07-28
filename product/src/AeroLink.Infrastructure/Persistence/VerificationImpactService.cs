@@ -298,6 +298,40 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
                 revision => revision.ProcedureId, procedure => procedure.Id, (revision, _) => revision.Id)
             .AnyAsync(ct);
 
+    /// <summary>
+    /// Applies a coverage-confirmed decision immediately when materialisation has already bound the item to
+    /// an exact requirement revision. Before materialisation there is nothing to link, so the same decision is
+    /// applied later by <see cref="ApplyMaterializationAsync"/>.
+    /// </summary>
+    public async Task<bool> ApplyResolvedCoverageAsync(VerificationImpactItem item, DateTimeOffset now, CancellationToken ct)
+    {
+        if (item.Outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed
+            || item.ResolvedProcedureId is null
+            || item.RequirementRevisionId is null)
+            return false;
+
+        var procedureRevisionId = await db.TestProcedureRevisions
+            .Where(x => x.ProcedureId == item.ResolvedProcedureId.Value && x.State == TestProcedureState.Approved)
+            .OrderByDescending(x => x.Revision)
+            .Select(x => (Guid?)x.Id)
+            .FirstOrDefaultAsync(ct);
+        if (procedureRevisionId is null) return false;
+
+        var existing = await db.TestCoverage.SingleOrDefaultAsync(
+            x => x.RequirementRevisionId == item.RequirementRevisionId.Value
+                && x.ProcedureRevisionId == procedureRevisionId.Value, ct);
+        if (existing is not null)
+        {
+            existing.ConfirmStillValid(item.ResolvedBy ?? "verification", now);
+        }
+        else
+        {
+            db.TestCoverage.Add(new TestRequirementCoverage(
+                procedureRevisionId.Value, item.RequirementRevisionId.Value));
+        }
+        return true;
+    }
+
     private static string ArtifactNumberDisplay(RequirementChange change) =>
         $"{change.BaseNumber}.{change.Revision:00}";
 }
