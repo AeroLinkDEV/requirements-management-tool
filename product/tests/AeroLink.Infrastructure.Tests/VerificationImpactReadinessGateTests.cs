@@ -49,6 +49,32 @@ public sealed class VerificationImpactReadinessGateTests
     }
 
     [Fact]
+    public async Task Downstream_assurance_gates_wait_for_the_materialized_baseline_prerequisite()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            await using var db = new AeroLinkDbContext(seed.Options);
+            var readiness = await new ReleaseReadinessService(db).CalculateAsync(seed.CampaignId, default);
+            var downstream = readiness.Gates.Where(x =>
+                x.Code is "traceability" or "coverage" or "verification" or "evidence").ToList();
+
+            Assert.Equal(4, downstream.Count);
+            Assert.All(downstream, gate =>
+            {
+                Assert.False(gate.Complete);
+                Assert.Equal("WaitingForPrerequisite", gate.EvaluationState);
+                Assert.Equal("baseline", gate.PrerequisiteCode);
+                Assert.Equal(0, gate.Completed);
+                Assert.Equal(0, gate.Total);
+                Assert.Contains("Waiting for a materialized baseline", gate.Detail);
+                Assert.Contains("Requirement baseline materialized", gate.Action);
+            });
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
     public async Task A_release_that_changed_no_requirements_has_nothing_to_decide()
     {
         var seed = await SeedAsync();
@@ -200,6 +226,9 @@ public sealed class VerificationImpactReadinessGateTests
                 arrange.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, artifact.Id, revision.Id));
                 arrange.TestCoverage.Add(new TestRequirementCoverage(approved.Id, revision.Id));
                 await arrange.SaveChangesAsync();
+                await arrange.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(update => update
+                    .SetProperty(x => x.State, CandidateBaselineState.Frozen)
+                    .SetProperty(x => x.RequirementsMaterializedAt, Now));
                 procedureId = procedure.Id; approvedRevisionId = approved.Id;
             }
 

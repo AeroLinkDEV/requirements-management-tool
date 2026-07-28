@@ -7,7 +7,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
-public sealed record ReadinessGate(string Code, string Name, bool Complete, int Completed, int Total, string Detail, string Action);
+public sealed record ReadinessGate(
+    string Code,
+    string Name,
+    bool Complete,
+    int Completed,
+    int Total,
+    string Detail,
+    string Action,
+    string EvaluationState = "Evaluated",
+    string? PrerequisiteCode = null);
 public sealed record ReleaseReadiness(int Percent, bool ReadyForRelease, IReadOnlyList<ReadinessGate> Gates);
 
 public sealed class ReleaseReadinessService(AeroLinkDbContext db)
@@ -63,16 +72,49 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         var impactDecided = verificationImpacts.Count(x => x.State == VerificationImpactState.Resolved);
         var undecided = verificationImpacts.Where(x => x.State != VerificationImpactState.Resolved).ToList();
         var integrated = requests.Count(x => x.State == ScrState.SelectedForBaseline); var disposed = impacts.Count(x => x.State != ImpactDispositionState.Pending);
+        var baselineMaterialized = baseline.RequirementsMaterializedAt is not null;
         var gates = new List<ReadinessGate>
         {
             new("change_control","Change requests integrated",requests.Count > 0 && integrated == requests.Count,integrated,requests.Count,$"{requests.Count-integrated} non-deferred SCR/SWCR records remain outside the candidate baseline.","Approve and select every included change, or formally defer it."),
             new("impact_disposition","Impact analysis dispositioned",impacts.Count > 0 && disposed == impacts.Count,disposed,impacts.Count,$"{impacts.Count-disposed} impact findings remain pending.","Disposition requirement, trace, verification, and document impacts."),
             new("baseline","Requirement baseline materialized",baseline.State is CandidateBaselineState.Frozen or CandidateBaselineState.Released && baseline.RequirementsMaterializedAt is not null,baseline.RequirementsMaterializedAt is null?0:1,1,"The release needs an exact frozen and materialized requirement set.","Freeze the candidate and materialize its requirements."),
             new("verification_impact","Verification impact decided",impactDecided == verificationImpacts.Count,impactDecided,verificationImpacts.Count,undecided.Count==0?"Every new, modified, and orphaned requirement in this release has a recorded verification decision.":$"{undecided.Count} changed requirement(s) await a verification decision: {string.Join(", ",undecided.Take(3).Select(x=>x.SubjectDisplayNumber))}.","Assign each item to a test engineer, then record an approved procedure or a confirmation that no test is required."),
-            new("traceability","Trace network complete",members.Count > 0 && tracedDerivedIds.Count == derivedIds.Count,tracedDerivedIds.Count,derivedIds.Count,"Every derived HLR/LLR must retain an exact parent link.","Resolve orphan and suspect trace links."),
-            new("coverage","Requirement coverage complete",members.Count > 0 && coveredIds.Count == members.Count,coveredIds.Count,members.Count,$"{members.Count-coveredIds.Count} effective requirement revisions have no settled coverage. A link counts only when it is not suspect, names an approved procedure revision, and that procedure has no revision still in draft or review.","Approve every procedure being changed, then confirm the coverage each changed requirement needs."),
-            new("verification","Required verification passed",procedureIds.Count > 0 && latestRuns.Count == procedureIds.Count && latestRuns.All(x=>x.Outcome==TestOutcome.Pass),latestRuns.Count(x=>x.Outcome==TestOutcome.Pass),procedureIds.Count,$"{procedureIds.Count-latestRuns.Count(x=>x.Outcome==TestOutcome.Pass)} required procedures lack a latest Pass.","Execute tests, resolve failures, and record retests."),
-            new("evidence","Evidence uploaded and checksummed",latestRuns.Count > 0 && evidenceRunIds.Count == latestRuns.Count,evidenceRunIds.Count,latestRuns.Count,$"{latestRuns.Count-evidenceRunIds.Count} latest results lack uploaded evidence.","Upload evidence files for every latest required result."),
+            baselineMaterialized
+                ? new("traceability","Trace network complete",members.Count > 0 && tracedDerivedIds.Count == derivedIds.Count,tracedDerivedIds.Count,derivedIds.Count,
+                    members.Count == 0
+                        ? "The materialized baseline contains no effective requirement revisions, so traceability cannot pass."
+                        : "Every derived HLR/LLR must retain an exact parent link.",
+                    members.Count == 0
+                        ? "Inspect the selected changes and materialized manifest; a releasable baseline must contain an effective requirement population."
+                        : "Resolve orphan and suspect trace links.")
+                : WaitingForMaterializedBaseline("traceability", "Trace network complete"),
+            baselineMaterialized
+                ? new("coverage","Requirement coverage complete",members.Count > 0 && coveredIds.Count == members.Count,coveredIds.Count,members.Count,
+                    members.Count == 0
+                        ? "The materialized baseline contains no effective requirement revisions, so coverage cannot pass."
+                        : $"{members.Count-coveredIds.Count} effective requirement revisions have no settled coverage. A link counts only when it is not suspect, names an approved procedure revision, and that procedure has no revision still in draft or review.",
+                    members.Count == 0
+                        ? "Inspect the selected changes and materialized manifest; a releasable baseline must contain an effective requirement population."
+                        : "Approve every procedure being changed, then confirm the coverage each changed requirement needs.")
+                : WaitingForMaterializedBaseline("coverage", "Requirement coverage complete"),
+            baselineMaterialized
+                ? new("verification","Required verification passed",procedureIds.Count > 0 && latestRuns.Count == procedureIds.Count && latestRuns.All(x=>x.Outcome==TestOutcome.Pass),latestRuns.Count(x=>x.Outcome==TestOutcome.Pass),procedureIds.Count,
+                    procedureIds.Count == 0
+                        ? "No required procedure revisions were resolved from the materialized requirement population."
+                        : $"{procedureIds.Count-latestRuns.Count(x=>x.Outcome==TestOutcome.Pass)} required procedures lack a latest Pass.",
+                    procedureIds.Count == 0
+                        ? "Resolve requirement coverage with approved exact procedure revisions before recording results."
+                        : "Execute tests, resolve failures, and record retests.")
+                : WaitingForMaterializedBaseline("verification", "Required verification passed"),
+            baselineMaterialized
+                ? new("evidence","Evidence uploaded and checksummed",latestRuns.Count > 0 && evidenceRunIds.Count == latestRuns.Count,evidenceRunIds.Count,latestRuns.Count,
+                    latestRuns.Count == 0
+                        ? "No latest required test results exist, so evidence has not been evaluated against an execution population."
+                        : $"{latestRuns.Count-evidenceRunIds.Count} latest results lack uploaded evidence.",
+                    latestRuns.Count == 0
+                        ? "Complete required verification executions before attaching their checksummed evidence."
+                        : "Upload evidence files for every latest required result.")
+                : WaitingForMaterializedBaseline("evidence", "Evidence uploaded and checksummed"),
             new("problem_reports","Problem-report blockers resolved",problemBlockers.Count==0,0,problemBlockers.Count,problemBlockers.Count==0?"No unwaived controlled problem reports block this release.":$"{problemBlockers.Count} unwaived problem report blocker(s) remain: {string.Join(", ",problemBlockers.Take(3).Select(x=>x.DisplayNumber))}.","Resolve, formally disposition, or record an attributable waiver for every release-blocking problem report."),
             new("documents","Controlled outputs generated",docs.Select(x=>x.Type).Distinct().Count()>=6,docs.Select(x=>x.Type).Distinct().Count(),6,"The release package requires six controlled document types.","Generate SYSRD, both SWRDs, and three test-procedure documents."),
             new("release_approval","Release approval complete",campaign.Approvals.Count>0 && campaign.Approvals.All(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count==0?3:campaign.Approvals.Count,"Ordered release approval must be unanimous.","Start release review and collect every approval.")
@@ -80,4 +122,10 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         var percent = (int)Math.Round(gates.Average(x => x.Total == 0 ? (x.Complete ? 100 : 0) : Math.Min(100, x.Completed * 100d / x.Total)));
         return new(percent, gates.All(x => x.Complete), gates);
     }
+
+    private static ReadinessGate WaitingForMaterializedBaseline(string code, string name) =>
+        new(code, name, false, 0, 0,
+            "Waiting for a materialized baseline. The exact requirement-revision population does not exist yet, so this gate has not been evaluated.",
+            "Complete the Requirement baseline materialized gate first: freeze the candidate baseline and materialize its requirements.",
+            "WaitingForPrerequisite", "baseline");
 }

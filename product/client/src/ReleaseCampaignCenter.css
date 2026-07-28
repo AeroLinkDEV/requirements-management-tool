@@ -99,6 +99,10 @@
 .gateGrid article.blocked {
   border-left: 3px solid #dda33a;
 }
+.gateGrid article.waiting {
+  border-left: 3px solid #70869a;
+  background: #f5f8fa;
+}
 .gateGrid article > div {
   display: flex;
   gap: 7px;
@@ -369,6 +373,10 @@
 }
 .campaignGateRail article.pending {
   border-top-color: #96a4b2;
+}
+.campaignGateRail article.waiting {
+  border-top-color: #70869a;
+  background: linear-gradient(180deg, #f3f7fa, white 62%);
 }
 .campaignGateRail article span {
   color: #8391a1;

@@ -286,6 +286,13 @@ becoming that record's author. State, release and concurrency guards remain unch
 and controlled-editing evidence identifies the administrator as the actual actor. The rule and browser journey
 are shared by System and Software change requests.
 
+Test-procedure applicability begins at exact baseline materialization (DEC-066). Before that lifecycle point,
+new procedure authoring is disabled with the reason and the Product Versions next step; existing inherited
+procedures remain tied to their predecessor revisions and change-impact work remains planned rather than
+counted as coverage. Release readiness exposes traceability, coverage, verification, and evidence as
+`WaitingForPrerequisite` with `baseline` as their dependency. Once materialized they become evaluated gates;
+an empty effective population remains an explicit HOLD, not a successful or waiting `0/0`.
+
 ## How this project governs itself
 
 AeroLink is developed under the same discipline it sells. Respect it — these conventions are the
