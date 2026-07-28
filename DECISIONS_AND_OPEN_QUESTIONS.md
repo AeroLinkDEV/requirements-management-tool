@@ -636,6 +636,26 @@ Future entries use:
   proposal from its draft, so the section had to be carried through `ProposalDraft` explicitly — without that,
   saving an unrelated edit would have silently erased the chosen section of every proposal in the change request.
 
+### DEC-058 - A Test Procedure Has No Shelf of Its Own
+
+- **Date:** 2026-07-27
+- **Status:** Accepted
+- **Decision:** Deferral applies to change requests only. Test procedures get no deferred state. A requirement
+  that is new or modified in the build being worked on is assumed to need verification coverage, so the
+  procedures covering it cannot be put away while it ships.
+- **Rationale:** Systems, software and test were asked for as three separate shelves when
+  [DEC-056](#dec-056---allocation-and-state-are-two-questions-answered-separately) was scoped, and the third one
+  is a different thing from the first two. A change request is a proposal, and a programme may decide not to
+  make it — that is what a shelf is for. A test procedure is not a proposal; it is how a requirement that *is*
+  shipping gets verified. Deferring one does not postpone work, it removes coverage from a requirement that is
+  still in the build, and the tool would be recording that as an ordinary planning act. The deferral that
+  matters happens one level up: shelve the change request and its verification work goes with it, because
+  verification already follows its change request through retargeting and materialization.
+- **Consequences:** Nothing is built, and the absence is deliberate rather than pending. If a programme ever
+  needs to ship a requirement while explicitly accepting reduced coverage, that is a coverage exception with an
+  accountable approver — a different record with a different meaning — and not a procedure quietly moved to a
+  shelf. Revisit only against that need, not as leftover scope.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
