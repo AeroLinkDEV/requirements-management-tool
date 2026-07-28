@@ -3,7 +3,18 @@ param(
     [switch]$DoNotOpenBrowser
 )
 
+# Starts AeroLink for development: the API on 5080 and the Vite dev server on 5173, each supervised separately.
+#
+# For anything anybody else is going to look at, use Start-AeroLinkProduction.ps1 instead — this one recompiles
+# on every keystroke and serves unbundled modules.
+#
+# The probing, waiting, port reclaiming and PostgreSQL plumbing live in AeroLinkLaunch.ps1, shared with the
+# production launcher.
+
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
+. (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
+
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 $apiProject = Join-Path $productRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
@@ -14,70 +25,15 @@ $websiteUrl = 'http://127.0.0.1:5173'
 
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 
-# Prerequisites first. See the same block in Start-AeroLinkProduction.ps1.
-. (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
+# Prerequisites first, before anything that takes minutes, so a missing SDK is reported in seconds rather than
+# after an npm install and a two-minute wait on a health endpoint that could never answer.
 Write-Host '[0/4] Checking prerequisites...' -ForegroundColor Cyan
 $dotnet = Resolve-AeroLinkDotnet
 Assert-AeroLinkNode
 Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green
 
-function Test-HttpEndpoint {
-    param([Parameter(Mandatory)][string]$Uri)
-    try {
-        $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 2
-        return $response.StatusCode -ge 200 -and $response.StatusCode -lt 500
-    }
-    catch { return $false }
-}
-
-function Wait-HttpEndpoint {
-    param(
-        [Parameter(Mandatory)][string]$Uri,
-        [Parameter(Mandatory)][string]$ServiceName,
-        [int]$TimeoutSeconds = 75
-    )
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    do {
-        if (Test-HttpEndpoint -Uri $Uri) { return }
-        Start-Sleep -Milliseconds 500
-    } while ((Get-Date) -lt $deadline)
-    throw "$ServiceName did not become ready within $TimeoutSeconds seconds."
-}
-
-function Clear-StaleAeroLinkPort {
-    param(
-        [Parameter(Mandatory)][int]$Port,
-        [Parameter(Mandatory)][string[]]$ExpectedCommandFragments
-    )
-    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
-    foreach ($listener in $listeners) {
-        $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
-        $command = "$($process.ExecutablePath) $($process.CommandLine)"
-        $recognized = $false
-        foreach ($fragment in $ExpectedCommandFragments) {
-            if ($command -like "*$fragment*") { $recognized = $true; break }
-        }
-        if (-not $recognized) {
-            throw "Port $Port is occupied by another application (PID $($listener.OwningProcess)). Close it and run this launcher again."
-        }
-        Write-Host "Stopping an unresponsive AeroLink process on port $Port (PID $($listener.OwningProcess))..." -ForegroundColor Yellow
-        Stop-Process -Id $listener.OwningProcess -Force
-        Start-Sleep -Milliseconds 500
-    }
-}
-
 Write-Host '[1/4] Checking PostgreSQL...' -ForegroundColor Cyan
-# Installs it on a machine that has never had it. See the same block in Start-AeroLinkProduction.ps1.
-$catalogue = Join-Path $productRoot '.local\postgresql\pgsql\share\postgres.bki'
-if (-not (Test-Path $catalogue)) {
-    Write-Host '      PostgreSQL is not installed on this machine yet. Installing it once (about 320 MB).' -ForegroundColor Yellow
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Setup-Postgres.ps1')
-    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL could not be installed. The output above says why.' }
-}
-else {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Start-Postgres.ps1')
-    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL could not be started.' }
-}
+Assert-AeroLinkPostgres -ProductRoot $productRoot
 
 Write-Host '[2/4] Checking AeroLink API...' -ForegroundColor Cyan
 # /health/ready, not /health. Liveness answers "is the process listening", which it is even when PostgreSQL is
@@ -86,45 +42,43 @@ Write-Host '[2/4] Checking AeroLink API...' -ForegroundColor Cyan
 # asked. The endpoint already existed and returns 503 until the database answers.
 if (-not (Test-HttpEndpoint -Uri "$apiUrl/health/ready")) {
     Clear-StaleAeroLinkPort -Port 5080 -ExpectedCommandFragments @('AeroLink.Api', $apiProject)
-    $apiOut = Join-Path $logs 'api.stdout.log'
-    $apiErr = Join-Path $logs 'api.stderr.log'
-    # Windows PowerShell flattens ArgumentList into a single command line, so
-    # paths containing spaces must be quoted explicitly.
-    $apiArguments = "run --project `"$apiProject`" --urls `"$apiUrl`""
-    Start-Process -FilePath $dotnet `
-        -ArgumentList $apiArguments `
+    # Windows PowerShell flattens ArgumentList into a single command line, so paths containing spaces must be
+    # quoted explicitly.
+    Start-AeroLinkService `
+        -FilePath $dotnet `
+        -ArgumentList "run --project `"$apiProject`" --urls `"$apiUrl`"" `
         -WorkingDirectory $repositoryRoot `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $apiOut `
-        -RedirectStandardError $apiErr | Out-Null
-    try { Wait-HttpEndpoint -Uri "$apiUrl/health/ready" -ServiceName 'AeroLink API' -TimeoutSeconds 120 }
-    catch {
-        $tail = if (Test-Path $apiErr) { (Get-Content $apiErr -Tail 20) -join [Environment]::NewLine } else { 'No API error log was produced.' }
-        throw "$($_.Exception.Message)`nAPI error log:`n$tail"
-    }
+        -StandardOutput (Join-Path $logs 'api.stdout.log') `
+        -StandardError (Join-Path $logs 'api.stderr.log') `
+        -ReadyUri "$apiUrl/health/ready" `
+        -ServiceName 'AeroLink API' `
+        -TailLines 20
 }
 Write-Host '      API ready on 127.0.0.1:5080, database reachable.' -ForegroundColor Green
 
 Write-Host '[3/4] Checking website...' -ForegroundColor Cyan
-if (-not (Test-HttpEndpoint -Uri $websiteUrl)) {
+# SuccessBelow 500 here, unlike the readiness probes: this asks whether the dev server is up and serving at all,
+# and any answer that is not a server error means it is. The API checks above want 2xx and nothing else.
+if (-not (Test-HttpEndpoint -Uri $websiteUrl -SuccessBelow 500)) {
     Clear-StaleAeroLinkPort -Port 5173 -ExpectedCommandFragments @('vite', $clientRoot)
-    $clientOut = Join-Path $logs 'client.stdout.log'
-    $clientErr = Join-Path $logs 'client.stderr.log'
-    Start-Process -FilePath 'npm.cmd' `
+    Start-AeroLinkService `
+        -FilePath 'npm.cmd' `
         -ArgumentList @('run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173', '--strictPort') `
         -WorkingDirectory $clientRoot `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $clientOut `
-        -RedirectStandardError $clientErr | Out-Null
-    try { Wait-HttpEndpoint -Uri $websiteUrl -ServiceName 'AeroLink website' }
-    catch {
-        $tail = if (Test-Path $clientErr) { (Get-Content $clientErr -Tail 20) -join [Environment]::NewLine } else { 'No website error log was produced.' }
-        throw "$($_.Exception.Message)`nWebsite error log:`n$tail"
-    }
+        -StandardOutput (Join-Path $logs 'client.stdout.log') `
+        -StandardError (Join-Path $logs 'client.stderr.log') `
+        -ReadyUri $websiteUrl `
+        -ServiceName 'AeroLink website' `
+        -TimeoutSeconds 75 `
+        -SuccessBelow 500 `
+        -TailLines 20
 }
 Write-Host '      Website healthy on 127.0.0.1:5173.' -ForegroundColor Green
 
 Write-Host '[4/4] Verifying authentication service...' -ForegroundColor Cyan
+# Not Test-HttpEndpoint: 401 is the *expected* answer from an unauthenticated caller, so this has to tell a 401
+# apart from a connection failure rather than folding both into false. Anything else means the endpoint is
+# there but not behaving, which is worth failing on now instead of at the sign-in screen.
 $authStatus = $null
 try {
     $meResponse = Invoke-WebRequest -Uri "$apiUrl/api/auth/me" -UseBasicParsing -TimeoutSec 3
