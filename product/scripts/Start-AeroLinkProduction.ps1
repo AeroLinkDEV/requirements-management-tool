@@ -10,9 +10,7 @@ param(
 #
 # `Start-AeroLink.ps1` runs the Vite dev server, which is right for development and wrong for anything watched
 # by other people. It recompiles on every keystroke, prints its own diagnostics into the page, serves unbundled
-# modules, and needs a second process supervised on a second port with a CORS policy joining them. None of that
-# is what a deployment looks like — and until this script existed, the built client had never been served at
-# all, so the environment a demonstration depends on was also the only one never tried.
+# modules, and needs a second process supervised on a second port with a CORS policy joining them.
 #
 # This is the production *build*, run with local demonstration configuration: PostgreSQL, the FMSLIVE dataset
 # and the demonstration identities, over plain HTTP. It is not a production *deployment* — TLS, certificates,
@@ -22,8 +20,14 @@ param(
 # `-Shared` lets colleagues on the same network open it from their own machines. Off by default, because the
 # same run also prints a known administrator password and loads demonstration data, and a launcher somebody
 # double-clicks out of habit should not put that on an office network without being asked to.
+#
+# The probing, waiting, port reclaiming and PostgreSQL plumbing live in AeroLinkLaunch.ps1, shared with the
+# development launcher.
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
+. (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
+
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 $apiProject = Join-Path $productRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
@@ -79,50 +83,13 @@ function Test-AeroLinkFirewallRule {
 # Prerequisites first, before anything that takes minutes. Without this the launcher installed npm packages,
 # compiled the client, started the API and waited two minutes for a health endpoint that could never answer,
 # then reported "No .NET SDKs were found" — the right diagnosis, four minutes after it was knowable.
-. (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
 Write-Host '[0/4] Checking prerequisites...' -ForegroundColor Cyan
 $dotnet = Resolve-AeroLinkDotnet
 Assert-AeroLinkNode
 Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green
 
-function Test-HttpEndpoint {
-    param([Parameter(Mandatory)][string]$Uri)
-    try {
-        $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 3
-        return $response.StatusCode -ge 200 -and $response.StatusCode -lt 300
-    }
-    catch { return $false }
-}
-
-function Wait-HttpEndpoint {
-    param(
-        [Parameter(Mandatory)][string]$Uri,
-        [Parameter(Mandatory)][string]$ServiceName,
-        [int]$TimeoutSeconds = 120
-    )
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    do {
-        if (Test-HttpEndpoint -Uri $Uri) { return }
-        Start-Sleep -Milliseconds 500
-    } while ((Get-Date) -lt $deadline)
-    throw "$ServiceName did not become ready within $TimeoutSeconds seconds."
-}
-
 Write-Host '[1/4] Checking PostgreSQL...' -ForegroundColor Cyan
-# Installs it if this machine has never had it, rather than failing with an instruction to go and run another
-# script. A launcher whose first step is "now run a different script" is a launcher that does not launch, and
-# the repository is cloned to a different path on every machine — so there is nothing to configure here, only
-# something to do. Setup is idempotent and returns immediately once PostgreSQL is present.
-$catalogue = Join-Path $productRoot '.local\postgresql\pgsql\share\postgres.bki'
-if (-not (Test-Path $catalogue)) {
-    Write-Host '      PostgreSQL is not installed on this machine yet. Installing it once (about 320 MB).' -ForegroundColor Yellow
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Setup-Postgres.ps1')
-    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL could not be installed. The output above says why.' }
-}
-else {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Start-Postgres.ps1')
-    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL could not be started.' }
-}
+Assert-AeroLinkPostgres -ProductRoot $productRoot
 
 Write-Host '[2/4] Building the client...' -ForegroundColor Cyan
 if ($SkipClientBuild) {
@@ -149,47 +116,28 @@ else {
 }
 
 Write-Host '[3/4] Starting AeroLink...' -ForegroundColor Cyan
-$listeners = @(Get-NetTCPConnection -LocalPort 5080 -State Listen -ErrorAction SilentlyContinue)
-foreach ($listener in $listeners) {
-    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
-    $command = "$($process.ExecutablePath) $($process.CommandLine)"
-    if ($command -notlike '*AeroLink.Api*') {
-        throw "Port 5080 is occupied by another application (PID $($listener.OwningProcess)). Close it and run this launcher again."
-    }
-    Write-Host "      Stopping the AeroLink process already on port 5080 (PID $($listener.OwningProcess))..." -ForegroundColor Yellow
-    Stop-Process -Id $listener.OwningProcess -Force
-    Start-Sleep -Milliseconds 800
-}
-
-$apiOut = Join-Path $logs 'production.stdout.log'
-$apiErr = Join-Path $logs 'production.stderr.log'
-# Release, and --no-launch-profile so launchSettings.json cannot quietly substitute development configuration.
-# Client:StaticFiles is named rather than discovered, so this serves the build made moments ago and no other.
-$arguments = "run --configuration Release --no-launch-profile --project `"$apiProject`" --urls `"$bindUrl`""
-$environment = @{
-    ASPNETCORE_ENVIRONMENT = 'Development'
-    Client__StaticFiles    = $distRoot
-    AllowedHosts           = $allowedHosts
-}
-foreach ($entry in $environment.GetEnumerator()) { [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process') }
-Start-Process -FilePath $dotnet `
-    -ArgumentList $arguments `
-    -WorkingDirectory $repositoryRoot `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $apiOut `
-    -RedirectStandardError $apiErr | Out-Null
+Clear-StaleAeroLinkPort -Port 5080 -ExpectedCommandFragments @('AeroLink.Api', $apiProject)
 
 Write-Host '[4/4] Waiting for AeroLink to be ready...' -ForegroundColor Cyan
-try {
-    # /health/ready, not /health. Liveness answers "is the process up", which it is even when the database is
-    # unreachable — so waiting on it reports a working product over a dead database. Readiness opens a
-    # connection, which is the question an operator is actually asking.
-    Wait-HttpEndpoint -Uri "$url/health/ready" -ServiceName 'AeroLink'
-}
-catch {
-    $tail = if (Test-Path $apiErr) { (Get-Content $apiErr -Tail 25) -join [Environment]::NewLine } else { 'No error log was produced.' }
-    throw "$($_.Exception.Message)`nAeroLink error log:`n$tail"
-}
+# Release, and --no-launch-profile so launchSettings.json cannot quietly substitute development configuration.
+# Client:StaticFiles is named rather than discovered, so this serves the build made moments ago and no other.
+#
+# Readiness is /health/ready, not /health. Liveness answers "is the process up", which it is even when the
+# database is unreachable — so waiting on it reports a working product over a dead database. Readiness opens a
+# connection, which is the question an operator is actually asking.
+Start-AeroLinkService `
+    -FilePath $dotnet `
+    -ArgumentList "run --configuration Release --no-launch-profile --project `"$apiProject`" --urls `"$bindUrl`"" `
+    -WorkingDirectory $repositoryRoot `
+    -StandardOutput (Join-Path $logs 'production.stdout.log') `
+    -StandardError (Join-Path $logs 'production.stderr.log') `
+    -ReadyUri "$url/health/ready" `
+    -ServiceName 'AeroLink' `
+    -Environment @{
+        ASPNETCORE_ENVIRONMENT = 'Development'
+        Client__StaticFiles    = $distRoot
+        AllowedHosts           = $allowedHosts
+    }
 
 # The document itself, because a ready API that serves no client is the failure this script was written to
 # prevent: the previous launcher reported success while the site behind it was unusable.
