@@ -148,6 +148,70 @@ public static class ChangeRequestEndpoints
                 currentSectionId = sectionByArtifact.TryGetValue(x.Id, out var sectionId) ? sectionId : (Guid?)null }));
         });
 
+        // What the traceability graph says a proposed change touches.
+        //
+        // A change request already asks its author to close five impact decisions — trace, verification,
+        // documents, baselines, collaboration — and asked them from memory. The links needed to answer two of
+        // those are recorded: which requirements derive from this one, and which procedures verify it. They were
+        // reachable from the requirements explorer and nowhere near the person actually deciding.
+        //
+        // This informs the decision and does not make it. Nothing here sets a disposition, and a change with
+        // nothing downstream still requires its author to say so — "the tool found no links" and "an engineer
+        // confirmed there is no impact" are different claims, and only the second is worth anything in a review.
+        // Keyed by base number rather than artifact id, because that is the identity a proposal carries.
+        app.MapGet("/api/authoring/impact", async (Guid projectId, string baseNumber, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var normalized = (baseNumber ?? "").Trim().ToUpperInvariant();
+            var artifact = await db.Requirements.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.BaseNumber == normalized, ct);
+            // An introduced requirement has no history and nothing downstream yet. That is not an error; it is
+            // the honest answer, and the caller renders it as "nothing recorded" rather than as a failure.
+            if (artifact is null)
+                return Results.Ok(new { baseNumber = normalized, known = false, derivedRequirements = Array.Empty<object>(), coveringProcedures = Array.Empty<object>() });
+
+            var current = await db.RequirementRevisions.AsNoTracking()
+                .Where(x => x.ArtifactId == artifact.Id).OrderByDescending(x => x.Revision).FirstOrDefaultAsync(ct);
+            if (current is null)
+                return Results.Ok(new { baseNumber = normalized, known = false, derivedRequirements = Array.Empty<object>(), coveringProcedures = Array.Empty<object>() });
+
+            // Children: requirements that trace *to* this one, so a change here propagates down to them.
+            var derived = await (from link in db.RequirementTraces.AsNoTracking().Where(x => x.TargetRevisionId == current.Id)
+                                 join revision in db.RequirementRevisions.AsNoTracking() on link.SourceRevisionId equals revision.Id
+                                 join related in db.Requirements.AsNoTracking() on revision.ArtifactId equals related.Id
+                                 orderby related.BaseNumber
+                                 select new
+                                 {
+                                     related.Id,
+                                     displayNumber = related.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
+                                     level = related.Level.ToString(),
+                                     revision.Statement,
+                                     linkType = link.Type.ToString(),
+                                 }).ToListAsync(ct);
+
+            var procedures = await (from coverage in db.TestCoverage.AsNoTracking().Where(x => x.RequirementRevisionId == current.Id)
+                                    join revision in db.TestProcedureRevisions.AsNoTracking() on coverage.ProcedureRevisionId equals revision.Id
+                                    join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                    orderby procedure.BaseNumber
+                                    select new
+                                    {
+                                        procedure.Id,
+                                        displayNumber = procedure.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
+                                        procedure.Title,
+                                        level = procedure.Level.ToString(),
+                                        state = revision.State.ToString(),
+                                    }).ToListAsync(ct);
+
+            return Results.Ok(new
+            {
+                baseNumber = artifact.BaseNumber,
+                known = true,
+                displayNumber = artifact.BaseNumber + "." + (current.Revision < 10 ? "0" : "") + current.Revision,
+                derivedRequirements = derived,
+                coveringProcedures = procedures,
+            });
+        });
+
         /// The sections a requirement of a given level can be placed in, for the picker on a proposal.
         app.MapGet("/api/authoring/sections", async (Guid projectId, RequirementLevel level, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {

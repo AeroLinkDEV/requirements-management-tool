@@ -12,8 +12,8 @@ import type {
 import PersonPicker from "./PersonPicker";
 import ControlledAttachments from "./ControlledAttachments";
 import ScrJiraLink from "./ScrJiraLink";
-import { PersonName, personLabel } from "./People";
-import { demoPerson } from "./PeopleRegistry";
+import { PersonName } from "./People";
+import { demoPerson, personLabel } from "./PeopleRegistry";
 import { RichCaseField, RichContentView } from "./RichContent";
 import { useDebouncedSave } from "./autosave";
 import { emptyRichContent, fromPlainText, toPlainText } from "./richContentModel";

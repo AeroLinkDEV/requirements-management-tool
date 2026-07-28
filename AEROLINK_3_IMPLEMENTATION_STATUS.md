@@ -1,6 +1,6 @@
 # AeroLink 3.0 — Implementation Status
 
-**Status date:** 2026-07-26  
+**Status date:** 2026-07-28  
 **Authority:** This record summarizes implementation evidence and limitations. The detailed workstream contract remains `AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md`.
 
 > This file sat at 2026-07-24 through fifteen merges while `PROJECT_STATE.md` named it the authority for
@@ -14,6 +14,22 @@
 - **In progress:** production code exists, but one or more acceptance-gate capabilities remain.
 - **Foundation only:** shared domain or architectural primitives exist, but no end-to-end capability is claimed.
 - **Not started:** no material implementation evidence has been accepted.
+
+## What has merged since the last status date
+
+Two evenings of product review (26 and 27 July) and their follow-up merged through PR #98. **None of it moves a
+workstream boundary**, and the scorecard below is unchanged as a result — that is the honest reading, not an
+oversight. The work was defect repair, reachability and product decisions inside capabilities already claimed:
+change-request allocation separated from state with a deferral shelf (DEC-056), a released build closed to new
+change requests (DEC-055), revision from the state approved change requests actually rest in (DEC-054),
+author-chosen specification sections applied at materialization (DEC-057), documents offered where requirements
+are read, and computed trace impact shown beside the declared disposition (DEC-059).
+
+The pattern worth recording for the workstreams still open: four of the eleven findings on 27 July were **not
+missing features but unreachable ones** — a gate admitting a state nothing rested in, a domain method with no
+endpoint, a field that was read-only where it mattered, and a read-side filter no authoring path could aim. A
+workstream can be implemented and evidenced and still be unreachable, and this scorecard does not currently
+distinguish those. Acceptance evidence should name the path a user takes, not only the capability.
 
 ## Overall position
 

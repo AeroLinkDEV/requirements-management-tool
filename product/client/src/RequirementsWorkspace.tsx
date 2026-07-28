@@ -4,7 +4,8 @@ import { stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useFormDraft } from "./autosave";
-import DocumentActions, { targetsFor } from "./DocumentActions";
+import DocumentActions from "./DocumentActions";
+import { targetsFor } from "./presentation";
 import "./RequirementsWorkspace.css";
 
 type Field = {

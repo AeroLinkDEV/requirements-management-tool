@@ -12,7 +12,8 @@ namespace AeroLink.Infrastructure.Tests;
 /// document actually contains, that a document keeps the layout it was generated with after the template is
 /// revised, and that a project without a layout is unaffected.
 /// </summary>
-public sealed class DocumentTemplateGenerationTests
+[Collection(ShowcaseCollection.Name)]
+public sealed class DocumentTemplateGenerationTests(ShowcaseDatabaseFixture showcaseFixture)
 {
     private const string Layout = """
         {
@@ -50,17 +51,17 @@ public sealed class DocumentTemplateGenerationTests
         return evidence;
     }
 
-    private static async Task<(DbContextOptions<AeroLinkDbContext> Options, Guid ProjectId, Guid ReleaseId, Guid BaselineId, string Path)> SeedAsync()
+    // A copy of the showcase rather than a fresh seed. Each of the four tests here spent between 36 and 65
+    // seconds rebuilding an identical 1,250-requirement dataset; they now take a file copy of one built once for
+    // the whole run. The database each test receives is still private and still writable.
+    private async Task<(DbContextOptions<AeroLinkDbContext> Options, Guid ProjectId, Guid ReleaseId, Guid BaselineId, string Path)> SeedAsync()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"aerolink-templates-{Guid.NewGuid():N}.db");
-        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
-        await using var db = new AeroLinkDbContext(options);
-        await db.Database.EnsureCreatedAsync();
-        var summary = await new FmsShowcaseSeeder(db).EnsureSeededAsync();
-        db.ChangeTracker.Clear();
+        var showcase = showcaseFixture.Create();
+        await using var db = showcase.Context();
+        var summary = showcaseFixture.Summary;
         var document = await db.ControlledDocuments.AsNoTracking()
             .FirstAsync(x => x.BaselineId == summary.ReleasedBaselineId && x.Type == ControlledDocumentType.Sysrd);
-        return (options, summary.ProjectId, document.ReleaseId, summary.ReleasedBaselineId, path);
+        return (showcase.Options, summary.ProjectId, document.ReleaseId, summary.ReleasedBaselineId, showcase.Path);
     }
 
     [Fact]

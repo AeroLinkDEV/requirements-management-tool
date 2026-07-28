@@ -656,6 +656,45 @@ Future entries use:
   accountable approver — a different record with a different meaning — and not a procedure quietly moved to a
   shelf. Revisit only against that need, not as leftover scope.
 
+### DEC-059 - Computed Impact Informs the Declared Disposition, and Never Replaces It
+
+- **Date:** 2026-07-28
+- **Status:** Accepted
+- **Decision:** A requirement proposal shows what the traceability graph records for the requirement it changes
+  — the requirements derived from it, and the procedures that verify it — beside the five impact dispositions.
+  The panel is read-only, writes no disposition, and closes no readiness gate. An introduced requirement has
+  nothing downstream, so nothing is shown for one, and an unknown identifier answers "nothing recorded" rather
+  than failing.
+- **Rationale:** The product asked authors to decide whether trace relationships and verification coverage were
+  affected, and asked it from memory: the links that answer both were recorded, and reachable only from the
+  requirements explorer, a page away from the person deciding. Showing them where the decision is made means the
+  author dispositions something concrete instead of an empty category. This closes the impact-disposition
+  question raised in `PRODUCT_REVIEW_2026_07_26.md`, which had been parked because the two ideas behind it —
+  computed impact and declared disposition — needed separating before either could be built.
+- **Consequences:** The distinction is the whole point and is enforced by test: reading the traces must leave
+  every disposition Pending. "The tool found no links" and "an engineer confirmed there is no impact" are
+  different claims, and only the second is signed for and frozen into the review snapshot. A change request with
+  nothing downstream therefore still requires its author to say so. Keyed by base number rather than artifact
+  identifier, because that is the identity a proposal carries before materialization gives it anything else.
+
+### DEC-060 - The Repository Is Public
+
+- **Date:** 2026-07-28
+- **Status:** Accepted
+- **Supersedes the open question in:** [DEC-011](#dec-011---git-repository-initialized-locally-before-github-connection),
+  which deferred publication to "a later explicit repository decision". This is that decision.
+- **Decision:** `seanmccarthyns/requirements-management-tool` is public.
+- **Rationale:** GitHub Actions is unmetered on public repositories, and the private-repository bill had reached
+  94% of its cap with a hard stop configured — CI would have stopped mid-week. Every other saving available was
+  a trade of coverage for money; this one was not a trade.
+- **Consequences:** The full commit history, the demonstration dataset, this decision log and its record of
+  mistakes are all readable. Checked before publishing rather than after: no tokens, keys or private keys appear
+  in any commit, `node_modules` was never committed, and the only credentials in the tree are the demonstration
+  password the launcher prints on screen and two throwaway CI values. Publication is one-way in practice — clones
+  and caches survive a later switch back — so anything genuinely sensitive must never be committed rather than
+  removed afterwards. Pull requests from forks require workflow approval, which does not affect branches pushed
+  to this repository directly.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

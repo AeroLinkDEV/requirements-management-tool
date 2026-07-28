@@ -108,3 +108,27 @@ export const changeRequestState = (facts: ChangeRequestFacts) => {
   // Approved and allocated is still approved work until the build it is in actually ships.
   return facts.targetRelease?.isReleased ? 'Incorporated' : 'Approved'
 }
+
+/**
+ * Which requirement documents a discipline and level correspond to.
+ *
+ * A requirement's level fixes which specification it belongs to, so the offer follows the level being read: the
+ * System explorer offers the system document and nothing else, and the Software explorer filtered to high-level
+ * stops offering the low-level one — a document for requirements the reader has just filtered out is not a
+ * useful offer. An empty level means the discipline's whole set.
+ *
+ * Here rather than in DocumentActions.tsx because that module renders a component, and a module exporting both
+ * components and plain functions loses Fast Refresh.
+ */
+export type DocumentTypeName = 'Sysrd' | 'SwrdHighLevel' | 'SwrdLowLevel'
+
+export type DocumentTarget = { type: DocumentTypeName; label: string }
+
+export const targetsFor = (scope: 'System' | 'Software', level?: string): DocumentTarget[] => {
+  if (scope === 'System') return [{ type: 'Sysrd', label: 'System Requirements Document' }]
+  const high: DocumentTarget = { type: 'SwrdHighLevel', label: 'Software Requirements Document — High-Level' }
+  const low: DocumentTarget = { type: 'SwrdLowLevel', label: 'Software Requirements Document — Low-Level' }
+  if (level === 'HighLevel') return [high]
+  if (level === 'LowLevel') return [low]
+  return [high, low]
+}

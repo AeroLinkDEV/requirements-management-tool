@@ -11,16 +11,18 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Tests;
 
-public sealed class ReleaseCampaignPersistenceTests
+[Collection(ShowcaseCollection.Name)]
+public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture showcaseFixture)
 {
     [Fact]
     public async Task Showcase_campaign_has_real_gates_impacts_outputs_and_checksummed_evidence()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"aerolink-campaign-{Guid.NewGuid():N}.db"); var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-evidence-{Guid.NewGuid():N}");
-        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        // A private copy of the showcase, rather than a 69-second rebuild of one.
+        using var showcase = showcaseFixture.Create(); var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-evidence-{Guid.NewGuid():N}");
+        var options = showcase.Options;
         try
         {
-            await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync(); var summary = await new FmsShowcaseSeeder(db).EnsureSeededAsync(); db.ChangeTracker.Clear();
+            await using var db = showcase.Context(); var summary = showcaseFixture.Summary;
             var campaign = await db.ReleaseCampaigns.SingleAsync(x => x.ProjectId == summary.ProjectId); Assert.Equal(ReleaseCampaignState.Verification, campaign.State);
             Assert.Equal(32, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id)); Assert.Equal(8, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id && x.State == ImpactDispositionState.Addressed));
             var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default); Assert.False(readiness.ReadyForRelease); Assert.Contains(readiness.Gates, x => x.Code == "change_control" && x.Completed == 2 && x.Total == 7);
@@ -51,17 +53,18 @@ public sealed class ReleaseCampaignPersistenceTests
             var store = new EvidenceFileStore(evidenceRoot);
             var stored = await store.StoreAsync(new MemoryStream("evidence payload"u8.ToArray()), "run.json", "application/json", default); Assert.Equal(64, stored.Sha256.Length); await using var opened = store.OpenRead(stored.StorageKey); Assert.Equal(stored.Size, opened.Length);
         }
-        finally { File.Delete(path); if (Directory.Exists(evidenceRoot)) Directory.Delete(evidenceRoot, true); }
+        finally { if (Directory.Exists(evidenceRoot)) Directory.Delete(evidenceRoot, true); }
     }
 
     [Fact]
     public async Task Release_execution_reconciles_versioned_links_and_imports_an_exact_build_manifest()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"aerolink-execution-{Guid.NewGuid():N}.db"); var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-execution-evidence-{Guid.NewGuid():N}");
-        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        // A private copy of the showcase, rather than a 44-second rebuild of one.
+        using var showcase = showcaseFixture.Create(); var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-execution-evidence-{Guid.NewGuid():N}");
+        var options = showcase.Options;
         try
         {
-            await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync(); var summary = await new FmsShowcaseSeeder(db).EnsureSeededAsync(); db.ChangeTracker.Clear();
+            await using var db = showcase.Context(); var summary = showcaseFixture.Summary;
             var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleAsync(x => x.ProjectId == summary.ProjectId);
             var baseline = await db.CandidateBaselines.Include(x => x.Selections).Include(x => x.Events).SingleAsync(x => x.Id == campaign.BaselineId);
             var requests = await db.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.ReviewCycles).ThenInclude(x => x.Steps).Where(x => x.TargetReleaseId == campaign.ReleaseId).ToListAsync();
@@ -108,6 +111,6 @@ public sealed class ReleaseCampaignPersistenceTests
             var frozenImport = await Assert.ThrowsAsync<DomainException>(() => service.ImportVerificationAsync(campaign.Id, blockedManifest, blockedEvidence, "blocked.zip", "application/zip", "test.lead", now.AddMinutes(3), default));
             Assert.Contains("frozen", frozenImport.Message, StringComparison.OrdinalIgnoreCase);
         }
-        finally { File.Delete(path); if (Directory.Exists(evidenceRoot)) Directory.Delete(evidenceRoot, true); }
+        finally { if (Directory.Exists(evidenceRoot)) Directory.Delete(evidenceRoot, true); }
     }
 }

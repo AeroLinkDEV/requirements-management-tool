@@ -18,9 +18,10 @@ import "./DocumentActions.css";
  * (see DraftDocumentGenerator). Offering them as one button labelled "generate" would hide that difference at
  * the exact moment it matters, so the label always says which one this is.
  */
-export type DocumentTypeName = "Sysrd" | "SwrdHighLevel" | "SwrdLowLevel";
-
-export type DocumentTarget = { type: DocumentTypeName; label: string };
+// The type mapping and `targetsFor` live in presentation.ts, with the other derivations. A module that exports
+// both components and plain functions loses Fast Refresh — editing it remounts the tree rather than hot-swapping
+// it — and this one is imported by the requirements explorer for exactly that helper.
+import type { DocumentTarget } from "./presentation";
 
 type ApprovedDocument = {
   id: string;
@@ -36,16 +37,6 @@ type Props = {
   targets: DocumentTarget[];
   /** Rendered above the actions. Omitted where the surrounding surface already says what these are. */
   heading?: string;
-};
-
-/** The requirement documents a discipline and level correspond to. Empty level means the discipline's whole set. */
-export const targetsFor = (scope: "System" | "Software", level?: string): DocumentTarget[] => {
-  if (scope === "System") return [{ type: "Sysrd", label: "System Requirements Document" }];
-  const high: DocumentTarget = { type: "SwrdHighLevel", label: "Software Requirements Document — High-Level" };
-  const low: DocumentTarget = { type: "SwrdLowLevel", label: "Software Requirements Document — Low-Level" };
-  if (level === "HighLevel") return [high];
-  if (level === "LowLevel") return [low];
-  return [high, low];
 };
 
 export default function DocumentActions({ api, projectId, release, targets, heading }: Props) {

@@ -26,6 +26,15 @@ export type ControlledRequirementDraft = {
   targetSectionId?: string;
 };
 
+type TracedImpact = {
+  baseNumber: string;
+  /** False when the requirement does not exist yet, which is the normal case for an introduction. */
+  known: boolean;
+  displayNumber?: string;
+  derivedRequirements: { id: string; displayNumber: string; level: string; statement: string; linkType: string }[];
+  coveringProcedures: { id: string; displayNumber: string; title: string; level: string; state: string }[];
+};
+
 type SpecificationSection = {
   id: string;
   heading: string;
@@ -221,6 +230,35 @@ export default function ControlledRequirementEditor({
       .catch(() => { if (!cancelled) setSections([]); });
     return () => { cancelled = true; };
   }, [api, projectId, item.level]);
+
+  /**
+   * What the traceability graph says this change touches.
+   *
+   * The five dispositions below ask an author to decide whether trace relationships and verification coverage
+   * are affected, and until now asked it from memory — while the links that answer it were recorded and shown
+   * only on the requirements explorer, a page away from the person deciding.
+   *
+   * This informs the decision and never makes it. Nothing here writes a disposition: "the tool found no links"
+   * and "an engineer confirmed there is no impact" are different claims, and only the second means anything in
+   * a review. An introduced requirement has nothing downstream, so nothing is fetched for one.
+   */
+  const [traced, setTraced] = useState<TracedImpact>();
+  const [tracedBusy, setTracedBusy] = useState(false);
+  useEffect(() => {
+    if (item.kind === "Introduce" || !item.baseNumber) {
+      setTraced(undefined);
+      return;
+    }
+    let cancelled = false;
+    setTracedBusy(true);
+    fetch(`${api}/api/authoring/impact?projectId=${projectId}&baseNumber=${encodeURIComponent(item.baseNumber)}`)
+      .then((response) => (response.ok ? (response.json() as Promise<TracedImpact>) : undefined))
+      .then((value) => { if (!cancelled) setTraced(value); })
+      // Never blocks authoring. A proposal must remain writable when this cannot be read.
+      .catch(() => { if (!cancelled) setTraced(undefined); })
+      .finally(() => { if (!cancelled) setTracedBusy(false); });
+    return () => { cancelled = true; };
+  }, [api, projectId, item.kind, item.baseNumber]);
 
   const pendingImpacts = impactAreas.filter(
     ([key]) => !impact[key] || impact[key] === "Pending",
@@ -512,6 +550,46 @@ export default function ControlledRequirementEditor({
           <p>
             Record an explicit engineering decision for every lifecycle area. “Affected” and “Follow-up Assigned” remain visible to reviewers.
           </p>
+          {/* What the traces already record, shown beside the decisions rather than instead of them. Deliberately
+              read-only: it changes no disposition and unblocks no gate. An author still has to decide, because a
+              tool finding no links and an engineer confirming no impact are different claims. */}
+          {item.kind !== "Introduce" && item.baseNumber && (
+            <section className="tracedImpact" aria-label={`Recorded links for proposal ${index + 1}`}>
+              <header>
+                <b>What the traces already record</b>
+                <span>Read-only. You still decide each disposition below.</span>
+              </header>
+              {tracedBusy && !traced && <p className="tracedEmpty">Reading recorded links…</p>}
+              {traced && (
+                <dl>
+                  <div>
+                    <dt>Requirements derived from this one</dt>
+                    <dd>
+                      {traced.derivedRequirements.length
+                        ? traced.derivedRequirements.map((row) => (
+                            <span className="tracedItem" key={row.id} title={row.statement}>
+                              {row.displayNumber} <i>{row.level}</i>
+                            </span>
+                          ))
+                        : <em>None recorded — confirm below whether that is correct.</em>}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Procedures that verify it</dt>
+                    <dd>
+                      {traced.coveringProcedures.length
+                        ? traced.coveringProcedures.map((row) => (
+                            <span className="tracedItem" key={row.id} title={row.title}>
+                              {row.displayNumber} <i>{row.state}</i>
+                            </span>
+                          ))
+                        : <em>None recorded — confirm below whether that is correct.</em>}
+                    </dd>
+                  </div>
+                </dl>
+              )}
+            </section>
+          )}
           {impactAreas.map(([key, label]) => {
             const value = String(impact[key] || "Pending");
             return (
