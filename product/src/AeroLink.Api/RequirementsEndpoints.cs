@@ -61,7 +61,7 @@ public static class RequirementsEndpoints
 
         // Enterprise Requirements Workspace: configurable schemas, structured specifications,
         // collaboration, saved views, governed bulk operations, redlines, and onboarding.
-        app.MapGet("/api/enterprise-requirements/workspace", async (Guid projectId, Guid? specificationId, Guid? sectionId, string? search, string? level, string? verification, string? tag,string? state,string? owner,string? sourceScr,Guid? baselineId,bool? openComments,string? sort,int page, int pageSize,
+        app.MapGet("/api/enterprise-requirements/workspace", async (Guid projectId, Guid? specificationId, Guid? sectionId, string? search, string? level, string? verification, string? tag,string? state,string? owner,string? sourceScr,Guid? baselineId,bool? openComments,string? coverageState,string? sort,int page, int pageSize,
             HttpContext http, AeroLinkDbContext db, EnterpriseRequirementsService enterprise, CancellationToken ct) =>
         {
             if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
@@ -87,17 +87,31 @@ public static class RequirementsEndpoints
             if(!string.IsNullOrWhiteSpace(sourceScr)){var s=sourceScr.Trim().ToLower();current=current.Where(x=>db.SystemChangeRequests.Any(scr=>scr.Id==x.revision.SourceScrId&&(scr.BaseNumber.ToLower().Contains(s)||scr.Title.ToLower().Contains(s))));}
             if(baselineId is not null)current=current.Where(x=>db.BaselineRequirements.Any(b=>b.BaselineId==baselineId&&b.RevisionId==x.revision.Id));
             if(openComments==true)current=current.Where(x=>db.ArtifactComments.Any(c=>c.ArtifactId==x.artifact.Id&&c.ArtifactType=="Requirement"&&c.State==CollaborationState.Open));
+            // Which requirements are uncovered, or covered only by something that no longer counts, was a
+            // question the workspace could not answer at all — it filtered on the verification *method* an
+            // author declared, which says what kind of evidence is intended and nothing about whether any
+            // exists. Both subqueries stay composable so this filters in the database alongside every other
+            // predicate, before the count and the page.
+            if(!string.IsNullOrWhiteSpace(coverageState)&&RequirementCoverageState.TryParse(coverageState,out var parsedCoverage))
+            {
+                var settled=VerificationCoverageProjection.SettledCoveredRequirementRevisionIds(db);var linked=VerificationCoverageProjection.LinkedRequirementRevisionIds(db);
+                current=parsedCoverage switch{
+                    RequirementCoverageState.Covered=>current.Where(x=>settled.Contains(x.revision.Id)),
+                    RequirementCoverageState.Suspect=>current.Where(x=>!settled.Contains(x.revision.Id)&&linked.Contains(x.revision.Id)),
+                    _=>current.Where(x=>!linked.Contains(x.revision.Id))};
+            }
             var ordered=sort?.ToLowerInvariant() switch{"updated" when !db.Database.IsSqlite()=>current.OrderByDescending(x=>x.revision.CreatedAt).ThenBy(x=>x.artifact.BaseNumber),"verification"=>current.OrderBy(x=>x.revision.VerificationMethod).ThenBy(x=>x.artifact.BaseNumber),"state"=>current.OrderBy(x=>x.revision.State).ThenBy(x=>x.artifact.BaseNumber),_=>current.OrderBy(x=>x.artifact.BaseNumber)};
             var total=await current.CountAsync(ct);var rows=await ordered.Skip((page-1)*pageSize).Take(pageSize)
                 .Select(x=>new{x.artifact.Id,x.artifact.BaseNumber,level=x.artifact.Level.ToString(),revisionId=x.revision.Id,x.revision.Revision,x.revision.Statement,x.revision.Rationale,x.revision.VerificationMethod,state=x.revision.State.ToString(),x.revision.SourceScrId,x.revision.CreatedAt}).ToListAsync(ct);
             var revisionIds=rows.Select(x=>x.revisionId).ToList();var profiles=await db.RequirementRevisionProfiles.AsNoTracking().Where(x=>revisionIds.Contains(x.RevisionId)).ToDictionaryAsync(x=>x.RevisionId,ct);
+            var coverageStates=await VerificationCoverageProjection.StatesAsync(db,revisionIds,ct);
             var commentCounts=await db.ArtifactComments.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.ArtifactType=="Requirement"&&rows.Select(r=>r.Id).Contains(x.ArtifactId)).GroupBy(x=>x.ArtifactId).Select(x=>new{x.Key,Count=x.Count(),Open=x.Count(c=>c.State==CollaborationState.Open)}).ToDictionaryAsync(x=>x.Key,ct);
             var schemas=await db.ArtifactSchemas.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.IsActive).OrderBy(x=>x.Name).Select(x=>new{x.Id,x.Key,x.Name,x.AppliesTo,x.Description,x.Version,fields=x.Fields.OrderBy(f=>f.SortOrder).Select(f=>new{f.Id,f.Key,f.Label,type=f.Type.ToString(),f.IsRequired,f.SortOrder,f.OptionsJson})}).ToListAsync(ct);
             var specificationRows=await db.RequirementSpecifications.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderBy(x=>x.Level).Select(x=>new{x.Id,x.DocumentNumber,x.Title,x.Level,x.Description,nodeCount=db.SpecificationNodes.Count(n=>n.SpecificationId==x.Id&&n.Type==SpecificationNodeType.Requirement)}).ToListAsync(ct);
             var specificationIds=specificationRows.Select(x=>x.Id).ToList();var sectionRows=await db.SpecificationNodes.AsNoTracking().Where(n=>specificationIds.Contains(n.SpecificationId)&&n.Type==SpecificationNodeType.Section).OrderBy(n=>n.Position).Select(n=>new{n.Id,n.SpecificationId,n.Heading,n.Position,count=db.SpecificationNodes.Count(c=>c.ParentId==n.Id)}).ToListAsync(ct);
             var specifications=specificationRows.Select(x=>new{x.Id,x.DocumentNumber,x.Title,x.Level,x.Description,x.nodeCount,sections=sectionRows.Where(s=>s.SpecificationId==x.Id).Select(s=>new{s.Id,s.Heading,s.Position,s.count})}).ToList();
             var views=await db.SavedRequirementViews.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.OwnerId==http.UserAccount().Id||x.IsShared)).OrderBy(x=>x.Name).Select(x=>new{x.Id,x.Name,x.QueryJson,x.ColumnsJson,x.IsShared,owned=x.OwnerId==http.UserAccount().Id}).ToListAsync(ct);
-            timer.Stop();return Results.Ok(new{page,pageSize,totalCount=total,totalPages=(int)Math.Ceiling(total/(double)pageSize),queryElapsedMs=timer.ElapsedMilliseconds,schemas,specifications,views,items=rows.Select(x=>{profiles.TryGetValue(x.revisionId,out var profile);commentCounts.TryGetValue(x.Id,out var comments);return new{x.Id,x.BaseNumber,displayNumber=$"{x.BaseNumber}.{x.Revision:D2}",x.level,x.revisionId,x.Revision,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceScrId,x.CreatedAt,richText=profile?.RichText??x.Statement,attributesJson=profile?.AttributesJson??"{}",tagsJson=profile?.TagsJson??"[]",commentCount=comments?.Count??0,openCommentCount=comments?.Open??0};})});
+            timer.Stop();return Results.Ok(new{page,pageSize,totalCount=total,totalPages=(int)Math.Ceiling(total/(double)pageSize),queryElapsedMs=timer.ElapsedMilliseconds,schemas,specifications,views,items=rows.Select(x=>{profiles.TryGetValue(x.revisionId,out var profile);commentCounts.TryGetValue(x.Id,out var comments);return new{x.Id,x.BaseNumber,displayNumber=$"{x.BaseNumber}.{x.Revision:D2}",x.level,x.revisionId,x.Revision,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceScrId,x.CreatedAt,richText=profile?.RichText??x.Statement,attributesJson=profile?.AttributesJson??"{}",tagsJson=profile?.TagsJson??"[]",commentCount=comments?.Count??0,openCommentCount=comments?.Open??0,coverageState=coverageStates.TryGetValue(x.revisionId,out var rowCoverage)?rowCoverage:RequirementCoverageState.Uncovered};})});
         });
 
         app.MapGet("/api/enterprise-requirements/{artifactId:guid}", async (Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
