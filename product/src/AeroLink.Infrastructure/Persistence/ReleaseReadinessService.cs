@@ -41,22 +41,11 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         // And the procedure must have no revision in flight. A procedure being modified has to be reviewed
         // and approved before anything relying on it can be considered approved; counting the superseded
         // revision in the meantime would claim a settled answer while the answer is being rewritten.
+        // The predicate itself lives in VerificationCoverageProjection so the requirements workspace filter
+        // reads the same definition. Two implementations of "covered" is how a workspace comes to disagree
+        // with the gate it is meant to be preparing for.
         var coverage = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
-        var linkedProcedureRevisionIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
-        var linkedRevisions = await db.TestProcedureRevisions.AsNoTracking()
-            .Where(x => linkedProcedureRevisionIds.Contains(x.Id))
-            .Select(x => new { x.Id, x.ProcedureId, x.State }).ToListAsync(ct);
-        var linkedProcedureIds = linkedRevisions.Select(x => x.ProcedureId).Distinct().ToList();
-        var proceduresBeingChanged = (await db.TestProcedureRevisions.AsNoTracking()
-                .Where(x => linkedProcedureIds.Contains(x.ProcedureId) && x.State != TestProcedureState.Approved)
-                .Select(x => x.ProcedureId).Distinct().ToListAsync(ct))
-            .ToHashSet();
-        var settledProcedureRevisionIds = linkedRevisions
-            .Where(x => x.State == TestProcedureState.Approved && !proceduresBeingChanged.Contains(x.ProcedureId))
-            .Select(x => x.Id).ToHashSet();
-        var coveredIds = coverage
-            .Where(x => !x.IsSuspect && settledProcedureRevisionIds.Contains(x.ProcedureRevisionId))
-            .Select(x => x.RequirementRevisionId).Distinct().ToHashSet();
+        var coveredIds = await VerificationCoverageProjection.SettledCoveredAsync(db, revisionIds, ct);
         var procedureIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList(); var executions = await db.TestExecutions.AsNoTracking().Where(x => procedureIds.Contains(x.ProcedureRevisionId) && (campaign.SoftwareBuildId == null || x.SoftwareBuildId == campaign.SoftwareBuildId)).ToListAsync(ct);
         var latestRuns = executions.GroupBy(x => x.ProcedureRevisionId).Select(x => x.OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).First()).ToList();
         var runIds = latestRuns.Select(x => x.Id).ToList(); var evidenceRunIds = await db.TestExecutionEvidence.AsNoTracking().Where(x => runIds.Contains(x.TestExecutionId)).Select(x => x.TestExecutionId).Distinct().ToListAsync(ct);

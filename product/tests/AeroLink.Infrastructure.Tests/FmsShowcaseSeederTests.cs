@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -28,6 +29,53 @@ public sealed class FmsShowcaseSeederTests
             var active = db.SystemChangeRequests.Where(x => x.TargetReleaseId == first.ActiveReleaseId);
             Assert.Equal(8, await active.CountAsync()); Assert.Equal(2, await active.CountAsync(x => x.State == ScrState.SelectedForBaseline));
             Assert.Equal(2, await active.CountAsync(x => x.State == ScrState.InReview)); Assert.Equal(3, await active.CountAsync(x => x.State == ScrState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ScrState.Deferred));
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>
+    /// The showcase covered all 1,250 of its requirements, so it could never demonstrate the product finding
+    /// a verification gap — the question the tool exists to answer. One FMS 1.6 rework item now puts an
+    /// approved System procedure back into revision, which is enough to make the coverage it provides stop
+    /// counting without disturbing a single released FMS 1.5 record.
+    /// </summary>
+    [Fact]
+    public async Task An_in_work_procedure_revision_creates_suspect_coverage_that_reseeding_does_not_multiply()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-gap-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync();
+            var seeder = new FmsShowcaseSeeder(db);
+            var first = await seeder.EnsureSeededAsync();
+            await seeder.EnsureSeededAsync();
+
+            var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.BaseNumber == "SYSTP-000040");
+            var revisions = await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => x.ProcedureId == procedure.Id).OrderBy(x => x.Revision).ToListAsync();
+
+            // Seeding twice must leave one in-work revision, not two.
+            Assert.Equal([0, 1], revisions.Select(x => x.Revision).ToArray());
+            Assert.Equal(TestProcedureState.Approved, revisions[0].State);
+            Assert.Equal(TestProcedureState.Draft, revisions[1].State);
+
+            // Released FMS 1.5 is untouched: every effective revision still carries its coverage link.
+            Assert.Equal(1250, await db.TestCoverage.Select(x => x.RequirementRevisionId).Distinct().CountAsync());
+
+            var effective = await db.BaselineRequirements.AsNoTracking()
+                .Where(x => x.BaselineId == first.ReleasedBaselineId).Select(x => x.RevisionId).ToListAsync();
+            var states = await VerificationCoverageProjection.StatesAsync(db, effective, default);
+            var suspect = states.Where(x => x.Value == RequirementCoverageState.Suspect).Select(x => x.Key).OrderBy(x => x).ToArray();
+            var carried = await db.TestCoverage.AsNoTracking()
+                .Where(x => x.ProcedureRevisionId == revisions[0].Id).Select(x => x.RequirementRevisionId).ToListAsync();
+
+            // Exactly the requirements that one procedure covers, and nothing else in the programme.
+            Assert.Equal(carried.OrderBy(x => x).ToArray(), suspect);
+            Assert.Equal(2, suspect.Length);
+
+            // Uncovered is deliberately not seeded — see EnsureVerificationCoverageGapAsync for why.
+            Assert.DoesNotContain(RequirementCoverageState.Uncovered, states.Values);
         }
         finally { File.Delete(path); }
     }

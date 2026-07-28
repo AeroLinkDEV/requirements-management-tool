@@ -40,6 +40,21 @@ export const stateLabel = (state?: string) => {
 }
 
 /**
+ * How a requirement's coverage state reads to somebody deciding what to work on.
+ *
+ * "Not covered" rather than "Uncovered" because the row is a worklist entry, not a classification. The
+ * server owns which state a requirement is in; this only decides the words.
+ */
+export const coverageLabel = (state?: string) => {
+  switch (state?.toLowerCase()) {
+    case 'covered': return 'Covered'
+    case 'suspect': return 'Suspect'
+    case 'uncovered': return 'Not covered'
+    default: return ''
+  }
+}
+
+/**
  * A change request's state, said the way the programme says it.
  *
  * "Selected for baseline" describes the mechanism — a row was picked into a candidate — and says nothing a

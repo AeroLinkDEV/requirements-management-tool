@@ -25,6 +25,10 @@ The showcase coexists with the clean **Create a new program** workflow. Its prog
 
 Requirement identities are stable and revisions are immutable. Requirements at revision `.01` or `.02` include retained superseded revisions. Every effective requirement revision is included in the exact FMS 1.5 baseline and has at least one version-aware test-procedure coverage link.
 
+**Two of those links do not currently count.** `SYSTP-000040` carries an FMS 1.6 draft revision alongside its approved one — an in-work procedure change — and coverage settles only when the procedure it names has no revision in flight. The two system requirements that procedure covers therefore read **Suspect** rather than Covered, which is what lets the showcase demonstrate the product finding a verification gap at all. Released FMS 1.5 is untouched by this: the approved revision, its coverage links, the baseline, the build, the executions and the controlled documents are all exactly as they were, and the counts above are unchanged because `Test procedures` counts procedures rather than revisions.
+
+No **Uncovered** requirement is seeded, deliberately. Reaching one would mean either stripping coverage from a released requirement — a released baseline that failed its own coverage gate — or materializing the FMS 1.6 baseline, which would discard the `WaitingForPrerequisite` position DEC-066 exists to demonstrate. Uncovered appears as soon as somebody materializes 1.6, which is the honest way to show it. See DEC-068.
+
 The released build is `FMS-1.5.0-RELEASE`. It references the frozen and materialized FMS 1.5 baseline, whose SCR manifest and effective-requirement manifest have independent SHA-256 hashes.
 
 ## Allocation and verification

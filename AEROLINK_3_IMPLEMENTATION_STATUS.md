@@ -124,12 +124,25 @@ workspace explains the lifecycle ordering and the four downstream assurance gate
 release view names baseline materialization as the next governed action instead of presenting contradictory
 `0/0` failures.
 
+The second verification/readiness increment gives the requirements workspace a coverage-state filter and gives
+settled coverage one definition (DEC-067). The release readiness gate, the workspace filter and the requirement
+trace panel now read the same predicate; before this the gate applied three conditions while the trace panel
+counted confirmed tests from the suspect flag alone, so one coverage link could be described two ways on two
+screens. The showcase gains a single in-work suspect gap so the product can be shown discovering one, and
+deliberately no uncovered requirement — the reasons are recorded in DEC-068 rather than left as a silent
+shortfall against issue #137's acceptance criteria.
+
+**This does not move a workstream boundary.** Workstream 7 covers quality and portfolio intelligence and its
+remaining acceptance gate is untouched; this is correctness and reachability inside capabilities already
+claimed, in the same pattern as the increments above.
+
 ## Repository and authority corrections
 
 The following facts supersede earlier planning assumptions that predated repository publication:
 
 - The shared repository exists at `seanmccarthyns/requirements-management-tool`.
-- Repository visibility is private.
+- Repository visibility is public, by DEC-060 of 2026-07-28. This line read "private" for as long as DEC-060
+  had existed, inside the section headed as the one that supersedes earlier planning assumptions.
 - `main` is the source-of-truth integration branch and must remain releasable.
 - GitHub issues and pull requests are the delivery-control mechanism for AeroLink 3.0 increments.
 - Markdown in Git remains authoritative for product definition and implementation limitations.

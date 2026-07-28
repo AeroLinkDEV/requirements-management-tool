@@ -811,6 +811,57 @@ Future entries use:
   baseline with no effective requirements is an evaluated invalid release population, not a waiting state, and
   remains on HOLD with a repair instruction. System, Software, and product-line configurations use the same rule.
 
+### DEC-067 - Settled Coverage Has One Definition, and Every Surface Reads It
+
+- **Date:** 2026-07-28
+- **Status:** Accepted
+- **Extends:** [DEC-050](#dec-050---suspect-coverage-is-not-coverage-and-materialization-owns-carry-forward),
+  which established that suspect coverage is not coverage. This says where that judgement lives.
+- **Decision:** A requirement revision is **Covered** only when a coverage link is not suspect, names a
+  procedure revision that is Approved, and that procedure has no other revision still in draft or review. It
+  is **Suspect** when a coverage link exists and does not meet that test, and **Uncovered** when no coverage
+  link exists at all. The three states are mutually exclusive and exhaustive. The predicate lives in
+  `VerificationCoverageProjection` and the release readiness gate, the requirements-workspace filter and the
+  trace panel all read it from there.
+- **Rationale:** The three-part test already existed inside the release readiness gate, computed in memory
+  over a baseline's members. The requirements workspace had no coverage filter at all, so the only way to
+  ask "which requirements need verification attention?" was to read the readiness counts, which appear far
+  too late to act on. Adding a filter that tested only the suspect flag would have been the cheap
+  implementation and would have given the product two answers to one question — the workspace calling a
+  requirement covered while the gate refused to count it. This project has paid for that shape repeatedly.
+  The trace panel was already the third answer: it counted "confirmed tests" from the raw flag, so a
+  requirement could show one confirmed test beside a row labelled Suspect, both describing the same link.
+- **Consequences:** `IsSuspect` keeps its meaning as the stored carry-forward fact; `CoverageState` is the
+  computed judgement and is no longer derived from the flag alone. A procedure being rewritten therefore
+  stops settling coverage everywhere at once, which is a behaviour change on the trace panel and in the
+  verification workspace, not only in the new filter. The workspace filter is a composable database query,
+  not an in-memory pass, because it runs against fifty thousand requirements. A test asserts the workspace
+  and the gate return the same set, so a future second implementation fails rather than diverging quietly.
+
+### DEC-068 - The Showcase Demonstrates a Suspect Gap, and Deliberately Not an Uncovered One
+
+- **Date:** 2026-07-28
+- **Status:** Accepted
+- **Decision:** Fresh showcase data contains exactly one verification gap: an approved System procedure
+  (`SYSTP-000040`) put back into revision as FMS 1.6 work, which makes the two requirements it covers
+  **Suspect**. No **Uncovered** requirement is seeded.
+- **Rationale:** Every one of the showcase's 1,250 requirements was covered, so the product could never be
+  shown discovering the thing it exists to discover. Reaching an Uncovered requirement, however, needs one
+  of two untruths. Removing coverage from a released FMS 1.5 requirement produces a released baseline that
+  failed its own coverage gate, which is worse than a missing demonstration state. Materializing the FMS 1.6
+  baseline discards the `WaitingForPrerequisite` lifecycle position that
+  [DEC-066](#dec-066---test-procedures-bind-only-to-materialized-requirement-revisions) exists to show. The
+  in-work requirements that will need coverage are already visible as verification-impact items, so the
+  workflow is represented; only the workspace state is not.
+- **Consequences:** Uncovered is reachable in a demonstration the moment somebody materializes FMS 1.6,
+  which is a governed action the product already offers, and that is the honest way to show it — the tool
+  creating the gap rather than the fixture asserting one. The seeded procedure is deliberately not
+  `SYSTP-000001`: procedures are dealt requirements round-robin, so `SYSTP-000001` covers `SYSR-000001` and
+  is the first approved procedure any test searching for one finds. Seeding the gap there removed it from
+  the covering-procedure list and broke an unrelated journey. A fixture that changes what other journeys
+  discover is not an isolated fixture. Seeding stays idempotent and applies to databases seeded before this
+  existed, so an upgrade reconciles rather than duplicating.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

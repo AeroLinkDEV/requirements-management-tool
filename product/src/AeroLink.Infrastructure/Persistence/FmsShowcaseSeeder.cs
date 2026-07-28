@@ -24,7 +24,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
     public async Task<FmsShowcaseSummary> EnsureSeededAsync(CancellationToken ct = default)
     {
         var existing = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == ProgramCode, ct);
-        if (existing is not null) { await EnsureReleaseCampaignAsync(existing.Id, ct);await EnsureProductLineAsync(existing.Id,ct); return await SummarizeAsync(existing.Id, ct); }
+        if (existing is not null) { await EnsureReleaseCampaignAsync(existing.Id, ct);await EnsureProductLineAsync(existing.Id,ct);await EnsureVerificationCoverageGapAsync(existing.Id, ct); return await SummarizeAsync(existing.Id, ct); }
 
         var start = new DateTimeOffset(2024, 1, 8, 14, 0, 0, TimeSpan.Zero);
         var program = new ProgramRecord("Flight Management System Live Program", ProgramCode);
@@ -107,7 +107,56 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         db.CandidateBaselines.Add(baseline16); await db.SaveChangesAsync(ct);
         await EnsureReleaseCampaignAsync(program.Id, ct);
         await EnsureProductLineAsync(program.Id,ct);
+        await EnsureVerificationCoverageGapAsync(program.Id, ct);
         return await SummarizeAsync(program.Id, ct);
+    }
+
+    /// <summary>
+    /// Procedure whose FMS 1.6 rework creates the showcase's suspect coverage.
+    ///
+    /// Deliberately not SYSTP-000001. Procedures are dealt requirements round-robin, so SYSTP-000001 covers
+    /// SYSR-000001 and is therefore the first approved procedure any test that searches for one will find —
+    /// putting it into revision took it out of the covering-procedure list and broke the suspect-coverage
+    /// journey. A fixture that changes what other journeys discover is not an isolated fixture.
+    /// </summary>
+    private const string GapProcedureNumber = "SYSTP-000040";
+
+    /// <summary>
+    /// A showcase in which all 1,250 requirements are covered can never demonstrate the tool finding a
+    /// verification gap, which is the question a verification engineer actually arrives with.
+    ///
+    /// The gap seeded here is one FMS 1.6 work item: an approved System procedure put back into revision.
+    /// Coverage settles only when the procedure it names has no revision in flight, so the two requirements
+    /// that procedure covers become Suspect — linked to something that no longer counts — without altering a
+    /// single released FMS 1.5 record. The approved revision 0 is untouched, its coverage links are
+    /// untouched, and the 1.5 baseline, build, executions and controlled documents all still agree.
+    ///
+    /// The Uncovered state is deliberately not seeded. Reaching it would take either removing coverage from
+    /// a released requirement — a released baseline that failed its own coverage gate, which is a worse
+    /// untruth than a missing demonstration state — or materializing the FMS 1.6 baseline, which would
+    /// discard the WaitingForPrerequisite lifecycle position DEC-066 exists to show. Uncovered becomes
+    /// reachable the moment somebody materializes 1.6, which is a governed action the product already
+    /// offers; the requirements awaiting that step are already visible as verification-impact items.
+    ///
+    /// Idempotent, and safe to apply to a database seeded before this existed: it no-ops when the procedure
+    /// is absent or already has a revision in flight.
+    /// </summary>
+    private async Task EnsureVerificationCoverageGapAsync(Guid programId, CancellationToken ct)
+    {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleOrDefaultAsync(ct);
+        if (projectId == Guid.Empty) return;
+        var procedure = await db.TestProcedures.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.BaseNumber == GapProcedureNumber, ct);
+        if (procedure is null) return;
+        if (await db.TestProcedureRevisions.AnyAsync(x => x.ProcedureId == procedure.Id && x.State != TestProcedureState.Approved, ct)) return;
+
+        db.TestProcedureRevisions.Add(new TestProcedureRevision(procedure.Id, 1,
+            "Verify oceanic round-robin waypoint sequencing against the revised FMS 1.6 behavior.",
+            "Load the FMS 1.6 candidate software and the approved navigation database.",
+            "Initialize oceanic mode, stimulate the revised sequencing inputs, and record each observable output.",
+            "Every observed output meets the linked requirement acceptance criteria.",
+            TestProcedureState.Draft, "test.author", new DateTimeOffset(2024, 11, 18, 9, 30, 0, TimeSpan.Zero)));
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task EnsureProductLineAsync(Guid programId,CancellationToken ct)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PersonName } from "./People";
-import { stateLabel } from './presentation'
+import { coverageLabel, stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useFormDraft } from "./autosave";
@@ -62,6 +62,8 @@ type Requirement = {
   tagsJson: string;
   commentCount: number;
   openCommentCount: number;
+  /** Covered, Suspect or Uncovered — the server's single definition, never recomputed here. */
+  coverageState: string;
 };
 type Workspace = {
   page: number;
@@ -199,6 +201,7 @@ export default function RequirementsWorkspace({
     [owner, setOwner] = useState(""),
     [sourceScr, setSourceScr] = useState(""),
     [openComments, setOpenComments] = useState(false),
+    [coverageState, setCoverageState] = useState(""),
     [sort, setSort] = useState("identifier"),
     [showAdvanced, setShowAdvanced] = useState(false),
     [specificationId, setSpecificationId] = useState(""),
@@ -255,6 +258,7 @@ export default function RequirementsWorkspace({
     if (owner) p.set("owner", owner);
     if (sourceScr) p.set("sourceScr", sourceScr);
     if (openComments) p.set("openComments", "true");
+    if (coverageState) p.set("coverageState", coverageState);
     if (specificationId) p.set("specificationId", specificationId);
     if (sectionId) p.set("sectionId", sectionId);
     return p;
@@ -271,6 +275,7 @@ export default function RequirementsWorkspace({
     owner,
     sourceScr,
     openComments,
+    coverageState,
     sort,
     specificationId,
     sectionId,
@@ -383,6 +388,10 @@ export default function RequirementsWorkspace({
         tagsJson: latest.tagsJson,
         commentCount: 0,
         openCommentCount: 0,
+        // Synthesized from the detail endpoint to select a deep-linked requirement, never rendered as a
+        // list row. Left empty rather than guessed, because a coverage state this screen did not compute
+        // is exactly the kind of value that becomes believed once it is displayed.
+        coverageState: "",
       };
       setDetail(value);
       setSelected(item);
@@ -403,6 +412,7 @@ export default function RequirementsWorkspace({
     setOwner("");
     setSourceScr("");
     setOpenComments(false);
+    setCoverageState("");
     setSort("identifier");
     setSpecificationId("");
     setSectionId("");
@@ -419,6 +429,7 @@ export default function RequirementsWorkspace({
       setOwner(q.owner || "");
       setSourceScr(q.sourceScr || "");
       setOpenComments(!!q.openComments);
+      setCoverageState(q.coverageState || "");
       setSort(q.sort || "identifier");
       setSpecificationId(q.specificationId || "");
       setPage(1);
@@ -454,6 +465,7 @@ export default function RequirementsWorkspace({
           owner,
           sourceScr,
           openComments,
+          coverageState,
           sort,
           specificationId,
         }),
@@ -577,6 +589,12 @@ export default function RequirementsWorkspace({
       label: "Open discussions",
       clear: () => setOpenComments(false),
     });
+  if (coverageState)
+    filterChips.push({
+      key: "coverage",
+      label: `Coverage: ${coverageLabel(coverageState)}`,
+      clear: () => setCoverageState(""),
+    });
   if (specificationId)
     filterChips.push({
       key: "specification",
@@ -695,6 +713,24 @@ export default function RequirementsWorkspace({
           <option>Analysis</option>
           <option>Inspection</option>
           <option>Demonstration</option>
+        </select>
+        {/*
+          The control beside this one filters on the verification *method* an author declared, which says
+          what kind of evidence is intended and nothing about whether any exists. This one answers the
+          question an engineer actually arrives with.
+        */}
+        <select
+          aria-label="Coverage state filter"
+          value={coverageState}
+          onChange={(e) => {
+            setCoverageState(e.target.value);
+            setPage(1);
+          }}
+        >
+          <option value="">All coverage</option>
+          <option value="covered">Covered</option>
+          <option value="suspect">Suspect</option>
+          <option value="uncovered">Not covered</option>
         </select>
         <input
           className="tagFilter"
@@ -971,6 +1007,7 @@ export default function RequirementsWorkspace({
                 <span>Identifier & statement</span>
                 <span>Level</span>
                 <span>Verification</span>
+                <span>Coverage</span>
                 <span>State</span>
                 <span>Discussion</span>
               </div>
@@ -1003,6 +1040,33 @@ export default function RequirementsWorkspace({
                         : "System"}
                   </span>
                   <span>{item.verificationMethod}</span>
+                  {/*
+                    A state that only reads is a state nobody can act on. Covered is a plain label because
+                    there is nothing to do about it; the other two open the trace panel, which is where the
+                    procedures covering this revision — or the absence of them — actually are.
+                  */}
+                  {!item.coverageState ? (
+                    <span />
+                  ) : item.coverageState === "Covered" ? (
+                    <span className="coverageState covered">{coverageLabel(item.coverageState)}</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`coverageState ${item.coverageState.toLowerCase()}`}
+                      title={
+                        item.coverageState === "Suspect"
+                          ? "Coverage exists but does not count yet. Open the verification trace."
+                          : "No procedure covers this revision. Open the verification trace."
+                      }
+                      onClick={() => {
+                        onOpenRequirement(item.id);
+                        open(item);
+                        setInspectorTab("trace");
+                      }}
+                    >
+                      {coverageLabel(item.coverageState)}
+                    </button>
+                  )}
                   <i className={item.state.toLowerCase()}>{stateLabel(item.state)}</i>
                   <span className={item.openCommentCount ? "hasComments" : ""}>
                     ◌ {item.commentCount}
@@ -1207,7 +1271,10 @@ export default function RequirementsWorkspace({
                 <div className="traceSummary">
                   <article><b>{impact?.parents.length ?? 0}</b><span>upstream</span></article>
                   <article><b>{impact?.children.length ?? 0}</b><span>downstream</span></article>
-                  <article><b>{impact?.tests.filter((item) => !item.isSuspect).length ?? 0}</b><span>confirmed tests</span></article>
+                  {/* coverageState, not the raw isSuspect flag: a link to a procedure that is being
+                      rewritten is not confirmed coverage, and counting it here contradicted the row the
+                      reader clicked to get in. */}
+                  <article><b>{impact?.tests.filter((item) => item.coverageState === "Confirmed").length ?? 0}</b><span>confirmed tests</span></article>
                 </div>
                 <button className="openDigitalThread" onClick={onOpenTraceability}>
                   Open complete Digital Thread →
@@ -1227,7 +1294,7 @@ export default function RequirementsWorkspace({
                 {impact?.children.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
                 {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
                 <h3>Verification coverage</h3>
-                {impact?.tests.map((item) => <article className={`traceRelation${item.isSuspect ? " attention" : ""}`} key={item.revisionId ?? item.id}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · {item.isSuspect ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{item.isSuspect && <button onClick={onOpenVerification}>Resolve in Verification →</button>}</article>)}
+                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.revisionId ?? item.id}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · {unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button onClick={onOpenVerification}>Resolve in Verification →</button>}</article>; })}
                 {!impact?.tests.length && <div className="traceEmpty attention"><span>No verification procedure currently covers this revision.</span></div>}
               </div>
             )}
