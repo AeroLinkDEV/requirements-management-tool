@@ -108,7 +108,11 @@
 .resultSummary { height: 58px; padding: 0 18px; }
 .resultSummary b { font-size: 14px; }
 .resultSummary span, .confidence { font-size: 12px; }
-.reqTableHead, .reqTable article { grid-template-columns: minmax(300px, 1fr) 95px 110px 92px 105px; }
+/* Six tracks for six children: identifier, level, verification, coverage, state, discussion. The same
+   column count is set in RequirementsWorkspace.css so the row does not depend on which stylesheet the
+   module graph happens to load last — a seventh child with only six tracks lands in an implicit column and
+   takes the page sideways with it. */
+.reqTableHead, .reqTable article { grid-template-columns: minmax(300px, 1fr) 95px 110px 116px 92px 105px; }
 .reqTableHead { padding: 12px 14px; font-size: 12px; }
 .reqTable article { padding: 14px; min-height: 86px; }
 .reqTable article > button { min-height: 44px; }

@@ -257,7 +257,7 @@ html .sectionTree button.active { background: #e2edf7; color: #1d4a72; font-weig
 .reqTableHead,
 .reqTable article {
   display: grid;
-  grid-template-columns: 34px minmax(300px, 1fr) 85px 95px 75px 90px;
+  grid-template-columns: minmax(300px, 1fr) 95px 110px 116px 92px 105px;
   align-items: center;
 }
 .reqTableHead {
@@ -323,6 +323,40 @@ html .sectionTree button.active { background: #e2edf7; color: #1d4a72; font-weig
 .reqTable article > i.retired {
   background: #f3edf0;
   color: #89566a;
+}
+/* Pinned at 12px rather than inherited: the readability floor is measured on rendered pixels in both
+   densities, and a relative size here would fall under it in compact. Suspect and Not covered are buttons,
+   so they carry the 24x24 minimum target size; Covered is a plain label with nothing to act on. */
+.coverageState {
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 4px 7px;
+  border-radius: 8px;
+  width: max-content;
+  min-height: 24px;
+  text-align: left;
+}
+.coverageState.covered {
+  color: #3c5163;
+  background: #eef2f6;
+}
+button.coverageState {
+  border: 1px solid transparent;
+  cursor: pointer;
+  min-width: 24px;
+}
+button.coverageState.suspect {
+  color: #7a5310;
+  background: #fdf3dd;
+  border-color: #e8cf94;
+}
+button.coverageState.uncovered {
+  color: #8f3242;
+  background: #fdeef0;
+  border-color: #edbcc4;
+}
+button.coverageState:hover {
+  filter: brightness(0.97);
 }
 .miniTags {
   display: flex;
@@ -929,6 +963,7 @@ html .sectionTree button.active { background: #e2edf7; color: #1d4a72; font-weig
   }
   .reqTableHead span:nth-child(n + 4),
   .reqTable article > span:nth-child(n + 4),
+  .reqTable article > .coverageState,
   .reqTable article > i {
     display: none;
   }
