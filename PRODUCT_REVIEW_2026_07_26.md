@@ -7,6 +7,13 @@ product appears to say.
 
 This file records the disposition of each. It is a working record, not a product definition.
 
+> **Closed as of 2026-07-28.** Every item below has been decided and built. The nine that needed a product
+> decision were answered on 27 July and merged through PR #98; the last of them, *What the impact-disposition
+> field is for*, is closed by [DEC-059](DECISIONS_AND_OPEN_QUESTIONS.md) — the computed trace impact now appears
+> beside the declared disposition in the proposal card, read-only, exactly as this file argued it should.
+>
+> Retained as the record of what was found and what was decided. Nothing here is outstanding work.
+
 ## What was wrong, and is now fixed
 
 ### Spaces could not be typed into the change case

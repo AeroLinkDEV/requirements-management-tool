@@ -6,16 +6,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Tests;
 
-public sealed class ProductLinePublicationTests
+[Collection(ShowcaseCollection.Name)]
+public sealed class ProductLinePublicationTests(ShowcaseDatabaseFixture showcaseFixture)
 {
     [Fact]
     public async Task Frozen_variants_project_exact_reuse_decisions_and_render_reproducible_rich_publications()
     {
-        var path=Path.Combine(Path.GetTempPath(),$"aerolink-product-line-{Guid.NewGuid():N}.db");
-        var options=new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        // A private copy of the showcase, rather than a 68-second rebuild of one.
+        using var showcase=showcaseFixture.Create();
         try
         {
-            await using var db=new AeroLinkDbContext(options);await db.Database.EnsureCreatedAsync();var summary=await new FmsShowcaseSeeder(db).EnsureSeededAsync();db.ChangeTracker.Clear();
+            await using var db=showcase.Context();var summary=showcaseFixture.Summary;
             var variants=await db.ProductVariants.AsNoTracking().Where(x=>x.ProjectId==summary.ProjectId).OrderBy(x=>x.VariantKey).ToListAsync();
             var released=variants.Single(x=>x.VariantKey=="FMS-1.5");var active=variants.Single(x=>x.VariantKey=="FMS-1.6");
             var releasedBaseline=await db.ProductVariantBaselines.AsNoTracking().Where(x=>x.VariantId==released.Id).OrderByDescending(x=>x.Revision).FirstAsync();
@@ -32,7 +33,7 @@ public sealed class ProductLinePublicationTests
             var editable=await db.DocumentTemplates.SingleAsync();editable.BeginSuccessorRevision("cm.fms",template.ApprovedAt.AddDays(1));editable.UpdateDraft("AeroLink configured SYSRD - refreshed","{\"subtitle\":\"Updated organization format\",\"titlePrefix\":\"Configured System Requirements\"}","cm.fms",template.ApprovedAt.AddDays(1));var revision=editable.Approve("cm.fms",template.ApprovedAt.AddDays(1));var successor=new DocumentTemplateRevision(editable.Id,revision,"SYSRD","AeroLink Flight Systems",editable.Body,VariantConfigurationProjectionService.Hash(editable.Body),"cm.fms",template.ApprovedAt.AddDays(1));db.DocumentTemplateRevisions.Add(successor);await db.SaveChangesAsync();
             var later=await generator.GenerateAsync(activeBaseline.Id,successor.Id,releasedBaseline.Id,"docx",default);Assert.NotNull(later);Assert.NotEqual(docx.TemplateManifestHash,later!.TemplateManifestHash);Assert.NotEqual(docx.Output.Content,later.Output.Content);Assert.Equal(docx.Output.Content,repeated.Output.Content);
         }
-        finally{File.Delete(path);}
+        finally{/* the copy is removed when `showcase` is disposed */}
     }
 
     private static async Task<string> ReadAsync(ZipArchive archive,string name){await using var stream=archive.GetEntry(name)!.Open();using var reader=new StreamReader(stream);return await reader.ReadToEndAsync();}

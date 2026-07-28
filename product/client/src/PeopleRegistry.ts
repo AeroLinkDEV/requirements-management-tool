@@ -45,3 +45,20 @@ export const decisionPeople = {
   safety: people["program.manager"],
   release: people["release.manager"],
 };
+
+/**
+ * A person's name as a plain string, for the places a component cannot go — a template literal, an aria-label,
+ * a document title.
+ *
+ * Lives here rather than beside `PersonName` in People.tsx because a module that exports both components and
+ * plain functions loses Fast Refresh: editing it remounts the tree instead of hot-swapping it, and the state
+ * you were part-way through setting up disappears. It belongs here anyway — it is a thin reading of
+ * `demoPerson`, which is defined two lines up.
+ *
+ * Falls back to the account name, so an unmapped or real account still identifies itself rather than
+ * disappearing.
+ */
+export function personLabel(userName: string | undefined, displayName?: string) {
+  if (!userName) return displayName ?? "";
+  return demoPerson(userName, displayName)?.name ?? displayName ?? userName;
+}

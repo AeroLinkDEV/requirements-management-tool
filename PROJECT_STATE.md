@@ -101,6 +101,27 @@ versioned and never edited in place; a **Jira connector** with field mapping and
 document templates that decide what a generated document contains**, rather than being numbered and approved
 while a generator ignored them.
 
+Change control reads as two facts rather than one. **Allocation** says which build a change request is going
+into, or that it is **deferred** — put away for another day with the state it had reached remembered, so a
+signed-off change on the shelf is distinguishable from an unwritten one, and reinstating returns it exactly
+there. **State** says how far it has got: Draft, In review, Approved, Incorporated once the build ships, and
+Superseded once a later revision exists. The last two are derived from the release and from the revision set
+rather than stored, so neither can disagree with reality. Listings show each change request's newest revision
+with its superseded history one click away (DEC-056). A released build takes no new change requests and no
+revisions of old ones (DEC-055, DEC-054).
+
+Authoring says where a requirement goes and what the traces already know. An author chooses the specification
+section a proposed requirement belongs in, applied at materialization — introduced requirements land there and
+modified ones move (DEC-057). Beside the five impact dispositions, the proposal shows what the trace graph
+records: the requirements that derive from this one and the procedures that verify it. That panel is read-only
+and closes no gate — a tool finding no links and an engineer confirming no impact are different claims, and only
+the second is worth anything in a review (DEC-059).
+
+Documents are offered where the requirements are read, not only on the Digital Thread. The build decides which:
+the approved controlled document for a released build, or a draft at the revision the released document will
+carry, generated from the released baseline plus every approved change and stamped DRAFT on every page — never
+stored, because a controlled record of content that is still moving is a record of nothing.
+
 Identity: local accounts, Program-scoped roles, sessions, MFA with recovery codes, mandatory
 temporary-password rotation, scoped service accounts, and security audit.
 
@@ -159,11 +180,17 @@ operations and qualification). The next active focus is deliberately unselected;
 implementation status document when it is chosen.
 
 **[PRODUCT_REVIEW_2026_07_26.md](PRODUCT_REVIEW_2026_07_26.md)** holds the findings from the first evening of
-using the product as an engineer would, and is the best short list of what to do next. Six defects from it
-are fixed; two reports turned out to be correct behaviour; nine items are written up with the specific
-question each one turns on, because each needs a product decision rather than an implementation. Several are
-small and visible — the verification surface opening on the work a release actually created is the one that
-most affects the demonstration.
+using the product as an engineer would. **Every item in it is now closed** — the six defects, and all nine that
+needed a product decision first. The last of them was the impact-disposition question, which asked for the
+computed trace impact to be shown beside the declared disposition; that is now in the proposal card (DEC-059).
+The file is retained as the record of what was found and decided, not as a list of work outstanding.
+
+A second evening of review followed on 27 July, and its eleven observations are also closed. Four of them were
+not missing features but unreachable ones: a Revise action gated on a state no change request in the programme
+rested in, a deferral shelf the domain supported and nothing exposed, a change-type field that was read-only on
+the one proposal that arrived pre-seeded, and section filtering that worked on the read side while no authoring
+path could set a section. **The recurring failure was reachability, not absence** — code that existed, was
+correct, and had no route to it.
 
 ## Known limitations — state these accurately
 

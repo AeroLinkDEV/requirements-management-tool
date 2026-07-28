@@ -543,3 +543,40 @@ html .approvedWording > small {
   }
 }
 
+
+/* Recorded links, styled so they cannot be mistaken for a decision. No control, no colour that reads as a
+   state, and a heading that says read-only — the five selects below are where authority lives. */
+.tracedImpact {
+  margin: 0 0 14px;
+  padding: 13px 15px;
+  border: 1px solid #dbe4ec;
+  border-left: 3px solid #8fa8bd;
+  border-radius: 10px;
+  background: #f7f9fb;
+}
+
+.tracedImpact header { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.tracedImpact header b { color: #2a3d52; font-size: 13px; }
+.tracedImpact header span { color: #76859a; font-size: 12px; }
+
+.tracedImpact dl { display: flex; flex-direction: column; gap: 9px; margin: 0; }
+.tracedImpact dl > div { display: flex; flex-direction: column; gap: 4px; }
+.tracedImpact dt { color: #63738a; font-size: 12px; font-weight: 700; }
+.tracedImpact dd { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.tracedImpact dd em { color: #7c8798; font-size: 12px; font-style: normal; }
+
+.tracedItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #d7e0e9;
+  border-radius: 999px;
+  background: white;
+  padding: 3px 9px;
+  color: #2c4054;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tracedItem i { color: #7d8b9d; font-size: 12px; font-style: normal; font-weight: 400; }
+.tracedEmpty { margin: 0; color: #7c8798; font-size: 12px; }
