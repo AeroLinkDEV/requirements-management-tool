@@ -77,6 +77,45 @@ jobs:
           echo "browser=$browser" >> "$GITHUB_OUTPUT"
           echo "postgresql=$postgresql" >> "$GITHUB_OUTPUT"
 
+  # Warms the Chromium cache on main, and exists only because of how GitHub scopes caches.
+  #
+  # A cache written by a pull request is visible to that pull request and nothing else. A cache written on the
+  # default branch is visible to every pull request. The browser jobs run only on pull requests, so without this
+  # the entry they save is scoped to the branch that saved it, no run on main ever writes one, and every new
+  # pull request misses forever — a cache that looks present, reports itself saved, and never once gets read.
+  #
+  # So one small job on main does nothing but download the browser under the shared key. It gates nothing and
+  # blocks nothing; if it fails the browser jobs simply download Chromium as they did before.
+  warm-chromium-cache:
+    name: Warm the Chromium cache
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache Chromium
+        id: chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
+      - name: Install Node.js
+        if: steps.chromium.outputs.cache-hit != 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+      # No `--with-deps`: only the browser binary is being cached, and the apt packages this would install are
+      # thrown away with the runner. The jobs that read this cache install them for themselves.
+      - name: Download Chromium
+        if: steps.chromium.outputs.cache-hit != 'true'
+        working-directory: product/client
+        run: |
+          npm ci
+          npx playwright install chromium
+
   validate:
     name: Build, test, and exercise product journeys
     needs: changes
