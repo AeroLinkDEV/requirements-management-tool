@@ -171,7 +171,8 @@ public sealed class VerificationImpactMaterializationTests
             var item = await db.VerificationImpactItems.SingleAsync();
             item.AssignToEngineer("test.lead", "test.engineer", now);
             item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
-                "The existing procedure still exercises the two-second bound.", now, procedure.Id);
+                "The existing procedure still exercises the two-second bound.", now,
+                procedure.Id, procedureRevision.Id);
             await db.SaveChangesAsync();
 
             await MaterializeAsync(db, second.Id, now);
@@ -226,7 +227,8 @@ public sealed class VerificationImpactMaterializationTests
                 x => x.RequirementRevisionId == item.RequirementRevisionId)).IsSuspect);
 
             item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
-                "The procedure still exercises the exact changed requirement.", now.AddHours(1), procedure.Id);
+                "The procedure still exercises the exact changed requirement.", now.AddHours(1),
+                procedure.Id, procedureRevision.Id);
             Assert.True(await service.ApplyResolvedCoverageAsync(item, now.AddHours(1), default));
             await db.SaveChangesAsync();
             db.ChangeTracker.Clear();

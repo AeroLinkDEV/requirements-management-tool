@@ -123,6 +123,17 @@ public sealed class TestRequirementCoverage
         ConfirmedAt = now;
     }
 
+    /// <summary>Returns a withdrawn applicability decision to suspect without erasing the link or its history.</summary>
+    public void MarkSuspect(string reason, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("Suspect coverage requires a reason.");
+        IsSuspect = true;
+        SuspectReason = reason.Trim();
+        SuspectSince = now;
+        ConfirmedBy = null;
+        ConfirmedAt = null;
+    }
+
     // There is deliberately no method for marking an existing link suspect. A requirement changing under a
     // procedure produces a new revision, and materialisation creates a fresh carried-forward link already
     // marked suspect rather than mutating the old one, which must stay exactly as it was approved. A

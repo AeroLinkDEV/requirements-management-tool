@@ -14,7 +14,7 @@ type Requirement={revisionId:string;displayNumber:string;statement:string}
 type Procedure={id:string;revisionId:string;displayNumber:string;title:string;ownerId:string;state:string;objective:string;requirementCount:number;lastOutcome?:string}
 type Execution={id:string;procedureRevisionId:string;displayNumber:string;title:string;outcome:string;executedBy:string;determination:string;evidenceReference:string;executedAt:string;retestOfExecutionId?:string;evidence:{id:string;originalFileName:string;size:number;sha256:string}[]}
 type Coverage={total:number;covered:number;verified:number;uncovered:number;items:{revisionId:string;displayNumber:string;statement:string;covered:boolean;verified:boolean;coveredBy:{procedureId:string;revisionId:string;displayNumber:string;title:string;state:string;isSuspect:boolean;coverageState:"Confirmed"|"Suspect";latestOutcome?:string;latestExecutionId?:string}[]}[]}
-type ImpactItem={id:string;trigger:string;state:string;subjectDisplayNumber:string;declaredVerificationMethod:string;procedureId?:string;assignedEngineerId?:string;assignedByLeadId?:string;outcome?:string;resolutionRationale:string;resolvedBy?:string;raisedAt:string;blocksBaselineApproval:boolean}
+type ImpactItem={id:string;trigger:string;state:string;subjectDisplayNumber:string;declaredVerificationMethod:string;requirementRevisionId?:string;procedureId?:string;assignedEngineerId?:string;assignedByLeadId?:string;assignedAt?:string;outcome?:string;resolutionRationale:string;resolvedBy?:string;resolvedAt?:string;raisedAt:string;blocksBaselineApproval:boolean;resolvedProcedure?:{id:string;revisionId:string;displayNumber:string;title:string;level:string;state:string;configuration:{requirementRevisionId?:string;procedureRevisionId:string}};decisionHistory:{id:string;action:string;outcome?:string;procedureId?:string;procedureRevisionId?:string;rationale:string;actor:string;occurredAt:string}[]}
 type Props={api:string;programId:string;projectId:string;releaseId:string;scope:'System'|'Software';user:AuthUser;onBack:()=>void}
 
 export default function VerificationCenter({api,programId,projectId,releaseId,scope,user,onBack}:Props){
@@ -28,7 +28,7 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
  // second is a reason to come here on a Tuesday morning. Landing on coverage meant a verification engineer saw
  // a table of everything and no sign of the four things the last approval had just made their problem.
  const [workspaceTab,setWorkspaceTab]=useState<'impact'|'coverage'|'procedures'|'executions'>('impact')
- const [impact,setImpact]=useState<ImpactItem[]>([]),[resolving,setResolving]=useState<ImpactItem>(),[assigning,setAssigning]=useState<ImpactItem>()
+ const [impact,setImpact]=useState<ImpactItem[]>([]),[resolving,setResolving]=useState<ImpactItem>(),[assigning,setAssigning]=useState<ImpactItem>(),[reopening,setReopening]=useState<ImpactItem>()
  const [requirementQuery,setRequirementQuery]=useState(''),[selectedRequirementIds,setSelectedRequirementIds]=useState<string[]>([])
  const [outcome,setOutcome]=useState<'Pass'|'Fail'|'Blocked'>('Pass')
  const selectedProgram=user.programs.find(program=>program.programId===programId)
@@ -49,6 +49,7 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
  const approve=async(password:string,meaning:string)=>{if(!approving||!canApprove){setError('Approver authority is required in the selected Program.');return}if(mutationBusy)return;setMutationBusy(true);setError('');try{await apiRequest(`${api}/api/test-procedures/${approving.revisionId}/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password,meaning})});setApproving(undefined);await load();await loadCoverage()}catch(error){recordClientOperationFailure('verification.procedure.approve',error);setError(operationError(error,'Procedure approval could not be recorded.'))}finally{setMutationBusy(false)}}
  const assignImpact=async(item:ImpactItem,engineerId:string)=>{if(mutationBusy)return;setMutationBusy(true);setError('');try{await apiRequest(`${api}/api/verification-impact/${item.id}/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({engineerId})});setAssigning(undefined);await loadImpact()}catch(error){recordClientOperationFailure('verification.impact.assign',error);setError(operationError(error,'The item could not be assigned.'))}finally{setMutationBusy(false)}}
  const resolveImpact=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!resolving||mutationBusy)return;setMutationBusy(true);setError('');const form=new FormData(e.currentTarget);const outcomeValue=String(form.get('outcome'));const procedureId=String(form.get('procedureId')||'');try{await apiRequest(`${api}/api/verification-impact/${resolving.id}/resolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({outcome:outcomeValue,rationale:form.get('rationale'),procedureId:outcomeValue==='ProcedureCoverageConfirmed'?procedureId:null})});setResolving(undefined);await loadImpact();await loadCoverage()}catch(error){recordClientOperationFailure('verification.impact.resolve',error);setError(operationError(error,'The decision could not be recorded.'))}finally{setMutationBusy(false)}}
+ const reopenImpact=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!reopening||mutationBusy)return;setMutationBusy(true);setError('');const form=new FormData(e.currentTarget);try{await apiRequest(`${api}/api/verification-impact/${reopening.id}/reopen`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rationale:form.get('rationale')})});setReopening(undefined);await loadImpact();await loadCoverage()}catch(error){recordClientOperationFailure('verification.impact.reopen',error);setError(operationError(error,'The decision could not be reopened.'))}finally{setMutationBusy(false)}}
  // Which procedure the reader was sent to look at, so it can be marked when the procedures tab opens.
  const [procedureFocus,setProcedureFocus]=useState('')
  const outstandingImpact=impact.filter(x=>x.blocksBaselineApproval)
@@ -64,13 +65,22 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
  const impactGroups=[
   {trigger:'RequirementIntroduced',heading:'New requirements need a procedure',
    hint:'An approved change introduced these. Nothing verifies them yet.',
-   items:impact.filter(x=>x.trigger==='RequirementIntroduced')},
+   items:impact.filter(x=>x.trigger==='RequirementIntroduced'&&x.blocksBaselineApproval)},
   {trigger:'RequirementModified',heading:'Changed requirements — coverage is suspect until reconfirmed',
    hint:'The wording moved under an existing procedure. Open the procedure and judge whether it still verifies the requirement.',
-   items:impact.filter(x=>x.trigger==='RequirementModified')},
+   items:impact.filter(x=>x.trigger==='RequirementModified'&&x.blocksBaselineApproval)},
   {trigger:'ProcedureOrphaned',heading:'Retired requirements leave procedures covering nothing',
    hint:'The requirement these verified is no longer effective in this release.',
-   items:impact.filter(x=>x.trigger==='ProcedureOrphaned')},
+   items:impact.filter(x=>x.trigger==='ProcedureOrphaned'&&x.blocksBaselineApproval)},
+  {trigger:'RequirementIntroducedResolved',heading:'New requirement verification decisions',
+   hint:'Recorded procedure coverage and explicit no-test determinations for introduced requirements.',
+   items:impact.filter(x=>x.trigger==='RequirementIntroduced'&&!x.blocksBaselineApproval)},
+  {trigger:'RequirementModifiedResolved',heading:'Changed requirement verification decisions',
+   hint:'Recorded applicability decisions for changed exact requirement revisions.',
+   items:impact.filter(x=>x.trigger==='RequirementModified'&&!x.blocksBaselineApproval)},
+  {trigger:'ProcedureOrphanedResolved',heading:'Retired requirement procedure decisions',
+   hint:'Recorded dispositions for procedures left without an effective requirement.',
+   items:impact.filter(x=>x.trigger==='ProcedureOrphaned'&&!x.blocksBaselineApproval)},
  ]
  const impactLabels:Record<string,string>={RequirementIntroduced:'New requirement',RequirementModified:'Modified requirement',ProcedureOrphaned:'Orphaned procedure'}
  const visibleRequirements=requirements.filter(x=>!requirementQuery.trim()||`${x.displayNumber} ${x.statement}`.toLowerCase().includes(requirementQuery.trim().toLowerCase())).slice(0,40)
@@ -111,8 +121,12 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
      {x.blocksBaselineApproval?<span className="impactState blocking">{x.state==='Assigned'?`Assigned · ${x.assignedEngineerId}`:'Unassigned'}</span>
       :<span className="impactState done">{x.outcome==='NoTestRequired'?'No test required':x.outcome==='ProcedureCoverageConfirmed'?'Coverage confirmed':x.outcome==='ProcedureRetired'?'Procedure retired':'Procedure retained'}</span>}
     </div>
-    {x.declaredVerificationMethod&&<p className="impactMethod">Author declared <b>{x.declaredVerificationMethod}</b> — a verification engineer still confirms what testing this needs.</p>}
-    {x.resolutionRationale&&<p className="impactRationale">{x.resolutionRationale}<small><PersonName userName={x.resolvedBy} /></small></p>}
+    {x.declaredVerificationMethod&&<p className="impactMethod">Author declared <b>{x.declaredVerificationMethod}</b>{x.blocksBaselineApproval?' — a verification engineer still confirms what testing this needs.':'. The governed decision evidence is recorded below.'}</p>}
+    {x.assignedEngineerId&&<p className="impactAssignment">Assigned to <PersonName userName={x.assignedEngineerId}/>{x.assignedByLeadId&&<> by <PersonName userName={x.assignedByLeadId}/></>}{x.assignedAt&&<> · {new Date(x.assignedAt).toLocaleString()}</>}</p>}
+    {x.resolvedProcedure&&<section className="impactDecisionEvidence covered"><span>Exact procedure coverage</span><b>{x.resolvedProcedure.displayNumber} · {x.resolvedProcedure.title}</b><small>{x.resolvedProcedure.level} · {x.resolvedProcedure.state} · revision {x.resolvedProcedure.revisionId}</small><small>Requirement configuration {x.resolvedProcedure.configuration.requirementRevisionId??'awaiting materialization'}</small><button className="outline" onClick={()=>{setWorkspaceTab('procedures');setProcedureFocus(x.resolvedProcedure?.id??'')}}>Open selected procedure →</button></section>}
+    {x.outcome==='NoTestRequired'&&<section className="impactDecisionEvidence waived"><span>No-test determination</span><b>Verification accepted without a test procedure</b><small>This is an attributable engineering determination, not procedure coverage.</small></section>}
+    {x.resolutionRationale&&<p className="impactRationale">{x.resolutionRationale}<small>Decided by <PersonName userName={x.resolvedBy} />{x.resolvedAt&&<> · {new Date(x.resolvedAt).toLocaleString()}</>}</small></p>}
+    {!!x.decisionHistory.length&&<details className="impactHistory"><summary>Decision history · {x.decisionHistory.length}</summary>{x.decisionHistory.map(entry=><article key={entry.id}><b>{entry.action==='Reopened'?'Decision reopened':entry.outcome==='ProcedureCoverageConfirmed'?'Coverage confirmed':entry.outcome==='NoTestRequired'?'No test required':entry.outcome}</b><span><PersonName userName={entry.actor}/> · {new Date(entry.occurredAt).toLocaleString()}</span><p>{entry.rationale}</p>{entry.procedureRevisionId&&<code>{entry.procedureRevisionId}</code>}</article>)}</details>}
     {x.blocksBaselineApproval&&<div className="impactActions">
      {canLead&&<button className="outline" onClick={()=>setAssigning(x)}>Assign…</button>}
      {/* The procedure is opened and read before anything is confirmed. Judging whether a procedure still
@@ -122,6 +136,7 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
      {canDecideImpact&&<button onClick={()=>setResolving(x)}>Record decision…</button>}
      {!canDecideImpact&&<span className="impactHint">Verification authority is required to decide this.</span>}
     </div>}
+    {!x.blocksBaselineApproval&&canDecideImpact&&<div className="impactActions"><button className="outline" onClick={()=>setReopening(x)}>Reopen / change decision…</button></div>}
    </article>)}
    </div>)}
    {!impact.length&&<div className="verificationEmpty"><b>No verification impact for this release</b><span>Approving a change that introduces or modifies a requirement raises work here.</span></div>}
@@ -135,8 +150,9 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
  {resolving&&<div className="impactDialog" role="dialog" aria-label="Record verification decision"><form onSubmit={resolveImpact}><h2>Decide {resolving.subjectDisplayNumber}</h2><p>{impactLabels[resolving.trigger]??resolving.trigger}{resolving.declaredVerificationMethod?` · author declared ${resolving.declaredVerificationMethod}`:''}</p>
   <label>Decision<select name="outcome" defaultValue={resolving.trigger==='ProcedureOrphaned'?'ProcedureRetired':'ProcedureCoverageConfirmed'}>{resolving.trigger==='ProcedureOrphaned'?<><option value="ProcedureRetired">Procedure retired</option><option value="ProcedureRetained">Procedure deliberately retained</option></>:<><option value="ProcedureCoverageConfirmed">An approved procedure covers this</option><option value="NoTestRequired">No test required</option></>}</select></label>
   {resolving.trigger!=='ProcedureOrphaned'&&<label>Covering procedure<select name="procedureId" defaultValue=""><option value="">Select an approved procedure…</option>{procedures.filter(x=>x.state==='Approved').map(x=><option value={x.id} key={x.id}>{x.displayNumber} · {x.title}</option>)}</select><small>Required when confirming coverage. Only approved procedures are accepted.</small></label>}
-  <label className="wide">Rationale<textarea name="rationale" required placeholder="Why this is the right verification decision"/></label>
+ <label className="wide">Rationale<textarea name="rationale" required placeholder="Why this is the right verification decision"/></label>
   <div><button type="button" className="outline" onClick={()=>setResolving(undefined)}>Cancel</button><button>Record decision</button></div></form></div>}
+ {reopening&&<div className="impactDialog" role="dialog" aria-label="Reopen verification decision"><form onSubmit={reopenImpact}><h2>Reopen {reopening.subjectDisplayNumber}</h2><p>The current decision remains in immutable history. Reopening returns this item to the release gate and any selected coverage to suspect.</p><label className="wide">Reopen rationale<textarea name="rationale" required placeholder="Why the recorded decision must be reconsidered"/></label><div><button type="button" className="outline" onClick={()=>setReopening(undefined)}>Cancel</button><button>Reopen decision</button></div></form></div>}
  {editing&&<ControlledProcedureEditor api={api} procedure={editing} onClose={()=>setEditing(undefined)} onCommitted={async()=>{await load();await loadCoverage()}}/>}
  </main>
 }

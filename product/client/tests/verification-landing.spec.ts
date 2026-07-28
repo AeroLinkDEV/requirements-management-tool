@@ -41,7 +41,7 @@ test('verification opens on the queue the release created, grouped by cause', as
   const headings = await page.locator('.impactGroupHead b').allInnerTexts()
   expect(
     headings.every(heading =>
-      /New requirements need a procedure|Changed requirements|Retired requirements/.test(heading),
+      /New requirements need a procedure|Changed requirements|Retired requirements|New requirement verification decisions|Changed requirement verification decisions|Retired requirement procedure decisions/.test(heading),
     ),
     `unexpected group headings: ${headings.join(' | ')}`,
   ).toBeTruthy()

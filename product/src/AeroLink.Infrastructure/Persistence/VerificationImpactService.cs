@@ -21,6 +21,8 @@ public sealed record MaterializedRequirementChange(
 /// and procedures a retirement left covering nothing.</summary>
 public sealed record MaterializationImpactResult(int BoundToRevision, int CoverageCarriedForward,
     int CoverageConfirmed, int ProceduresOrphaned);
+public sealed record ApprovedProcedureSelection(Guid ProcedureId, Guid RevisionId, int Revision,
+    string DisplayNumber, string Title, string Level, string State);
 
 /// <summary>
 /// Raises verification work when an approved change alters what must be tested, and keeps that work
@@ -186,16 +188,20 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
         var confirmed = 0;
         foreach (var (change, item) in decided)
         {
-            if (!approvedRevisions.TryGetValue(item.ResolvedProcedureId!.Value, out var procedureRevisionId)) continue;
+            var procedureRevisionId = item.ResolvedProcedureRevisionId;
+            if (procedureRevisionId is null
+                && approvedRevisions.TryGetValue(item.ResolvedProcedureId!.Value, out var legacyRevisionId))
+                procedureRevisionId = legacyRevisionId;
+            if (procedureRevisionId is null) continue;
             var existing = carried.SingleOrDefault(x =>
-                x.RequirementRevisionId == change.RevisionId && x.ProcedureRevisionId == procedureRevisionId);
+                x.RequirementRevisionId == change.RevisionId && x.ProcedureRevisionId == procedureRevisionId.Value);
             if (existing is not null)
             {
                 existing.ConfirmStillValid(item.ResolvedBy ?? "verification", now);
             }
             else
             {
-                db.TestCoverage.Add(new TestRequirementCoverage(procedureRevisionId, change.RevisionId));
+                db.TestCoverage.Add(new TestRequirementCoverage(procedureRevisionId.Value, change.RevisionId));
             }
             confirmed++;
         }
@@ -292,11 +298,30 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
     /// claimed against a procedure that is actually approved.
     /// </summary>
     public async Task<bool> HasApprovedProcedureAsync(Guid projectId, Guid procedureId, CancellationToken ct)
-        => await db.TestProcedureRevisions.AsNoTracking()
-            .Where(revision => revision.ProcedureId == procedureId && revision.State == TestProcedureState.Approved)
-            .Join(db.TestProcedures.AsNoTracking().Where(p => p.ProjectId == projectId),
-                revision => revision.ProcedureId, procedure => procedure.Id, (revision, _) => revision.Id)
-            .AnyAsync(ct);
+        => await FindApprovedProcedureAsync(projectId, procedureId, ct) is not null;
+
+    public async Task<ApprovedProcedureSelection?> FindApprovedProcedureAsync(
+        Guid projectId, Guid procedureId, CancellationToken ct)
+    {
+        var revisions = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                               where revision.ProcedureId == procedureId && revision.State == TestProcedureState.Approved
+                               join procedure in db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId)
+                                   on revision.ProcedureId equals procedure.Id
+                               select new
+                               {
+                                   procedure.Id,
+                                   RevisionId = revision.Id,
+                                   revision.Revision,
+                                   procedure.BaseNumber,
+                                   procedure.Title,
+                                   Level = procedure.Level.ToString(),
+                                   State = revision.State.ToString()
+                               }).ToListAsync(ct);
+        var selected = revisions.OrderByDescending(x => x.Revision).FirstOrDefault();
+        return selected is null ? null : new ApprovedProcedureSelection(
+            selected.Id, selected.RevisionId, selected.Revision,
+            $"{selected.BaseNumber}.{selected.Revision:D2}", selected.Title, selected.Level, selected.State);
+    }
 
     /// <summary>
     /// Applies a coverage-confirmed decision immediately when materialisation has already bound the item to
@@ -310,11 +335,13 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
             || item.RequirementRevisionId is null)
             return false;
 
-        var procedureRevisionId = await db.TestProcedureRevisions
-            .Where(x => x.ProcedureId == item.ResolvedProcedureId.Value && x.State == TestProcedureState.Approved)
-            .OrderByDescending(x => x.Revision)
-            .Select(x => (Guid?)x.Id)
-            .FirstOrDefaultAsync(ct);
+        var procedureRevisionId = item.ResolvedProcedureRevisionId;
+        if (procedureRevisionId is null)
+            procedureRevisionId = await db.TestProcedureRevisions
+                .Where(x => x.ProcedureId == item.ResolvedProcedureId.Value && x.State == TestProcedureState.Approved)
+                .OrderByDescending(x => x.Revision)
+                .Select(x => (Guid?)x.Id)
+                .FirstOrDefaultAsync(ct);
         if (procedureRevisionId is null) return false;
 
         var existing = await db.TestCoverage.SingleOrDefaultAsync(
@@ -331,6 +358,22 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
         }
         return true;
     }
+
+    public async Task<bool> ReopenResolvedCoverageAsync(VerificationImpactItem item, string rationale,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        if (item.Outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed
+            || item.RequirementRevisionId is null
+            || item.ResolvedProcedureRevisionId is null)
+            return false;
+        var existing = await db.TestCoverage.SingleOrDefaultAsync(
+            x => x.RequirementRevisionId == item.RequirementRevisionId.Value
+                && x.ProcedureRevisionId == item.ResolvedProcedureRevisionId.Value, ct);
+          if (existing is null) return false;
+          var reason = $"Verification-impact decision reopened: {rationale}";
+          existing.MarkSuspect(reason.Length <= 500 ? reason : reason[..500], now);
+          return true;
+      }
 
     private static string ArtifactNumberDisplay(RequirementChange change) =>
         $"{change.BaseNumber}.{change.Revision:00}";
