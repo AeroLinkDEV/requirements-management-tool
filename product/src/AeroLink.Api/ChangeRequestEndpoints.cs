@@ -25,13 +25,16 @@ public static class ChangeRequestEndpoints
         app.MapPost("/api/scrs/{id:guid}/retarget", async (Guid id, RetargetScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount();
+            if (!CanAdminister(scr, actor)) return Results.Forbid();
             if (!await db.Releases.AnyAsync(x => x.Id == request.TargetReleaseId && x.ProjectId == scr.ProjectId && !x.IsReleased, ct)) return Results.BadRequest(new { error = "Choose an unreleased target release in this project." });
             // Verification work follows its change request. Left behind, it would hold a release the change no longer
             // belongs to and go missing from the one it does.
             try
             {
                 var now = DateTimeOffset.UtcNow;
-                scr.Retarget(http.UserAccount().UserName, request.TargetReleaseId, request.Reason, now);
+                scr.Retarget(actor.UserName, request.TargetReleaseId, request.Reason, now, actor.IsAdministrator);
                 await verificationImpact.RetargetAsync(scr.Id, request.TargetReleaseId, now, ct);
                 await repository.SaveAsync(ct);
                 return Results.Ok(ApiMap.ScrDetail(scr));
@@ -46,24 +49,30 @@ public static class ChangeRequestEndpoints
         // one could exist was for the demonstration seeder to create it. The shelf was visible and unreachable.
         //
         // Deferring is the author's decision about their own work, so it takes the same authority as editing it.
-        app.MapPost("/api/scrs/{id:guid}/defer", async (Guid id, DeferScrRequest request, HttpContext http, IScrRepository repository, CancellationToken ct) =>
+        app.MapPost("/api/scrs/{id:guid}/defer", async (Guid id, DeferScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount();
+            if (!CanAdminister(scr, actor)) return Results.Forbid();
             try
             {
-                scr.Defer(http.UserAccount().UserName, request.Reason ?? "", DateTimeOffset.UtcNow);
+                scr.Defer(actor.UserName, request.Reason ?? "", DateTimeOffset.UtcNow, actor.IsAdministrator);
                 await repository.SaveAsync(ct);
                 return Results.Ok(ApiMap.ScrDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/scrs/{id:guid}/reinstate", async (Guid id, HttpContext http, IScrRepository repository, CancellationToken ct) =>
+        app.MapPost("/api/scrs/{id:guid}/reinstate", async (Guid id, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount();
+            if (!CanAdminister(scr, actor)) return Results.Forbid();
             try
             {
-                scr.Reinstate(http.UserAccount().UserName, DateTimeOffset.UtcNow);
+                scr.Reinstate(actor.UserName, DateTimeOffset.UtcNow, actor.IsAdministrator);
                 await repository.SaveAsync(ct);
                 return Results.Ok(ApiMap.ScrDetail(scr));
             }
@@ -73,6 +82,9 @@ public static class ChangeRequestEndpoints
         app.MapPost("/api/scrs/{id:guid}/next-revision", async (Guid id, ActorRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var approved = await repository.GetAsync(id, ct); if (approved is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, approved.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount();
+            if (!CanAdminister(approved, actor)) return Results.Forbid();
             if (request.ExpectedVersion is not null && approved.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This approved request changed after it was opened. Refresh before revising.", code = "stale_version" });
             try
             {
@@ -80,7 +92,7 @@ public static class ChangeRequestEndpoints
                 // the aggregate, which owns the rule about what that fact forbids.
                 var released = await db.Releases.AsNoTracking()
                     .Where(x => x.Id == approved.TargetReleaseId).Select(x => x.IsReleased).SingleOrDefaultAsync(ct);
-                var next = approved.StartNextRevision(http.UserAccount().UserName, DateTimeOffset.UtcNow, released);
+                var next = approved.StartNextRevision(actor.UserName, DateTimeOffset.UtcNow, released, actor.IsAdministrator);
                 await repository.AddAsync(next, ct); await repository.SaveAsync(ct);
                 return Results.Created($"/api/scrs/{next.Id}", ApiMap.ScrDetail(next));
             }
@@ -375,14 +387,18 @@ public static class ChangeRequestEndpoints
             catch (DbUpdateException) { return Results.Conflict(new { error = "Another author created an artifact at the same instant. No duplicate was saved; submit again to receive the next available numbers." }); }
         });
 
-        app.MapPost("/api/scrs/{id:guid}/requirements", async (Guid id, RequirementChangeRequest request, HttpContext http, IScrRepository repository, CancellationToken ct) =>
+        app.MapPost("/api/scrs/{id:guid}/requirements", async (Guid id, RequirementChangeRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount();
+            if (!CanAdminister(scr, actor)) return Results.Forbid();
             try
             {
-                scr.AddRequirementChange(http.UserAccount().UserName, request.BaseNumber, request.Revision, request.Level, request.Kind,
+                scr.AddRequirementChange(actor.UserName, request.BaseNumber, request.Revision, request.Level, request.Kind,
                     request.Statement, request.Rationale, request.VerificationMethod, DateTimeOffset.UtcNow,
-                    impactDispositionJson: RequirementAuthoringJson.PendingImpactDispositions);
+                    impactDispositionJson: RequirementAuthoringJson.PendingImpactDispositions,
+                    administratorAuthority: actor.IsAdministrator);
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -396,7 +412,7 @@ public static class ChangeRequestEndpoints
             try
             {
                 var actor = http.UserAccount();
-                if (scr.AuthorId != actor.UserName && !actor.IsAdministrator) return Results.Forbid();
+                if (!CanAdminister(scr, actor)) return Results.Forbid();
                 foreach (var change in scr.RequirementChanges)
                 {
                     var sectionError = await TargetSectionRefusalAsync(db, scr.ProjectId, change.Level,
@@ -416,7 +432,8 @@ public static class ChangeRequestEndpoints
                     return new ApproverSelection(account.UserName, account.DisplayName, role);
                 }).ToList();
                 var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, scr.ProjectId, scr.Type, ct);
-                var cycle = scr.SubmitForReview(actor.UserName, selections, now, request.Mode, workflow);
+                var cycle = scr.SubmitForReview(actor.UserName, selections, now, request.Mode, workflow,
+                    actor.IsAdministrator);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
                     db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
@@ -439,7 +456,7 @@ public static class ChangeRequestEndpoints
             {
                 var actor = http.UserAccount();
                 // The domain restricts this to the author; an administrator may also act, matching submission.
-                if (scr.AuthorId != actor.UserName && !actor.IsAdministrator) return Results.Forbid();
+                if (!CanAdminister(scr, actor)) return Results.Forbid();
                 var now = DateTimeOffset.UtcNow;
                 var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
                 if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every corrected approver must be an active AeroLink user." });
@@ -452,7 +469,8 @@ public static class ChangeRequestEndpoints
                     authorities.TryGetValue(account.Id, out var role);
                     return new ApproverSelection(account.UserName, account.DisplayName, role);
                 }).ToList();
-                var cycle = scr.CancelAndRestartForWrongApprover(scr.AuthorId, request.Reason, corrected, now);
+                var cycle = scr.CancelAndRestartForWrongApprover(actor.UserName, request.Reason, corrected, now,
+                    administratorAuthority: actor.IsAdministrator);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
                     db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
@@ -504,6 +522,9 @@ public static class ChangeRequestEndpoints
             return Results.Ok(await projected.OrderByDescending(x => x.SignedAt).Take(500).ToListAsync(ct));
         });
     }
+
+    private static bool CanAdminister(SystemChangeRequest scr, AuthenticatedUser actor) =>
+        actor.IsAdministrator || string.Equals(scr.AuthorId, actor.UserName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Why a released build takes no new change requests, or null when it will.

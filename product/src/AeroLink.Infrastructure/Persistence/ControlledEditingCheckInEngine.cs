@@ -19,7 +19,7 @@ public interface IControlledEditingAdapter
     Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct);
     string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null);
     Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
-        DateTimeOffset now, CancellationToken ct);
+        bool administratorAuthority, DateTimeOffset now, CancellationToken ct);
 }
 
 public sealed record ControlledEditingArtifact(Guid ProjectId, string LifecycleState, object Aggregate,
@@ -126,7 +126,7 @@ public sealed class ControlledEditingCheckInEngine(
 
         try
         {
-            await adapter.ApplyDraftAsync(artifact, draft.DraftJson, actor.UserName, now, ct);
+            await adapter.ApplyDraftAsync(artifact, draft.DraftJson, actor.UserName, actor.IsAdministrator, now, ct);
             var resultingVersion = artifact.Version + 1;
             var resultingSnapshot = adapter.CanonicalSnapshot(artifact, resultingVersion);
             var resultingHash = Hash(resultingSnapshot);
@@ -268,7 +268,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
                 impactDispositionJson = x.ImpactDispositionJson, targetSectionId = x.TargetSectionId }) });
 
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
-        DateTimeOffset now, CancellationToken ct)
+        bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var item = (SystemChangeRequest)artifact.Aggregate;
         var draft = JsonSerializer.Deserialize<SystemChangeRequestDraft>(draftJson, DraftOptions)
@@ -277,7 +277,8 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             throw new JsonException("The latest autosaved SCR draft does not contain requirement changes.");
         var changes = await NormalizeAsync(item, draft.RequirementChanges, ct);
         item.UpdateDraft(actor, draft.Title ?? "", draft.Problem ?? "", draft.Analysis ?? "",
-            draft.Solution ?? "", changes, now, draft.ProblemRich, draft.AnalysisRich, draft.SolutionRich);
+            draft.Solution ?? "", changes, now, draft.ProblemRich, draft.AnalysisRich, draft.SolutionRich,
+            administratorAuthority);
     }
 
     private async Task<IReadOnlyList<RequirementChangeDraft>> NormalizeAsync(SystemChangeRequest scr,
@@ -390,7 +391,7 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
             targetSectionId = item.TargetSectionId, parentVersion });
 
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
-        DateTimeOffset now, CancellationToken ct)
+        bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var state = (State)artifact.Aggregate;
         var parent = state.Parent;
@@ -479,7 +480,7 @@ public sealed class SpecificationStructureControlledEditingAdapter(AeroLinkDbCon
     });
 
     public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
-        DateTimeOffset now, CancellationToken ct)
+        bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var state = (State)artifact.Aggregate;
         var draft = JsonSerializer.Deserialize<SpecificationDraft>(draftJson, DraftOptions)
@@ -570,7 +571,7 @@ public sealed class TestProcedureControlledEditingAdapter(AeroLinkDbContext db) 
         });
 
     public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
-        DateTimeOffset now, CancellationToken ct)
+        bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var state = (State)artifact.Aggregate;
         var draft = JsonSerializer.Deserialize<TestProcedureDraft>(draftJson, DraftOptions)
@@ -614,7 +615,7 @@ public sealed class TraceLinkProposalControlledEditingAdapter(AeroLinkDbContext 
     });
 
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
-        DateTimeOffset now, CancellationToken ct)
+        bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var item = (RequirementTraceLink)artifact.Aggregate;
         var draft = JsonSerializer.Deserialize<TraceLinkDraft>(draftJson, DraftOptions)
@@ -656,7 +657,7 @@ public sealed class ReleasePlanningControlledEditingAdapter(AeroLinkDbContext db
     });
 
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
-        DateTimeOffset now, CancellationToken ct)
+        bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var baseline = (CandidateBaseline)artifact.Aggregate;
         var draft = JsonSerializer.Deserialize<ReleasePlanningDraft>(draftJson, DraftOptions)
@@ -694,7 +695,7 @@ public sealed class DocumentTemplateControlledEditingAdapter(AeroLinkDbContext d
     }
     public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) => Snapshot((DocumentTemplate)artifact.Aggregate, versionOverride);
     public static string Snapshot(DocumentTemplate item, long? versionOverride = null) => JsonSerializer.Serialize(new { item.Id, item.ProjectId, item.TemplateNumber, item.Title, item.Body, item.OwnerId, state = item.State.ToString(), version = versionOverride ?? item.Version });
-    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, DateTimeOffset now, CancellationToken ct)
+    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var item = (DocumentTemplate)artifact.Aggregate; var draft = JsonSerializer.Deserialize<TemplateDraft>(draftJson, Options) ?? throw new JsonException("The latest document-template draft is empty.");
         if (draft.Id != item.Id || draft.ProjectId != item.ProjectId || !string.Equals(draft.TemplateNumber?.Trim(), item.TemplateNumber, StringComparison.OrdinalIgnoreCase)) throw new DomainException("The controlled document-template identity cannot change.");
@@ -715,7 +716,7 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
     }
     public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) => Snapshot((ProblemReport)artifact.Aggregate, versionOverride);
     public static string Snapshot(ProblemReport item, long? versionOverride = null) => JsonSerializer.Serialize(new { item.Id, item.ProjectId, item.ReportNumber, item.Revision, item.Title, item.Problem, item.Analysis, item.ReportedBy, item.Classification, severity = item.Severity.ToString(), priority = item.Priority.ToString(), item.Origin, item.AffectedConfiguration, item.RootCause, item.Effects, item.Containment, item.CorrectiveAction, disposition = item.Disposition?.ToString(), item.DispositionRationale, item.ResolutionVerificationExecutionId, item.IsReleaseBlocker, item.WaiverRationale, state = item.State.ToString(), version = versionOverride ?? item.Version });
-    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, DateTimeOffset now, CancellationToken ct)
+    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var item = (ProblemReport)artifact.Aggregate; var draft = JsonSerializer.Deserialize<ProblemDraft>(draftJson, Options) ?? throw new JsonException("The latest problem-report draft is empty.");
         if (draft.Id != item.Id || draft.ProjectId != item.ProjectId || !string.Equals(draft.ReportNumber?.Trim(), item.ReportNumber, StringComparison.OrdinalIgnoreCase) || !string.Equals(draft.ReportedBy?.Trim(), item.ReportedBy, StringComparison.OrdinalIgnoreCase)) throw new DomainException("The controlled problem-report identity cannot change.");
@@ -736,7 +737,7 @@ public sealed class ConfigurationChangeSetControlledEditingAdapter(AeroLinkDbCon
     }
     public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) => Snapshot((ConfigurationChangeSet)artifact.Aggregate, versionOverride);
     public static string Snapshot(ConfigurationChangeSet item, long? versionOverride = null) => JsonSerializer.Serialize(new { item.Id, item.ProjectId, item.ChangeSetNumber, item.Title, item.Description, item.OwnerId, state = item.State.ToString(), version = versionOverride ?? item.Version });
-    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, DateTimeOffset now, CancellationToken ct)
+    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var item = (ConfigurationChangeSet)artifact.Aggregate; var draft = JsonSerializer.Deserialize<ChangeSetDraft>(draftJson, Options) ?? throw new JsonException("The latest configuration change-set draft is empty.");
         if (draft.Id != item.Id || draft.ProjectId != item.ProjectId || !string.Equals(draft.ChangeSetNumber?.Trim(), item.ChangeSetNumber, StringComparison.OrdinalIgnoreCase)) throw new DomainException("The controlled configuration change-set identity cannot change.");

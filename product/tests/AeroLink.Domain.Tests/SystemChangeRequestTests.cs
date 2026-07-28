@@ -380,6 +380,40 @@ public sealed class SystemChangeRequestTests
         Assert.Throws<DomainException>(() => approved.Defer("author", "Twice.", Now));
     }
 
+    [Fact]
+    public void Server_derived_administrator_authority_preserves_state_rules_authorship_and_actual_actor()
+    {
+        var draft = CreateDraftWithRequirement();
+        Assert.Throws<DomainException>(() => draft.Defer("unrelated", "Unauthorized.", Now));
+
+        draft.UpdateDraft("admin", "Administrator governed Draft", draft.Problem, draft.Analysis, draft.Solution,
+            draft.RequirementChanges.Select(x => new RequirementChangeDraft(x.BaseNumber, x.Revision, x.Level,
+                x.Kind, x.Statement, x.Rationale, x.VerificationMethod, x.RichText, x.AttributesJson,
+                x.ImpactDispositionJson, x.TargetSectionId)).ToList(), Now.AddMinutes(1),
+            administratorAuthority: true);
+        draft.SubmitForReview("admin", Approvers(), Now.AddMinutes(2),
+            administratorAuthority: true);
+        draft.Defer("admin", "Programme authority paused the package.", Now.AddMinutes(3),
+            administratorAuthority: true);
+        draft.Reinstate("admin", Now.AddMinutes(4), administratorAuthority: true);
+
+        Assert.Equal("author", draft.AuthorId);
+        Assert.Equal(ScrState.Draft, draft.State);
+        Assert.Contains(draft.AuditEvents, x => x.ActorId == "admin" && x.EventType == "ScrDraftUpdated");
+        Assert.Contains(draft.AuditEvents, x => x.ActorId == "admin" && x.EventType == "ChangeRequestDeferred");
+
+        var approved = FullyApprove();
+        var next = approved.StartNextRevision("admin", Now.AddMinutes(5),
+            targetReleaseIsReleased: false, administratorAuthority: true);
+        Assert.Equal("author", next.AuthorId);
+        Assert.Contains(next.AuditEvents, x => x.ActorId == "admin" && x.EventType == "RequirementChangeAdded");
+
+        var invalidState = CreateDraftWithRequirement();
+        var refusal = Assert.Throws<DomainException>(() => invalidState.StartNextRevision("admin",
+            Now.AddMinutes(6), targetReleaseIsReleased: false, administratorAuthority: true));
+        Assert.Contains("approved", refusal.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static SystemChangeRequest CreateDraft() =>
         new("SCR-00001049", 1, ProjectId, ReleaseId, "Introduce Round Robin",
             "Round Robin is not available.", "The existing sequence is linear.",
