@@ -40,6 +40,12 @@ are recorded in [SCOPE_AND_BOUNDARIES.md](SCOPE_AND_BOUNDARIES.md).
 - **No architecture, design, or source-code management, and not a Git host.**
 - **No automated test execution.** Tests run in external environments; AeroLink controls the
   procedures and captures or imports the results and evidence.
+- **No deferral for test procedures.** Change requests can be put away for another day; procedures
+  cannot. A requirement that is new or modified in the build being worked on is assumed to need
+  coverage, so the procedures verifying it cannot be shelved while it ships — deferring one would
+  remove coverage from a requirement still in the build and record it as ordinary planning. The
+  deferral that matters happens one level up, on the change request, and verification work already
+  follows its change request. See [DEC-058](DECISIONS_AND_OPEN_QUESTIONS.md).
 - **Not a document editor.** Documents are generated outputs of controlled data. Uploaded files are
   never the authoritative record.
 
