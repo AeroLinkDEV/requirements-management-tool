@@ -160,7 +160,7 @@ type Props = {
   onProposeChange: (requirementId: string) => void;
   onOpenRequirement: (id: string) => void;
   onCloseRequirement: () => void;
-  onOpenTraceability: () => void;
+  onOpenTraceability: (artifactId?: string) => void;
   onOpenVerification: () => void;
 };
 
@@ -1189,7 +1189,7 @@ export default function RequirementsWorkspace({
                 <h3>Requirement statement</h3>
                 <div className="richRequirement">{selected.statement}</div>
                 <h3>Digital thread</h3>
-                <button className="threadPreview" onClick={onOpenTraceability}>
+                <button className="threadPreview" onClick={() => onOpenTraceability(selected?.id)}>
                   <span>
                     <i>CR</i>
                     <b>Source</b>
@@ -1276,7 +1276,7 @@ export default function RequirementsWorkspace({
                       reader clicked to get in. */}
                   <article><b>{impact?.tests.filter((item) => item.coverageState === "Confirmed").length ?? 0}</b><span>confirmed tests</span></article>
                 </div>
-                <button className="openDigitalThread" onClick={onOpenTraceability}>
+                <button className="openDigitalThread" onClick={() => onOpenTraceability(selected?.id)}>
                   Open complete Digital Thread →
                 </button>
                 <h3>Active controlled changes</h3>
