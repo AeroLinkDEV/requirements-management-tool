@@ -7,7 +7,8 @@ public enum RequirementChangeKind { Introduce, Modify, Retire }
 
 public sealed record RequirementChangeDraft(string BaseNumber, int Revision, RequirementLevel Level,
     RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod,
-    string RichText = "", string AttributesJson = "{}", string ImpactDispositionJson = "{}",
+    string RichText = "", string AttributesJson = "{}",
+    string ImpactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
     Guid? TargetSectionId = null);
 
 public sealed class RequirementChange
@@ -16,7 +17,8 @@ public sealed class RequirementChange
 
     internal RequirementChange(Guid scrId, string baseNumber, int revision, RequirementLevel level,
         RequirementChangeKind kind, string statement, string rationale, string verificationMethod,
-        string richText = "", string attributesJson = "{}", string impactDispositionJson = "{}",
+        string richText = "", string attributesJson = "{}",
+        string impactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
         Guid? targetSectionId = null)
     {
         Id = Guid.NewGuid();

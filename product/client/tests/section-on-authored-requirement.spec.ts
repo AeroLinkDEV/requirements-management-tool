@@ -24,7 +24,20 @@ test('an author chooses the section a new requirement goes in', async ({ page })
   expect(options.length).toBeGreaterThan(1)
 
   await section.selectOption({ index: 1 })
-  await expect(section).not.toHaveValue('')
+  const selectedSection = await section.inputValue()
+  expect(selectedSection).not.toBe('')
+  await page.getByLabel('Title').fill('Persist an authored specification section')
+  await page.getByLabel('Problem').fill('The proposal needs an explicit document location.')
+  await page.getByLabel('Analysis', { exact: true }).fill('The section is part of the controlled proposal.')
+  await page.getByLabel('Solution').fill('Carry the exact section through save and checkout.')
+  await page.getByLabel('Requirement statement').fill('The FMS shall retain its authored specification section.')
+  await page.getByRole('textbox', { name: 'Author', exact: true }).fill('systems.author')
+  await page.getByRole('button', { name: 'Save SCR Draft' }).click()
+
+  await expect(page.getByRole('heading', { name: 'Persist an authored specification section' })).toBeVisible()
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  await expect(page.getByLabel('Section for proposal 1')).toHaveValue(selectedSection)
+  await expect(page.getByRole('textbox', { name: 'Author', exact: true })).toHaveValue('systems.author')
 })
 
 test('modifying a requirement offers to leave it where it already is', async ({ page }) => {

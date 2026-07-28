@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { apiBase, apiLogin, login, openNavigationGroup } from './auth'
 
+const completeImpacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
+
 test('searches full history and proves exact software build contents', async ({ page, request }) => {
   await apiLogin(request)
   const suffix=Date.now().toString().slice(-7),programName=`History Program ${suffix}`
@@ -9,7 +11,7 @@ test('searches full history and proves exact software build contents', async ({ 
   } }); expect(workspaceResponse.ok()).toBeTruthy(); const workspace = await workspaceResponse.json()
   const scrResponse = await request.post(`${apiBase}/api/scr-drafts`, { data: {
     projectId: workspace.project.id, targetReleaseId: workspace.release.id, type: 'Software', title: 'Introduce round robin routing', problem: 'Routing is unavailable', analysis: 'A new function is required', solution: 'Implement round robin routing',
-    requirementChanges: [{ level: 'HighLevel', kind: 'Introduce', statement: 'The software shall provide round robin routing.', rationale: 'New function', verificationMethod: 'Test' }],
+    requirementChanges: [{ level: 'HighLevel', kind: 'Introduce', statement: 'The software shall provide round robin routing.', rationale: 'New function', verificationMethod: 'Test', impactDispositionJson:completeImpacts }],
   } }); expect(scrResponse.ok()).toBeTruthy(); const scr = await scrResponse.json()
   await request.post(`${apiBase}/api/scrs/${scr.id}/submit`, { data: { approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }] } })
   await request.post(`${apiBase}/api/scrs/${scr.id}/approve`, { data: { password: 'AeroLink!2026', meaning: 'Approved for test baseline assembly.' } })

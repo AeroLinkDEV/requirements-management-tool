@@ -55,6 +55,7 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 - provider-compatible PostgreSQL/SQLite persistence, versioned migration, and deterministic workspace synchronization for existing Programs
 - direct “analyze impact and propose change” workflow from an approved requirement into its proposed next revision inside a Draft SCR/SWCR; no parallel requirement-approval path
 - controlled structured-text authoring with lists, tables, aerospace symbols, exact references, Program fields, safe preview, and five mandatory impact-disposition categories included in the review snapshot hash
+- schema-validated proposal attributes with server-owned derived state, durable authored section placement, and fail-closed impact checks at review, baseline selection, freeze, and materialization
 - relationship-aware impact intelligence spanning parent/child requirements, verification procedures, baselines, builds, documents, active change packages, comments, and assigned follow-up
 - requirement watchers, threaded notifications, accountable assignments, due/overdue work queues, completion concurrency, and a combined engineering operations center
 - advanced permission-scoped requirement filters for lifecycle state, owner, source SCR/SWCR, open discussions, verification, tag, specification, and deterministic sorting

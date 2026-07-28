@@ -75,7 +75,8 @@ public sealed class SystemChangeRequest
     public RequirementChange AddRequirementChange(string actorId, string baseNumber, int revision,
         RequirementLevel level, RequirementChangeKind kind, string statement, string rationale,
         string verificationMethod, DateTimeOffset now, string richText = "", string attributesJson = "{}",
-        string impactDispositionJson = "{}", Guid? targetSectionId = null)
+        string impactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
+        Guid? targetSectionId = null)
     {
         EnsureAuthor(actorId);
         EnsureDraft();
@@ -312,13 +313,8 @@ public sealed class SystemChangeRequest
             throw new DomainException("Problem, Analysis, and Solution are required before review.");
         if (_requirementChanges.Count == 0)
             throw new DomainException("At least one requirement change is required before review.");
-        var requiredImpacts=new[]{"trace","verification","documents","baseline","collaboration"};
         foreach(var change in _requirementChanges)
-        {
-            if(change.ImpactDispositionJson=="{}")continue;
-            Dictionary<string,string> dispositions;try{dispositions=JsonSerializer.Deserialize<Dictionary<string,string>>(change.ImpactDispositionJson)??[];}catch(JsonException){throw new DomainException($"{change.DisplayNumber} contains invalid impact dispositions.");}
-            if(requiredImpacts.Any(key=>!dispositions.TryGetValue(key,out var value)||string.IsNullOrWhiteSpace(value)||value.Equals("Pending",StringComparison.OrdinalIgnoreCase)))throw new DomainException($"Complete every impact disposition for {change.DisplayNumber} before review.");
-        }
+            RequirementAuthoringJson.EnsureCompleteImpactDispositions(change.ImpactDispositionJson, change.DisplayNumber);
     }
 
     /// <summary>

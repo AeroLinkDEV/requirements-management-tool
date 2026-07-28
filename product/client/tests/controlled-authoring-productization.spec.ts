@@ -59,6 +59,7 @@ test('System proposal identity and stages are controlled from the first screen',
 })
 
 test('Software Draft closes impacts before an explicitly selected reviewer signs',async ({page,request})=>{
+  test.setTimeout(120_000)
   const programName=await createWorkspace(request,'Software Authoring')
   await selectProgram(page,programName)
   await openPageFromPalette(page,'New Software SWCR')
@@ -72,15 +73,19 @@ test('Software Draft closes impacts before an explicitly selected reviewer signs
   await page.getByLabel('Analysis',{exact:true}).fill('Identity, content, impacts, and review authority must remain attributable.')
   await page.getByLabel('Solution').fill('Use one staged controlled proposal experience.')
   await page.getByLabel('Requirement statement').fill('The software shall require explicit review readiness decisions.')
+  await page.getByRole('textbox',{name:'Author',exact:true}).fill('software.author')
   await page.getByRole('button',{name:'Save SWCR Draft'}).click()
 
   await expect(page.getByRole('heading',{name:'Control software authoring readiness'})).toBeVisible()
   await expect(page.getByRole('button',{name:'Configure & Submit Review'})).toHaveCount(0)
   await page.getByRole('button',{name:'Check out & edit'}).click()
+  await expect(page.getByRole('textbox',{name:'Author',exact:true})).toHaveValue('software.author')
   const impacts=page.locator('.editorColumns aside select')
   await expect(impacts).toHaveCount(5)
   for(let index=0;index<5;index++)await impacts.nth(index).selectOption('Not Affected')
-  await page.getByRole('button',{name:'Save & check in'}).click()
+  const checkIn=page.getByRole('button',{name:'Save & check in'})
+  await expect(checkIn).toBeEnabled({timeout:30_000})
+  await checkIn.click()
 
   await page.getByRole('button',{name:'Configure & Submit Review'}).click()
   await expect(page.getByText('No reviewers selected')).toBeVisible()

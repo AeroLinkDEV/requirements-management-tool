@@ -61,6 +61,10 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
         foreach(var item in Defaults)
             if(specs.All(x=>x.Level!=item.Level.ToString())){var spec=new RequirementSpecification(projectId,item.SpecNumber,item.SpecTitle,item.Level.ToString(),$"Authoritative structured {item.SpecTitle.ToLowerInvariant()}.",actor,now);db.RequirementSpecifications.Add(spec);specs.Add(spec);}
         await db.SaveChangesAsync(ct);
+        var sections=await db.SpecificationNodes.Where(x=>specs.Select(s=>s.Id).Contains(x.SpecificationId)&&x.Type==SpecificationNodeType.Section).ToListAsync(ct);
+        foreach(var spec in specs)
+            for(var i=1;i<=5;i++)if(sections.All(x=>x.SpecificationId!=spec.Id||x.Position!=i*1000)){var section=new SpecificationNode(spec.Id,null,i*1000,SpecificationNodeType.Section,$"{i}. {SectionName(i)}",null,actor,now);db.SpecificationNodes.Add(section);sections.Add(section);}
+        await db.SaveChangesAsync(ct);
 
         var artifacts=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderBy(x=>x.BaseNumber).ToListAsync(ct);
         if(artifacts.Count==0)
@@ -75,10 +79,6 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
         var current=revisions.GroupBy(x=>x.ArtifactId).ToDictionary(x=>x.Key,x=>x.First());
         var profiled=(await db.RequirementRevisionProfiles.AsNoTracking().Where(x=>revisions.Select(r=>r.Id).Contains(x.RevisionId)).Select(x=>x.RevisionId).ToListAsync(ct)).ToHashSet();
         var placed=(await db.SpecificationNodes.AsNoTracking().Where(x=>x.RequirementArtifactId!=null&&artifactIds.Contains(x.RequirementArtifactId.Value)).Select(x=>x.RequirementArtifactId!.Value).ToListAsync(ct)).ToHashSet();
-        var sections=await db.SpecificationNodes.Where(x=>specs.Select(s=>s.Id).Contains(x.SpecificationId)&&x.Type==SpecificationNodeType.Section).ToListAsync(ct);
-        foreach(var spec in specs)
-            for(var i=1;i<=5;i++)if(sections.All(x=>x.SpecificationId!=spec.Id||x.Position!=i*1000)){var section=new SpecificationNode(spec.Id,null,i*1000,SpecificationNodeType.Section,$"{i}. {SectionName(i)}",null,actor,now);db.SpecificationNodes.Add(section);sections.Add(section);}
-        await db.SaveChangesAsync(ct);
         foreach(var artifact in artifacts)
         {
             if(!current.TryGetValue(artifact.Id,out var revision))continue;var definition=Defaults.Single(x=>x.Level==artifact.Level);var schema=schemas.Single(x=>x.Key==definition.SchemaKey);

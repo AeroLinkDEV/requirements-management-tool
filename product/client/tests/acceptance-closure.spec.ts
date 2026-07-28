@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { apiBase, apiLogin } from './auth'
 
+const completeImpacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
+
 test('acceptance closure proves governed revisioning, direct review work, publications, full trace and historical discovery',async({request,playwright})=>{
  test.setTimeout(180_000)
  await apiLogin(request)
@@ -41,7 +43,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(mixed.baseNumber).toMatch(/^SWCR-\d{8}$/)
  expect(mixed.requirementChanges.map((x:any)=>x.level)).toEqual(['HighLevel','LowLevel'])
 
- const reviewDraftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Sequential activation acceptance',problem:'Ordered authority must be proven',analysis:'Only the current reviewer may act',solution:'Exercise two controlled stages',requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The software shall activate one sequential reviewer at a time.',rationale:'Prevents out-of-order approval.',verificationMethod:'Test'}]}})
+ const reviewDraftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Sequential activation acceptance',problem:'Ordered authority must be proven',analysis:'Only the current reviewer may act',solution:'Exercise two controlled stages',requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The software shall activate one sequential reviewer at a time.',rationale:'Prevents out-of-order approval.',verificationMethod:'Test',impactDispositionJson:completeImpacts}]}})
  const reviewDraft=await reviewDraftResponse.json()
  const sequentialResponse=await request.post(`${apiBase}/api/scrs/${reviewDraft.id}/submit`,{data:{expectedVersion:reviewDraft.version,mode:'Sequential',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
  expect(sequentialResponse.ok(),await sequentialResponse.text()).toBeTruthy()
@@ -65,7 +67,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(returnedDraft.state).toBe('Draft')
  expect(returnedDraft.revision).toBe(reviewDraft.revision)
 
- const parallelDraft=await (await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Parallel unanimity acceptance',problem:'Independent reviews must run concurrently',analysis:'Both signatures remain mandatory',solution:'Activate all parallel reviewers',requirementChanges:[{level:'LowLevel',kind:'Introduce',statement:'The component shall require unanimous parallel review.',rationale:'Independent assurance.',verificationMethod:'Inspection'}]}})).json()
+ const parallelDraft=await (await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Parallel unanimity acceptance',problem:'Independent reviews must run concurrently',analysis:'Both signatures remain mandatory',solution:'Activate all parallel reviewers',requirementChanges:[{level:'LowLevel',kind:'Introduce',statement:'The component shall require unanimous parallel review.',rationale:'Independent assurance.',verificationMethod:'Inspection',impactDispositionJson:completeImpacts}]}})).json()
  const parallelResponse=await request.post(`${apiBase}/api/scrs/${parallelDraft.id}/submit`,{data:{expectedVersion:parallelDraft.version,mode:'Parallel',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
  expect(parallelResponse.ok(),await parallelResponse.text()).toBeTruthy()
  expect((await parallelResponse.json()).reviewCycles.at(-1).steps.map((x:any)=>x.state)).toEqual(['Active','Active'])
@@ -84,7 +86,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  const suffix=Date.now().toString().slice(-6)
  const draftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{
   projectId:project.id,targetReleaseId:active.id,type:'Software',title:`Derived guidance continuity ${suffix}`,problem:'Guidance continuity needs an internal safety monitor',analysis:'The behavior is derived from software architecture rather than a direct system allocation',solution:'Introduce a derived HLR with explicit rationale',
-  requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The software shall monitor derived guidance continuity.',rationale:'Architecture safety analysis requires an independent continuity monitor.',verificationMethod:'Test',isDerived:true}]
+  requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The software shall monitor derived guidance continuity.',rationale:'Architecture safety analysis requires an independent continuity monitor.',verificationMethod:'Test',isDerived:true,impactDispositionJson:completeImpacts}]
  }})
  expect(draftResponse.status(),await draftResponse.text()).toBe(201)
  const draft=await draftResponse.json()

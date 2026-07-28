@@ -31,6 +31,7 @@ type Requirement = {
   richText: string;
   attributesJson: string;
   impactDispositionJson: string;
+  targetSectionId?: string;
 };
 type Step = {
   position: number;
@@ -211,6 +212,7 @@ const mapRequirements = (items: Requirement[]) =>
         richText: item.richText,
         attributesJson: item.attributesJson,
         impactDispositionJson: item.impactDispositionJson,
+        targetSectionId: item.targetSectionId ?? "",
       },
       item.level,
     ),

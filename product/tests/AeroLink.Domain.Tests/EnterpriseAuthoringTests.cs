@@ -37,6 +37,42 @@ public sealed class EnterpriseAuthoringTests
         var cycle=scr.SubmitForReview("author",[new("reviewer","Reviewer")],now.AddMinutes(2));Assert.Equal(64,cycle.SnapshotHash.Length);
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"trace\":\"Affected\"}")]
+    [InlineData("{\"trace\":\"Affected\",\"verification\":\"Affected\",\"documents\":\"Affected\",\"baseline\":\"Affected\",\"collaboration\":\"Pending\"}")]
+    [InlineData("{\"trace\":\"Affected\",\"verification\":\"Affected\",\"documents\":\"Affected\",\"baseline\":\"Affected\",\"collaboration\":\"Affected\",\"invented\":\"Affected\"}")]
+    [InlineData("not-json")]
+    public void Review_rejects_incomplete_malformed_or_unknown_impact_dispositions(string dispositions)
+    {
+        var now=DateTimeOffset.UtcNow;
+        var scr=new SystemChangeRequest("SCR-00000001",0,Guid.NewGuid(),Guid.NewGuid(),"Proposal","Problem","Analysis","Solution","author",now);
+        scr.AddRequirementChange("author","SYSR-00000001",0,RequirementLevel.System,RequirementChangeKind.Introduce,
+            "The FMS shall navigate.","Rationale","Test",now,impactDispositionJson:dispositions);
+        Assert.Throws<DomainException>(()=>scr.SubmitForReview("author",[new("reviewer","Reviewer")],now));
+    }
+
+    [Fact]
+    public void Schema_validation_preserves_authored_values_and_overrides_server_owned_derived()
+    {
+        var now=DateTimeOffset.UtcNow;
+        var schema=new ArtifactSchemaDefinition(Guid.NewGuid(),"hlr","HLR","HighLevel","", "admin",now);
+        schema.AddField("criticality","Criticality",SchemaFieldType.Enumeration,false,10,
+            "[\"Normal\",\"Safety Significant\"]","admin",now);
+        schema.AddField("owner","Owner",SchemaFieldType.User,false,20,"[]","admin",now);
+        schema.AddField("derived","Derived",SchemaFieldType.Boolean,false,30,"[]","admin",now);
+
+        var merged=RequirementAuthoringJson.ValidateAndMergeAttributes(
+            "{\"owner\":\"software.author\",\"criticality\":\"Safety Significant\",\"derived\":false}",schema,true);
+
+        Assert.Equal("{\"criticality\":\"Safety Significant\",\"owner\":\"software.author\",\"derived\":true}",merged);
+        Assert.Throws<DomainException>(()=>RequirementAuthoringJson.ValidateAndMergeAttributes(
+            "{\"unknown\":\"value\"}",schema,false));
+        Assert.Throws<DomainException>(()=>RequirementAuthoringJson.ValidateAndMergeAttributes(
+            "{\"criticality\":\"Impossible\"}",schema,false));
+        Assert.Throws<DomainException>(()=>RequirementAuthoringJson.ValidateAndMergeAttributes("[]",schema,false));
+    }
+
     [Fact]
     public void Assignments_and_notifications_preserve_work_state_and_concurrency()
     {

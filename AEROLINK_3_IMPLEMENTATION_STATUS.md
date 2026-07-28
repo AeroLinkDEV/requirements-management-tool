@@ -98,6 +98,11 @@ verification/readiness/traceability; content/audit/accessibility/maintainability
 reconciliation and repository governance. This work repairs reachability, correctness and qualification inside
 existing workstreams; it does not by itself move a scorecard boundary or resume Workstream 4 federation.
 
+The first controlled-change correctness increment closes proposal metadata loss and lifecycle bypasses:
+schema-governed authored attributes, server-authoritative derived state, durable specification placement, and
+canonical impact dispositions now share one contract across browser, API, domain, check-in and materialization
+(DEC-062). Legacy gaps are reported rather than silently invented or rewritten.
+
 ## Repository and authority corrections
 
 The following facts supersede earlier planning assumptions that predated repository publication:
