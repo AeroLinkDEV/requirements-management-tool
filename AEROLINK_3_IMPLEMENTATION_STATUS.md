@@ -103,6 +103,10 @@ schema-governed authored attributes, server-authoritative derived state, durable
 canonical impact dispositions now share one contract across browser, API, domain, check-in and materialization
 (DEC-062). Legacy gaps are reported rather than silently invented or rewritten.
 
+The second controlled-change correctness increment makes record context and approval attribution consistent
+(DEC-063): canonical typed SCR/SWCR URLs survive every supported entry path, and review rows retain the selected
+principal and authority through assignment, active work, audit and electronic signature.
+
 ## Repository and authority corrections
 
 The following facts supersede earlier planning assumptions that predated repository publication:

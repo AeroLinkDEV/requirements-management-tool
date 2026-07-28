@@ -269,6 +269,12 @@ freeze and materialization all refuse incomplete or malformed five-area impact d
 identify legacy authored-attribute gaps through `/api/authoring/attribute-gaps`, and integrity checkpoints count
 legacy impact-disposition violations without mutating historical records.
 
+Change-request context and review attribution are also controlled facts (DEC-063). Detail links now encode
+System or Software and self-correct old generic or mismatched links from the authorized record. Search, My Work,
+notifications and Jira preserve the same discipline. Each approval step retains the canonical selected account,
+display name, workflow stage and resolved Program authority; the review UI no longer substitutes a showcase
+person, while the actual signing account remains separate immutable signature evidence.
+
 ## How this project governs itself
 
 AeroLink is developed under the same discipline it sells. Respect it — these conventions are the

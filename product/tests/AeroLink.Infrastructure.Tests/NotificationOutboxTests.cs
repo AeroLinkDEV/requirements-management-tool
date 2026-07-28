@@ -276,6 +276,7 @@ public sealed class NotificationOutboxTests
 
     [Theory]
     [InlineData("scr:abc", "/systems/change-requests/abc")]
+    [InlineData("swcr:abc", "/software/change-requests/abc")]
     [InlineData("requirement:xyz", "/systems/requirements/xyz")]
     [InlineData("verification-impact:1", "/system-verification")]
     [InlineData("problem-report:7", "/problem-reports/7")]

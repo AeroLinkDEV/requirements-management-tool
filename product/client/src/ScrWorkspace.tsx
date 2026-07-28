@@ -13,7 +13,7 @@ import PersonPicker from "./PersonPicker";
 import ControlledAttachments from "./ControlledAttachments";
 import ScrJiraLink from "./ScrJiraLink";
 import { PersonName } from "./People";
-import { demoPerson, personLabel } from "./PeopleRegistry";
+import { personLabel } from "./PeopleRegistry";
 import { RichCaseField, RichContentView } from "./RichContent";
 import { useDebouncedSave } from "./autosave";
 import { emptyRichContent, fromPlainText, toPlainText } from "./richContentModel";
@@ -37,6 +37,8 @@ type Step = {
   position: number;
   approverId: string;
   approverName: string;
+  authority: string;
+  stageName: string;
   state: string;
   decidedAt?: string;
 };
@@ -122,6 +124,7 @@ type Props = {
   onBack: () => void;
   onChanged: () => Promise<void>;
   onOpenScr: (id: string) => void;
+  onDisciplineResolved: (discipline: "system" | "software") => void;
   /**
    * The project's builds, so this record's own target can be resolved once it loads. Without them the rail
    * can only report the stored state, and "Selected for baseline" is the one wording nobody wants to read.
@@ -236,6 +239,7 @@ export default function ScrWorkspace({
   onBack,
   onChanged,
   onOpenScr,
+  onDisciplineResolved,
   releases,
 }: Props) {
   const [scr, setScr] = useState<ScrDetail>();
@@ -272,6 +276,7 @@ export default function ScrWorkspace({
     const response = await fetch(`${api}/api/scrs/${scrId}`);
     if (response.ok) {
       const detail = (await response.json()) as ScrDetail;
+      onDisciplineResolved(detail.type === "Software" ? "software" : "system");
       setScr(detail);
       if (mode !== "edit") {
         setDraft({
@@ -287,7 +292,7 @@ export default function ScrWorkspace({
       }
     }
     await loadStatus();
-  }, [api, loadStatus, mode, scrId]);
+  }, [api, loadStatus, mode, onDisciplineResolved, scrId]);
 
   useEffect(() => {
     void load();
@@ -739,7 +744,7 @@ export default function ScrWorkspace({
     <main className="scrPage">
       <header className="scrHeader">
         <div>
-          <button className="back" type="button" onClick={onBack}>← Command Center</button>
+          <button className="back" type="button" onClick={onBack}>← {scr.type === "Software" ? "Software" : "System"} Change Requests</button>
           <p className="eyebrow">CHANGE CONTROL / {scr.displayNumber}</p>
           <h1>{scr.title}</h1>
           <p>Revision-controlled change case, requirement proposals, and review authority.</p>
@@ -1090,13 +1095,13 @@ export default function ScrWorkspace({
                 <div className="workspaceTitle"><div><h2>Review cycle {latest.sequence}</h2><p>{stateLabel(latest.state)} · {latest.snapshotHash.slice(0, 12)}…</p></div></div>
                 <div className="approvalPath">
                   {latest.steps.map((step) => (
-                    <div className={`approvalStep ${step.state.toLowerCase()}`} key={step.position}><span>{step.state === "Approved" ? "✓" : step.position + 1}</span><div><b><PersonName userName={step.approverId} displayName={step.approverName} /></b><small>{demoPerson(step.approverId, step.approverName)?.role ?? step.approverId} · {stateLabel(step.state)}</small></div></div>
+                    <div className={`approvalStep ${step.state.toLowerCase()}`} key={step.position}><span>{step.state === "Approved" ? "✓" : step.position + 1}</span><div><b><PersonName userName={step.approverId} displayName={step.approverName} /></b><small>{step.stageName || step.authority || "Authority unresolved"} · {stateLabel(step.state)}</small></div></div>
                   ))}
                 </div>
                 {latest.closureReason && <div className="closure"><b>Closure reason</b><p>{latest.closureReason}</p></div>}
                 {scr.state === "InReview" && active && (
                   <div className="reviewActions">
-                    <p><b>{active.approverName}</b> is the active reviewer.</p>
+                    <p><b><PersonName userName={active.approverId} displayName={active.approverName} /></b> is the active reviewer.</p>
                     {active.approverId === user.userName ? (
                       <><button type="button" disabled={busy} onClick={() => setSigning(true)}>Review & electronically approve</button><textarea placeholder="Reason for requested changes" value={reason} onChange={(event) => setReason(event.target.value)} /><button type="button" className="danger" disabled={busy || !reason.trim()} onClick={() => void call("request-changes", { expectedVersion: scr.version, reason })}>Request changes</button></>
                     ) : (

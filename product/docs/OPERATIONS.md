@@ -38,6 +38,13 @@ returned `scr:<guid>` reference, check it out, enter the attributable values, an
 owner or rewrite an approved record. For approved history, create a controlled successor revision and record the
 reconciliation rationale there.
 
+## Review-step authority migration
+
+Migration `20260728141151_PreserveReviewStepAuthority` adds the frozen authority field to approval steps. Existing
+steps retain their stored approver account and name; because historical authority cannot be reconstructed
+honestly, an empty legacy value is shown as `Authority unresolved`. New and restarted review cycles resolve and
+store current Program authority at assignment time.
+
 ## Open Digital Thread configuration
 
 Production permits no cross-origin browser callers unless each trusted origin is configured as `Cors__AllowedOrigins__0`, `Cors__AllowedOrigins__1`, and so on. Never use a wildcard origin with credentialed browser sessions.

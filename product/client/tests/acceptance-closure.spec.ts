@@ -109,7 +109,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(queueResponse.ok(),await queueResponse.text()).toBeTruthy()
  const queue=await queueResponse.json()
  const notification=queue.notifications.find((x:any)=>x.artifactId===draft.id)
- expect(notification).toMatchObject({route:`scr:${draft.id}`,type:'ReviewActivated'})
+ expect(notification).toMatchObject({route:`swcr:${draft.id}`,type:'ReviewActivated'})
  const approvedResponse=await reviewer.post(`${apiBase}/api/scrs/${draft.id}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved as the exact reviewed software change snapshot.',expectedVersion:inReview.version}})
  expect(approvedResponse.ok(),await approvedResponse.text()).toBeTruthy()
  expect((await approvedResponse.json()).state).toBe('Approved')

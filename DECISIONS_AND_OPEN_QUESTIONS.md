@@ -734,6 +734,23 @@ Future entries use:
   violations. Approved history is never auto-filled: repair occurs through a Draft checkout or a controlled
   successor revision.
 
+### DEC-063 - Change-Request Type and Review Principal Are Frozen Context
+
+- **Date:** 2026-07-28
+- **Status:** Accepted
+- **Decision:** Every change-request detail URL encodes `systems` or `software`; generic legacy links are
+  accepted only long enough to load the authorized record and are then replaced with its canonical typed URL.
+  Review steps retain the selected account name and resolved Program authority as frozen fields. Presentation
+  uses those fields directly and records the actual signing principal separately in electronic-signature
+  evidence.
+- **Rationale:** A generic route made an SWCR appear inside System navigation, and the showcase people registry
+  replaced `systems.reviewer` with the System author even though authorization and the signature used the
+  reviewer account. Both defects let surrounding presentation contradict the controlled record.
+- **Consequences:** Refresh, new-tab, history, search, My Work, notification and Jira entry paths keep the
+  discipline revealed by the record. A caller-supplied type mismatch is canonicalized before actions are
+  offered. Reviewer name, authority, active assignment, audit actor and signature are now traceable to stable
+  principals; missing legacy authority is displayed as unresolved rather than inferred from another person.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

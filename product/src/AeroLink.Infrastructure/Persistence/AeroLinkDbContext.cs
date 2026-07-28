@@ -242,6 +242,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ApproverId).HasMaxLength(100).IsRequired();
             b.Property(x => x.ApproverName).HasMaxLength(200).IsRequired();
             b.Property(x => x.StageName).HasMaxLength(120);
+            b.Property(x => x.Authority).HasMaxLength(40);
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.HasIndex(x => new { x.ReviewCycleId, x.Position }).IsUnique();
         });

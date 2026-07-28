@@ -20,7 +20,9 @@ export function PersonName({ userName, displayName, role, withRole = false }: {
   withRole?: boolean;
 }) {
   const person = userName ? demoPerson(userName, displayName, role) : undefined;
-  const name = person?.name ?? displayName ?? userName ?? "";
+  // A display name carried by the controlled record is authoritative for that record. The showcase registry
+  // may still contribute a portrait and role, but it must never replace a frozen reviewer or signer name.
+  const name = displayName ?? person?.name ?? userName ?? "";
   // The account stays available to anyone who needs it — an auditor reconciling against the identity
   // provider should not have to guess which login "Maya Patel" was.
   return (

@@ -418,7 +418,7 @@ public static class ChangeRequestEndpoints
                 var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, scr.ProjectId, scr.Type, ct);
                 var cycle = scr.SubmitForReview(actor.UserName, selections, now, request.Mode, workflow);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
-                    db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"scr:{scr.Id}", scr.Id, now));
+                    db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -441,13 +441,20 @@ public static class ChangeRequestEndpoints
                 // The domain restricts this to the author; an administrator may also act, matching submission.
                 if (scr.AuthorId != actor.UserName && !actor.IsAdministrator) return Results.Forbid();
                 var now = DateTimeOffset.UtcNow;
-                var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.UserName, x.DisplayName }).ToListAsync(ct);
+                var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
                 if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every corrected approver must be an active AeroLink user." });
                 var directory = known.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
-                var corrected = request.Approvers.Select(x => new ApproverSelection(directory[x.UserId].UserName, directory[x.UserId].DisplayName)).ToList();
+                var authorities = await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId,
+                    known.Select(x => x.Id).ToList(), ct);
+                var corrected = request.Approvers.Select(x =>
+                {
+                    var account = directory[x.UserId];
+                    authorities.TryGetValue(account.Id, out var role);
+                    return new ApproverSelection(account.UserName, account.DisplayName, role);
+                }).ToList();
                 var cycle = scr.CancelAndRestartForWrongApprover(scr.AuthorId, request.Reason, corrected, now);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
-                    db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"scr:{scr.Id}", scr.Id, now));
+                    db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -460,7 +467,7 @@ public static class ChangeRequestEndpoints
             var actor = http.UserAccount(); if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
             var programId = await db.Projects.Where(x => x.Id == scr.ProjectId).Join(db.Programs, x => x.ProgramId, x => x.Id, (_, p) => p.Id).SingleAsync(ct);
             if (!await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct)) return Results.Forbid();
-            try { var now = DateTimeOffset.UtcNow; var snapshotHash = scr.ActiveReviewCycle?.SnapshotHash ?? ""; var activeBefore=scr.ActiveReviewCycle!.Steps.Where(x=>x.State==ApprovalStepState.Active).Select(x=>x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase); scr.ApproveActiveStage(actor.UserName, now); var activated=scr.ActiveReviewCycle?.Steps.Where(x=>x.State==ApprovalStepState.Active&&!activeBefore.Contains(x.ApproverId)).ToList()??[];foreach(var step in activated)db.UserNotifications.Add(new(scr.ProjectId,step.ApproverId,"ReviewActivated",$"Review {scr.DisplayNumber}",$"The prior stage is complete. You are now authorized to review {scr.DisplayNumber}: {scr.Title}",$"scr:{scr.Id}",scr.Id,now)); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "SCR", scr.Id, scr.DisplayNumber, "Approve", request.Meaning, snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
+            try { var now = DateTimeOffset.UtcNow; var snapshotHash = scr.ActiveReviewCycle?.SnapshotHash ?? ""; var activeBefore=scr.ActiveReviewCycle!.Steps.Where(x=>x.State==ApprovalStepState.Active).Select(x=>x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase); scr.ApproveActiveStage(actor.UserName, now); var activated=scr.ActiveReviewCycle?.Steps.Where(x=>x.State==ApprovalStepState.Active&&!activeBefore.Contains(x.ApproverId)).ToList()??[];foreach(var step in activated)db.UserNotifications.Add(new(scr.ProjectId,step.ApproverId,"ReviewActivated",$"Review {scr.DisplayNumber}",$"The prior stage is complete. You are now authorized to review {scr.DisplayNumber}: {scr.Title}",$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now)); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "SCR", scr.Id, scr.DisplayNumber, "Approve", request.Meaning, snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
                 // Approval is what settles the engineering decision, so verification work is raised here rather than
                 // waiting for baseline inclusion. Saved in the same unit of work as the approval itself.
                 await verificationImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct);
@@ -472,7 +479,7 @@ public static class ChangeRequestEndpoints
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
-            try { var now=DateTimeOffset.UtcNow;scr.RequestChanges(http.UserAccount().UserName, request.Reason, now);db.UserNotifications.Add(new(scr.ProjectId,scr.AuthorId,"ReviewChangesRequested",$"Changes requested for {scr.DisplayNumber}",request.Reason,$"scr:{scr.Id}",scr.Id,now)); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
+            try { var now=DateTimeOffset.UtcNow;scr.RequestChanges(http.UserAccount().UserName, request.Reason, now);db.UserNotifications.Add(new(scr.ProjectId,scr.AuthorId,"ReviewChangesRequested",$"Changes requested for {scr.DisplayNumber}",request.Reason,$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now)); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 

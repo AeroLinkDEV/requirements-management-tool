@@ -175,7 +175,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
   const release = project?.releases.find(x => x.id === selectedReleaseId) ?? project?.releases.at(-1);
   const item = (label:string,target:View,icon:string,area:Discipline="system",accessibleLabel=label) => {
-    const activeItem = (view===target || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area;
+    const activeItem = (view===target || (target==="history" && view==="scr") || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area;
     // Fetched on hover or keyboard focus, so the workspace's code is usually already here by the time the
     // click is. Both events, because a keyboard user never hovers anything.
     const warm = () => viewCode[target]?.warm();
@@ -428,7 +428,7 @@ function App() {
     setUser(null);
   }}/>;
   const labels:Record<View,string>={dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
-  const scopedLabel=view==="history"?`${historyTypeIntent==="All"?"All":discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
+  const scopedLabel=view==="history"?`${historyTypeIntent==="All"?"All":discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
   const scopeSwitch=view==="history"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={historyTypeIntent==="All"} onClick={()=>navigate("history",discipline,undefined,undefined,false,historyStateIntent,"All")}>All</button><button aria-pressed={historyTypeIntent!=="All"&&discipline!=="software"} onClick={()=>navigate("history","system",undefined,undefined,false,historyStateIntent,"System")}>System</button><button aria-pressed={historyTypeIntent!=="All"&&discipline==="software"} onClick={()=>navigate("history","software",undefined,undefined,false,historyStateIntent,"Software")}>Software</button></div>:view==="requirements"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={discipline!=="software"} onClick={()=>navigate(view,"system")}>System</button><button aria-pressed={discipline==="software"} onClick={()=>navigate(view,"software")}>Software</button></div>:view==="verification"?<div className="contextScopeSwitch" role="group" aria-label="Verification scope"><button aria-pressed={discipline!=="softwareTest"} onClick={()=>navigate("verification","systemTest")}>System</button><button aria-pressed={discipline==="softwareTest"} onClick={()=>navigate("verification","softwareTest")}>Software</button></div>:null;
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b><span>{release?.version}</span><b aria-hidden="true">›</b><strong>{scopedLabel}</strong></nav><div className="contextActions">{scopeSwitch}<span className="contextReleaseState">{release?.isReleased?"Released":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
@@ -497,9 +497,13 @@ function App() {
         api={API}
         scrId={selectedScrId}
         user={user}
-        onBack={() => navigate("dashboard")}
+        onBack={() => navigate("history", discipline)}
         onChanged={loadData}
         onOpenScr={(id) => navigate("scr", discipline, id)}
+        onDisciplineResolved={(resolved) => {
+          if (resolved !== discipline) setDiscipline(resolved);
+          if (context) history.replaceState({}, "", routePath(context, "scr", resolved, selectedScrId));
+        }}
         releases={project?.releases ?? []}
       />
     );
@@ -638,7 +642,7 @@ function App() {
         projectId={project.project.id}
         user={user}
         onBack={() => navigate("dashboard")}
-        onOpenScr={(id) => navigate("scr",discipline,id)}
+        onOpenScr={(id, resolved) => navigate("scr",resolved,id)}
         onOpenRelease={() => navigate("release")}
       />
     );

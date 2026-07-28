@@ -12,7 +12,8 @@ export type DemoPerson = {
 const people: Record<string, DemoPerson> = {
   "systems.lead": { name: "Maya Patel", role: "Systems Lead", portrait: mayaPatel },
   "systems.author": { name: "Maya Patel", role: "Systems Lead", portrait: mayaPatel },
-  "systems.reviewer": { name: "Maya Patel", role: "Systems Lead", portrait: mayaPatel },
+  // A distinct approval principal: it must never be rendered as the showcase author.
+  "systems.reviewer": { name: "Systems Engineer", role: "Systems Assurance Reviewer", portrait: "" },
   "lead.reviewer": { name: "Maya Patel", role: "Systems Lead", portrait: mayaPatel },
   "test.engineer": { name: "Ethan Brooks", role: "Verification Lead", portrait: ethanBrooks },
   "test.author": { name: "Ethan Brooks", role: "Verification Lead", portrait: ethanBrooks },

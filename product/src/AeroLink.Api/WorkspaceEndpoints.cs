@@ -185,7 +185,7 @@ public static class WorkspaceEndpoints
                                         join cycle in db.ReviewCycles.AsNoTracking() on step.ReviewCycleId equals cycle.Id
                                         join scr in db.SystemChangeRequests.AsNoTracking() on cycle.ScrId equals scr.Id
                                         where projectId == null || scr.ProjectId == projectId
-                                        select new { id = scr.Id, type = "SCR approval", artifact = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, title = scr.Title, priority = "High", dueAt = cycle.StartedAt.AddDays(5), ageDays = (int)(now - cycle.StartedAt).TotalDays, route = "scr" }).ToListAsync(ct);
+                                        select new { id = scr.Id, type = "SCR approval", artifact = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, title = scr.Title, priority = "High", dueAt = cycle.StartedAt.AddDays(5), ageDays = (int)(now - cycle.StartedAt).TotalDays, route = "scr", discipline = scr.Type == ChangeRequestType.Software ? "software" : "system" }).ToListAsync(ct);
             activeScrSteps = activeScrSteps.OrderBy(x => x.dueAt).ToList();
             var releaseSteps = await (from step in db.ReleaseApprovals.AsNoTracking().Where(x => x.ApproverId == actor.UserName && x.State == ReleaseApprovalState.Active)
                                       join campaign in db.ReleaseCampaigns.AsNoTracking() on step.CampaignId equals campaign.Id
@@ -195,7 +195,7 @@ public static class WorkspaceEndpoints
             // Ordered after materialisation: SQLite cannot ORDER BY a DateTimeOffset, and this set is bounded by
             // the drafts one person authored, so sorting in memory costs nothing and works on every provider.
             var authoredDrafts = (await db.SystemChangeRequests.AsNoTracking().Where(x => x.AuthorId == actor.UserName && x.State == ScrState.Draft && (projectId == null || x.ProjectId == projectId))
-                .Select(x => new { id = x.Id, type = "Draft to complete", artifact = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, title = x.Title, priority = "Normal", dueAt = x.UpdatedAt.AddDays(10), ageDays = (int)(now - x.UpdatedAt).TotalDays, route = "scr" }).ToListAsync(ct))
+                .Select(x => new { id = x.Id, type = "Draft to complete", artifact = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, title = x.Title, priority = "Normal", dueAt = x.UpdatedAt.AddDays(10), ageDays = (int)(now - x.UpdatedAt).TotalDays, route = "scr", discipline = x.Type == ChangeRequestType.Software ? "software" : "system" }).ToListAsync(ct))
                 .OrderByDescending(x => x.dueAt).ToList();
             var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).ToList();
             return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now), drafts = authoredDrafts.Count }, tasks });

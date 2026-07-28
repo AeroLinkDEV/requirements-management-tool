@@ -45,9 +45,9 @@ export type AppRoute = {
 
 const decoded = (value: string | undefined) => value ? decodeURIComponent(value) : undefined;
 
-export function readRoute(): AppRoute {
-  const parts = location.pathname.split("/").filter(Boolean);
-  const query = new URLSearchParams(location.search);
+export function parseRoute(pathname: string, search = ""): AppRoute {
+  const parts = pathname.split("/").filter(Boolean);
+  const query = new URLSearchParams(search);
   if (!parts.length) return { view: "dashboard", discipline: "system" };
   if (parts[0] !== "programs" || parts[2] !== "projects" || parts[4] !== "releases")
     return { view: "notFound", discipline: "system" };
@@ -61,6 +61,10 @@ export function readRoute(): AppRoute {
   if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
   if (path === "systems/change-requests/new") return { ...base, view: "createSystemScr", discipline: "system", artifactId: query.get("requirement") || undefined };
   if (path === "software/change-requests/new") return { ...base, view: "createSoftwareChange", discipline: "software", artifactId: query.get("requirement") || undefined };
+  if (tail[0] === "systems" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[2]) };
+  if (tail[0] === "software" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "software", artifactId: decoded(tail[2]) };
+  // Compatibility for links created before typed change-request routes existed. The detail view replaces this
+  // with the canonical typed path after the authorized record reveals its type.
   if (tail[0] === "change-requests" && tail[1]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[1]) };
   if (path === "systems/requirements") return { ...base, view: "requirements", discipline: "system", savedViewId: query.get("view") || undefined };
   if (path === "software/requirements") return { ...base, view: "requirements", discipline: "software", savedViewId: query.get("view") || undefined };
@@ -83,6 +87,10 @@ export function readRoute(): AppRoute {
   return { ...base, view: "notFound", discipline: "system" };
 }
 
+export function readRoute(): AppRoute {
+  return parseRoute(location.pathname, location.search);
+}
+
 export type RouteContext = { programId: string; projectId: string; releaseId: string };
 
 export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent) {
@@ -99,7 +107,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "mywork": return `${root}/my-work`;
     case "createSystemScr": return `${root}/systems/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;
     case "createSoftwareChange": return `${root}/software/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;
-    case "scr": return `${root}/change-requests/${artifactId}`;
+    case "scr": return `${root}/${discipline === "software" ? "software" : "systems"}/change-requests/${artifactId}`;
     case "history": return historyPath(discipline === "software" ? "software" : "systems");
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
     case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification`;
@@ -121,7 +129,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
 }
 
 export function artifactPath(context: RouteContext, kind: string, id: string, discipline = "system") {
-  if (kind === "change-request") return routePath(context, "scr", "system", id);
+  if (kind === "change-request") return routePath(context, "scr", discipline === "software" ? "software" : "system", id);
   if (kind === "requirement") return routePath(context, "requirements", discipline === "software" ? "software" : "system", id);
   return routePath(context, "artifact", "system", id, kind);
 }
