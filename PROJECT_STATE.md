@@ -134,6 +134,20 @@ deliberately do **not** block the baseline freeze, because freezing and material
 requirement revisions a procedure is written against. "Decided" means the procedures are authored and
 approved — it says nothing about whether they have been executed.
 
+Coverage is a question the requirements workspace can now answer. A **coverage-state filter** builds a worklist
+of what is Covered, Suspect or Uncovered, and every row carries its state; the suspect and uncovered ones are
+buttons that open the verification trace rather than labels that only read. Covered means one thing everywhere —
+the link is not suspect, the procedure revision it names is approved, and that procedure has no revision still in
+flight — because the release readiness gate, the workspace filter and the trace panel now read one predicate
+(DEC-067). They did not: the gate applied all three conditions while the trace panel counted "confirmed tests"
+from the suspect flag alone, so a requirement could show a confirmed test beside a row that called it suspect.
+
+The showcase covered all 1,250 of its requirements and so could never demonstrate the product finding a gap. One
+FMS 1.6 work item now puts an approved System procedure back into revision, making the two requirements it covers
+suspect while released FMS 1.5 is left exactly as it was. **No uncovered requirement is seeded** — reaching one
+would need either a released baseline that failed its own coverage gate or a materialized FMS 1.6, and both are
+worse than the missing state. Uncovered appears the moment somebody materializes 1.6 (DEC-068).
+
 Materialization is where the loop closes, because it is the first moment requirement revisions exist. Each
 item binds to the exact revision its change produced; coverage on a modified requirement carries forward
 onto the new revision marked **suspect**; a decision that named a procedure becomes the real coverage link,
@@ -419,6 +433,17 @@ reason the document set can be trusted.
   Procedures and New Change Request arrived later and were never added, so neither had ever been measured,
   and both were breaking the contract. The production journey reads the navigation instead — it cannot go
   stale, because the product tells it what exists. Prefer enumerating the thing over describing it.
+- **A fixture that changes what other tests find is not an isolated fixture.** The showcase's verification gap
+  was first seeded on `SYSTP-000001`. Procedures are dealt requirements round-robin, so that procedure covers
+  `SYSR-000001` and is therefore the first approved procedure any test looking for one discovers. Putting it
+  into revision — the whole point of the fixture — removed it from the covering-procedure list and broke a
+  journey that had nothing to do with the change. Demonstration data is shared mutable state; before changing a
+  record in it, ask which gates find that record by searching rather than by name.
+- **Adding a column costs the columns already there.** The coverage state needed a sixth column in the
+  requirements table. Measured against an untouched checkout, the heading went from 35.8px to 52.6px and the row
+  from 94.8px to 119.6px, because the narrower statement track pushed both onto a second line — one fewer
+  requirement visible per screen. Nothing failed; the design contract passed throughout. A dense table has no
+  spare width, so the cost of a new column is paid by the existing ones whether or not anybody measures it.
 - **Specificity is the other way a rule loses.** `.richFileInput` set a visually-hidden control to one pixel
   and lost to `.controlledEditor input { width: 100% }` — (0,1,0) against (0,1,1) — so the input rendered at
   1160px and pushed the page 106px off screen. The cascade lesson above is about load order; this is the same
