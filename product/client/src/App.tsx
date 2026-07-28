@@ -550,7 +550,7 @@ function App() {
         onProposeChange={(id) => navigate(discipline === "software" ? "createSoftwareChange" : "createSystemScr", discipline, id)}
         onOpenRequirement={(id) => navigate("requirements",discipline,id)}
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
-        onOpenTraceability={() => navigate("lifecycle")}
+        onOpenTraceability={(artifactId) => navigate("lifecycle", discipline, artifactId, artifactId ? "requirement" : undefined)}
         onOpenVerification={() => navigate("verification", discipline === "software" ? "softwareTest" : "systemTest")}
       />
     );
@@ -583,6 +583,7 @@ function App() {
         projectId={project.project.id}
         releases={project.releases}
         activeReleaseId={release?.id??""}
+        initialArtifactId={selectedArtifactId || undefined}
         onBack={() => navigate("dashboard")}
       />
     );

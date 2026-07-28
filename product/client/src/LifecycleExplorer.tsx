@@ -10,9 +10,21 @@ type TraceExecution = { id: string; outcome: string; executedBy: string; execute
 type TraceTest = { procedureId: string; revisionId: string; displayNumber: string; title: string; level: string; state: string; isSuspect: boolean; coverageState: "Confirmed" | "Suspect"; executions: TraceExecution[] };
 type TraceRelation = { id: string; displayNumber: string; level: string; type: string };
 type Trace = { id: string; revisionId: string; displayNumber: string; level: string; statement: string; testCount: number; suspectTestCount: number; parents: TraceRelation[]; children: TraceRelation[]; tests: TraceTest[] };
-type Props = { api: string; projectId: string; activeReleaseId: string; releases: { id: string; version: string; isReleased?: boolean }[]; onBack: () => void };
+type Props = {
+  api: string;
+  projectId: string;
+  activeReleaseId: string;
+  releases: { id: string; version: string; isReleased?: boolean }[];
+  /**
+   * The requirement to open on, as a stable artifact identity rather than a revision or a display number —
+   * revisions move and display numbers can be re-read in another context. Carried in the route, so a refresh
+   * or a shared link lands on the same record.
+   */
+  initialArtifactId?: string;
+  onBack: () => void;
+};
 
-export default function LifecycleExplorer({ api, projectId, activeReleaseId, releases, onBack }: Props) {
+export default function LifecycleExplorer({ api, projectId, activeReleaseId, releases, initialArtifactId, onBack }: Props) {
   const [tab, setTab] = useState<"thread" | "documents">("thread");
   // Released and draft documents are different kinds of thing, so the tab asks which you came for rather than
   // mixing a controlled record that carries a content hash in among generated-on-the-spot drafts that
@@ -59,7 +71,12 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
         const body = (await traceResponse.json()) as { items: Trace[]; totalCount: number };
         setTraces(body.items);
         setTotal(body.totalCount);
-        setFocusId((current) => (body.items.some((item) => item.revisionId === current) ? current : body.items[0]?.revisionId || ""));
+        // Order matters: keep whatever the reader is already looking at, otherwise honour the artifact the
+        // route asked for, and only then fall back to the first row. This line used to go straight to the
+        // first row, which is why arriving from SYSR-000011 focused HLR-000001.00.
+        setFocusId((current) => body.items.some((item) => item.revisionId === current)
+          ? current
+          : body.items.find((item) => item.id === initialArtifactId)?.revisionId ?? body.items[0]?.revisionId ?? "");
       } else {
         setTraces([]);
         setTotal(0);
@@ -71,12 +88,33 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
     } finally {
       setLoading(false);
     }
-  }, [api, projectId, releases, activeReleaseId, baselineId, query]);
+  }, [api, projectId, releases, activeReleaseId, baselineId, query, initialArtifactId]);
 
   useEffect(() => {
     const timer = setTimeout(load, 150);
     return () => clearTimeout(timer);
   }, [load]);
+
+  // The thread loads one page of traces, so a requirement outside that page cannot be focused however
+  // precisely the route asks for it — which is why passing the identity through was necessary but not
+  // sufficient. Seeding the search with the requested record's number is exactly what a reader does by hand
+  // today, and what traverse() already does to move focus. The number only loads the row; focus is still
+  // resolved from the stable artifact id.
+  useEffect(() => {
+    if (!initialArtifactId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`${api}/api/enterprise-requirements/${initialArtifactId}`);
+        if (!response.ok || cancelled) return;
+        const body = (await response.json()) as { baseNumber?: string };
+        if (body.baseNumber && !cancelled) setQuery(body.baseNumber);
+      } catch {
+        // Leave the thread on its default page; requestedButAbsent explains what happened.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [api, initialArtifactId]);
 
   const generate = async () => {
     if (!baselineId) return;
@@ -101,6 +139,9 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
   // documents for " followed by a bare identifier is worse than saying nothing.
   const activeVersion = releases.find((item) => item.id === activeReleaseId)?.version ?? "the release in work";
   const focus = traces.find((item) => item.revisionId === focusId) ?? traces[0];
+  // A requested artifact outside the loaded page — filtered out by the search box, or on another baseline —
+  // must not be answered with an unrelated record and no explanation.
+  const requestedButAbsent = Boolean(initialArtifactId) && traces.length > 0 && !traces.some((item) => item.id === initialArtifactId);
   const selectedBaseline = baselines.find((item) => item.id === baselineId);
   const confirmedTests = useMemo(() => focus?.tests.filter((test) => !test.isSuspect) ?? [], [focus]);
   const executions = useMemo(() => confirmedTests.flatMap((test) => test.executions), [confirmedTests]);
@@ -152,6 +193,7 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
 
         {threadMode === "map" ? focus ? <section className="digitalThreadStage">
           <div className="threadCanvas">
+            {requestedButAbsent && <p className="threadFocusMissing" role="status">The requested requirement is not in the current baseline or search results, so the thread is showing {focus.displayNumber} instead. Clear the search or choose the baseline that contains it.</p>}
             <header><div><span>FOCUSED PATH</span><b>{focus.displayNumber}</b></div><small>Select a related record to traverse the controlled network</small></header>
             <div className="threadPath" role="list" aria-label={`Digital thread for ${focus.displayNumber}`}>
               <div className="threadLane authority">

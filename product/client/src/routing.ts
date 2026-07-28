@@ -73,6 +73,10 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "software-verification") return { ...base, view: "verification", discipline: "softwareTest" };
   if (path === "problem-reports") return { ...base, view: "problemReports", discipline: "system" };
   if (path === "traceability") return { ...base, view: "lifecycle", discipline: "system" };
+  // The focused artifact is part of the address, not just component state. Without it the route rewrote
+  // itself to a bare /traceability, the app re-read that URL, and the requirement the reader arrived from
+  // was cleared before the thread could open on it.
+  if (tail[0] === "traceability" && tail[1]) return { ...base, view: "lifecycle", discipline: "system", artifactId: decoded(tail[1]) };
   if (path === "release-planning") return { ...base, view: "planning", discipline: "system" };
   if (path === "baselines") return { ...base, view: "baselines", discipline: "system" };
   if (path === "release-readiness" || path === "release-campaign") return { ...base, view: "release", discipline: "system" };
@@ -112,7 +116,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
     case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification`;
     case "problemReports": return `${root}/problem-reports`;
-    case "lifecycle": return `${root}/traceability`;
+    case "lifecycle": return artifactId ? `${root}/traceability/${encodeURIComponent(artifactId)}` : `${root}/traceability`;
     case "planning": return `${root}/release-planning`;
     case "baselines": return `${root}/baselines`;
     case "release": return `${root}/release-readiness`;

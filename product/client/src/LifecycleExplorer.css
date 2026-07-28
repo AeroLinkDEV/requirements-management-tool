@@ -30,3 +30,17 @@ html .threadLane article.suspect { border-color: #d6a33b; background: #fff8e8; }
 html .threadLane article.suspect i { background: #fff0c9; color: #765313; }
 html .traceVerification > section.suspect { border-left: 3px solid #d6a33b; background: #fff8e8; }
 html .traceVerification > section.suspect em { color: #765313; font-weight: 650; }
+
+/* Shown when a route asked for a requirement the loaded set does not contain. Saying which record is on
+   screen instead is the point: the alternative is a thread that quietly answers a different question. */
+.threadFocusMissing {
+  margin: 0 0 10px;
+  border: 1px solid #e2c982;
+  border-radius: 8px;
+  background: #fff9e8;
+  padding: 9px 12px;
+  color: #7a5a13;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
