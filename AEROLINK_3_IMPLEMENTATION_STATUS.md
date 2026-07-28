@@ -107,6 +107,11 @@ The second controlled-change correctness increment makes record context and appr
 (DEC-063): canonical typed SCR/SWCR URLs survive every supported entry path, and review rows retain the selected
 principal and authority through assignment, active work, audit and electronic signature.
 
+The third security-boundary increment removes caller-selectable attribution from authenticated mutation
+contracts (DEC-064). Browser writes derive the author, actor, owner, recorder and executor from the authenticated
+principal, legacy spoof fields remain harmless during compatibility, and credentialless diagnostics prove
+liveness/readiness without creating administrator sessions.
+
 ## Repository and authority corrections
 
 The following facts supersede earlier planning assumptions that predated repository publication:

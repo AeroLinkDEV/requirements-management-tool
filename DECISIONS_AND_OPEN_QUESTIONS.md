@@ -751,6 +751,25 @@ Future entries use:
   offered. Reviewer name, authority, active assignment, audit actor and signature are now traceable to stable
   principals; missing legacy authority is displayed as unresolved rather than inferred from another person.
 
+### DEC-064 - Mutation Attribution Comes Only from Authenticated Context
+
+- **Date:** 2026-07-28
+- **Status:** Accepted
+- **Decision:** Authenticated browser mutation contracts do not accept actor, author, owner, recorder, or
+  executor identity. Human attribution is resolved from the authenticated session; service attribution is
+  resolved from the authenticated service principal. Legacy JSON identity properties are ignored during the
+  compatibility interval and can never alter stored provenance. Standard operations diagnostics are anonymous
+  and session-free; an optional authenticated probe uses a separately issued `integrations:read` service key.
+- **Rationale:** The handlers already used the server session, but public DTOs and clients continued to send
+  values such as `server-derived`, role-like usernames, and the visible user name. Those misleading fields made
+  spoofable attribution look supported and created a future risk that a handler would accidentally trust one.
+  Diagnostics also logged in using a committed demonstration password, coupling health evidence to a human
+  account and leaving a new administrator session behind after every run.
+- **Consequences:** OpenAPI-visible request shapes describe the actual trust boundary, client forms contain no
+  hidden identity placeholders, and compatibility tests prove submitted legacy identities cannot change
+  authorship. Historical provenance is untouched. Diagnostics distinguish liveness, readiness, authentication
+  capability, migration posture, backup recency, and storage without changing session state or exposing secrets.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

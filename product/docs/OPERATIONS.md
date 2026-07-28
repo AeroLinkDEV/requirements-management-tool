@@ -130,9 +130,39 @@ The design-time migration factory uses `AEROLINK_MIGRATIONS_CONNECTION`; `Connec
 3. Record the incident/change authority and notify users of downtime.
 4. Invoke `product\scripts\Restore-AeroLink.ps1` with `-TargetDatabase aerolink -AllowProductionRestore -Confirmation RESTORE-AEROLINK`.
 5. The script creates a new pre-restore safety backup, stops repository services, restores the database and evidence, and restarts AeroLink.
-6. Run diagnostics, sign in, inspect FMS 1.5 and 1.6, and reconcile any external records created after the restored point.
+6. Run credentialless diagnostics, sign in separately, inspect FMS 1.5 and 1.6, and reconcile any external records created after the restored point.
 
 Never use production restore as an automated test. Keep the pre-restore archive until recovery is formally accepted.
+
+## Safe diagnostics
+
+`product\scripts\Get-AeroLinkDiagnostics.ps1` checks API liveness, API/database readiness, the client, direct
+database connectivity, migration posture, backup recency, disk capacity, and evidence storage. The standard
+mode is credentialless and never creates a browser session:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Get-AeroLinkDiagnostics.ps1
+```
+
+Deployment endpoints and storage locations are parameters, so the same script can target a local workstation,
+shared demonstration host, or production topology without relying on development ports. Use `Get-Help
+product\scripts\Get-AeroLinkDiagnostics.ps1 -Detailed` to inspect them.
+
+An optional authenticated probe targets only the service API health route. It requires a service identity with
+the `integrations:read` scope and reads its API key as a `SecureString`; it never logs in as a person, creates a
+browser session, or writes the key to output:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Get-AeroLinkDiagnostics.ps1 `
+  -ApiBaseUri https://aerolink.example.test -ClientUri https://aerolink.example.test `
+  -AuthenticatedProbe
+```
+
+The script prompts for the key as a secure value. An automation host that already owns a `SecureString` may
+invoke the script in-process with `-ServiceApiKey`; never put the plain key in a command-line argument.
+
+The authenticated probe proves only that a least-privilege service credential is accepted. It is not evidence
+that interactive login, MFA, delegated authority, or every governed workflow is operational.
 
 ## Verification commands
 

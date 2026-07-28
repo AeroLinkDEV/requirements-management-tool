@@ -163,7 +163,6 @@ export default function BaselineCenter({
         projectId,
         releaseId,
         name: form.get("name"),
-        actorId: form.get("actorId"),
         predecessorBaselineId: form.get("predecessorBaselineId") || null,
       }),
     });
@@ -266,7 +265,6 @@ export default function BaselineCenter({
             <label>
               Authority
               <input value="Authenticated configuration manager" readOnly />
-              <input type="hidden" name="actorId" value="server-derived" />
             </label>
             <label className="full">
               Exact predecessor product baseline
@@ -389,9 +387,7 @@ export default function BaselineCenter({
                   {detail.state === "Draft" ? (
                     <button
                       disabled={busy || !detail.selections.length}
-                      onClick={() =>
-                        action("freeze", "POST", { actorId: "server-derived" })
-                      }
+                      onClick={() => action("freeze", "POST", {})}
                     >
                       Freeze Baseline
                     </button>
@@ -401,9 +397,7 @@ export default function BaselineCenter({
                     <button
                       disabled={busy}
                       onClick={() =>
-                        action("materialize-requirements", "POST", {
-                          actorId: "server-derived",
-                        })
+                        action("materialize-requirements", "POST", {})
                       }
                     >
                       {busy ? "Materializing…" : "Materialize SWRD"}
@@ -474,10 +468,7 @@ export default function BaselineCenter({
                           {detail.state === "Draft" && (
                             <button
                               onClick={() =>
-                                action(
-                                  `selections/${item.id}?actorId=server-derived`,
-                                  "DELETE",
-                                )
+                                action(`selections/${item.id}`, "DELETE")
                               }
                             >
                               Remove
@@ -547,7 +538,6 @@ export default function BaselineCenter({
                               onClick={() =>
                                 action("selections", "POST", {
                                   scrId: scr.id,
-                                  actorId: "server-derived",
                                 })
                               }
                             >

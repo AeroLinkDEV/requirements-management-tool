@@ -275,6 +275,11 @@ notifications and Jira preserve the same discipline. Each approval step retains 
 display name, workflow stage and resolved Program authority; the review UI no longer substitutes a showcase
 person, while the actual signing account remains separate immutable signature evidence.
 
+Authenticated mutation attribution is server-owned (DEC-064). Browser request contracts no longer accept
+caller-selected author, actor, owner, recorder, or executor values; durable provenance comes from the
+authenticated session or service principal. Operations diagnostics are credentialless and session-free by
+default, with an explicitly optional scoped-service probe for authentication capability.
+
 ## How this project governs itself
 
 AeroLink is developed under the same discipline it sells. Respect it — these conventions are the
