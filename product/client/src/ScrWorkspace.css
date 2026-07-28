@@ -473,6 +473,14 @@ html .reviseAction:disabled { cursor: not-allowed; opacity: .5; }
   border-bottom: 1px solid #edf1f4;
 }
 
+/* A flex item defaults to min-width: auto, so this column could not shrink below the intrinsic width of
+   the longest unbroken string inside it. One GUID or hash in an audit detail took the row to 2190px and the
+   whole document to 2537px at a 1265px viewport, pushing the review rail off screen. Wrapping rather than
+   truncating keeps the complete value readable and selectable, so nothing needs a reveal control. */
+.auditRow > div {
+  min-width: 0;
+}
+
 .auditRow i {
   flex: 0 0 9px;
   width: 9px;
@@ -491,11 +499,13 @@ html .reviseAction:disabled { cursor: not-allowed; opacity: .5; }
   margin: 4px 0;
   color: #56687b;
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .auditRow small {
   color: #8492a1;
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .workspaceStages {
