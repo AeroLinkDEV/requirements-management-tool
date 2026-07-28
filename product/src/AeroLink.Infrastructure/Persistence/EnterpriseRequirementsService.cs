@@ -85,7 +85,12 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
             if(!profiled.Contains(revision.Id))
             {
                 var attributes=JsonSerializer.Serialize(new{rationale=revision.Rationale,verification_method=revision.VerificationMethod,criticality=artifact.BaseNumber.EndsWith("5")?"Safety Significant":"Normal",owner=artifact.Level==RequirementLevel.System?"systems.author":"software.author",derived=artifact.Level!=RequirementLevel.System});
-                db.RequirementRevisionProfiles.Add(new(revision.Id,schema.Id,$"<p>{SecurityElement.Escape(revision.Statement)}</p>",attributes,"[]",actor,now));
+                // The canonical structured representation, not markup. This wrote an escaped <p> element,
+                // which the reader adopted verbatim — so every existing requirement opened in the controlled
+                // editor showing literal <p> and </p>, and checking it in published them. The product's own
+                // contract is that controlled content is stored as structure and never as markup; this line
+                // was the one place breaking it.
+                db.RequirementRevisionProfiles.Add(new(revision.Id,schema.Id,JsonSerializer.Serialize(new{blocks=new[]{new{type="paragraph",text=revision.Statement}}}),attributes,"[]",actor,now));
             }
             if(!placed.Contains(artifact.Id))
             {

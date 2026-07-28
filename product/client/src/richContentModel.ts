@@ -25,10 +25,36 @@ export const emptyRichContent = '{"blocks":[]}';
  * paragraph, because refusing to show an approved requirement whose storage format predates the reader would
  * be a defect in the reader, not in the record.
  */
+/**
+ * Content this product wrote before the structured model existed: one or more escaped `<p>` elements.
+ *
+ * It was adopted verbatim as a paragraph, so the editor and the controlled preview showed the reader literal
+ * `<p>` and `</p>` around every existing requirement, and checking that requirement in published the markup
+ * as if an author had typed it.
+ *
+ * Deliberately not an HTML parser. It recognises the exact shape this product generated and converts it;
+ * anything else has its tags stripped to text rather than interpreted, so no stored string can ever become
+ * markup a browser executes. Entities are decoded through a text node, which cannot run script.
+ */
+function normalizeLegacyHtml(value: string): RichBlock[] | undefined {
+  if (!/<\s*\/?\s*[a-z]/i.test(value)) return undefined;
+  const decode = (text: string) => {
+    const holder = document.createElement("textarea");
+    holder.innerHTML = text;
+    return holder.value;
+  };
+  const paragraphs = [...value.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)].map(match => match[1]);
+  const sources = paragraphs.length ? paragraphs : [value];
+  return sources
+    .map(part => decode(part.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, "")).trim())
+    .filter(text => text.length > 0)
+    .map(text => ({ type: "paragraph", text }) as RichBlock);
+}
+
 export function readBlocks(stored: string | undefined | null): RichBlock[] {
   const value = (stored ?? "").trim();
   if (!value) return [];
-  if (!value.startsWith("{")) return [{ type: "paragraph", text: value }];
+  if (!value.startsWith("{")) return normalizeLegacyHtml(value) ?? [{ type: "paragraph", text: value }];
   try {
     const parsed = JSON.parse(value) as { blocks?: RichBlock[] };
     return Array.isArray(parsed.blocks) ? parsed.blocks : [{ type: "paragraph", text: value }];
