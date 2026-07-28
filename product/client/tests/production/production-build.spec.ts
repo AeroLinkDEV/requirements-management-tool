@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { apiLogin, login, selectProgram } from '../auth'
+import { apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } from '../auth'
 
 /**
  * What can only be checked against a build.
@@ -143,6 +143,148 @@ test('a deep link reloads, because the server falls back to the client', async (
   const missing = await request.get(`${baseURL}/api/no-such-endpoint`)
   expect(missing.status()).toBeGreaterThanOrEqual(400)
   expect(missing.headers()['content-type'] ?? '').toContain('json')
+})
+
+test('the first protected production mutation after deep-linked sign-in creates durable controlled state', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  const showcase = await showcaseSeed(request)
+  const title = `Production mutation ${Date.now()}`
+  const deepLink = `/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/systems/change-requests/new`
+
+  // Start signed out on the protected destination. Login must replace any unauthenticated CSRF state before
+  // this first write becomes actionable; requiring a refresh here is the regression from #119.
+  await page.goto(deepLink)
+  await page.getByLabel('Username').fill('admin')
+  await page.getByLabel('Password').fill('AeroLink!2026')
+  await page.getByRole('button', { name: /Sign in securely/ }).click()
+  await expect(page.getByRole('heading', { name: 'Create System Change Request' })).toBeVisible()
+
+  await page.getByRole('button', { name: '+ Introduce System requirement' }).click()
+  await page.getByLabel('Title').fill(title)
+  await page.getByLabel('Problem').fill('The compiled production client must perform protected writes.')
+  await page.getByRole('textbox', { name: 'Analysis', exact: true }).fill('A durable server query must prove the write rather than trusting the success ceremony.')
+  await page.getByLabel('Solution').fill('Resolve relative API URLs and bind CSRF state to the signed-in session.')
+  await page.getByLabel('Requirement statement').fill('The production client shall preserve authenticated mutation capability.')
+  await page.getByRole('button', { name: 'Save SCR Draft' }).click()
+  await expect(page.getByRole('heading', { name: title })).toBeVisible()
+
+  await apiLogin(request)
+  const list = await request.get(`/api/scrs?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)
+  expect(list.ok(), await list.text()).toBeTruthy()
+  const body = await list.json()
+  const persisted = body.items.find((item: { title: string }) => item.title === title)
+  expect(persisted, 'the success view must correspond to a durable server record').toBeTruthy()
+  const detail = await request.get(`/api/scrs/${persisted.id}`)
+  expect(detail.ok(), await detail.text()).toBeTruthy()
+  expect(await detail.json()).toEqual(expect.objectContaining({
+    title,
+    problem: 'The compiled production client must perform protected writes.',
+  }))
+})
+
+test('the production wrapper accepts relative and absolute unsafe request URLs for every supported method', async ({ page, baseURL }) => {
+  const methods: string[] = []
+  await page.route('**/api/client-wrapper-probe*', async route => {
+    methods.push(route.request().method())
+    await route.fulfill({ status: 204 })
+  })
+  await login(page)
+
+  const results = await page.evaluate(async origin => {
+    const targets = [
+      ['/api/client-wrapper-probe?shape=relative', 'POST'],
+      [`${origin}/api/client-wrapper-probe?shape=absolute`, 'PUT'],
+      ['/api/client-wrapper-probe?shape=relative', 'PATCH'],
+      [`${origin}/api/client-wrapper-probe?shape=absolute`, 'DELETE'],
+    ] as const
+    return Promise.all(targets.map(async ([url, method]) => {
+      const response = await fetch(url, { method })
+      return { method, status: response.status }
+    }))
+  }, new URL(baseURL!).origin)
+
+  expect(results).toEqual([
+    { method: 'POST', status: 204 },
+    { method: 'PUT', status: 204 },
+    { method: 'PATCH', status: 204 },
+    { method: 'DELETE', status: 204 },
+  ])
+  expect(methods).toEqual(['POST', 'PUT', 'PATCH', 'DELETE'])
+})
+
+test('verification mutation failures retain the engineer input and only confirmed success creates one immutable result', async ({ page, request, playwright, baseURL }) => {
+  test.setTimeout(180_000)
+  const showcase = await showcaseSeed(request)
+  await apiLogin(request)
+  const requirementsResponse = await request.get(`/api/requirements?projectId=${showcase.projectId}&baselineId=${showcase.releasedBaselineId}&scope=System&page=1&pageSize=1`)
+  expect(requirementsResponse.ok(), await requirementsResponse.text()).toBeTruthy()
+  const requirements = await requirementsResponse.json()
+
+  const engineer = await playwright.request.newContext({ baseURL })
+  const engineerLogin = await engineer.post('/api/auth/login', { data: { userName: 'test.engineer', password: 'AeroLink!2026' } })
+  expect(engineerLogin.ok(), await engineerLogin.text()).toBeTruthy()
+  const created = await engineer.post('/api/test-procedures', { data: {
+    projectId: showcase.projectId,
+    baseNumber: 'SERVER-ALLOCATED',
+    title: `Production result procedure ${Date.now()}`,
+    objective: 'Exercise the production mutation and failure contract.',
+    preconditions: 'Compiled single-origin client is running.',
+    steps: 'Record one externally determined result.',
+    expectedResult: 'Exactly one immutable result exists after server confirmation.',
+    requirementRevisionIds: [requirements.items[0].revisionId],
+    level: 'System',
+  } })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  const procedure = await created.json()
+  const approved = await request.post(`/api/test-procedures/${procedure.revisionId}/approve`, { data: {
+    password: 'AeroLink!2026',
+    meaning: 'Approved for the compiled production mutation qualification.',
+  } })
+  expect(approved.ok(), await approved.text()).toBeTruthy()
+  await engineer.dispose()
+
+  await login(page)
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'VERIFICATION')
+  await page.getByRole('link', { name: 'System Verification' }).click()
+  await page.getByRole('button', { name: /Test procedures/ }).click()
+  const row = page.locator('.procedureRow').filter({ hasText: procedure.displayNumber })
+  await expect(row).toBeVisible()
+  await row.getByRole('button', { name: 'Record result' }).click()
+  const form = page.locator('form.resultForm')
+  await form.getByLabel('Configuration').fill('Production qualification rig')
+  await form.getByLabel('Evidence reference').fill('evidence/production-mutation.json')
+  await form.getByLabel('Human determination', { exact: true }).fill('The compiled client recorded the protected result exactly once.')
+
+  await page.route('**/api/test-executions', route => route.abort('connectionfailed'))
+  await form.getByRole('button', { name: 'Record immutable result' }).click()
+  await expect(page.getByRole('alert')).toContainText(/Failed to fetch|could not/i)
+  await expect(form.getByLabel('Human determination', { exact: true })).toHaveValue('The compiled client recorded the protected result exactly once.')
+
+  await page.unroute('**/api/test-executions')
+  await page.route('**/api/test-executions', route => route.fulfill({
+    status: 409,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'A conflicting result version is already being reviewed.' }),
+  }))
+  await form.getByRole('button', { name: 'Record immutable result' }).click()
+  await expect(page.getByRole('alert')).toContainText('A conflicting result version is already being reviewed.')
+  await expect(form).toBeVisible()
+
+  await page.unroute('**/api/test-executions')
+  await form.getByRole('button', { name: 'Record immutable result' }).click()
+  await expect(page.getByRole('heading', { name: 'Execution history' })).toBeVisible()
+  await expect(page.locator('.executionRow').filter({ hasText: procedure.displayNumber })).toContainText('compiled client recorded')
+
+  const executionsResponse = await request.get(`/api/test-executions?projectId=${showcase.projectId}`)
+  expect(executionsResponse.ok(), await executionsResponse.text()).toBeTruthy()
+  const executions = await executionsResponse.json()
+  expect(executions.filter((item: { procedureRevisionId: string }) => item.procedureRevisionId === procedure.revisionId)).toEqual([
+    expect.objectContaining({
+      determination: 'The compiled client recorded the protected result exactly once.',
+      evidenceReference: 'evidence/production-mutation.json',
+    }),
+  ])
 })
 
 test('every workspace chunk arrives and keeps the design contract in both densities', async ({ page, request }) => {

@@ -120,7 +120,10 @@ dotnet test product\AeroLink.slnx --configuration Release
 Set-Location product\client
 npm.cmd run lint
 npm.cmd run build
+npm.cmd run test:production
 npm.cmd run test:e2e
 ```
 
-Playwright starts its own API on port 5082 with a disposable SQLite database and does not reuse the live API.
+Playwright starts disposable APIs and SQLite databases and does not reuse the live API. `test:production`
+serves the compiled client and API on one origin, performs protected writes, and verifies their durable server
+state; `test:e2e` exercises the wider development-client journey matrix.

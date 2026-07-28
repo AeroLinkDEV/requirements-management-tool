@@ -152,7 +152,9 @@ per run. If `dotnet` is not on `PATH`, set `AEROLINK_DOTNET` to its full path.
   client, served by the API on one origin. Everything above serves the client with `vite dev`, which is a
   different artifact: dev hands over unbundled modules and injects each stylesheet as its module evaluates,
   while a build chunks the code, extracts every stylesheet into one hashed file, and minifies. Use this before
-  a demonstration, and expect it to catch things the dev journeys structurally cannot.
+  a demonstration, and expect it to catch things the dev journeys structurally cannot. The gate signs in from
+  a deep link, performs real protected writes, reloads their durable API state, and proves network/conflict
+  failures preserve form input without creating false-success records.
 - Every browser run prints its five slowest journeys and writes `test-results/test-timings.json` (one file per shard for sharded runs).
 
 Before publishing, run the complete backend and parallel client gates:
