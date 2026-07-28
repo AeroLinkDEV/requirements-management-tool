@@ -77,6 +77,45 @@ jobs:
           echo "browser=$browser" >> "$GITHUB_OUTPUT"
           echo "postgresql=$postgresql" >> "$GITHUB_OUTPUT"
 
+  # Warms the Chromium cache on main, and exists only because of how GitHub scopes caches.
+  #
+  # A cache written by a pull request is visible to that pull request and nothing else. A cache written on the
+  # default branch is visible to every pull request. The browser jobs run only on pull requests, so without this
+  # the entry they save is scoped to the branch that saved it, no run on main ever writes one, and every new
+  # pull request misses forever — a cache that looks present, reports itself saved, and never once gets read.
+  #
+  # So one small job on main does nothing but download the browser under the shared key. It gates nothing and
+  # blocks nothing; if it fails the browser jobs simply download Chromium as they did before.
+  warm-chromium-cache:
+    name: Warm the Chromium cache
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache Chromium
+        id: chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
+      - name: Install Node.js
+        if: steps.chromium.outputs.cache-hit != 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+      # No `--with-deps`: only the browser binary is being cached, and the apt packages this would install are
+      # thrown away with the runner. The jobs that read this cache install them for themselves.
+      - name: Download Chromium
+        if: steps.chromium.outputs.cache-hit != 'true'
+        working-directory: product/client
+        run: |
+          npm ci
+          npx playwright install chromium
+
   validate:
     name: Build, test, and exercise product journeys
     needs: changes
@@ -157,11 +196,28 @@ jobs:
         run: |
           dotnet restore product/src/AeroLink.Api/AeroLink.Api.csproj
           dotnet build product/src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
+      # Chromium was re-downloaded by every browser job on every run — three times per pull request, for a
+      # binary that only changes when Playwright does. Keyed on the lockfile because that is what pins the
+      # Playwright version; an unrelated dependency bump invalidates it needlessly, which costs one download
+      # and is the safe direction. A stale browser cannot pass silently: Playwright refuses to start a browser
+      # build its client library does not expect.
+      - name: Cache Chromium
+        id: chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Install client and Chromium
         working-directory: product/client
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          # The cache holds the browser binary. The system libraries it links against are apt packages that
+          # live outside it, so they are installed either way — `install-deps` alone on a hit.
+          if [ "${{ steps.chromium.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
       - name: Run browser journey shard
         working-directory: product/client
         env:
@@ -216,11 +272,22 @@ jobs:
         run: |
           dotnet restore product/src/AeroLink.Api/AeroLink.Api.csproj
           dotnet build product/src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
+      # Shares the cache entry the pull request shards populate: same key, same runner, same browser.
+      - name: Cache Chromium
+        id: chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Install client and Chromium
         working-directory: product/client
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          if [ "${{ steps.chromium.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
       - name: Build the client and run the production journeys
         working-directory: product/client
         env:
@@ -263,13 +330,25 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: product/client/package-lock.json
+      # The weekly run reuses whatever the week's pull requests left behind. On a quiet week the entry has been
+      # evicted and this pays the download once, which is the point of a weekly environment-rot check anyway.
+      - name: Cache Chromium
+        id: chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Restore, build, and install browser dependencies
         working-directory: product/client
         run: |
           dotnet restore ../src/AeroLink.Api/AeroLink.Api.csproj
           dotnet build ../src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
           npm ci
-          npx playwright install --with-deps chromium
+          if [ "${{ steps.chromium.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
       - name: Run full browser shard
         working-directory: product/client
         env:
@@ -314,6 +393,10 @@ jobs:
           dotnet restore ../src/AeroLink.Api/AeroLink.Api.csproj
           dotnet build ../src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
           npm ci
+          # Deliberately uncached, unlike the Linux jobs. This one runs weekly and nothing else populates a
+          # Windows entry, so a cache would sit unused for seven days — exactly the point at which GitHub
+          # evicts it — and pay the download every time regardless, for the cost of a cache step that always
+          # misses. The Linux jobs cache because pull requests keep their entry warm.
           npx playwright install chromium
       # Windows is the deployment platform, and until this step existed nothing had ever type-checked or
       # built the client on it. The journeys alone could not: Playwright serves them through `vite dev`,
