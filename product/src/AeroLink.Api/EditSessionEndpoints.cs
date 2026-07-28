@@ -62,6 +62,13 @@ public static class EditSessionEndpoints
                 _=>false,
             };
             if(!artifactExists)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
+            if(artifactType=="ChangeRequest")
+            {
+                var changeRequest=await db.SystemChangeRequests.AsNoTracking().SingleAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
+                var actor=http.UserAccount();
+                if(!actor.IsAdministrator&&!string.Equals(changeRequest.AuthorId,actor.UserName,StringComparison.OrdinalIgnoreCase))return Results.Forbid();
+                if(changeRequest.State!=ScrState.Draft)return Results.Conflict(new{error="Supporting files can be added only while the change request is a Draft.",code="artifact_not_editable"});
+            }
             Guid? revisionId=Guid.TryParse(form["revisionId"],out var parsedRevision)?parsedRevision:null;if(revisionId is not null&&artifactType=="Requirement"&&!await db.RequirementRevisions.AnyAsync(x=>x.Id==revisionId&&x.ArtifactId==artifactId,ct))return Results.BadRequest(new{error="The selected revision does not belong to this requirement."});
             var logicalId=Guid.TryParse(form["logicalId"],out var parsedLogical)?parsedLogical:Guid.NewGuid();var previous=await db.ControlledAttachments.Where(x=>x.ProjectId==projectId&&x.ArtifactId==artifactId&&x.LogicalId==logicalId&&x.State==ControlledAttachmentState.Active).OrderByDescending(x=>x.Version).FirstOrDefaultAsync(ct);
             var stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,file.ContentType,ct);try{previous?.Supersede();var attachment=new ControlledAttachment(projectId,artifactType,artifactId,revisionId,logicalId,(previous?.Version??0)+1,form["label"].ToString(),form["description"].ToString(),stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256,stored.StorageKey,previous?.Id,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-hardening/attachments/{attachment.Id}",new{attachment.Id,attachment.LogicalId,attachment.Version,attachment.Sha256});}catch{store.Delete(stored.StorageKey);throw;}

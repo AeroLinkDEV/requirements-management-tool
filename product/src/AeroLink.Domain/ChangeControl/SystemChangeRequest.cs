@@ -76,9 +76,9 @@ public sealed class SystemChangeRequest
         RequirementLevel level, RequirementChangeKind kind, string statement, string rationale,
         string verificationMethod, DateTimeOffset now, string richText = "", string attributesJson = "{}",
         string impactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
-        Guid? targetSectionId = null)
+        Guid? targetSectionId = null, bool administratorAuthority = false)
     {
-        EnsureAuthor(actorId);
+        EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
         if (string.IsNullOrWhiteSpace(statement) && kind != RequirementChangeKind.Retire)
             throw new DomainException("A requirement statement is required.");
@@ -92,9 +92,10 @@ public sealed class SystemChangeRequest
 
     public void UpdateDraft(string actorId, string title, string problem, string analysis, string solution,
         IReadOnlyList<RequirementChangeDraft> changes, DateTimeOffset now,
-        string? problemRich = null, string? analysisRich = null, string? solutionRich = null)
+        string? problemRich = null, string? analysisRich = null, string? solutionRich = null,
+        bool administratorAuthority = false)
     {
-        EnsureAuthor(actorId);
+        EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException("An SCR title is required.");
         Title = title.Trim();
@@ -113,9 +114,10 @@ public sealed class SystemChangeRequest
     }
 
     public ReviewCycle SubmitForReview(string actorId, IReadOnlyList<ApproverSelection> approvers,
-        DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null)
+        DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null,
+        bool administratorAuthority = false)
     {
-        EnsureAuthor(actorId);
+        EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
         ValidateReadyForReview();
         var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(), approvers, now, mode, workflow);
@@ -156,9 +158,9 @@ public sealed class SystemChangeRequest
     }
 
     public void ReplaceFutureApprover(string actorId, int position, ApproverSelection replacement,
-        DateTimeOffset now, ReviewWorkflowSpecification? workflow = null)
+        DateTimeOffset now, ReviewWorkflowSpecification? workflow = null, bool administratorAuthority = false)
     {
-        EnsureAuthor(actorId);
+        EnsureAuthor(actorId, administratorAuthority);
         EnsureInReview();
         var cycle = ActiveReviewCycle!;
         var previous = cycle.Steps.Single(x => x.Position == position).ApproverName;
@@ -169,9 +171,9 @@ public sealed class SystemChangeRequest
 
     public ReviewCycle CancelAndRestartForWrongApprover(string actorId, string reason,
         IReadOnlyList<ApproverSelection> correctedApprovers, DateTimeOffset now,
-        ReviewWorkflowSpecification? workflow = null)
+        ReviewWorkflowSpecification? workflow = null, bool administratorAuthority = false)
     {
-        EnsureAuthor(actorId);
+        EnsureAuthor(actorId, administratorAuthority);
         EnsureInReview();
         // Cancelling an in-flight review discards recorded approval authority, so it is exactly the kind of
         // act that must carry an attributable reason. Every other controlled action here demands one.
@@ -201,9 +203,10 @@ public sealed class SystemChangeRequest
     /// answer there is a new change request against the in-work build, so the caller passes the release's
     /// state in rather than the rule living outside the aggregate where a second caller could forget it.
     /// </summary>
-    public SystemChangeRequest StartNextRevision(string actorId, DateTimeOffset now, bool targetReleaseIsReleased)
+    public SystemChangeRequest StartNextRevision(string actorId, DateTimeOffset now, bool targetReleaseIsReleased,
+        bool administratorAuthority = false)
     {
-        EnsureAuthor(actorId);
+        EnsureAuthor(actorId, administratorAuthority);
         if (State is not (ScrState.Approved or ScrState.SelectedForBaseline))
             throw new DomainException("Only an approved SCR can advance to its next revision.");
         if (targetReleaseIsReleased)
@@ -214,7 +217,7 @@ public sealed class SystemChangeRequest
         foreach (var item in _requirementChanges)
             next.AddRequirementChange(actorId, item.BaseNumber, item.Revision, item.Level, item.Kind,
                 item.Statement, item.Rationale, item.VerificationMethod, now, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
-                item.TargetSectionId);
+                item.TargetSectionId, administratorAuthority);
         return next;
     }
 
@@ -251,9 +254,9 @@ public sealed class SystemChangeRequest
     /// into a candidate baseline has to be taken out of it first, which is an explicit, attributable act with
     /// its own audit event rather than a side effect of deferring.
     /// </summary>
-    public void Defer(string actorId, string reason, DateTimeOffset now)
+    public void Defer(string actorId, string reason, DateTimeOffset now, bool administratorAuthority = false)
     {
-        EnsureAuthor(actorId);
+        EnsureAuthor(actorId, administratorAuthority);
         if (State == ScrState.Deferred) throw new DomainException("The change request is already deferred.");
         if (State == ScrState.SelectedForBaseline)
             throw new DomainException("Remove the change request from its candidate baseline before deferring it.");
@@ -275,9 +278,9 @@ public sealed class SystemChangeRequest
     /// comes back as a Draft and its author submits it again. Anything else would restore signatures against a
     /// snapshot nobody has looked at since.
     /// </summary>
-    public void Reinstate(string actorId, DateTimeOffset now)
+    public void Reinstate(string actorId, DateTimeOffset now, bool administratorAuthority = false)
     {
-        EnsureAuthor(actorId);
+        EnsureAuthor(actorId, administratorAuthority);
         if (State != ScrState.Deferred) throw new DomainException("Only a deferred change request can be reinstated.");
         var restored = DeferredFromState switch
         {
@@ -293,9 +296,10 @@ public sealed class SystemChangeRequest
         Audit("ChangeRequestReinstated", actorId, $"Reinstated {DisplayNumber} as {restored}.", now);
     }
 
-    public void Retarget(string actorId, Guid targetReleaseId, string reason, DateTimeOffset now)
+    public void Retarget(string actorId, Guid targetReleaseId, string reason, DateTimeOffset now,
+        bool administratorAuthority = false)
     {
-        EnsureAuthor(actorId);
+        EnsureAuthor(actorId, administratorAuthority);
         if (State is not (ScrState.Draft or ScrState.Approved or ScrState.Deferred))
             throw new DomainException("Only a Draft, Approved, or Deferred change request can move to another release.");
         if (targetReleaseId == Guid.Empty || targetReleaseId == TargetReleaseId)
@@ -354,9 +358,9 @@ public sealed class SystemChangeRequest
 
     private void Audit(string type, string actor, string detail, DateTimeOffset now) =>
         _auditEvents.Add(new AuditEvent(Id, type, actor, detail, now));
-    private void EnsureAuthor(string actorId)
+    private void EnsureAuthor(string actorId, bool administratorAuthority)
     {
-        if (!string.Equals(AuthorId, actorId, StringComparison.OrdinalIgnoreCase))
+        if (!administratorAuthority && !string.Equals(AuthorId, actorId, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("Only the SCR author can perform this action.");
     }
     private void EnsureDraft() { if (State != ScrState.Draft) throw new DomainException("The SCR must be in Draft."); }

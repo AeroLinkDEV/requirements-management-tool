@@ -72,6 +72,7 @@ public static class ControlledEditingEndpoints
         var artifact = await ResolveAsync(policy, artifactId, db, ct);
         if (artifact is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, artifact.ProjectId, ct)) return Results.Forbid();
+        var actor = http.UserAccount();
 
         var now = DateTimeOffset.UtcNow;
         var sessions = await db.ArtifactEditSessions
@@ -86,7 +87,9 @@ public static class ControlledEditingEndpoints
             artifactType = policy.CanonicalType,
             artifactId,
             artifact.State,
-            editable = policy.IsEditableState(artifact.State),
+            editable = policy.IsEditableState(artifact.State) &&
+                (artifact.GoverningAuthorId is null || actor.IsAdministrator ||
+                 string.Equals(artifact.GoverningAuthorId, actor.UserName, StringComparison.OrdinalIgnoreCase)),
             locked = active is not null,
             sessionId = active?.Id,
             holder = active?.UserName,
@@ -107,6 +110,10 @@ public static class ControlledEditingEndpoints
         var artifact = await ResolveAsync(policy, request.ArtifactId, db, ct);
         if (artifact is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, artifact.ProjectId, ct)) return Results.Forbid();
+        var actor = http.UserAccount();
+        if (artifact.GoverningAuthorId is not null && !actor.IsAdministrator &&
+            !string.Equals(artifact.GoverningAuthorId, actor.UserName, StringComparison.OrdinalIgnoreCase))
+            return Results.Forbid();
         if (!await http.HasProjectRoleAsync(db, identity, artifact.ProjectId, ct,
                 ProgramRole.Engineer, ProgramRole.TestEngineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager))
             return Results.Forbid();
@@ -117,7 +124,6 @@ public static class ControlledEditingEndpoints
         try { leaseMinutes = policy.NormalizeLease(request.LeaseMinutes); }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message, code = "invalid_lease" }); }
 
-        var actor = http.UserAccount();
         var now = DateTimeOffset.UtcNow;
         var sessions = await db.ArtifactEditSessions
             .Where(x => x.ArtifactId == request.ArtifactId && x.ArtifactType == policy.CanonicalType && x.IsExclusive && x.State == EditSessionState.Active)
@@ -313,7 +319,7 @@ public static class ControlledEditingEndpoints
                     .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
                 return item is null ? null : new(item.ProjectId, item.State.ToString(), null,
                     SystemChangeRequestControlledEditingAdapter.Snapshot(item),
-                    "ChangeRequest", item.Id);
+                    "ChangeRequest", item.Id, item.AuthorId);
             }
             case ControlledArtifactFamily.RequirementProposal:
             {
@@ -322,7 +328,7 @@ public static class ControlledEditingEndpoints
                 var parent = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == item.ScrId, ct);
                 return new(parent.ProjectId, parent.State.ToString(), null,
                     RequirementProposalControlledEditingAdapter.Snapshot(item, parent.Version),
-                    "RequirementProposal", parent.Id);
+                    "RequirementProposal", parent.Id, parent.AuthorId);
             }
             case ControlledArtifactFamily.SpecificationStructure:
             {
@@ -395,7 +401,7 @@ public static class ControlledEditingEndpoints
     }
 
     private sealed record ResolvedControlledArtifact(Guid ProjectId, string State, Guid? RevisionId,
-        string SnapshotJson, string Adapter, Guid? AuditAggregateId = null);
+        string SnapshotJson, string Adapter, Guid? AuditAggregateId = null, string? GoverningAuthorId = null);
 }
 
 public sealed record UniversalCheckoutRequest(string ArtifactType, Guid ArtifactId, int? LeaseMinutes = null);

@@ -770,6 +770,27 @@ Future entries use:
   authorship. Historical provenance is untouched. Diagnostics distinguish liveness, readiness, authentication
   capability, migration posture, backup recency, and storage without changing session state or exposing secrets.
 
+### DEC-065 - Administrator Recovery Authority Does Not Transfer Authorship
+
+- **Date:** 2026-07-28
+- **Status:** Accepted
+- **Decision:** An authenticated administrator with access to the governed Project may perform the same
+  author-owned recovery actions as the original change-request author: controlled checkout/check-in,
+  supporting-file attachment while Draft, proposal completion, review submission or restart, defer/reinstate,
+  retargeting, and successor-revision creation. The server derives that authority from the authenticated
+  principal; request-body identity values cannot grant it. Every resulting audit event, attachment and
+  check-in record identifies the actual administrator, while the immutable `AuthorId` continues to identify
+  the original author.
+- **Rationale:** The browser offered administrator recovery controls, but several domain guards and adapters
+  still required the administrator's account to equal `AuthorId`. That made the controls fail and encouraged
+  callers to impersonate the author. Transferring authorship would repair the UI at the cost of false controlled
+  history.
+- **Consequences:** Author, administrator and unrelated-engineer behavior uses one server-owned rule for System
+  and Software changes. Project access is checked before authority, non-administrators cannot gain author powers
+  by submitting identity fields, and administrators do not bypass Draft, review, approval, release or optimistic
+  concurrency rules. Recovery remains operationally possible and forensically attributable without rewriting
+  ownership.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

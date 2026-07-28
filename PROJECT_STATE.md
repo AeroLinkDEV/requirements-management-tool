@@ -280,6 +280,12 @@ caller-selected author, actor, owner, recorder, or executor values; durable prov
 authenticated session or service principal. Operations diagnostics are credentialless and session-free by
 default, with an explicitly optional scoped-service probe for authentication capability.
 
+Administrator recovery authority is also server-owned (DEC-065). An administrator with Project access may
+complete the original author's Draft/deferred workflow or create an approved record's successor without
+becoming that record's author. State, release and concurrency guards remain unchanged; durable audit, attachment
+and controlled-editing evidence identifies the administrator as the actual actor. The rule and browser journey
+are shared by System and Software change requests.
+
 ## How this project governs itself
 
 AeroLink is developed under the same discipline it sells. Respect it — these conventions are the

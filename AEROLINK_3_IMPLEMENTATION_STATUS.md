@@ -112,6 +112,12 @@ contracts (DEC-064). Browser writes derive the author, actor, owner, recorder an
 principal, legacy spoof fields remain harmless during compatibility, and credentialless diagnostics prove
 liveness/readiness without creating administrator sessions.
 
+The fourth controlled-change increment makes administrator recovery functional without transferring authorship
+(DEC-065). A Project-authorized administrator can complete every author-owned Draft/deferred action and create
+the controlled successor of an approved record; lifecycle, release and concurrency rules still apply. The
+original author remains immutable while audit events, attachments and check-in evidence name the administrator
+who actually acted, identically for System and Software changes.
+
 ## Repository and authority corrections
 
 The following facts supersede earlier planning assumptions that predated repository publication:
