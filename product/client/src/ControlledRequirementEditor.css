@@ -579,4 +579,7 @@ html .approvedWording > small {
 }
 
 .tracedItem i { color: #7d8b9d; font-size: 12px; font-style: normal; font-weight: 400; }
+.tracedItem.suspect { border-color: #d7a63b; background: #fff8e7; color: #765313; }
+.tracedItem.suspect i { color: #765313; font-weight: 650; }
+.tracedWarning { margin: 10px 0 0; color: #765313; font-size: 12px; line-height: 1.5; }
 .tracedEmpty { margin: 0; color: #7c8798; font-size: 12px; }

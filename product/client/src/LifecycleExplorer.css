@@ -26,3 +26,7 @@ html .documentKindSwitch button[aria-pressed="true"] {
 }
 
 html .documentKindSwitch button:hover[aria-pressed="false"] { border-color: #9fb3c6; color: #2c4054; }
+html .threadLane article.suspect { border-color: #d6a33b; background: #fff8e8; }
+html .threadLane article.suspect i { background: #fff0c9; color: #765313; }
+html .traceVerification > section.suspect { border-left: 3px solid #d6a33b; background: #fff8e8; }
+html .traceVerification > section.suspect em { color: #765313; font-weight: 650; }

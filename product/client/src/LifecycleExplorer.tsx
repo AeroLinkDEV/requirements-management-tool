@@ -7,9 +7,9 @@ type Baseline = { id: string; releaseId: string; releaseVersion: string; display
 type Document = { id: string; type: string; displayNumber: string; title: string; contentHash: string; artifactCount: number; release: string; baselineId: string; baseline: string; generatedAt: string };
 type TraceEvidence = { id: string; originalFileName: string; sha256: string; size: number; uploadedAt: string };
 type TraceExecution = { id: string; outcome: string; executedBy: string; executedAt: string; determination: string; evidenceReference: string; evidence: TraceEvidence[] };
-type TraceTest = { procedureId: string; revisionId: string; displayNumber: string; title: string; level: string; executions: TraceExecution[] };
+type TraceTest = { procedureId: string; revisionId: string; displayNumber: string; title: string; level: string; state: string; isSuspect: boolean; coverageState: "Confirmed" | "Suspect"; executions: TraceExecution[] };
 type TraceRelation = { id: string; displayNumber: string; level: string; type: string };
-type Trace = { id: string; revisionId: string; displayNumber: string; level: string; statement: string; testCount: number; parents: TraceRelation[]; children: TraceRelation[]; tests: TraceTest[] };
+type Trace = { id: string; revisionId: string; displayNumber: string; level: string; statement: string; testCount: number; suspectTestCount: number; parents: TraceRelation[]; children: TraceRelation[]; tests: TraceTest[] };
 type Props = { api: string; projectId: string; activeReleaseId: string; releases: { id: string; version: string; isReleased?: boolean }[]; onBack: () => void };
 
 export default function LifecycleExplorer({ api, projectId, activeReleaseId, releases, onBack }: Props) {
@@ -102,18 +102,21 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
   const activeVersion = releases.find((item) => item.id === activeReleaseId)?.version ?? "the release in work";
   const focus = traces.find((item) => item.revisionId === focusId) ?? traces[0];
   const selectedBaseline = baselines.find((item) => item.id === baselineId);
-  const executions = useMemo(() => focus?.tests.flatMap((test) => test.executions) ?? [], [focus]);
+  const confirmedTests = useMemo(() => focus?.tests.filter((test) => !test.isSuspect) ?? [], [focus]);
+  const executions = useMemo(() => confirmedTests.flatMap((test) => test.executions), [confirmedTests]);
   const evidence = useMemo(() => executions.flatMap((execution) => execution.evidence), [executions]);
-  const threadPercent = focus ? Math.round(([true, focus.tests.length > 0, executions.length > 0, evidence.length > 0].filter(Boolean).length / 4) * 100) : 0;
+  const threadPercent = focus ? Math.round(([true, confirmedTests.length > 0, executions.length > 0, evidence.length > 0].filter(Boolean).length / 4) * 100) : 0;
   const answer = !focus
     ? "Select a requirement to inspect its digital thread."
-    : !focus.tests.length
-      ? "Not yet — no verification procedure is linked to this controlled revision."
+    : !confirmedTests.length
+      ? focus.tests.some((test) => test.isSuspect)
+        ? "Not yet — procedure applicability is suspect after the requirement changed and does not count as confirmed coverage."
+        : "Not yet — no verification procedure is linked to this controlled revision."
       : !executions.length
         ? "Not yet — linked procedures are awaiting an authoritative execution result."
         : !evidence.length
           ? "Partially — an execution result exists, but no immutable evidence file is attached."
-          : `Yes — ${focus.tests.length} procedure${focus.tests.length === 1 ? "" : "s"}, ${executions.length} execution${executions.length === 1 ? "" : "s"}, and ${evidence.length} evidence file${evidence.length === 1 ? "" : "s"} support this claim.`;
+          : `Yes — ${confirmedTests.length} confirmed procedure${confirmedTests.length === 1 ? "" : "s"}, ${executions.length} execution${executions.length === 1 ? "" : "s"}, and ${evidence.length} evidence file${evidence.length === 1 ? "" : "s"} support this claim.`;
 
   return (
     <main className="lifecyclePage">
@@ -158,7 +161,7 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
               <i className="threadConnector" aria-hidden="true">›</i>
               <div className="threadLane requirement"><small>FOCUS REQUIREMENT</small><article className="selected"><i>RQ</i><b>{focus.displayNumber}</b><span>{focus.level} · controlled</span><p>{focus.statement}</p></article></div>
               <i className="threadConnector" aria-hidden="true">›</i>
-              <div className="threadLane verification"><small>VERIFIED BY</small>{focus.tests.length ? focus.tests.slice(0, 3).map((test) => <article key={test.revisionId}><i>TP</i><b>{test.displayNumber}</b><span>{test.executions.length} execution{test.executions.length === 1 ? "" : "s"}</span></article>) : <article className="missing"><i>!</i><b>No procedure</b><span>Verification link required</span></article>}</div>
+              <div className="threadLane verification"><small>VERIFIED BY</small>{focus.tests.length ? focus.tests.slice(0, 3).map((test) => <article className={test.isSuspect ? "suspect" : ""} key={test.revisionId}><i>TP</i><b>{test.displayNumber}</b><span>{test.isSuspect ? "Suspect applicability" : `${test.executions.length} execution${test.executions.length === 1 ? "" : "s"}`}</span></article>) : <article className="missing"><i>!</i><b>No procedure</b><span>Verification link required</span></article>}</div>
               <i className="threadConnector" aria-hidden="true">›</i>
               <div className="threadLane evidence"><small>EVIDENCE</small>{executions.length ? executions.slice(0, 3).map((run) => <article key={run.id}><i>{run.outcome === "Pass" ? "✓" : "!"}</i><b>{run.outcome}</b><span>{run.evidence.length} immutable file{run.evidence.length === 1 ? "" : "s"}</span></article>) : <article className="missing"><i>!</i><b>No execution</b><span>Authoritative result required</span></article>}</div>
               <i className="threadConnector" aria-hidden="true">›</i>
@@ -173,15 +176,15 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
             <p>{focus.statement}</p>
             <div className="threadCompleteness"><div><b>Thread completeness</b><strong>{threadPercent}%</strong></div><span><i style={{ width: `${threadPercent}%` }} /></span></div>
             <section className="threadAnswer"><small>THE QUESTION THIS ANSWERS</small><h3>Can this baseline claim verification evidence for the selected requirement?</h3><p>{answer}</p></section>
-            <div className="threadRelations"><div><span>Parents</span><b>{focus.parents.length}</b></div><div><span>Children</span><b>{focus.children.length}</b></div><div><span>Procedures</span><b>{focus.tests.length}</b></div><div><span>Evidence</span><b>{evidence.length}</b></div></div>
+            <div className="threadRelations"><div><span>Parents</span><b>{focus.parents.length}</b></div><div><span>Children</span><b>{focus.children.length}</b></div><div><span>Confirmed procedures</span><b>{confirmedTests.length}</b></div><div><span>Evidence</span><b>{evidence.length}</b></div></div>
             {!!focus.children.length && <section className="threadDownstream"><small>DOWNSTREAM</small>{focus.children.slice(0, 4).map((child) => <button key={child.id} onClick={() => traverse(child)}><span>{child.displayNumber}</span><b>Open path →</b></button>)}</section>}
           </aside>
         </section> : <section className="traceEmpty"><b>No matching digital thread</b><p>Broaden the identifier search or choose another controlled baseline.</p></section> :
         <section className="traceList">{traces.map((item) => <article key={item.revisionId} className={item.revisionId === focusId ? "focused" : ""}>
-          <div className="traceIdentity"><button onClick={() => { setFocusId(item.revisionId); setThreadMode("map"); }}>{item.displayNumber}</button><i>{item.level}</i><span>{item.testCount} test link{item.testCount === 1 ? "" : "s"}</span></div><p>{item.statement}</p>
+          <div className="traceIdentity"><button onClick={() => { setFocusId(item.revisionId); setThreadMode("map"); }}>{item.displayNumber}</button><i>{item.level}</i><span>{item.testCount} confirmed{item.suspectTestCount ? ` · ${item.suspectTestCount} suspect` : ""}</span></div><p>{item.statement}</p>
           <details className="traceDetails" open={query.trim() !== "" && traces.length === 1 ? true : undefined}><summary><span>Explore relationships and evidence</span><small>{item.parents.length} parent{item.parents.length === 1 ? "" : "s"} · {item.children.length} child{item.children.length === 1 ? "" : "ren"} · {item.tests.length} procedure{item.tests.length === 1 ? "" : "s"}</small></summary>
             <div className="traceRelations"><div><small>PARENT / DERIVED FROM</small>{item.parents.map((parent) => <button key={parent.id} onClick={() => traverse(parent)}>{parent.displayNumber} · {parent.level}</button>)}{!item.parents.length && <em>Top-level requirement</em>}</div><div><small>CHILDREN / SATISFIED BY</small>{item.children.slice(0, 8).map((child) => <button key={child.id} onClick={() => traverse(child)}>{child.displayNumber} · {child.level}</button>)}{item.children.length > 8 && <em>+ {item.children.length - 8} additional children</em>}{!item.children.length && <em>Leaf-level requirement</em>}</div></div>
-            {item.tests.length > 0 && <div className="traceVerification"><small>VERIFICATION / RESULTS / EVIDENCE</small>{item.tests.map((test) => <section key={test.revisionId}><div><b>{test.displayNumber}</b><span>{test.title}</span></div>{test.executions.map((run) => <article key={run.id}><i className={run.outcome.toLowerCase()}>{run.outcome}</i><p>{run.determination}</p><small>{run.executedBy} · {new Date(run.executedAt).toLocaleString()}</small>{run.evidence.map((file) => <a key={file.id} href={`${api}/api/evidence/${file.id}`}><b>{file.originalFileName}</b><code>{file.sha256}</code></a>)}</article>)}{!test.executions.length && <em>Approved procedure awaiting execution</em>}</section>)}</div>}
+            {item.tests.length > 0 && <div className="traceVerification"><small>VERIFICATION / RESULTS / EVIDENCE</small>{item.tests.map((test) => <section className={test.isSuspect ? "suspect" : ""} key={test.revisionId}><div><b>{test.displayNumber}</b><span>{test.title} · {test.isSuspect ? "Suspect applicability — not coverage" : "Confirmed applicability"}</span></div>{!test.isSuspect && test.executions.map((run) => <article key={run.id}><i className={run.outcome.toLowerCase()}>{run.outcome}</i><p>{run.determination}</p><small>{run.executedBy} · {new Date(run.executedAt).toLocaleString()}</small>{run.evidence.map((file) => <a key={file.id} href={`${api}/api/evidence/${file.id}`}><b>{file.originalFileName}</b><code>{file.sha256}</code></a>)}</article>)}{test.isSuspect ? <em>Resolve this applicability in Verification change impact.</em> : !test.executions.length && <em>Approved procedure awaiting execution</em>}</section>)}</div>}
           </details>
         </article>)}</section>}
       </> : <>

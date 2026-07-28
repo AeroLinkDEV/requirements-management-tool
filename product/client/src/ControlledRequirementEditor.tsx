@@ -32,7 +32,7 @@ type TracedImpact = {
   known: boolean;
   displayNumber?: string;
   derivedRequirements: { id: string; displayNumber: string; level: string; statement: string; linkType: string }[];
-  coveringProcedures: { id: string; displayNumber: string; title: string; level: string; state: string }[];
+  coveringProcedures: { id: string; revisionId: string; displayNumber: string; title: string; level: string; state: string; isSuspect: boolean; coverageState: "Confirmed" | "Suspect" }[];
 };
 
 type SpecificationSection = {
@@ -586,8 +586,8 @@ export default function ControlledRequirementEditor({
                     <dd>
                       {traced.coveringProcedures.length
                         ? traced.coveringProcedures.map((row) => (
-                            <span className="tracedItem" key={row.id} title={row.title}>
-                              {row.displayNumber} <i>{row.state}</i>
+                            <span className={`tracedItem${row.isSuspect ? " suspect" : ""}`} key={row.revisionId} title={row.title}>
+                              {row.displayNumber} <i>{row.isSuspect ? "Suspect applicability" : row.state}</i>
                             </span>
                           ))
                         : <em>None recorded — confirm below whether that is correct.</em>}
@@ -595,6 +595,7 @@ export default function ControlledRequirementEditor({
                   </div>
                 </dl>
               )}
+              {traced?.coveringProcedures.some((row) => row.isSuspect) && <p className="tracedWarning">Changed wording made this applicability suspect. Resolve it through Verification â†’ Change impact; the procedure remains approved, but it does not count as confirmed coverage.</p>}
             </section>
           )}
           {impactAreas.map(([key, label]) => {
