@@ -1,6 +1,7 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Identity;
 
 namespace AeroLink.Domain.Tests;
 
@@ -89,6 +90,19 @@ public sealed class SystemChangeRequestTests
         scr.ApproveActiveStage("software", Now.AddMinutes(3));
         Assert.Equal(ScrState.Approved, scr.State);
         Assert.All(cycle.Steps, step => Assert.Equal(ApprovalStepState.Approved, step.State));
+    }
+
+    [Fact]
+    public void Review_step_freezes_configured_principal_name_and_authority()
+    {
+        var scr = CreateDraftWithRequirement();
+        var cycle = scr.SubmitForReview("author",
+            [new ApproverSelection("systems.reviewer", "Systems Engineer", ProgramRole.Approver)], Now);
+
+        var step = Assert.Single(cycle.Steps);
+        Assert.Equal("systems.reviewer", step.ApproverId);
+        Assert.Equal("Systems Engineer", step.ApproverName);
+        Assert.Equal("Approver", step.Authority);
     }
 
     [Fact]

@@ -145,6 +145,37 @@ test('a deep link reloads, because the server falls back to the client', async (
   expect(missing.headers()['content-type'] ?? '').toContain('json')
 })
 
+test('typed change-request URLs preserve System and Software navigation context', async ({ page, request }) => {
+  const showcase = await showcaseSeed(request)
+  await apiLogin(request)
+  const response = await request.get(`/api/scrs?projectId=${showcase.projectId}&pageSize=200`)
+  expect(response.ok(), await response.text()).toBeTruthy()
+  const records = (await response.json()).items as { id: string; type: 'System' | 'Software' }[]
+  const system = records.find(item => item.type === 'System')
+  const software = records.find(item => item.type === 'Software')
+  expect(system).toBeTruthy()
+  expect(software).toBeTruthy()
+
+  const root = `/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}`
+  await login(page)
+
+  await page.goto(`${root}/systems/change-requests/${system!.id}`)
+  await expect(page).toHaveURL(`${root}/systems/change-requests/${system!.id}`)
+  await expect(page.getByRole('link', { name: 'System Change Requests' })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('link', { name: 'New System SCR' })).toBeVisible()
+
+  await page.goto(`${root}/software/change-requests/${software!.id}`)
+  await expect(page).toHaveURL(`${root}/software/change-requests/${software!.id}`)
+  await expect(page.getByRole('link', { name: 'Software Change Requests' })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('link', { name: 'New Software SWCR' })).toBeVisible()
+
+  // Old links and a caller-supplied type mismatch are both replaced from the authorized record type.
+  await page.goto(`${root}/change-requests/${software!.id}`)
+  await expect(page).toHaveURL(`${root}/software/change-requests/${software!.id}`)
+  await page.goto(`${root}/systems/change-requests/${software!.id}`)
+  await expect(page).toHaveURL(`${root}/software/change-requests/${software!.id}`)
+})
+
 test('the first protected production mutation after deep-linked sign-in creates durable controlled state', async ({ page, request }) => {
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)

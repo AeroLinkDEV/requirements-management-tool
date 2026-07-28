@@ -36,7 +36,8 @@ public sealed class NotificationLinkBuilder(IConfiguration configuration)
         if (string.IsNullOrWhiteSpace(id)) return "/";
         return kind switch
         {
-            "scr" or "swcr" => $"/systems/change-requests/{id}",
+            "scr" => $"/systems/change-requests/{id}",
+            "swcr" => $"/software/change-requests/{id}",
             "requirement" => $"/systems/requirements/{id}",
             "procedure" => $"/system-verification/procedures/{id}",
             "verification-impact" => "/system-verification",

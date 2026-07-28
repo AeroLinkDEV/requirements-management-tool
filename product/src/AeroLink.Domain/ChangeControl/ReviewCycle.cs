@@ -21,6 +21,7 @@ public sealed class ApprovalStep
         // The stage this signature answers, when the review follows a recorded procedure. An approval that
         // records only a name and a position cannot later be read as "the verification lead signed".
         StageName = stageName.Trim();
+        Authority = "Reviewer";
         State = active ? ApprovalStepState.Active : ApprovalStepState.Pending;
     }
 
@@ -30,12 +31,18 @@ public sealed class ApprovalStep
     public string ApproverId { get; private set; } = string.Empty;
     public string ApproverName { get; private set; } = string.Empty;
     public string StageName { get; private set; } = string.Empty;
+    public string Authority { get; private set; } = string.Empty;
     public ApprovalStepState State { get; private set; }
     public DateTimeOffset? DecidedAt { get; private set; }
 
     internal void Approve(DateTimeOffset now) { State = ApprovalStepState.Approved; DecidedAt = now; }
     internal void Activate() => State = ApprovalStepState.Active;
-    internal void Replace(string id, string name) { ApproverId = id; ApproverName = name; }
+    internal void Replace(string id, string name, ProgramRole? role)
+    {
+        ApproverId = id;
+        ApproverName = name;
+        Authority = role?.ToString() ?? "Reviewer";
+    }
 }
 
 public sealed class ReviewCycle
@@ -69,9 +76,13 @@ public sealed class ReviewCycle
         State = ReviewCycleState.Active;
         StartedAt = now;
         for (var index = 0; index < approvers.Count; index++)
-            _steps.Add(new ApprovalStep(Id, index, approvers[index].UserId, approvers[index].Name,
+        {
+            var step = new ApprovalStep(Id, index, approvers[index].UserId, approvers[index].Name,
                 Mode == ReviewMode.Parallel || index == 0,
-                workflow is null ? "" : workflow.Stages[index].Name));
+                workflow is null ? "" : workflow.Stages[index].Name);
+            step.Replace(approvers[index].UserId, approvers[index].Name, approvers[index].Role);
+            _steps.Add(step);
+        }
     }
 
     public Guid Id { get; private set; }
@@ -121,7 +132,7 @@ public sealed class ReviewCycle
         // submission and quietly break it before anybody signed.
         var stage = workflow?.Stages.SingleOrDefault(x => x.Position == position);
         if (stage is not null) workflow!.ValidateStage(stage, replacement);
-        _steps[position].Replace(replacement.UserId, replacement.Name);
+        _steps[position].Replace(replacement.UserId, replacement.Name, replacement.Role);
     }
 
     internal void RequestChanges(string reason, DateTimeOffset now)
