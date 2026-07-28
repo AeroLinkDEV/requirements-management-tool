@@ -669,6 +669,10 @@ function App() {
       <EnterpriseControlCenter
         api={API}
         projectId={project.project.id}
+        // The stable link pointed at Enterprise Control's own path with ?enterpriseView=, which nothing
+        // reads. A saved view is a requirements query, so its link is the Requirements route with ?view=,
+        // which the router already resolves and the workspace already applies.
+        viewLink={(id, area) => `${routePath(context!, "requirements", area)}?view=${encodeURIComponent(id)}`}
         onBack={() => navigate("dashboard")}
       />
     );
