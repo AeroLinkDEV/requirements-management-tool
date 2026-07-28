@@ -70,7 +70,12 @@ jobs:
           printf '%s\n' "$files" | grep -Eq '^product/(src|tests)/|^product/.*\.(cs|csproj|slnx|props|targets)$' && backend=true || true
           printf '%s\n' "$files" | grep -Eq '^product/client/' && client=true || true
           printf '%s\n' "$files" | grep -Eq '^product/(client|src/AeroLink.Api|src/AeroLink.Domain|src/AeroLink.Infrastructure)/|^\.github/workflows/ci\.yml$' && browser=true || true
-          printf '%s\n' "$files" | grep -Eqi '^product/(src/AeroLink.Api|src/AeroLink.Infrastructure|tests)/.*(migration|database|identity|auth|bootstrap|postgres)|^product/src/AeroLink.Infrastructure/Migrations/|^\.github/workflows/ci\.yml$' && postgresql=true || true
+          # Keyed on persistence as well as the migration/identity keywords. A change to an EF query needs
+          # the real provider even when no schema moves: translation is not portable, and the SQLite path
+          # every other gate runs on will happily accept an expression Npgsql cannot produce. The previous
+          # pattern also pointed at AeroLink.Infrastructure/Migrations/, which does not exist — migrations
+          # live under Persistence/Migrations/ — so that alternative had never matched a file.
+          printf '%s\n' "$files" | grep -Eqi '^product/(src/AeroLink.Api|src/AeroLink.Infrastructure|tests)/.*(migration|database|identity|auth|bootstrap|postgres|persistence)|^product/src/AeroLink.Infrastructure/Persistence/Migrations/|^\.github/workflows/ci\.yml$' && postgresql=true || true
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "backend=$backend" >> "$GITHUB_OUTPUT"
           echo "client=$client" >> "$GITHUB_OUTPUT"
