@@ -222,6 +222,8 @@ export default function ControlledRequirementEditor({
   // Which sections this requirement could go in. Keyed by level, because the level fixes which specification the
   // requirement belongs to — a low-level requirement cannot be filed in the system document.
   const [sections, setSections] = useState<SpecificationSection[]>([]);
+  const staleSection = Boolean(item.targetSectionId) &&
+    !sections.some((section) => section.id === item.targetSectionId);
   useEffect(() => {
     let cancelled = false;
     fetch(`${api}/api/authoring/sections?projectId=${projectId}&level=${item.level}`)
@@ -349,7 +351,7 @@ export default function ControlledRequirementEditor({
             to carry it: an introduced requirement landed wherever a backfill put it, and a modification could
             not move one at all. Hidden when the change is a retirement, which removes a requirement from future
             baselines and so has no section to be in. */}
-        {item.kind !== "Retire" && sections.length > 0 && (
+        {item.kind !== "Retire" && (sections.length > 0 || staleSection) && (
           <label>
             Section
             <select
@@ -357,6 +359,11 @@ export default function ControlledRequirementEditor({
               value={item.targetSectionId ?? ""}
               onChange={(event) => onChange("targetSectionId", event.target.value)}
             >
+              {staleSection && (
+                <option value={item.targetSectionId}>
+                  Previously selected section is unavailable — choose another
+                </option>
+              )}
               <option value="">
                 {item.kind === "Modify" ? "Leave where it is" : "Decide when the baseline is assembled"}
               </option>

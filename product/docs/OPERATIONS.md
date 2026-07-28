@@ -24,6 +24,20 @@ Logs are under `product/.local/logs`. The authoritative database is `aerolink`; 
 
 Liveness is available at `/health/live`. Deployment orchestrators should use `/health/ready`, which returns `503` until the database can be reached.
 
+## Requirement proposal integrity reconciliation
+
+After upgrading, create an Enterprise integrity checkpoint from **Enterprise Control**. A checkpoint in
+`Attention` reports the count of legacy requirement proposals whose five impact dispositions are missing,
+malformed, unknown, or still Pending. Those records cannot enter review, be selected into a candidate baseline,
+freeze, or materialize until corrected.
+
+An authenticated Program member can read
+`GET /api/authoring/attribute-gaps?projectId=<project-guid>` to inventory proposals missing the standard
+`criticality` or `owner` authored attributes. This report is deliberately read-only. For a Draft, follow its
+returned `scr:<guid>` reference, check it out, enter the attributable values, and check it in. Never infer an
+owner or rewrite an approved record. For approved history, create a controlled successor revision and record the
+reconciliation rationale there.
+
 ## Open Digital Thread configuration
 
 Production permits no cross-origin browser callers unless each trusted origin is configured as `Cors__AllowedOrigins__0`, `Cors__AllowedOrigins__1`, and so on. Never use a wildcard origin with credentialed browser sessions.

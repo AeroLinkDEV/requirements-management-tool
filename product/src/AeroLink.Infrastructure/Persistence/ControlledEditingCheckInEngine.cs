@@ -265,7 +265,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
                 revision = x.Revision, level = x.Level.ToString(), kind = x.Kind.ToString(),
                 statement = x.Statement, rationale = x.Rationale, verificationMethod = x.VerificationMethod,
                 richText = x.RichText, attributesJson = x.AttributesJson,
-                impactDispositionJson = x.ImpactDispositionJson }) });
+                impactDispositionJson = x.ImpactDispositionJson, targetSectionId = x.TargetSectionId }) });
 
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
         DateTimeOffset now, CancellationToken ct)
@@ -283,6 +283,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     private async Task<IReadOnlyList<RequirementChangeDraft>> NormalizeAsync(SystemChangeRequest scr,
         IReadOnlyList<SystemChangeRequestRequirementDraft> requested, CancellationToken ct)
     {
+        await new EnterpriseRequirementsService(db).SynchronizeProjectAsync(scr.ProjectId, scr.AuthorId, ct);
         var existing = scr.RequirementChanges.ToDictionary(x => x.BaseNumber, StringComparer.OrdinalIgnoreCase);
         var nextNumbers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -296,7 +297,8 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
                 throw new DomainException("A System SCR can contain only System requirement changes.");
             if (scr.Type == ChangeRequestType.Software && level == RequirementLevel.System)
                 throw new DomainException("A Software SWCR can contain only HLR and LLR changes.");
-            if (raw.IsDerived && string.IsNullOrWhiteSpace(raw.Rationale))
+            var isDerived = raw.IsDerived ?? RequirementAuthoringJson.IsDerived(raw.AttributesJson);
+            if (isDerived && string.IsNullOrWhiteSpace(raw.Rationale))
                 throw new DomainException("Every derived software requirement requires an explicit engineering rationale.");
 
             var supplied = (raw.BaseNumber ?? "").Trim().ToUpperInvariant();
@@ -327,9 +329,14 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             }
             if (!reserved.Add(baseNumber))
                 throw new DomainException($"{baseNumber} appears more than once in this Draft.");
+            var schema = await db.ArtifactSchemas.Include(x => x.Fields).SingleOrDefaultAsync(x =>
+                x.ProjectId == scr.ProjectId && x.IsActive && x.AppliesTo == level.ToString(), ct)
+                ?? throw new DomainException($"No active requirement schema is configured for {level}.");
+            var attributes = RequirementAuthoringJson.ValidateAndMergeAttributes(raw.AttributesJson, schema,
+                level != RequirementLevel.System && isDerived);
             normalized.Add(new(baseNumber, revision, level, kind, raw.Statement ?? "", raw.Rationale ?? "",
-                raw.VerificationMethod ?? "", raw.RichText ?? "", raw.AttributesJson ?? "{}",
-                raw.ImpactDispositionJson ?? "{}"));
+                raw.VerificationMethod ?? "", raw.RichText ?? "", attributes,
+                raw.ImpactDispositionJson ?? "{}", raw.TargetSectionId));
         }
         return normalized;
     }
@@ -348,7 +355,8 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
         string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null);
     private sealed record SystemChangeRequestRequirementDraft(string? BaseNumber, int Revision,
         string? Level, string? Kind, string? Statement, string? Rationale, string? VerificationMethod,
-        string? RichText, string? AttributesJson, string? ImpactDispositionJson, bool IsDerived = false);
+        string? RichText, string? AttributesJson, string? ImpactDispositionJson, bool? IsDerived = null,
+        Guid? TargetSectionId = null);
 }
 
 public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
@@ -379,9 +387,9 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
         JsonSerializer.Serialize(new { item.Id, item.BaseNumber, item.Revision,
             level = item.Level.ToString(), kind = item.Kind.ToString(), item.Statement, item.Rationale,
             item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
-            parentVersion });
+            targetSectionId = item.TargetSectionId, parentVersion });
 
-    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
+    public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
         DateTimeOffset now, CancellationToken ct)
     {
         var state = (State)artifact.Aggregate;
@@ -394,6 +402,13 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
             !Enum.TryParse<RequirementLevel>(draft.Level, true, out var level) || level != current.Level ||
             !Enum.TryParse<RequirementChangeKind>(draft.Kind, true, out var kind) || kind != current.Kind)
             throw new DomainException($"The controlled identity of {current.DisplayNumber} cannot change.");
+        await new EnterpriseRequirementsService(db).SynchronizeProjectAsync(parent.ProjectId, actor, ct);
+        var schema = await db.ArtifactSchemas.Include(x => x.Fields).SingleOrDefaultAsync(x =>
+            x.ProjectId == parent.ProjectId && x.IsActive && x.AppliesTo == current.Level.ToString(), ct)
+            ?? throw new DomainException($"No active requirement schema is configured for {current.Level}.");
+        var attributes = RequirementAuthoringJson.ValidateAndMergeAttributes(draft.AttributesJson, schema,
+            current.Level != RequirementLevel.System &&
+            (draft.IsDerived ?? RequirementAuthoringJson.IsDerived(current.AttributesJson)));
 
         // Every proposal is rewritten from these drafts, so anything not carried here is lost. The chosen section
         // of the untouched proposals comes from the stored change, and of the edited one from the draft — falling
@@ -401,14 +416,13 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
         var changes = parent.RequirementChanges.Select(item => item.Id == current.Id
             ? new RequirementChangeDraft(current.BaseNumber, current.Revision, current.Level, current.Kind,
                 draft.Statement ?? "", draft.Rationale ?? "", draft.VerificationMethod ?? "",
-                draft.RichText ?? "", draft.AttributesJson ?? "{}", draft.ImpactDispositionJson ?? "{}",
+                draft.RichText ?? "", attributes, draft.ImpactDispositionJson ?? "{}",
                 draft.TargetSectionId ?? current.TargetSectionId)
             : new RequirementChangeDraft(item.BaseNumber, item.Revision, item.Level, item.Kind, item.Statement,
                 item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson,
                 item.ImpactDispositionJson, item.TargetSectionId)).ToList();
         parent.UpdateDraft(actor, parent.Title, parent.Problem, parent.Analysis, parent.Solution, changes, now,
             parent.ProblemRich, parent.AnalysisRich, parent.SolutionRich);
-        return Task.CompletedTask;
     }
 
     private static RequirementChange FindProposal(State state) => state.Parent.RequirementChanges.Single(x =>
@@ -423,7 +437,8 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
     /// </param>
     private sealed record ProposalDraft(string? BaseNumber, int Revision, string? Level, string? Kind,
         string? Statement, string? Rationale, string? VerificationMethod, string? RichText,
-        string? AttributesJson, string? ImpactDispositionJson, Guid? TargetSectionId = null);
+        string? AttributesJson, string? ImpactDispositionJson, Guid? TargetSectionId = null,
+        bool? IsDerived = null);
 }
 
 public sealed class SpecificationStructureControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter

@@ -228,6 +228,37 @@ public static class ChangeRequestEndpoints
             return Results.Ok(rows);
         });
 
+        // Detection only: missing authored metadata cannot be reconstructed honestly by a backfill. Returning
+        // the exact Draft proposals lets an administrator reopen each through the controlled checkout/check-in
+        // path and supply the missing values with attribution, rather than inventing an owner after the fact.
+        app.MapGet("/api/authoring/attribute-gaps", async (Guid projectId, HttpContext http,
+            AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var rows = await (from change in db.RequirementChanges.AsNoTracking()
+                              join scr in db.SystemChangeRequests.AsNoTracking() on change.ScrId equals scr.Id
+                              where scr.ProjectId == projectId
+                              select new
+                              {
+                                  scr.Id, scrDisplayNumber = scr.BaseNumber + "." +
+                                      (scr.Revision < 10 ? "0" : "") + scr.Revision,
+                                  scr.Title, scr.AuthorId, scr.State, changeId = change.Id,
+                                  requirementDisplayNumber = change.BaseNumber + "." +
+                                      (change.Revision < 10 ? "0" : "") + change.Revision,
+                                  change.Level, change.AttributesJson
+                              }).ToListAsync(ct);
+            var gaps = rows.Select(row =>
+            {
+                var keys = AttributeKeys(row.AttributesJson);
+                var missing = new[] { "criticality", "owner" }.Where(key => !keys.Contains(key)).ToArray();
+                return new { row.Id, displayNumber = row.scrDisplayNumber, row.Title, row.AuthorId,
+                    state = row.State.ToString(), row.changeId, requirement = row.requirementDisplayNumber,
+                    level = row.Level.ToString(), missing,
+                    reconciliation = row.State == ScrState.Draft ? $"scr:{row.Id}" : "Create a controlled successor revision; approved history is immutable." };
+            }).Where(x => x.missing.Length > 0).OrderBy(x => x.displayNumber).ThenBy(x => x.requirement);
+            return Results.Ok(gaps);
+        });
+
         app.MapGet("/api/scrs/{id:guid}/download", async (Guid id, string? format, ChangeRequestOutputGenerator generator, CancellationToken ct) =>
         {
             var output = await generator.GenerateAsync(id, format ?? "docx", ct); return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
@@ -279,17 +310,21 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, EnterpriseRequirementsService enterpriseRequirements, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
             var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
             if (closed is not null) return Results.BadRequest(new { error = closed, code = "release_is_closed" });
+            await enterpriseRequirements.SynchronizeProjectAsync(request.ProjectId, http.UserAccount().UserName, ct);
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
             try
             {
                 var now = DateTimeOffset.UtcNow;
                 var actor = http.UserAccount().UserName;
                 var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, ct);
+                var schemas = await db.ArtifactSchemas.Include(x => x.Fields)
+                    .Where(x => x.ProjectId == request.ProjectId && x.IsActive)
+                    .ToDictionaryAsync(x => x.AppliesTo, StringComparer.OrdinalIgnoreCase, ct);
                 var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
                     request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, now, request.Type,
                     request.ProblemRich, request.AnalysisRich, request.SolutionRich);
@@ -320,7 +355,13 @@ public static class ChangeRequestEndpoints
                         requirementNumber = artifact.BaseNumber;
                         revision = await db.RequirementRevisions.Where(x => x.ArtifactId == artifact.Id).MaxAsync(x => x.Revision, ct) + 1;
                     }
-                    var attributes = JsonSerializer.Serialize(new { derived = change.Level != RequirementLevel.System && change.IsDerived });
+                    if (!schemas.TryGetValue(change.Level.ToString(), out var schema))
+                        return Results.BadRequest(new { error = $"No active requirement schema is configured for {change.Level}." });
+                    var attributes = RequirementAuthoringJson.ValidateAndMergeAttributes(
+                        change.AttributesJson, schema, change.Level != RequirementLevel.System && change.IsDerived);
+                    var sectionError = await TargetSectionRefusalAsync(db, request.ProjectId, change.Level,
+                        change.TargetSectionId, ct);
+                    if (sectionError is not null) return Results.BadRequest(new { error = sectionError });
                     scr.AddRequirementChange(actor, requirementNumber, revision, change.Level, change.Kind,
                         change.Statement, change.Rationale, change.VerificationMethod, now, change.RichText, attributes, change.ImpactDispositionJson,
                         change.TargetSectionId);
@@ -340,7 +381,8 @@ public static class ChangeRequestEndpoints
             try
             {
                 scr.AddRequirementChange(http.UserAccount().UserName, request.BaseNumber, request.Revision, request.Level, request.Kind,
-                    request.Statement, request.Rationale, request.VerificationMethod, DateTimeOffset.UtcNow);
+                    request.Statement, request.Rationale, request.VerificationMethod, DateTimeOffset.UtcNow,
+                    impactDispositionJson: RequirementAuthoringJson.PendingImpactDispositions);
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -355,6 +397,12 @@ public static class ChangeRequestEndpoints
             {
                 var actor = http.UserAccount();
                 if (scr.AuthorId != actor.UserName && !actor.IsAdministrator) return Results.Forbid();
+                foreach (var change in scr.RequirementChanges)
+                {
+                    var sectionError = await TargetSectionRefusalAsync(db, scr.ProjectId, change.Level,
+                        change.TargetSectionId, ct);
+                    if (sectionError is not null) return Results.BadRequest(new { error = sectionError });
+                }
                 var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
                 if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every approver must be an active AeroLink user." });
                 var directory = known.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
@@ -474,5 +522,31 @@ public static class ChangeRequestEndpoints
         if (release is null) return "The target build does not exist.";
         if (!release.IsReleased) return null;
         return $"{release.Version} has been released and takes no new change requests. Switch to the in-work build and raise it there.";
+    }
+
+    private static async Task<string?> TargetSectionRefusalAsync(AeroLinkDbContext db, Guid projectId,
+        RequirementLevel level, Guid? targetSectionId, CancellationToken ct)
+    {
+        if (targetSectionId is null) return null;
+        var exists = await (from node in db.SpecificationNodes.AsNoTracking()
+                            join specification in db.RequirementSpecifications.AsNoTracking()
+                                on node.SpecificationId equals specification.Id
+                            where node.Id == targetSectionId && node.Type == SpecificationNodeType.Section &&
+                                  specification.ProjectId == projectId && specification.Level == level.ToString()
+                            select node.Id).AnyAsync(ct);
+        return exists ? null :
+            $"The selected {level} specification section is no longer available. Reopen the Draft and choose another section.";
+    }
+
+    private static HashSet<string> AttributeKeys(string attributesJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(attributesJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                ? document.RootElement.EnumerateObject().Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : [];
+        }
+        catch (JsonException) { return []; }
     }
 }

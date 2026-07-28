@@ -714,6 +714,26 @@ Future entries use:
   input, and never display success until the server confirms it. Client failure diagnostics record only an
   operation identifier and transport status/code, never credentials, request bodies or controlled content.
 
+### DEC-062 - Requirement Proposal Metadata Is a Server-Enforced Lifecycle Contract
+
+- **Date:** 2026-07-28
+- **Status:** Accepted
+- **Decision:** Requirement proposal attributes are validated against the active schema for their exact level.
+  Authored fields survive unchanged; `derived` is server-owned and is recomputed rather than trusted. The five
+  canonical impact categories are mandatory and must contain one of `Affected`, `Not Affected`, or
+  `Follow-up Assigned` before review. A chosen specification section is part of the proposal and must survive
+  create, detail, checkout, autosave, check-in, review snapshot and materialization.
+- **Rationale:** Initial creation replaced every authored attribute with `{ derived }`, reopening a Draft omitted
+  `TargetSectionId`, and the domain treated `{}` impact JSON as a completed decision. Each defect made the
+  browser appear to capture controlled intent while the durable record said something else; direct API calls
+  could then advance that incomplete record.
+- **Consequences:** Malformed, unknown and schema-invalid attributes fail with an actionable error. Incomplete,
+  malformed and unknown impact dispositions fail at submission, baseline selection, freeze and materialization.
+  Stale section identifiers fail closed while naming the required author action. Operators can list historical
+  attribute gaps without rewriting evidence, and integrity checkpoints report legacy impact-disposition
+  violations. Approved history is never auto-filled: repair occurs through a Draft checkout or a controlled
+  successor revision.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

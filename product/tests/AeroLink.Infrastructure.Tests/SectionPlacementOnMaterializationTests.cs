@@ -1,5 +1,6 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
@@ -126,7 +127,7 @@ public sealed class SectionPlacementOnMaterializationTests
     /// look deliberate afterwards.
     /// </summary>
     [Fact]
-    public async Task A_section_from_another_project_is_ignored()
+    public async Task A_section_from_another_project_is_rejected_without_partial_materialization()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-section-foreign-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
@@ -144,11 +145,13 @@ public sealed class SectionPlacementOnMaterializationTests
             db.AddRange(scr, baseline);
             await db.SaveChangesAsync();
 
-            await new RequirementBaselineMaterializer(db, new VerificationImpactService(db))
-                .MaterializeAsync(baseline.Id, "cm", now, default);
-
-            var artifact = await db.Requirements.SingleAsync(x => x.ProjectId == projectId);
-            Assert.Empty(await db.SpecificationNodes.Where(x => x.RequirementArtifactId == artifact.Id).ToListAsync());
+            var error = await Assert.ThrowsAsync<DomainException>(() =>
+                new RequirementBaselineMaterializer(db, new VerificationImpactService(db))
+                    .MaterializeAsync(baseline.Id, "cm", now, default));
+            Assert.Contains("section that is no longer available", error.Message);
+            db.ChangeTracker.Clear();
+            Assert.Empty(await db.Requirements.Where(x => x.ProjectId == projectId).ToListAsync());
+            Assert.Null((await db.CandidateBaselines.SingleAsync(x => x.Id == baseline.Id)).RequirementsMaterializedAt);
         }
         finally { File.Delete(path); }
     }

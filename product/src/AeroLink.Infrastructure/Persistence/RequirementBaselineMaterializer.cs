@@ -39,6 +39,8 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
 
         var scrIds = baseline.Selections.Select(x => x.ScrId).ToList();
         var scrs = await db.SystemChangeRequests.AsNoTracking().Where(x => scrIds.Contains(x.Id)).Include(x => x.RequirementChanges).ToListAsync(ct);
+        foreach (var change in scrs.SelectMany(x => x.RequirementChanges))
+            RequirementAuthoringJson.EnsureCompleteImpactDispositions(change.ImpactDispositionJson, change.DisplayNumber);
         var created = 0;
         // What each change became, so verification work can bind to exact revisions once they exist.
         var materialized = new List<MaterializedRequirementChange>();
@@ -129,7 +131,8 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         foreach (var change in chosen)
         {
             var section = sections.SingleOrDefault(x => x.Id == change.TargetSectionId!.Value);
-            if (section is null) continue;
+            if (section is null)
+                throw new DomainException($"{change.DisplayNumber} names a section that is no longer available in this project.");
             if (!artifactByBase.TryGetValue(change.BaseNumber, out var artifact)) continue;
             var placement = existing.SingleOrDefault(x => x.RequirementArtifactId == artifact.Id);
             if (placement is null)

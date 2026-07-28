@@ -261,6 +261,14 @@ Local demonstration identities (`admin`, `systems.author`, `software.author`, `s
 `release.manager`) share a local-only password documented in `product/README.md`. Production
 deployment uses the one-time protected administrator bootstrap instead.
 
+Requirement proposal metadata is now one durable server contract (DEC-062). Initial SCR/SWCR creation preserves
+schema-allowed `owner`, `criticality`, and future configured attributes while recomputing the server-owned
+`derived` flag. Exact section placement survives create, detail, checkout/check-in, review and baseline
+materialization; stale section identifiers are rejected with a repair instruction. Review, baseline selection,
+freeze and materialization all refuse incomplete or malformed five-area impact decisions. Administrators can
+identify legacy authored-attribute gaps through `/api/authoring/attribute-gaps`, and integrity checkpoints count
+legacy impact-disposition violations without mutating historical records.
+
 ## How this project governs itself
 
 AeroLink is developed under the same discipline it sells. Respect it — these conventions are the

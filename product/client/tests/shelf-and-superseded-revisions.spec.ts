@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { apiBase, apiLogin, login, openNavigationGroup } from './auth'
 
+const completeImpacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
+
 // Putting work away for another day, and taking it back off the shelf.
 //
 // `Defer` existed in the domain and nothing exposed it: the dashboard counted deferred change requests, the
@@ -21,7 +23,7 @@ test('a change request goes on the shelf with its state remembered, and comes ba
   const scr = await (await request.post(`${apiBase}/api/scr-drafts`, { data: {
     projectId: workspace.project.id, targetReleaseId: workspace.release.id, type: 'System',
     title: 'Oceanic waypoint sequencing', problem: 'P', analysis: 'A', solution: 'S',
-    requirementChanges: [{ level: 'System', kind: 'Introduce', statement: 'The FMS shall sequence oceanic waypoints.', rationale: 'New', verificationMethod: 'Test' }],
+    requirementChanges: [{ level: 'System', kind: 'Introduce', statement: 'The FMS shall sequence oceanic waypoints.', rationale: 'New', verificationMethod: 'Test', impactDispositionJson:completeImpacts }],
   } })).json()
 
   await login(page)
@@ -60,7 +62,7 @@ test('superseded revisions collapse under the newest one and expand on request',
   const scr = await (await request.post(`${apiBase}/api/scr-drafts`, { data: {
     projectId: workspace.project.id, targetReleaseId: workspace.release.id, type: 'System',
     title: 'Oceanic waypoint sequencing', problem: 'P', analysis: 'A', solution: 'S',
-    requirementChanges: [{ level: 'System', kind: 'Introduce', statement: 'The FMS shall sequence oceanic waypoints.', rationale: 'New', verificationMethod: 'Test' }],
+    requirementChanges: [{ level: 'System', kind: 'Introduce', statement: 'The FMS shall sequence oceanic waypoints.', rationale: 'New', verificationMethod: 'Test', impactDispositionJson:completeImpacts }],
   } })).json()
   await request.post(`${apiBase}/api/scrs/${scr.id}/submit`, { data: { approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }] } })
   await request.post(`${apiBase}/api/scrs/${scr.id}/approve`, { data: { password: 'AeroLink!2026', meaning: 'Approved.' } })
