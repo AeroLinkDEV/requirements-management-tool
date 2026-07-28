@@ -791,6 +791,26 @@ Future entries use:
   concurrency rules. Recovery remains operationally possible and forensically attributable without rewriting
   ownership.
 
+### DEC-066 - Test Procedures Bind Only to Materialized Requirement Revisions
+
+- **Date:** 2026-07-28
+- **Status:** Accepted
+- **Decision:** A test procedure may be authored for a release only after its candidate requirement baseline is
+  frozen and materialized. That is the first point at which the exact immutable requirement-revision IDs exist.
+  AeroLink will not silently bind a procedure to a predecessor revision, provisionally bind proposed content,
+  or later repoint either form as though it had always covered the materialized revision.
+- **Rationale:** Predecessor and provisional authoring can be useful future workflows, but each needs an explicit
+  applicability state and an attributable carry-forward decision. Treating either as confirmed coverage would
+  let evidence written for different content satisfy a release gate. The existing exact-revision architecture
+  already avoids that ambiguity; its UI merely presented the prerequisite as an empty, broken form.
+- **Consequences:** Before materialization, procedure creation is disabled with the exact reason and next
+  governed step. Existing inherited procedures remain visible against the predecessor revisions they actually
+  cover, and verification-impact items retain planned work without counting it as confirmed coverage. After
+  materialization, the new exact revisions become selectable. Traceability, coverage, verification, and evidence
+  gates report `WaitingForPrerequisite` rather than misleading `0/0` failures until that point. A materialized
+  baseline with no effective requirements is an evaluated invalid release population, not a waiting state, and
+  remains on HOLD with a repair instruction. System, Software, and product-line configurations use the same rule.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

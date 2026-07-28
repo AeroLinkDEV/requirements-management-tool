@@ -13,6 +13,8 @@ type Gate = {
   total: number;
   detail: string;
   action: string;
+  evaluationState: "Evaluated" | "WaitingForPrerequisite";
+  prerequisiteCode?: string;
 };
 type Impact = {
   id: string;
@@ -284,6 +286,8 @@ export default function ReleaseCampaignCenter({
       0,
     );
   const actionForGate = (gate: Gate) => {
+    if (gate.evaluationState === "WaitingForPrerequisite")
+      return { label: "Open Product Versions", run: onOpenPlanning };
     if (["coverage", "verification", "evidence"].includes(gate.code))
       return { label: "Open Verification", run: onOpenVerification };
     if (["traceability", "documents"].includes(gate.code))
@@ -322,21 +326,22 @@ export default function ReleaseCampaignCenter({
               run: actionForGate(firstBlocker).run,
             }
           : undefined;
-  const renderGate = (gate: Gate) => (
-    <article className={gate.complete ? "complete" : "blocked"} key={gate.code}>
-      <div>
-        <span>{gate.complete ? "✓" : "!"}</span>
-        <b>{gate.name}</b>
-      </div>
-      <strong>
-        {gate.completed}/{gate.total}
-      </strong>
-      <p>{gate.complete ? "Gate complete." : gate.detail}</p>
-      <small>
-        {gate.complete ? "Configuration evidence is current." : gate.action}
-      </small>
-    </article>
-  );
+  const renderGate = (gate: Gate) => {
+    const waiting = gate.evaluationState === "WaitingForPrerequisite";
+    return (
+      <article className={gate.complete ? "complete" : waiting ? "waiting" : "blocked"} key={gate.code}>
+        <div>
+          <span>{gate.complete ? "✓" : waiting ? "…" : "!"}</span>
+          <b>{gate.name}</b>
+        </div>
+        <strong>{waiting ? "Waiting" : `${gate.completed}/${gate.total}`}</strong>
+        <p>{gate.complete ? "Gate complete." : gate.detail}</p>
+        <small>
+          {gate.complete ? "Configuration evidence is current." : gate.action}
+        </small>
+      </article>
+    );
+  };
   const renderImpact = (item: Impact) => (
     <article key={item.id}>
       <div>
@@ -472,6 +477,8 @@ export default function ReleaseCampaignCenter({
                 className={
                   gate.complete
                     ? "complete"
+                    : gate.evaluationState === "WaitingForPrerequisite"
+                      ? "waiting"
                     : gate.completed > 0
                       ? "warning"
                       : "pending"
@@ -483,6 +490,8 @@ export default function ReleaseCampaignCenter({
                 <small>
                   {gate.complete
                     ? "Complete"
+                    : gate.evaluationState === "WaitingForPrerequisite"
+                      ? "Waiting for baseline materialization"
                     : `${gate.completed}/${gate.total} · ${gate.action}`}
                 </small>
               </article>

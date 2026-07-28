@@ -135,7 +135,13 @@ public static class VerificationEndpoints
             if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.TestEngineer))return Results.Forbid();
             await using var transaction=await db.Database.BeginTransactionAsync(IsolationLevel.Serializable,ct);
             var requirementIds = request.RequirementRevisionIds.Distinct().ToList();
-            var validRequirementIds = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x=>requirementIds.Contains(x.Id)) join artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==request.ProjectId) on revision.ArtifactId equals artifact.Id select revision.Id).CountAsync(ct);
+            if (requirementIds.Count == 0)
+                return Results.BadRequest(new { error = "Select at least one exact requirement revision from a materialized baseline.", code = "materialized_requirement_required" });
+            var validRequirementIds = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x=>requirementIds.Contains(x.Id))
+                                             join artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==request.ProjectId) on revision.ArtifactId equals artifact.Id
+                                             join member in db.BaselineRequirements.AsNoTracking() on revision.Id equals member.RevisionId
+                                             join baseline in db.CandidateBaselines.AsNoTracking().Where(x=>x.RequirementsMaterializedAt!=null) on member.BaselineId equals baseline.Id
+                                             select revision.Id).Distinct().CountAsync(ct);
             if (validRequirementIds != requirementIds.Count) return Results.BadRequest(new { error = "Every coverage link must reference an authoritative requirement revision in this project." });
             if (requirementIds.Count > 0 && await (from member in db.BaselineRequirements.AsNoTracking().Where(x => requirementIds.Contains(x.RevisionId))
                                                    join campaign in db.ReleaseCampaigns.AsNoTracking().Where(x => x.ProjectId == request.ProjectId && x.State == ReleaseCampaignState.InReview) on member.BaselineId equals campaign.BaselineId

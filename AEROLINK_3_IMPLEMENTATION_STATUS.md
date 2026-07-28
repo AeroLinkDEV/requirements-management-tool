@@ -118,6 +118,12 @@ the controlled successor of an approved record; lifecycle, release and concurren
 original author remains immutable while audit events, attachments and check-in evidence name the administrator
 who actually acted, identically for System and Software changes.
 
+The first verification/readiness increment makes baseline materialization an explicit prerequisite (DEC-066).
+Procedure authoring begins only when exact immutable requirement revisions exist. Until then, the verification
+workspace explains the lifecycle ordering and the four downstream assurance gates are not evaluated; every
+release view names baseline materialization as the next governed action instead of presenting contradictory
+`0/0` failures.
+
 ## Repository and authority corrections
 
 The following facts supersede earlier planning assumptions that predated repository publication:

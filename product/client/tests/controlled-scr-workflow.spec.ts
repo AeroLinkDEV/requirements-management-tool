@@ -27,6 +27,18 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
     await page.locator('.program > select:not(.releaseSelector)').selectOption({label:programName})
   }
 
+  await openPageFromPalette(page,'Software Verification')
+  await expect(page.getByText('Procedure authoring waits for materialization')).toBeVisible()
+  await expect(page.getByText(/no immutable requirement revisions yet/)).toBeVisible()
+  await expect(page.getByText(/Existing inherited procedures remain visible/)).toBeVisible()
+  await expect(page.getByText(/Open Product Versions.*freeze and materialize the candidate baseline/)).toBeVisible()
+  await expect(page.getByRole('button',{name:'New Test Procedure'})).toBeDisabled()
+  await expect(page.getByRole('button',{name:'New Test Procedure'})).toHaveAttribute(
+    'title',
+    'Materialize the candidate requirement baseline before creating a procedure.',
+  )
+  await page.getByRole('button',{name:'Command Center'}).click()
+
   await openPageFromPalette(page,'New Software SWCR')
   await expect(page.getByRole('navigation', { name: 'Change authoring progress' })).toBeVisible()
   // The author chooses the first change; the editor no longer assumes one.
@@ -105,6 +117,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByRole('link', { name: /Command Center/ }).first().click()
   await openPageFromPalette(page,'Software Verification')
   await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible()
+  await expect(page.getByText('Procedure authoring waits for materialization')).toHaveCount(0)
   await expect(page.getByText('1', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: 'New Test Procedure' }).click()
   await page.getByLabel('Title').fill('Verify ordered approval workflow')

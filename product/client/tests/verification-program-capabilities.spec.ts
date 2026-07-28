@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { apiBase, apiLogin, openNavigationGroup } from './auth'
 
 test('verification actions follow authority in the selected Program',async({page,request,playwright})=>{
+  test.setTimeout(90_000)
   await apiLogin(request)
   const suffix=Date.now().toString().slice(-7)
   const makeWorkspace=async(label:string)=>{
@@ -18,6 +19,37 @@ test('verification actions follow authority in the selected Program',async({page
   }
   const testWorkspace=await makeWorkspace('Test Authority')
   const approvalWorkspace=await makeWorkspace('Approval Authority')
+  const prepareExactRequirement=async(workspace:any,label:string)=>{
+    const impacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
+    const draftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{
+      projectId:workspace.project.id,targetReleaseId:workspace.release.id,type:'System',
+      title:`${label} exact verification target`,problem:'A controlled target is required.',
+      analysis:'Procedure authoring must bind to a materialized revision.',solution:'Introduce one exact revision.',
+      requirementChanges:[{level:'System',kind:'Introduce',statement:`The ${label.toLowerCase()} product shall expose an exact verification target.`,rationale:'Capability qualification.',verificationMethod:'Test',impactDispositionJson:impacts}],
+    }})
+    expect(draftResponse.ok(),await draftResponse.text()).toBeTruthy()
+    const draft=await draftResponse.json()
+    const submitted=await request.post(`${apiBase}/api/scrs/${draft.id}/submit`,{data:{approvers:[{userId:'admin',name:'Ignored'}]}})
+    expect(submitted.ok(),await submitted.text()).toBeTruthy()
+    const approved=await request.post(`${apiBase}/api/scrs/${draft.id}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved for exact verification applicability.'}})
+    expect(approved.ok(),await approved.text()).toBeTruthy()
+    const baselineResponse=await request.post(`${apiBase}/api/baselines`,{data:{baseNumber:`SWBL-${Date.now().toString().slice(-8)}`,revision:0,projectId:workspace.project.id,releaseId:workspace.release.id,name:`${label} materialized baseline`}})
+    expect(baselineResponse.ok(),await baselineResponse.text()).toBeTruthy()
+    const baseline=await baselineResponse.json()
+    for(const [path,data] of [
+      [`selections`,{scrId:draft.id}],
+      [`freeze`,{}],
+      [`materialize-requirements`,{}],
+    ] as const){
+      const response=await request.post(`${apiBase}/api/baselines/${baseline.id}/${path}`,{data})
+      expect(response.ok(),await response.text()).toBeTruthy()
+    }
+    const requirementsResponse=await request.get(`${apiBase}/api/requirements?projectId=${workspace.project.id}&baselineId=${baseline.id}&scope=System&includeRetired=false&page=1&pageSize=10`)
+    expect(requirementsResponse.ok(),await requirementsResponse.text()).toBeTruthy()
+    return (await requirementsResponse.json()).items[0].revisionId as string
+  }
+  const testRequirementId=await prepareExactRequirement(testWorkspace,'Test authority')
+  const approvalRequirementId=await prepareExactRequirement(approvalWorkspace,'Approval authority')
 
   const usersResponse=await request.get(`${apiBase}/api/admin/users`)
   expect(usersResponse.ok(),await usersResponse.text()).toBeTruthy()
@@ -48,7 +80,7 @@ test('verification actions follow authority in the selected Program',async({page
   const reviewerRequest=await playwright.request.newContext()
   const reviewerLogin=await reviewerRequest.post(`${apiBase}/api/auth/login`,{data:{userName:'systems.reviewer',password:'AeroLink!2026'}})
   expect(reviewerLogin.ok(),await reviewerLogin.text()).toBeTruthy()
-  const createProcedure=async(projectId:string,title:string,approve=true)=>{
+  const createProcedure=async(projectId:string,requirementRevisionId:string,title:string,approve=true)=>{
     const createdResponse=await request.post(`${apiBase}/api/test-procedures`,{data:{
       projectId,
       baseNumber:'SERVER-ALLOCATED',
@@ -57,7 +89,7 @@ test('verification actions follow authority in the selected Program',async({page
       preconditions:'Controlled configuration available.',
       steps:'Exercise the approved behavior.',
       expectedResult:'The expected behavior is observed.',
-      requirementRevisionIds:[],
+      requirementRevisionIds:[requirementRevisionId],
       level:'System',
     }})
     expect(createdResponse.ok(),await createdResponse.text()).toBeTruthy()
@@ -71,9 +103,9 @@ test('verification actions follow authority in the selected Program',async({page
     }
     return created
   }
-  const testProcedure=await createProcedure(testWorkspace.project.id,'Test-authority approved procedure')
-  const approvalProcedure=await createProcedure(approvalWorkspace.project.id,'Approval-only approved procedure')
-  await createProcedure(approvalWorkspace.project.id,'Approval-only draft procedure',false)
+  const testProcedure=await createProcedure(testWorkspace.project.id,testRequirementId,'Test-authority approved procedure')
+  const approvalProcedure=await createProcedure(approvalWorkspace.project.id,approvalRequirementId,'Approval-only approved procedure')
+  await createProcedure(approvalWorkspace.project.id,approvalRequirementId,'Approval-only draft procedure',false)
   for(const [workspace,procedure] of [[testWorkspace,testProcedure],[approvalWorkspace,approvalProcedure]]){
     const recorded=await request.post(`${apiBase}/api/test-executions`,{data:{
       projectId:workspace.project.id,
