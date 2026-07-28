@@ -130,7 +130,16 @@ public static class VerificationCoverageProjection
                           procedure.Level.ToString(),
                           revision.State.ToString(),
                           coverage.IsSuspect,
-                          coverage.IsSuspect ? "Suspect" : "Confirmed"))
+                          // IsSuspect is the stored flag; CoverageState is the judgement, and it uses the
+                          // same settled rule as the release gate and the workspace filter. A link to a
+                          // procedure that is being rewritten reported Confirmed here while the gate refused
+                          // to count it — so a requirement could show "1 confirmed test" beside a workspace
+                          // row labelled Suspect, and both were describing the same link.
+                          !coverage.IsSuspect
+                          && revision.State == TestProcedureState.Approved
+                          && !db.TestProcedureRevisions.Any(sibling => sibling.ProcedureId == procedure.Id
+                              && sibling.State != TestProcedureState.Approved)
+                              ? "Confirmed" : "Suspect"))
             .ToListAsync(ct);
     }
 }

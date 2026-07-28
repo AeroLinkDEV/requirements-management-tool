@@ -1271,7 +1271,10 @@ export default function RequirementsWorkspace({
                 <div className="traceSummary">
                   <article><b>{impact?.parents.length ?? 0}</b><span>upstream</span></article>
                   <article><b>{impact?.children.length ?? 0}</b><span>downstream</span></article>
-                  <article><b>{impact?.tests.filter((item) => !item.isSuspect).length ?? 0}</b><span>confirmed tests</span></article>
+                  {/* coverageState, not the raw isSuspect flag: a link to a procedure that is being
+                      rewritten is not confirmed coverage, and counting it here contradicted the row the
+                      reader clicked to get in. */}
+                  <article><b>{impact?.tests.filter((item) => item.coverageState === "Confirmed").length ?? 0}</b><span>confirmed tests</span></article>
                 </div>
                 <button className="openDigitalThread" onClick={onOpenTraceability}>
                   Open complete Digital Thread →
@@ -1291,7 +1294,7 @@ export default function RequirementsWorkspace({
                 {impact?.children.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
                 {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
                 <h3>Verification coverage</h3>
-                {impact?.tests.map((item) => <article className={`traceRelation${item.isSuspect ? " attention" : ""}`} key={item.revisionId ?? item.id}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · {item.isSuspect ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{item.isSuspect && <button onClick={onOpenVerification}>Resolve in Verification →</button>}</article>)}
+                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.revisionId ?? item.id}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · {unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button onClick={onOpenVerification}>Resolve in Verification →</button>}</article>; })}
                 {!impact?.tests.length && <div className="traceEmpty attention"><span>No verification procedure currently covers this revision.</span></div>}
               </div>
             )}
