@@ -592,3 +592,15 @@ html .procedureRow.focused {
 .correctiveBanner p { margin: 3px 0 0; color: var(--ink-600); font-size: 12px; line-height: 1.45; }
 .correctiveBanner button { min-height: 38px; font-size: 13px; }
 .correctiveHint { max-width: 340px; color: #7a5a13; font-size: 12px; line-height: 1.45; }
+
+/* Procedure browsing. The software side renders 440 of these, so finding one had to stop meaning scrolling. */
+.procedureFilters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 4px; }
+.procedureSearch { display: flex; align-items: center; gap: 6px; min-width: 200px; flex: 1 1 200px; border: 1px solid #d9e1e9; border-radius: 8px; background: white; padding: 0 10px; }
+.procedureSearch span { color: #7c8b9d; font-size: 13px; }
+.procedureSearch input { flex: 1 1 0; min-width: 120px; border: 0; background: transparent; padding: 9px 0; font-size: 13px; outline: 0; }
+.procedureFilters select { min-width: 118px; min-height: 38px; border: 1px solid #d9e1e9; border-radius: 8px; background: white; padding: 0 9px; font-size: 12px; color: #4e5f73; }
+.procedureCount { margin-left: auto; color: var(--ink-500); font-size: 12px; }
+.procedurePager { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 12px 0 2px; }
+.procedurePager button { min-height: 34px; border: 1px solid #d9e1e9; border-radius: 8px; background: white; color: #3c5d71; font-size: 13px; padding: 6px 13px; }
+.procedurePager button:disabled { color: #a8b4c1; }
+.procedurePager span { color: var(--ink-600); font-size: 12px; }
