@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Contracts;
@@ -65,6 +66,16 @@ public static class RequirementsEndpoints
             HttpContext http, AeroLinkDbContext db, EnterpriseRequirementsService enterprise, CancellationToken ct) =>
         {
             if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
+            // Direct filters are validated against the same contract a saved view is stored under, so a
+            // worklist means the same thing whether it arrives as a query string or as a saved record — and
+            // a sort or coverage state this workspace cannot apply is refused rather than silently ignored.
+            var submitted=new JsonObject();
+            void Submit(string key,string? value){if(RequirementFilterValue.HasValue(value))submitted[key]=value;}
+            Submit("search",search);Submit("level",level);Submit("verification",verification);Submit("tag",tag);
+            Submit("state",state);Submit("owner",owner);Submit("sourceScr",sourceScr);Submit("coverageState",coverageState);Submit("sort",sort);
+            var contract=SavedViewContract.Normalize(submitted.ToJsonString(),"[]");
+            if(!contract.Valid)return Results.BadRequest(new{error=contract.Error,code="requirement_filter_invalid"});
+
             var timer=Stopwatch.StartNew();
             await enterprise.SynchronizeProjectAsync(projectId,http.UserAccount().UserName,ct);page=Math.Max(1,page==0?1:page);pageSize=Math.Clamp(pageSize==0?100:pageSize,1,250);
             var artifacts=db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId);
@@ -81,9 +92,13 @@ public static class RequirementsEndpoints
                         select new{artifact,revision};
             if(!string.IsNullOrWhiteSpace(search)){var q=search.Trim().ToLower();current=current.Where(x=>x.artifact.BaseNumber.ToLower().Contains(q)||x.revision.Statement.ToLower().Contains(q)||x.revision.Rationale.ToLower().Contains(q));}
             if(!string.IsNullOrWhiteSpace(verification)){var v=verification.Trim().ToLower();current=current.Where(x=>x.revision.VerificationMethod.ToLower()==v);}
-            if(!string.IsNullOrWhiteSpace(tag)){var t=tag.Trim().ToLower();current=current.Where(x=>db.RequirementRevisionProfiles.Any(p=>p.RevisionId==x.revision.Id&&p.TagsJson.ToLower().Contains(t)));}
+            // Exact tag membership against the normalized index, not a substring of the serialized array —
+            // the tag "safe" matched every requirement tagged "failsafe", and a leading-wildcard scan over
+            // raw JSON can use no index at all.
+            if(RequirementFilterValue.HasValue(tag)){var t=RequirementFilterValue.Normalize(tag);current=current.Where(x=>db.RequirementRevisionTags.Any(p=>p.RevisionId==x.revision.Id&&p.Tag==t));}
             if(!string.IsNullOrWhiteSpace(state)&&Enum.TryParse<RequirementRevisionState>(state,true,out var parsedState))current=current.Where(x=>x.revision.State==parsedState);
-            if(!string.IsNullOrWhiteSpace(owner)){var o=owner.Trim().ToLower();current=current.Where(x=>db.RequirementRevisionProfiles.Any(p=>p.RevisionId==x.revision.Id&&p.AttributesJson.ToLower().Contains(o)));}
+            // The declared owner field, exactly, rather than any attribute value that happens to contain it.
+            if(RequirementFilterValue.HasValue(owner)){var o=RequirementFilterValue.Normalize(owner);current=current.Where(x=>db.RequirementRevisionProfiles.Any(p=>p.RevisionId==x.revision.Id&&p.Owner==o));}
             if(!string.IsNullOrWhiteSpace(sourceScr)){var s=sourceScr.Trim().ToLower();current=current.Where(x=>db.SystemChangeRequests.Any(scr=>scr.Id==x.revision.SourceScrId&&(scr.BaseNumber.ToLower().Contains(s)||scr.Title.ToLower().Contains(s))));}
             if(baselineId is not null)current=current.Where(x=>db.BaselineRequirements.Any(b=>b.BaselineId==baselineId&&b.RevisionId==x.revision.Id));
             if(openComments==true)current=current.Where(x=>db.ArtifactComments.Any(c=>c.ArtifactId==x.artifact.Id&&c.ArtifactType=="Requirement"&&c.State==CollaborationState.Open));

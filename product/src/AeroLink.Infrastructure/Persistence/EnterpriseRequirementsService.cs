@@ -98,6 +98,7 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
                 db.SpecificationNodes.Add(new(spec.Id,parent.Id,StableNumber(artifact.BaseNumber),SpecificationNodeType.Requirement,"",artifact.Id,actor,now));
             }
         }
+        await BackfillFilterIndexAsync(projectId, ct);
         // Recorded only after the backfill actually completed, so a failure part-way through leaves the
         // watermark behind and the next read finishes the work rather than skipping it.
         if(watermark is null)db.ProjectWorkspaceSynchronizations.Add(new ProjectWorkspaceSynchronization(projectId,artifactCount,now));
@@ -125,6 +126,79 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
     }
     public static bool TryLevel(string text,out RequirementLevel level)
     { var value=text.Replace(" ","").Replace("-","").ToLowerInvariant();level=value switch{"system" or "sysr"=>RequirementLevel.System,"highlevel" or "hlr"=>RequirementLevel.HighLevel,"lowlevel" or "llr"=>RequirementLevel.LowLevel,_=>(RequirementLevel)(-1)};return (int)level>=0; }
+    /// <summary>
+    /// Keeps the queryable owner and tag index in step with the authored JSON.
+    ///
+    /// The authored attributes and tag array remain what an author edits and what the UI shows. This writes
+    /// the normalized copies the filters actually search, because a substring scan over serialized JSON is
+    /// both wrong — `safe` matched `failsafe`, an owner fragment matched unrelated attribute values — and
+    /// unindexable.
+    ///
+    /// Done here rather than in a migration because splitting a JSON array is provider-specific SQL, and this
+    /// synchronizer already owns bringing a Project's workspace records up to date. It is idempotent: only
+    /// profiles whose index is missing or stale are touched, so a large Project is walked once and thereafter
+    /// costs one indexed count.
+    /// </summary>
+    private async Task BackfillFilterIndexAsync(Guid projectId, CancellationToken ct)
+    {
+        // The ids are found with an untracked join; the profiles themselves are then loaded tracked, because a
+        // query with AsNoTracking anywhere in it returns untracked entities throughout — and an untracked
+        // entity's changes are silently discarded on save, which is exactly what happened here.
+        var profileIdsToLoad = await (from profile in db.RequirementRevisionProfiles.AsNoTracking()
+                                      join revision in db.RequirementRevisions.AsNoTracking() on profile.RevisionId equals revision.Id
+                                      join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId) on revision.ArtifactId equals artifact.Id
+                                      select profile.Id).ToListAsync(ct);
+        if (profileIdsToLoad.Count == 0) return;
+        var profiles = await db.RequirementRevisionProfiles.Where(x => profileIdsToLoad.Contains(x.Id)).ToListAsync(ct);
+        if (profiles.Count == 0) return;
+
+        var profileIds = profiles.Select(x => x.RevisionId).ToList();
+        var existingTags = (await db.RequirementRevisionTags.AsNoTracking()
+            .Where(x => profileIds.Contains(x.RevisionId)).ToListAsync(ct))
+            .GroupBy(x => x.RevisionId).ToDictionary(x => x.Key, x => x.Select(t => t.Tag).ToHashSet());
+
+        var changed = false;
+        foreach (var profile in profiles)
+        {
+            var owner = RequirementFilterValue.Normalize(ReadOwner(profile.AttributesJson));
+            if (!string.Equals(profile.Owner, owner, StringComparison.Ordinal)) { profile.SetOwner(owner); changed = true; }
+
+            var authored = ReadTags(profile.TagsJson);
+            existingTags.TryGetValue(profile.RevisionId, out var indexed);
+            indexed ??= [];
+            foreach (var tag in authored.Where(x => !indexed.Contains(RequirementFilterValue.Normalize(x))))
+            { db.RequirementRevisionTags.Add(new RequirementRevisionTag(profile.RevisionId, tag)); changed = true; }
+        }
+        if (changed) await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>The owner attribute, read as a field rather than matched as a substring of the whole document.</summary>
+    private static string ReadOwner(string attributesJson)
+    {
+        try
+        {
+            using var parsed = JsonDocument.Parse(string.IsNullOrWhiteSpace(attributesJson) ? "{}" : attributesJson);
+            return parsed.RootElement.ValueKind == JsonValueKind.Object && parsed.RootElement.TryGetProperty("owner", out var owner)
+                ? owner.ValueKind == JsonValueKind.String ? owner.GetString() ?? "" : ""
+                : "";
+        }
+        catch (JsonException) { return ""; }
+    }
+
+    private static List<string> ReadTags(string tagsJson)
+    {
+        try
+        {
+            using var parsed = JsonDocument.Parse(string.IsNullOrWhiteSpace(tagsJson) ? "[]" : tagsJson);
+            if (parsed.RootElement.ValueKind != JsonValueKind.Array) return [];
+            return [.. parsed.RootElement.EnumerateArray()
+                .Where(x => x.ValueKind == JsonValueKind.String)
+                .Select(x => x.GetString() ?? "")
+                .Where(x => x.Trim().Length > 0)];
+        }
+        catch (JsonException) { return []; }
+    }
+
     public static string Hash(byte[] bytes)=>Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
     public static IReadOnlyList<DiffSpan> Diff(string oldText,string newText)
