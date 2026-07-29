@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
@@ -17,6 +18,7 @@ public static class ProblemReportEndpoints
         group.MapPost("", CreateAsync);
         group.MapPost("/from-test-execution/{executionId:guid}", CreateFromFailureAsync);
         group.MapGet("/{id:guid}", DetailAsync);
+        group.MapGet("/{id:guid}/corrective-action", CorrectiveActionAsync);
         group.MapPost("/{id:guid}/investigation", InvestigateAsync);
         group.MapPost("/{id:guid}/resolution", ProposeResolutionAsync);
         group.MapPost("/{id:guid}/verify", VerifyAsync);
@@ -222,6 +224,97 @@ public static class ProblemReportEndpoints
 
     private static object Summary(ProblemReport x) => new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = x.State.ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Classification, x.ReportedBy, x.IsReleaseBlocker, waived = !string.IsNullOrWhiteSpace(x.WaiverRationale), x.UpdatedAt, x.Version };
     private static object Detail(ProblemReport x, IEnumerable<ProblemReportLinkView> links, IEnumerable<ProblemReportRevision> revisions) => new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.Analysis, x.ReportedBy, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.Containment, x.CorrectiveAction, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.WaiverRationale, x.WaivedBy, x.WaivedAt, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), links, revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotHash, x.OccurredAt }) };
+
+    /// <summary>
+    /// Where "record a passing successor execution" should actually take the reader.
+    ///
+    /// The button navigated to a generic System Verification workspace carrying nothing, so a software
+    /// author arrived in the wrong discipline, on a tab about change impact, with no procedure, execution or
+    /// report selected — the primary remediation call to action could not guide anyone to the evidence it
+    /// was asking for.
+    ///
+    /// Resolved here rather than in the browser. A problem report raised from a failure links the execution
+    /// that produced it, and that execution names the exact procedure revision; the discipline follows from
+    /// that procedure's level rather than from a field somebody has to remember to set. One place computes
+    /// it, so the button, the destination and any future caller cannot disagree.
+    /// </summary>
+    private static async Task<IResult> CorrectiveActionAsync(Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var report = await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (report is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
+
+        // Materialized before ordering: SQLite cannot ORDER BY a DateTimeOffset server-side, and the rest of
+        // this codebase already orders these rows in memory for that reason.
+        var originatingLinks = (await db.ProblemReportLinks.AsNoTracking()
+            .Where(x => x.ProblemReportId == id && x.ArtifactType == "TestExecution" && x.Relationship == "OriginatingFailure")
+            .ToListAsync(ct)).OrderBy(x => x.AddedAt).ToList();
+        Guid? executionId = originatingLinks.Count > 0 ? originatingLinks[0].ArtifactId : null;
+
+        Guid? originExecutionId = null, procedureId = null, procedureRevisionId = null;
+        string? procedureNumber = null, procedureTitle = null;
+        TestProcedureLevel? procedureLevel = null;
+        if (executionId is not null)
+        {
+            var executionValue = executionId.Value;
+            var execution = await db.TestExecutions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == executionValue, ct);
+            var revision = execution is null ? null
+                : await db.TestProcedureRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == execution.ProcedureRevisionId, ct);
+            var procedure = revision is null ? null
+                : await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x => x.Id == revision.ProcedureId, ct);
+            if (procedure is not null)
+            {
+                originExecutionId = execution!.Id; procedureId = procedure.Id; procedureRevisionId = revision!.Id;
+                procedureNumber = procedure.BaseNumber; procedureTitle = procedure.Title; procedureLevel = procedure.Level;
+            }
+        }
+
+        // With no originating execution the report was raised by hand, so the discipline comes from whatever
+        // requirement it is about. Falling back to System silently would send half of them to the wrong place.
+        RequirementLevel? requirementLevel = null;
+        if (procedureLevel is null)
+        {
+            var linkedRequirementIds = await db.ProblemReportLinks.AsNoTracking()
+                .Where(x => x.ProblemReportId == id && x.ArtifactType == "Requirement").Select(x => x.ArtifactId).ToListAsync(ct);
+            if (linkedRequirementIds.Count > 0)
+            {
+                var levels = await db.Requirements.AsNoTracking()
+                    .Where(x => linkedRequirementIds.Contains(x.Id)).Select(x => x.Level).Take(1).ToListAsync(ct);
+                if (levels.Count > 0) requirementLevel = levels[0];
+            }
+        }
+
+        var discipline = procedureLevel is not null
+            ? procedureLevel == TestProcedureLevel.System ? "system" : "software"
+            : requirementLevel switch
+            {
+                RequirementLevel.System => "system",
+                RequirementLevel.HighLevel or RequirementLevel.LowLevel => "software",
+                _ => (string?)null,
+            };
+
+        var reason = procedureNumber is not null
+            ? $"Record the successor execution against {procedureNumber}, the procedure whose failure raised this report."
+            : discipline is not null
+                ? "This report was raised by hand, so no originating execution is preselected. Choose the procedure that verifies the affected requirement."
+                : "This report is not linked to a procedure or a requirement, so the applicable verification scope cannot be determined. Link the affected artifact first.";
+
+        return Results.Ok(new
+        {
+            problemReportId = report.Id,
+            problemReportNumber = report.DisplayNumber,
+            available = discipline is not null,
+            discipline,
+            reason,
+            executionId = originExecutionId,
+            procedureId,
+            procedureRevisionId,
+            procedureNumber,
+            procedureTitle,
+            // Naming the authority a handoff needs, rather than only refusing.
+            requiredRole = ProgramRole.TestEngineer.ToString(),
+        });
+    }
 
     private sealed record ProblemReportLinkView(string ArtifactType, Guid ArtifactId, string Relationship, string AddedBy, DateTimeOffset AddedAt);
     private sealed record CreateProblemReportRequest(Guid ProjectId, string Title, string Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? Origin, string? AffectedConfiguration);

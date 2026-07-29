@@ -572,3 +572,23 @@ html .procedureRow.focused {
   outline-offset: 2px;
   background: #f1faf8;
 }
+
+/* Arriving from a problem report. States which record is being corrected and what to do about it, because
+   the destination used to be a generic tab with nothing selected. */
+.correctiveBanner {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  border: 1px solid #b9ddd5;
+  border-radius: var(--radius-md);
+  background: #eff9f6;
+  padding: 13px 15px;
+}
+.correctiveBanner .eyebrow { margin: 0 0 3px; color: #277466; font-size: 12px; font-weight: 750; letter-spacing: .07em; }
+.correctiveBanner b { display: block; color: var(--ink-900); font-size: 14px; }
+.correctiveBanner p { margin: 3px 0 0; color: var(--ink-600); font-size: 12px; line-height: 1.45; }
+.correctiveBanner button { min-height: 38px; font-size: 13px; }
+.correctiveHint { max-width: 340px; color: #7a5a13; font-size: 12px; line-height: 1.45; }
