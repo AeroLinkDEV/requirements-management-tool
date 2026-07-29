@@ -54,4 +54,15 @@ test("the copied saved-view link reopens the view and applies its filters", asyn
 
   await page.goto(copied, { waitUntil: "load" });
   await expect(page.getByLabel("Search requirements")).toHaveValue(search, { timeout: 30_000 });
+
+  // A stable link is handed to somebody else, so the case that matters is the one where the reader has no
+  // session yet: sign in from the link and still arrive at the view it names, not at a dashboard.
+  // Signed in on the link itself rather than through the helper, which navigates to the root first and would
+  // discard the very thing under test.
+  await page.context().clearCookies();
+  await page.goto(copied, { waitUntil: "load" });
+  await page.getByLabel("Username").fill("admin");
+  await page.getByLabel("Password").fill("AeroLink!2026");
+  await page.getByRole("button", { name: /Sign in securely/ }).click();
+  await expect(page.getByLabel("Search requirements")).toHaveValue(search, { timeout: 30_000 });
 });
