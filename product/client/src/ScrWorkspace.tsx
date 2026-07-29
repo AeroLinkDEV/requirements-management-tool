@@ -56,8 +56,13 @@ type Cycle = {
 type Audit = {
   eventType: string;
   actorId: string;
+  /** The sentence a reader sees. Never parsed for meaning. */
   detail: string;
   occurredAt: string;
+  /** Structured technical evidence, when the event carries any. */
+  evidenceJson?: string | null;
+  /** 0 for events written before evidence was separated from the narrative. */
+  schemaVersion?: number;
 };
 type ScrDetail = {
   id: string;
@@ -231,6 +236,61 @@ const proposalComplete = (item: DraftRequirement) =>
       (!(item.isDerived ?? parseObject(item.attributesJson).derived === true) ||
         item.rationale.trim()),
   );
+
+/**
+ * The sentence to show for an audit event.
+ *
+ * Events written before evidence was separated stored a serialized payload in the narrative field, so the
+ * timeline rendered a wall of GUIDs and hashes as the audit story. Those are recognised by their schema
+ * version — never by parsing the string — and given a plain description; the payload itself moves into the
+ * evidence panel, where it belongs and where it is labelled as unrecognised.
+ */
+const auditSummary = (event: Audit) => {
+  const legacyPayload = (event.schemaVersion ?? 0) === 0 && event.detail.trimStart().startsWith("{");
+  if (!legacyPayload) return event.detail;
+  return `${event.eventType.replace(/([A-Z])/g, " $1").trim().toLowerCase()} — recorded before this event carried a written summary.`;
+};
+
+/**
+ * Technical evidence, collapsed and labelled, never the headline.
+ *
+ * Field names come from the record rather than a hardcoded list, so an evidence shape that gains a field
+ * shows it instead of silently dropping it. Values are rendered as text: nothing here is interpreted, so no
+ * stored string can become markup or be mistaken for a semantic signal.
+ */
+function AuditEvidence({ event }: { event: Audit }) {
+  const legacyPayload = (event.schemaVersion ?? 0) === 0 && event.detail.trimStart().startsWith("{");
+  const raw = event.evidenceJson ?? (legacyPayload ? event.detail : null);
+  if (!raw) return null;
+
+  let fields: [string, string][] = [];
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+      fields = Object.entries(parsed).map(([key, value]) => [key, value === null || value === undefined ? "—" : String(value)]);
+  } catch {
+    fields = [];
+  }
+
+  return (
+    <details className="auditEvidence">
+      <summary>{legacyPayload && !event.evidenceJson ? "Technical evidence (recorded in an earlier format)" : "Technical evidence"}</summary>
+      {fields.length ? (
+        <dl>
+          {fields.map(([key, value]) => (
+            <div key={key}>
+              <dt>{key.replace(/([A-Z])/g, " $1").replace(/^./, first => first.toUpperCase())}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="auditEvidenceRaw">{raw}</p>
+      )}
+      <button type="button" onClick={() => void navigator.clipboard?.writeText(raw)}>Copy evidence</button>
+    </details>
+  );
+}
 
 export default function ScrWorkspace({
   api,
@@ -1049,7 +1109,7 @@ export default function ScrWorkspace({
             <section className="workspaceCard">
               <div className="workspaceTitle"><div><h2>Audit history</h2><p>Append-only material events</p></div></div>
               {scr.audit.map((event, index) => (
-                <div className="auditRow" key={`${event.occurredAt}-${index}`}><i /><div><b>{event.eventType.replace(/([A-Z])/g, " $1").trim()}</b><p>{event.detail}</p><small><PersonName userName={event.actorId} /> · {new Date(event.occurredAt).toLocaleString()}</small></div></div>
+                <div className="auditRow" key={`${event.occurredAt}-${index}`}><i /><div><b>{event.eventType.replace(/([A-Z])/g, " $1").trim()}</b><p>{auditSummary(event)}</p><AuditEvidence event={event} /><small><PersonName userName={event.actorId} /> · {new Date(event.occurredAt).toLocaleString()}</small></div></div>
               ))}
             </section>
           </div>

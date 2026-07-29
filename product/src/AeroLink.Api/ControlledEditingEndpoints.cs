@@ -154,8 +154,12 @@ public static class ControlledEditingEndpoints
         db.ArtifactDraftSnapshots.Add(new ArtifactDraftSnapshot(artifact.ProjectId, session.Id, policy.CanonicalType,
             request.ArtifactId, 1, artifact.SnapshotJson, hash, actor.UserName, now));
         if (artifact.AuditAggregateId is Guid auditAggregateId)
+            // The narrative says what happened; the identifiers, the exact lease instant and the adapter are
+            // evidence, and were previously spelled out in the sentence a reader sees.
             db.AuditEvents.Add(new AuditEvent(auditAggregateId, "ArtifactCheckedOut", actor.UserName,
-                $"Checked out {policy.CanonicalType}:{request.ArtifactId} until {session.ExpiresAt:O} using adapter {artifact.Adapter}.", now));
+                "Took exclusive control of the record for editing.", now,
+                JsonSerializer.Serialize(new { canonicalType = policy.CanonicalType, artifactId = request.ArtifactId,
+                    sessionId = session.Id, leaseExpiresAt = session.ExpiresAt, adapter = artifact.Adapter })));
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException)
         {

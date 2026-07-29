@@ -135,11 +135,12 @@ public sealed class ControlledEditingCheckInEngine(
                 resultingHash, artifact.Revision);
             db.ControlledArtifactCheckInEvidence.Add(evidence);
             AddLegacyAudit(artifact.AuditAggregateId, "ArtifactCheckedIn", actor.UserName,
+                $"Checked in the controlled edit, taking the record to version {resultingVersion}.", now,
                 JsonSerializer.Serialize(new { evidenceId = evidence.Id, sessionId = session.Id,
                     sessionVersion = session.Version, adapter = adapter.Name, session.BaseSnapshotHash,
                     resultingSnapshotHash = resultingHash, aggregateVersionBefore = artifact.Version,
                     aggregateVersionAfter = resultingVersion, revisionBefore = artifact.Revision,
-                    revisionAfter = artifact.Revision }), now);
+                    revisionAfter = artifact.Revision }));
             session.Close(EditSessionState.Committed, expectedVersion, now, actor.UserName,
                 $"Checked in through {adapter.Name}; evidence {evidence.Id}.");
             await db.SaveChangesAsync(ct);
@@ -229,11 +230,15 @@ public sealed class ControlledEditingCheckInEngine(
 
     private static string Hash(string value) => EnterpriseRequirementsService.Hash(Encoding.UTF8.GetBytes(value));
 
-    private void AddLegacyAudit(Guid? aggregateId, string eventType, string actor, string detail, DateTimeOffset now)
+    private void AddLegacyAudit(Guid? aggregateId, string eventType, string actor, string detail, DateTimeOffset now,
+        string? evidenceJson = null)
     {
         // The legacy audit_events table is scoped to SystemChangeRequest. Universal evidence is
         // the authoritative audit record for every other artifact family.
-        if (aggregateId is not null) db.AuditEvents.Add(new AuditEvent(aggregateId.Value, eventType, actor, detail, now));
+        //
+        // `detail` is the sentence a reader sees; `evidenceJson` is the structured record behind it. They used
+        // to be one field, which is how a serialized payload of GUIDs and hashes became the audit narrative.
+        if (aggregateId is not null) db.AuditEvents.Add(new AuditEvent(aggregateId.Value, eventType, actor, detail, now, evidenceJson));
     }
 }
 
