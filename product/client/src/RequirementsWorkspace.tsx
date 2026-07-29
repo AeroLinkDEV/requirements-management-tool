@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PersonName } from "./People";
 import { coverageLabel, stateLabel } from './presentation'
+import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import type { FormEvent } from "react";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useFormDraft } from "./autosave";
@@ -417,6 +418,33 @@ export default function RequirementsWorkspace({
     setSpecificationId("");
     setSectionId("");
     setPage(1);
+  };
+  /**
+   * Owner lifecycle. The server is the authority — it answers Not Found for a view that is not yours — so
+   * these read the same failure the API reports rather than guessing at one.
+   */
+  const mutateView = async (view: SavedView, method: "PUT" | "DELETE", body?: unknown) => {
+    setError("");
+    try {
+      await apiRequest(`${api}/api/enterprise-requirements/views/${view.id}`, {
+        method,
+        ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+      });
+      await load();
+    } catch (reason) {
+      recordClientOperationFailure("enterprise.view.lifecycle", reason);
+      setError(operationError(reason, "The saved view could not be updated."));
+    }
+  };
+  const renameView = async (view: SavedView) => {
+    const name = prompt("Rename saved view", view.name);
+    if (name === null || name.trim() === "" || name.trim() === view.name) return;
+    await mutateView(view, "PUT", { name: name.trim() });
+  };
+  const shareView = (view: SavedView, isShared: boolean) => mutateView(view, "PUT", { isShared });
+  const deleteView = async (view: SavedView) => {
+    if (!confirm(`Delete the saved view "${view.name}"? Anyone holding its link will no longer be able to open it.`)) return;
+    await mutateView(view, "DELETE");
   };
   const applyView = (view: SavedView) => {
     try {
@@ -948,14 +976,31 @@ export default function RequirementsWorkspace({
               <span>{data?.views.length ?? 0}</span>
             </summary>
             <div>
+              {/*
+                Owners can now tidy their own views. The product could create them and copy links to them and
+                offered no way to rename, unshare or remove one, so repeated use left duplicates that had to be
+                lived with. Non-owners see a shared view and no controls, which is the same authority the
+                server enforces rather than a second opinion about it.
+              */}
               {data?.views.map((view) => (
-                <button onClick={() => applyView(view)} key={view.id}>
-                  <i>{view.isShared ? "◉" : "○"}</i>
-                  <div>
-                    <b>{view.name}</b>
-                    <small>{view.isShared ? "Shared" : "Personal"}</small>
-                  </div>
-                </button>
+                <div className="savedViewRow" key={view.id}>
+                  <button onClick={() => applyView(view)}>
+                    <i>{view.isShared ? "◉" : "○"}</i>
+                    <div>
+                      <b>{view.name}</b>
+                      <small>{view.isShared ? "Shared" : "Personal"}</small>
+                    </div>
+                  </button>
+                  {view.owned && (
+                    <div className="savedViewActions">
+                      <button type="button" title="Rename this view" onClick={() => renameView(view)}>Rename</button>
+                      <button type="button" title={view.isShared ? "Make personal" : "Share with authorized"} onClick={() => shareView(view, !view.isShared)}>
+                        {view.isShared ? "Unshare" : "Share"}
+                      </button>
+                      <button type="button" title="Delete this view" onClick={() => deleteView(view)}>Delete</button>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           </details>
