@@ -167,7 +167,8 @@ tokens applied through the workspace shell, and **WCAG 2.2 AA as a commitment**:
 
 Authentication no longer drops a user into an implicit FMS workspace. The supported path is
 **Projects → FMS Product Development → Software Builds → build-scoped workspace** (DEC-070).
-Build 1.5 is released and read-only; Build 1.6 is in work and editable. Changing build requires leaving the
+`SW-01.50` (informally Build 1.5) is released and read-only; `SW-01.60` (informally Build 1.6) is in work and
+editable. Baseline and software build are one product concept. Changing build requires leaving the
 workspace through **Back to Software Builds**. There is no in-workspace build switcher, and a released build
 does not show a completion percentage.
 
@@ -179,7 +180,9 @@ is labelled with its originating build without changing workspace context.
 The active navigation deliberately hides Problem Reports, Product Versions, Candidate Baselines and the old
 Change Request Software Builds view (DEC-072). Their implementation remains dormant for potential future reuse;
 it is neither a supported route nor dead code to reconnect or delete without a new decision. Lifecycle Decision
-Room remains visible. The broader Verification redesign is still pending product-owner direction.
+Room remains visible. Verification now separates governed procedure-alignment reviews from evidence/results:
+approved changes create System, Software HLR, and/or Software LLR Test Change Reviews, while only procedures
+explicitly marked during that review require passing evidence before release (DEC-073).
 
 The restart-ready description, routes, issue state and validation evidence are in
 [CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).

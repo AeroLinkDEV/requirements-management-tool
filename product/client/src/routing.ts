@@ -1,6 +1,6 @@
 export type View =
   | "projects" | "builds" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
+  | "verification" | "documents" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
@@ -76,6 +76,10 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (tail[0] === "change-requests" && tail[1]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[1]) };
   if (path === "systems/requirements") return { ...base, view: "requirements", discipline: "system", savedViewId: query.get("view") || undefined };
   if (path === "software/requirements") return { ...base, view: "requirements", discipline: "software", savedViewId: query.get("view") || undefined };
+  if (path === "systems/documents") return { ...base, view: "documents", discipline: "system" };
+  if (path === "software/documents") return { ...base, view: "documents", discipline: "software" };
+  if (path === "system-verification/documents") return { ...base, view: "documents", discipline: "systemTest" };
+  if (path === "software-verification/documents") return { ...base, view: "documents", discipline: "softwareTest" };
   if (tail[0] === "requirements" && tail[1]) return { ...base, view: "requirements", discipline: query.get("discipline") === "software" ? "software" : "system", artifactId: decoded(tail[1]) };
   if (path === "system-verification") return { ...base, view: "verification", discipline: "systemTest" };
   // The problem report a corrective action came from is part of the address, so refresh and back return to
@@ -139,6 +143,11 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "history": return historyPath(discipline === "software" ? "software" : "systems");
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
     case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
+    case "documents": {
+      if (discipline === "systemTest" || discipline === "softwareTest")
+        return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification/documents`;
+      return `${root}/${discipline === "software" ? "software" : "systems"}/documents`;
+    }
     case "problemReports": return `${root}/problem-reports`;
     case "lifecycle": return artifactId ? `${root}/traceability/${encodeURIComponent(artifactId)}` : `${root}/traceability`;
     case "planning": return `${root}/release-planning`;

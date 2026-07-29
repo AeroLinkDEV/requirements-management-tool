@@ -36,12 +36,12 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         db.AddRange(program, project, release15, release16); await db.SaveChangesAsync(ct);
 
         var historical = new List<SystemChangeRequest>();
-        for (var i = 1; i <= 30; i++) historical.Add(BuildHistoricalRequest($"SCR-{i:D8}", ChangeRequestType.System, RequirementLevel.System, 5, (i - 1) * 5, project.Id, release15.Id, start.AddDays(i), "system"));
-        for (var i = 1; i <= 30; i++) historical.Add(BuildHistoricalRequest($"SWCR-{i:D8}", ChangeRequestType.Software, RequirementLevel.HighLevel, i <= 10 ? 14 : 13, (i - 1) * 13 + Math.Min(i - 1, 10), project.Id, release15.Id, start.AddDays(40 + i), "HLR"));
-        for (var i = 1; i <= 45; i++) historical.Add(BuildHistoricalRequest($"SWCR-{i + 30:D8}", ChangeRequestType.Software, RequirementLevel.LowLevel, i <= 25 ? 16 : 15, (i - 1) * 15 + Math.Min(i - 1, 25), project.Id, release15.Id, start.AddDays(80 + i), "LLR"));
+        for (var i = 1; i <= 30; i++) historical.Add(BuildHistoricalRequest($"SCR-{i:D5}", ChangeRequestType.System, RequirementLevel.System, 5, (i - 1) * 5, project.Id, release15.Id, start.AddDays(i), "system"));
+        for (var i = 1; i <= 30; i++) historical.Add(BuildHistoricalRequest($"SWCR-{i:D5}", ChangeRequestType.Software, RequirementLevel.HighLevel, i <= 10 ? 14 : 13, (i - 1) * 13 + Math.Min(i - 1, 10), project.Id, release15.Id, start.AddDays(40 + i), "HLR"));
+        for (var i = 1; i <= 45; i++) historical.Add(BuildHistoricalRequest($"SWCR-{i + 30:D5}", ChangeRequestType.Software, RequirementLevel.LowLevel, i <= 25 ? 16 : 15, (i - 1) * 15 + Math.Min(i - 1, 25), project.Id, release15.Id, start.AddDays(80 + i), "LLR"));
         db.SystemChangeRequests.AddRange(historical); await db.SaveChangesAsync(ct);
 
-        var baseline15 = new CandidateBaseline("SWBL-00000015", 0, project.Id, release15.Id, null, "FMS 1.5 Released Product Baseline", "cm.fms", start.AddDays(150));
+        var baseline15 = new CandidateBaseline("SW-01.50", 0, project.Id, release15.Id, null, "FMS 1.5 Released Software Build", "cm.fms", start.AddDays(150));
         foreach (var request in historical) baseline15.Select(request, "cm.fms", start.AddDays(150));
         baseline15.Freeze("cm.fms", start.AddDays(151)); db.CandidateBaselines.Add(baseline15); await db.SaveChangesAsync(ct);
         await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(baseline15.Id, "cm.fms", start.AddDays(152), ct);
@@ -64,7 +64,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         db.RequirementTraces.AddRange(llrs.Select((x, i) => new RequirementTraceLink(project.Id, x.Revision.Id, hlrs[i % hlrs.Count].Revision.Id, RequirementTraceType.DerivedFrom, "Detailed behavior implements the parent high-level requirement.", start.AddDays(153))));
         await db.SaveChangesAsync(ct);
 
-        var build15 = new SoftwareBuild(project.Id, release15.Id, baseline15.Id, "FMS-1.5.0-RELEASE", "Released operational FMS 1.5 software configuration.", "cm.fms", start.AddDays(160));
+        var build15 = new SoftwareBuild(project.Id, release15.Id, baseline15.Id, "SW-01.50", "Released operational FMS 1.5 software configuration.", "cm.fms", start.AddDays(160));
         db.SoftwareBuilds.Add(build15); await db.SaveChangesAsync(ct);
         var procedures = new List<(TestProcedure Procedure, TestProcedureRevision Revision, List<Guid> Requirements)>();
         procedures.AddRange(BuildProcedures(project.Id, systems.Select(x => x.Revision.Id).ToList(), 75, TestProcedureLevel.System, "SYSTP", start.AddDays(154)));
@@ -105,7 +105,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         foreach (var request in activeRequests.Where(x => x.State is ScrState.Approved or ScrState.SelectedForBaseline))
             await verificationImpact.RaiseForApprovedChangeRequestAsync(request, start.AddDays(305), ct);
         await db.SaveChangesAsync(ct);
-        var baseline16 = new CandidateBaseline("SWBL-00000016", 0, project.Id, release16.Id, baseline15.Id, "FMS 1.6 Working Candidate", "cm.fms", start.AddDays(310));
+        var baseline16 = new CandidateBaseline("SW-01.60", 0, project.Id, release16.Id, baseline15.Id, "FMS 1.6 In-Work Software Build", "cm.fms", start.AddDays(310));
         foreach (var request in activeRequests.Where(x => x.State == ScrState.Approved).Take(2)) baseline16.Select(request, "cm.fms", start.AddDays(311));
         db.CandidateBaselines.Add(baseline16); await db.SaveChangesAsync(ct);
         // The fresh path runs the same ordered steps, so a database seeded today records them as applied
@@ -135,6 +135,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             ("release-campaign", async (id, token) => { await EnsureReleaseCampaignAsync(id, token); return "Release campaign present."; }),
             ("product-line", async (id, token) => { await EnsureProductLineAsync(id, token); return "Product-line configuration present."; }),
             ("verification-impact", ReconcileVerificationImpactAsync),
+            ("test-change-reviews", EnsureTestChangeReviewsAsync),
             ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
         };
 
@@ -147,6 +148,173 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             applied.Add($"{step.Key}: {detail ?? "No change required."}");
         }
         return applied;
+    }
+
+    private async Task<string?> EnsureTestChangeReviewsAsync(Guid programId, CancellationToken ct)
+    {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleAsync(ct);
+        var releases = await db.Releases.Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var released = releases.Single(x => x.Version == "1.5");
+        var inWork = releases.Single(x => x.Version == "1.6");
+        var now = new DateTimeOffset(2024, 11, 28, 14, 0, 0, TimeSpan.Zero);
+
+        var requests = await db.SystemChangeRequests
+            .Include(x => x.RequirementChanges)
+            .Where(x => x.ProjectId == projectId
+                && (x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline))
+            .ToListAsync(ct);
+        var existingReviews = await db.TestChangeReviews
+            .Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var reviewsByRequestAndDiscipline = existingReviews
+            .ToDictionary(x => (x.ChangeRequestId, x.Discipline));
+        var raisedChangeIds = (await db.VerificationImpactItems
+                .Where(x => x.ProjectId == projectId && x.RequirementChangeId != null)
+                .Select(x => x.RequirementChangeId!.Value).ToListAsync(ct))
+            .ToHashSet();
+
+        // The deterministic showcase has 105 historical requests. Build the reconciliation from one
+        // preloaded graph instead of issuing review/item queries per request.
+        var automaticChangeDetection = db.ChangeTracker.AutoDetectChangesEnabled;
+        db.ChangeTracker.AutoDetectChangesEnabled = false;
+        foreach (var request in requests)
+        {
+            foreach (var change in request.RequirementChanges.Where(x =>
+                         x.Kind is RequirementChangeKind.Introduce or RequirementChangeKind.Modify
+                         && !raisedChangeIds.Contains(x.Id)))
+            {
+                var discipline = change.Level switch
+                {
+                    RequirementLevel.System => TestChangeReviewDiscipline.System,
+                    RequirementLevel.HighLevel => TestChangeReviewDiscipline.HighLevelSoftware,
+                    _ => TestChangeReviewDiscipline.LowLevelSoftware
+                };
+                if (!reviewsByRequestAndDiscipline.TryGetValue((request.Id, discipline), out var review))
+                {
+                    review = new TestChangeReview(projectId, request.TargetReleaseId, request.Id,
+                        discipline, request.DisplayNumber, now);
+                    db.TestChangeReviews.Add(review);
+                    reviewsByRequestAndDiscipline.Add((request.Id, discipline), review);
+                }
+                var display = $"{change.BaseNumber}.{change.Revision:D2}";
+                db.VerificationImpactItems.Add(change.Kind == RequirementChangeKind.Introduce
+                    ? VerificationImpactItem.ForIntroducedRequirement(projectId, request.TargetReleaseId,
+                        request.Id, review.Id, change.Id, display, change.VerificationMethod, now)
+                    : VerificationImpactItem.ForModifiedRequirement(projectId, request.TargetReleaseId,
+                        request.Id, review.Id, change.Id, display, change.VerificationMethod, now));
+                raisedChangeIds.Add(change.Id);
+            }
+        }
+        db.ChangeTracker.DetectChanges();
+        db.ChangeTracker.AutoDetectChangesEnabled = automaticChangeDetection;
+        await db.SaveChangesAsync(ct);
+
+        var releasedBaselineId = await db.CandidateBaselines
+            .Where(x => x.ProjectId == projectId && x.ReleaseId == released.Id && x.RequirementsMaterializedAt != null)
+            .Select(x => x.Id).SingleAsync(ct);
+        var releasedItems = await db.VerificationImpactItems
+            .Where(x => x.ReleaseId == released.Id && x.State != VerificationImpactState.Resolved)
+            .ToListAsync(ct);
+        var changeIds = releasedItems.Where(x => x.RequirementChangeId is not null)
+            .Select(x => x.RequirementChangeId!.Value).ToList();
+        var changes = await db.RequirementChanges.Where(x => changeIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, ct);
+        var exactByBaseNumber = await (from member in db.BaselineRequirements
+                                      where member.BaselineId == releasedBaselineId
+                                      join artifact in db.Requirements on member.ArtifactId equals artifact.Id
+                                      join revision in db.RequirementRevisions on member.RevisionId equals revision.Id
+                                      select new { artifact.BaseNumber, artifact.Level, Revision = revision })
+            .ToDictionaryAsync(x => x.BaseNumber, ct);
+        var exactRevisionIds = exactByBaseNumber.Values.Select(x => x.Revision.Id).ToList();
+        var procedureCoverage = (await (from coverage in db.TestCoverage
+                                       where exactRevisionIds.Contains(coverage.RequirementRevisionId)
+                                       join revision in db.TestProcedureRevisions on coverage.ProcedureRevisionId equals revision.Id
+                                       join record in db.TestProcedures on revision.ProcedureId equals record.Id
+                                       where revision.State == TestProcedureState.Approved
+                                       select new
+                                       {
+                                           coverage.RequirementRevisionId,
+                                           Procedure = record,
+                                           Revision = revision
+                                       }).ToListAsync(ct))
+            .GroupBy(x => x.RequirementRevisionId)
+            .ToDictionary(x => x.Key, x => x.First());
+        var procedureSequences = (await db.TestProcedures.Where(x => x.ProjectId == projectId)
+                .GroupBy(x => x.Level).Select(x => new { Level = x.Key, Count = x.Count() }).ToListAsync(ct))
+            .ToDictionary(x => x.Level, x => x.Count);
+
+        db.ChangeTracker.AutoDetectChangesEnabled = false;
+        foreach (var item in releasedItems)
+        {
+            if (item.RequirementChangeId is null || !changes.TryGetValue(item.RequirementChangeId.Value, out var change))
+                continue;
+            var exact = exactByBaseNumber[change.BaseNumber];
+            item.LinkRequirementRevision(exact.Revision.Id, now);
+
+            procedureCoverage.TryGetValue(exact.Revision.Id, out var procedure);
+            if (procedure is null)
+            {
+                var level = exact.Level switch
+                {
+                    RequirementLevel.System => TestProcedureLevel.System,
+                    RequirementLevel.HighLevel => TestProcedureLevel.HighLevel,
+                    _ => TestProcedureLevel.LowLevel
+                };
+                var prefix = level switch
+                {
+                    TestProcedureLevel.System => "SYSTP",
+                    TestProcedureLevel.HighLevel => "HLRTP",
+                    _ => "LLRTP"
+                };
+                var sequence = procedureSequences.GetValueOrDefault(level) + 1;
+                procedureSequences[level] = sequence;
+                var record = new TestProcedure(projectId, $"{prefix}-{sequence:D6}",
+                    $"Verify {change.BaseNumber}", "verification.engineer", now, level);
+                var revision = new TestProcedureRevision(record.Id, 0,
+                    $"Verify the approved behaviour of {change.BaseNumber}.", "Released FMS test environment",
+                    "Exercise the requirement under nominal and boundary conditions.",
+                    "Observed behaviour satisfies the approved requirement.", TestProcedureState.Approved,
+                    "verification.engineer", now);
+                db.AddRange(record, revision, new TestRequirementCoverage(revision.Id, exact.Revision.Id));
+                procedure = new
+                {
+                    RequirementRevisionId = exact.Revision.Id,
+                    Procedure = record,
+                    Revision = revision
+                };
+                procedureCoverage[exact.Revision.Id] = procedure;
+            }
+            item.Resolve("verification.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
+                $"Procedure alignment completed for released software build SW-01.50 under {change.BaseNumber}.",
+                now, procedure.Procedure.Id, procedure.Revision.Id,
+                change.Kind == RequirementChangeKind.Introduce
+                    ? TestProcedureChangeAction.CreateNew
+                    : TestProcedureChangeAction.ModifyExisting,
+                preReleaseEvidenceRequired: false);
+            db.VerificationImpactDecisionHistory.Add(new VerificationImpactDecisionHistory(
+                item.Id, VerificationImpactHistoryAction.Resolved, item.Outcome,
+                item.ResolvedProcedureId, item.ResolvedProcedureRevisionId,
+                item.ResolutionRationale, "verification.engineer", now));
+        }
+        db.ChangeTracker.DetectChanges();
+        db.ChangeTracker.AutoDetectChangesEnabled = automaticChangeDetection;
+        await db.SaveChangesAsync(ct);
+
+        var releasedReviews = await db.TestChangeReviews
+            .Where(x => x.ReleaseId == released.Id && x.State == TestChangeReviewState.Open).ToListAsync(ct);
+        var incompleteReviewIds = (await db.VerificationImpactItems
+                .Where(x => x.ReleaseId == released.Id && x.State != VerificationImpactState.Resolved)
+                .Select(x => x.TestChangeReviewId).Distinct().ToListAsync(ct))
+            .ToHashSet();
+        foreach (var review in releasedReviews)
+        {
+            review.Submit("verification.engineer", !incompleteReviewIds.Contains(review.Id), now);
+            review.Approve("assurance.reviewer",
+                "Historical procedure changes and exact coverage were approved for released software build SW-01.50.", now);
+        }
+        await db.SaveChangesAsync(ct);
+
+        var currentReviews = await db.TestChangeReviews.CountAsync(x => x.ReleaseId == inWork.Id, ct);
+        return $"{releasedReviews.Count} historical Build 1.5 review(s) completed; {currentReviews} Build 1.6 review(s) remain active.";
     }
 
     /// <summary>
@@ -323,7 +491,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var result = new List<SystemChangeRequest>();
         for (var i = 1; i <= 8; i++)
         {
-            var system = i <= 2; var type = system ? ChangeRequestType.System : ChangeRequestType.Software; var number = system ? $"SCR-{30 + i:D8}" : $"SWCR-{75 + i - 2:D8}";
+            var system = i <= 2; var type = system ? ChangeRequestType.System : ChangeRequestType.Software; var number = system ? $"SCR-{30 + i:D5}" : $"SWCR-{75 + i - 2:D5}";
             var request = new SystemChangeRequest(number, 0, projectId, releaseId, i == 1 ? "Introduce oceanic round-robin waypoint sequencing" : $"FMS 1.6 change package {i}", "Operational feedback or a product improvement requires controlled change.", "The impact to requirements, traces, and verification has been assessed.", "Update the applicable FMS behavior and verification assets.", type == ChangeRequestType.System ? "systems.author" : "software.author", now.AddDays(i), type);
             if (i == 1) request.AddRequirementChange(request.AuthorId, "SYSR-000151", 0, RequirementLevel.System, RequirementChangeKind.Introduce, "The FMS shall support configurable round-robin sequencing of eligible oceanic waypoints.", "New FMS 1.6 capability.", "Test", now);
             else { var level = i <= 4 ? RequirementLevel.HighLevel : RequirementLevel.LowLevel; var prefix = level == RequirementLevel.HighLevel ? "HLR" : "LLR"; var max = level == RequirementLevel.HighLevel ? 400 : 700; var idx = ((i * 37) % max) + 1; var row = current[$"{prefix}-{idx:D6}"]; request.AddRequirementChange(request.AuthorId, $"{prefix}-{idx:D6}", row.Revision.Revision + 1, level, RequirementChangeKind.Modify, CurrentStatement(level, idx) + " The behavior shall include the approved FMS 1.6 refinement.", "Product improvement or corrective action.", "Test", now); }

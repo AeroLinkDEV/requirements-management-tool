@@ -135,7 +135,13 @@ export const changeRequestState = (facts: ChangeRequestFacts) => {
  * Here rather than in DocumentActions.tsx because that module renders a component, and a module exporting both
  * components and plain functions loses Fast Refresh.
  */
-export type DocumentTypeName = 'Sysrd' | 'SwrdHighLevel' | 'SwrdLowLevel'
+export type DocumentTypeName =
+  | 'Sysrd'
+  | 'SwrdHighLevel'
+  | 'SwrdLowLevel'
+  | 'SystemTestProcedures'
+  | 'HighLevelTestProcedures'
+  | 'LowLevelTestProcedures'
 
 export type DocumentTarget = { type: DocumentTypeName; label: string }
 

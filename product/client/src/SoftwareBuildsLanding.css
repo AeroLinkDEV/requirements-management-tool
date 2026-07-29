@@ -81,7 +81,7 @@ body:has(.buildsLandingPage) { min-width: 0; }
   box-shadow: 0 7px 21px rgba(18, 38, 61, .05);
 }
 .buildCardTop { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.buildVersion { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid #c7d0da; border-radius: 50%; font: 700 16px var(--font-display); }
+.buildVersion { min-width: 64px; height: 42px; display: grid; place-items: center; box-sizing: border-box; padding: 0 9px; border: 1px solid #c7d0da; border-radius: 22px; white-space: nowrap; font: 700 14px var(--font-display); }
 .buildStatus { border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: 750; line-height: 1; }
 .buildStatus.released { border: 1px solid #91cfa5; background: #e9f7ed; color: #207044; }
 .buildStatus.in-work { border: 1px solid #58a2d4; background: #eef7fd; color: #12659d; }

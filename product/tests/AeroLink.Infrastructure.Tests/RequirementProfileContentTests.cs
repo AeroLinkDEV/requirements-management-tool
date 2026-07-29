@@ -32,8 +32,8 @@ public sealed class RequirementProfileContentTests
                 var program = new ProgramRecord("Content Program", "CTP");
                 var project = new ProjectRecord(program.Id, "Software", "Content Software");
                 var release = new SoftwareRelease(project.Id, "1.0", false);
-                var scr = new SystemChangeRequest("SCR-00000700", 0, project.Id, release.Id, "Content", "P", "A", "S", "author", now);
-                var baseline = new CandidateBaseline("SWBL-00000700", 0, project.Id, release.Id, null, "Candidate", "cm", now);
+                var scr = new SystemChangeRequest("SCR-00700", 0, project.Id, release.Id, "Content", "P", "A", "S", "author", now);
+                var baseline = new CandidateBaseline("SW-70.00", 0, project.Id, release.Id, null, "Candidate", "cm", now);
                 var artifact = new RequirementArtifact(project.Id, "SYSR-00000700", RequirementLevel.System, now);
                 // An apostrophe and an angle bracket, because the old path escaped them into entities that
                 // then had to be read back as literal text.

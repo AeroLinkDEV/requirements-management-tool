@@ -300,7 +300,7 @@ public sealed class ControlledEditingCheckInEngineTests
     public async Task Trace_link_adapter_rejects_identity_changes_and_applies_an_authorized_proposal_update()
     {
         await using var scenario = await Scenario.CreateAsync();
-        var baseline = new CandidateBaseline("SWBL-000001", 0, scenario.Project.Id,
+        var baseline = new CandidateBaseline("SW-00.10", 0, scenario.Project.Id,
             (await scenario.Db.Releases.SingleAsync()).Id, null, "Trace support", scenario.Actor.UserName, scenario.Now);
         var source = new RequirementArtifact(scenario.Project.Id, "SYSR-000001", RequirementLevel.System, scenario.Now);
         var target = new RequirementArtifact(scenario.Project.Id, "SYSR-000002", RequirementLevel.System, scenario.Now);
@@ -328,7 +328,7 @@ public sealed class ControlledEditingCheckInEngineTests
     {
         await using var scenario = await Scenario.CreateAsync();
         var release = await scenario.Db.Releases.SingleAsync();
-        var baseline = new CandidateBaseline("SWBL-000002", 0, scenario.Project.Id, release.Id, null,
+        var baseline = new CandidateBaseline("SW-00.20", 0, scenario.Project.Id, release.Id, null,
             "Original release plan", scenario.Actor.UserName, scenario.Now);
         scenario.Db.CandidateBaselines.Add(baseline);
         await scenario.Db.SaveChangesAsync();
@@ -443,7 +443,7 @@ public sealed class ControlledEditingCheckInEngineTests
             var program = new ProgramRecord("Controlled Editing Program", $"CE{Guid.NewGuid():N}"[..12]);
             var project = new ProjectRecord(program.Id, "Controlled Product", "Flight Management System");
             var release = new SoftwareRelease(project.Id, "1.0", false);
-            var scr = new SystemChangeRequest("SCR-00000001", 0, project.Id, release.Id, "Original title",
+            var scr = new SystemChangeRequest("SCR-00001", 0, project.Id, release.Id, "Original title",
                 "Original problem", "Original analysis", "Original solution", "engineer", now);
             db.AddRange(program, project, release, scr);
             await db.SaveChangesAsync();

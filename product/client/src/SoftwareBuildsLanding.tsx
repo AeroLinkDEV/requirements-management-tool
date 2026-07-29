@@ -30,6 +30,11 @@ const softwareBuilds: readonly BuildDefinition[] = [
   { id: "fms-1-6", version: "1.6", status: "in-work", statusLabel: "In Work", title: "Current in-work build", description: "Ongoing enhancements and integration for the upcoming release.", isAccessible: true, isReleased: false, isReadOnly: false, isCurrent: true, sortOrder: 4 },
 ];
 
+const officialBuildName = (version: string) => {
+  const [major, minor] = version.split(".").map(Number);
+  return `SW-${String(major).padStart(2, "0")}.${String(minor * 10).padStart(2, "0")}`;
+};
+
 function MetadataIcon({ kind }: { kind: "owner" | "created" | "phase" }) {
   const path = kind === "owner"
     ? <><circle cx="8" cy="6" r="3"/><circle cx="18" cy="8" r="3"/><path d="M2 18c0-4 3-7 6-7s6 3 6 7M13 18c0-3 2-6 5-6s5 3 5 6"/></>
@@ -105,7 +110,7 @@ export default function SoftwareBuildsLanding({
                     data-build-version={build.version}
                   >
                     <div className="buildCardTop">
-                      <strong className="buildVersion">{build.version}</strong>
+                      <strong className="buildVersion">{officialBuildName(build.version)}</strong>
                       <span className={`buildStatus ${build.status}`}>{build.statusLabel}</span>
                     </div>
                     <h3>{build.title}</h3>
@@ -114,12 +119,12 @@ export default function SoftwareBuildsLanding({
                       type="button"
                       disabled={!enabled}
                       onClick={() => release && onOpenBuild(release)}
-                      aria-label={`Open build ${build.version}`}
+                      aria-label={`Open software build ${officialBuildName(build.version)}`}
                     >
                       <span aria-hidden="true">↗</span> Open build
                     </button>
-                    {build.isReadOnly && enabled && <small>Read-only historical workspace</small>}
-                    {build.isCurrent && <small>Active development workspace</small>}
+                    {build.isReadOnly && enabled && <small>Informally Build {build.version} Â· read-only historical workspace</small>}
+                    {build.isCurrent && <small>Informally Build {build.version} Â· active development workspace</small>}
                   </article>
                   {index < softwareBuilds.length - 1 && <span className="buildConnector" aria-hidden="true">→</span>}
                 </li>

@@ -953,6 +953,25 @@ Future entries use:
   available. The broader Verification redesign is intentionally deferred; current verification behavior is
   simplified only where required by DEC-071 and the three-way Command Center.
 
+### DEC-073 - One Official Software-Build Identity and Governed Test Change Reviews
+
+- **Date:** 2026-07-29
+- **Status:** Accepted
+- **Decision:** A baseline and software build are one product concept. The official identifier derives from the
+  release version (`1.6` becomes `SW-01.60`); “Build 1.6” is informal wording. SCR/SWCR identifiers use five
+  digits for existing and future records. Every approved change request creates one controlled Test Change
+  Review per affected System, Software HLR, or Software LLR discipline.
+- **Rationale:** Separate baseline/build names implied two configurations where the product owner intends one.
+  Verification procedure maintenance is specialist downstream work, not author impact disposition. Treating
+  each approved change as a governed discipline-specific review creates a clear handoff and release gate.
+- **Consequences:** Existing SCR/SWCR and FMS software-build identifiers are destructively normalized by
+  migration. Each Test Change Review records create/link/modify/retire/no-test decisions and requires complete
+  decisions plus independent approval. Procedure alignment is required for release. Only procedures explicitly
+  marked during that review require passing evidence before release; other evidence may be captured after
+  release. A failure remains attached to the tested released build, and software-caused correction occurs in a
+  later build rather than mutating the released one. The verification workspace exposes the active official
+  software-build identity without a build selector.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

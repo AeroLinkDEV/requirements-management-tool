@@ -28,7 +28,7 @@ public sealed class ReviewWorkflowTests
 
     private static SystemChangeRequest ReadyScr()
     {
-        var scr = new SystemChangeRequest("SCR-00000001", 0, Guid.NewGuid(), Guid.NewGuid(), "Oceanic routing",
+        var scr = new SystemChangeRequest("SCR-00001", 0, Guid.NewGuid(), Guid.NewGuid(), "Oceanic routing",
             "A defect exists.", "It was analyzed.", "It will be fixed.", "author", Now);
         scr.AddRequirementChange("author", "REQ-00000001", 1, RequirementLevel.System,
             RequirementChangeKind.Modify, "The FMS shall sequence waypoints.", "Because.", "Test", Now,

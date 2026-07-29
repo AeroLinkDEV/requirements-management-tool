@@ -96,7 +96,7 @@ public sealed class ControlledEditingCheckInApiTests
         var program = new ProgramRecord("Check-In API Program", $"CI{Guid.NewGuid():N}"[..12]);
         var project = new ProjectRecord(program.Id, "Controlled Product", "Flight Management System");
         var release = new SoftwareRelease(project.Id, "1.0", false);
-        var scr = new SystemChangeRequest("SCR-00000001", 0, project.Id, release.Id, "Original title",
+        var scr = new SystemChangeRequest("SCR-00001", 0, project.Id, release.Id, "Original title",
             "Original problem", "Original analysis", "Original solution", "admin", now);
         db.AddRange(program, project, release, scr);
         await db.SaveChangesAsync();

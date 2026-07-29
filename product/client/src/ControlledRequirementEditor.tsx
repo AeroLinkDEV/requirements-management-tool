@@ -276,7 +276,8 @@ export default function ControlledRequirementEditor({
               {item.kind === "Modify" ? "Select the requirement to modify" : "Select the requirement to retire"}
             </b>
             <span>
-              Search the current controlled repository. AeroLink will lock the exact identity and next revision.
+              Search by requirement identifier or words in the requirement. AeroLink will lock the exact identity
+              and next revision.
             </span>
           </div>
           <label>
@@ -285,14 +286,14 @@ export default function ControlledRequirementEditor({
               aria-label={`Find controlled requirement ${index + 1}`}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Type any identifier fragment, for example 0150"
+              placeholder="Search identifier or requirement wording"
               autoComplete="off"
             />
           </label>
           {lookupBusy && <small className="lookupStatus">Searching…</small>}
           {lookupError && <small className="lookupStatus error">{lookupError}</small>}
           {!lookupBusy && query.trim().length >= 2 && !results.length && !lookupError && (
-            <small className="lookupStatus">No permitted requirements match this identifier.</small>
+            <small className="lookupStatus">No permitted requirements match that identifier or wording.</small>
           )}
           {!!results.length && (
             <div className="proposalLookupResults">

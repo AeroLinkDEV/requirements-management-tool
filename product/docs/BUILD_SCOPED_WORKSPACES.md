@@ -2,7 +2,9 @@
 
 ## Decision
 
-The existing `SoftwareRelease` record is the durable software-build workspace identity. AeroLink does not
+The existing `SoftwareRelease` record is the durable software-build workspace identity. Its official display
+name is derived deterministically (`1.6` becomes `SW-01.60`); “Build 1.6” remains acceptable informal wording.
+A baseline and software build are the same product concept. AeroLink does not
 introduce a second mutable "active build" table or a browser-session selection record.
 
 An entered workspace is identified by the existing route tuple:
@@ -28,12 +30,12 @@ The build boundary follows relationships that already exist:
 | Content | Build ownership |
 | --- | --- |
 | Change requests and reviews | `SystemChangeRequest.TargetReleaseId` |
-| Candidate and frozen baselines | `CandidateBaseline.ReleaseId` |
+| Software build configuration (persisted as candidate/frozen baseline) | `CandidateBaseline.ReleaseId` |
 | Effective requirement snapshot | exact `BaselineRequirementSelection` rows for the resolved build baseline |
 | Generated controlled documents | `ControlledDocument.ReleaseId` and `BaselineId` |
 | Immutable software builds | `SoftwareBuild.ReleaseId` and `BaselineId` |
 | Release campaigns and approvals | `ReleaseCampaign.ReleaseId` and `BaselineId` |
-| Verification impact | `VerificationImpact.ReleaseId` |
+| Test change reviews and procedure-impact decisions | `TestChangeReview.ReleaseId` and `VerificationImpact.ReleaseId` |
 | Test executions | `TestExecution.ReleaseId`; an optional immutable `SoftwareBuildId` adds exact configuration provenance |
 | Problem reports | explicit `ProblemReportLink` to the owning `SoftwareRelease`; failure-origin reports derive it from their execution build |
 | Requirement history | revision plus source SCR and effective baseline; historical rows retain their origin |
@@ -71,9 +73,23 @@ API clients that do not send a browser workspace context retain their existing e
 keeps integrations and administrative automation deterministic; their project/release authorization continues
 to be enforced by endpoint and domain rules.
 
+## Verification alignment and release evidence
+
+Approval of a change request automatically creates one controlled Test Change Review for each affected
+discipline: System, Software HLR, or Software LLR. A mixed-level software request therefore creates two
+independent reviews. Verification engineers decide whether to create, link, modify, retire, or omit a test
+procedure; the review cannot be submitted until every item is decided, and an approver closes it.
+
+Procedure alignment is always a release gate. Execution evidence is a release gate only for the subset of
+procedures explicitly marked **Evidence required before software-build release** during the Test Change Review.
+All other execution/evidence work may continue after release. A failed post-release test remains evidence
+against that released software build. If software caused the failure, correction is made through a change
+request in a later software build; the released build is never rewritten.
+
 ## Schema impact
 
-`TestExecution.ReleaseId` is the one schema addition. A verification result can be recorded while a release is
+`TestExecution.ReleaseId`, `TestChangeReview`, and the review/action/pre-release-evidence fields on
+`VerificationImpactItem` are the schema additions. A verification result can be recorded while a release is
 in work, before an immutable `SoftwareBuild` provenance record exists, so deriving workspace ownership only
 through optional `SoftwareBuildId` left those results without an unambiguous build boundary. The migration
 backfills existing execution rows from their linked software build and leaves genuinely legacy unlinked rows

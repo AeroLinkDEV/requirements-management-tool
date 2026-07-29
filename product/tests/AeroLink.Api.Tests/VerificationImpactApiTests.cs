@@ -29,12 +29,12 @@ public sealed class VerificationImpactApiTests
         var program = new ProgramRecord("Verification Program", "VIP");
         var project = new ProjectRecord(program.Id, "Software", "Verification Software");
         var release = new SoftwareRelease(project.Id, "1.6", false);
-        var scr = new SystemChangeRequest("SCR-00000900", 0, project.Id, release.Id, "Oceanic", "P", "A", "S", "author", now);
+        var scr = new SystemChangeRequest("SCR-00900", 0, project.Id, release.Id, "Oceanic", "P", "A", "S", "author", now);
         scr.AddRequirementChange("author", "SYSR-00000901", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
             "The FMS shall sequence oceanic waypoints.", "New capability", "Analysis", now);
         scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
         scr.ApproveActiveStage("reviewer", now);
-        var baseline = new CandidateBaseline("SWBL-00000900", 0, project.Id, release.Id, null, "Candidate", "cm", now);
+        var baseline = new CandidateBaseline("SW-90.00", 0, project.Id, release.Id, null, "Candidate", "cm", now);
         baseline.Select(scr, "cm", now);
         db.AddRange(program, project, release, scr, baseline);
 

@@ -94,7 +94,7 @@ public static class BaselineEndpoints
             if (!string.IsNullOrWhiteSpace(search)) { var q = search.Trim().ToLower(); source = source.Where(x => x.BuildNumber.ToLower().Contains(q) || x.Description.ToLower().Contains(q)); }
             var joined = from build in source join release in db.Releases.AsNoTracking() on build.ReleaseId equals release.Id join baseline in db.CandidateBaselines.AsNoTracking() on build.BaselineId equals baseline.Id
                 select new { build.Id, build.BuildNumber, build.Description, state = build.State.ToString(), build.RecordedBy, build.RecordedAt, build.ReleasedAt,
-                    releaseId = release.Id, release.Version, baselineId = baseline.Id, baselineDisplayNumber = baseline.BaseNumber + "." + (baseline.Revision < 10 ? "0" : "") + baseline.Revision,
+                    releaseId = release.Id, release.Version, baselineId = baseline.Id, baselineDisplayNumber = ArtifactNumber.Display(baseline.BaseNumber, baseline.Revision),
                     baseline.ContentHash, scrCount = baseline.Selections.Count };
             var items = await (db.Database.IsSqlite() ? joined.OrderByDescending(x => x.BuildNumber) : joined.OrderByDescending(x => x.RecordedAt)).ToListAsync(ct);
             return Results.Ok(items);
@@ -108,8 +108,8 @@ public static class BaselineEndpoints
             if (baseline.State != CandidateBaselineState.Frozen) return Results.BadRequest(new { error = "A build can only reference a frozen baseline." });
             if (baseline.RequirementsMaterializedAt is null) return Results.BadRequest(new { error = "Materialize the authoritative requirement baseline before recording a software build." });
             if (baseline.ProjectId != request.ProjectId || baseline.ReleaseId != request.ReleaseId) return Results.BadRequest(new { error = "Build, release, and baseline must belong to the same project context." });
-            if (await db.SoftwareBuilds.AnyAsync(x => x.ProjectId == request.ProjectId && x.BuildNumber == request.BuildNumber.Trim(), ct)) return Results.Conflict(new { error = "That build number already exists in this project." });
-            try { var build = new SoftwareBuild(request.ProjectId, request.ReleaseId, request.BaselineId, request.BuildNumber, request.Description, http.UserAccount().UserName, DateTimeOffset.UtcNow);
+            if (await db.SoftwareBuilds.AnyAsync(x => x.BaselineId == baseline.Id, ct)) return Results.Conflict(new { error = "This software build has already been recorded." });
+            try { var build = new SoftwareBuild(request.ProjectId, request.ReleaseId, request.BaselineId, baseline.DisplayNumber, request.Description, http.UserAccount().UserName, DateTimeOffset.UtcNow);
                 db.SoftwareBuilds.Add(build); await db.SaveChangesAsync(ct); return Results.Created($"/api/builds/{build.Id}", new { build.Id, build.BuildNumber }); }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -134,7 +134,7 @@ public static class BaselineEndpoints
         {
             var items = await db.CandidateBaselines.AsNoTracking().Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId)
                 .OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision).Select(x => new { x.Id, x.BaseNumber, x.Revision, x.Name, state = x.State.ToString(), x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, selectionCount = x.Selections.Count }).ToListAsync(ct);
-            return Results.Ok(items.Select(x => new { x.Id, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.Name, x.state, x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, x.selectionCount }));
+            return Results.Ok(items.Select(x => new { x.Id, displayNumber = ArtifactNumber.Display(x.BaseNumber, x.Revision), x.Name, x.state, x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, x.selectionCount }));
         });
 
         app.MapGet("/api/baselines/predecessors", async (Guid projectId, Guid releaseId, AeroLinkDbContext db, CancellationToken ct) =>
@@ -152,14 +152,17 @@ public static class BaselineEndpoints
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
             try
             {
-                if (!await db.Releases.AnyAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId && !x.IsReleased, ct))
+                var release = await db.Releases.SingleOrDefaultAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId && !x.IsReleased, ct);
+                if (release is null)
                     return Results.BadRequest(new { error = "Candidate baselines can only be created for an unreleased version in this project." });
+                if (await db.CandidateBaselines.AnyAsync(x => x.ProjectId == request.ProjectId && x.ReleaseId == request.ReleaseId, ct))
+                    return Results.Conflict(new { error = "A software build already exists for this release." });
                 var priorProductExists = await db.CandidateBaselines.AnyAsync(x => x.ProjectId == request.ProjectId && x.ReleaseId != request.ReleaseId && x.RequirementsMaterializedAt != null, ct);
                 if (priorProductExists && request.PredecessorBaselineId is null)
                     return Results.BadRequest(new { error = "Select the exact predecessor product baseline that this candidate inherits." });
                 if (request.PredecessorBaselineId is not null && !await db.CandidateBaselines.AnyAsync(x => x.Id == request.PredecessorBaselineId && x.ProjectId == request.ProjectId && x.ReleaseId != request.ReleaseId && x.RequirementsMaterializedAt != null, ct))
                     return Results.BadRequest(new { error = "The predecessor must be a materialized baseline from this project." });
-                var baseline = new CandidateBaseline(request.BaseNumber, request.Revision, request.ProjectId, request.ReleaseId,
+                var baseline = new CandidateBaseline(SoftwareBuildIdentifier.FromVersion(release.Version), 0, request.ProjectId, request.ReleaseId,
                     request.PredecessorBaselineId, request.Name, http.UserAccount().UserName, DateTimeOffset.UtcNow);
                 await repository.AddAsync(baseline, ct); await repository.SaveAsync(ct);
                 return Results.Created($"/api/baselines/{baseline.Id}", ApiMap.Baseline(baseline));

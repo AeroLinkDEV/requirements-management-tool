@@ -59,8 +59,8 @@ public sealed class NotificationOutboxTests
     }
 
     private static UserNotification Notification(Guid projectId, string recipient = "approver.user") =>
-        new(projectId, recipient, "ReviewActivated", "Review SCR-00000031.00",
-            "You are now authorized to review SCR-00000031.00: Oceanic routing.", "scr:11111111-1111-1111-1111-111111111111", null, Now);
+        new(projectId, recipient, "ReviewActivated", "Review SCR-00031.00",
+            "You are now authorized to review SCR-00031.00: Oceanic routing.", "scr:11111111-1111-1111-1111-111111111111", null, Now);
 
     [Fact]
     public async Task Raising_a_notification_queues_its_delivery_without_anyone_asking()
@@ -123,7 +123,7 @@ public sealed class NotificationOutboxTests
             Assert.Equal(1, result.Sent);
             var message = Assert.Single(sender.Sent);
             Assert.Equal("approver@example.test", message.To);
-            Assert.Contains("SCR-00000031.00", message.Subject);
+            Assert.Contains("SCR-00031.00", message.Subject);
             Assert.Contains("https://aerolink.example.test/open/scr/11111111-1111-1111-1111-111111111111", message.PlainTextBody);
             Assert.Contains("/api/notifications/unsubscribe", message.PlainTextBody);
             Assert.Equal(NotificationDeliveryState.Sent, (await db.NotificationDeliveries.AsNoTracking().SingleAsync()).State);

@@ -7,8 +7,12 @@ using Microsoft.EntityFrameworkCore;
 namespace AeroLink.Api;
 
 public sealed record AssignVerificationImpactRequest(string EngineerId);
-public sealed record ResolveVerificationImpactRequest(VerificationImpactOutcome Outcome, string Rationale, Guid? ProcedureId);
+public sealed record ResolveVerificationImpactRequest(VerificationImpactOutcome Outcome, string Rationale, Guid? ProcedureId,
+    TestProcedureChangeAction? ProcedureChangeAction = null, bool PreReleaseEvidenceRequired = false);
 public sealed record ReopenVerificationImpactRequest(string Rationale);
+public sealed record SubmitTestChangeReviewRequest(string? Rationale = null);
+public sealed record ApproveTestChangeReviewRequest(string Rationale);
+public sealed record ReturnTestChangeReviewRequest(string Rationale);
 
 public static class VerificationImpactEndpoints
 {
@@ -27,11 +31,48 @@ public static class VerificationImpactEndpoints
             return Results.Ok(await MapAsync(items, db, ct));
         });
 
+        app.MapGet("/api/releases/{releaseId:guid}/test-change-reviews", async (Guid releaseId,
+            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var projectId = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
+                .Select(x => x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId == Guid.Empty) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var reviews = await db.TestChangeReviews.AsNoTracking()
+                .Where(x => x.ReleaseId == releaseId)
+                .OrderBy(x => x.State).ThenBy(x => x.Discipline).ThenBy(x => x.CreatedAt)
+                .ToListAsync(ct);
+            var reviewIds = reviews.Select(x => x.Id).ToList();
+            var items = await db.VerificationImpactItems.AsNoTracking()
+                .Where(x => reviewIds.Contains(x.TestChangeReviewId)).ToListAsync(ct);
+            return Results.Ok(reviews.Select(review => new
+            {
+                review.Id,
+                review.ProjectId,
+                review.ReleaseId,
+                review.ChangeRequestId,
+                discipline = review.Discipline.ToString(),
+                state = review.State.ToString(),
+                review.SourceChangeRequestNumber,
+                review.AssignedEngineerId,
+                review.SubmittedBy,
+                review.SubmittedAt,
+                review.ApprovedBy,
+                review.ApprovedAt,
+                review.ApprovalRationale,
+                totalItems = items.Count(x => x.TestChangeReviewId == review.Id),
+                resolvedItems = items.Count(x => x.TestChangeReviewId == review.Id && x.State == VerificationImpactState.Resolved),
+                preReleaseEvidenceItems = items.Count(x => x.TestChangeReviewId == review.Id && x.PreReleaseEvidenceRequired)
+            }));
+        });
+
         app.MapPost("/api/verification-impact/{id:guid}/assign", async (Guid id, AssignVerificationImpactRequest request,
             HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var item = await db.VerificationImpactItems.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (item is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == item.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build verification records are read-only." });
             if (!await http.HasProjectRoleAsync(db, identity, item.ProjectId, ct, ProgramRole.TestLead))
                 return Results.Forbid();
             try
@@ -48,6 +89,8 @@ public static class VerificationImpactEndpoints
         {
             var item = await db.VerificationImpactItems.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (item is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == item.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build verification records are read-only." });
             if (!await http.HasProjectRoleAsync(db, identity, item.ProjectId, ct,
                     ProgramRole.TestEngineer, ProgramRole.TestLead))
                 return Results.Forbid();
@@ -66,7 +109,8 @@ public static class VerificationImpactEndpoints
                 var now = DateTimeOffset.UtcNow;
                 var actor = http.UserAccount().UserName;
                 item.Resolve(actor, request.Outcome, request.Rationale, now,
-                    selectedProcedure?.ProcedureId, selectedProcedure?.RevisionId);
+                    selectedProcedure?.ProcedureId, selectedProcedure?.RevisionId,
+                    request.ProcedureChangeAction, request.PreReleaseEvidenceRequired);
                 db.VerificationImpactDecisionHistory.Add(new VerificationImpactDecisionHistory(
                     item.Id, VerificationImpactHistoryAction.Resolved, item.Outcome,
                     item.ResolvedProcedureId, item.ResolvedProcedureRevisionId,
@@ -78,11 +122,70 @@ public static class VerificationImpactEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        app.MapPost("/api/test-change-reviews/{id:guid}/submit", async (Guid id, SubmitTestChangeReviewRequest request,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build test change reviews are read-only." });
+            if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
+                return Results.Forbid();
+            try
+            {
+                var allResolved = await db.VerificationImpactItems
+                    .Where(x => x.TestChangeReviewId == id)
+                    .AllAsync(x => x.State == VerificationImpactState.Resolved, ct);
+                review.Submit(http.UserAccount().UserName, allResolved, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { review.Id, state = review.State.ToString() });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/test-change-reviews/{id:guid}/approve", async (Guid id, ApproveTestChangeReviewRequest request,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build test change reviews are read-only." });
+            if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestLead, ProgramRole.Approver))
+                return Results.Forbid();
+            try
+            {
+                review.Approve(http.UserAccount().UserName, request.Rationale, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { review.Id, state = review.State.ToString() });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/test-change-reviews/{id:guid}/return", async (Guid id, ReturnTestChangeReviewRequest request,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build test change reviews are read-only." });
+            if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestLead, ProgramRole.Approver))
+                return Results.Forbid();
+            try
+            {
+                review.ReturnToWork(http.UserAccount().UserName, request.Rationale, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { review.Id, state = review.State.ToString() });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         app.MapPost("/api/verification-impact/{id:guid}/reopen", async (Guid id, ReopenVerificationImpactRequest request,
             HttpContext http, AeroLinkDbContext db, IdentityService identity, VerificationImpactService service, CancellationToken ct) =>
         {
             var item = await db.VerificationImpactItems.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (item is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == item.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build verification records are read-only." });
             if (!await http.HasProjectRoleAsync(db, identity, item.ProjectId, ct,
                     ProgramRole.TestEngineer, ProgramRole.TestLead))
                 return Results.Forbid();
@@ -142,6 +245,7 @@ public static class VerificationImpactEndpoints
                 x.Id,
                 x.ReleaseId,
                 x.ChangeRequestId,
+                x.TestChangeReviewId,
                 trigger = x.Trigger.ToString(),
                 state = x.State.ToString(),
                 x.SubjectDisplayNumber,
@@ -153,6 +257,8 @@ public static class VerificationImpactEndpoints
                 x.AssignedByLeadId,
                 x.AssignedAt,
                 outcome = x.Outcome?.ToString(),
+                procedureChangeAction = x.ProcedureChangeAction?.ToString(),
+                x.PreReleaseEvidenceRequired,
                 x.ResolvedProcedureId,
                 x.ResolvedProcedureRevisionId,
                 resolvedProcedure = procedure is null ? null : new

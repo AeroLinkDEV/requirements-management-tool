@@ -296,6 +296,7 @@ export default function ScrWorkspace({
   const [mode, setMode] = useState<"view" | "edit" | "approvers">("view");
   const [reviewMode, setReviewMode] = useState<"Sequential" | "Parallel">("Sequential");
   const [error, setError] = useState("");
+  const [loadFailure, setLoadFailure] = useState("");
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState("");
   const [signing, setSigning] = useState(false);
@@ -322,8 +323,16 @@ export default function ScrWorkspace({
   }, [api, scrId]);
 
   const load = useCallback(async () => {
-    const response = await fetch(`${api}/api/scrs/${scrId}`);
-    if (response.ok) {
+    setLoadFailure("");
+    try {
+      const response = await fetch(`${api}/api/scrs/${scrId}`);
+      if (!response.ok) {
+        setLoadFailure(response.status === 404
+          ? "No originating change request is available for this requirement."
+          : "The originating change request could not be loaded in this build workspace.");
+        return;
+      }
+      {
       const detail = (await response.json()) as ScrDetail;
       onDisciplineResolved(detail.type === "Software" ? "software" : "system");
       setScr(detail);
@@ -339,6 +348,9 @@ export default function ScrWorkspace({
         });
         setRequirements(mapRequirements(detail.requirementChanges));
       }
+      }
+    } catch {
+      setLoadFailure("The originating change request could not be loaded. Check the AeroLink service and try again.");
     }
     await loadStatus();
   }, [api, loadStatus, mode, onDisciplineResolved, scrId]);
@@ -752,6 +764,14 @@ export default function ScrWorkspace({
       return next;
     });
 
+  if (!scr && loadFailure) return <main className="scrLoading missingControlledRecord">
+    <section>
+      <p className="eyebrow">CHANGE REQUEST DETAILS</p>
+      <h1>No change request record is available</h1>
+      <p>{loadFailure}</p>
+      <p>This is where the details of the change request that introduced or modified this requirement would be shown.</p>
+    </section>
+  </main>;
   if (!scr) return <main className="scrLoading">Loading controlled record…</main>;
 
   const latest = [...scr.reviewCycles].sort((a, b) => b.sequence - a.sequence)[0];
@@ -990,7 +1010,7 @@ export default function ScrWorkspace({
                     on the page and its label says which of the two applies. A Draft is checked out and
                     edited in place. An approved revision is immutable and cannot be — it is superseded, and
                     the action that does that is Revise. It was previously buried in the rail below a
-                    definition list and labelled "Create SCR-00000031.01 Draft", which describes the
+                    definition list and labelled "Create SCR-31.01 Draft", which describes the
                     mechanism rather than the intent, and nobody found it. */}
                 {scr.state === "Draft" && isAuthor && (
                   <button className="outline" type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>

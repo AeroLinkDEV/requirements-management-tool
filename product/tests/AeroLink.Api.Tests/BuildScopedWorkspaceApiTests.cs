@@ -21,10 +21,10 @@ public sealed class BuildScopedWorkspaceApiTests
         var project = new ProjectRecord(program.Id, "FMS Product Development", "Flight Management System");
         var released = new SoftwareRelease(project.Id, "1.5", true);
         var inWork = new SoftwareRelease(project.Id, "1.6", false, released.Id);
-        var releasedScr = new SystemChangeRequest("SCR-15000001", 0, project.Id, released.Id,
+        var releasedScr = new SystemChangeRequest("SCR-15001", 0, project.Id, released.Id,
             "BUILD-ONE-FIVE-ONLY stability evidence", "P", "A", "S", "build.user", now,
             ChangeRequestType.System);
-        var inWorkScr = new SystemChangeRequest("SCR-16000001", 0, project.Id, inWork.Id,
+        var inWorkScr = new SystemChangeRequest("SCR-16001", 0, project.Id, inWork.Id,
             "BUILD-ONE-SIX-ONLY development work", "P", "A", "S", "build.user", now,
             ChangeRequestType.System);
         var user = new UserAccount("build.user", "Build User", "build.user@example.test",

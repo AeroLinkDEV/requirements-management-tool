@@ -25,7 +25,9 @@ public sealed class ShowcaseUpgradeTests
     /// </summary>
     private static async Task RewindToPriorVersionAsync(AeroLinkDbContext db)
     {
+        db.VerificationImpactDecisionHistory.RemoveRange(await db.VerificationImpactDecisionHistory.ToListAsync());
         db.VerificationImpactItems.RemoveRange(await db.VerificationImpactItems.ToListAsync());
+        db.TestChangeReviews.RemoveRange(await db.TestChangeReviews.ToListAsync());
         db.ShowcaseUpgradeSteps.RemoveRange(await db.ShowcaseUpgradeSteps.ToListAsync());
         await db.SaveChangesAsync();
     }

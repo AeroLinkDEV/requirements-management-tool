@@ -60,6 +60,15 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         var verificationImpacts = await db.VerificationImpactItems.AsNoTracking().Where(x => x.ReleaseId == campaign.ReleaseId).ToListAsync(ct);
         var impactDecided = verificationImpacts.Count(x => x.State == VerificationImpactState.Resolved);
         var undecided = verificationImpacts.Where(x => x.State != VerificationImpactState.Resolved).ToList();
+        var testChangeReviews = await db.TestChangeReviews.AsNoTracking().Where(x => x.ReleaseId == campaign.ReleaseId).ToListAsync(ct);
+        var approvedTestChangeReviews = testChangeReviews.Count(x => x.State == TestChangeReviewState.Approved);
+        var preReleaseProcedureRevisionIds = verificationImpacts
+            .Where(x => x.State == VerificationImpactState.Resolved && x.PreReleaseEvidenceRequired
+                && x.ResolvedProcedureRevisionId is not null)
+            .Select(x => x.ResolvedProcedureRevisionId!.Value).Distinct().ToHashSet();
+        var preReleaseRuns = latestRuns.Where(x => preReleaseProcedureRevisionIds.Contains(x.ProcedureRevisionId)).ToList();
+        var preReleaseRunIds = preReleaseRuns.Select(x => x.Id).ToHashSet();
+        var preReleaseEvidenceCount = evidenceRunIds.Count(x => preReleaseRunIds.Contains(x));
         var integrated = requests.Count(x => x.State == ScrState.SelectedForBaseline); var disposed = impacts.Count(x => x.State != ImpactDispositionState.Pending);
         var baselineMaterialized = baseline.RequirementsMaterializedAt is not null;
         var gates = new List<ReadinessGate>
@@ -68,6 +77,13 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
             new("impact_disposition","Impact analysis dispositioned",impacts.Count > 0 && disposed == impacts.Count,disposed,impacts.Count,$"{impacts.Count-disposed} impact findings remain pending.","Disposition requirement, trace, verification, and document impacts."),
             new("baseline","Requirement baseline materialized",baseline.State is CandidateBaselineState.Frozen or CandidateBaselineState.Released && baseline.RequirementsMaterializedAt is not null,baseline.RequirementsMaterializedAt is null?0:1,1,"The release needs an exact frozen and materialized requirement set.","Freeze the candidate and materialize its requirements."),
             new("verification_impact","Verification impact decided",impactDecided == verificationImpacts.Count,impactDecided,verificationImpacts.Count,undecided.Count==0?"Every new, modified, and orphaned requirement in this release has a recorded verification decision.":$"{undecided.Count} changed requirement(s) await a verification decision: {string.Join(", ",undecided.Take(3).Select(x=>x.SubjectDisplayNumber))}.","Assign each item to a test engineer, then record an approved procedure or a confirmation that no test is required."),
+            new("test_change_reviews","Test change reviews approved",
+                testChangeReviews.Count > 0 && approvedTestChangeReviews == testChangeReviews.Count,
+                approvedTestChangeReviews,testChangeReviews.Count,
+                testChangeReviews.Count == 0
+                    ? "No controlled test change reviews have been raised for this software build."
+                    : $"{testChangeReviews.Count-approvedTestChangeReviews} System, HLR, or LLR test change review(s) still require approval.",
+                "Complete every procedure decision, submit each discipline review, and record test-lead approval."),
             baselineMaterialized
                 ? new("traceability","Trace network complete",members.Count > 0 && tracedDerivedIds.Count == derivedIds.Count,tracedDerivedIds.Count,derivedIds.Count,
                     members.Count == 0
@@ -87,23 +103,24 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
                         : "Approve every procedure being changed, then confirm the coverage each changed requirement needs.")
                 : WaitingForMaterializedBaseline("coverage", "Requirement coverage complete"),
             baselineMaterialized
-                ? new("verification","Required verification passed",procedureIds.Count > 0 && latestRuns.Count == procedureIds.Count && latestRuns.All(x=>x.Outcome==TestOutcome.Pass),latestRuns.Count(x=>x.Outcome==TestOutcome.Pass),procedureIds.Count,
-                    procedureIds.Count == 0
-                        ? "No required procedure revisions were resolved from the materialized requirement population."
-                        : $"{procedureIds.Count-latestRuns.Count(x=>x.Outcome==TestOutcome.Pass)} required procedures lack a latest Pass.",
-                    procedureIds.Count == 0
-                        ? "Resolve requirement coverage with approved exact procedure revisions before recording results."
-                        : "Execute tests, resolve failures, and record retests.")
-                : WaitingForMaterializedBaseline("verification", "Required verification passed"),
+                ? new("verification","Selected pre-release verification passed",
+                    preReleaseProcedureRevisionIds.Count == 0
+                        || (preReleaseRuns.Count == preReleaseProcedureRevisionIds.Count && preReleaseRuns.All(x=>x.Outcome==TestOutcome.Pass)),
+                    preReleaseRuns.Count(x=>x.Outcome==TestOutcome.Pass),preReleaseProcedureRevisionIds.Count,
+                    preReleaseProcedureRevisionIds.Count == 0
+                        ? "The approved test change reviews require no test execution before this build is released."
+                        : $"{preReleaseProcedureRevisionIds.Count-preReleaseRuns.Count(x=>x.Outcome==TestOutcome.Pass)} specifically selected pre-release procedure(s) lack a latest Pass.",
+                    "Execute only the procedures explicitly marked as requiring pre-release results. Remaining verification continues after release.")
+                : WaitingForMaterializedBaseline("verification", "Selected pre-release verification passed"),
             baselineMaterialized
-                ? new("evidence","Evidence uploaded and checksummed",latestRuns.Count > 0 && evidenceRunIds.Count == latestRuns.Count,evidenceRunIds.Count,latestRuns.Count,
-                    latestRuns.Count == 0
-                        ? "No latest required test results exist, so evidence has not been evaluated against an execution population."
-                        : $"{latestRuns.Count-evidenceRunIds.Count} latest results lack uploaded evidence.",
-                    latestRuns.Count == 0
-                        ? "Complete required verification executions before attaching their checksummed evidence."
-                        : "Upload evidence files for every latest required result.")
-                : WaitingForMaterializedBaseline("evidence", "Evidence uploaded and checksummed"),
+                ? new("evidence","Selected pre-release evidence captured",
+                    preReleaseProcedureRevisionIds.Count == 0 || preReleaseEvidenceCount == preReleaseProcedureRevisionIds.Count,
+                    preReleaseEvidenceCount,preReleaseProcedureRevisionIds.Count,
+                    preReleaseProcedureRevisionIds.Count == 0
+                        ? "No evidence packages were designated as a prerequisite to releasing this build."
+                        : $"{preReleaseProcedureRevisionIds.Count-preReleaseEvidenceCount} selected pre-release result(s) lack checksummed evidence.",
+                    "Upload evidence only for procedures explicitly designated as pre-release prerequisites.")
+                : WaitingForMaterializedBaseline("evidence", "Selected pre-release evidence captured"),
             new("problem_reports","Problem-report blockers resolved",problemBlockers.Count==0,0,problemBlockers.Count,problemBlockers.Count==0?"No unwaived controlled problem reports block this release.":$"{problemBlockers.Count} unwaived problem report blocker(s) remain: {string.Join(", ",problemBlockers.Take(3).Select(x=>x.DisplayNumber))}.","Resolve, formally disposition, or record an attributable waiver for every release-blocking problem report."),
             new("documents","Controlled outputs generated",docs.Select(x=>x.Type).Distinct().Count()>=6,docs.Select(x=>x.Type).Distinct().Count(),6,"The release package requires six controlled document types.","Generate SYSRD, both SWRDs, and three test-procedure documents."),
             new("release_approval","Release approval complete",campaign.Approvals.Count>0 && campaign.Approvals.All(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count==0?3:campaign.Approvals.Count,"Ordered release approval must be unanimous.","Start release review and collect every approval.")

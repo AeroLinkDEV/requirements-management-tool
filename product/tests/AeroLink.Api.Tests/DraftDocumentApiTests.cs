@@ -44,7 +44,7 @@ public sealed class DraftDocumentApiTests
             modifiedNumber = members[0];
             retiredNumber = members[1];
 
-            var approved = new SystemChangeRequest("SCR-00900001", 0, summary.ProjectId, releaseId,
+            var approved = new SystemChangeRequest("SCR-90001", 0, summary.ProjectId, releaseId,
                 "Draft document coverage", "Problem", "Analysis", "Solution", "admin", DateTimeOffset.UtcNow);
             approved.AddRequirementChange("admin", introducedNumber, 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall do a newly introduced thing.", "New", "Test", DateTimeOffset.UtcNow);
@@ -56,7 +56,7 @@ public sealed class DraftDocumentApiTests
 
             // A second change request that is still a Draft. Nothing of it may reach the document — a draft
             // shows what has been agreed, not what somebody is currently typing.
-            var unapproved = new SystemChangeRequest("SCR-00900002", 0, summary.ProjectId, releaseId,
+            var unapproved = new SystemChangeRequest("SCR-90002", 0, summary.ProjectId, releaseId,
                 "Not agreed yet", "Problem", "Analysis", "Solution", "admin", DateTimeOffset.UtcNow);
             unapproved.AddRequirementChange("admin", "SYSR-900002", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall do an unapproved thing.", "Draft", "Test", DateTimeOffset.UtcNow);
@@ -101,7 +101,7 @@ public sealed class DraftDocumentApiTests
     }
 
     [Fact]
-    public async Task A_draft_is_refused_for_a_document_that_is_not_built_from_requirements()
+    public async Task An_in_work_test_procedure_document_is_available_as_a_living_draft()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -113,10 +113,14 @@ public sealed class DraftDocumentApiTests
             releaseId = (await new FmsShowcaseSeeder(db).EnsureSeededAsync()).ActiveReleaseId;
         }
 
-        // A test-procedure document is not assembled from a baseline of requirements, so a "draft" of one would
-        // be the ordinary generator with a stamp on it. Refused rather than half-answered.
+        // Test-procedure documents now live in Assurance. The in-work build exposes their latest approved
+        // procedure content as an explicitly non-approved living draft.
         using var response = await client.GetAsync($"/api/releases/{releaseId}/draft-document?type=SystemTestProcedures&format=pdf");
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/pdf", response.Content.Headers.ContentType?.MediaType);
+        var pdf = Encoding.Latin1.GetString(await response.Content.ReadAsByteArrayAsync());
+        Assert.Contains("DRAFT - NOT APPROVED", pdf);
+        Assert.Contains("System Test Procedure Document", pdf);
     }
 
     /// <summary>Drives a change request through review to Approved the way the workflow does.</summary>

@@ -249,8 +249,8 @@ export default function BaselineCenter({
               Baseline number
               <input
                 name="baseNumber"
-                defaultValue="SWBL-00000001"
-                pattern="[A-Z]+-[0-9]{8}"
+                defaultValue="SW-01.60"
+                pattern="SW-[0-9]{2}\.[0-9]{2}"
                 required
               />
             </label>

@@ -1285,13 +1285,13 @@ export default function RequirementsWorkspace({
                   </button>
                 )) : <div className="traceEmpty"><b>No active change package</b><span>This requirement has no Draft, In Review, or Approved proposal awaiting baseline effectivity.</span></div>}
                 <h3>Upstream requirements</h3>
-                {impact?.parents.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
+                {impact?.parents.map((item) => <button type="button" className="traceRelation linkedArtifact" key={item.id} onClick={() => onOpenRequirement(item.id)}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level} · Open requirement →</small></button>)}
                 {!impact?.parents.length && <div className="traceEmpty"><span>No upstream requirement is recorded.</span></div>}
                 <h3>Downstream requirements</h3>
-                {impact?.children.map((item) => <article className="traceRelation" key={item.id}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
+                {impact?.children.map((item) => <button type="button" className="traceRelation linkedArtifact" key={item.id} onClick={() => onOpenRequirement(item.id)}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level} · Open requirement →</small></button>)}
                 {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
                 <h3>Verification coverage</h3>
-                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.revisionId ?? item.id}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · {unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button onClick={onOpenVerification}>Resolve in Verification →</button>}</article>; })}
+                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.revisionId ?? item.id}><button type="button" className="linkedArtifactText" onClick={onOpenVerification}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · Open test procedure →</small></button><small>{unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button onClick={onOpenVerification}>Resolve in Verification →</button>}</article>; })}
                 {!impact?.tests.length && <div className="traceEmpty attention"><span>No verification procedure currently covers this revision.</span></div>}
               </div>
             )}
@@ -1317,7 +1317,7 @@ export default function RequirementsWorkspace({
                     </div>
                     <p>{x.statement}</p>
                     <small>
-                      {x.isHistorical ? `Historical version — Build ${x.originBuild}` : `Build ${x.originBuild}`} · {x.sourceScr} ·{" "}
+                      {x.isHistorical ? `Historical version — Build ${x.originBuild}` : `Build ${x.originBuild}`} · <button type="button" className="inlineArtifactLink" onClick={() => onOpenScr(x.sourceScrId)}>{x.sourceScr}</button> ·{" "}
                       {new Date(x.createdAt).toLocaleDateString()}
                     </small>
                   </article>

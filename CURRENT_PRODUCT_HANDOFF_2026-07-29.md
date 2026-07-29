@@ -99,12 +99,36 @@ Digital Thread remains available from that tab and the Assurance navigation.
 
 ### Verification
 
-The Command Center now summarizes verification as System, Software HLR and Software LLR triage. The complete
-Verification workspace has not received the expected larger redesign. Current procedure, coverage, execution,
-suspect-link and impact-decision behavior remains in place unless DEC-071 changed the authoring boundary.
+The Command Center summarizes verification as System, Software HLR and Software LLR triage. The Verification
+workspace is split conceptually into **pre-release procedure alignment** and **evidence & results**.
 
-The product owner expects substantial future verification changes. Treat that as a future design discussion,
-not permission to remove current evidence or weaken exact revision/build scoping.
+- Every approved CR creates one controlled Test Change Review per affected discipline: System, Software HLR,
+  or Software LLR. A mixed HLR/LLR software request creates two reviews.
+- Each impacted requirement receives an explicit create/link/modify/retire/no-test procedure decision.
+- All decisions must be complete before the Test Change Review can be submitted and approved.
+- The verification engineer explicitly marks the subset of procedures whose passing evidence is required
+  before release. All other execution/evidence work may continue after release.
+- A post-release failure remains evidence against the released build. Software correction occurs only through
+  a later software build; released content is not rewritten.
+- `SW-01.50` seeded history contains completed, approved Test Change Reviews and procedure coverage.
+- `SW-01.60` contains the current open review work generated from its active changes.
+
+Future redesign may simplify evidence/result capture further, but must preserve these discipline, build and
+approval boundaries.
+
+### Naming and navigation additions
+
+- SCR and SWCR identifiers use five digits everywhere: `SCR-00039.00`, not `SCR-00000039.00`. The migration
+  rewrites existing primary identifiers and stored textual references; new allocation uses the five-digit form.
+- A baseline and a software build are the same product concept. `SW-01.60` is the official name; “Build 1.6”
+  is informal supporting language only.
+- Documents moved into the relevant Engineering and Assurance navigation groups. System has one requirements
+  document; Software has HLR and LLR requirements documents; Assurance exposes the corresponding test
+  procedure documents and traceability-document guidance. Digital Thread no longer owns document generation.
+- Password controls have an accessible Show/Hide toggle.
+- Modification authoring searches both exact requirement identifiers and requirement wording.
+- Missing source-change links show an explanatory empty state, and inspector references to requirements,
+  changes and test procedures are actionable links.
 
 ## Deliberately dormant UI
 

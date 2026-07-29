@@ -32,9 +32,9 @@ public sealed class SectionPlacementOnMaterializationTests
             var now = DateTimeOffset.UtcNow;
             var (projectId, releaseId, navigation, performance) = await SeedAsync(db, now);
 
-            var scr = ApprovedScr("SCR-00000001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var scr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The software shall sequence oceanic waypoints.", projectId, releaseId, now, navigation);
-            var baseline = FrozenBaseline("SWBL-00000001", projectId, releaseId, null, scr, now);
+            var baseline = FrozenBaseline("SW-00.10", projectId, releaseId, null, scr, now);
             db.AddRange(scr, baseline);
             await db.SaveChangesAsync();
 
@@ -64,17 +64,17 @@ public sealed class SectionPlacementOnMaterializationTests
             var now = DateTimeOffset.UtcNow;
             var (projectId, releaseId, navigation, performance) = await SeedAsync(db, now);
 
-            var introduce = ApprovedScr("SCR-00000001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var introduce = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The software shall sequence oceanic waypoints.", projectId, releaseId, now, navigation);
-            var first = FrozenBaseline("SWBL-00000001", projectId, releaseId, null, introduce, now);
+            var first = FrozenBaseline("SW-00.10", projectId, releaseId, null, introduce, now);
             db.AddRange(introduce, first);
             await db.SaveChangesAsync();
             await new RequirementBaselineMaterializer(db, new VerificationImpactService(db))
                 .MaterializeAsync(first.Id, "cm", now, default);
 
-            var modify = ApprovedScr("SCR-00000002", "SWR-00002375", 1, RequirementChangeKind.Modify,
+            var modify = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
                 "The software shall sequence oceanic waypoints deterministically.", projectId, releaseId, now, performance);
-            var second = FrozenBaseline("SWBL-00000002", projectId, releaseId, first.Id, modify, now);
+            var second = FrozenBaseline("SW-00.20", projectId, releaseId, first.Id, modify, now);
             db.AddRange(modify, second);
             await db.SaveChangesAsync();
             await new RequirementBaselineMaterializer(db, new VerificationImpactService(db))
@@ -106,9 +106,9 @@ public sealed class SectionPlacementOnMaterializationTests
             var now = DateTimeOffset.UtcNow;
             var (projectId, releaseId, _, _) = await SeedAsync(db, now);
 
-            var scr = ApprovedScr("SCR-00000001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var scr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The software shall sequence oceanic waypoints.", projectId, releaseId, now, targetSectionId: null);
-            var baseline = FrozenBaseline("SWBL-00000001", projectId, releaseId, null, scr, now);
+            var baseline = FrozenBaseline("SW-00.10", projectId, releaseId, null, scr, now);
             db.AddRange(scr, baseline);
             await db.SaveChangesAsync();
 
@@ -139,9 +139,9 @@ public sealed class SectionPlacementOnMaterializationTests
             var (projectId, releaseId, _, _) = await SeedAsync(db, now);
             var (_, _, foreignSection, _) = await SeedAsync(db, now, "Other", "OTH", "SWRD-000002");
 
-            var scr = ApprovedScr("SCR-00000001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var scr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The software shall sequence oceanic waypoints.", projectId, releaseId, now, foreignSection);
-            var baseline = FrozenBaseline("SWBL-00000001", projectId, releaseId, null, scr, now);
+            var baseline = FrozenBaseline("SW-00.10", projectId, releaseId, null, scr, now);
             db.AddRange(scr, baseline);
             await db.SaveChangesAsync();
 

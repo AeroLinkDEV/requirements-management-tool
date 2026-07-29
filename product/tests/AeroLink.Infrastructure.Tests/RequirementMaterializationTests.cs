@@ -20,16 +20,16 @@ public sealed class RequirementMaterializationTests
             var program = new ProgramRecord("FMS", "FMSR"); var project = new ProjectRecord(program.Id, "Software", "FMS Software"); var release = new SoftwareRelease(project.Id, "3.3", false);
             db.AddRange(program, project, release); await db.SaveChangesAsync();
 
-            var firstScr = ApprovedScr("SCR-00000001", "SWR-00002375", 0, RequirementChangeKind.Introduce, "Initial round robin requirement", project.Id, release.Id, now);
-            var first = FrozenBaseline("SWBL-00000001", project.Id, release.Id, null, firstScr, now); db.AddRange(firstScr, first); await db.SaveChangesAsync();
+            var firstScr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce, "Initial round robin requirement", project.Id, release.Id, now);
+            var first = FrozenBaseline("SW-00.10", project.Id, release.Id, null, firstScr, now); db.AddRange(firstScr, first); await db.SaveChangesAsync();
             await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(first.Id, "cm", now, default);
 
-            var modifyScr = ApprovedScr("SCR-00000002", "SWR-00002375", 1, RequirementChangeKind.Modify, "Clarified round robin requirement", project.Id, release.Id, now);
-            var second = FrozenBaseline("SWBL-00000002", project.Id, release.Id, first.Id, modifyScr, now); db.AddRange(modifyScr, second); await db.SaveChangesAsync();
+            var modifyScr = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify, "Clarified round robin requirement", project.Id, release.Id, now);
+            var second = FrozenBaseline("SW-00.20", project.Id, release.Id, first.Id, modifyScr, now); db.AddRange(modifyScr, second); await db.SaveChangesAsync();
             await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(second.Id, "cm", now, default);
 
-            var retireScr = ApprovedScr("SCR-00000003", "SWR-00002375", 2, RequirementChangeKind.Retire, "", project.Id, release.Id, now);
-            var third = FrozenBaseline("SWBL-00000003", project.Id, release.Id, second.Id, retireScr, now); db.AddRange(retireScr, third); await db.SaveChangesAsync();
+            var retireScr = ApprovedScr("SCR-00003", "SWR-00002375", 2, RequirementChangeKind.Retire, "", project.Id, release.Id, now);
+            var third = FrozenBaseline("SW-00.30", project.Id, release.Id, second.Id, retireScr, now); db.AddRange(retireScr, third); await db.SaveChangesAsync();
             await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(third.Id, "cm", now, default);
 
             var artifact = await db.Requirements.SingleAsync(); var history = await db.RequirementRevisions.Where(x => x.ArtifactId == artifact.Id).OrderBy(x => x.Revision).ToListAsync();

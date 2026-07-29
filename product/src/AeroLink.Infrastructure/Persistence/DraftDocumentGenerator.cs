@@ -1,7 +1,11 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
+using AeroLink.Domain.Programs;
+using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -32,6 +36,11 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         if (release is null) return null;
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == release.ProjectId, ct);
         var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct);
+
+        if (type is ControlledDocumentType.SystemTestProcedures
+            or ControlledDocumentType.HighLevelTestProcedures
+            or ControlledDocumentType.LowLevelTestProcedures)
+            return await GenerateProcedureDraftAsync(release, project, program, type, format, preparedBy, ct);
 
         var level = type switch
         {
@@ -104,6 +113,68 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
                 || AeroLink.Domain.Content.RichContent.ToPlainText(content) != item.Statement;
             return adds ? RichContentPublisher.ForPublication(content, images) : "";
         }
+    }
+
+    private async Task<GeneratedOutput> GenerateProcedureDraftAsync(SoftwareRelease release, ProjectRecord project,
+        ProgramRecord program, ControlledDocumentType type, string format, string preparedBy, CancellationToken ct)
+    {
+        var level = type switch
+        {
+            ControlledDocumentType.SystemTestProcedures => TestProcedureLevel.System,
+            ControlledDocumentType.HighLevelTestProcedures => TestProcedureLevel.HighLevel,
+            _ => TestProcedureLevel.LowLevel
+        };
+        var rows = await (from procedure in db.TestProcedures.AsNoTracking()
+                          where procedure.ProjectId == project.Id && procedure.Level == level
+                          join revision in db.TestProcedureRevisions.AsNoTracking()
+                              on procedure.Id equals revision.ProcedureId
+                          select new { Procedure = procedure, Revision = revision }).ToListAsync(ct);
+        var latest = rows.GroupBy(x => x.Procedure.Id)
+            .Select(x => x.OrderByDescending(row => row.Revision.Revision).First())
+            .OrderBy(x => x.Procedure.BaseNumber, StringComparer.Ordinal)
+            .ToList();
+        var records = latest.Select(x => new PublicationRecord(
+            $"{x.Procedure.BaseNumber}.{x.Revision.Revision:D2}",
+            $"{level} · {x.Revision.State}",
+            x.Procedure.Title,
+            x.Revision.Steps,
+            new[]
+            {
+                ("Objective", x.Revision.Objective),
+                ("Preconditions", x.Revision.Preconditions),
+                ("Expected result", x.Revision.ExpectedResult),
+                ("Owner", x.Procedure.OwnerId)
+            })).ToList();
+        var generatedAt = DateTimeOffset.UtcNow;
+        var documentNumber = DocumentNumber(type, release.Version);
+        var revisionNumber = await NextRevisionAsync(project.Id, type, ct);
+        var publication = new ProfessionalPublication(
+            project.SoftwareProduct, $"{program.Name} ({program.Code})", project.Name, DocumentTypeName(type),
+            $"{project.SoftwareProduct} {DocumentTypeName(type)}",
+            $"Living draft for software build {SoftwareBuildIdentifier.FromVersion(release.Version)}.",
+            documentNumber, revisionNumber.ToString("D2"), "DRAFT - NOT APPROVED", release.Version,
+            SoftwareBuildIdentifier.FromVersion(release.Version), preparedBy, generatedAt,
+            "not applicable to a draft",
+            new[]
+            {
+                ("Test procedures", records.Count.ToString("N0")),
+                ("Approved revisions", latest.Count(x => x.Revision.State == TestProcedureState.Approved).ToString("N0")),
+                ("In review or draft", latest.Count(x => x.Revision.State != TestProcedureState.Approved).ToString("N0")),
+                ("Status", "Draft - content may still change")
+            },
+            [],
+            new[] { (revisionNumber.ToString("D2"), "Draft", generatedAt.UtcDateTime.ToString("yyyy-MM-dd"), preparedBy) },
+            new[]
+            {
+                new PublicationSection("Effective Test Procedures",
+                    "Latest controlled revision of each procedure, including procedure changes still moving through review.",
+                    records)
+            })
+        {
+            Watermark = "DRAFT"
+        };
+        return ProfessionalPublicationRenderer.Render(publication, format,
+            $"DRAFT_{documentNumber}.{revisionNumber:D2}_{release.Version}");
     }
 
     /// <summary>The materialized baseline of the released predecessor, or null for a first release.</summary>
@@ -201,13 +272,19 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
     {
         ControlledDocumentType.Sysrd => "SYSRD-" + version.Replace(".", ""),
         ControlledDocumentType.SwrdHighLevel => "SWRD-HLR-" + version.Replace(".", ""),
-        _ => "SWRD-LLR-" + version.Replace(".", ""),
+        ControlledDocumentType.SwrdLowLevel => "SWRD-LLR-" + version.Replace(".", ""),
+        ControlledDocumentType.SystemTestProcedures => "SYTPD-" + version.Replace(".", ""),
+        ControlledDocumentType.HighLevelTestProcedures => "HLRTPD-" + version.Replace(".", ""),
+        _ => "LLRTPD-" + version.Replace(".", ""),
     };
 
     private static string DocumentTypeName(ControlledDocumentType type) => type switch
     {
         ControlledDocumentType.Sysrd => "System Requirements Document",
         ControlledDocumentType.SwrdHighLevel => "Software Requirements Document - High-Level",
-        _ => "Software Requirements Document - Low-Level",
+        ControlledDocumentType.SwrdLowLevel => "Software Requirements Document - Low-Level",
+        ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document",
+        ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedure Document",
+        _ => "LLR Test Procedure Document",
     };
 }

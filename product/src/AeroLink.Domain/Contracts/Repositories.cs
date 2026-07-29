@@ -17,7 +17,7 @@ public interface IScrRepository
 /// </param>
 /// <param name="LatestRevisionOnly">
 /// Collapses each change request to its newest revision. A programme's history is a list of change requests, not
-/// of revisions: SCR-00000031.00 superseded by .01 is one piece of work read twice, and listing both puts the
+/// of revisions: SCR-31.00 superseded by .01 is one piece of work read twice, and listing both puts the
 /// superseded copy in the reader's way. Off when a specific BaseNumber is asked for, which is how the newest row
 /// expands to show what came before it.
 /// </param>
