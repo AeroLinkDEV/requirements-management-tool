@@ -112,20 +112,70 @@ public static class VerificationEndpoints
             return Results.Ok(new { baselineId, page, pageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)pageSize), items });
         });
 
-        app.MapGet("/api/test-procedures", async (Guid projectId, string? search, string? scope, AeroLinkDbContext db, CancellationToken ct) =>
+        // The workspace rendered every procedure it was given — 440 cards on the software side — with no
+        // search, filter or page. This returns a bounded page and the total, and every predicate below runs
+        // in the database, because a page of twenty-five that costs a full table read is not paging.
+        app.MapGet("/api/test-procedures", async (Guid projectId, string? search, string? scope, string? state,
+            string? owner, string? outcome, Guid? requirementRevisionId, string? sort, int? page, int? pageSize,
+            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
+            // This endpoint read a Project's controlled procedures without checking the caller was in it.
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var currentPage = Math.Max(1, page ?? 1);
+            var size = Math.Clamp(pageSize ?? 25, 1, 200);
             var source = db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId);
             if(string.Equals(scope,"System",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.System);
             else if(string.Equals(scope,"Software",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.HighLevel||x.Level==TestProcedureLevel.LowLevel);
             if (!string.IsNullOrWhiteSpace(search)) { var q = search.Trim().ToLower(); source = source.Where(x => x.BaseNumber.ToLower().Contains(q) || x.Title.ToLower().Contains(q)); }
-            var items = await source.OrderBy(x => x.BaseNumber).Select(x => new { x.Id, x.BaseNumber, x.Title, x.OwnerId, x.Level, x.CreatedAt }).ToListAsync(ct);
+            if (!string.IsNullOrWhiteSpace(owner)) { var o = owner.Trim().ToLower(); source = source.Where(x => x.OwnerId.ToLower() == o); }
+            // Lifecycle state belongs to the current revision, so the predicate names it rather than matching
+            // any revision a procedure has ever had.
+            if (!string.IsNullOrWhiteSpace(state) && Enum.TryParse<TestProcedureState>(state, true, out var parsedState))
+                source = source.Where(x => db.TestProcedureRevisions.Any(r => r.ProcedureId == x.Id
+                    && r.Revision == db.TestProcedureRevisions.Where(o => o.ProcedureId == x.Id).Max(o => o.Revision)
+                    && r.State == parsedState));
+            if (requirementRevisionId is not null)
+                source = source.Where(x => db.TestCoverage.Any(c => c.RequirementRevisionId == requirementRevisionId
+                    && db.TestProcedureRevisions.Any(r => r.Id == c.ProcedureRevisionId && r.ProcedureId == x.Id)));
+            // Latest outcome means the most recent run, not any run the procedure ever had — a procedure that
+            // failed and was then fixed must answer to Pass and not to Fail.
+            //
+            // SQLite can neither order nor aggregate a DateTimeOffset, so "most recent" cannot be expressed in
+            // SQL here. The comparison is made in memory over the ids the other predicates have already
+            // narrowed to, and only when this filter is actually used; the page itself is still taken in the
+            // database.
+            if (!string.IsNullOrWhiteSpace(outcome) && Enum.TryParse<TestOutcome>(outcome, true, out var parsedOutcome))
+            {
+                var candidateIds = await source.Select(x => x.Id).ToListAsync(ct);
+                var runs = await (from execution in db.TestExecutions.AsNoTracking()
+                                  join revision in db.TestProcedureRevisions.AsNoTracking() on execution.ProcedureRevisionId equals revision.Id
+                                  where candidateIds.Contains(revision.ProcedureId)
+                                  select new { revision.ProcedureId, execution.Outcome, execution.ExecutedAt, execution.RecordedAt }).ToListAsync(ct);
+                var matching = runs.GroupBy(x => x.ProcedureId)
+                    .Where(group => group.OrderByDescending(x => x.ExecutedAt).ThenByDescending(x => x.RecordedAt).First().Outcome == parsedOutcome)
+                    .Select(group => group.Key).ToList();
+                source = source.Where(x => matching.Contains(x.Id));
+            }
+
+            var totalCount = await source.CountAsync(ct);
+            // Every sort ends on the controlled number, so a page boundary cannot depend on tie order.
+            var ordered = sort?.ToLowerInvariant() switch
+            {
+                "title" => source.OrderBy(x => x.Title).ThenBy(x => x.BaseNumber),
+                "owner" => source.OrderBy(x => x.OwnerId).ThenBy(x => x.BaseNumber),
+                "level" => source.OrderBy(x => x.Level).ThenBy(x => x.BaseNumber),
+                _ => source.OrderBy(x => x.BaseNumber).ThenBy(x => x.BaseNumber),
+            };
+            var items = await ordered.Skip((currentPage - 1) * size).Take(size)
+                .Select(x => new { x.Id, x.BaseNumber, x.Title, x.OwnerId, x.Level, x.CreatedAt }).ToListAsync(ct);
             var ids = items.Select(x => x.Id).ToList(); var revisions = await db.TestProcedureRevisions.AsNoTracking().Where(x => ids.Contains(x.ProcedureId)).ToListAsync(ct);
             var revisionIds = revisions.Select(x => x.Id).ToList(); var coverage = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
             var executions = await db.TestExecutions.AsNoTracking().Where(x => revisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
-            return Results.Ok(items.Select(x => { var latest = revisions.Where(r => r.ProcedureId == x.Id).OrderByDescending(r => r.Revision).FirstOrDefault(); var lastRun = latest is null ? null : executions.Where(e => e.ProcedureRevisionId == latest.Id).OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).FirstOrDefault();
+            return Results.Ok(new { page = currentPage, pageSize = size, totalCount, totalPages = (int)Math.Ceiling(totalCount / (double)size),
+                items = items.Select(x => { var latest = revisions.Where(r => r.ProcedureId == x.Id).OrderByDescending(r => r.Revision).FirstOrDefault(); var lastRun = latest is null ? null : executions.Where(e => e.ProcedureRevisionId == latest.Id).OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).FirstOrDefault();
                 return new { x.Id, displayNumber = latest is null ? x.BaseNumber : x.BaseNumber + "." + latest.Revision.ToString("D2"), x.Title, x.OwnerId, level = x.Level.ToString(),
                     revisionId = latest?.Id, revision = latest?.Revision, state = latest?.State.ToString(), objective = latest?.Objective,
-                    requirementCount = latest is null ? 0 : coverage.Count(c => c.ProcedureRevisionId == latest.Id), lastOutcome = lastRun?.Outcome.ToString(), lastExecutedAt = lastRun?.ExecutedAt }; }));
+                    requirementCount = latest is null ? 0 : coverage.Count(c => c.ProcedureRevisionId == latest.Id), lastOutcome = lastRun?.Outcome.ToString(), lastExecutedAt = lastRun?.ExecutedAt }; }) });
         });
 
         app.MapPost("/api/test-procedures", async (CreateTestProcedureRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>

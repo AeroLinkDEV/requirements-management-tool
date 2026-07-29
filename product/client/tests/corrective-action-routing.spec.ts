@@ -20,8 +20,8 @@ import { apiBase, apiLogin, login, selectProgram } from "./auth";
  * isolated fixture. This reads what is there instead of adding to it.
  */
 async function raiseReport(page: Page, projectId: string, scope: "System" | "Software") {
-  const procedures = await (await page.request.get(
-    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=${scope}`)).json();
+  const procedures = (await (await page.request.get(
+    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=${scope}&pageSize=200`)).json()).items;
   const revisionIds = new Set(procedures.map((x: { revisionId: string }) => x.revisionId));
 
   const executions = await (await page.request.get(`${apiBase}/api/test-executions?projectId=${projectId}`)).json();
