@@ -118,6 +118,15 @@ public sealed class RequirementRevisionProfile
     public string TagsJson { get; private set; }="[]";
     public string UpdatedBy { get; private set; }="";
     public DateTimeOffset UpdatedAt { get; private set; }
+    /// <summary>
+    /// The owner as a queryable field rather than a fragment of serialized attributes.
+    ///
+    /// Owner filtering matched a substring of AttributesJson, so an owner fragment could match another
+    /// attribute's value entirely — and a leading-wildcard substring scan over raw JSON cannot use an index.
+    /// The authored attributes remain the source; this is the normalized copy the query reads.
+    /// </summary>
+    public string Owner { get; private set; }="";
+    public void SetOwner(string owner)=>Owner=RequirementFilterValue.Normalize(owner);
     public void AddTag(string tag,string actor,DateTimeOffset now)
     { var tags=System.Text.Json.JsonSerializer.Deserialize<List<string>>(TagsJson)??[];if(!tags.Contains(tag,StringComparer.OrdinalIgnoreCase))tags.Add(tag.Trim());TagsJson=System.Text.Json.JsonSerializer.Serialize(tags.OrderBy(x=>x,StringComparer.OrdinalIgnoreCase));UpdatedBy=actor;UpdatedAt=now; }
 }

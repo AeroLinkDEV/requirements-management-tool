@@ -117,3 +117,56 @@ The load command mixes paging, verification aggregation, specification-tree quer
 - Test cold-cache behavior and realistic search terms.
 - Test backups, restores, evidence storage, and failure recovery.
 - Record query plans and detect regressions in continuous integration.
+
+## Structured requirement filters: supported operators and budgets
+
+Owner and tag filtering used to be case-folded substring scans over serialized JSON — `TagsJson.Contains(tag)`
+and `AttributesJson.Contains(owner)`. That is wrong twice over: the tag `safe` matched every requirement
+tagged `failsafe`, an owner fragment matched any attribute value containing it, and a leading-wildcard scan
+over a JSON document can use no index at all.
+
+Both are now normalized at write time into queryable form — `requirement_revision_tags` for tags, an indexed
+`Owner` column for ownership — while the authored `TagsJson` and `AttributesJson` remain what an author edits
+and what the UI displays. The synchronizer keeps the two in step and backfills existing Projects on first read.
+
+### Supported operators
+
+Every field below is matched **exactly** after trimming, Unicode NFC normalization and invariant lowercasing.
+There are no wildcard, prefix or contains operators on these fields, deliberately: an approximate match on a
+controlled worklist is worse than no match, because it is not visibly wrong.
+
+| Field | Operator | Notes |
+| --- | --- | --- |
+| `tag` | exact membership | matches one tag of the revision, never a substring of another tag |
+| `owner` | exact equality | the declared owner attribute only, not any attribute mentioning that name |
+| `level` | exact | `System`, `Software`, `HighLevel`, `LowLevel` |
+| `state` | exact | requirement revision state |
+| `verification` | exact | declared verification method |
+| `coverageState` | exact | `covered`, `suspect`, `uncovered` — see DEC-067 |
+| `sourceScr` | contains | free text over the source change request's number and title |
+| `search` | contains | free text over identifier, statement and rationale |
+| `sort` | enumerated | `identifier`, `updated`, `verification`, `state` |
+
+Free-text `search` and `sourceScr` remain substring matches because they are searches rather than filters —
+the distinction is that a search is expected to be approximate and a filter is not.
+
+An unsupported field, sort or enumerated value is refused with HTTP 400 and the stable code
+`requirement_filter_invalid` rather than being silently dropped. The same contract validates saved views, so a
+worklist means the same thing whether it arrives as a query string or a stored record.
+
+### Budgets at 50,000 requirements
+
+Measured by `dotnet run --project product/tools/AeroLink.Scale -- benchmark` against the workspace dataset.
+Each measure reports a cold first run alongside the warm p95, because a warm number alone hides what the first
+reader of the day waits for.
+
+| Measure | Target (warm p95) |
+| --- | --- |
+| `exact_tag_filter_page` | 500 ms |
+| `exact_owner_filter_page` | 500 ms |
+| `combined_owner_tag_level_filter` | 500 ms |
+| `filtered_total_count` | 500 ms |
+| `worst_case_no_match` | 500 ms |
+
+`worst_case_no_match` is the honest upper bound: a filter matching nothing cannot stop early, so it is what a
+mistyped tag costs.

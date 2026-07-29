@@ -215,15 +215,25 @@ public sealed class CoverageStateFilterApiTests
     }
 
     [Fact]
-    public async Task An_unparsable_coverage_state_is_ignored_rather_than_silently_emptying_the_workspace()
+    /// <summary>
+    /// This once asserted that an unparsable value was ignored, on the reasoning that emptying the workspace
+    /// would be worse. Both were wrong: a filter that is quietly dropped shows a worklist that does not match
+    /// what was asked for, and on a controlled record set that is the more dangerous of the two. An
+    /// unsupported value is now refused with a stable code.
+    /// </summary>
+    public async Task An_unsupported_coverage_state_is_refused_rather_than_quietly_dropped()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await SignInAsync(client, Member);
 
-        var workspace = await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=partially");
-        Assert.Equal(4, workspace.GetProperty("totalCount").GetInt32());
+        using var response = await client.GetAsync(
+            $"/api/enterprise-requirements/workspace?projectId={fixture.ProjectId}&page=1&pageSize=50&coverageState=partially");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("requirement_filter_invalid", body.GetProperty("code").GetString());
+        Assert.Contains("partially", body.GetProperty("error").GetString());
     }
 
     [Fact]

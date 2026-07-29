@@ -61,6 +61,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<RequirementSpecification> RequirementSpecifications => Set<RequirementSpecification>();
     public DbSet<SpecificationNode> SpecificationNodes => Set<SpecificationNode>();
     public DbSet<RequirementRevisionProfile> RequirementRevisionProfiles => Set<RequirementRevisionProfile>();
+    public DbSet<RequirementRevisionTag> RequirementRevisionTags => Set<RequirementRevisionTag>();
     public DbSet<ArtifactComment> ArtifactComments => Set<ArtifactComment>();
     public DbSet<SavedRequirementView> SavedRequirementViews => Set<SavedRequirementView>();
     public DbSet<EnterpriseOperationJob> EnterpriseOperationJobs => Set<EnterpriseOperationJob>();
@@ -529,6 +530,17 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<RequirementRevisionProfile>(b =>
         {
             b.ToTable("requirement_revision_profiles"); b.HasKey(x=>x.Id); b.Property(x=>x.RichText); b.Property(x=>x.AttributesJson).IsRequired(); b.Property(x=>x.TagsJson).IsRequired(); b.Property(x=>x.UpdatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>x.RevisionId).IsUnique(); b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x=>x.RevisionId).OnDelete(DeleteBehavior.Restrict); b.HasOne<ArtifactSchemaDefinition>().WithMany().HasForeignKey(x=>x.SchemaId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<RequirementRevisionTag>(b =>
+        {
+            b.ToTable("requirement_revision_tags"); b.HasKey(x => x.Id);
+            b.Property(x => x.Tag).HasMaxLength(120).IsRequired();
+            b.Property(x => x.DisplayTag).HasMaxLength(120).IsRequired();
+            // The index the substring scan could never use, and the uniqueness that stops a tag being
+            // written twice for the same revision.
+            b.HasIndex(x => new { x.Tag, x.RevisionId });
+            b.HasIndex(x => new { x.RevisionId, x.Tag }).IsUnique();
+            b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<ArtifactComment>(b =>
         {
