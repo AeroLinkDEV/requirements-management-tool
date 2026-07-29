@@ -17,6 +17,7 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> options) : DbContext(options)
 {
     public DbSet<ProgramRecord> Programs => Set<ProgramRecord>();
+    public DbSet<ShowcaseUpgradeStep> ShowcaseUpgradeSteps => Set<ShowcaseUpgradeStep>();
     public DbSet<ProjectRecord> Projects => Set<ProjectRecord>();
     public DbSet<SoftwareRelease> Releases => Set<SoftwareRelease>();
     public DbSet<SoftwareBuild> SoftwareBuilds => Set<SoftwareBuild>();
@@ -113,6 +114,17 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<ShowcaseUpgradeStep>(b =>
+        {
+            b.ToTable("showcase_upgrade_steps"); b.HasKey(x => x.Id);
+            b.Property(x => x.StepKey).HasMaxLength(100).IsRequired();
+            b.Property(x => x.Detail).HasMaxLength(500).IsRequired();
+            // One row per step per Program: the unique index is what makes re-running the upgrade a no-op
+            // rather than a duplicate, even when two processes start at once.
+            b.HasIndex(x => new { x.ProgramId, x.StepKey }).IsUnique();
+            b.HasOne<ProgramRecord>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<ProgramRecord>(b =>
         {
             b.ToTable("programs"); b.HasKey(x => x.Id);

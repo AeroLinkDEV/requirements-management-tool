@@ -12,6 +12,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
+/// <summary>One checked expectation about the showcase, and whether it currently holds.</summary>
+public sealed record ShowcaseInvariant(string Key, bool Holds, string Detail);
+
 public sealed record FmsShowcaseSummary(Guid ProgramId, Guid ProjectId, Guid ReleasedBaselineId, Guid ActiveReleaseId,
     int SystemRequirements, int HighLevelRequirements, int LowLevelRequirements, int HistoricalScrs,
     int HistoricalSwcrs, int TraceLinks, int TestProcedures, int TestExecutions, int Documents);
@@ -24,7 +27,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
     public async Task<FmsShowcaseSummary> EnsureSeededAsync(CancellationToken ct = default)
     {
         var existing = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == ProgramCode, ct);
-        if (existing is not null) { await EnsureReleaseCampaignAsync(existing.Id, ct);await EnsureProductLineAsync(existing.Id,ct);await EnsureVerificationCoverageGapAsync(existing.Id, ct); return await SummarizeAsync(existing.Id, ct); }
+        if (existing is not null) { await UpgradeAsync(existing.Id, ct); return await SummarizeAsync(existing.Id, ct); }
 
         var start = new DateTimeOffset(2024, 1, 8, 14, 0, 0, TimeSpan.Zero);
         var program = new ProgramRecord("Flight Management System Live Program", ProgramCode);
@@ -105,10 +108,112 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var baseline16 = new CandidateBaseline("SWBL-00000016", 0, project.Id, release16.Id, baseline15.Id, "FMS 1.6 Working Candidate", "cm.fms", start.AddDays(310));
         foreach (var request in activeRequests.Where(x => x.State == ScrState.Approved).Take(2)) baseline16.Select(request, "cm.fms", start.AddDays(311));
         db.CandidateBaselines.Add(baseline16); await db.SaveChangesAsync(ct);
-        await EnsureReleaseCampaignAsync(program.Id, ct);
-        await EnsureProductLineAsync(program.Id,ct);
-        await EnsureVerificationCoverageGapAsync(program.Id, ct);
+        // The fresh path runs the same ordered steps, so a database seeded today records them as applied
+        // and a later start does not try to reconcile what was just built.
+        await UpgradeAsync(program.Id, ct);
         return await SummarizeAsync(program.Id, ct);
+    }
+
+    /// <summary>
+    /// Brings an already-seeded showcase Program up to the invariants the current seeder produces.
+    ///
+    /// A fresh seed builds everything in one pass, so nothing here ever ran against a database created
+    /// today — which is exactly why the gap went unnoticed. An installation seeded before verification
+    /// impact existed kept two approved FMS 1.6 change requests and an empty impact queue, a state the
+    /// product describes as impossible, because the code that raises those items shipped afterwards and the
+    /// seeder returned early on every subsequent start.
+    ///
+    /// Each step is keyed, ordered and idempotent, and records itself only after its own work commits. An
+    /// interrupted upgrade resumes at the step it stopped on rather than repeating the ones that already
+    /// succeeded, and a step added later applies on its own without renumbering anything.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> UpgradeAsync(Guid programId, CancellationToken ct = default)
+    {
+        var applied = new List<string>();
+        var steps = new (string Key, Func<Guid, CancellationToken, Task<string?>> Run)[]
+        {
+            ("release-campaign", async (id, token) => { await EnsureReleaseCampaignAsync(id, token); return "Release campaign present."; }),
+            ("product-line", async (id, token) => { await EnsureProductLineAsync(id, token); return "Product-line configuration present."; }),
+            ("verification-impact", ReconcileVerificationImpactAsync),
+            ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
+        };
+
+        foreach (var step in steps)
+        {
+            if (await db.ShowcaseUpgradeSteps.AsNoTracking().AnyAsync(x => x.ProgramId == programId && x.StepKey == step.Key, ct)) continue;
+            var detail = await step.Run(programId, ct);
+            db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, step.Key, detail ?? "No change required.", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync(ct);
+            applied.Add($"{step.Key}: {detail ?? "No change required."}");
+        }
+        return applied;
+    }
+
+    /// <summary>
+    /// What the showcase is supposed to contain, checked rather than assumed.
+    ///
+    /// The upgrade steps report what they did; this reports whether the result is right, which is a
+    /// different question. A step that ran and a database that is correct are not the same claim, and the
+    /// defect behind this work was precisely a database nobody had checked.
+    /// </summary>
+    public async Task<IReadOnlyList<ShowcaseInvariant>> CheckInvariantsAsync(Guid programId, CancellationToken ct = default)
+    {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleOrDefaultAsync(ct);
+        if (projectId == Guid.Empty) return [new ShowcaseInvariant("project", false, "The showcase Program has no Project.")];
+
+        var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var baselines = await db.CandidateBaselines.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var materialized = baselines.Where(x => x.RequirementsMaterializedAt is not null).ToList();
+        var approved = await db.SystemChangeRequests.AsNoTracking()
+            .CountAsync(x => x.ProjectId == projectId && (x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline), ct);
+        var impacts = await db.VerificationImpactItems.CountAsync(ct);
+        var procedures = await db.TestProcedures.CountAsync(x => x.ProjectId == projectId, ct);
+        var executions = await db.TestExecutions.CountAsync(x => x.ProjectId == projectId, ct);
+        var documents = await db.ControlledDocuments.CountAsync(x => x.ProjectId == projectId, ct);
+        var campaigns = await db.ReleaseCampaigns.CountAsync(x => x.ProjectId == projectId, ct);
+        var components = await db.ProductLineComponents.CountAsync(x => x.ProjectId == projectId, ct);
+
+        return
+        [
+            new("releases", releases.Count >= 2, $"{releases.Count} release(s); a released 1.5 and an in-work 1.6 are expected."),
+            new("materialized-baseline", materialized.Count >= 1, $"{materialized.Count} materialized baseline(s)."),
+            new("documents", documents >= 6, $"{documents} controlled document(s)."),
+            new("procedures", procedures >= 500, $"{procedures} test procedure(s)."),
+            new("executions", executions >= 500, $"{executions} recorded execution(s)."),
+            // The one this work exists for: approved change requests with an empty queue is the state the
+            // product calls impossible, and a live installation was sitting in it.
+            new("verification-impact", approved == 0 || impacts > 0,
+                $"{approved} approved or selected change request(s) and {impacts} verification-impact item(s)."),
+            new("release-campaign", campaigns >= 1, $"{campaigns} release campaign(s)."),
+            new("product-line", components >= 1, $"{components} product-line component(s)."),
+        ];
+    }
+
+    /// <summary>
+    /// Raises the verification-impact items an approved or selected change request should already have.
+    ///
+    /// Approval is what raises this work, and these change requests were approved directly in the seed
+    /// rather than through the endpoint that normally does it — so a database seeded before the impact
+    /// service existed has approved changes introducing and modifying requirements with nothing in the
+    /// queue. The service is asked to raise them again; it already declines to duplicate an item that
+    /// exists, so this adds only what is missing and leaves anything a user resolved untouched.
+    /// </summary>
+    private async Task<string?> ReconcileVerificationImpactAsync(Guid programId, CancellationToken ct)
+    {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleOrDefaultAsync(ct);
+        if (projectId == Guid.Empty) return null;
+        var requests = await db.SystemChangeRequests
+            .Include(x => x.RequirementChanges)
+            .Where(x => x.ProjectId == projectId && (x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline))
+            .ToListAsync(ct);
+        if (requests.Count == 0) return null;
+
+        var before = await db.VerificationImpactItems.CountAsync(ct);
+        var service = new VerificationImpactService(db);
+        foreach (var request in requests) await service.RaiseForApprovedChangeRequestAsync(request, DateTimeOffset.UtcNow, ct);
+        await db.SaveChangesAsync(ct);
+        var raised = await db.VerificationImpactItems.CountAsync(ct) - before;
+        return raised == 0 ? "Verification impact already complete." : $"Raised {raised} missing verification-impact item(s).";
     }
 
     /// <summary>
