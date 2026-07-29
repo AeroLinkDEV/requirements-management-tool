@@ -1,6 +1,29 @@
 import { expect, test } from '@playwright/test'
 import { login } from './auth'
 
+test('Password visibility is a compact control that does not cover the password field', async ({ page }) => {
+  await page.goto('/')
+  const input = page.getByLabel('Password')
+  const toggle = page.getByRole('button', { name: 'Reveal typed characters' })
+
+  await expect(input).toBeVisible()
+  await expect(toggle).toBeVisible()
+  const [inputBox, toggleBox] = await Promise.all([input.boundingBox(), toggle.boundingBox()])
+  expect(inputBox).not.toBeNull()
+  expect(toggleBox).not.toBeNull()
+  expect(toggleBox!.width).toBeLessThanOrEqual(48)
+  expect(toggleBox!.height).toBeLessThanOrEqual(inputBox!.height)
+  expect(toggleBox!.x).toBeGreaterThan(inputBox!.x + inputBox!.width - 60)
+  await expect(toggle).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+
+  await input.fill('AeroLink!2026')
+  await toggle.click()
+  await expect(input).toHaveAttribute('type', 'text')
+  await expect(input).toHaveValue('AeroLink!2026')
+  await page.getByRole('button', { name: 'Conceal typed characters' }).click()
+  await expect(input).toHaveAttribute('type', 'password')
+})
+
 test('AeroLink starts against the real API and presents a valid entry state', async ({ page }) => {
   await login(page)
   await expect(page.getByText(/AeroLink/).first()).toBeVisible()
