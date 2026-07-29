@@ -41,6 +41,32 @@ public static class WorkspaceEndpoints
 
         app.MapPost("/api/showcase/seed", async (HttpContext http,FmsShowcaseSeeder seeder, IdentitySeeder identities, EnterpriseRequirementsService workspace, IConfiguration configuration, CancellationToken ct) => {if(!http.UserAccount().IsAdministrator)return Results.Forbid();if(!configuration.GetValue<bool>("Identity:SeedDemoAccounts"))return Results.NotFound();var result=await seeder.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); await workspace.SynchronizeProjectAsync(result.ProjectId,"system.workspace",ct); return Results.Ok(result); });
 
+        // What the showcase upgrade has and has not applied to this installation, and whether the invariants
+        // it is meant to guarantee actually hold. An upgrade that reports success is not the same as a
+        // database that is correct, so this reports the two separately and an operator can read both.
+        app.MapGet("/api/showcase/upgrade-state", async (HttpContext http, AeroLinkDbContext db, FmsShowcaseSeeder seeder, CancellationToken ct) =>
+        {
+            if (!http.UserAccount().IsAdministrator) return Results.Forbid();
+            var program = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == FmsShowcaseSeeder.ProgramCode, ct);
+            if (program is null) return Results.Ok(new { seeded = false, steps = Array.Empty<object>(), invariants = Array.Empty<object>() });
+            var steps = (await db.ShowcaseUpgradeSteps.AsNoTracking().Where(x => x.ProgramId == program.Id).ToListAsync(ct))
+                .OrderBy(x => x.AppliedAt).Select(x => new { x.StepKey, x.Detail, x.AppliedAt }).ToList();
+            var invariants = await seeder.CheckInvariantsAsync(program.Id, ct);
+            return Results.Ok(new { seeded = true, programId = program.Id, steps, healthy = invariants.All(x => x.Holds), invariants });
+        });
+
+        // The repair command for an existing local showcase: apply any outstanding steps and report what
+        // changed. Safe to run repeatedly, and safe to run again after an interrupted attempt.
+        app.MapPost("/api/showcase/upgrade", async (HttpContext http, AeroLinkDbContext db, FmsShowcaseSeeder seeder, CancellationToken ct) =>
+        {
+            if (!http.UserAccount().IsAdministrator) return Results.Forbid();
+            var program = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == FmsShowcaseSeeder.ProgramCode, ct);
+            if (program is null) return Results.NotFound(new { error = "No showcase Program is installed.", code = "showcase_absent" });
+            var applied = await seeder.UpgradeAsync(program.Id, ct);
+            var invariants = await seeder.CheckInvariantsAsync(program.Id, ct);
+            return Results.Ok(new { applied, healthy = invariants.All(x => x.Holds), invariants });
+        });
+
         app.MapGet("/api/programs", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var actor=http.UserAccount(); var allowed=actor.IsAdministrator?null:actor.Programs.Select(x=>x.ProgramId).ToHashSet();

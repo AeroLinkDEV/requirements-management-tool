@@ -85,6 +85,39 @@ Demo identity seeding fails closed outside the `Development` environment. `Ident
 
 The deterministic demonstration password is `AeroLink!2026`. Useful users include `admin`, `systems.author`, `software.author`, `systems.reviewer`, and `release.manager`. These credentials are for the disconnected local development installation only. Replace them, remove credential prefill, configure TLS, and establish organizational identity and privileged-access policy before operational use.
 
+## Repairing an existing showcase database
+
+A database seeded by an older build does not receive invariants added since. The seeder used to return early
+whenever a showcase Program already existed, so an installation created before verification impact shipped
+kept approved FMS 1.6 change requests alongside an empty impact queue — a state the product describes as
+impossible, and one no amount of restarting would fix.
+
+Reconciliation is now ordered, keyed and idempotent, and runs on every start. Two commands let an operator
+see and force it. Both need an administrator session and neither reseeds or replaces anything.
+
+**Read what has been applied, and whether the invariants hold:**
+
+```bash
+curl -s --cookie cookies.txt http://127.0.0.1:5080/api/showcase/upgrade-state
+```
+
+`steps` lists each reconciliation step with what it changed and when. `invariants` is checked independently of
+those steps: `healthy` false means the database is wrong regardless of what the steps claim to have done, and
+each entry names the count it expected against the count it found.
+
+**Apply anything outstanding:**
+
+```bash
+curl -s --cookie cookies.txt -X POST http://127.0.0.1:5080/api/showcase/upgrade
+```
+
+Safe to run repeatedly and safe to run again after an interrupted attempt: a step records itself only after
+its own work commits, so an upgrade resumes at the step it stopped on rather than repeating the ones that
+already succeeded. Records created by users are never touched.
+
+If `healthy` is still false afterwards, read the failing invariant's detail rather than reseeding — dropping
+and recreating the database is documented below and discards everything anybody has authored locally.
+
 ## FMS-only local showcase cleanup
 
 The Development seed creates only `Flight Management System Live Program` (`FMSLIVE`) with released version 1.5 and in-work version 1.6. Playwright uses a disposable SQLite database, so browser journeys do not add Programs to the live PostgreSQL selector.
