@@ -3,3 +3,4 @@
 /* Draft state sits with the action it protects, not floating above the form. */
 .prCreateFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .prFlow .draftState { align-self: start; }
+.problemReportsPage[data-read-only="true"] .prFlow{display:none}

@@ -30,7 +30,7 @@ async function createWorkspace(request: APIRequestContext, prefix: string) {
 
 async function openNewSystemScr(page: Page, programName: string) {
   await login(page)
-  await page.locator('.program > select:not(.releaseSelector)').selectOption({ label: programName })
+  await selectProgram(page, programName)
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'New System SCR' }).click()
 }

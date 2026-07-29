@@ -29,7 +29,7 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
     .map(element=>({text:(element.textContent||'').trim().slice(0,40),size:getComputedStyle(element).fontSize})))
   expect(tinyText).toEqual([])
   await expect(page.getByRole('button',{name:'Record Software Build'})).toBeHidden()
-  await page.getByRole('button',{name:/Software Builds/}).click()
+  await page.getByRole('button',{name:/^Software Builds/}).click()
   await expect(page.getByRole('button',{name:'Record Software Build'})).toBeVisible()
 
   await page.getByRole('link',{name:/Command Center/}).click()

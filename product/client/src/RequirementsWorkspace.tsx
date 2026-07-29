@@ -88,6 +88,8 @@ type History = {
   sourceScrId: string;
   sourceScr: string;
   createdAt: string;
+  originBuild: string;
+  isHistorical: boolean;
   attributesJson: string;
   tagsJson: string;
 };
@@ -262,6 +264,7 @@ export default function RequirementsWorkspace({
     if (coverageState) p.set("coverageState", coverageState);
     if (specificationId) p.set("specificationId", specificationId);
     if (sectionId) p.set("sectionId", sectionId);
+    if (release?.id) p.set("releaseId", release.id);
     return p;
   }, [
     projectId,
@@ -280,6 +283,7 @@ export default function RequirementsWorkspace({
     sort,
     specificationId,
     sectionId,
+    release?.id,
   ]);
   /**
    * Only the specifications this explorer is about.
@@ -336,14 +340,14 @@ export default function RequirementsWorkspace({
     setSelected(item);
     setInspectorTab("details");
     const [a, b, c] = await Promise.all([
-      fetch(`${api}/api/enterprise-requirements/${item.id}`),
+      fetch(`${api}/api/enterprise-requirements/${item.id}${release?.id ? `?releaseId=${release.id}` : ""}`),
       fetch(`${api}/api/enterprise-requirements/${item.id}/comments`),
       fetch(`${api}/api/enterprise-requirements/${item.id}/impact`),
     ]);
     if (a.ok) setDetail(await a.json());
     if (b.ok) setComments(await b.json());
     if (c.ok) setImpact(await c.json());
-  }, [api]);
+  }, [api, release?.id]);
   useEffect(() => {
     if (
       autoSelected.current ||
@@ -361,7 +365,7 @@ export default function RequirementsWorkspace({
     let cancelled = false;
     (async () => {
       const [detailResponse, commentsResponse, impactResponse] = await Promise.all([
-        fetch(`${api}/api/enterprise-requirements/${initialArtifactId}`),
+        fetch(`${api}/api/enterprise-requirements/${initialArtifactId}${release?.id ? `?releaseId=${release.id}` : ""}`),
         fetch(
           `${api}/api/enterprise-requirements/${initialArtifactId}/comments`,
         ),
@@ -403,7 +407,7 @@ export default function RequirementsWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [api, initialArtifactId, selected?.id]);
+  }, [api, initialArtifactId, release?.id, selected?.id]);
   const clearFilters = () => {
     setSearch("");
     setLevel(scope);
@@ -663,7 +667,7 @@ export default function RequirementsWorkspace({
             <i aria-hidden="true">◈</i>
             <span><b>Authoritative view</b><small>Requirement content is read-only here</small></span>
           </span>
-          <details className="pageActionsMenu" ref={actionsMenu}>
+          {!release?.isReleased && <details className="pageActionsMenu" ref={actionsMenu}>
             <summary>Workspace tools</summary>
             <div>
               <button onClick={() => {
@@ -675,7 +679,7 @@ export default function RequirementsWorkspace({
                 setShowSave(true);
               }}>☆ Save view</button>
             </div>
-          </details>
+          </details>}
         </div>
       </header>
       {error && <div className="workspaceError">{error}</div>}
@@ -1041,9 +1045,9 @@ export default function RequirementsWorkspace({
               <div>
                 {filterChips.length ? (
                   <button onClick={clearFilters}>Clear all filters</button>
-                ) : (
+                ) : !release?.isReleased ? (
                   <button onClick={() => onProposeChange("")}>Open Changes</button>
-                )}
+                ) : null}
               </div>
             </div>
           ) : mode === "table" ? (
@@ -1222,15 +1226,9 @@ export default function RequirementsWorkspace({
                   <b>✓ Controlled revision</b>
                   <span>Content changes require an SCR/SWCR</span>
                 </div>
-                <button
-                  className="impactLaunch"
-                  onClick={() => onProposeChange(selected.id)}
-                >
-                  Propose controlled change →
-                </button>
-                <p className="changeBoundaryNote">
-                  Opens a new Draft SCR/SWCR in Changes. This authoritative revision remains unchanged.
-                </p>
+                {release?.isReleased
+                  ? <p className="changeBoundaryNote"><b>Read-only historical record — Build {release.version}</b><br/>Exit this workspace and select an in-work build to propose a change.</p>
+                  : <><button className="impactLaunch" onClick={() => onProposeChange(selected.id)}>Propose controlled change →</button><p className="changeBoundaryNote">Opens a new Draft SCR/SWCR in Changes. This authoritative revision remains unchanged.</p></>}
                 <h3>Requirement statement</h3>
                 <div className="richRequirement">{selected.statement}</div>
                 <h3>Digital thread</h3>
@@ -1365,7 +1363,7 @@ export default function RequirementsWorkspace({
                     </div>
                     <p>{x.statement}</p>
                     <small>
-                      {x.sourceScr} ·{" "}
+                      {x.isHistorical ? `Historical version — Build ${x.originBuild}` : `Build ${x.originBuild}`} · {x.sourceScr} ·{" "}
                       {new Date(x.createdAt).toLocaleDateString()}
                     </small>
                   </article>
@@ -1374,7 +1372,7 @@ export default function RequirementsWorkspace({
             )}
             {inspectorTab === "discussion" && (
               <div className="discussionPane">
-                <form onSubmit={addComment} ref={commentForm}>
+                {!release?.isReleased ? <form onSubmit={addComment} ref={commentForm}>
                   {commentDraft.offered && (
                     <DraftRestore
                       savedAt={commentDraft.offered.savedAt}
@@ -1392,7 +1390,7 @@ export default function RequirementsWorkspace({
                     <AutosaveState status={commentDraft.status} savedAt={commentDraft.savedAt} where="this browser" />
                     <button>Add comment</button>
                   </div>
-                </form>
+                </form> : <div className="traceEmpty"><span>Discussion is read-only in released Build {release.version}.</span></div>}
                 {comments.map((c) => (
                   <article key={c.id} className={c.state.toLowerCase()}>
                     <div>

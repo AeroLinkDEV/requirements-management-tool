@@ -11,6 +11,8 @@ test('the authenticated project selector has a context-free route', () => {
   expect(parseRoute('/')).toMatchObject({ view: 'projects', discipline: 'system' })
   expect(parseRoute('/projects')).toMatchObject({ view: 'projects', discipline: 'system' })
   expect(routePath(context, 'projects')).toBe('/projects')
+  expect(parseRoute('/projects/fms-product-development/builds')).toMatchObject({ view: 'builds', discipline: 'system' })
+  expect(routePath(context, 'builds')).toBe('/projects/fms-product-development/builds')
 })
 
 test('change-request route generation and parsing preserve both engineering disciplines', () => {

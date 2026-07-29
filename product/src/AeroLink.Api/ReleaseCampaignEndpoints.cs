@@ -17,9 +17,9 @@ public static class ReleaseCampaignEndpoints
 {
     public static void MapReleaseCampaignEndpoints(this WebApplication app)
     {
-        app.MapGet("/api/documents", async (Guid projectId, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/documents", async (Guid projectId, Guid? releaseId, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            var rows = await (from document in db.ControlledDocuments.AsNoTracking().Where(x => x.ProjectId == projectId)
+            var rows = await (from document in db.ControlledDocuments.AsNoTracking().Where(x => x.ProjectId == projectId && (releaseId == null || x.ReleaseId == releaseId))
                               join release in db.Releases.AsNoTracking() on document.ReleaseId equals release.Id
                               join baseline in db.CandidateBaselines.AsNoTracking() on document.BaselineId equals baseline.Id
                               orderby document.Type select new { document.Id, type = document.Type.ToString(), document.DocumentNumber, document.Revision, document.Title,
@@ -56,9 +56,9 @@ public static class ReleaseCampaignEndpoints
             var document=await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(document is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,document.ProjectId,ct))return Results.Forbid();var baseline=await db.CandidateBaselines.AsNoTracking().SingleAsync(x=>x.Id==document.BaselineId,ct);var release=await db.Releases.AsNoTracking().SingleAsync(x=>x.Id==document.ReleaseId,ct);var approvals=await(from approval in db.ReleaseApprovals.AsNoTracking() join campaign in db.ReleaseCampaigns.AsNoTracking() on approval.CampaignId equals campaign.Id where campaign.ProjectId==document.ProjectId&&campaign.ReleaseId==document.ReleaseId&&campaign.BaselineId==document.BaselineId&&approval.ApprovedAt!=null&&approval.ApprovedAt<=document.GeneratedAt select new{campaignId=campaign.Id,approval.ApproverId,approval.ApproverName,state=approval.State.ToString(),approval.ApprovedAt}).OrderBy(x=>x.ApprovedAt).ToListAsync(ct);return Results.Ok(new{format="AeroLink controlled-publication-manifest/v1",document=new{document.Id,document.DocumentNumber,document.Revision,document.Title,type=document.Type.ToString(),document.ContentHash,document.ArtifactCount,document.GeneratedAt},source=new{baseline=baseline.DisplayNumber,baseline.ContentHash,baseline.RequirementsHash,release=release.Version},approvalEvidence=approvals,reproducibility=new{renderer="AeroLink professional publication renderer",contentHash=document.ContentHash,deterministic=true}});
         });
 
-        app.MapGet("/api/release-campaigns", async (Guid projectId, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
+        app.MapGet("/api/release-campaigns", async (Guid projectId, Guid? releaseId, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
         {
-            var campaigns = (await db.ReleaseCampaigns.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct)).OrderByDescending(x => x.CreatedAt).ToList(); var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToDictionaryAsync(x => x.Id, ct);
+            var campaigns = (await db.ReleaseCampaigns.AsNoTracking().Where(x => x.ProjectId == projectId && (releaseId == null || x.ReleaseId == releaseId)).ToListAsync(ct)).OrderByDescending(x => x.CreatedAt).ToList(); var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToDictionaryAsync(x => x.Id, ct);
             var output = new List<object>(); foreach (var campaign in campaigns) { var status = await readiness.CalculateAsync(campaign.Id, ct); output.Add(new { campaign.Id, campaign.Name, state = campaign.State.ToString(), campaign.ReleaseId, release = releases[campaign.ReleaseId].Version, campaign.BaselineId, campaign.SoftwareBuildId, campaign.OwnerId, campaign.CreatedAt, campaign.ReleasedAt, campaign.ReleaseHash, readiness = status }); }
             return Results.Ok(output);
         });

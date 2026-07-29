@@ -82,6 +82,7 @@ type Props = {
   projectId: string;
   releaseId: string;
   releaseVersion: string;
+  readOnly: boolean;
   productName: string;
   onBack: () => void;
 };
@@ -91,6 +92,7 @@ export default function BaselineCenter({
   projectId,
   releaseId,
   releaseVersion,
+  readOnly,
   productName,
   onBack,
 }: Props) {
@@ -219,9 +221,9 @@ export default function BaselineCenter({
             manifest.
           </p>
         </div>
-        <button className="newBaseline" onClick={() => setCreating(true)}>
+        {readOnly?<span className="statusPill">Released build · read-only</span>:<button className="newBaseline" onClick={() => setCreating(true)}>
           + New Candidate
-        </button>
+        </button>}
       </header>
       {error && <div className="workspaceError">{error}</div>}
       {creating ? (
@@ -384,7 +386,7 @@ export default function BaselineCenter({
                       <span>Requirement changes</span>
                     </div>
                   </div>
-                  {detail.state === "Draft" ? (
+                  {!readOnly && detail.state === "Draft" ? (
                     <button
                       disabled={busy || !detail.selections.length}
                       onClick={() => action("freeze", "POST", {})}
@@ -393,7 +395,7 @@ export default function BaselineCenter({
                     </button>
                   ) : detail.requirementsMaterializedAt ? (
                     <div className="frozenMark">✓ SWRD materialized</div>
-                  ) : (
+                  ) : !readOnly ? (
                     <button
                       disabled={busy}
                       onClick={() =>
@@ -402,7 +404,7 @@ export default function BaselineCenter({
                     >
                       {busy ? "Materializing…" : "Materialize SWRD"}
                     </button>
-                  )}
+                  ) : <div className="frozenMark">Released build · read-only</div>}
                 </div>
                 {detail.state === "Frozen" && (
                   <div className="hashPanel">
@@ -465,7 +467,7 @@ export default function BaselineCenter({
                             </span>
                           </div>
                           <p>{item.title}</p>
-                          {detail.state === "Draft" && (
+                          {!readOnly && detail.state === "Draft" && (
                             <button
                               onClick={() =>
                                 action(`selections/${item.id}`, "DELETE")
@@ -518,7 +520,7 @@ export default function BaselineCenter({
                     </section>
                   </div>
                   <aside className="baselineSide">
-                    {detail.state === "Draft" && (
+                    {!readOnly && detail.state === "Draft" && (
                       <section className="baselineCard">
                         <div className="baselineCardTitle">
                           <div>

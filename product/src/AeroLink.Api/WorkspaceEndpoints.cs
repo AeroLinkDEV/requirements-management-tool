@@ -115,6 +115,31 @@ public static class WorkspaceEndpoints
             releases = await db.Releases.AsNoTracking().Where(x=>projects.Select(p=>p.Id).Contains(x.ProjectId)).OrderBy(x => x.Version).ToListAsync(ct)
         }); });
 
+        app.MapGet("/api/build-context", async (Guid projectId, Guid releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == releaseId && x.ProjectId == projectId, ct);
+            if (release is null) return Results.NotFound(new { error = "The selected build does not exist in this project." });
+            var effectiveBaselineId = await BuildScope.EffectiveBaselineAsync(db, projectId, releaseId, ct);
+            var effectiveBaseline = effectiveBaselineId is null
+                ? null
+                : await (from baseline in db.CandidateBaselines.AsNoTracking()
+                         join origin in db.Releases.AsNoTracking() on baseline.ReleaseId equals origin.Id
+                         where baseline.Id == effectiveBaselineId
+                         select new { baseline.Id, baseline.BaseNumber, baseline.Revision, baseline.Name, baseline.RequirementsMaterializedAt, ReleaseId = origin.Id, ReleaseVersion = origin.Version }).SingleAsync(ct);
+            return Results.Ok(new
+            {
+                projectId,
+                releaseId = release.Id,
+                release.Version,
+                release.IsReleased,
+                release.PredecessorReleaseId,
+                effectiveBaselineId,
+                effectiveBaseline,
+                inheritedBaseline = effectiveBaseline is not null && effectiveBaseline.ReleaseId != release.Id
+            });
+        });
+
         app.MapGet("/api/release-planning", async (Guid projectId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
@@ -147,25 +172,36 @@ public static class WorkspaceEndpoints
             await db.SaveChangesAsync(ct); return Results.Created($"/api/releases/{release.Id}", new { release.Id, release.Version, release.IsReleased, request.PredecessorReleaseId });
         });
 
-        app.MapGet("/api/showcase/overview", async (Guid projectId, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/showcase/overview", async (Guid projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).OrderBy(x => x.Version).ToListAsync(ct);
-            var releasedIds = releases.Where(x => x.IsReleased).Select(x => x.Id).ToArray(); var activeIds = releases.Where(x => !x.IsReleased).Select(x => x.Id).ToArray();
-            var requests = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId);
-            var requirements = db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId);
+            var selectedReleaseIds = releaseId is null ? releases.Select(x => x.Id).ToArray() : [releaseId.Value];
+            var requests = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId && selectedReleaseIds.Contains(x.TargetReleaseId));
+            var effectiveBaselineId = releaseId is null ? null : await BuildScope.EffectiveBaselineAsync(db, projectId, releaseId.Value, ct);
+            var revisionIds = effectiveBaselineId is null
+                ? []
+                : await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == effectiveBaselineId).Select(x => x.RevisionId).ToListAsync(ct);
+            var artifactIds = effectiveBaselineId is null
+                ? await db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId).Select(x => x.Id).ToListAsync(ct)
+                : await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == effectiveBaselineId).Select(x => x.ArtifactId).ToListAsync(ct);
+            var requirements = db.Requirements.AsNoTracking().Where(x => artifactIds.Contains(x.Id));
+            var procedureRevisionIds = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.RequirementRevisionId)).Select(x => x.ProcedureRevisionId).Distinct().ToListAsync(ct);
+            var procedureIds = await db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id)).Select(x => x.ProcedureId).Distinct().ToListAsync(ct);
+            var executionBuildIds = await db.SoftwareBuilds.AsNoTracking().Where(x => selectedReleaseIds.Contains(x.ReleaseId)).Select(x => x.Id).ToListAsync(ct);
             return Results.Ok(new {
                 releases = releases.Select(x => new { x.Id, x.Version, x.IsReleased }),
                 systemRequirements = await requirements.CountAsync(x => x.Level == RequirementLevel.System, ct),
                 highLevelRequirements = await requirements.CountAsync(x => x.Level == RequirementLevel.HighLevel, ct),
                 lowLevelRequirements = await requirements.CountAsync(x => x.Level == RequirementLevel.LowLevel, ct),
-                historicalScrs = await requests.CountAsync(x => x.Type == ChangeRequestType.System && releasedIds.Contains(x.TargetReleaseId), ct),
-                historicalSwcrs = await requests.CountAsync(x => x.Type == ChangeRequestType.Software && releasedIds.Contains(x.TargetReleaseId), ct),
-                activeRequests = await requests.CountAsync(x => activeIds.Contains(x.TargetReleaseId), ct),
-                traceLinks = await db.RequirementTraces.CountAsync(x => x.ProjectId == projectId, ct),
-                testProcedures = await db.TestProcedures.CountAsync(x => x.ProjectId == projectId, ct),
-                testExecutions = await db.TestExecutions.CountAsync(x => x.ProjectId == projectId, ct),
-                controlledDocuments = await db.ControlledDocuments.CountAsync(x => x.ProjectId == projectId, ct),
-                softwareBuilds = await db.SoftwareBuilds.CountAsync(x => x.ProjectId == projectId, ct)
+                historicalScrs = await requests.CountAsync(x => x.Type == ChangeRequestType.System, ct),
+                historicalSwcrs = await requests.CountAsync(x => x.Type == ChangeRequestType.Software, ct),
+                activeRequests = await requests.CountAsync(x => x.State != ScrState.Deferred, ct),
+                traceLinks = await db.RequirementTraces.CountAsync(x => revisionIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId), ct),
+                testProcedures = await db.TestProcedures.CountAsync(x => procedureIds.Contains(x.Id), ct),
+                testExecutions = await db.TestExecutions.CountAsync(x => x.SoftwareBuildId != null && executionBuildIds.Contains(x.SoftwareBuildId.Value), ct),
+                controlledDocuments = await db.ControlledDocuments.CountAsync(x => x.ProjectId == projectId && selectedReleaseIds.Contains(x.ReleaseId), ct),
+                softwareBuilds = await db.SoftwareBuilds.CountAsync(x => x.ProjectId == projectId && selectedReleaseIds.Contains(x.ReleaseId), ct)
             });
         });
 
@@ -175,19 +211,13 @@ public static class WorkspaceEndpoints
             if (projectId is not null && !await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
             var allowedProjects = actor.IsAdministrator ? null : await db.Projects.AsNoTracking().Where(x => actor.Programs.Select(p => p.ProgramId).Contains(x.ProgramId)).Select(x => x.Id).ToListAsync(ct);
             var source = db.SystemChangeRequests.AsNoTracking().Where(x => (allowedProjects == null || allowedProjects.Contains(x.ProjectId)) && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.TargetReleaseId == releaseId));
-            // Deferred is counted across the project rather than within the selected release, and split by
-            // discipline. A change request that has been put away is precisely one that is not part of the
-            // build being worked on, so scoping the count to that build would hide the records this collection
-            // exists to hold — and systems and software keep their own, because they are worked by different
-            // people who should not be reading each other's shelved work.
-            var everywhere = db.SystemChangeRequests.AsNoTracking().Where(x => (allowedProjects == null || allowedProjects.Contains(x.ProjectId)) && (projectId == null || x.ProjectId == projectId));
             return Results.Ok(new {
                 totalScrs = await source.CountAsync(ct),
                 draft = await source.CountAsync(x => x.State == ScrState.Draft, ct),
                 inReview = await source.CountAsync(x => x.State == ScrState.InReview, ct),
                 approved = await source.CountAsync(x => x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline, ct),
-                deferredSystem = await everywhere.CountAsync(x => x.State == ScrState.Deferred && x.Type == ChangeRequestType.System, ct),
-                deferredSoftware = await everywhere.CountAsync(x => x.State == ScrState.Deferred && x.Type == ChangeRequestType.Software, ct)
+                deferredSystem = await source.CountAsync(x => x.State == ScrState.Deferred && x.Type == ChangeRequestType.System, ct),
+                deferredSoftware = await source.CountAsync(x => x.State == ScrState.Deferred && x.Type == ChangeRequestType.Software, ct)
             });
         });
 
@@ -204,23 +234,23 @@ public static class WorkspaceEndpoints
             return Results.Ok(people.OrderBy(x=>x.DisplayName).Take(Math.Clamp(limit??50,1,200)));
         });
 
-        app.MapGet("/api/my-work", async (Guid? projectId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/my-work", async (Guid? projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
             var activeScrSteps = await (from step in db.ApprovalSteps.AsNoTracking().Where(x => x.ApproverId == actor.UserName && x.State == ApprovalStepState.Active)
                                         join cycle in db.ReviewCycles.AsNoTracking() on step.ReviewCycleId equals cycle.Id
                                         join scr in db.SystemChangeRequests.AsNoTracking() on cycle.ScrId equals scr.Id
-                                        where projectId == null || scr.ProjectId == projectId
+                                        where (projectId == null || scr.ProjectId == projectId) && (releaseId == null || scr.TargetReleaseId == releaseId)
                                         select new { id = scr.Id, type = "SCR approval", artifact = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, title = scr.Title, priority = "High", dueAt = cycle.StartedAt.AddDays(5), ageDays = (int)(now - cycle.StartedAt).TotalDays, route = "scr", discipline = scr.Type == ChangeRequestType.Software ? "software" : "system" }).ToListAsync(ct);
             activeScrSteps = activeScrSteps.OrderBy(x => x.dueAt).ToList();
             var releaseSteps = await (from step in db.ReleaseApprovals.AsNoTracking().Where(x => x.ApproverId == actor.UserName && x.State == ReleaseApprovalState.Active)
                                       join campaign in db.ReleaseCampaigns.AsNoTracking() on step.CampaignId equals campaign.Id
-                                      where projectId == null || campaign.ProjectId == projectId
+                                      where (projectId == null || campaign.ProjectId == projectId) && (releaseId == null || campaign.ReleaseId == releaseId)
                                       select new { id = campaign.Id, type = "Release approval", artifact = campaign.Name, title = "Authorize the controlled release package", priority = "Critical", dueAt = campaign.CreatedAt.AddDays(10), ageDays = (int)(now - campaign.CreatedAt).TotalDays, route = "release" }).ToListAsync(ct);
             releaseSteps = releaseSteps.OrderBy(x => x.dueAt).ToList();
             // Ordered after materialisation: SQLite cannot ORDER BY a DateTimeOffset, and this set is bounded by
             // the drafts one person authored, so sorting in memory costs nothing and works on every provider.
-            var authoredDrafts = (await db.SystemChangeRequests.AsNoTracking().Where(x => x.AuthorId == actor.UserName && x.State == ScrState.Draft && (projectId == null || x.ProjectId == projectId))
+            var authoredDrafts = (await db.SystemChangeRequests.AsNoTracking().Where(x => x.AuthorId == actor.UserName && x.State == ScrState.Draft && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.TargetReleaseId == releaseId))
                 .Select(x => new { id = x.Id, type = "Draft to complete", artifact = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, title = x.Title, priority = "Normal", dueAt = x.UpdatedAt.AddDays(10), ageDays = (int)(now - x.UpdatedAt).TotalDays, route = "scr", discipline = x.Type == ChangeRequestType.Software ? "software" : "system" }).ToListAsync(ct))
                 .OrderByDescending(x => x.dueAt).ToList();
             var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).ToList();
@@ -316,20 +346,23 @@ public static class WorkspaceEndpoints
 
         // Bounded, Program-scoped universal search. Results are identifiers plus stable IDs;
         // the client owns the durable URL so every result can be opened in a new tab.
-        app.MapGet("/api/search",async(Guid projectId,string query,int? limit,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        app.MapGet("/api/search",async(Guid projectId,Guid? releaseId,string query,int? limit,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
         {
             if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
             var q=(query??string.Empty).Trim().ToLowerInvariant();if(q.Length<2)return Results.Ok(new{query,items=Array.Empty<SearchResultDto>()});var take=Math.Clamp(limit??30,1,50);var items=new List<SearchResultDto>();
-            items.AddRange(await db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.BaseNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"change-request",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),x.Type==ChangeRequestType.Software?"software":"system",x.UpdatedAt)).ToListAsync(ct));
-            items.AddRange(await db.ProblemReports.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.ReportNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q)||x.RootCause.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"problem-report",x.ReportNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),"assurance",x.UpdatedAt)).ToListAsync(ct));
-            var requirementRows=await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)&&(artifact.BaseNumber.ToLower().Contains(q)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q)) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct);
+            var effectiveBaselineId=releaseId is null?null:await BuildScope.EffectiveBaselineAsync(db,projectId,releaseId.Value,ct);
+            items.AddRange(await db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.TargetReleaseId==releaseId)&&(x.BaseNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"change-request",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),x.Type==ChangeRequestType.Software?"software":"system",x.UpdatedAt)).ToListAsync(ct));
+            items.AddRange(await db.ProblemReports.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||db.ProblemReportLinks.Any(link=>link.ProblemReportId==x.Id&&link.ArtifactType=="Release"&&link.ArtifactId==releaseId))&&(x.ReportNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q)||x.RootCause.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"problem-report",x.ReportNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),"assurance",x.UpdatedAt)).ToListAsync(ct));
+            var requirementRows=effectiveBaselineId is not null
+                ? await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==effectiveBaselineId) on artifact.Id equals member.ArtifactId join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id where artifact.BaseNumber.ToLower().Contains(q)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct)
+                : await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)&&(artifact.BaseNumber.ToLower().Contains(q)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q)) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct);
             items.AddRange(requirementRows.Select(x=>new SearchResultDto(x.Id,"requirement",$"{x.BaseNumber}.{x.Revision:D2}",x.Statement,x.State.ToString(),x.Level==RequirementLevel.System?"system":"software",x.CreatedAt)));
-            items.AddRange(await db.CandidateBaselines.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.BaseNumber.ToLower().Contains(q)||x.Name.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"baseline",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
-            items.AddRange(await db.SoftwareBuilds.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.BuildNumber.ToLower().Contains(q)||x.Description.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"build",x.BuildNumber,x.Description,x.State.ToString(),"software",x.RecordedAt)).ToListAsync(ct));
+            items.AddRange(await db.CandidateBaselines.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&(x.BaseNumber.ToLower().Contains(q)||x.Name.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"baseline",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
+            items.AddRange(await db.SoftwareBuilds.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&(x.BuildNumber.ToLower().Contains(q)||x.Description.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"build",x.BuildNumber,x.Description,x.State.ToString(),"software",x.RecordedAt)).ToListAsync(ct));
             items.AddRange(await db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.BaseNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"test-procedure",x.BaseNumber,x.Title,"Controlled",x.Level==TestProcedureLevel.System?"system":"software",x.CreatedAt)).ToListAsync(ct));
-            items.AddRange(await db.ControlledDocuments.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.DocumentNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"document",x.DocumentNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,"Generated",x.Type==ControlledDocumentType.Sysrd?"system":"software",x.GeneratedAt)).ToListAsync(ct));
-            items.AddRange(await db.ReleaseCampaigns.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.Name.ToLower().Contains(q)).Take(take).Select(x=>new SearchResultDto(x.Id,"release-campaign",x.Name,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
-            items.AddRange(await db.Releases.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.Version.ToLower().Contains(q)).Take(take).Select(x=>new SearchResultDto(x.Id,"release",x.Version,"Software release "+x.Version,x.IsReleased?"Released":"InWork","configuration",x.ReleasedAt)).ToListAsync(ct));
+            items.AddRange(await db.ControlledDocuments.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&(x.DocumentNumber.ToLower().Contains(q)||x.Title.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"document",x.DocumentNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,"Generated",x.Type==ControlledDocumentType.Sysrd?"system":"software",x.GeneratedAt)).ToListAsync(ct));
+            items.AddRange(await db.ReleaseCampaigns.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&x.Name.ToLower().Contains(q)).Take(take).Select(x=>new SearchResultDto(x.Id,"release-campaign",x.Name,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
+            items.AddRange(await db.Releases.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.Id==releaseId)&&x.Version.ToLower().Contains(q)).Take(take).Select(x=>new SearchResultDto(x.Id,"release",x.Version,"Software release "+x.Version,x.IsReleased?"Released":"InWork","configuration",x.ReleasedAt)).ToListAsync(ct));
             var executionRows=await(from execution in db.TestExecutions.AsNoTracking().Where(x=>x.ProjectId==projectId) join revision in db.TestProcedureRevisions.AsNoTracking() on execution.ProcedureRevisionId equals revision.Id join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id where procedure.BaseNumber.ToLower().Contains(q)||procedure.Title.ToLower().Contains(q)||execution.Determination.ToLower().Contains(q)||execution.EvidenceReference.ToLower().Contains(q) select new{execution.Id,identifier=procedure.BaseNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,procedure.Title,execution.Outcome,execution.RecordedAt,procedure.Level}).Take(take).ToListAsync(ct);
             items.AddRange(executionRows.Select(x=>new SearchResultDto(x.Id,"test-execution",x.identifier,$"{x.Title} result",x.Outcome.ToString(),x.Level==TestProcedureLevel.System?"system":"software",x.RecordedAt)));
             items.AddRange(await db.EvidenceRecords.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.OriginalFileName.ToLower().Contains(q)||x.Sha256.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"evidence",x.OriginalFileName,x.Sha256,"Immutable","verification",x.UploadedAt)).ToListAsync(ct));

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { apiBase, login, openNavigationGroup } from './auth'
+import { apiBase, login, openNavigationGroup, selectProgram } from './auth'
 
 async function openPageFromPalette(page:Page,label:string){
   await page.getByRole('button',{name:/Search & navigate/}).click()
@@ -23,8 +23,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   }else{
     const created=await page.request.post(`${apiBase}/api/workspaces`,{data:{programName,programCode:`BW${suffix}`,projectName:'Workflow Software',softwareProduct:'Workflow Management Software',initialRelease:'1.0',initialReleaseIsReleased:false}})
     expect(created.ok(),await created.text()).toBeTruthy()
-    await page.reload()
-    await page.locator('.program > select:not(.releaseSelector)').selectOption({label:programName})
+    await selectProgram(page,programName)
   }
 
   await openPageFromPalette(page,'Software Verification')
@@ -135,13 +134,16 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByRole('dialog').getByLabel('Objective').fill('Verify the approved software behavior through the controlled recovery workflow.')
   await page.getByRole('dialog').getByRole('button', { name: 'Check in controlled revision' }).click()
   await expect(page.getByRole('dialog')).toBeHidden({ timeout: 15_000 })
-  const workspacesResponse=await page.request.get(`${apiBase}/api/workspaces`);expect(workspacesResponse.ok(),await workspacesResponse.text()).toBeTruthy();const workspaces=await workspacesResponse.json();const workspace=workspaces.find((x:{program:{name:string}})=>x.program.name===programName);const projectId=workspace.projects[0].project.id
+  const workspacesResponse=await page.request.get(`${apiBase}/api/workspaces`);expect(workspacesResponse.ok(),await workspacesResponse.text()).toBeTruthy();const workspaces=await workspacesResponse.json();const workspace=workspaces.find((x:{program:{name:string}})=>x.program.name===programName);const projectId=workspace.projects[0].project.id;const releaseId=workspace.projects[0].releases.find((x:{isReleased:boolean})=>!x.isReleased).id
+  const baselinesResponse=await page.request.get(`${apiBase}/api/baselines?projectId=${projectId}&releaseId=${releaseId}`);expect(baselinesResponse.ok(),await baselinesResponse.text()).toBeTruthy();const baseline=(await baselinesResponse.json()).find((x:{requirementsMaterializedAt?:string})=>x.requirementsMaterializedAt)
+  const buildNumber=`WORKFLOW-${suffix}`;const buildResponse=await page.request.post(`${apiBase}/api/builds`,{data:{projectId,releaseId,baselineId:baseline.id,buildNumber,description:'Controlled workflow verification build'}});expect(buildResponse.ok(),await buildResponse.text()).toBeTruthy()
   const usersResponse=await page.request.get(`${apiBase}/api/admin/users`);expect(usersResponse.ok(),await usersResponse.text()).toBeTruthy();const reviewer=(await usersResponse.json()).find((x:{userName:string})=>x.userName==='systems.reviewer')
   const grant=await page.request.post(`${apiBase}/api/admin/users/${reviewer.id}/memberships`,{data:{programId:workspace.program.id,role:'Approver'}});expect(grant.ok(),await grant.text()).toBeTruthy()
   const proceduresResponse=await page.request.get(`${apiBase}/api/test-procedures?projectId=${projectId}&scope=Software&pageSize=200`);expect(proceduresResponse.ok(),await proceduresResponse.text()).toBeTruthy();const procedure=(await proceduresResponse.json()).items.find((x:{title:string})=>x.title==='Verify ordered approval workflow')
   const approver=await playwright.request.newContext();const approverLogin=await approver.post(`${apiBase}/api/auth/login`,{data:{userName:'systems.reviewer',password:'AeroLink!2026'}});expect(approverLogin.ok(),await approverLogin.text()).toBeTruthy();const approval=await approver.post(`${apiBase}/api/test-procedures/${procedure.revisionId}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved after independent review for controlled verification use.'}});expect(approval.ok(),await approval.text()).toBeTruthy();await approver.dispose()
   await page.reload();await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible()
   await page.getByRole('button', { name: /Test procedures/ }).click()
+  await page.getByLabel('Software build (optional result context)').selectOption({label:buildNumber})
   await page.getByRole('button', { name: 'Record result' }).click()
   await page.getByLabel('Outcome').selectOption('Fail')
   await page.getByLabel('Evidence reference').fill('evidence/workflow-fail-001.json')

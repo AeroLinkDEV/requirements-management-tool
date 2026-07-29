@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, openNavigationGroup } from './auth'
+import { apiBase, apiLogin, login, openNavigationGroup, selectProgram } from './auth'
 
 const completeImpacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
 
@@ -27,7 +27,7 @@ test('a change request goes on the shelf with its state remembered, and comes ba
   } })).json()
 
   await login(page)
-  await page.locator('.program > select:not(.releaseSelector)').selectOption({ label: programName })
+  await selectProgram(page, programName)
   await page.goto(`/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/change-requests/${scr.id}`)
 
   // Allocation and state read as two facts, in the rail and in the header badge.
@@ -70,7 +70,7 @@ test('superseded revisions collapse under the newest one and expand on request',
   expect(next.ok(), await next.text()).toBeTruthy()
 
   await login(page)
-  await page.locator('.program > select:not(.releaseSelector)').selectOption({ label: programName })
+  await selectProgram(page, programName)
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'System Change Requests' }).click()
 

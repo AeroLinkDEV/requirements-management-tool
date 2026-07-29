@@ -29,7 +29,10 @@ test('the requirements explorer offers the document for the build being read', a
   await expect(drafts.getByText(/High-Level|Low-Level/)).toHaveCount(0)
 
   // Switch to the released build and the offer changes to the controlled record that was generated for it.
-  await page.getByLabel('Active release').selectOption({ label: '1.5 · Released' })
+  await page.getByRole('button', { name: 'Back to Software Builds' }).click()
+  await page.getByRole('button', { name: 'Open build 1.5' }).click()
+  await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
+  await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
   const approved = page.getByRole('region', { name: /Approved documents for 1\.5/ })
   await expect(approved).toBeVisible()
   await expect(approved.getByRole('link', { name: 'Draft DOCX' })).toHaveCount(0)

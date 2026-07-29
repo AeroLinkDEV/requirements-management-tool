@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, openNavigationGroup } from './auth'
+import { apiBase, apiLogin, login, openNavigationGroup, selectProgram } from './auth'
 
 const completeImpacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
 
@@ -23,7 +23,7 @@ test('searches full history and proves exact software build contents', async ({ 
   const historyBody = await historyResponse.text(); expect(historyResponse.status(), historyBody).toBe(200); expect(JSON.parse(historyBody).totalCount).toBe(1)
 
   await login(page)
-  await page.locator('.program > select:not(.releaseSelector)').selectOption({ label: programName })
+  await selectProgram(page, programName)
   await openNavigationGroup(page,'SOFTWARE ENGINEERING')
   await page.getByRole('link', { name: 'Software Change Requests' }).click()
   await expect(page.getByRole('heading', { name: 'Software Change Requests' })).toBeVisible()
@@ -35,7 +35,7 @@ test('searches full history and proves exact software build contents', async ({ 
   // the materialized revision is reachable is still proven below, from the build's own contents.
   await page.getByLabel('Search history').fill('')
 
-  await page.getByRole('button', { name: /Software Builds/ }).click()
+  await page.getByRole('button', { name: /^Software Builds/ }).click()
   await page.getByRole('button', { name: 'Record Software Build' }).click()
   await page.getByLabel('Build number').fill('FMS-3.3.0-rc1')
   await page.getByLabel('Frozen baseline').selectOption(baseline.id)

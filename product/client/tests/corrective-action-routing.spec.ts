@@ -19,7 +19,7 @@ import { apiBase, apiLogin, login, selectProgram } from "./auth";
  * documented figure that another journey asserts, and a fixture that changes what other tests find is not an
  * isolated fixture. This reads what is there instead of adding to it.
  */
-async function raiseReport(page: Page, projectId: string, scope: "System" | "Software") {
+async function raiseReport(page: Page, projectId: string, releaseId: string, scope: "System" | "Software") {
   const procedures = (await (await page.request.get(
     `${apiBase}/api/test-procedures?projectId=${projectId}&scope=${scope}&pageSize=200`)).json()).items;
   const revisionIds = new Set(procedures.map((x: { revisionId: string }) => x.revisionId));
@@ -34,7 +34,7 @@ async function raiseReport(page: Page, projectId: string, scope: "System" | "Sof
   if (execution) {
     // Raised from a failure: the discipline and the procedure both come from the execution.
     const created = await page.request.post(`${apiBase}/api/problem-reports/from-test-execution/${execution.id}`, {
-      data: { title: `${scope} corrective routing ${Date.now()}` },
+      data: { releaseId, title: `${scope} corrective routing ${Date.now()}` },
     });
     expect(created.ok(), `raising the ${scope} report: ${created.status()}`).toBe(true);
     report = await created.json();
@@ -49,7 +49,7 @@ async function raiseReport(page: Page, projectId: string, scope: "System" | "Sof
     expect(requirement, `the showcase must hold a ${scope} requirement`).toBeTruthy();
 
     const created = await page.request.post(`${apiBase}/api/problem-reports`, {
-      data: { projectId, title: `${scope} corrective routing ${Date.now()}`, problem: "Raised by hand for corrective routing." },
+      data: { projectId, releaseId, title: `${scope} corrective routing ${Date.now()}`, problem: "Raised by hand for corrective routing." },
     });
     expect(created.ok(), `raising the ${scope} report: ${created.status()}`).toBe(true);
     report = await created.json();
@@ -85,9 +85,10 @@ test("a corrective action opens the discipline, report and procedure it belongs 
   const workspaces = await (await page.request.get(`${apiBase}/api/workspaces`)).json();
   const fms = workspaces.find((x: { program: { name: string } }) => x.program.name === "Flight Management System Live Program");
   const projectId = fms.projects[0].project.id;
+  const releaseId = fms.projects[0].releases.find((x: { isReleased: boolean }) => !x.isReleased).id;
 
-  const system = await raiseReport(page, projectId, "System");
-  const software = await raiseReport(page, projectId, "Software");
+  const system = await raiseReport(page, projectId, releaseId, "System");
+  const software = await raiseReport(page, projectId, releaseId, "Software");
 
   for (const [scope, raised, expectedPath] of [
     ["System", system, "system-verification"],

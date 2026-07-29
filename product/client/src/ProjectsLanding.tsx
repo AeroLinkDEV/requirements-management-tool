@@ -1,7 +1,5 @@
-import { useState } from "react";
-import { AccountSecurityDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
-import { PersonAvatar } from "./People";
+import PortalHeader from "./PortalHeader";
 import "./ProjectsLanding.css";
 
 type ProjectIconName =
@@ -153,7 +151,7 @@ const projectCards: readonly ProjectCardDefinition[] = [
   },
 ];
 
-function ProjectIcon({ name }: { name: ProjectIconName }) {
+export function ProjectIcon({ name }: { name: ProjectIconName }) {
   const shared = {
     fill: "none",
     stroke: "currentColor",
@@ -249,26 +247,9 @@ export default function ProjectsLanding({
   onOpenWorkspace: () => void;
   onSignOut: () => void;
 }) {
-  const [securityOpen, setSecurityOpen] = useState(false);
-  const role = user.isAdministrator
-    ? "Administrator"
-    : user.programs.flatMap((program) => program.roles)[0]?.replace(/([a-z])([A-Z])/g, "$1 $2") ?? "AeroLink user";
-
   return (
     <div className="projectsPage">
-      <header className="projectsTopBar">
-        <div className="projectsTopBarInner">
-          <div className="projectsBrand"><span aria-hidden="true">▲</span><b>AeroLink</b></div>
-          <div className="projectsAccount">
-            <button type="button" className="projectsSecurity" onClick={() => setSecurityOpen(true)}>
-              Account security
-            </button>
-            <PersonAvatar userName={user.userName} displayName={user.displayName} size="small"/>
-            <div><b>{user.displayName}</b><small>{role}</small></div>
-            <button type="button" className="projectsSignOut" onClick={onSignOut}>Sign out</button>
-          </div>
-        </div>
-      </header>
+      <PortalHeader api={api} user={user} onSignOut={onSignOut}/>
       <main className="projectsMain">
         <header>
           <div>
@@ -288,7 +269,6 @@ export default function ProjectsLanding({
           ))}
         </section>
       </main>
-      {securityOpen && <AccountSecurityDialog api={api} onClose={() => setSecurityOpen(false)}/>}
     </div>
   );
 }

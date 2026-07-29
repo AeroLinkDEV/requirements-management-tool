@@ -148,7 +148,7 @@ test('a deep link reloads, because the server falls back to the client', async (
 test('typed change-request URLs preserve System and Software navigation context', async ({ page, request }) => {
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
-  const response = await request.get(`/api/scrs?projectId=${showcase.projectId}&pageSize=200`)
+  const response = await request.get(`/api/scrs?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}&pageSize=200`)
   expect(response.ok(), await response.text()).toBeTruthy()
   const records = (await response.json()).items as { id: string; type: 'System' | 'Software' }[]
   const system = records.find(item => item.type === 'System')

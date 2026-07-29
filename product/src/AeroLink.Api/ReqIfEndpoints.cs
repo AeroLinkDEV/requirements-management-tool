@@ -34,7 +34,9 @@ public static class ReqIfEndpoints
     private static async Task<IResult> ExportAsync(ReqIfExportRequest request,HttpContext http,ReqIfExchangeService service,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
     {
         if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();
-        var result=await service.ExportAsync(request.ProjectId,http.UserAccount().UserName,DateTimeOffset.UtcNow,ct);
+        var baselineId=await AeroLink.Api.BuildScope.EffectiveBaselineAsync(db,request.ProjectId,request.ReleaseId,ct);
+        if(baselineId is null&&await db.Requirements.AnyAsync(x=>x.ProjectId==request.ProjectId,ct))return Results.BadRequest(new{error="The selected build has no effective requirement baseline.",code="build_baseline_unavailable"});
+        var result=await service.ExportAsync(request.ProjectId,baselineId,http.UserAccount().UserName,DateTimeOffset.UtcNow,ct);
         await using var package=service.OpenPackage(result.Job);var integrity=ReqIfPackageIntegrity.Inspect(package,result.Job.FileName,result.Job.Sha256);
         return Results.Created($"/api/reqif/jobs/{result.Job.Id}",new{job=Map(result.Job),downloadUrl=$"/api/reqif/jobs/{result.Job.Id}/download",binaryIntegrity=integrity});
     }
@@ -108,6 +110,6 @@ public static class ReqIfEndpoints
     private static object Map(ReqIfExchangeJob x)=>new{x.Id,direction=x.Direction.ToString(),state=x.State.ToString(),x.FileName,x.Sha256,x.RequirementCount,x.HierarchyCount,x.RelationCount,x.AttachmentCount,x.WarningCount,x.ErrorCount,x.ProcessedCount,x.CheckpointJson,x.Attempt,x.LastError,x.CreatedBy,x.CreatedAt,x.CompletedAt,x.CreatedScrId,downloadUrl=$"/api/reqif/jobs/{x.Id}/download",attachmentsUrl=$"/api/reqif/jobs/{x.Id}/attachments"};
 }
 
-public sealed record ReqIfExportRequest(Guid ProjectId);
+public sealed record ReqIfExportRequest(Guid ProjectId,Guid ReleaseId);
 public sealed record CommitReqIfImportRequest(Guid TargetReleaseId,string Title,string Problem,string Analysis,string Solution,ChangeRequestType Type);
 public sealed record ProcessReqIfJobRequest(int? BatchSize);

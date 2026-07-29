@@ -29,19 +29,13 @@ test('a released build explains where to raise a change instead of taking one', 
   expect(successor.ok(), await successor.text()).toBeTruthy()
 
   await login(page)
-  await page.locator('.program > select:not(.releaseSelector)').selectOption({ label: programName })
-  // The product opens on the in-work build, which is right, so the released one is chosen deliberately.
-  await page.getByLabel('Active release').selectOption({ label: '1.5 · Released' })
+  await page.goto(`/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/command-center`)
+  await expect(page.getByLabel('Active build 1.5')).toContainText('Released')
   await openNavigationGroup(page, 'ENGINEERING')
-  // Reads "New Change Request" and is labelled for the discipline it acts on, which is the accessible name.
-  await page.getByRole('link', { name: 'New System SCR' }).click()
-
-  // Told, not silently refused, and told which build to use.
-  await expect(page.getByRole('heading', { name: '1.5 has been released' })).toBeVisible()
-  await expect(page.getByText(/could never reach a baseline/)).toBeVisible()
-
-  // And the way out is one press, landing in the editor rather than back at the start.
-  await page.getByRole('button', { name: /Switch to 1\.6 and continue/ }).click()
-  await expect(page.getByLabel(/Title/).first()).toBeVisible()
-  await expect(page.getByRole('heading', { name: '1.5 has been released' })).toBeHidden()
+  await expect(page.getByRole('link', { name: 'New System SCR' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '+ New System SCR' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Back to Software Builds' }).click()
+  await expect(page.getByRole('heading', { name: 'Software Builds' })).toBeVisible()
+  await page.getByRole('button', { name: 'Open build 1.6' }).click()
+  await expect(page.getByLabel('Active build 1.6')).toContainText('In work')
 })

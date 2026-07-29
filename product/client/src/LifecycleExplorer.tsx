@@ -44,6 +44,13 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const contextResponse = await fetch(`${api}/api/build-context?projectId=${projectId}&releaseId=${activeReleaseId}`);
+      if (!contextResponse.ok) throw new Error("The active build context could not be loaded.");
+      const buildContext = await contextResponse.json() as {
+        effectiveBaselineId?: string;
+        inheritedBaseline: boolean;
+        effectiveBaseline?: { id: string; baseNumber: string; revision: number; name: string; requirementsMaterializedAt?: string; releaseId: string; releaseVersion: string };
+      };
       const lists = await Promise.all(
         releases.map(async (release) => {
           const response = await fetch(`${api}/api/baselines?projectId=${projectId}&releaseId=${release.id}`);
@@ -52,14 +59,25 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
           return items.map((item) => ({ ...item, releaseId: release.id, releaseVersion: release.version }));
         }),
       );
-      const bs = lists.flat().filter((item) => item.requirementsMaterializedAt);
+      const inherited = buildContext.inheritedBaseline && buildContext.effectiveBaseline
+        ? {
+            id: buildContext.effectiveBaseline.id,
+            displayNumber: `${buildContext.effectiveBaseline.baseNumber}.${String(buildContext.effectiveBaseline.revision).padStart(2, "0")}`,
+            name: `${buildContext.effectiveBaseline.name} · inherited from Build ${buildContext.effectiveBaseline.releaseVersion}`,
+            requirementsMaterializedAt: buildContext.effectiveBaseline.requirementsMaterializedAt,
+            releaseId: buildContext.effectiveBaseline.releaseId,
+            releaseVersion: buildContext.effectiveBaseline.releaseVersion,
+          }
+        : undefined;
+      const bs = [...lists.flat().filter((item) => item.requirementsMaterializedAt),
+        ...(inherited && !lists.flat().some((item) => item.id === inherited.id) ? [inherited] : [])];
       setBaselines(bs);
       const chosen = bs.some((item) => item.id === baselineId)
         ? baselineId
-        : bs.find((item) => item.releaseId === activeReleaseId)?.id || bs[0]?.id || "";
+        : buildContext.effectiveBaselineId || bs.find((item) => item.releaseId === activeReleaseId)?.id || bs[0]?.id || "";
       if (chosen !== baselineId) setBaselineId(chosen);
       const [documentResponse, traceResponse] = await Promise.all([
-        fetch(`${api}/api/documents?projectId=${projectId}`),
+        fetch(`${api}/api/documents?projectId=${projectId}&releaseId=${activeReleaseId}`),
         chosen
           ? fetch(`${api}/api/traceability?projectId=${projectId}&baselineId=${chosen}&search=${encodeURIComponent(query)}&page=1&pageSize=200`)
           : undefined,
