@@ -95,7 +95,7 @@ public static class IdentifierAllocator
         }
 
         return await TryClaimAsync(db, scope, ct)
-            ?? throw new InvalidOperationException($"Could not allocate a controlled number for prefix '{scope}'.");
+            ?? throw new IdentifierAllocationException(scope);
     }
 
     private static Task SeedRowAsync(AeroLinkDbContext db, string scope, int firstValue, CancellationToken ct) =>
@@ -252,4 +252,14 @@ static class ApiMap
         }),
         events = x.Events.OrderByDescending(e => e.OccurredAt).Select(e => new { e.EventType, e.ActorId, e.Detail, e.OccurredAt })
     };
+}
+
+/// <summary>
+/// The sequence row for a prefix could neither be read nor created. The request itself was valid, so this is
+/// answered as a conflict a caller can resubmit rather than as a fault.
+/// </summary>
+public sealed class IdentifierAllocationException(string scope)
+    : Exception($"Could not allocate a controlled number for prefix '{scope}'.")
+{
+    public string Scope { get; } = scope;
 }

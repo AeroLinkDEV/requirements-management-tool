@@ -76,7 +76,14 @@ public static class EditSessionEndpoints
             // one would lose on the unique index, failing an upload whose bytes are already stored.
             var version=await IdentifierAllocator.ClaimAsync(db,"ATTACHMENT-"+logicalId.ToString("N"),
                 async()=>(await db.ControlledAttachments.AsNoTracking().Where(x=>x.LogicalId==logicalId).Select(x=>x.Version).ToListAsync(ct)).DefaultIfEmpty(0).Max()+1,ct);
-            var stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,file.ContentType,ct);try{previous?.Supersede();var attachment=new ControlledAttachment(projectId,artifactType,artifactId,revisionId,logicalId,version,form["label"].ToString(),form["description"].ToString(),stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256,stored.StorageKey,previous?.Id,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-hardening/attachments/{attachment.Id}",new{attachment.Id,attachment.LogicalId,attachment.Version,attachment.Sha256});}catch{store.Delete(stored.StorageKey);throw;}
+            var stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,file.ContentType,ct);try{previous?.Supersede();var attachment=new ControlledAttachment(projectId,artifactType,artifactId,revisionId,logicalId,version,form["label"].ToString(),form["description"].ToString(),stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256,stored.StorageKey,previous?.Id,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);
+            // Superseding only the row this upload read is not enough: a concurrent upload read the same one,
+            // so both would commit an Active row and the logical file would have two current versions. Deciding
+            // it after the write instead — everything but the highest version is superseded — reaches the same
+            // answer whichever upload commits last, because it is a statement about the rows that now exist
+            // rather than about the row this request happened to see.
+            await SupersedeAllButNewestAsync(db,projectId,artifactId,logicalId,ct);
+            return Results.Created($"/api/enterprise-hardening/attachments/{attachment.Id}",new{attachment.Id,attachment.LogicalId,attachment.Version,attachment.Sha256});}catch{store.Delete(stored.StorageKey);throw;}
         }).DisableAntiforgery();
 
         // Inline images are their own surface rather than a use of the attachment vault.
@@ -188,4 +195,17 @@ public static class EditSessionEndpoints
     static string ControlledScrDraft(SystemChangeRequest scr)=>JsonSerializer.Serialize(new{scrVersion=scr.Version,title=scr.Title,problem=scr.Problem,analysis=scr.Analysis,solution=scr.Solution,requirementChanges=scr.RequirementChanges.Select(x=>new{baseNumber=x.BaseNumber,revision=x.Revision,level=x.Level.ToString(),kind=x.Kind.ToString(),statement=x.Statement,rationale=x.Rationale,verificationMethod=x.VerificationMethod,richText=x.RichText,attributesJson=x.AttributesJson,impactDispositionJson=x.ImpactDispositionJson,targetSectionId=x.TargetSectionId})});
 
     static object EditSessionMap(ArtifactEditSession session,string draftJson,bool resumed)=>new{session.Id,session.ArtifactType,session.ArtifactId,session.Version,session.UserName,session.OpenedAt,lastActivityAt=session.UpdatedAt,session.ExpiresAt,session.BaseSnapshotHash,draftJson,resumed,readOnly=false,status="Saved"};
+
+    /// <summary>
+    /// Leaves exactly one Active version of a logical file: the highest. Run after an upload commits, so the
+    /// decision is made against the rows that exist rather than against the row one request read.
+    /// </summary>
+    static async Task SupersedeAllButNewestAsync(AeroLinkDbContext db,Guid projectId,Guid artifactId,Guid logicalId,CancellationToken ct)
+    {
+        var active=await db.ControlledAttachments.Where(x=>x.ProjectId==projectId&&x.ArtifactId==artifactId&&x.LogicalId==logicalId&&x.State==ControlledAttachmentState.Active).ToListAsync(ct);
+        if(active.Count<2)return;
+        var newest=active.Max(x=>x.Version);
+        foreach(var stale in active.Where(x=>x.Version!=newest))stale.Supersede();
+        await db.SaveChangesAsync(ct);
+    }
 }

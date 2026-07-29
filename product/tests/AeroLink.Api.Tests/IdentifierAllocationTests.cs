@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -110,6 +111,67 @@ public sealed class IdentifierAllocationTests
         Assert.Equal(2, await Claim(logicalId));
         Assert.Equal(1, await Claim(other));
         Assert.Equal(3, await Claim(logicalId));
+    }
+
+    [Fact]
+    public async Task Two_uploads_of_one_logical_file_leave_exactly_one_active_version()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory);
+        using var report = await client.PostAsJsonAsync("/api/problem-reports", new { projectId, title = "Attachment host", problem = "The unit resets during a route update.", analysis = "", classification = "Verification failure", severity = "High", priority = "Urgent", origin = "Test execution", affectedConfiguration = "Build 1.6.0" });
+        Assert.Equal(HttpStatusCode.Created, report.StatusCode);
+        var artifactId = (await report.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var logicalId = Guid.NewGuid();
+
+        using var one = await UploadAsync(client, projectId, artifactId, logicalId, "first");
+        Assert.Equal(HttpStatusCode.Created, one.StatusCode);
+
+        // The state two overlapping uploads leave behind, written directly because two requests cannot be held
+        // mid-flight against each other here — SQLite serializes them, so the second always sees the first's row
+        // and the interesting case never arises. Version 2 is Active alongside version 1: each upload superseded
+        // only the row it had read, and neither read the other.
+        using (var seedScope = factory.Services.CreateScope())
+        {
+            var seedDb = seedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var existing = await seedDb.ControlledAttachments.AsNoTracking().SingleAsync(x => x.LogicalId == logicalId);
+            // Claimed rather than assigned, because that is what the upload it stands in for would have done.
+            var version = await IdentifierAllocator.ClaimAsync(seedDb, "ATTACHMENT-" + logicalId.ToString("N"),
+                () => Task.FromResult(1), default);
+            seedDb.ControlledAttachments.Add(new ControlledAttachment(projectId, "ProblemReport", artifactId, null, logicalId, version,
+                "second", "Concurrent upload", "second.txt", "text/plain", 8, existing.Sha256, existing.StorageKey + "-2",
+                null, "admin", DateTimeOffset.UtcNow));
+            await seedDb.SaveChangesAsync();
+        }
+
+        // The next upload is what reconciles it: everything but the highest version ends up superseded, so the
+        // logical file has one current version again rather than two.
+        using var three = await UploadAsync(client, projectId, artifactId, logicalId, "third");
+        Assert.Equal(HttpStatusCode.Created, three.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var versions = await db.ControlledAttachments.AsNoTracking().Where(x => x.LogicalId == logicalId).ToListAsync();
+        Assert.Equal(new[] { 1, 2, 3 }, versions.Select(x => x.Version).Order());
+        var active = versions.Where(x => x.State == ControlledAttachmentState.Active).ToList();
+        Assert.Single(active);
+        Assert.Equal(3, active[0].Version);
+    }
+
+    private static Task<HttpResponseMessage> UploadAsync(HttpClient client, Guid projectId, Guid artifactId, Guid logicalId, string label)
+    {
+        var content = new MultipartFormDataContent
+        {
+            { new StringContent(projectId.ToString()), "projectId" },
+            { new StringContent("ProblemReport"), "artifactType" },
+            { new StringContent(artifactId.ToString()), "artifactId" },
+            { new StringContent(logicalId.ToString()), "logicalId" },
+            { new StringContent(label), "label" },
+            { new StringContent("Concurrent upload"), "description" },
+            { new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes($"contents of {label}")) { Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain") } }, "file", $"{label}.txt" },
+        };
+        return client.PostAsync("/api/enterprise-hardening/attachments", content);
     }
 
     [Fact]
