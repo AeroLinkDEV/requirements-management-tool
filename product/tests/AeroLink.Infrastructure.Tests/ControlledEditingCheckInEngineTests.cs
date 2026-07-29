@@ -1,5 +1,6 @@
-using System.Text;
 using System.Text.Json;
+using AeroLink.Domain.Common;
+using System.Text;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
@@ -41,8 +42,22 @@ public sealed class ControlledEditingCheckInEngineTests
         Assert.Equal(2, evidence.AggregateVersionAfter);
         Assert.Equal(result.ResultingHash, evidence.ResultingSnapshotHash);
         Assert.NotNull(evidence.DraftSnapshotId);
-        Assert.Contains(await scenario.Db.AuditEvents.ToListAsync(), x =>
+        // The narrative and the evidence are separate records, because the narrative used to be the payload:
+        // the timeline rendered serialized session and evidence identifiers as the audit story.
+        var checkedIn = Assert.Single(await scenario.Db.AuditEvents.ToListAsync(), x =>
             x.AggregateId == scenario.Scr.Id && x.EventType == "ArtifactCheckedIn");
+        Assert.DoesNotContain("{", checkedIn.Detail);
+        Assert.DoesNotContain(evidence.Id.ToString(), checkedIn.Detail);
+        Assert.Contains("Checked in", checkedIn.Detail);
+        Assert.Equal(AuditEvent.CurrentSchemaVersion, checkedIn.SchemaVersion);
+
+        // The identifiers are retained, in the structured field rather than the sentence.
+        Assert.NotNull(checkedIn.EvidenceJson);
+        using var structured = JsonDocument.Parse(checkedIn.EvidenceJson!);
+        Assert.Equal(evidence.Id, structured.RootElement.GetProperty("evidenceId").GetGuid());
+        Assert.Equal("SystemChangeRequestControlledEditingAdapter", structured.RootElement.GetProperty("adapter").GetString());
+        Assert.Equal(2, structured.RootElement.GetProperty("aggregateVersionAfter").GetInt32());
+        Assert.Equal(result.ResultingHash, structured.RootElement.GetProperty("resultingSnapshotHash").GetString());
     }
 
     [Fact]

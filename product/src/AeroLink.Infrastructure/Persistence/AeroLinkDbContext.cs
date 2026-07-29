@@ -264,6 +264,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("audit_events"); b.HasKey(x => x.Id);
             b.Property(x => x.EventType).HasMaxLength(100).IsRequired();
             b.Property(x => x.ActorId).HasMaxLength(100).IsRequired();
+            // Evidence is unbounded JSON by nature; the summary is a sentence and is capped so it cannot
+            // quietly become a payload again.
+            b.Property(x => x.Detail).HasMaxLength(1000);
+            b.Property(x => x.EvidenceJson);
             b.Property(x => x.Detail).HasMaxLength(4000).IsRequired();
             b.HasIndex(x => new { x.AggregateId, x.OccurredAt });
         });

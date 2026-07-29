@@ -1189,3 +1189,23 @@ html .deferAction:disabled { cursor: not-allowed; opacity: .5; }
   padding: 3px 9px;
   color: #7c5f1f;
 }
+
+/* Technical evidence sits under the narrative, collapsed and labelled. It used to be the narrative. */
+.auditEvidence { margin: 5px 0 2px; }
+.auditEvidence summary { cursor: pointer; color: #5b6b7f; font-size: 12px; font-weight: 700; }
+.auditEvidence dl { display: grid; gap: 3px; margin: 7px 0 0; }
+.auditEvidence dl > div { display: grid; grid-template-columns: minmax(120px, 190px) 1fr; gap: 10px; }
+.auditEvidence dt { color: #6b7a8c; font-size: 12px; }
+.auditEvidence dd { margin: 0; color: #38495c; font-size: 12px; overflow-wrap: anywhere; }
+.auditEvidenceRaw { margin: 7px 0 0; color: #56687b; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.auditEvidence button {
+  margin-top: 7px;
+  border: 1px solid #d9e1e9;
+  border-radius: 6px;
+  background: white;
+  color: #4e5f73;
+  font-size: 12px;
+  min-height: 26px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
