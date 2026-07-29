@@ -17,6 +17,7 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> options) : DbContext(options)
 {
     public DbSet<ProgramRecord> Programs => Set<ProgramRecord>();
+    public DbSet<IdentifierSequence> IdentifierSequences => Set<IdentifierSequence>();
     public DbSet<ShowcaseUpgradeStep> ShowcaseUpgradeSteps => Set<ShowcaseUpgradeStep>();
     public DbSet<ProjectRecord> Projects => Set<ProjectRecord>();
     public DbSet<SoftwareRelease> Releases => Set<SoftwareRelease>();
@@ -260,6 +261,16 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.HasIndex(x => new { x.ReviewCycleId, x.Position }).IsUnique();
         });
+        modelBuilder.Entity<IdentifierSequence>(b =>
+        {
+            b.ToTable("identifier_sequences"); b.HasKey(x => x.Id);
+            b.Property(x => x.Scope).HasMaxLength(80).IsRequired();
+            // The unique scope is what makes a claim a single-row contest, and the concurrency stamp is what
+            // makes two simultaneous claims resolve to two different numbers rather than the same one.
+            b.HasIndex(x => x.Scope).IsUnique();
+            b.Property(x => x.ConcurrencyStamp).IsConcurrencyToken();
+        });
+
         modelBuilder.Entity<AuditEvent>(b =>
         {
             b.ToTable("audit_events"); b.HasKey(x => x.Id);

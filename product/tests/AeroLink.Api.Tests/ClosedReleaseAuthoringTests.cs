@@ -102,7 +102,9 @@ public sealed class ClosedReleaseAuthoringTests
 
         using var response = await client.PostAsJsonAsync(endpoint, Body(projectId, inWorkId));
         var body = await response.Content.ReadAsStringAsync();
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        // Asserted against the body rather than the status alone: when this refuses, the reason is in the body
+        // and a bare status comparison throws it away.
+        Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
         Assert.Contains("\"state\":\"Draft\"", body);
     }
 
