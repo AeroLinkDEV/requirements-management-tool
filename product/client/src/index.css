@@ -68,6 +68,10 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 }
 button:disabled { cursor: not-allowed; }
 
+@media (max-width: 760px) {
+  body { min-width: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }

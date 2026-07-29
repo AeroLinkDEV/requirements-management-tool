@@ -74,7 +74,10 @@ test('Build 1.6 keeps editing capability, scopes search, and labels predecessor 
   await login(page)
   await expect(page.getByLabel('Active build 1.6')).toContainText('In work')
   await expect(page.locator('.releaseSelector')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '+ New System SCR' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'New System SCR' })).toHaveCount(0)
+  await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
+  await page.getByRole('link', { name: 'System Change Requests' }).click()
+  await expect(page.getByRole('button', { name: '+ New System Change Request' })).toBeVisible()
 
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'System Requirements Explorer' }).click()

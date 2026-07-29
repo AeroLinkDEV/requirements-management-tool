@@ -26,6 +26,23 @@ test('change-request route generation and parsing preserve both engineering disc
   expect(artifactPath(context, 'change-request', 'swcr-a', 'software')).toBe(software)
 })
 
+test('software authoring routes preserve the selected HLR or LLR level', () => {
+  const hlr = routePath(context, 'createSoftwareChange', 'software', undefined, 'HighLevel')
+  const llr = routePath(context, 'createSoftwareChange', 'software', undefined, 'LowLevel')
+  expect(hlr).toContain('/software/change-requests/new?level=HLR')
+  expect(llr).toContain('/software/change-requests/new?level=LLR')
+  expect(parseRoute(hlr)).toMatchObject({ view: 'createSoftwareChange', artifactKind: 'HighLevel' })
+  expect(parseRoute(llr)).toMatchObject({ view: 'createSoftwareChange', artifactKind: 'LowLevel' })
+})
+
+test('retired problem-report, product-version, and baseline pages reject direct navigation', () => {
+  const root = '/programs/program-a/projects/project-a/releases/release-a'
+  for (const path of ['problem-reports', 'release-planning', 'baselines'])
+    expect(parseRoute(`${root}/${path}`)).toMatchObject({ view: 'notFound' })
+  for (const kind of ['problem-report', 'baseline', 'build'])
+    expect(parseRoute(`${root}/artifacts/${kind}/record-a`)).toMatchObject({ view: 'notFound' })
+})
+
 test('legacy context-free change-request routes remain loadable until detail canonicalizes them', () => {
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/change-requests/legacy-a'))
     .toMatchObject({ view: 'scr', discipline: 'system', artifactId: 'legacy-a' })

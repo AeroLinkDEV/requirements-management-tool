@@ -26,7 +26,7 @@ test("requirements stay read-only while controlled proposals and imports move in
   await page.getByLabel("Search requirements").fill("SYSR-000150");
   await expect(page.getByText(/SYSR-000150\.\d{2}/)).toBeVisible();
   await page.getByText(/SYSR-000150\.\d{2}/).click();
-  await expect(page.getByText("Controlled revision")).toBeVisible();
+  await expect(page.getByText("Controlled revision")).toHaveCount(0);
   await page.getByRole("button", { name: /Discussion/ }).click();
   await page
     .getByPlaceholder(

@@ -311,6 +311,8 @@ public static class ChangeRequestEndpoints
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
             var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
             if (closed is not null) return Results.BadRequest(new { error = closed, code = "release_is_closed" });
+            if (string.IsNullOrWhiteSpace(request.Title))
+                return Results.BadRequest(new { error = "Title of change request must be filled out before save is available." });
             try
             {
                 var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, ct);
@@ -328,6 +330,10 @@ public static class ChangeRequestEndpoints
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
             var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
             if (closed is not null) return Results.BadRequest(new { error = closed, code = "release_is_closed" });
+            // Reject before synchronization, transaction creation, or identifier allocation: an untouched
+            // form is not a controlled record and must not consume the next SCR/SWCR number.
+            if (string.IsNullOrWhiteSpace(request.Title))
+                return Results.BadRequest(new { error = "Title of change request must be filled out before save is available." });
             await enterpriseRequirements.SynchronizeProjectAsync(request.ProjectId, http.UserAccount().UserName, ct);
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
             try

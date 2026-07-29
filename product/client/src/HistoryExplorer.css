@@ -28,6 +28,48 @@
   overflow: hidden;
 }
 
+.softwareChangeChoice {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.3fr) repeat(2, minmax(190px, .8fr)) auto;
+  gap: 12px;
+  align-items: stretch;
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid #b9d7e8;
+  border-radius: var(--radius-md);
+  background: linear-gradient(110deg, #f3f9ff, #f8fbfd);
+  box-shadow: var(--shadow-soft);
+}
+
+.softwareChangeChoice > div { padding: 3px 8px; }
+.softwareChangeChoice > div span { color: #286d99; font-size: 11px; font-weight: 800; letter-spacing: .09em; }
+.softwareChangeChoice h2 { margin: 5px 0; color: var(--ink-900); font: 600 17px var(--font-display); }
+.softwareChangeChoice p { margin: 0; color: var(--ink-500); font-size: 13px; line-height: 1.4; }
+.softwareChangeChoice > button {
+  display: grid;
+  gap: 5px;
+  align-content: center;
+  text-align: left;
+  border: 1px solid #bfd3e1;
+  border-radius: 9px;
+  background: white;
+  color: var(--ink-900);
+  padding: 13px 15px;
+}
+.softwareChangeChoice > button:hover,
+.softwareChangeChoice > button:focus-visible { border-color: #3183b7; box-shadow: 0 0 0 3px rgba(49,131,183,.14); }
+.softwareChangeChoice > button span { color: var(--ink-500); font-size: 12px; }
+.softwareChangeChoice > button.choiceCancel { display: block; align-self: center; border: 0; background: transparent; color: var(--ink-500); padding: 8px; }
+
+.historyContext {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 18px 0;
+}
+.historyContext b { color: #1f587b; font-size: 13px; }
+.historyContext span { border-left: 1px solid #d8e0e8; padding-left: 10px; color: var(--ink-500); font-size: 12px; }
+
 .historyTabs {
   display: flex;
   border-bottom: 1px solid #e6eaf0;
@@ -61,6 +103,18 @@
   display: flex;
   gap: 12px;
   padding: 14px 18px;
+}
+
+@media (max-width: 1050px) {
+  .softwareChangeChoice { grid-template-columns: 1fr 1fr; }
+  .softwareChangeChoice > div { grid-column: 1 / -1; }
+}
+
+@media (max-width: 650px) {
+  .historyHeader { flex-direction: column; }
+  .softwareChangeChoice { grid-template-columns: 1fr; }
+  .softwareChangeChoice > div { grid-column: auto; }
+  .historyFilters { flex-direction: column; }
 }
 
 .historyFilters input {

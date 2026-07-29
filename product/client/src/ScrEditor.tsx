@@ -29,6 +29,7 @@ type Props = {
   releaseId: string;
   releaseVersion: string;
   scope: ChangeScope;
+  softwareLevel?: "HighLevel" | "LowLevel";
   user: AuthUser;
   sourceRequirementId?: string;
   onCancel: () => void;
@@ -54,13 +55,6 @@ const pendingImpact = JSON.stringify({
   baseline: "Pending",
   collaboration: "Pending",
 });
-const impactKeys = [
-  "trace",
-  "verification",
-  "documents",
-  "baseline",
-  "collaboration",
-] as const;
 const prefixFor = (level: RequirementLevel) =>
   level === "System" ? "SYSR" : level === "HighLevel" ? "HLR" : "LLR";
 const addToIdentifier = (identifier: string | undefined, offset: number) => {
@@ -75,10 +69,6 @@ const parseObject = (value: string | undefined): Record<string, unknown> => {
   } catch {
     return {};
   }
-};
-const impactsComplete = (item: ControlledRequirementDraft) => {
-  const values = parseObject(item.impactDispositionJson);
-  return impactKeys.every((key) => values[key] && values[key] !== "Pending");
 };
 const createProposal = (
   level: RequirementLevel,
@@ -122,14 +112,16 @@ export default function ScrEditor({
   releaseId,
   releaseVersion,
   scope,
+  softwareLevel,
   user,
   sourceRequirementId,
   onCancel,
   onSaved,
 }: Props) {
   const abbreviation = scope === "System" ? "SCR" : "SWCR";
-  const defaultLevel: RequirementLevel = scope === "System" ? "System" : "HighLevel";
-  const storageKey = `aerolink:new-${scope.toLowerCase()}-change:${projectId}:${releaseId}`;
+  const defaultLevel: RequirementLevel = scope === "System" ? "System" : softwareLevel ?? "HighLevel";
+  const softwareLevelLabel = defaultLevel === "LowLevel" ? "LLR" : "HLR";
+  const storageKey = `aerolink:new-${scope.toLowerCase()}-${scope === "Software" ? softwareLevelLabel.toLowerCase() : "system"}-change:${projectId}:${releaseId}`;
   const seededSource = useRef("");
   const [context, setContext] = useState<AuthoringContext>();
   // Nothing is seeded from a stored draft. It is offered below, and applied only if the author says so.
@@ -307,13 +299,10 @@ export default function ScrEditor({
         (!(item.isDerived ?? parseObject(item.attributesJson).derived === true) ||
           item.rationale.trim()),
     );
-  const impactCount = changes.filter(impactsComplete).length;
-  const reviewReady = caseComplete && proposalsComplete && impactCount === changes.length;
-
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!title.trim()) {
-      setError("Give this change request a title before saving it as a Draft.");
+      setError("Title of change request must be filled out before save is available.");
       return;
     }
     // An untouched proposal card is a blank form row, not a proposal, so it is not sent. A *partly* filled one
@@ -372,9 +361,9 @@ export default function ScrEditor({
             ← Command Center
           </button>
           <p className="eyebrow">{scope.toUpperCase()} CHANGE CONTROL / NEW {abbreviation}</p>
-          <h1>Create {scope} Change Request</h1>
+          <h1>Create {scope === "System" ? "System" : softwareLevelLabel} Change Request</h1>
           <p>
-            Build the case, define controlled requirement changes, and close impact decisions before review.
+            Build the engineering case and define the requirement changes for Build {releaseVersion}.
           </p>
           {sourceRequirementId && (
             <div className="sourceHandoff">
@@ -409,15 +398,12 @@ export default function ScrEditor({
         }}
       />
 
-      <nav className="authoringStages" aria-label="Change authoring progress">
+      <nav className="authoringStages twoStages" aria-label="Change authoring progress">
         <a href="#change-case" className={caseComplete ? "complete" : "active"}>
           <span>1</span><b>Change case</b><small>{caseComplete ? "Complete" : "In progress"}</small>
         </a>
         <a href="#requirement-changes" className={proposalsComplete ? "complete" : caseComplete ? "active" : ""}>
           <span>2</span><b>Requirement changes</b><small>{proposalsComplete ? "Complete" : `${changes.length} proposal${changes.length === 1 ? "" : "s"}`}</small>
-        </a>
-        <a href="#impact-readiness" className={reviewReady ? "complete" : proposalsComplete ? "active" : ""}>
-          <span>3</span><b>Impact & readiness</b><small>{reviewReady ? "Review ready" : `${impactCount}/${changes.length} impacts closed`}</small>
         </a>
       </nav>
 
@@ -457,17 +443,16 @@ export default function ScrEditor({
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="A concise, decision-ready description"
-                required
               />
             </label>
           </div>
           <div className="pas">
             <RichCaseField api={api} projectId={projectId} label="Problem" value={problemRich} onChange={setProblemRich}
-              placeholder="What need, defect, or risk exists?" />
+              placeholder="What need, defect, or risk exists?" required={false} />
             <RichCaseField api={api} projectId={projectId} label="Analysis" value={analysisRich} onChange={setAnalysisRich}
-              placeholder="What is affected and what alternatives were considered?" />
+              placeholder="What is affected and what alternatives were considered?" required={false} />
             <RichCaseField api={api} projectId={projectId} label="Solution" value={solutionRich} onChange={setSolutionRich}
-              placeholder="What controlled outcome is proposed?" />
+              placeholder="What controlled outcome is proposed?" required={false} />
           </div>
         </section>
 
@@ -492,10 +477,9 @@ export default function ScrEditor({
               </>
             ) : (
               <>
-                <button type="button" onClick={() => addProposal("Introduce", "HighLevel")}>+ Introduce HLR</button>
-                <button type="button" onClick={() => addProposal("Introduce", "LowLevel")}>+ Introduce LLR</button>
-                <button type="button" onClick={() => addProposal("Modify", "HighLevel")}>Modify existing</button>
-                <button type="button" onClick={() => addProposal("Retire", "HighLevel")}>Retire existing</button>
+                <button type="button" onClick={() => addProposal("Introduce", defaultLevel)}>+ Introduce {softwareLevelLabel}</button>
+                <button type="button" onClick={() => addProposal("Modify", defaultLevel)}>Modify existing {softwareLevelLabel}</button>
+                <button type="button" onClick={() => addProposal("Retire", defaultLevel)}>Retire existing {softwareLevelLabel}</button>
               </>
             )}
           </div>
@@ -526,37 +510,6 @@ export default function ScrEditor({
           )}
         </section>
 
-        <section className="editorCard readinessStage" id="impact-readiness">
-          <div className="sectionTitle">
-            <span>03</span>
-            <div>
-              <h2>Impact & review readiness</h2>
-              <p>A Draft may be saved now; every impact decision must be explicit before review</p>
-            </div>
-            <i className={reviewReady ? "stageState complete" : "stageState"}>
-              {reviewReady ? "Review ready" : "Draft only"}
-            </i>
-          </div>
-          <div className="readinessGrid">
-            <article className={caseComplete ? "complete" : ""}>
-              <span>{caseComplete ? "✓" : "1"}</span><div><b>Change case</b><p>{caseComplete ? "Decision context is complete." : "Complete title, problem, analysis, and solution."}</p></div>
-            </article>
-            <article className={proposalsComplete ? "complete" : ""}>
-              <span>{proposalsComplete ? "✓" : "2"}</span><div><b>Requirement proposals</b><p>{proposalsComplete ? `${changes.length} controlled proposal${changes.length === 1 ? " is" : "s are"} complete.` : "Select identities and complete required proposal content."}</p></div>
-            </article>
-            <article className={impactCount === changes.length && changes.length ? "complete" : ""}>
-              <span>{impactCount === changes.length && changes.length ? "✓" : "3"}</span><div><b>Lifecycle impact</b><p>{impactCount}/{changes.length} proposals have all five decisions closed.</p></div>
-            </article>
-          </div>
-          <div className={reviewReady ? "nextAction ready" : "nextAction"}>
-            <div>
-              <b>{reviewReady ? "Ready for controlled check-in" : "Next action"}</b>
-              <p>{reviewReady ? "Save this Draft, confirm the checked-in snapshot, then assign review authority." : !caseComplete ? "Finish the change case before creating the Draft." : !proposalsComplete ? "Complete each requirement proposal." : "Close the remaining impact decisions in the proposal cards above."}</p>
-            </div>
-            <span>{reviewReady ? "REVIEW READY" : "DRAFT PATH"}</span>
-          </div>
-        </section>
-
         {error && <div className="formError" role="alert">{error}</div>}
         <footer className="editorActions">
           <p>
@@ -569,7 +522,7 @@ export default function ScrEditor({
                 closed meant the button stayed dead through the whole of authoring and only lit up at the point
                 you no longer needed it, so there was nowhere to put work down. Completeness is still required,
                 but by the review gate below, which is the decision it actually belongs to. */}
-            <button disabled={saving || !context || !title.trim()}>
+            <button disabled={saving || !context}>
               {saving ? "Saving Draft…" : `Save ${abbreviation} Draft`}
             </button>
           </div>

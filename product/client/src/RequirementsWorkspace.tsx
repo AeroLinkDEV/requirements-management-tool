@@ -160,7 +160,7 @@ type Props = {
   initialArtifactId?: string;
   onBack: () => void;
   onOpenScr: (id: string) => void;
-  onProposeChange: (requirementId: string) => void;
+  onProposeChange: (requirementId: string, level?: Requirement["level"]) => void;
   onOpenRequirement: (id: string) => void;
   onCloseRequirement: () => void;
   onOpenTraceability: (artifactId?: string) => void;
@@ -1222,49 +1222,11 @@ export default function RequirementsWorkspace({
             </div>
             {inspectorTab === "details" && (
               <div className="inspectorBody">
-                <div className="controlledBanner">
-                  <b>✓ Controlled revision</b>
-                  <span>Content changes require an SCR/SWCR</span>
-                </div>
                 {release?.isReleased
                   ? <p className="changeBoundaryNote"><b>Read-only historical record — Build {release.version}</b><br/>Exit this workspace and select an in-work build to propose a change.</p>
-                  : <><button className="impactLaunch" onClick={() => onProposeChange(selected.id)}>Propose controlled change →</button><p className="changeBoundaryNote">Opens a new Draft SCR/SWCR in Changes. This authoritative revision remains unchanged.</p></>}
+                  : <><button className="impactLaunch" onClick={() => onProposeChange(selected.id, selected.level)}>Propose controlled change →</button><p className="changeBoundaryNote">Opens a new Draft SCR/SWCR in Changes. This authoritative revision remains unchanged.</p></>}
                 <h3>Requirement statement</h3>
                 <div className="richRequirement">{selected.statement}</div>
-                <h3>Digital thread</h3>
-                <button className="threadPreview" onClick={() => onOpenTraceability(selected?.id)}>
-                  <span>
-                    <i>CR</i>
-                    <b>Source</b>
-                    <small>Change authority</small>
-                  </span>
-                  <em>›</em>
-                  <span>
-                    <i>RQ</i>
-                    <b>{detail?.traceCount ?? "—"} links</b>
-                    <small>Requirement</small>
-                  </span>
-                  <em>›</em>
-                  <span>
-                    <i>EV</i>
-                    <b>{detail?.testCoverageCount ?? "—"} tests</b>
-                    <small>Evidence</small>
-                  </span>
-                </button>
-                <div
-                  className={`impactSignal ${selected.openCommentCount > 0 ? "attention" : "clear"}`}
-                >
-                  <b>
-                    {selected.openCommentCount > 0
-                      ? `${selected.openCommentCount} open decision${selected.openCommentCount === 1 ? "" : "s"} need attention`
-                      : "No open discussion decisions"}
-                  </b>
-                  <p>
-                    {selected.openCommentCount > 0
-                      ? "Review attributable discussion before progressing this requirement."
-                      : "The selected revision has no unresolved discussion recorded."}
-                  </p>
-                </div>
                 <dl>
                   <div>
                     <dt>Verification</dt>
@@ -1281,14 +1243,6 @@ export default function RequirementsWorkspace({
                         Open SCR →
                       </button>
                     </dd>
-                  </div>
-                  <div>
-                    <dt>Trace links</dt>
-                    <dd>{detail?.traceCount ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Test coverage</dt>
-                    <dd>{detail?.testCoverageCount ?? "—"} procedures</dd>
                   </div>
                 </dl>
                 <h3>Classification</h3>

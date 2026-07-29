@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { APIRequestContext, Page } from '@playwright/test'
-import { apiBase, apiLogin, login, openNavigationGroup, selectProgram } from './auth'
+import { apiBase, apiLogin, login, openNavigationGroup, openNewSystemChangeRequest, selectProgram } from './auth'
 
 /**
  * What the author typed is what the product holds.
@@ -32,7 +32,7 @@ async function openNewSystemScr(page: Page, programName: string) {
   await login(page)
   await selectProgram(page, programName)
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
-  await page.getByRole('link', { name: 'New System SCR' }).click()
+  await openNewSystemChangeRequest(page)
 }
 
 test('the change case keeps every space the author types', async ({ page, request }) => {
@@ -70,7 +70,7 @@ test('modifying a requirement shows the approved wording beside the proposed wor
   await login(page)
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
-  await page.getByRole('link', { name: 'New System SCR' }).click()
+  await openNewSystemChangeRequest(page)
 
   // Introduce has nothing to compare against, so the read-only field must not be there.
   await page.getByRole('button', { name: '+ Introduce System requirement' }).click()

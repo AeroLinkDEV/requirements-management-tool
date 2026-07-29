@@ -11,23 +11,12 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await selectProgram(page,"Flight Management System Live Program");
   await expect(page.getByText("FMS Product Development", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Active build 1.6")).toContainText("In work");
-  await expect(
-    page.getByRole("heading", { name: /Complete .+ lifecycle inventory/ }),
-  ).toBeVisible();
-  const inventory = page.locator(".programInventory");
-  await expect(inventory.locator("article").filter({ hasText: "System requirements" }).locator("b")).toHaveText("150");
-  await expect(inventory.locator("article").filter({ hasText: "HLR" }).locator("b")).toHaveText("400");
-  await expect(inventory.locator("article").filter({ hasText: "LLR" }).locator("b")).toHaveText("700");
-  const traceLinkCount = Number(
-    (await inventory.locator("article").filter({ hasText: "Trace links" }).locator("b").textContent())?.replaceAll(",", ""),
-  );
-  expect(traceLinkCount).toBeGreaterThanOrEqual(1_100);
-  await expect(inventory.locator("article").filter({ hasText: "Test procedures" }).locator("b")).toHaveText("515");
-  // The 520 predecessor executions remain historical evidence; none are current 1.6 execution records.
-  await expect(inventory.locator("article").filter({ hasText: "Test executions" }).locator("b")).toHaveText("0");
-  await expect(
-    page.getByRole("button", { name: "Open All controlled changes" }),
-  ).toBeVisible();
+  await expect(page.locator(".programInventory")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "System change control" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Software change control" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Change triage" })).toBeVisible();
+  await expect(page.getByText("Release attention")).toHaveCount(0);
+  await expect(page.getByText("Change request flow")).toHaveCount(0);
 
   await openNavigationGroup(page,"SOFTWARE ENGINEERING");
   await page.getByRole("link", { name: "Software Requirements Explorer" }).click();

@@ -359,6 +359,7 @@ export function RichCaseField({
   label,
   value,
   placeholder,
+  required = true,
   onChange,
 }: {
   api: string;
@@ -366,6 +367,7 @@ export function RichCaseField({
   label: string;
   value: string;
   placeholder: string;
+  required?: boolean;
   onChange: (value: string) => void;
 }) {
   const id = useId();
@@ -388,7 +390,7 @@ export function RichCaseField({
         value={toEditableText(value)}
         onChange={(event) => onChange(fromPlainText(event.target.value))}
         placeholder={placeholder}
-        required
+        required={required}
       />
       <button
         type="button"

@@ -70,3 +70,16 @@ export async function openNavigationGroup(page:Page,name:string){
     if(await scopeButton.getAttribute('aria-pressed')!=='true')await scopeButton.click()
   }
 }
+
+export async function openNewSystemChangeRequest(page:Page){
+  await openNavigationGroup(page,'SYSTEMS ENGINEERING')
+  await page.getByRole('link',{name:'System Change Requests'}).click()
+  await page.getByRole('button',{name:'+ New System Change Request'}).click()
+}
+
+export async function openNewSoftwareChangeRequest(page:Page,level:'HLR'|'LLR'='HLR'){
+  await openNavigationGroup(page,'SOFTWARE ENGINEERING')
+  await page.getByRole('link',{name:'Software Change Requests'}).click()
+  await page.getByRole('button',{name:'+ New Software Change Request'}).click()
+  await page.getByRole('button',{name:new RegExp(`^${level} change request`)}).click()
+}

@@ -162,12 +162,12 @@ test('typed change-request URLs preserve System and Software navigation context'
   await page.goto(`${root}/systems/change-requests/${system!.id}`)
   await expect(page).toHaveURL(`${root}/systems/change-requests/${system!.id}`)
   await expect(page.getByRole('link', { name: 'System Change Requests' })).toHaveAttribute('aria-current', 'page')
-  await expect(page.getByRole('link', { name: 'New System SCR' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'New System SCR' })).toHaveCount(0)
 
   await page.goto(`${root}/software/change-requests/${software!.id}`)
   await expect(page).toHaveURL(`${root}/software/change-requests/${software!.id}`)
   await expect(page.getByRole('link', { name: 'Software Change Requests' })).toHaveAttribute('aria-current', 'page')
-  await expect(page.getByRole('link', { name: 'New Software SWCR' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'New Software SWCR' })).toHaveCount(0)
 
   // Old links and a caller-supplied type mismatch are both replaced from the authorized record type.
   await page.goto(`${root}/change-requests/${software!.id}`)

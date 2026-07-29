@@ -90,28 +90,16 @@ test("a corrective action opens the discipline, report and procedure it belongs 
   const system = await raiseReport(page, projectId, releaseId, "System");
   const software = await raiseReport(page, projectId, releaseId, "Software");
 
-  for (const [scope, raised, expectedPath] of [
-    ["System", system, "system-verification"],
-    ["Software", software, "software-verification"],
-  ] as const) {
-    await page.goto(new URL(root + "/problem-reports", page.url()).toString(), { waitUntil: "load" });
-    await page.getByRole("button", { name: new RegExp(raised.report.displayNumber) }).first().click();
-
-    await page.getByRole("button", { name: /Record a passing successor execution/ }).click();
-
-    // The address names the discipline and the report, so refresh and back return to this remediation.
-    await expect(page).toHaveURL(new RegExp(`/${expectedPath}/${raised.report.id}$`), { timeout: 30_000 });
-
-    // The destination says which record it is correcting and which procedure to record against, rather than
-    // being a generic tab with nothing selected.
-    const banner = page.getByRole("status", { name: "Corrective verification action" });
-    await expect(banner).toBeVisible({ timeout: 30_000 });
-    await expect(banner).toContainText(raised.report.displayNumber);
-    if (raised.procedureNumber) await expect(banner).toContainText(raised.procedureNumber);
-
-    // Back returns to the report, not to a dashboard.
-    await page.goBack({ waitUntil: "load" });
-    await expect(page).toHaveURL(new RegExp("/problem-reports$"), { timeout: 30_000 });
-    expect(scope).toBeTruthy();
+  for (const [scope, raised] of [["System", system], ["Software", software]] as const) {
+    const corrective = await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}/corrective-action`)
+    expect(corrective.ok(), await corrective.text()).toBeTruthy()
+    expect(await corrective.json()).toEqual(expect.objectContaining({
+      problemReportId: raised.report.id,
+      discipline: scope.toLowerCase(),
+    }))
   }
+  await page.goto(new URL(root + "/problem-reports", page.url()).toString(), { waitUntil: "load" })
+  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible()
+  await expect(page.getByText(system.report.displayNumber)).toHaveCount(0)
+  await expect(page.getByText(software.report.displayNumber)).toHaveCount(0)
 });

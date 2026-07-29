@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { apiBase, login, openNavigationGroup, selectProgram } from './auth'
+import { apiBase, login, openNewSoftwareChangeRequest, selectProgram } from './auth'
 
 async function openPageFromPalette(page:Page,label:string){
   await page.getByRole('button',{name:/Search & navigate/}).click()
@@ -9,7 +9,7 @@ async function openPageFromPalette(page:Page,label:string){
   await palette.getByRole('link',{name:new RegExp(label)}).click()
 }
 
-test('author creates, edits, submits, and sequentially approves an SCR', async ({ page,playwright }) => {
+test('author creates, edits, submits, and sequentially approves an SCR', async ({ page }) => {
   test.setTimeout(60_000)
   await login(page)
   const suffix=Date.now().toString().slice(-7),programName=`Browser Workflow ${suffix}`
@@ -27,10 +27,10 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   }
 
   await openPageFromPalette(page,'Software Verification')
-  await expect(page.getByText('Procedure authoring waits for materialization')).toBeVisible()
+  await expect(page.getByText('Procedure authoring waits for governed requirement materialization')).toBeVisible()
   await expect(page.getByText(/no immutable requirement revisions yet/)).toBeVisible()
   await expect(page.getByText(/Existing inherited procedures remain visible/)).toBeVisible()
-  await expect(page.getByText(/Open Product Versions.*freeze and materialize the candidate baseline/)).toBeVisible()
+  await expect(page.getByText(/Requirement materialization is not exposed/)).toBeVisible()
   await expect(page.getByRole('button',{name:'New Test Procedure'})).toBeDisabled()
   await expect(page.getByRole('button',{name:'New Test Procedure'})).toHaveAttribute(
     'title',
@@ -38,7 +38,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   )
   await page.getByRole('button',{name:'Command Center'}).click()
 
-  await openPageFromPalette(page,'New Software SWCR')
+  await openNewSoftwareChangeRequest(page,'HLR')
   await expect(page.getByRole('navigation', { name: 'Change authoring progress' })).toBeVisible()
   // The author chooses the first change; the editor no longer assumes one.
   await page.getByRole('button',{name:'+ Introduce HLR'}).click()
@@ -64,9 +64,8 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByRole('link', { name: 'Download PDF' })).toHaveAttribute('href', /\/api\/scrs\/.+\/download\?format=pdf/)
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   await page.getByLabel('Title').fill('Introduce controlled approval workflow')
-  const impactDispositions=page.locator('.editorColumns aside select')
-  expect(await impactDispositions.count()).toBe(5)
-  for(let i=0;i<5;i++)await impactDispositions.nth(i).selectOption('Not Affected')
+  await expect(page.getByText('Known downstream context',{exact:true})).toBeVisible()
+  await expect(page.locator('.editorColumns aside select')).toHaveCount(0)
   await page.getByRole('button', { name: 'Save & check in' }).click()
   await expect(page.getByRole('heading', { name: 'Introduce controlled approval workflow' })).toBeVisible()
 
@@ -93,69 +92,4 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByRole('button', { name: 'Revise', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: /Check out & edit/ })).toHaveCount(0)
   await expect(page.getByText(/This approved revision is immutable/)).toBeVisible()
-
-  await page.getByRole('link', { name: /Command Center/ }).first().click()
-  await openNavigationGroup(page,'RELEASE & CONFIGURATION')
-  await page.getByRole('link', { name: /Baselines/ }).click()
-  await page.getByRole('button', { name: '+ New Candidate' }).click()
-  await page.getByLabel('Baseline name').fill('Workflow Software 1.0 Controlled Candidate')
-  await page.getByRole('button', { name: 'Create Candidate Baseline' }).click()
-  await expect(page.getByText(/SWCR-\d{8}\.00/)).toBeVisible()
-  await page.getByRole('button', { name: '+ Select exact revision' }).click()
-  await expect(page.getByText('1 exact SCR revision')).toBeVisible()
-  await expect(page.getByText('The software shall enforce ordered SCR approval.')).toBeVisible()
-  await page.getByRole('button', { name: 'Freeze Baseline' }).click()
-  await expect(page.getByText('Frozen', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('SHA-256 CONTENT HASH')).toBeVisible()
-  await page.getByRole('button', { name: 'Materialize SWRD' }).click()
-  await expect(page.getByText('SWRD materialized')).toBeVisible()
-  await expect(page.getByText('Software Requirements Document')).toBeVisible()
-  await expect(page.getByText('REQUIREMENT MANIFEST SHA-256')).toBeVisible()
-  await expect(page.getByText(/HLR-\d{6}\.00/).last()).toBeVisible()
-
-  await page.getByRole('link', { name: /Command Center/ }).first().click()
-  await openPageFromPalette(page,'Software Verification')
-  await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible()
-  await expect(page.getByText('Procedure authoring waits for materialization')).toHaveCount(0)
-  await expect(page.getByText('1', { exact: true }).first()).toBeVisible()
-  await page.getByRole('button', { name: 'New Test Procedure' }).click()
-  await page.getByLabel('Title').fill('Verify ordered approval workflow')
-  await page.getByLabel('Objective').fill('Verify the approved software behavior.')
-  await page.getByLabel('Expected result').fill('The ordered workflow is enforced.')
-  await page.getByLabel('Procedure steps').fill('Configure, stimulate, and observe the workflow.')
-  await page.getByRole('checkbox').check()
-  await page.getByRole('button', { name: 'Create Procedure' }).click()
-  await expect(page.getByText(/(?:HLRTP|LLRTP)-\d{6}\.00/, { exact: true }).last()).toBeVisible()
-  await page.getByRole('button', { name: /Test procedures/ }).click()
-  const draftSelector=page.getByLabel('Choose Draft test procedure')
-  const draftValue=await draftSelector.locator('option').filter({hasText:'Verify ordered approval workflow'}).getAttribute('value')
-  await draftSelector.selectOption(draftValue!)
-  await expect(page.getByRole('dialog', { name: /Edit (?:HLRTP|LLRTP)-\d{6}\.00/ })).toBeVisible()
-  await page.getByRole('dialog').getByLabel('Objective').fill('Verify the approved software behavior through the controlled recovery workflow.')
-  await page.getByRole('dialog').getByRole('button', { name: 'Check in controlled revision' }).click()
-  await expect(page.getByRole('dialog')).toBeHidden({ timeout: 15_000 })
-  const workspacesResponse=await page.request.get(`${apiBase}/api/workspaces`);expect(workspacesResponse.ok(),await workspacesResponse.text()).toBeTruthy();const workspaces=await workspacesResponse.json();const workspace=workspaces.find((x:{program:{name:string}})=>x.program.name===programName);const projectId=workspace.projects[0].project.id;const releaseId=workspace.projects[0].releases.find((x:{isReleased:boolean})=>!x.isReleased).id
-  const baselinesResponse=await page.request.get(`${apiBase}/api/baselines?projectId=${projectId}&releaseId=${releaseId}`);expect(baselinesResponse.ok(),await baselinesResponse.text()).toBeTruthy();const baseline=(await baselinesResponse.json()).find((x:{requirementsMaterializedAt?:string})=>x.requirementsMaterializedAt)
-  const buildNumber=`WORKFLOW-${suffix}`;const buildResponse=await page.request.post(`${apiBase}/api/builds`,{data:{projectId,releaseId,baselineId:baseline.id,buildNumber,description:'Controlled workflow verification build'}});expect(buildResponse.ok(),await buildResponse.text()).toBeTruthy()
-  const usersResponse=await page.request.get(`${apiBase}/api/admin/users`);expect(usersResponse.ok(),await usersResponse.text()).toBeTruthy();const reviewer=(await usersResponse.json()).find((x:{userName:string})=>x.userName==='systems.reviewer')
-  const grant=await page.request.post(`${apiBase}/api/admin/users/${reviewer.id}/memberships`,{data:{programId:workspace.program.id,role:'Approver'}});expect(grant.ok(),await grant.text()).toBeTruthy()
-  const proceduresResponse=await page.request.get(`${apiBase}/api/test-procedures?projectId=${projectId}&scope=Software&pageSize=200`);expect(proceduresResponse.ok(),await proceduresResponse.text()).toBeTruthy();const procedure=(await proceduresResponse.json()).items.find((x:{title:string})=>x.title==='Verify ordered approval workflow')
-  const approver=await playwright.request.newContext();const approverLogin=await approver.post(`${apiBase}/api/auth/login`,{data:{userName:'systems.reviewer',password:'AeroLink!2026'}});expect(approverLogin.ok(),await approverLogin.text()).toBeTruthy();const approval=await approver.post(`${apiBase}/api/test-procedures/${procedure.revisionId}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved after independent review for controlled verification use.'}});expect(approval.ok(),await approval.text()).toBeTruthy();await approver.dispose()
-  await page.reload();await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible()
-  await page.getByRole('button', { name: /Test procedures/ }).click()
-  await page.getByLabel('Software build (optional result context)').selectOption({label:buildNumber})
-  await page.getByRole('button', { name: 'Record result' }).click()
-  await page.getByLabel('Outcome').selectOption('Fail')
-  await page.getByLabel('Evidence reference').fill('evidence/workflow-fail-001.json')
-  await page.getByPlaceholder('Why this run passed, failed, or was blocked').fill('The second approval stage did not activate.')
-  await page.getByRole('button', { name: 'Record immutable result' }).click()
-  await expect(page.getByText('Fail', { exact: true }).last()).toBeVisible()
-  await page.getByRole('button', { name: 'Record retest' }).click()
-  await page.getByLabel('Outcome').selectOption('Pass')
-  await page.getByLabel('Evidence reference').fill('evidence/workflow-pass-002.json')
-  await page.getByPlaceholder('Why this run passed, failed, or was blocked').fill('All ordered approval stages activated correctly after correction.')
-  await page.getByRole('button', { name: 'Record immutable result' }).click()
-  await expect(page.getByText('Pass', { exact: true }).last()).toBeVisible({timeout:15_000})
-  await page.getByRole('button', { name: /Requirement coverage/ }).click()
-  await expect(page.getByText('Verified', { exact: true })).toBeVisible({timeout:15_000})
 })

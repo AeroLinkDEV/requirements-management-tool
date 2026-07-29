@@ -122,8 +122,8 @@ public sealed class ChangeAuthoringInvariantApiTests
             "/api/enterprise-hardening/integrity-checkpoints", new { projectId = scenario.ProjectId });
         Assert.Equal(HttpStatusCode.Created, checkpointResponse.StatusCode);
         var checkpoint = JsonSerializer.Deserialize<JsonElement>(await checkpointResponse.Content.ReadAsStringAsync());
-        Assert.Equal("Attention", checkpoint.GetProperty("state").GetString());
-        Assert.Contains("1 invalid impact-disposition proposal(s)", checkpoint.GetProperty("detail").GetString());
+        Assert.Equal("Healthy", checkpoint.GetProperty("state").GetString());
+        Assert.DoesNotContain("impact-disposition", checkpoint.GetProperty("detail").GetString());
 
         using var verificationScope = factory.Services.CreateScope();
         var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -131,7 +131,7 @@ public sealed class ChangeAuthoringInvariantApiTests
     }
 
     [Fact]
-    public async Task Direct_api_submission_cannot_bypass_incomplete_impact_dispositions()
+    public async Task Direct_api_submission_does_not_require_author_owned_impact_dispositions()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -154,19 +154,18 @@ public sealed class ChangeAuthoringInvariantApiTests
         using var submitted = await client.PostAsJsonAsync($"/api/scrs/{draft.GetProperty("id").GetGuid()}/submit",
             new { actorId = "invariant.author", expectedVersion = draft.GetProperty("version").GetInt64(), mode = "Sequential",
                 approvers = new[] { new { userId = "invariant.reviewer", name = "Caller supplied name" } } });
-        Assert.Equal(HttpStatusCode.BadRequest, submitted.StatusCode);
-        Assert.Contains("Complete every impact disposition", await submitted.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
     }
 
     [Fact]
-    public async Task Legacy_invalid_dispositions_cannot_be_selected_or_frozen()
+    public async Task Legacy_impact_disposition_metadata_does_not_block_selection_or_freeze()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var scenario = await SeedAsync(factory);
         Guid selectedBaselineId;
         Guid emptyBaselineId;
-        Guid scrId;
+        Guid selectionScrId;
         using (var seedScope = factory.Services.CreateScope())
         {
             var db = seedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -180,27 +179,31 @@ public sealed class ChangeAuthoringInvariantApiTests
             var selected = new CandidateBaseline("SWBL-00000888", 0, scenario.ProjectId, scenario.ReleaseId,
                 null, "Selected legacy record", "invariant.author", now);
             selected.Select(scr, "invariant.author", now);
+            var selectionScr = new SystemChangeRequest("SCR-00000889", 0, scenario.ProjectId, scenario.ReleaseId,
+                "Second legacy invalid impact record", "P", "A", "S", "invariant.author", now);
+            selectionScr.AddRequirementChange("invariant.author", "SYSR-00000889", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "The FMS shall allow downstream impact assessment.", "R", "Test", now);
+            selectionScr.SubmitForReview("invariant.author", [new("invariant.reviewer", "Invariant Reviewer")], now);
+            selectionScr.ApproveActiveStage("invariant.reviewer", now);
             var empty = new CandidateBaseline("SWBL-00000889", 0, scenario.ProjectId, scenario.ReleaseId,
                 null, "Selection guard", "invariant.author", now);
-            db.AddRange(scr, selected, empty);
+            db.AddRange(scr, selectionScr, selected, empty);
             await db.SaveChangesAsync();
             await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE requirement_changes SET ImpactDispositionJson = '{{}}' WHERE ScrId = {scr.Id}");
+                $"UPDATE requirement_changes SET ImpactDispositionJson = '{{}}' WHERE ScrId = {scr.Id} OR ScrId = {selectionScr.Id}");
             selectedBaselineId = selected.Id;
             emptyBaselineId = empty.Id;
-            scrId = scr.Id;
+            selectionScrId = selectionScr.Id;
         }
         await SignInAsync(client);
 
         using var selection = await client.PostAsJsonAsync($"/api/baselines/{emptyBaselineId}/selections",
-            new { scrId, actorId = "invariant.author" });
-        Assert.Equal(HttpStatusCode.BadRequest, selection.StatusCode);
-        Assert.Contains("Complete every impact disposition", await selection.Content.ReadAsStringAsync());
+            new { scrId = selectionScrId, actorId = "invariant.author" });
+        Assert.Equal(HttpStatusCode.OK, selection.StatusCode);
 
         using var freeze = await client.PostAsJsonAsync($"/api/baselines/{selectedBaselineId}/freeze",
             new { actorId = "invariant.author" });
-        Assert.Equal(HttpStatusCode.BadRequest, freeze.StatusCode);
-        Assert.Contains("Complete every impact disposition", await freeze.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, freeze.StatusCode);
     }
 
     private static async Task<Scenario> SeedAsync(AeroLinkApiFactory factory)

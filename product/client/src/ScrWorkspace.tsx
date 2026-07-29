@@ -144,13 +144,6 @@ const pendingImpact = JSON.stringify({
   baseline: "Pending",
   collaboration: "Pending",
 });
-const impactKeys = [
-  "trace",
-  "verification",
-  "documents",
-  "baseline",
-  "collaboration",
-] as const;
 const base = (display: string) => display.replace(/\.\d{2}$/, "");
 const revision = (display: string) => Number(display.match(/\.(\d{2})$/)?.[1] ?? 0);
 const prefixFor = (level: RequirementLevel) =>
@@ -225,10 +218,6 @@ const mapRequirements = (items: Requirement[]) =>
       item.level,
     ),
   );
-const impactsComplete = (item: DraftRequirement) => {
-  const values = parseObject(item.impactDispositionJson);
-  return impactKeys.every((key) => values[key] && values[key] !== "Pending");
-};
 const proposalComplete = (item: DraftRequirement) =>
   Boolean(
     item.baseNumber &&
@@ -785,9 +774,7 @@ export default function ScrWorkspace({
     value.trim(),
   );
   const proposalsComplete = requirements.length > 0 && requirements.every(proposalComplete);
-  const impactCount = requirements.filter(impactsComplete).length;
-  const reviewReady =
-    caseComplete && proposalsComplete && impactCount === requirements.length && requirements.length > 0;
+  const reviewReady = caseComplete && proposalsComplete && requirements.length > 0;
   const uniqueApprovers = new Set(approvers.map((item) => item.userId).filter(Boolean));
   const reviewerSetupValid =
     approvers.length > 0 &&
@@ -837,9 +824,6 @@ export default function ScrWorkspace({
             <a href="#checked-requirements" className={proposalsComplete ? "complete" : caseComplete ? "active" : ""}>
               <span>2</span><div><b>Requirement changes</b><small>{proposalsComplete ? "Complete" : "In progress"}</small></div>
             </a>
-            <a href="#checked-readiness" className={reviewReady ? "complete" : proposalsComplete ? "active" : ""}>
-              <span>3</span><div><b>Impact & readiness</b><small>{reviewReady ? "Review ready" : `${impactCount}/${requirements.length} closed`}</small></div>
-            </a>
           </nav>
 
           <section className="workspaceCard authoringCard" id="checked-change-case">
@@ -880,7 +864,7 @@ export default function ScrWorkspace({
               <div>
                 <span className="stageKicker">STAGE 2</span>
                 <h2>Controlled requirement authoring</h2>
-                <p>One shared editor for content, classification, and lifecycle impact decisions.</p>
+                <p>One shared editor for requirement content and classification.</p>
               </div>
               <span className={proposalsComplete ? "completionBadge complete" : "completionBadge"}>
                 {proposalsComplete ? "Complete" : `${requirements.length} proposal${requirements.length === 1 ? "" : "s"}`}
@@ -925,28 +909,6 @@ export default function ScrWorkspace({
             )}
           </section>
 
-          <section className="workspaceCard authoringCard" id="checked-readiness">
-            <div className="workspaceTitle">
-              <div>
-                <span className="stageKicker">STAGE 3</span>
-                <h2>Impact & review readiness</h2>
-                <p>Check in an honest Draft now; submit only when every gate is closed.</p>
-              </div>
-              <span className={reviewReady ? "completionBadge complete" : "completionBadge"}>
-                {reviewReady ? "Review ready" : "Draft only"}
-              </span>
-            </div>
-            <div className="workspaceReadiness">
-              <article className={caseComplete ? "complete" : ""}><span>{caseComplete ? "✓" : "1"}</span><div><b>Change case</b><p>{caseComplete ? "Complete" : "Needs required context"}</p></div></article>
-              <article className={proposalsComplete ? "complete" : ""}><span>{proposalsComplete ? "✓" : "2"}</span><div><b>Proposal content</b><p>{proposalsComplete ? "Complete" : "Resolve incomplete identities or content"}</p></div></article>
-              <article className={impactCount === requirements.length && requirements.length ? "complete" : ""}><span>{impactCount === requirements.length && requirements.length ? "✓" : "3"}</span><div><b>Impact decisions</b><p>{impactCount}/{requirements.length} proposals closed</p></div></article>
-            </div>
-            <div className={reviewReady ? "workspaceNext ready" : "workspaceNext"}>
-              <b>{reviewReady ? "Next: check in and assign reviewers" : "Next: close the highlighted authoring gaps"}</b>
-              <p>{reviewReady ? "The checked-in snapshot will be ready for explicit reviewer selection." : "You may check in completed proposal content with pending impacts, but review stays blocked."}</p>
-            </div>
-          </section>
-
           <div className="workspaceActions stickyWorkspaceActions">
             <div>
               <b>{reviewReady ? "Ready to check in" : "Draft can be checked in before review readiness"}</b>
@@ -965,7 +927,7 @@ export default function ScrWorkspace({
             <span>FINAL HANDOFF</span>
             <h2>Configure review authority</h2>
             <p>Select only the people who have decision authority for this exact controlled snapshot.</p>
-            <div><b>{scr.displayNumber}</b><span>{requirements.length} proposals · 5/5 impact decisions complete</span></div>
+            <div><b>{scr.displayNumber}</b><span>{requirements.length} requirement proposal{requirements.length === 1 ? "" : "s"} ready for review</span></div>
           </div>
           <div className="reviewModePicker">
             <button type="button" className={reviewMode === "Sequential" ? "active" : ""} onClick={() => setReviewMode("Sequential")}>
@@ -1095,12 +1057,11 @@ export default function ScrWorkspace({
             <section className="workspaceCard">
               <div className="workspaceTitle"><div><h2>Requirement impact</h2><p>{scr.requirementChanges.length} proposed controlled change{scr.requirementChanges.length === 1 ? "" : "s"}</p></div></div>
               {scr.requirementChanges.map((item) => {
-                const draftItem = normalizeRequirement({ ...item, baseNumber: base(item.displayNumber), revision: revision(item.displayNumber) }, item.level);
                 return (
                   <article className="requirementView" key={item.id}>
                     <div><b>{item.displayNumber}</b><span>{item.level} · {item.kind}</span></div>
                     <p>{item.kind === "Retire" && !item.statement ? "Requirement will be retired." : item.statement}</p>
-                    <footer><small>{item.verificationMethod} · {item.rationale || "No rationale recorded"}</small><em className={impactsComplete(draftItem) ? "closed" : "pending"}>{impactsComplete(draftItem) ? "5/5 impacts closed" : "Impact decisions pending"}</em></footer>
+                    <footer><small>{item.verificationMethod} · {item.rationale || "No rationale recorded"}</small><em>Downstream impact assessed after approval</em></footer>
                   </article>
                 );
               })}
@@ -1128,10 +1089,10 @@ export default function ScrWorkspace({
                 <div><dt>Updated</dt><dd>{new Date(scr.updatedAt).toLocaleDateString()}</dd></div>
               </dl>
               {scr.state === "Draft" && isAuthor && reviewReady && (
-                <><div className="railReadiness ready"><b>Ready for review</b><span>Case, proposals, and impacts are complete.</span></div><button type="button" className="primaryFull" onClick={openReviewerSetup}>Configure & Submit Review</button></>
+                <><div className="railReadiness ready"><b>Ready for review</b><span>The change case and requirement proposals are complete.</span></div><button type="button" className="primaryFull" onClick={openReviewerSetup}>Configure & Submit Review</button></>
               )}
               {scr.state === "Draft" && isAuthor && !reviewReady && (
-                <div className="railReadiness"><b>Draft needs authoring</b><span>{!caseComplete ? "Complete the change case." : !proposalsComplete ? "Complete requirement proposals." : `Close impact decisions on ${requirements.length - impactCount} proposal${requirements.length - impactCount === 1 ? "" : "s"}.`}</span><button type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>Complete Draft readiness</button></div>
+                <div className="railReadiness"><b>Draft needs authoring</b><span>{!caseComplete ? "Complete the change case." : "Complete the requirement proposals."}</span><button type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>Complete Draft readiness</button></div>
               )}
               {/* No second Revise button here. The action lives in the Change case header with Check out &
                   edit, so there is one place to act; this only explains what it will do. */}

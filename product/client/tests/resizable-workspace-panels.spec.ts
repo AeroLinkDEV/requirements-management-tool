@@ -1,34 +1,23 @@
 import { expect, test } from '@playwright/test'
 import { login } from './auth'
 
-test('Command Center panels resize horizontally and persist', async ({ page }) => {
+test('Command Center presents a responsive, aligned three-way work summary', async ({ page }) => {
   await login(page)
   await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
+  const panels = page.locator('.dashboardTriptych > .dashboardAreaCard')
+  await expect(panels).toHaveCount(3)
+  await expect(page.locator('.dashboardTriptych').getByRole('separator')).toHaveCount(0)
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()
 
-  const layout = page.locator('.commandCenterPage > .grid')
-  const panels = layout.locator(':scope > .resizableWorkspacePanel')
-  const splitter = layout.getByRole('separator').first()
-
-  await expect(splitter).toBeAttached()
-  await expect(panels).toHaveCount(2)
-
-  const before = await panels.first().boundingBox()
-  if (!before) throw new Error('Resizable Command Center layout was not measurable')
-
-  await splitter.focus()
-  await splitter.press('Shift+ArrowRight')
-  await splitter.press('Shift+ArrowRight')
-  await splitter.press('Shift+ArrowRight')
-
-  await expect.poll(async () => (await panels.first().boundingBox())?.width ?? 0)
-    .toBeGreaterThan(before.width + 80)
-
-  const resizedWidth = (await panels.first().boundingBox())?.width ?? 0
-
-  await page.reload()
-  await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
-  const persisted = await page.locator('.commandCenterPage > .grid > .resizableWorkspacePanel').first().boundingBox()
-  expect(persisted?.width ?? 0).toBeGreaterThan(resizedWidth - 8)
+  await page.setViewportSize({width: 680, height: 900})
+  const boxes = await panels.evaluateAll(items=>items.map(item=>item.getBoundingClientRect()))
+  expect(boxes[1].top).toBeGreaterThan(boxes[0].bottom)
+  expect(boxes[2].top).toBeGreaterThan(boxes[1].bottom)
+  const overflow = await page.evaluate(()=>[...document.querySelectorAll<HTMLElement>('body *')].filter(element=>{
+    const box=element.getBoundingClientRect()
+    return box.width>0&&box.right>innerWidth+1
+  }).map(element=>({tag:element.tagName,className:element.className,right:element.getBoundingClientRect().right,width:element.getBoundingClientRect().width})).slice(0,8))
+  expect(overflow).toEqual([])
 })
 
 test('Reusable layout supports up and down resizing with keyboard access', async ({ page }) => {

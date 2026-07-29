@@ -82,14 +82,6 @@ const kindOptions: { value: RequirementKind; label: string }[] = [
   { value: "Retire", label: "Retire an existing requirement" },
 ];
 
-const impactAreas = [
-  ["trace", "Trace relationships"],
-  ["verification", "Verification coverage"],
-  ["documents", "Controlled documents"],
-  ["baseline", "Baselines and builds"],
-  ["collaboration", "Open collaboration"],
-] as const;
-
 const parse = (value: string): Record<string, unknown> => {
   try {
     return JSON.parse(value) as Record<string, unknown>;
@@ -117,10 +109,6 @@ export default function ControlledRequirementEditor({
   onRemove,
 }: Props) {
   const attributes = useMemo(() => parse(item.attributesJson), [item.attributesJson]);
-  const impact = useMemo(
-    () => parse(item.impactDispositionJson),
-    [item.impactDispositionJson],
-  );
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ExistingRequirement[]>([]);
   const [lookupBusy, setLookupBusy] = useState(false);
@@ -128,8 +116,6 @@ export default function ControlledRequirementEditor({
 
   const setAttribute = (key: string, value: unknown) =>
     onChange("attributesJson", JSON.stringify({ ...attributes, [key]: value }));
-  const setImpact = (key: string, value: string) =>
-    onChange("impactDispositionJson", JSON.stringify({ ...impact, [key]: value }));
 
   useEffect(() => {
     if (identityLocked || item.kind === "Introduce") {
@@ -262,9 +248,6 @@ export default function ControlledRequirementEditor({
     return () => { cancelled = true; };
   }, [api, projectId, item.kind, item.baseNumber]);
 
-  const pendingImpacts = impactAreas.filter(
-    ([key]) => !impact[key] || impact[key] === "Pending",
-  ).length;
   const derived = item.isDerived ?? attributes.derived === true;
   const displayNumber = item.baseNumber
     ? `${item.baseNumber}.${String(item.revision).padStart(2, "0")}`
@@ -550,21 +533,18 @@ export default function ControlledRequirementEditor({
         <aside>
           <div className="sectionTitle">
             <div>
-              <b>Impact decisions</b>
-              <span>Required before this package can enter review.</span>
+              <b>Known downstream context</b>
+              <span>Read-only information for the change author.</span>
             </div>
           </div>
           <p>
-            Record an explicit engineering decision for every lifecycle area. “Affected” and “Follow-up Assigned” remain visible to reviewers.
+            Verification and consuming engineering teams assess downstream impact after this change request is reviewed.
           </p>
-          {/* What the traces already record, shown beside the decisions rather than instead of them. Deliberately
-              read-only: it changes no disposition and unblocks no gate. An author still has to decide, because a
-              tool finding no links and an engineer confirming no impact are different claims. */}
           {item.kind !== "Introduce" && item.baseNumber && (
             <section className="tracedImpact" aria-label={`Recorded links for proposal ${index + 1}`}>
               <header>
-                <b>What the traces already record</b>
-                <span>Read-only. You still decide each disposition below.</span>
+                <b>Live trace for {item.baseNumber}</b>
+                <span>This does not ask the author to make an impact decision.</span>
               </header>
               {tracedBusy && !traced && <p className="tracedEmpty">Reading recorded links…</p>}
               {traced && (
@@ -578,7 +558,7 @@ export default function ControlledRequirementEditor({
                               {row.displayNumber} <i>{row.level}</i>
                             </span>
                           ))
-                        : <em>None recorded — confirm below whether that is correct.</em>}
+                        : <em>No derived requirements are recorded.</em>}
                     </dd>
                   </div>
                   <div>
@@ -590,7 +570,7 @@ export default function ControlledRequirementEditor({
                               {row.displayNumber} <i>{row.isSuspect ? "Suspect applicability" : row.state}</i>
                             </span>
                           ))
-                        : <em>None recorded — confirm below whether that is correct.</em>}
+                        : <em>No covering procedures are recorded.</em>}
                     </dd>
                   </div>
                 </dl>
@@ -598,28 +578,7 @@ export default function ControlledRequirementEditor({
               {traced?.coveringProcedures.some((row) => row.isSuspect) && <p className="tracedWarning">Changed wording made this applicability suspect. Resolve it through Verification â†’ Change impact; the procedure remains approved, but it does not count as confirmed coverage.</p>}
             </section>
           )}
-          {impactAreas.map(([key, label]) => {
-            const value = String(impact[key] || "Pending");
-            return (
-              <label className={value.toLowerCase().replaceAll(" ", "-")} key={key}>
-                <span>{label}</span>
-                <select value={value} onChange={(event) => setImpact(key, event.target.value)}>
-                  <option>Pending</option>
-                  <option>Affected</option>
-                  <option>Not Affected</option>
-                  <option>Follow-up Assigned</option>
-                </select>
-              </label>
-            );
-          })}
-          <div className={pendingImpacts ? "impactGate pending" : "impactGate complete"}>
-            <b>{5 - pendingImpacts}/5 impact decisions complete</b>
-            <span>
-              {pendingImpacts
-                ? `${pendingImpacts} decision${pendingImpacts === 1 ? "" : "s"} still block review readiness.`
-                : "This proposal is ready to join the controlled review snapshot."}
-            </span>
-          </div>
+          {item.kind === "Introduce" && <div className="tracedImpact tracedEmpty"><b>New requirement</b><p>No earlier lifecycle trace exists. Downstream teams will establish the necessary traceability and verification after approval.</p></div>}
         </aside>
       </div>
     </article>
