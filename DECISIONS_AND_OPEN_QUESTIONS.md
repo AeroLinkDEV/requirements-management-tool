@@ -888,6 +888,71 @@ Future entries use:
   connection statement rather than as part of the caller's save, which is what makes the number spent at the
   moment it is issued rather than at commit.
 
+### DEC-070 - Project and Build Selection Establish the Workspace Context
+
+- **Date:** 2026-07-29
+- **Status:** Accepted
+- **Decision:** Authentication opens a context-free Projects page. Selecting **FMS Product Development**
+  opens its Software Builds lineage, and selecting an accessible build establishes the project and build in
+  the canonical route. Build 1.5 is a released, read-only historical workspace; Build 1.6 is the in-work
+  development workspace. Build 0.5 and 1.0 remain visible lineage but are inaccessible. There is no build
+  switcher inside a workspace: changing build requires **Back to Software Builds** and an explicit new
+  selection.
+- **Rationale:** Entering the FMS workspace immediately after login made the project and release implicit and
+  allowed one shared screen to appear as though it represented every build. A route-owned context survives
+  refresh and deep links, lets every query and mutation validate the same build, and prevents a casual selector
+  from silently replacing the data beneath an engineer.
+- **Consequences:** Primary requirements, changes, traceability, verification, search, reports, exports and
+  navigation counts are scoped to the selected build. Released Build 1.5 exposes exploration but rejects
+  mutation at both UI and server/data boundaries; because it is already released, its Command Center reports
+  that fact and never displays a completion percentage. Build 1.6 may show clearly labelled read-only evidence
+  from Build 1.5 without changing the active context. Logout and workspace exit clear or replace the context.
+  Canonical routes and the complete contract are summarized in
+  [CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).
+
+### DEC-071 - Change Authors Describe the Change; Consuming Engineers Decide Downstream Impact
+
+- **Date:** 2026-07-29
+- **Status:** Accepted
+- **Supersedes:** [DEC-059](#dec-059---computed-impact-informs-the-declared-disposition-and-never-replaces-it)
+  and only the impact-disposition requirements and consequences in
+  [DEC-062](#dec-062---requirement-proposal-metadata-is-a-server-enforced-lifecycle-contract).
+- **Decision:** A change-request author records the change and may inspect a read-only live trace of known
+  downstream relationships. The author does not disposition trace relationships, verification coverage,
+  controlled documents, baselines/builds, collaboration, or lifecycle impact. The engineers who consume and
+  triage the change determine the actual downstream response in their governed workspaces.
+- **Rationale:** Asking the author to decide every downstream consequence confuses proposal intent with the
+  specialist assessment that follows it. The trace graph is useful context, but a link does not tell an author
+  whether a procedure, document or baseline must change. Requiring those answers also made browser fields into
+  lifecycle gates that blocked otherwise useful Drafts and encouraged unsupported guesses.
+- **Consequences:** Author impact selectors and the lifecycle-impact summary are absent. Review submission,
+  baseline selection/freeze/materialization and integrity checkpoints do not require the former five
+  dispositions. Existing stored disposition data remains historical and is not rewritten. The read-only trace
+  does not change active build context or close a readiness gate. A Draft may be incomplete; a title is the only
+  prerequisite to save because the title prevents an empty form from consuming a controlled number. System
+  Change Requests open directly from the System area; Software authoring first asks whether the change targets
+  HLR or LLR.
+
+### DEC-072 - The Active Product Surface Favors the Current Engineering Story
+
+- **Date:** 2026-07-29
+- **Status:** Accepted
+- **Decision:** Keep System and Software as distinct areas, with Verification as the third Command Center
+  concern. Hide Problem Reports, Product Versions, Candidate Baselines, and the Change Request page's Software
+  Builds view from navigation, search and direct UI routing for now. Preserve their domain/API/client
+  implementation as dormant code unless a later decision removes or reuses it.
+- **Rationale:** These surfaces added competing concepts to the demonstration before their product roles were
+  settled. Hiding them creates a coherent path—project, build, System/Software change, requirements and
+  verification—without paying the irreversible cost of deleting working lifecycle primitives that may inform
+  a later design.
+- **Consequences:** The Command Center is a three-way System/Software/Verification summary. It omits the old
+  requirement-count banner, release-attention rail and change-request-flow visualization. A requirement
+  Overview omits the Controlled Revision, Digital Thread and empty-discussion banners; Trace & Impact, History
+  and Discussion remain the focused places for that information. New Change Request actions live on the
+  applicable Change Requests page rather than as a permanent sidebar button. Lifecycle Decision Room remains
+  available. The broader Verification redesign is intentionally deferred; current verification behavior is
+  simplified only where required by DEC-071 and the three-way Command Center.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

@@ -5,7 +5,10 @@ This catalog is the authoritative capability inventory. Feature identifiers are 
 Implementation status is tracked against acceptance outcomes, not feature titles. **This catalog is the
 capability inventory, not the status record** — for current status read
 [PROJECT_STATE.md](PROJECT_STATE.md) and
-[AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md). The paragraph below is a
+[AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md). For the current supported routes,
+dormant UI and aligned issue backlog, read
+[CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md). A capability listed here may be
+implemented but deliberately not exposed; the catalog is not authority to reconnect dormant modules. The paragraph below is a
 2026-07-18 snapshot retained for history and is not maintained.
 
 As of 2026-07-18, Wave 1 has integrated foundations for EA-001 through EA-004, COL-001 through COL-004, SRCH-001, SRCH-002, BULK-001, EXCH-001, and EXCH-002. The Requirements Explorer is now an explicitly read-only surface for structure, trace, verification, history, discussion, and active-change awareness; introductions, modifications, retirements, bulk mutations, and governed imports enter through dedicated Draft SCR/SWCR workflows in Changes. Important artifacts have durable URLs, browser history, context-preserving breadcrumbs, a keyboard command palette, and bounded permission-aware identifier search. SCR/SWCR editing has an exclusive renewable server lease, read-only observers, server autosave snapshots, explicit check-in/discard, forced-unlock audit, and optimistic concurrency. Controlled attachment versions and integrity verification, structured/attachment redlines, a visual saved-query builder with stable URLs, idempotent downloadable background exports, retained three-way merge conflicts, integrity checkpoints, a 50,000-requirement PostgreSQL qualification dataset, and a 150-client mixed database workload join the established impact, collaboration, interchange, and work-management capabilities. Backup integrity and an isolated PostgreSQL restore drill are proven. Remaining acceptance depth includes extending checkout to every controlled draft type, embedded inline-image rendering, import-worker resumability, production-topology browser concurrency, and scheduled recovery drills.

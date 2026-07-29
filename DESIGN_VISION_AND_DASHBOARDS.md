@@ -2,6 +2,13 @@
 
 This document turns the AeroLink concept mockups into guiding product direction. The images are inspiration, not approved implementation specifications. Future design work may refine layout, naming, metrics, and visual treatment while preserving the behaviors and principles defined here.
 
+> **Current implementation note — 2026-07-29.** The active Command Center is intentionally a simpler
+> three-way System/Software/Verification view, reached only after Project and Software Build selection.
+> Requirement totals, Release Attention and Change Request Flow are not current dashboard requirements.
+> Problem Reports, Product Versions and Candidate Baselines are dormant UI. Treat the mockups below as
+> inspiration, not instructions to restore those elements. See
+> [CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).
+
 ## Experience Vision
 
 The product should feel like calm mission control for controlled lifecycle data:

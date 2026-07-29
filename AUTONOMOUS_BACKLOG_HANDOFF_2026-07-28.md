@@ -1,5 +1,10 @@
 # Autonomous backlog handoff — 2026-07-28
 
+> **Historical checkpoint; do not restart from its issue list.** Work continued through PR #168 on
+> 2026-07-29, and several product decisions changed the active surface. Use
+> [CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md) for current routes,
+> issue state, deliberate dormant code and restart instructions.
+
 ## Why work stopped
 
 The autonomous backlog run was intentionally stopped after completing and merging issue #127 because the available Codex usage was running low. This is a clean scope boundary, not a technical blocker.

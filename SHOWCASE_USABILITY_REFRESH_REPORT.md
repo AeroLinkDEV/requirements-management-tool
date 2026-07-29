@@ -6,6 +6,11 @@ Status: delivered and validated on 2026-07-13.
 > about the retired `showcase/` prototype, despite the name. "Showcase-critical surfaces" here means the
 > product screens used in demonstrations. The design system it introduced is still in force; the test
 > counts and validation results were true on that date and are not maintained.
+>
+> **Navigation and dashboard details below are also historical.** PRs #166–#168 later introduced Projects
+> and Software Builds landing pages, a three-way System/Software/Verification Command Center, and deliberately
+> hid Problem Reports, Product Versions, Candidate Baselines and the Change Request Software Builds view.
+> Current behavior is in [CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).
 
 ## Outcome
 

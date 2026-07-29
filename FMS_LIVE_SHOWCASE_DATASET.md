@@ -6,6 +6,14 @@ The FMS live showcase is a deterministic, production-shaped program used for dem
 
 The showcase coexists with the clean **Create a new program** workflow. Its program code is `FMSLIVE`, and repeated generation is idempotent.
 
+## How the dataset is entered
+
+After authentication, the user selects **FMS Product Development** on the Projects page and then chooses a
+Software Build. Build 1.5 opens this released dataset as a read-only historical workspace. Build 1.6 opens the
+in-work successor and scopes normal queries and mutations to that release. Builds 0.5 and 1.0 are lineage-only
+placeholders. Historical Build 1.5 evidence may appear inside 1.6 when clearly labelled, but it never switches
+the active workspace. See DEC-070.
+
 ## Released FMS 1.5 baseline
 
 | Controlled content | Exact count |

@@ -1,6 +1,6 @@
 # Project State — Start Here
 
-**Last updated: 2026-07-26.**
+**Last updated: 2026-07-29.**
 
 This is the orientation record for anyone — human or model — picking up AeroLink. It answers *what
 exists, what is true today, what is deliberately not being built, and where to start*. Every other
@@ -112,10 +112,11 @@ revisions of old ones (DEC-055, DEC-054).
 
 Authoring says where a requirement goes and what the traces already know. An author chooses the specification
 section a proposed requirement belongs in, applied at materialization — introduced requirements land there and
-modified ones move (DEC-057). Beside the five impact dispositions, the proposal shows what the trace graph
-records: the requirements that derive from this one and the procedures that verify it. That panel is read-only
-and closes no gate — a tool finding no links and an engineer confirming no impact are different claims, and only
-the second is worth anything in a review (DEC-059).
+modified ones move (DEC-057). The proposal may show a read-only live trace of the requirements derived from this
+one and the procedures that verify it. The author does not disposition downstream trace, verification,
+document, baseline/build, collaboration or lifecycle consequences; the engineers who consume and triage the
+change make those decisions in their governed workspaces (DEC-071, which supersedes DEC-059 and the
+impact-disposition portion of DEC-062).
 
 Documents are offered where the requirements are read, not only on the Digital Thread. The build decides which:
 the approved controlled document for a released build, or a draft at the revision the released document will
@@ -162,6 +163,27 @@ tokens applied through the workspace shell, and **WCAG 2.2 AA as a commitment**:
 3:1 large text, and 24x24 minimum target sizes, all measured on rendered pixels by
 `product/client/tests/accessibility-contrast.spec.ts` and `design-system.spec.ts` in both densities.
 
+## Current product flow and visible surface
+
+Authentication no longer drops a user into an implicit FMS workspace. The supported path is
+**Projects → FMS Product Development → Software Builds → build-scoped workspace** (DEC-070).
+Build 1.5 is released and read-only; Build 1.6 is in work and editable. Changing build requires leaving the
+workspace through **Back to Software Builds**. There is no in-workspace build switcher, and a released build
+does not show a completion percentage.
+
+Inside a build, System and Software remain separate engineering areas. The Command Center summarizes System,
+Software and Verification work. System change creation is direct; Software creation first asks HLR or LLR.
+Change history, requirements, search and verification are scoped to the active build, and historical evidence
+is labelled with its originating build without changing workspace context.
+
+The active navigation deliberately hides Problem Reports, Product Versions, Candidate Baselines and the old
+Change Request Software Builds view (DEC-072). Their implementation remains dormant for potential future reuse;
+it is neither a supported route nor dead code to reconnect or delete without a new decision. Lifecycle Decision
+Room remains visible. The broader Verification redesign is still pending product-owner direction.
+
+The restart-ready description, routes, issue state and validation evidence are in
+[CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).
+
 ## The demonstration dataset
 
 `FMSLIVE` is a deterministic, production-shaped program built through the same domain and persistence
@@ -189,16 +211,17 @@ the identity administration UI are not in progress and not scheduled. The reason
 resume and the order to resume in are recorded in the contract's Workstream 4 decision record. Do not
 treat that deferral as a backlog to pick up without the trigger being met.
 
-The active focus is the reconciled product-review remediation backlog in issues **#99-#139**, executed in
-dependency-ordered PR batches. Issues **#29** (program parent), **#34** (identity — deferred remainder), and
-**#38** (production operations and qualification) remain the longer-lived program records. The review backlog
-does not reopen the deferred federation scope in #34 or expand into unrelated AeroLink features.
+The 28 July review backlog has largely been delivered. The still-open applicable issues from that batch are
+**#100, #101, #102, #106, #110, #112, #113, #115 and #132**. Issues **#29** (program parent), **#34**
+(identity — deferred remainder), and **#38** (production operations and qualification) remain the longer-lived
+program records. #131 and #133 are closed as superseded/not planned after the 29 July product decisions; future
+agents must not restore Problem Report search or author-owned impact dispositions as regression fixes.
 
 **[PRODUCT_REVIEW_2026_07_26.md](PRODUCT_REVIEW_2026_07_26.md)** holds the findings from the first evening of
 using the product as an engineer would. **Every item in it is now closed** — the six defects, and all nine that
-needed a product decision first. The last of them was the impact-disposition question, which asked for the
-computed trace impact to be shown beside the declared disposition; that is now in the proposal card (DEC-059).
-The file is retained as the record of what was found and decided, not as a list of work outstanding.
+needed a product decision first. Its impact-disposition outcome was later superseded: computed trace remains
+useful context, but downstream decisions now belong to consuming engineers rather than the change author
+(DEC-071). The file is retained as the record of what was found and decided, not as current product direction.
 
 A second evening of review followed on 27 July, and its eleven observations are also closed. Four of them were
 not missing features but unreachable ones: a Revise action gated on a state no change request in the programme
@@ -278,10 +301,10 @@ deployment uses the one-time protected administrator bootstrap instead.
 Requirement proposal metadata is now one durable server contract (DEC-062). Initial SCR/SWCR creation preserves
 schema-allowed `owner`, `criticality`, and future configured attributes while recomputing the server-owned
 `derived` flag. Exact section placement survives create, detail, checkout/check-in, review and baseline
-materialization; stale section identifiers are rejected with a repair instruction. Review, baseline selection,
-freeze and materialization all refuse incomplete or malformed five-area impact decisions. Administrators can
-identify legacy authored-attribute gaps through `/api/authoring/attribute-gaps`, and integrity checkpoints count
-legacy impact-disposition violations without mutating historical records.
+materialization; stale section identifiers are rejected with a repair instruction. Administrators can identify
+legacy authored-attribute gaps through `/api/authoring/attribute-gaps`. DEC-071 supersedes the former
+five-area author-impact requirement: review and downstream lifecycle operations no longer block on those
+fields, and integrity checkpoints do not treat their absence as a violation.
 
 Change-request context and review attribution are also controlled facts (DEC-063). Detail links now encode
 System or Software and self-correct old generic or mismatched links from the authorized record. Search, My Work,
@@ -301,7 +324,8 @@ and controlled-editing evidence identifies the administrator as the actual actor
 are shared by System and Software change requests.
 
 Test-procedure applicability begins at exact baseline materialization (DEC-066). Before that lifecycle point,
-new procedure authoring is disabled with the reason and the Product Versions next step; existing inherited
+new procedure authoring is disabled with the reason and the governed materialization prerequisite; the former
+Product Versions and Candidate Baselines pages are not exposed in the current product surface. Existing inherited
 procedures remain tied to their predecessor revisions and change-impact work remains planned rather than
 counted as coverage. Release readiness exposes traceability, coverage, verification, and evidence as
 `WaitingForPrerequisite` with `baseline` as their dependency. Once materialized they become evaluated gates;

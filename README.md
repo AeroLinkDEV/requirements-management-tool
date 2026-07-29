@@ -1,13 +1,16 @@
 # Aerospace Development Assurance Platform
 
-> **New here — human or model? Read [PROJECT_STATE.md](PROJECT_STATE.md) first.** It records what
+> **New here — human or model? Read [PROJECT_STATE.md](PROJECT_STATE.md) first, then the
+> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).** They record what
 > exists today, what is deliberately excluded, where delivery stands, and the known limitations. The
 > documents indexed below are durable definitions and historical records; `PROJECT_STATE.md` describes
 > the present.
 
 This repository contains the working, local/on-premises AeroLink Aerospace Development Assurance Platform and its authoritative product-definition records. AeroLink manages controlled system and software requirements, change, review, traceability, verification evidence, immutable baselines, builds, documents, and release campaigns without claiming certification or tool qualification.
 
-The production-oriented application uses React/TypeScript, ASP.NET Core, Entity Framework, and PostgreSQL. Its FMS workspace retains released version 1.5 as immutable history and version 1.6 as an explicitly user-controlled in-work successor.
+The production-oriented application uses React/TypeScript, ASP.NET Core, Entity Framework, and PostgreSQL.
+After sign-in, users select a Project and then a Software Build. Its FMS workspace retains released version
+1.5 as immutable, read-only history and version 1.6 as an explicitly user-controlled in-work successor.
 
 Release evolution is user-controlled: authorized users plan an in-work successor (for example 1.6), approve the exact SCR/SWCR revisions they intend to include, assemble a candidate over an exact materialized predecessor baseline, complete verification and release approvals, and only then release it. The tool never auto-creates or auto-approves 1.6, 1.7, or later product baselines.
 
@@ -55,6 +58,7 @@ demonstrations use the `FMSLIVE` dataset described in
 | Document | Purpose |
 | --- | --- |
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
+| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-07-29.md) | Restart-ready account of PRs #140–#168, build-scoped navigation, dormant UI, aligned issues and next conversations |
 | [Project vision](PROJECT_VISION.md) | Problem, audience, value, ambition, and success definition |
 | [Scope and boundaries](SCOPE_AND_BOUNDARIES.md) | Current, future, and excluded capabilities |
 | [Domain model and glossary](DOMAIN_MODEL_AND_GLOSSARY.md) | Shared vocabulary and lifecycle concepts |
