@@ -12,32 +12,53 @@ import { apiBase, apiLogin, login, selectProgram } from "./auth";
  * happened to arrive somewhere plausible, and only a software one exposed that the destination was hardcoded.
  */
 
-/** Records a failing run against a procedure of the given scope and raises the report it belongs to. */
+/**
+ * Raises a report from a failure the showcase already contains.
+ *
+ * Recording a new failing run here would work and would be wrong: the showcase's execution count is a
+ * documented figure that another journey asserts, and a fixture that changes what other tests find is not an
+ * isolated fixture. This reads what is there instead of adding to it.
+ */
 async function raiseReport(page: Page, projectId: string, scope: "System" | "Software") {
   const procedures = await (await page.request.get(
     `${apiBase}/api/test-procedures?projectId=${projectId}&scope=${scope}`)).json();
-  const procedure = procedures.find((x: { state: string }) => x.state === "Approved") ?? procedures[0];
-  expect(procedure, `the showcase must hold a ${scope} procedure`).toBeTruthy();
+  const revisionIds = new Set(procedures.map((x: { revisionId: string }) => x.revisionId));
 
-  const failure = await page.request.post(`${apiBase}/api/test-executions`, {
-    data: {
-      projectId,
-      procedureRevisionId: procedure.revisionId,
-      outcome: "Fail",
-      configuration: "Corrective routing fixture",
-      determination: "Observed output did not satisfy the expected result.",
-      evidenceReference: `evidence/corrective/${scope}-${Date.now()}.json`,
-      executedAt: new Date().toISOString(),
-    },
-  });
-  expect(failure.ok(), `recording the ${scope} failure: ${failure.status()}`).toBe(true);
-  const execution = await failure.json();
+  const executions = await (await page.request.get(`${apiBase}/api/test-executions?projectId=${projectId}`)).json();
+  const execution = executions.find((x: { outcome: string; procedureRevisionId: string }) =>
+    x.outcome === "Fail" && revisionIds.has(x.procedureRevisionId));
 
-  const created = await page.request.post(`${apiBase}/api/problem-reports/from-test-execution/${execution.id}`, {
-    data: { title: `${scope} corrective routing ${Date.now()}` },
-  });
-  expect(created.ok(), `raising the ${scope} report: ${created.status()}`).toBe(true);
-  let report = await created.json();
+  let report: { id: string; displayNumber: string; version: number };
+  let procedureNumber: string | undefined;
+
+  if (execution) {
+    // Raised from a failure: the discipline and the procedure both come from the execution.
+    const created = await page.request.post(`${apiBase}/api/problem-reports/from-test-execution/${execution.id}`, {
+      data: { title: `${scope} corrective routing ${Date.now()}` },
+    });
+    expect(created.ok(), `raising the ${scope} report: ${created.status()}`).toBe(true);
+    report = await created.json();
+    const procedure = procedures.find((x: { revisionId: string }) => x.revisionId === execution.procedureRevisionId);
+    procedureNumber = (procedure.displayNumber as string).replace(/\.\d{2}$/, "");
+  } else {
+    // The showcase holds no failed System execution, so this exercises the other resolution path the fix
+    // added: a report raised by hand takes its discipline from the requirement it is linked to.
+    const workspace = await (await page.request.get(
+      `${apiBase}/api/enterprise-requirements/workspace?projectId=${projectId}&level=${scope}&page=1&pageSize=1`)).json();
+    const requirement = workspace.items[0];
+    expect(requirement, `the showcase must hold a ${scope} requirement`).toBeTruthy();
+
+    const created = await page.request.post(`${apiBase}/api/problem-reports`, {
+      data: { projectId, title: `${scope} corrective routing ${Date.now()}`, problem: "Raised by hand for corrective routing." },
+    });
+    expect(created.ok(), `raising the ${scope} report: ${created.status()}`).toBe(true);
+    report = await created.json();
+
+    const linked = await page.request.post(`${apiBase}/api/problem-reports/${report.id}/links`, {
+      data: { artifactType: "Requirement", artifactId: requirement.id, relationship: "AffectedRequirement" },
+    });
+    expect(linked.ok(), `linking the ${scope} requirement: ${linked.status()}`).toBe(true);
+  }
 
   // Advance to the state whose call to action is the one under test.
   for (const [path, body] of [
@@ -50,8 +71,7 @@ async function raiseReport(page: Page, projectId: string, scope: "System" | "Sof
     expect(response.ok(), `${path} on the ${scope} report: ${response.status()}`).toBe(true);
     report = await response.json();
   }
-  // The banner names the procedure by its controlled base number; the list returns it revision-suffixed.
-  return { report, procedureNumber: (procedure.displayNumber as string).replace(/\.\d{2}$/, "") };
+  return { report, procedureNumber };
 }
 
 test("a corrective action opens the discipline, report and procedure it belongs to", async ({ page, request }) => {
@@ -86,7 +106,7 @@ test("a corrective action opens the discipline, report and procedure it belongs 
     const banner = page.getByRole("status", { name: "Corrective verification action" });
     await expect(banner).toBeVisible({ timeout: 30_000 });
     await expect(banner).toContainText(raised.report.displayNumber);
-    await expect(banner).toContainText(raised.procedureNumber);
+    if (raised.procedureNumber) await expect(banner).toContainText(raised.procedureNumber);
 
     // Back returns to the report, not to a dashboard.
     await page.goBack({ waitUntil: "load" });
