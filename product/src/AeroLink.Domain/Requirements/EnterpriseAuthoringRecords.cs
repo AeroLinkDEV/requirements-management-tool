@@ -148,7 +148,7 @@ public sealed class SavedRequirementView
 {
     private SavedRequirementView() { }
     public SavedRequirementView(Guid projectId,Guid ownerId,string name,string queryJson,string columnsJson,bool shared,DateTimeOffset now)
-    { Id=Guid.NewGuid();ProjectId=projectId;OwnerId=ownerId;Name=name.Trim();QueryJson=queryJson;ColumnsJson=columnsJson;IsShared=shared;CreatedAt=now; }
+    { Id=Guid.NewGuid();ProjectId=projectId;OwnerId=ownerId;Name=name.Trim();QueryJson=queryJson;ColumnsJson=columnsJson;IsShared=shared;CreatedAt=now;UpdatedAt=now; }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public Guid OwnerId { get; private set; }
@@ -157,6 +157,25 @@ public sealed class SavedRequirementView
     public string ColumnsJson { get; private set; }="[]";
     public bool IsShared { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
+
+    /// <summary>
+    /// Renaming, resharing and replacing are separate from creating, because a view somebody else has a link
+    /// to must keep its identity when its owner tidies it up. Replacing the query in place is deliberate: the
+    /// alternative was saving a second view with the same name, which is how the duplicates that could not be
+    /// removed through the product came to exist.
+    /// </summary>
+    public void Rename(string name, DateTimeOffset now)
+    {
+        var trimmed = (name ?? "").Trim();
+        if (trimmed.Length == 0) throw new DomainException("A saved view needs a name.");
+        Name = trimmed; UpdatedAt = now;
+    }
+
+    public void SetShared(bool shared, DateTimeOffset now) { IsShared = shared; UpdatedAt = now; }
+
+    public void Replace(string queryJson, string columnsJson, DateTimeOffset now)
+    { QueryJson = queryJson; ColumnsJson = columnsJson; UpdatedAt = now; }
 }
 
 public sealed class EnterpriseOperationJob

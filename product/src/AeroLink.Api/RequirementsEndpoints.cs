@@ -227,7 +227,50 @@ public static class RequirementsEndpoints
         {var notification=await db.UserNotifications.SingleOrDefaultAsync(x=>x.Id==id&&x.Recipient==http.UserAccount().UserName,ct);if(notification is null)return Results.NotFound();notification.MarkRead(DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();});
 
         app.MapPost("/api/enterprise-requirements/views",async(CreateSavedViewRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
-        {if(!await http.HasProjectAccessAsync(db,request.ProjectId,ct))return Results.Forbid();var view=new SavedRequirementView(request.ProjectId,http.UserAccount().Id,request.Name,request.QueryJson,request.ColumnsJson,request.IsShared,DateTimeOffset.UtcNow);db.SavedRequirementViews.Add(view);try{await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/views/{view.Id}",new{view.Id});}catch(DbUpdateException){return Results.Conflict(new{error="A saved view with that name already exists."});}});
+        {
+            if(!await http.HasProjectAccessAsync(db,request.ProjectId,ct))return Results.Forbid();
+            var name=(request.Name??"").Trim();
+            if(name.Length==0)return Results.BadRequest(new{error="A saved view needs a name.",code="saved_view_name_required"});
+            // Validated before storage, not on the way out. A view is a worklist somebody else opens, so a
+            // field this workspace cannot apply or a column it cannot show must never reach the record.
+            var contract=SavedViewContract.Normalize(request.QueryJson,request.ColumnsJson);
+            if(!contract.Valid)return Results.BadRequest(new{error=contract.Error,code="saved_view_contract_invalid"});
+            var owner=http.UserAccount().Id;
+            // Deliberate rather than incidental: a repeat name is refused and says so, instead of quietly
+            // creating the second of two views nobody could tell apart or remove.
+            if(await db.SavedRequirementViews.AnyAsync(x=>x.ProjectId==request.ProjectId&&x.OwnerId==owner&&x.Name==name,ct))
+                return Results.Conflict(new{error=$"You already have a saved view named '{name}'. Rename it, or update the existing one.",code="saved_view_duplicate_name"});
+            var view=new SavedRequirementView(request.ProjectId,owner,name,contract.QueryJson,contract.ColumnsJson,request.IsShared,DateTimeOffset.UtcNow);db.SavedRequirementViews.Add(view);
+            try{await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/views/{view.Id}",new{view.Id});}catch(DbUpdateException){return Results.Conflict(new{error="A saved view with that name already exists.",code="saved_view_duplicate_name"});}
+        });
+
+        // Owner-only, and answered as Not Found rather than Forbidden for somebody else's view: a shared view
+        // is readable, and confirming that a particular id exists but is not yours is more than a reader of a
+        // shared list needs to know.
+        app.MapPut("/api/enterprise-requirements/views/{id:guid}",async(Guid id,UpdateSavedViewRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        {
+            var owner=http.UserAccount().Id;
+            var view=await db.SavedRequirementViews.SingleOrDefaultAsync(x=>x.Id==id&&x.OwnerId==owner,ct);
+            if(view is null)return Results.NotFound();
+            var now=DateTimeOffset.UtcNow;
+            if(request.Name is not null)
+            {
+                var name=request.Name.Trim();
+                if(name.Length==0)return Results.BadRequest(new{error="A saved view needs a name.",code="saved_view_name_required"});
+                if(!string.Equals(name,view.Name,StringComparison.Ordinal)&&await db.SavedRequirementViews.AnyAsync(x=>x.ProjectId==view.ProjectId&&x.OwnerId==owner&&x.Name==name&&x.Id!=id,ct))
+                    return Results.Conflict(new{error=$"You already have a saved view named '{name}'.",code="saved_view_duplicate_name"});
+                view.Rename(name,now);
+            }
+            if(request.IsShared is not null)view.SetShared(request.IsShared.Value,now);
+            if(request.QueryJson is not null||request.ColumnsJson is not null)
+            {
+                var contract=SavedViewContract.Normalize(request.QueryJson??view.QueryJson,request.ColumnsJson??view.ColumnsJson);
+                if(!contract.Valid)return Results.BadRequest(new{error=contract.Error,code="saved_view_contract_invalid"});
+                view.Replace(contract.QueryJson,contract.ColumnsJson,now);
+            }
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new{view.Id,view.Name,view.IsShared,view.QueryJson,view.ColumnsJson});
+        });
 
         app.MapDelete("/api/enterprise-requirements/views/{id:guid}",async(Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>{var view=await db.SavedRequirementViews.SingleOrDefaultAsync(x=>x.Id==id&&x.OwnerId==http.UserAccount().Id,ct);if(view is null)return Results.NotFound();db.Remove(view);await db.SaveChangesAsync(ct);return Results.NoContent();});
 

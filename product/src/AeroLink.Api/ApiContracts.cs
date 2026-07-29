@@ -59,6 +59,7 @@ record CreateSectionRequest(Guid? ParentId,int Position,string Heading);
 record CreateCommentRequest(Guid? RevisionId,Guid? ParentCommentId,string Body,List<string>? Mentions);
 record ResolveCommentRequest(string? Disposition);
 record CreateSavedViewRequest(Guid ProjectId,string Name,string QueryJson,string ColumnsJson,bool IsShared);
+record UpdateSavedViewRequest(string? Name,string? QueryJson,string? ColumnsJson,bool? IsShared);
 record BulkRequirementRequest(Guid ProjectId,List<Guid> ArtifactIds,string Tag,Guid? SpecificationId,Guid? SectionId);
 record BulkJobPayload(List<Guid> ArtifactIds,string Tag,Guid? SpecificationId,Guid? SectionId);
 record CommitImportRequest(Guid TargetReleaseId,string BaseNumber,string Title,string Problem,string Analysis,string Solution,ChangeRequestType Type=ChangeRequestType.Software);

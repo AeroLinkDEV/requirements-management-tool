@@ -1261,3 +1261,20 @@ button.coverageState:hover {
 
 /* Draft state sits with the action it protects. */
 .commentFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+/* Owner controls sit beside the view rather than inside its apply button, so opening a view and tidying it
+   are different targets. Hidden for views somebody else owns, which is what the server enforces anyway. */
+.savedViewRow { display: grid; gap: 2px; }
+.savedViewActions { display: flex; gap: 4px; padding: 0 9px 6px; }
+.savedViewActions button {
+  border: 1px solid #d9e1e9;
+  border-radius: 6px;
+  background: white;
+  color: #5b6b7f;
+  font-size: 12px;
+  line-height: 1.3;
+  min-height: 24px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.savedViewActions button:hover { border-color: #b9c8d6; color: #24405c; }
