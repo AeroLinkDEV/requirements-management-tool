@@ -1,5 +1,5 @@
 export type View =
-  | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
+  | "projects" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
   | "verification" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
@@ -48,7 +48,8 @@ const decoded = (value: string | undefined) => value ? decodeURIComponent(value)
 export function parseRoute(pathname: string, search = ""): AppRoute {
   const parts = pathname.split("/").filter(Boolean);
   const query = new URLSearchParams(search);
-  if (!parts.length) return { view: "dashboard", discipline: "system" };
+  if (!parts.length || (parts.length === 1 && parts[0] === "projects"))
+    return { view: "projects", discipline: "system" };
   if (parts[0] !== "programs" || parts[2] !== "projects" || parts[4] !== "releases")
     return { view: "notFound", discipline: "system" };
 
@@ -111,6 +112,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     return query.size ? `${path}?${query}` : path;
   };
   switch (view) {
+    case "projects": return "/projects";
     case "dashboard": return `${root}/command-center`;
     case "mywork": return `${root}/my-work`;
     case "createSystemScr": return `${root}/systems/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;

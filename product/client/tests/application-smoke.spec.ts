@@ -19,5 +19,5 @@ test('Sign in recovers cleanly when the local API is temporarily unavailable', a
 
   await page.unroute('**/api/auth/login')
   await page.getByRole('button', { name: /Sign in securely/ }).click()
-  await expect(page.getByRole('heading', { name: /Create your first program|Command Center/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Create your first program|Projects/ })).toBeVisible()
 })

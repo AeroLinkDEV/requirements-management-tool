@@ -136,6 +136,8 @@ test('verification actions follow authority in the selected Program',async({page
   await page.getByLabel('Username').fill(userName)
   await page.getByLabel('Password').fill(rotatedPassword)
   await page.getByRole('button',{name:/Sign in securely/}).click()
+  await expect(page.getByRole('heading',{name:'Projects'})).toBeVisible()
+  await page.getByRole('link',{name:'Open FMS Product Development'}).click()
   await expect(page.getByRole('heading',{name:/Command Center/})).toBeVisible()
 
   await page.getByLabel('Active program').selectOption({label:`Test Authority ${suffix}`})

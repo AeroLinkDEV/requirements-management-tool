@@ -7,6 +7,12 @@ const context = {
   releaseId: 'release-a',
 }
 
+test('the authenticated project selector has a context-free route', () => {
+  expect(parseRoute('/')).toMatchObject({ view: 'projects', discipline: 'system' })
+  expect(parseRoute('/projects')).toMatchObject({ view: 'projects', discipline: 'system' })
+  expect(routePath(context, 'projects')).toBe('/projects')
+})
+
 test('change-request route generation and parsing preserve both engineering disciplines', () => {
   const system = routePath(context, 'scr', 'system', 'scr-a')
   const software = routePath(context, 'scr', 'software', 'swcr-a')
