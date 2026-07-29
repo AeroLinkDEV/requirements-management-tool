@@ -102,7 +102,7 @@ public sealed class RichContentTests
     [Fact]
     public void A_change_case_written_as_structure_derives_its_own_readable_form()
     {
-        var scr = new SystemChangeRequest("SCR-00000001", 0, Guid.NewGuid(), Guid.NewGuid(), "Oceanic routing",
+        var scr = new SystemChangeRequest("SCR-00001", 0, Guid.NewGuid(), Guid.NewGuid(), "Oceanic routing",
             "ignored", "ignored", "ignored", "author", DateTimeOffset.UtcNow, ChangeRequestType.System,
             problemRich: Table);
 
@@ -115,7 +115,7 @@ public sealed class RichContentTests
     [Fact]
     public void A_change_case_written_as_plain_text_still_has_a_structural_form()
     {
-        var scr = new SystemChangeRequest("SCR-00000002", 0, Guid.NewGuid(), Guid.NewGuid(), "Routing",
+        var scr = new SystemChangeRequest("SCR-00002", 0, Guid.NewGuid(), Guid.NewGuid(), "Routing",
             "A defect exists.", "It was analyzed.", "It will be fixed.", "author", DateTimeOffset.UtcNow);
 
         Assert.Equal("A defect exists.", scr.Problem);
@@ -140,7 +140,7 @@ public sealed class RichContentTests
 
         string Submit(string plain, string? rich)
         {
-            var scr = new SystemChangeRequest("SCR-00000003", 0, projectId, releaseId, "Routing",
+            var scr = new SystemChangeRequest("SCR-00003", 0, projectId, releaseId, "Routing",
                 plain, "Analysis", "Solution", "author", now, ChangeRequestType.System, problemRich: rich);
             scr.AddRequirementChange("author", "REQ-00000001", 1, RequirementLevel.System,
                 RequirementChangeKind.Modify, "The FMS shall sequence waypoints.", "Because.", "Test", now,

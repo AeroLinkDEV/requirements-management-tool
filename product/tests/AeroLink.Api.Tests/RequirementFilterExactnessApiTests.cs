@@ -35,8 +35,8 @@ public sealed class RequirementFilterExactnessApiTests
         var program = new ProgramRecord("Filter Program", "FLT");
         var project = new ProjectRecord(program.Id, "Software", "Filter Software");
         var release = new SoftwareRelease(project.Id, "1.0", false);
-        var scr = new SystemChangeRequest("SCR-00000500", 0, project.Id, release.Id, "Filters", "P", "A", "S", "author", now);
-        var baseline = new CandidateBaseline("SWBL-00000500", 0, project.Id, release.Id, null, "Candidate", "cm", now);
+        var scr = new SystemChangeRequest("SCR-00500", 0, project.Id, release.Id, "Filters", "P", "A", "S", "author", now);
+        var baseline = new CandidateBaseline("SW-50.00", 0, project.Id, release.Id, null, "Candidate", "cm", now);
         db.AddRange(program, project, release, scr, baseline);
 
         var schema = new ArtifactSchemaDefinition(project.Id, "filter-schema", "Filter schema", "System", "", "test.setup", now);

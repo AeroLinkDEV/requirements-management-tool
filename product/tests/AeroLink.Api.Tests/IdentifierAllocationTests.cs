@@ -47,9 +47,9 @@ public sealed class IdentifierAllocationTests
         Assert.Equal("SYSR-000001", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", default));
         Assert.Equal("HLR-000001", await IdentifierAllocator.NextRequirementAsync(db, "HLR", default));
         Assert.Equal("SYSR-000002", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", default));
-        Assert.Equal("SCR-00000001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, default));
-        Assert.Equal("SWCR-00000001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.Software, default));
-        Assert.Equal("SCR-00000002", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, default));
+        Assert.Equal("SCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, default));
+        Assert.Equal("SWCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.Software, default));
+        Assert.Equal("SCR-00002", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, default));
         Assert.Equal("SYSTP-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.System, default));
         Assert.Equal("HLRTP-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.HighLevel, default));
 

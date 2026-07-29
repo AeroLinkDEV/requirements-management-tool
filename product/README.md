@@ -11,15 +11,16 @@ For project-wide orientation, start at [PROJECT_STATE.md](../PROJECT_STATE.md), 
 ## Current vertical slice
 
 The current entry path is login → Projects → FMS Product Development → Software Builds → one explicit
-build-scoped workspace. Build 1.5 is released/read-only; Build 1.6 is in work. System and Software remain
+build-scoped workspace. `SW-01.50` (informally Build 1.5) is released/read-only; `SW-01.60` (informally Build
+1.6) is in work. A baseline and software build are one product concept. System and Software remain
 separate, while Command Center summarizes System, Software and Verification. Problem Reports, Product Versions,
 Candidate Baselines and the old Change Request Software Builds view are deliberately dormant in the UI even
 though underlying lifecycle implementation remains.
 
 The 2026-07-13 enterprise control increment adds durable URL routing and context restoration, a keyboard command palette, Program-aware universal artifact search, authoritative artifact detail links, SCR/SWCR exclusive checkout, renewable leases, server autosave snapshots, read-only observers, check-in/discard, forced-unlock auditing, authentication throttling, Program-scope enforcement, isolated browser-test infrastructure, and verified backup/restore operations.
 
-- optional deterministic FMS live program with a released 1.5 baseline and active 1.6 development release
-- 150 system requirements, 400 HLRs, 700 LLRs, 105 historical SCR/SWCR records, 1,100 typed traces, 515 procedures, 520 executions, and six controlled outputs
+- optional deterministic FMS live program with released `SW-01.50` and active `SW-01.60`
+- 150 system requirements, 400 HLRs, 700 LLRs, 105 historical SCR/SWCR records, 1,100 typed traces, 515 procedures, 520 executions, and generated requirements/test-procedure documents
 
 - clean Program, software Project, and initial Release onboarding; optional FMS demonstration data
 - SCR creation with proposed system or high-level software requirement changes

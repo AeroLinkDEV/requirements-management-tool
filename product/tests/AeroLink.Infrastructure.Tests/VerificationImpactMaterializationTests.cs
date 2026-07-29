@@ -67,9 +67,9 @@ public sealed class VerificationImpactMaterializationTests
         {
             var now = DateTimeOffset.UtcNow;
             await using var db = new AeroLinkDbContext(seed.Options);
-            var scr = ApprovedScr("SCR-00000001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var scr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
-            var baseline = FrozenBaseline("SWBL-00000001", seed.ProjectId, seed.ReleaseId, null, scr, now);
+            var baseline = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, scr, now);
             db.AddRange(scr, baseline);
             await new VerificationImpactService(db).RaiseForApprovedChangeRequestAsync(scr, now, default);
             await db.SaveChangesAsync();
@@ -96,9 +96,9 @@ public sealed class VerificationImpactMaterializationTests
             var now = DateTimeOffset.UtcNow;
             await using var db = new AeroLinkDbContext(seed.Options);
 
-            var introduce = ApprovedScr("SCR-00000001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var introduce = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
-            var first = FrozenBaseline("SWBL-00000001", seed.ProjectId, seed.ReleaseId, null, introduce, now);
+            var first = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, introduce, now);
             db.AddRange(introduce, first);
             await db.SaveChangesAsync();
             await MaterializeAsync(db, first.Id, now);
@@ -114,9 +114,9 @@ public sealed class VerificationImpactMaterializationTests
             await db.SaveChangesAsync();
 
             // The requirement is then modified underneath it.
-            var modify = ApprovedScr("SCR-00000002", "SWR-00002375", 1, RequirementChangeKind.Modify,
+            var modify = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
                 "The FMS shall sequence oceanic waypoints within two seconds.", seed.ProjectId, seed.ReleaseId, now);
-            var second = FrozenBaseline("SWBL-00000002", seed.ProjectId, seed.ReleaseId, first.Id, modify, now);
+            var second = FrozenBaseline("SW-00.20", seed.ProjectId, seed.ReleaseId, first.Id, modify, now);
             db.AddRange(modify, second);
             await new VerificationImpactService(db).RaiseForApprovedChangeRequestAsync(modify, now, default);
             await db.SaveChangesAsync();
@@ -144,9 +144,9 @@ public sealed class VerificationImpactMaterializationTests
             var now = DateTimeOffset.UtcNow;
             await using var db = new AeroLinkDbContext(seed.Options);
 
-            var introduce = ApprovedScr("SCR-00000001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var introduce = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
-            var first = FrozenBaseline("SWBL-00000001", seed.ProjectId, seed.ReleaseId, null, introduce, now);
+            var first = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, introduce, now);
             db.AddRange(introduce, first);
             await db.SaveChangesAsync();
             await MaterializeAsync(db, first.Id, now);
@@ -160,9 +160,9 @@ public sealed class VerificationImpactMaterializationTests
             db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
             await db.SaveChangesAsync();
 
-            var modify = ApprovedScr("SCR-00000002", "SWR-00002375", 1, RequirementChangeKind.Modify,
+            var modify = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
                 "The FMS shall sequence oceanic waypoints within two seconds.", seed.ProjectId, seed.ReleaseId, now);
-            var second = FrozenBaseline("SWBL-00000002", seed.ProjectId, seed.ReleaseId, first.Id, modify, now);
+            var second = FrozenBaseline("SW-00.20", seed.ProjectId, seed.ReleaseId, first.Id, modify, now);
             db.AddRange(modify, second);
             await new VerificationImpactService(db).RaiseForApprovedChangeRequestAsync(modify, now, default);
             await db.SaveChangesAsync();
@@ -196,9 +196,9 @@ public sealed class VerificationImpactMaterializationTests
             var now = DateTimeOffset.UtcNow;
             await using var db = new AeroLinkDbContext(seed.Options);
 
-            var introduce = ApprovedScr("SCR-00000001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var introduce = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
-            var first = FrozenBaseline("SWBL-00000001", seed.ProjectId, seed.ReleaseId, null, introduce, now);
+            var first = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, introduce, now);
             db.AddRange(introduce, first);
             await db.SaveChangesAsync();
             await MaterializeAsync(db, first.Id, now);
@@ -212,9 +212,9 @@ public sealed class VerificationImpactMaterializationTests
             db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
             await db.SaveChangesAsync();
 
-            var modify = ApprovedScr("SCR-00000002", "SWR-00002375", 1, RequirementChangeKind.Modify,
+            var modify = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
                 "The FMS shall sequence oceanic waypoints within two seconds.", seed.ProjectId, seed.ReleaseId, now);
-            var second = FrozenBaseline("SWBL-00000002", seed.ProjectId, seed.ReleaseId, first.Id, modify, now);
+            var second = FrozenBaseline("SW-00.20", seed.ProjectId, seed.ReleaseId, first.Id, modify, now);
             db.AddRange(modify, second);
             var service = new VerificationImpactService(db);
             await service.RaiseForApprovedChangeRequestAsync(modify, now, default);
@@ -251,9 +251,9 @@ public sealed class VerificationImpactMaterializationTests
             var now = DateTimeOffset.UtcNow;
             await using var db = new AeroLinkDbContext(seed.Options);
 
-            var introduce = ApprovedScr("SCR-00000001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var introduce = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
-            var first = FrozenBaseline("SWBL-00000001", seed.ProjectId, seed.ReleaseId, null, introduce, now);
+            var first = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, introduce, now);
             db.AddRange(introduce, first);
             await db.SaveChangesAsync();
             await MaterializeAsync(db, first.Id, now);
@@ -267,9 +267,9 @@ public sealed class VerificationImpactMaterializationTests
             db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
             await db.SaveChangesAsync();
 
-            var retire = ApprovedScr("SCR-00000002", "SWR-00002375", 1, RequirementChangeKind.Retire,
+            var retire = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Retire,
                 "", seed.ProjectId, seed.ReleaseId, now);
-            var second = FrozenBaseline("SWBL-00000002", seed.ProjectId, seed.ReleaseId, first.Id, retire, now);
+            var second = FrozenBaseline("SW-00.20", seed.ProjectId, seed.ReleaseId, first.Id, retire, now);
             db.AddRange(retire, second);
             await new VerificationImpactService(db).RaiseForApprovedChangeRequestAsync(retire, now, default);
             await db.SaveChangesAsync();
@@ -298,7 +298,7 @@ public sealed class VerificationImpactMaterializationTests
             await using var db = new AeroLinkDbContext(seed.Options);
 
             // Two requirements, one procedure covering both.
-            var introduce = new SystemChangeRequest("SCR-00000001", 0, seed.ProjectId, seed.ReleaseId,
+            var introduce = new SystemChangeRequest("SCR-00001", 0, seed.ProjectId, seed.ReleaseId,
                 "Introduce", "P", "A", "S", "author", now);
             introduce.AddRequirementChange("author", "SWR-00002375", 0, RequirementLevel.HighLevel,
                 RequirementChangeKind.Introduce, "The FMS shall sequence oceanic waypoints.", "R", "Test", now);
@@ -306,7 +306,7 @@ public sealed class VerificationImpactMaterializationTests
                 RequirementChangeKind.Introduce, "The FMS shall annunciate sequencing failures.", "R", "Test", now);
             introduce.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
             introduce.ApproveActiveStage("reviewer", now);
-            var first = FrozenBaseline("SWBL-00000001", seed.ProjectId, seed.ReleaseId, null, introduce, now);
+            var first = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, introduce, now);
             db.AddRange(introduce, first);
             await db.SaveChangesAsync();
             await MaterializeAsync(db, first.Id, now);
@@ -321,9 +321,9 @@ public sealed class VerificationImpactMaterializationTests
             await db.SaveChangesAsync();
 
             // Retire only one of them.
-            var retire = ApprovedScr("SCR-00000002", "SWR-00002375", 1, RequirementChangeKind.Retire,
+            var retire = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Retire,
                 "", seed.ProjectId, seed.ReleaseId, now);
-            var second = FrozenBaseline("SWBL-00000002", seed.ProjectId, seed.ReleaseId, first.Id, retire, now);
+            var second = FrozenBaseline("SW-00.20", seed.ProjectId, seed.ReleaseId, first.Id, retire, now);
             db.AddRange(retire, second);
             await db.SaveChangesAsync();
             await MaterializeAsync(db, second.Id, now);

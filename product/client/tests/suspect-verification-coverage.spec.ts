@@ -61,9 +61,9 @@ test('modified requirement coverage stays suspect until an exact approved proced
   })
   expect(approved.ok(), await approved.text()).toBeTruthy()
 
-  const suffix = Date.now().toString().slice(-8)
+  const suffix = Date.now().toString().slice(-2)
   const baselineResponse = await request.post(`${apiBase}/api/baselines`, { data: {
-    baseNumber: `SWBL-${suffix}`,
+    baseNumber: `SW-98.${suffix}`,
     revision: 0,
     projectId: showcase.projectId,
     releaseId: showcase.activeReleaseId,

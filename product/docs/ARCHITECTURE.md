@@ -18,7 +18,11 @@ These are implementation decisions, not changes to the authoritative product beh
 
 Lifecycle rules live in domain objects rather than controllers or UI code. The API requests an operation; the aggregate validates state, actor authority, revision behavior, and ordered review rules; persistence records the resulting state and audit events atomically.
 
-The first aggregate is `SystemChangeRequest`. Stable artifact identity (`SCR-00000001`) is distinct from revision display (`SCR-00000001.04`). Requirements referenced by an SCR follow the same identity model.
+The first aggregate is `SystemChangeRequest`. Stable artifact identity (`SCR-00001`) is distinct from revision display (`SCR-00001.04`). Requirements referenced by an SCR retain their own established identity model.
+
+Software-build identity is canonical: a release version such as `1.6` is represented by `SW-01.60`. The
+historical `CandidateBaseline` and executable `SoftwareBuild` persistence records are implementation facets of
+that one software build, not separate product concepts presented to the user.
 
 ## Persistence
 

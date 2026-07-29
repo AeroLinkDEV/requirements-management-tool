@@ -5,6 +5,7 @@ import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
 import { readRoute, routePath } from "./routing";
 import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
+import { usePasswordVisibilityControls } from "./PasswordVisibility";
 import {
   AccountSecurityDialog,
   AdministrationCenter,
@@ -57,6 +58,7 @@ const ScrWorkspace = lazyView(() => import("./ScrWorkspace"));
 const BaselineCenter = lazyView(() => import("./BaselineCenter"));
 const HistoryExplorer = lazyView(() => import("./HistoryExplorer"));
 const VerificationCenter = lazyView(() => import("./VerificationCenter"));
+const DocumentCenter = lazyView(() => import("./DocumentCenter"));
 const ProblemReportCenter = lazyView(() => import("./ProblemReportCenter"));
 const LifecycleExplorer = lazyView(() => import("./LifecycleExplorer"));
 const ReleaseCampaignCenter = lazyView(() => import("./ReleaseCampaignCenter"));
@@ -76,6 +78,7 @@ const viewCode: Partial<Record<View, { warm: () => void }>> = {
   history: HistoryExplorer,
   requirements: RequirementsWorkspace,
   verification: VerificationCenter,
+  documents: DocumentCenter,
   problemReports: ProblemReportCenter,
   lifecycle: LifecycleExplorer,
   release: LifecycleDecisionRoom,
@@ -152,6 +155,9 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
   const release = project?.releases.find(x => x.id === selectedReleaseId) ?? project?.releases.at(-1);
+  const officialBuild = release
+    ? `SW-${String(Number(release.version.split(".")[0])).padStart(2, "0")}.${String(Number(release.version.split(".")[1]) * 10).padStart(2, "0")}`
+    : "";
   const item = (label:string,target:View,icon:string,area:Discipline="system",accessibleLabel=label) => {
     const activeItem = (view===target || (target==="history" && view==="scr") || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area;
     // Fetched on hover or keyboard focus, so the workspace's code is usually already here by the time the
@@ -161,7 +167,8 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       <i aria-hidden="true">{icon}</i><span>{label}</span>
     </a>;
   };
-  const engineeringView = ["createSystemScr","createSoftwareChange","history","requirements","scr"].includes(view);
+  const engineeringView = ["createSystemScr","createSoftwareChange","history","requirements","scr"].includes(view)
+    || (view === "documents" && (discipline === "system" || discipline === "software"));
   const releaseView = ["release","releaseImpact","releaseDecision","releaseOperations","enterprise"].includes(view);
   const engineeringScope:Discipline = discipline==="software" ? "software" : "system";
   const verificationScope:Discipline = discipline==="softwareTest"||discipline==="software" ? "softwareTest" : "systemTest";
@@ -173,17 +180,17 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
         <small>ACTIVE CONTEXT</small>
         <strong className="activeProgram" title={active?.program.name}>{active?.program.name}</strong>
         <span title={project?.project.name}>{project?.project.name}</span>
-        <div className="activeBuildIdentity" aria-label={`Active build ${release?.version ?? ""}`}>
+        <div className="activeBuildIdentity" aria-label={`Active software build ${officialBuild}`}>
           <small>BUILD</small>
-          <strong>{release?.version}</strong>
+          <strong>{officialBuild}</strong>
           <span>{release?.isReleased ? "Released · read-only" : "In work"}</span>
         </div>
         <button type="button" className="exitBuild" onClick={onExitBuild}>← Back to Software Builds</button>
       </div>
       <nav className="primaryNavigation" aria-label="Primary navigation">
         <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
-        <details className="navGroup" open={engineeringView}><summary>ENGINEERING</summary><div className="navScopeSwitch" role="group" aria-label="Engineering scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}</details>
-        <details className="navGroup" open={view==="verification"||view==="lifecycle"}><summary>ASSURANCE</summary><div className="navScopeSwitch" role="group" aria-label="Assurance scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{item("Verification","verification","✓",verificationScope,verificationScope==="softwareTest"?"Software Verification":"System Verification")}{item("Digital Thread","lifecycle","↗","system","Traceability & Outputs / Digital Thread")}</details>
+        <details className="navGroup" open={engineeringView}><summary>ENGINEERING</summary><div className="navScopeSwitch" role="group" aria-label="Engineering scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{item("Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Software Engineering Documents":"System Engineering Documents")}</details>
+        <details className="navGroup" open={view==="verification"||view==="lifecycle"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}><summary>ASSURANCE</summary><div className="navScopeSwitch" role="group" aria-label="Assurance scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{item("Verification","verification","✓",verificationScope,verificationScope==="softwareTest"?"Software Verification":"System Verification")}{item("Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Software Assurance Documents":"System Assurance Documents")}{item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>
         <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("Review Workflows","reviewWorkflows","⇉","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","↗","system","Integration Command Center")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
       </nav>
@@ -194,6 +201,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
 }
 
 function App() {
+  usePasswordVisibilityControls();
   const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
   const [initialRoute] = useState<AppRoute>(() => readRoute());
   const [metrics, setMetrics] = useState<Metrics>({
@@ -400,7 +408,7 @@ function App() {
   if(view==="projects")return <ProjectsLanding api={API} user={user} workspaceHref={buildsPath} onOpenWorkspace={()=>{setView("builds");history.pushState({},"",buildsPath)}} onSignOut={signOut}/>;
   if(view==="builds")return <SoftwareBuildsLanding api={API} user={user} releases={project?.releases??[]} onProjectOverview={showProjects} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;setSelectedReleaseId(selected.id);setView("dashboard");history.pushState({},"",routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} context={context} density={density} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
-  const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
+  const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",documents:"Documents",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
   const scopeSwitch=view==="history"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={discipline!=="software"} onClick={()=>navigate("history","system",undefined,undefined,false,historyStateIntent,"System")}>System</button><button aria-pressed={discipline==="software"} onClick={()=>navigate("history","software",undefined,undefined,false,historyStateIntent,"Software")}>Software</button></div>:view==="requirements"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={discipline!=="software"} onClick={()=>navigate(view,"system")}>System</button><button aria-pressed={discipline==="software"} onClick={()=>navigate(view,"software")}>Software</button></div>:view==="verification"?<div className="contextScopeSwitch" role="group" aria-label="Verification scope"><button aria-pressed={discipline!=="softwareTest"} onClick={()=>navigate("verification","systemTest")}>System</button><button aria-pressed={discipline==="softwareTest"} onClick={()=>navigate("verification","softwareTest")}>Software</button></div>:null;
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
@@ -534,12 +542,26 @@ function App() {
         programId={active?.program.id ?? ""}
         projectId={project.project.id}
         releaseId={release.id}
+        buildName={`SW-${String(Number(release.version.split(".")[0])).padStart(2, "0")}.${String(Number(release.version.split(".")[1]) * 10).padStart(2, "0")}`}
         readOnly={release.isReleased}
         scope={discipline === "softwareTest" ? "Software" : "System"}
         user={user}
         // Carried in the route, so refreshing or going back returns to the same remediation.
         correctiveProblemReportId={selectedArtifactKind === "problem-report" ? selectedArtifactId || undefined : undefined}
         onBack={() => navigate("dashboard")}
+      />
+    );
+  if (view === "documents" && project && release)
+    return inShell(
+      <DocumentCenter
+        api={API}
+        projectId={project.project.id}
+        release={release}
+        discipline={discipline}
+        onBack={() => navigate(
+          discipline === "systemTest" || discipline === "softwareTest" ? "verification" : "requirements",
+          discipline,
+        )}
       />
     );
   if (view === "problemReports" && project)

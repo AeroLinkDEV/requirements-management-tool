@@ -82,8 +82,8 @@
   background: #0b1a30;
   padding: 9px 10px;
 }
-.program .activeBuildIdentity small { grid-column: 1; font-size: 12px; }
-.program .activeBuildIdentity strong { grid-column: 1; color: white; font: 750 17px var(--font-display); }
+.program .activeBuildIdentity small { grid-column: 1; grid-row: 1; font-size: 12px; }
+.program .activeBuildIdentity strong { display: block; grid-column: 1; grid-row: 2; color: white; font: 750 17px var(--font-display); }
 .program .activeBuildIdentity span { grid-column: 2; grid-row: 1 / 3; color: #8cded1; font-size: 12px; white-space: normal; }
 .program .exitBuild {
   min-height: 34px;

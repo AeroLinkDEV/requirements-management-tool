@@ -33,7 +33,7 @@ test('verification actions follow authority in the selected Program',async({page
     expect(submitted.ok(),await submitted.text()).toBeTruthy()
     const approved=await request.post(`${apiBase}/api/scrs/${draft.id}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved for exact verification applicability.'}})
     expect(approved.ok(),await approved.text()).toBeTruthy()
-    const baselineResponse=await request.post(`${apiBase}/api/baselines`,{data:{baseNumber:`SWBL-${Date.now().toString().slice(-8)}`,revision:0,projectId:workspace.project.id,releaseId:workspace.release.id,name:`${label} materialized baseline`}})
+    const baselineResponse=await request.post(`${apiBase}/api/baselines`,{data:{baseNumber:`SW-99.${Date.now().toString().slice(-2)}`,revision:0,projectId:workspace.project.id,releaseId:workspace.release.id,name:`${label} materialized software build`}})
     expect(baselineResponse.ok(),await baselineResponse.text()).toBeTruthy()
     const baseline=await baselineResponse.json()
     for(const [path,data] of [

@@ -54,8 +54,8 @@ public sealed class AuthoringTracedImpactTests
 
         // A revision records the change request and baseline it came from, so those exist rather than being
         // faked with empty identifiers the foreign keys would reject.
-        var origin = new SystemChangeRequest("SCR-00000500", 0, project.Id, release.Id, "Origin", "P", "A", "S", "traced.author", now);
-        var baseline = new CandidateBaseline("SWBL-00000500", 0, project.Id, release.Id, null, "Origin baseline", "cm", now);
+        var origin = new SystemChangeRequest("SCR-00500", 0, project.Id, release.Id, "Origin", "P", "A", "S", "traced.author", now);
+        var baseline = new CandidateBaseline("SW-50.00", 0, project.Id, release.Id, null, "Origin baseline", "cm", now);
         db.AddRange(origin, baseline);
 
         var parent = new RequirementArtifact(project.Id, "SYSR-000501", RequirementLevel.System, now);
@@ -117,6 +117,22 @@ public sealed class AuthoringTracedImpactTests
         Assert.False(traced.CoveringProcedures[0].IsSuspect);
         Assert.NotEqual(Guid.Empty, traced.CoveringProcedures[0].RevisionId);
         Assert.NotNull(traced.RequirementRevisionId);
+    }
+
+    [Fact]
+    public async Task Modification_picker_searches_requirement_wording_as_well_as_identifier()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var (projectId, parentNumber, _, _) = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        using var response = await client.GetAsync(
+            $"/api/authoring/requirements?projectId={projectId}&scope=System&search=oceanic%20waypoints");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var rows = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+
+        Assert.Contains(rows.EnumerateArray(), x => x.GetProperty("baseNumber").GetString() == parentNumber);
     }
 
     [Fact]

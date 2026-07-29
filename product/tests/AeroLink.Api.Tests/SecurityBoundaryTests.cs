@@ -96,7 +96,7 @@ public sealed class SecurityBoundaryTests
             var program = new ProgramRecord("Security Boundary Program", "SBP");
             var project = new ProjectRecord(program.Id, "Security Boundary Project", "Boundary Product");
             var release = new SoftwareRelease(project.Id, "1.0", false);
-            var baseline = new CandidateBaseline("SWBL-90000001", 0, project.Id, release.Id, null, "Security candidate", "configuration.manager", now);
+            var baseline = new CandidateBaseline("SW-90.10", 0, project.Id, release.Id, null, "Security candidate", "configuration.manager", now);
             var campaign = new ReleaseCampaign(project.Id, release.Id, baseline.Id, "Security campaign", "program.manager", now);
             var member = new UserAccount("program.engineer", "Program Engineer", "program.engineer@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.AddRange(program, project, release, baseline, campaign, member, new ProgramMembership(member.Id, program.Id, ProgramRole.Engineer, "test.setup", now));

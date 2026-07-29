@@ -15,6 +15,7 @@ public enum VerificationImpactTrigger
 
 public enum VerificationImpactState { Open, Assigned, Resolved }
 public enum VerificationImpactHistoryAction { Resolved, Reopened }
+public enum TestProcedureChangeAction { LinkExisting, CreateNew, ModifyExisting, RetireExisting, NoTestRequired }
 
 /// <summary>
 /// What a verification engineer decided. Every value is an explicit judgement — there is no outcome that
@@ -48,37 +49,39 @@ public sealed class VerificationImpactItem
 {
     private VerificationImpactItem() { }
 
-    private VerificationImpactItem(Guid projectId, Guid releaseId, Guid changeRequestId,
+    private VerificationImpactItem(Guid projectId, Guid releaseId, Guid changeRequestId, Guid testChangeReviewId,
         VerificationImpactTrigger trigger, DateTimeOffset now)
     {
         if (projectId == Guid.Empty) throw new DomainException("A verification impact item requires its Project.");
         if (releaseId == Guid.Empty) throw new DomainException("A verification impact item requires its target release.");
         if (changeRequestId == Guid.Empty) throw new DomainException("A verification impact item requires its originating change request.");
+        if (testChangeReviewId == Guid.Empty) throw new DomainException("A verification impact item requires its test change review.");
         Id = Guid.NewGuid();
         ProjectId = projectId;
         ReleaseId = releaseId;
         ChangeRequestId = changeRequestId;
+        TestChangeReviewId = testChangeReviewId;
         Trigger = trigger;
         State = VerificationImpactState.Open;
         RaisedAt = now;
         UpdatedAt = now;
     }
 
-    public static VerificationImpactItem ForIntroducedRequirement(Guid projectId, Guid releaseId, Guid changeRequestId,
+    public static VerificationImpactItem ForIntroducedRequirement(Guid projectId, Guid releaseId, Guid changeRequestId, Guid testChangeReviewId,
         Guid requirementChangeId, string requirementDisplayNumber, string declaredVerificationMethod, DateTimeOffset now)
         => ForRequirement(projectId, releaseId, changeRequestId, VerificationImpactTrigger.RequirementIntroduced,
-            requirementChangeId, requirementDisplayNumber, declaredVerificationMethod, now);
+            testChangeReviewId, requirementChangeId, requirementDisplayNumber, declaredVerificationMethod, now);
 
-    public static VerificationImpactItem ForModifiedRequirement(Guid projectId, Guid releaseId, Guid changeRequestId,
+    public static VerificationImpactItem ForModifiedRequirement(Guid projectId, Guid releaseId, Guid changeRequestId, Guid testChangeReviewId,
         Guid requirementChangeId, string requirementDisplayNumber, string declaredVerificationMethod, DateTimeOffset now)
         => ForRequirement(projectId, releaseId, changeRequestId, VerificationImpactTrigger.RequirementModified,
-            requirementChangeId, requirementDisplayNumber, declaredVerificationMethod, now);
+            testChangeReviewId, requirementChangeId, requirementDisplayNumber, declaredVerificationMethod, now);
 
-    public static VerificationImpactItem ForOrphanedProcedure(Guid projectId, Guid releaseId, Guid changeRequestId,
+    public static VerificationImpactItem ForOrphanedProcedure(Guid projectId, Guid releaseId, Guid changeRequestId, Guid testChangeReviewId,
         Guid procedureId, string procedureDisplayNumber, DateTimeOffset now)
     {
         if (procedureId == Guid.Empty) throw new DomainException("An orphaned-procedure item requires its procedure.");
-        return new VerificationImpactItem(projectId, releaseId, changeRequestId, VerificationImpactTrigger.ProcedureOrphaned, now)
+        return new VerificationImpactItem(projectId, releaseId, changeRequestId, testChangeReviewId, VerificationImpactTrigger.ProcedureOrphaned, now)
         {
             ProcedureId = procedureId,
             SubjectDisplayNumber = Required(procedureDisplayNumber, "procedure identifier")
@@ -86,11 +89,11 @@ public sealed class VerificationImpactItem
     }
 
     private static VerificationImpactItem ForRequirement(Guid projectId, Guid releaseId, Guid changeRequestId,
-        VerificationImpactTrigger trigger, Guid requirementChangeId, string requirementDisplayNumber,
+        VerificationImpactTrigger trigger, Guid testChangeReviewId, Guid requirementChangeId, string requirementDisplayNumber,
         string declaredVerificationMethod, DateTimeOffset now)
     {
         if (requirementChangeId == Guid.Empty) throw new DomainException("A requirement item requires its approved requirement change.");
-        return new VerificationImpactItem(projectId, releaseId, changeRequestId, trigger, now)
+        return new VerificationImpactItem(projectId, releaseId, changeRequestId, testChangeReviewId, trigger, now)
         {
             RequirementChangeId = requirementChangeId,
             SubjectDisplayNumber = Required(requirementDisplayNumber, "requirement identifier"),
@@ -102,6 +105,7 @@ public sealed class VerificationImpactItem
     public Guid ProjectId { get; private set; }
     public Guid ReleaseId { get; private set; }
     public Guid ChangeRequestId { get; private set; }
+    public Guid TestChangeReviewId { get; private set; }
     public VerificationImpactTrigger Trigger { get; private set; }
     public VerificationImpactState State { get; private set; }
 
@@ -128,6 +132,8 @@ public sealed class VerificationImpactItem
     public DateTimeOffset? AssignedAt { get; private set; }
 
     public VerificationImpactOutcome? Outcome { get; private set; }
+    public TestProcedureChangeAction? ProcedureChangeAction { get; private set; }
+    public bool PreReleaseEvidenceRequired { get; private set; }
     /// <summary>The procedure named when coverage was confirmed; the exact link is bound at materialisation.</summary>
     public Guid? ResolvedProcedureId { get; private set; }
     /// <summary>The immutable approved procedure revision selected by the decision.</summary>
@@ -163,7 +169,8 @@ public sealed class VerificationImpactItem
     /// so naming the procedure keeps the claim checkable instead of leaving it as prose.
     /// </summary>
     public void Resolve(string actorId, VerificationImpactOutcome outcome, string rationale, DateTimeOffset now,
-        Guid? procedureId = null, Guid? procedureRevisionId = null)
+        Guid? procedureId = null, Guid? procedureRevisionId = null,
+        TestProcedureChangeAction? procedureChangeAction = null, bool preReleaseEvidenceRequired = false)
     {
         EnsureUnresolved();
         if (!Enum.IsDefined(outcome)) throw new DomainException("An unknown verification outcome cannot be recorded.");
@@ -177,9 +184,18 @@ public sealed class VerificationImpactItem
         if (outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed
             && (procedureId is not null || procedureRevisionId is not null))
             throw new DomainException("Only confirmed coverage names a procedure.");
+        var action = procedureChangeAction ?? (outcome == VerificationImpactOutcome.NoTestRequired
+            ? TestProcedureChangeAction.NoTestRequired
+            : TestProcedureChangeAction.LinkExisting);
+        if (outcome == VerificationImpactOutcome.NoTestRequired && action != TestProcedureChangeAction.NoTestRequired)
+            throw new DomainException("A no-test decision must use the no-test-required action.");
+        if (outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed && preReleaseEvidenceRequired)
+            throw new DomainException("Pre-release evidence can only be required for a selected test procedure.");
         ResolvedProcedureId = procedureId;
         ResolvedProcedureRevisionId = procedureRevisionId;
         Outcome = outcome;
+        ProcedureChangeAction = action;
+        PreReleaseEvidenceRequired = preReleaseEvidenceRequired;
         ResolutionRationale = Required(rationale, "resolution rationale");
         ResolvedBy = Required(actorId, "resolving verification engineer");
         ResolvedAt = now;
@@ -195,6 +211,8 @@ public sealed class VerificationImpactItem
         Required(actorId, "verification engineer reopening the decision");
         Required(rationale, "reopen rationale");
         Outcome = null;
+        ProcedureChangeAction = null;
+        PreReleaseEvidenceRequired = false;
         ResolvedProcedureId = null;
         ResolvedProcedureRevisionId = null;
         ResolutionRationale = "";

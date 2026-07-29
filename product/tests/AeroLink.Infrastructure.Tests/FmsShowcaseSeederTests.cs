@@ -25,6 +25,12 @@ public sealed class FmsShowcaseSeederTests
             Assert.Equal(["1.5", "1.6"], await db.Releases.AsNoTracking().Where(x => x.ProjectId == project.Id).OrderBy(x => x.Version).Select(x => x.Version).ToArrayAsync());
             Assert.Equal(1250, await db.BaselineRequirements.CountAsync(x => x.BaselineId == first.ReleasedBaselineId));
             Assert.Equal(1250, await db.TestCoverage.Select(x => x.RequirementRevisionId).Distinct().CountAsync());
+            Assert.Equal("SW-01.50", await db.CandidateBaselines.Where(x => x.Id == first.ReleasedBaselineId).Select(x => x.BaseNumber).SingleAsync());
+            Assert.Equal("SW-01.60", await db.CandidateBaselines.Where(x => x.ReleaseId == first.ActiveReleaseId).Select(x => x.BaseNumber).SingleAsync());
+            var historicalReviews = await db.TestChangeReviews.Where(x => x.ReleaseId != first.ActiveReleaseId).ToListAsync();
+            Assert.Equal(105, historicalReviews.Count);
+            Assert.All(historicalReviews, x => Assert.Equal(TestChangeReviewState.Approved, x.State));
+            Assert.Equal(historicalReviews.Count, historicalReviews.Select(x => new { x.ChangeRequestId, x.Discipline }).Distinct().Count());
             Assert.True(await db.RequirementRevisions.GroupBy(x => x.ArtifactId).AllAsync(x => x.Count() >= 1));
             var active = db.SystemChangeRequests.Where(x => x.TargetReleaseId == first.ActiveReleaseId);
             Assert.Equal(8, await active.CountAsync()); Assert.Equal(2, await active.CountAsync(x => x.State == ScrState.SelectedForBaseline));

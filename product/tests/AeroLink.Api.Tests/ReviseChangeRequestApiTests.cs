@@ -46,7 +46,7 @@ public sealed class ReviseChangeRequestApiTests
         }
         await db.SaveChangesAsync();
 
-        var scr = new SystemChangeRequest("SCR-00000060", 0, project.Id, release.Id,
+        var scr = new SystemChangeRequest("SCR-00060", 0, project.Id, release.Id,
             "Oceanic waypoint sequencing", "P", "A", "S", "revise.author", now);
         scr.AddRequirementChange("revise.author", "SYSR-00000601", 0, RequirementLevel.System,
             RequirementChangeKind.Introduce, "The FMS shall sequence oceanic waypoints.", "New", "Test", now);
@@ -88,7 +88,7 @@ public sealed class ReviseChangeRequestApiTests
 
         var next = await response.Content.ReadFromJsonAsync<ScrShape>();
         Assert.NotNull(next);
-        Assert.Equal("SCR-00000060.01", next.DisplayNumber);
+        Assert.Equal("SCR-00060.01", next.DisplayNumber);
         Assert.Equal("Draft", next.State);
         // The content comes forward, which is the whole point of revising rather than starting again.
         Assert.Single(next.RequirementChanges);

@@ -8,16 +8,17 @@ public sealed class VerificationImpactTests
     private static readonly Guid Project = Guid.NewGuid();
     private static readonly Guid Release = Guid.NewGuid();
     private static readonly Guid ChangeRequest = Guid.NewGuid();
+    private static readonly Guid Review = Guid.NewGuid();
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
     private static VerificationImpactItem Introduced(string method = "Test") =>
-        VerificationImpactItem.ForIntroducedRequirement(Project, Release, ChangeRequest, Guid.NewGuid(), "SYSR-000001.00", method, Now);
+        VerificationImpactItem.ForIntroducedRequirement(Project, Release, ChangeRequest, Review, Guid.NewGuid(), "SYSR-000001.00", method, Now);
 
     private static VerificationImpactItem Modified() =>
-        VerificationImpactItem.ForModifiedRequirement(Project, Release, ChangeRequest, Guid.NewGuid(), "SYSR-000002.01", "Test", Now);
+        VerificationImpactItem.ForModifiedRequirement(Project, Release, ChangeRequest, Review, Guid.NewGuid(), "SYSR-000002.01", "Test", Now);
 
     private static VerificationImpactItem Orphaned() =>
-        VerificationImpactItem.ForOrphanedProcedure(Project, Release, ChangeRequest, Guid.NewGuid(), "SYSTP-000009.00", Now);
+        VerificationImpactItem.ForOrphanedProcedure(Project, Release, ChangeRequest, Review, Guid.NewGuid(), "SYSTP-000009.00", Now);
 
     [Fact]
     public void Item_starts_open_carries_its_release_and_blocks_baseline_approval()
@@ -38,7 +39,7 @@ public sealed class VerificationImpactTests
         // A requirement author declaring "Analysis" does not close the question. A verification engineer
         // still has to confirm that no test is required.
         var item = VerificationImpactItem.ForIntroducedRequirement(Project, Release, ChangeRequest,
-            Guid.NewGuid(), "SYSR-000003.00", "Analysis", Now);
+            Review, Guid.NewGuid(), "SYSR-000003.00", "Analysis", Now);
 
         Assert.Equal("Analysis", item.DeclaredVerificationMethod);
         Assert.Equal(VerificationImpactState.Open, item.State);
@@ -170,17 +171,17 @@ public sealed class VerificationImpactTests
     public void Item_requires_its_project_release_change_request_and_subject()
     {
         Assert.Throws<DomainException>(() => VerificationImpactItem.ForIntroducedRequirement(
-            Guid.Empty, Release, ChangeRequest, Guid.NewGuid(), "SYSR-000001.00", "Test", Now));
+            Guid.Empty, Release, ChangeRequest, Review, Guid.NewGuid(), "SYSR-000001.00", "Test", Now));
         Assert.Throws<DomainException>(() => VerificationImpactItem.ForIntroducedRequirement(
-            Project, Guid.Empty, ChangeRequest, Guid.NewGuid(), "SYSR-000001.00", "Test", Now));
+            Project, Guid.Empty, ChangeRequest, Review, Guid.NewGuid(), "SYSR-000001.00", "Test", Now));
         Assert.Throws<DomainException>(() => VerificationImpactItem.ForIntroducedRequirement(
-            Project, Release, Guid.Empty, Guid.NewGuid(), "SYSR-000001.00", "Test", Now));
+            Project, Release, Guid.Empty, Review, Guid.NewGuid(), "SYSR-000001.00", "Test", Now));
         Assert.Throws<DomainException>(() => VerificationImpactItem.ForIntroducedRequirement(
-            Project, Release, ChangeRequest, Guid.Empty, "SYSR-000001.00", "Test", Now));  // no requirement change
+            Project, Release, ChangeRequest, Guid.Empty, Guid.NewGuid(), "SYSR-000001.00", "Test", Now));  // no review
         Assert.Throws<DomainException>(() => VerificationImpactItem.ForIntroducedRequirement(
-            Project, Release, ChangeRequest, Guid.NewGuid(), "  ", "Test", Now));
+            Project, Release, ChangeRequest, Review, Guid.NewGuid(), "  ", "Test", Now));
         Assert.Throws<DomainException>(() => VerificationImpactItem.ForOrphanedProcedure(
-            Project, Release, ChangeRequest, Guid.Empty, "SYSTP-000009.00", Now));
+            Project, Release, ChangeRequest, Review, Guid.Empty, "SYSTP-000009.00", Now));
     }
 }
 
@@ -236,7 +237,7 @@ public sealed class VerificationImpactRevisionBindingTests
         // materialised. The item must therefore be usable before any revision exists.
         var change = Guid.NewGuid();
         var item = VerificationImpactItem.ForIntroducedRequirement(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            change, "SYSR-000007.00", "Test", Now);
+            Guid.NewGuid(), change, "SYSR-000007.00", "Test", Now);
 
         Assert.Equal(change, item.RequirementChangeId);
         Assert.Null(item.RequirementRevisionId);
@@ -252,7 +253,7 @@ public sealed class VerificationImpactRevisionBindingTests
     public void Orphaned_procedure_items_have_no_requirement_revision_to_bind()
     {
         var item = VerificationImpactItem.ForOrphanedProcedure(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            Guid.NewGuid(), "SYSTP-000009.00", Now);
+            Guid.NewGuid(), Guid.NewGuid(), "SYSTP-000009.00", Now);
 
         Assert.Throws<DomainException>(() => item.LinkRequirementRevision(Guid.NewGuid(), Now));
     }
@@ -263,7 +264,7 @@ public sealed class VerificationImpactProcedureNamingTests
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
     private static VerificationImpactItem Item() => VerificationImpactItem.ForIntroducedRequirement(
-        Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "SYSR-000010.00", "Test", Now);
+        Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "SYSR-000010.00", "Test", Now);
 
     [Fact]
     public void Confirming_coverage_must_name_a_procedure()

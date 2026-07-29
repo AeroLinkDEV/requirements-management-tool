@@ -37,6 +37,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<TestProcedureRevision> TestProcedureRevisions => Set<TestProcedureRevision>();
     public DbSet<TestRequirementCoverage> TestCoverage => Set<TestRequirementCoverage>();
     public DbSet<TestExecution> TestExecutions => Set<TestExecution>();
+    public DbSet<TestChangeReview> TestChangeReviews => Set<TestChangeReview>();
     public DbSet<VerificationImpactItem> VerificationImpactItems => Set<VerificationImpactItem>();
     public DbSet<VerificationImpactDecisionHistory> VerificationImpactDecisionHistory => Set<VerificationImpactDecisionHistory>();
     public DbSet<RequirementTraceLink> RequirementTraces => Set<RequirementTraceLink>();
@@ -369,12 +370,30 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.RequirementRevisionId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<TestChangeReview>(b =>
+        {
+            b.ToTable("test_change_reviews"); b.HasKey(x => x.Id);
+            b.Property(x => x.Discipline).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.SourceChangeRequestNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.AssignedEngineerId).HasMaxLength(100);
+            b.Property(x => x.SubmittedBy).HasMaxLength(100);
+            b.Property(x => x.ApprovedBy).HasMaxLength(100);
+            b.Property(x => x.ApprovalRationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasIndex(x => new { x.ChangeRequestId, x.Discipline }).IsUnique();
+            b.HasIndex(x => new { x.ReleaseId, x.State, x.Discipline });
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<VerificationImpactItem>(b =>
         {
             b.ToTable("verification_impact_items"); b.HasKey(x => x.Id);
             b.Property(x => x.Trigger).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.ProcedureChangeAction).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.SubjectDisplayNumber).HasMaxLength(80).IsRequired();
             b.Property(x => x.DeclaredVerificationMethod).HasMaxLength(120).IsRequired();
             b.Property(x => x.AssignedEngineerId).HasMaxLength(100);
@@ -385,11 +404,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // The gate query is "unresolved items for this release", so it leads the index.
             b.HasIndex(x => new { x.ReleaseId, x.State });
             b.HasIndex(x => x.ChangeRequestId);
+            b.HasIndex(x => x.TestChangeReviewId);
             b.HasIndex(x => x.RequirementChangeId);
             b.HasIndex(x => x.RequirementRevisionId);
             b.HasIndex(x => x.AssignedEngineerId);
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestChangeReview>().WithMany().HasForeignKey(x => x.TestChangeReviewId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne<TestProcedure>().WithMany().HasForeignKey(x => x.ResolvedProcedureId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ResolvedProcedureRevisionId)
                 .OnDelete(DeleteBehavior.Restrict);

@@ -172,7 +172,7 @@ public static class IdentifierAllocator
 
     public static int Sequence(string number) => int.TryParse(number[(number.LastIndexOf('-') + 1)..], out var value) ? value : 1;
     public static string Format(string prefix, int sequence) => $"{prefix}-{sequence:D6}";
-    private static string FormatChangeRequest(string prefix, int sequence) => $"{prefix}-{sequence:D8}";
+    private static string FormatChangeRequest(string prefix, int sequence) => $"{prefix}-{sequence:D5}";
     private static int Max(IEnumerable<string> numbers, string prefix) => numbers.Select(x => x.StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase) && int.TryParse(x[(prefix.Length + 1)..], out var value) ? value : 0).DefaultIfEmpty(0).Max();
 }
 

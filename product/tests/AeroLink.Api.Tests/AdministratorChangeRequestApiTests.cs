@@ -190,12 +190,12 @@ public sealed class AdministratorChangeRequestApiTests
         var prefix = type == ChangeRequestType.System ? "SCR" : "SWCR";
         var requirement = type == ChangeRequestType.System ? "SYSR" : "HLR";
         var level = type == ChangeRequestType.System ? RequirementLevel.System : RequirementLevel.HighLevel;
-        var ready = Ready($"{prefix}-00000900", $"{requirement}-00000900", "Governed ready change");
-        var approved = Ready($"{prefix}-00000901", $"{requirement}-00000901", "Approved governed change");
+        var ready = Ready($"{prefix}-00900", $"{requirement}-00000900", "Governed ready change");
+        var approved = Ready($"{prefix}-00901", $"{requirement}-00000901", "Approved governed change");
         approved.SubmitForReview("change.author",
             [new ApproverSelection("change.reviewer", "change.reviewer")], now);
         approved.ApproveActiveStage("change.reviewer", now);
-        var addRequirement = new SystemChangeRequest($"{prefix}-00000902", 0, project.Id, release.Id,
+        var addRequirement = new SystemChangeRequest($"{prefix}-00902", 0, project.Id, release.Id,
             "Draft readiness completion", "Problem", "Analysis", "Solution", "change.author", now, type);
         db.AddRange(ready, approved, addRequirement);
         await db.SaveChangesAsync();

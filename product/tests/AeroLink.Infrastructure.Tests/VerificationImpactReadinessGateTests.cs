@@ -33,7 +33,7 @@ public sealed class VerificationImpactReadinessGateTests
         var baseline = new CandidateBaseline("BL-00000001", 0, project.Id, release.Id, null, "Gate baseline", "cm", Now);
         var campaign = new ReleaseCampaign(project.Id, release.Id, baseline.Id, "1.6", "program.manager", Now);
         // Impact items carry a real foreign key to the change request that raised them.
-        var scr = new SystemChangeRequest("SCR-00000010", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", "author", Now);
+        var scr = new SystemChangeRequest("SCR-00010", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", "author", Now);
         scr.AddRequirementChange("author", "SYSR-00000101", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
             "The FMS shall sequence oceanic waypoints.", "New capability", "Test", Now);
         setup.AddRange(program, project, release, baseline, campaign, scr);
@@ -46,6 +46,19 @@ public sealed class VerificationImpactReadinessGateTests
         await using var db = new AeroLinkDbContext(options);
         var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaignId, default);
         return readiness.Gates.Single(x => x.Code == "verification_impact");
+    }
+
+    private static VerificationImpactItem AddIntroduced(
+        AeroLinkDbContext db,
+        (DbContextOptions<AeroLinkDbContext> Options, Guid CampaignId, Guid ReleaseId, Guid ProjectId, Guid ScrId, string Path) seed,
+        string subject, string method)
+    {
+        var review = new TestChangeReview(seed.ProjectId, seed.ReleaseId, seed.ScrId,
+            TestChangeReviewDiscipline.System, "SCR-10.00", Now);
+        var item = VerificationImpactItem.ForIntroducedRequirement(
+            seed.ProjectId, seed.ReleaseId, seed.ScrId, review.Id, Guid.NewGuid(), subject, method, Now);
+        db.AddRange(review, item);
+        return item;
     }
 
     [Fact]
@@ -95,8 +108,7 @@ public sealed class VerificationImpactReadinessGateTests
         {
             await using (var arrange = new AeroLinkDbContext(seed.Options))
             {
-                arrange.VerificationImpactItems.Add(VerificationImpactItem.ForIntroducedRequirement(
-                    seed.ProjectId, seed.ReleaseId, seed.ScrId, Guid.NewGuid(), "SYSR-00000101.00", "Test", Now));
+                AddIntroduced(arrange, seed, "SYSR-00000101.00", "Test");
                 await arrange.SaveChangesAsync();
             }
 
@@ -120,9 +132,7 @@ public sealed class VerificationImpactReadinessGateTests
             {
                 // A requirement the author declared verifiable by analysis still needs the verification side
                 // to confirm that no test is owed. That confirmation is a decision, so it clears the gate.
-                var item = VerificationImpactItem.ForIntroducedRequirement(
-                    seed.ProjectId, seed.ReleaseId, seed.ScrId, Guid.NewGuid(), "SYSR-00000104.00", "Analysis", Now);
-                arrange.VerificationImpactItems.Add(item);
+                var item = AddIntroduced(arrange, seed, "SYSR-00000104.00", "Analysis");
                 await arrange.SaveChangesAsync();
                 itemId = item.Id;
             }
@@ -152,8 +162,7 @@ public sealed class VerificationImpactReadinessGateTests
         {
             await using (var arrange = new AeroLinkDbContext(seed.Options))
             {
-                arrange.VerificationImpactItems.Add(VerificationImpactItem.ForIntroducedRequirement(
-                    seed.ProjectId, seed.ReleaseId, seed.ScrId, Guid.NewGuid(), "SYSR-00000101.00", "Test", Now));
+                AddIntroduced(arrange, seed, "SYSR-00000101.00", "Test");
                 await arrange.SaveChangesAsync();
             }
 

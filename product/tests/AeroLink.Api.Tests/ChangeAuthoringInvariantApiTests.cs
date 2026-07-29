@@ -99,7 +99,7 @@ public sealed class ChangeAuthoringInvariantApiTests
         using (var seedScope = factory.Services.CreateScope())
         {
             var seedDb = seedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var scr = new SystemChangeRequest("SCR-00000999", 0, scenario.ProjectId, scenario.ReleaseId,
+            var scr = new SystemChangeRequest("SCR-00999", 0, scenario.ProjectId, scenario.ReleaseId,
                 "Legacy gap", "P", "A", "S", "invariant.author", DateTimeOffset.UtcNow);
             scr.AddRequirementChange("invariant.author", "SYSR-00000999", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall expose a legacy gap.", "R", "Test",
@@ -170,22 +170,22 @@ public sealed class ChangeAuthoringInvariantApiTests
         {
             var db = seedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var now = DateTimeOffset.UtcNow;
-            var scr = new SystemChangeRequest("SCR-00000888", 0, scenario.ProjectId, scenario.ReleaseId,
+            var scr = new SystemChangeRequest("SCR-00888", 0, scenario.ProjectId, scenario.ReleaseId,
                 "Legacy invalid impacts", "P", "A", "S", "invariant.author", now);
             scr.AddRequirementChange("invariant.author", "SYSR-00000888", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall reject legacy invalid impacts.", "R", "Test", now);
             scr.SubmitForReview("invariant.author", [new("invariant.reviewer", "Invariant Reviewer")], now);
             scr.ApproveActiveStage("invariant.reviewer", now);
-            var selected = new CandidateBaseline("SWBL-00000888", 0, scenario.ProjectId, scenario.ReleaseId,
+            var selected = new CandidateBaseline("SW-88.80", 0, scenario.ProjectId, scenario.ReleaseId,
                 null, "Selected legacy record", "invariant.author", now);
             selected.Select(scr, "invariant.author", now);
-            var selectionScr = new SystemChangeRequest("SCR-00000889", 0, scenario.ProjectId, scenario.ReleaseId,
+            var selectionScr = new SystemChangeRequest("SCR-00889", 0, scenario.ProjectId, scenario.ReleaseId,
                 "Second legacy invalid impact record", "P", "A", "S", "invariant.author", now);
             selectionScr.AddRequirementChange("invariant.author", "SYSR-00000889", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall allow downstream impact assessment.", "R", "Test", now);
             selectionScr.SubmitForReview("invariant.author", [new("invariant.reviewer", "Invariant Reviewer")], now);
             selectionScr.ApproveActiveStage("invariant.reviewer", now);
-            var empty = new CandidateBaseline("SWBL-00000889", 0, scenario.ProjectId, scenario.ReleaseId,
+            var empty = new CandidateBaseline("SW-88.90", 0, scenario.ProjectId, scenario.ReleaseId,
                 null, "Selection guard", "invariant.author", now);
             db.AddRange(scr, selectionScr, selected, empty);
             await db.SaveChangesAsync();

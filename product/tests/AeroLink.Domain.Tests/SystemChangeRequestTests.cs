@@ -15,18 +15,28 @@ public sealed class SystemChangeRequestTests
     public void Display_number_appends_two_digit_revision()
     {
         var scr = CreateDraft();
-        Assert.Equal("SCR-00001049.01", scr.DisplayNumber);
+        Assert.Equal("SCR-01049.01", scr.DisplayNumber);
         Assert.Equal("SYSR-00002375.04", ArtifactNumber.Display("SYSR-00002375", 4));
+    }
+
+    [Fact]
+    public void Change_requests_use_five_digits_and_software_builds_use_the_official_name()
+    {
+        Assert.Equal("SCR-00039.00", ArtifactNumber.Display("SCR-00039", 0));
+        Assert.Equal("SWCR-00039.02", ArtifactNumber.Display("SWCR-00039", 2));
+        Assert.Equal("SW-01.60", ArtifactNumber.Display("SW-01.60", 0));
+        Assert.Equal("SW-01.60", SoftwareBuildIdentifier.FromVersion("1.6"));
+        Assert.Throws<DomainException>(() => ArtifactNumber.ValidateBase("SCR-00000039"));
     }
 
     [Fact]
     public void Submit_requires_pas_and_at_least_one_requirement_change()
     {
-        var empty = new SystemChangeRequest("SCR-00001049", 1, ProjectId, ReleaseId,
+        var empty = new SystemChangeRequest("SCR-01049", 1, ProjectId, ReleaseId,
             "Round Robin", "", "Analysis", "Solution", "author", Now);
         Assert.Throws<DomainException>(() => empty.SubmitForReview("author", Approvers(), Now));
 
-        var noChange = new SystemChangeRequest("SCR-00001049", 1, ProjectId, ReleaseId,
+        var noChange = new SystemChangeRequest("SCR-01049", 1, ProjectId, ReleaseId,
             "Round Robin", "Problem", "Analysis", "Solution", "author", Now);
         Assert.Throws<DomainException>(() => noChange.SubmitForReview("author", Approvers(), Now));
     }
@@ -164,7 +174,7 @@ public sealed class SystemChangeRequestTests
         Assert.Equal(ScrState.Approved, scr.State);
         Assert.Equal(ScrState.Draft, next.State);
         Assert.Equal(2, next.Revision);
-        Assert.Equal("SCR-00001049.02", next.DisplayNumber);
+        Assert.Equal("SCR-01049.02", next.DisplayNumber);
         Assert.Single(next.RequirementChanges);
     }
 
@@ -415,7 +425,7 @@ public sealed class SystemChangeRequestTests
     }
 
     private static SystemChangeRequest CreateDraft() =>
-        new("SCR-00001049", 1, ProjectId, ReleaseId, "Introduce Round Robin",
+        new("SCR-01049", 1, ProjectId, ReleaseId, "Introduce Round Robin",
             "Round Robin is not available.", "The existing sequence is linear.",
             "Add selectable deterministic Round Robin sequencing.", "author", Now);
 

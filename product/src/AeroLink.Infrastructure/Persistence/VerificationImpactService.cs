@@ -51,18 +51,30 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
             .Select(x => x.RequirementChangeId)
             .ToListAsync(ct);
         var covered = alreadyRaised.Where(x => x is not null).Select(x => x!.Value).ToHashSet();
+        var reviews = await db.TestChangeReviews
+            .Where(x => x.ChangeRequestId == request.Id)
+            .ToDictionaryAsync(x => x.Discipline, ct);
 
         var raised = 0;
         foreach (var change in request.RequirementChanges)
         {
             if (covered.Contains(change.Id)) continue;
+            if (change.Kind is not (RequirementChangeKind.Introduce or RequirementChangeKind.Modify)) continue;
+            var discipline = Discipline(change.Level);
+            if (!reviews.TryGetValue(discipline, out var review))
+            {
+                review = new TestChangeReview(request.ProjectId, request.TargetReleaseId, request.Id,
+                    discipline, request.DisplayNumber, now);
+                db.TestChangeReviews.Add(review);
+                reviews.Add(discipline, review);
+            }
             var display = ArtifactNumberDisplay(change);
             VerificationImpactItem? item = change.Kind switch
             {
                 RequirementChangeKind.Introduce => VerificationImpactItem.ForIntroducedRequirement(
-                    request.ProjectId, request.TargetReleaseId, request.Id, change.Id, display, change.VerificationMethod, now),
+                    request.ProjectId, request.TargetReleaseId, request.Id, review.Id, change.Id, display, change.VerificationMethod, now),
                 RequirementChangeKind.Modify => VerificationImpactItem.ForModifiedRequirement(
-                    request.ProjectId, request.TargetReleaseId, request.Id, change.Id, display, change.VerificationMethod, now),
+                    request.ProjectId, request.TargetReleaseId, request.Id, review.Id, change.Id, display, change.VerificationMethod, now),
                 // Retirement raises work only where it strands a procedure, which is resolved separately
                 // once the retirement is materialised and remaining links are known.
                 _ => null
@@ -83,6 +95,8 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
     {
         var items = await db.VerificationImpactItems.Where(x => x.ChangeRequestId == changeRequestId).ToListAsync(ct);
         foreach (var item in items) item.Retarget(releaseId, now);
+        var reviews = await db.TestChangeReviews.Where(x => x.ChangeRequestId == changeRequestId).ToListAsync(ct);
+        foreach (var review in reviews) review.Retarget(releaseId, now);
         return items.Count;
     }
 
@@ -254,7 +268,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
             .Where(revision => orphanedRevisionIds.Contains(revision.Id))
             .Join(db.TestProcedures.AsNoTracking().Where(p => p.ProjectId == projectId),
                 revision => revision.ProcedureId, procedure => procedure.Id,
-                (revision, procedure) => new { procedure.Id, procedure.BaseNumber })
+                (revision, procedure) => new { procedure.Id, procedure.BaseNumber, procedure.Level })
             .Distinct()
             .ToListAsync(ct);
         if (orphanedProcedures.Count == 0) return 0;
@@ -264,13 +278,30 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
             .Select(x => x.ProcedureId).ToListAsync(ct);
         var covered = alreadyRaised.Where(x => x is not null).Select(x => x!.Value).ToHashSet();
         var changeRequestId = retired[0].ChangeRequestId;
+        var sourceNumber = await db.SystemChangeRequests.Where(x => x.Id == changeRequestId)
+            .Select(x => x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision)
+            .SingleAsync(ct);
+        var reviews = await db.TestChangeReviews.Where(x => x.ChangeRequestId == changeRequestId)
+            .ToDictionaryAsync(x => x.Discipline, ct);
 
         var raised = 0;
         foreach (var procedure in orphanedProcedures)
         {
             if (!covered.Add(procedure.Id)) continue;
+            var discipline = procedure.Level switch
+            {
+                TestProcedureLevel.System => TestChangeReviewDiscipline.System,
+                TestProcedureLevel.HighLevel => TestChangeReviewDiscipline.HighLevelSoftware,
+                _ => TestChangeReviewDiscipline.LowLevelSoftware
+            };
+            if (!reviews.TryGetValue(discipline, out var review))
+            {
+                review = new TestChangeReview(projectId, releaseId, changeRequestId, discipline, sourceNumber, now);
+                db.TestChangeReviews.Add(review);
+                reviews.Add(discipline, review);
+            }
             db.VerificationImpactItems.Add(VerificationImpactItem.ForOrphanedProcedure(
-                projectId, releaseId, changeRequestId, procedure.Id, procedure.BaseNumber, now));
+                projectId, releaseId, changeRequestId, review.Id, procedure.Id, procedure.BaseNumber, now));
             raised++;
         }
         return raised;
@@ -377,4 +408,11 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
 
     private static string ArtifactNumberDisplay(RequirementChange change) =>
         $"{change.BaseNumber}.{change.Revision:00}";
+
+    private static TestChangeReviewDiscipline Discipline(RequirementLevel level) => level switch
+    {
+        RequirementLevel.System => TestChangeReviewDiscipline.System,
+        RequirementLevel.HighLevel => TestChangeReviewDiscipline.HighLevelSoftware,
+        _ => TestChangeReviewDiscipline.LowLevelSoftware
+    };
 }

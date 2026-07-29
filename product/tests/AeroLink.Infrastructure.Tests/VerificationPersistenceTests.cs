@@ -18,11 +18,11 @@ public sealed class VerificationPersistenceTests
         {
             await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync(); var now = DateTimeOffset.UtcNow;
             var program = new ProgramRecord("Verification", "VRFY"); var project = new ProjectRecord(program.Id, "Software", "FMS"); var release = new SoftwareRelease(project.Id, "3.3", false);
-            var scr = new SystemChangeRequest("SCR-00000010", 0, project.Id, release.Id, "Requirements", "P", "A", "S", "author", now);
+            var scr = new SystemChangeRequest("SCR-00010", 0, project.Id, release.Id, "Requirements", "P", "A", "S", "author", now);
             scr.AddRequirementChange("author", "SWR-00000001", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "First behavior", "R", "Test", now);
             scr.AddRequirementChange("author", "SWR-00000002", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "Second behavior", "R", "Test", now);
             scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now); scr.ApproveActiveStage("reviewer", now);
-            var baseline = new CandidateBaseline("SWBL-00000010", 0, project.Id, release.Id, null, "3.3", "cm", now); baseline.Select(scr, "cm", now); baseline.Freeze("cm", now);
+            var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null, "3.3", "cm", now); baseline.Select(scr, "cm", now); baseline.Freeze("cm", now);
             db.AddRange(program, project, release, scr, baseline); await db.SaveChangesAsync(); await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(baseline.Id, "cm", now, default);
             var requirementIds = await db.BaselineRequirements.Where(x => x.BaselineId == baseline.Id).Select(x => x.RevisionId).ToListAsync();
             var procedure = new TestProcedure(project.Id, "SWTP-00000001", "Verify both behaviors", "tester", now);

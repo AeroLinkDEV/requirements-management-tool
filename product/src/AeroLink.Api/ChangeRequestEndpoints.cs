@@ -137,7 +137,10 @@ public static class ChangeRequestEndpoints
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var term = search.Trim().ToLower();
-                artifacts = artifacts.Where(x => x.BaseNumber.ToLower().Contains(term));
+                artifacts = artifacts.Where(x => x.BaseNumber.ToLower().Contains(term)
+                    || db.RequirementRevisions.Any(revision => revision.ArtifactId == x.Id
+                        && (revision.Statement.ToLower().Contains(term)
+                            || revision.Rationale.ToLower().Contains(term))));
             }
             var rows = await (from artifact in artifacts
                               join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId

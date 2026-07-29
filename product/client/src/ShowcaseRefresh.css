@@ -462,5 +462,9 @@
 .traceRelation b { color: #1a6270; font-size: 12px; }
 .traceRelation.attention { border-left-color: #d49a2f; background: #fff8e9; }
 .traceRelation.attention button { margin-top: 8px; border: 0; border-radius: 7px; background: #805d16; padding: 7px 10px; color: white; font-size: 12px; font-weight: 700; }
+.traceRelation.linkedArtifact { display: block; width: 100%; border-top: 0; border-right: 0; border-bottom: 0; color: inherit; cursor: pointer; text-align: left; }
+.traceRelation.linkedArtifact:hover, .traceRelation.linkedArtifact:focus-visible { background: #edf8f5; box-shadow: 0 0 0 2px #68b7aa; outline: 0; }
+.linkedArtifactText { display: block; width: 100%; margin: 0 !important; border: 0 !important; background: transparent !important; padding: 0 !important; color: inherit !important; text-align: left; }
+.inlineArtifactLink { border: 0; background: transparent; padding: 0; color: #176fc1; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .traceEmpty { display: flex; flex-direction: column; gap: 3px; border: 1px dashed #d4dde4; border-radius: 8px; padding: 12px; color: #738194; font-size: 12px; line-height: 1.45; }
 .traceEmpty.attention { border-color: #e7cf98; background: #fff9ec; color: #836523; }

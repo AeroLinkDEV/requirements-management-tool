@@ -191,7 +191,6 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
       {loading && !baselines.length && <section className="traceEmpty"><b>Loading exact configuration…</b><p>Resolving the active release baseline and its evidence network.</p></section>}
       <div className="lifeTabs">
         <button className={tab === "thread" ? "active" : ""} onClick={() => setTab("thread")}>Digital Thread</button>
-        <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>Controlled Documents <span>{documents.length}</span></button>
       </div>
 
       {tab === "thread" ? <>

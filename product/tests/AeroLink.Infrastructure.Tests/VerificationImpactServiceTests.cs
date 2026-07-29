@@ -25,7 +25,7 @@ public sealed class VerificationImpactServiceTests
                 var program = new ProgramRecord("Verification Program", "VFP");
                 var project = new ProjectRecord(program.Id, "Software", "Verification Software");
                 var release = new SoftwareRelease(project.Id, "1.6", false);
-                var scr = new SystemChangeRequest("SCR-00000010", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", "author", Now);
+                var scr = new SystemChangeRequest("SCR-00010", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", "author", Now);
                 scr.AddRequirementChange("author", "SYSR-00000101", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
                     "The FMS shall sequence oceanic waypoints.", "New capability", "Test", Now);
                 scr.AddRequirementChange("author", "SYSR-00000102", 1, RequirementLevel.System, RequirementChangeKind.Modify,
@@ -86,7 +86,7 @@ public sealed class VerificationImpactServiceTests
                 var project = new ProjectRecord(program.Id, "Software", "Verification Software");
                 var release = new SoftwareRelease(project.Id, "1.6", false);
                 var deferred = new SoftwareRelease(project.Id, "1.7", false);
-                var scr = new SystemChangeRequest("SCR-00000011", 0, project.Id, release.Id, "Deferred work", "P", "A", "S", "author", Now);
+                var scr = new SystemChangeRequest("SCR-00011", 0, project.Id, release.Id, "Deferred work", "P", "A", "S", "author", Now);
                 scr.AddRequirementChange("author", "SYSR-00000201", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
                     "The FMS shall do the thing.", "New", "Test", Now);
                 scr.SubmitForReview("author", [new("reviewer", "Reviewer")], Now);
@@ -140,7 +140,7 @@ public sealed class VerificationImpactServiceTests
                 var program = new ProgramRecord("Verification Program", "VFP3");
                 var project = new ProjectRecord(program.Id, "Software", "Verification Software");
                 var release = new SoftwareRelease(project.Id, "1.6", false);
-                var scr = new SystemChangeRequest("SCR-00000012", 0, project.Id, release.Id, "Gate work", "P", "A", "S", "author", Now);
+                var scr = new SystemChangeRequest("SCR-00012", 0, project.Id, release.Id, "Gate work", "P", "A", "S", "author", Now);
                 scr.AddRequirementChange("author", "SYSR-00000301", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
                     "First.", "New", "Test", Now);
                 scr.AddRequirementChange("author", "SYSR-00000302", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
@@ -194,12 +194,12 @@ public sealed class VerificationImpactServiceTests
                 var program = new ProgramRecord("Verification Program", "VFP4");
                 var project = new ProjectRecord(program.Id, "Software", "Verification Software");
                 var release = new SoftwareRelease(project.Id, "1.6", false);
-                var scr = new SystemChangeRequest("SCR-00000013", 0, project.Id, release.Id, "Selected", "P", "A", "S", "author", Now);
+                var scr = new SystemChangeRequest("SCR-00013", 0, project.Id, release.Id, "Selected", "P", "A", "S", "author", Now);
                 scr.AddRequirementChange("author", "SYSR-00000401", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
                     "Selected requirement.", "New", "Test", Now);
                 scr.SubmitForReview("author", [new("reviewer", "Reviewer")], Now);
                 scr.ApproveActiveStage("reviewer", Now);
-                var baseline = new AeroLink.Domain.Baselines.CandidateBaseline("SWBL-00000013", 0, project.Id, release.Id, null, "Candidate", "cm", Now);
+                var baseline = new AeroLink.Domain.Baselines.CandidateBaseline("SW-01.30", 0, project.Id, release.Id, null, "Candidate", "cm", Now);
                 baseline.Select(scr, "cm", Now);
                 Assert.Equal(ScrState.SelectedForBaseline, scr.State);
                 setup.AddRange(program, project, release, scr, baseline);
