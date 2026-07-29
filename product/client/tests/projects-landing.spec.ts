@@ -1,0 +1,82 @@
+import { expect, test } from '@playwright/test'
+import { login } from './auth'
+
+test('successful login opens the accessible Projects selector before the current workspace', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await login(page, 'admin', { openProject: false })
+
+  await expect(page).toHaveURL(/\/projects$/)
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
+  await expect(page.getByText('Select a project to continue.')).toBeVisible()
+
+  const cards = page.locator('[data-project-card]')
+  await expect(cards).toHaveCount(11)
+  const cardLayout = await cards.evaluateAll(items => items.map(item => ({
+    top: Math.round(item.getBoundingClientRect().top),
+    height: Math.round(item.getBoundingClientRect().height),
+  })))
+  expect(new Set(cardLayout.slice(0, 4).map(item => item.top)).size).toBe(1)
+  expect(new Set(cardLayout.map(item => item.height)).size).toBe(1)
+  if (process.env.AEROLINK_PROJECTS_SCREENSHOT) {
+    await page.screenshot({ path: process.env.AEROLINK_PROJECTS_SCREENSHOT, fullPage: true })
+  }
+
+  const active = page.getByRole('link', { name: 'Open FMS Product Development' })
+  await expect(active.getByText('Active', { exact: true })).toBeVisible()
+  await expect(active).toContainText('Opens your current workspace.')
+  await active.focus()
+  await expect(active).toBeFocused()
+
+  const mock = cards.filter({ hasText: 'GPS Receiver Modernization' })
+  await expect(mock).toHaveAttribute('aria-disabled', 'true')
+  await expect(mock.locator('a, button')).toHaveCount(0)
+  await expect(mock).not.toHaveAttribute('tabindex')
+  const selectorUrl = page.url()
+  await mock.click()
+  await expect(page).toHaveURL(selectorUrl)
+
+  const create = cards.filter({ hasText: 'Create New Project' })
+  await expect(create).toHaveAttribute('aria-disabled', 'true')
+  await expect(create.locator('a, button')).toHaveCount(0)
+  await create.click()
+  await expect(page).toHaveURL(selectorUrl)
+
+  await active.press('Enter')
+  await expect(page).toHaveURL(/\/programs\/[^/]+\/projects\/[^/]+\/releases\/[^/]+\/command-center$/)
+  await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
+})
+
+test('the project grid collapses cleanly without horizontal scrolling', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await login(page, 'admin', { openProject: false })
+
+  await expect(page.locator('[data-project-card]')).toHaveCount(11)
+  const dimensions = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: document.documentElement.clientWidth,
+    columns: new Set(
+      [...document.querySelectorAll('[data-project-card]')].map(card =>
+        Math.round(card.getBoundingClientRect().left),
+      ),
+    ).size,
+  }))
+  expect(dimensions.documentWidth).toBe(dimensions.viewportWidth)
+  expect(dimensions.columns).toBe(1)
+  if (process.env.AEROLINK_PROJECTS_MOBILE_SCREENSHOT) {
+    await page.screenshot({ path: process.env.AEROLINK_PROJECTS_MOBILE_SCREENSHOT, fullPage: true })
+  }
+})
+
+test('an authenticated project route survives refresh and FMS opens through its existing deep route', async ({ page }) => {
+  await login(page, 'admin', { openProject: false })
+  await page.reload()
+
+  await expect(page).toHaveURL(/\/projects$/)
+  await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible()
+  await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
+  const workspaceUrl = page.url()
+  await page.reload()
+
+  await expect(page).toHaveURL(workspaceUrl)
+  await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
+})

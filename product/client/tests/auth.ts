@@ -11,12 +11,16 @@ export type ShowcaseSeed = {
 
 let cachedShowcase: ShowcaseSeed | undefined
 
-export async function login(page:Page,userName='admin'){
+export async function login(page:Page,userName='admin',options:{openProject?:boolean}={}){
   await page.goto('/')
   await page.getByLabel('Username').fill(userName)
   await page.getByLabel('Password').fill('AeroLink!2026')
   await page.getByRole('button',{name:/Sign in securely/}).click()
-  await expect(page.getByRole('heading',{name:/Create your first program|Command Center/})).toBeVisible()
+  await expect(page.getByRole('heading',{name:/Create your first program|Projects/})).toBeVisible()
+  if(options.openProject!==false&&await page.getByRole('heading',{name:'Projects'}).count()){
+    await page.getByRole('link',{name:'Open FMS Product Development'}).click()
+    await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
+  }
 }
 export async function apiLogin(request:APIRequestContext,userName='admin'){
   const response=await request.post(`${apiBase}/api/auth/login`,{data:{userName,password:'AeroLink!2026'}})
