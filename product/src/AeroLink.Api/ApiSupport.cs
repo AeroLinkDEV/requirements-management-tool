@@ -98,43 +98,54 @@ public static class IdentifierAllocator
             ?? throw new InvalidOperationException($"Could not allocate a controlled number for prefix '{scope}'.");
     }
 
-    private static async Task SeedRowAsync(AeroLinkDbContext db, string scope, int firstValue, CancellationToken ct)
-    {
-        await using var command = await CommandAsync(db, ct);
-        command.CommandText = """INSERT INTO identifier_sequences ("Id", "Scope", "NextValue", "ConcurrencyStamp") VALUES (@id, @scope, @next, 0)""";
-        Bind(command, "@id", Guid.NewGuid());
-        Bind(command, "@scope", scope);
-        Bind(command, "@next", (long)firstValue);
-        await command.ExecuteNonQueryAsync(ct);
-    }
+    private static Task SeedRowAsync(AeroLinkDbContext db, string scope, int firstValue, CancellationToken ct) =>
+        ExecuteAsync(db, ct, command =>
+        {
+            command.CommandText = """INSERT INTO identifier_sequences ("Id", "Scope", "NextValue", "ConcurrencyStamp") VALUES (@id, @scope, @next, 0)""";
+            Bind(command, "@id", Guid.NewGuid());
+            Bind(command, "@scope", scope);
+            Bind(command, "@next", (long)firstValue);
+            return command.ExecuteNonQueryAsync(ct);
+        });
 
     private static async Task<int?> TryClaimAsync(AeroLinkDbContext db, string scope, CancellationToken ct)
     {
         // Raw ADO rather than a tracked entity on purpose. A tracked increment would only take effect when
         // the caller saves, which puts the read and the write back on opposite sides of a race; this commits
         // the claim on its own so the number is spent the moment it is handed out.
-        await using var command = await CommandAsync(db, ct);
-        command.CommandText =
-            """
-            UPDATE identifier_sequences
-               SET "NextValue" = "NextValue" + 1, "ConcurrencyStamp" = "ConcurrencyStamp" + 1
-             WHERE "Scope" = @scope
-            RETURNING "NextValue" - 1
-            """;
-        Bind(command, "@scope", scope);
-
-        var result = await command.ExecuteScalarAsync(ct);
+        var result = await ExecuteAsync(db, ct, command =>
+        {
+            command.CommandText =
+                """
+                UPDATE identifier_sequences
+                   SET "NextValue" = "NextValue" + 1, "ConcurrencyStamp" = "ConcurrencyStamp" + 1
+                 WHERE "Scope" = @scope
+                RETURNING "NextValue" - 1
+                """;
+            Bind(command, "@scope", scope);
+            return command.ExecuteScalarAsync(ct);
+        });
         return result is null or DBNull ? null : Convert.ToInt32(result);
     }
 
-    /// <summary>A command on the context's own connection, enlisted in whatever transaction it already has.</summary>
-    private static async Task<DbCommand> CommandAsync(AeroLinkDbContext db, CancellationToken ct)
+    /// <summary>
+    /// Runs one statement on the context's own connection, enlisted in whatever transaction it already has.
+    ///
+    /// Opened and closed through <see cref="DatabaseFacade"/> rather than on the raw connection: EF counts
+    /// who opened the connection and closes it when that count returns to zero. Opening the underlying
+    /// connection directly is invisible to that count, so the connection stays open for the rest of the
+    /// context's life — which on a file-backed database leaves the file locked long after the request is done.
+    /// </summary>
+    private static async Task<T> ExecuteAsync<T>(AeroLinkDbContext db, CancellationToken ct, Func<DbCommand, Task<T>> run)
     {
-        var connection = db.Database.GetDbConnection();
-        if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync(ct);
-        var command = connection.CreateCommand();
-        command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
-        return command;
+        await db.Database.OpenConnectionAsync(ct);
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            return await run(command);
+        }
+        finally { await db.Database.CloseConnectionAsync(); }
     }
 
     private static void Bind(DbCommand command, string name, object value)
