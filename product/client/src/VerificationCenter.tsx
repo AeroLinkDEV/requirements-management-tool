@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { PersonName } from './People'
 import { SignatureDialog } from './IdentityCenter'
@@ -42,11 +42,55 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
  // does this release contain"; the queue answers "what has to happen next, and whose job is it" — and only the
  // second is a reason to come here on a Tuesday morning. Landing on coverage meant a verification engineer saw
  // a table of everything and no sign of the four things the last approval had just made their problem.
- const [workspaceTab,setWorkspaceTab]=useState<'impact'|'coverage'|'procedures'|'executions'>('impact')
+ const workspaceTabs=['impact','coverage','procedures','executions'] as const
+ const initialTab=(typeof location!=='undefined'?new URLSearchParams(location.search).get('tab'):null)
+ const [workspaceTab,setWorkspaceTab]=useState<typeof workspaceTabs[number]>(workspaceTabs.includes(initialTab as typeof workspaceTabs[number])?initialTab as typeof workspaceTabs[number]:'impact')
  const [impact,setImpact]=useState<ImpactItem[]>([]),[resolving,setResolving]=useState<ImpactItem>(),[assigning,setAssigning]=useState<ImpactItem>(),[reopening,setReopening]=useState<ImpactItem>()
  const [requirementQuery,setRequirementQuery]=useState(''),[selectedRequirementIds,setSelectedRequirementIds]=useState<string[]>([])
  // Procedure browsing is server-side: 440 software procedures rendered as cards with no way to find one.
- const [procedureQuery,setProcedureQuery]=useState(''),[procedureState,setProcedureState]=useState(''),[procedureOutcome,setProcedureOutcome]=useState(''),[procedurePage,setProcedurePage]=useState(1),[procedureTotal,setProcedureTotal]=useState(0),[procedurePages,setProcedurePages]=useState(1)
+ //
+ // The state is seeded from the address and written back to it, so a filtered list can be refreshed, shared
+ // or reached with the browser's back button — a worklist somebody cannot hand to a colleague is half a
+ // worklist. Discrete changes push a history entry; typing replaces one, because a keystroke is not a place.
+  const lastDiscreteState=useRef<string|null>(null)
+  const suppressNextPush=useRef(false)
+ const initialProcedureQuery=typeof location!=='undefined'?new URLSearchParams(location.search):new URLSearchParams()
+ const [procedureQuery,setProcedureQuery]=useState(initialProcedureQuery.get('procedure')??''),[procedureState,setProcedureState]=useState(initialProcedureQuery.get('procedureState')??''),[procedureOutcome,setProcedureOutcome]=useState(initialProcedureQuery.get('procedureOutcome')??''),[procedurePage,setProcedurePage]=useState(Number(initialProcedureQuery.get('procedurePage')??'1')||1),[procedureTotal,setProcedureTotal]=useState(0),[procedurePages,setProcedurePages]=useState(1)
+ // Seeded from what the address already says, so the reader's first change after a reload still earns a
+ // history entry rather than being mistaken for arrival.
+ if(lastDiscreteState.current===null)lastDiscreteState.current=`${procedureState}|${procedureOutcome}|${procedurePage}|${workspaceTab}`
+ useEffect(()=>{
+  const params=new URLSearchParams(location.search)
+  const before=params.toString()
+  const apply=(key:string,value:string,fallback='')=>{if(value&&value!==fallback)params.set(key,value);else params.delete(key)}
+  apply('procedure',procedureQuery);apply('procedureState',procedureState);apply('procedureOutcome',procedureOutcome)
+  apply('procedurePage',procedurePage>1?String(procedurePage):'')
+  // The tab travels too, or a shared link restores the filters into a view that is not showing them.
+  apply('tab',workspaceTab==='impact'?'':workspaceTab)
+  if(params.toString()===before)return
+  const next=`${location.pathname}${params.toString()?`?${params}`:''}`
+  // Choosing a filter, a page or a tab is somewhere the reader went, so it earns a history entry and the
+  // back button returns to the previous list. Typing in the search box is not somewhere they went; pushing
+  // per keystroke would mean pressing back a dozen times to leave one search.
+  const discrete=`${procedureState}|${procedureOutcome}|${procedurePage}|${workspaceTab}`
+  // The exception is arriving from a problem report, which switches the tab for the reader. That is part of
+  // the navigation that brought them here, not a move they made, so it must not consume their back button.
+  const push=discrete!==lastDiscreteState.current&&!suppressNextPush.current
+  suppressNextPush.current=false
+  lastDiscreteState.current=discrete
+  if(push)history.pushState({},'',next);else history.replaceState({},'',next)
+ },[procedureQuery,procedureState,procedureOutcome,procedurePage,workspaceTab])
+ // The browser's own navigation must move the list, not just the address bar.
+ useEffect(()=>{
+  const restore=()=>{
+   const params=new URLSearchParams(location.search)
+   setProcedureQuery(params.get('procedure')??'');setProcedureState(params.get('procedureState')??'')
+   setProcedureOutcome(params.get('procedureOutcome')??'');setProcedurePage(Number(params.get('procedurePage')??'1')||1)
+   const tab=params.get('tab');if(workspaceTabs.includes(tab as typeof workspaceTabs[number]))setWorkspaceTab(tab as typeof workspaceTabs[number]);else setWorkspaceTab('impact')
+  }
+  addEventListener('popstate',restore)
+  return()=>removeEventListener('popstate',restore)
+ },[])
  const [outcome,setOutcome]=useState<'Pass'|'Fail'|'Blocked'>('Pass')
  const selectedProgram=user.programs.find(program=>program.programId===programId)
  const canTest=user.isAdministrator||!!selectedProgram?.roles.includes('TestEngineer')
@@ -70,6 +114,7 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
    const target=await response.json() as CorrectiveAction
    if(cancelled)return
    setCorrective(target)
+   suppressNextPush.current=true
    setWorkspaceTab('procedures')
   })()
   return()=>{cancelled=true}
@@ -78,7 +123,7 @@ export default function VerificationCenter({api,programId,projectId,releaseId,sc
  const createProcedure=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();setError('');if(!canTest){setError('Test Engineer authority is required in the selected Program.');return}const form=new FormData(e.currentTarget);if(!selectedRequirementIds.length){setError('Select at least one exact requirement revision.');return}if(mutationBusy)return;setMutationBusy(true);try{const created=await apiRequest<{displayNumber?:string;baseNumber?:string}>(`${api}/api/test-procedures`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectId,baseNumber:'SERVER-ALLOCATED',title:form.get('title'),objective:form.get('objective'),preconditions:form.get('preconditions'),steps:form.get('steps'),expectedResult:form.get('expectedResult'),requirementRevisionIds:selectedRequirementIds,level:form.get('level')})});setCreating(false);setSelectedRequirementIds([]);setRequirementQuery('');setWorkspaceTab('procedures');
   // The list is paged now, and a new procedure takes the highest controlled number — so it lands on the
   // last page and the author would not see what they just made. Show it by finding it.
-  setProcedureQuery((created?.baseNumber??created?.displayNumber??'').replace(/.d{2}$/,''));setProcedureState('');setProcedureOutcome('');setProcedurePage(1);await load();await loadCoverage()}catch(error){recordClientOperationFailure('verification.procedure.create',error);setError(operationError(error,'Procedure could not be created.'))}finally{setMutationBusy(false)}}
+  setProcedureQuery((created?.baseNumber??created?.displayNumber??'').replace(/\.\d{2}$/,''));setProcedureState('');setProcedureOutcome('');setProcedurePage(1);await loadCoverage()}catch(error){recordClientOperationFailure('verification.procedure.create',error);setError(operationError(error,'Procedure could not be created.'))}finally{setMutationBusy(false)}}
  const startRecording=(procedure?:Procedure,prior?:Execution)=>{if(!canTest){setError('Test Engineer authority is required in the selected Program.');return}if(!procedure){setError('The approved procedure revision could not be resolved for this result.');return}setOutcome('Pass');setRetest(prior);setRecording(procedure)}
  const record=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!recording||!canTest){setError('Test Engineer authority is required in the selected Program.');return}if(mutationBusy)return;const form=new FormData(e.currentTarget);setMutationBusy(true);setError('');try{await apiRequest(`${api}/api/test-executions`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectId,procedureRevisionId:recording.revisionId,softwareBuildId:buildId||null,retestOfExecutionId:retest?.id||null,outcome,configuration:form.get('configuration'),determination:form.get('determination'),evidenceReference:form.get('evidenceReference'),executedAt:new Date(String(form.get('executedAt'))).toISOString()})});setRecording(undefined);setRetest(undefined);setWorkspaceTab('executions');await load();await loadCoverage()}catch(error){recordClientOperationFailure('verification.result.record',error);setError(operationError(error,'Result could not be recorded.'))}finally{setMutationBusy(false)}}
  const upload=async(execution:Execution,file:File)=>{if(!canTest){setError('Test Engineer authority is required to attach evidence in the selected Program.');return}if(mutationBusy)return;const form=new FormData();form.append('file',file);form.append('projectId',projectId);setMutationBusy(true);setError('');try{const evidence=await apiRequest<{id:string}>(`${api}/api/evidence`,{method:'POST',body:form});await apiRequest(`${api}/api/test-executions/${execution.id}/evidence/${evidence.id}`,{method:'POST'});await load();await loadCoverage()}catch(error){recordClientOperationFailure('verification.evidence.upload',error);setError(operationError(error,'Evidence could not be stored and linked to this execution.'))}finally{setMutationBusy(false)}}

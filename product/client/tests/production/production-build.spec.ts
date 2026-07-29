@@ -279,6 +279,8 @@ test('verification mutation failures retain the engineer input and only confirme
   await openNavigationGroup(page, 'VERIFICATION')
   await page.getByRole('link', { name: 'System Verification' }).click()
   await page.getByRole('button', { name: /Test procedures/ }).click()
+  // The list is paged, so a procedure created through the API is found rather than scrolled to.
+  await page.getByLabel('Find a procedure').fill(procedure.displayNumber.replace(/\.\d{2}$/, ''))
   const row = page.locator('.procedureRow').filter({ hasText: procedure.displayNumber })
   await expect(row).toBeVisible()
   await row.getByRole('button', { name: 'Record result' }).click()
