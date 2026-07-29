@@ -160,11 +160,56 @@ app.Use(async (context, next) =>
         var valid=context.RequestServices.GetRequiredService<BrowserMutationProtector>().Validate(context.Request.Cookies[IdentityService.CookieName],context.Request.Headers["X-AeroLink-CSRF"].ToString());
         if(!valid){context.Response.StatusCode=StatusCodes.Status400BadRequest;await context.Response.WriteAsJsonAsync(new{error="The browser mutation token is missing or expired. Refresh and try again.",code="antiforgery_validation_failed"});return;}
     }
-    var db=context.RequestServices.GetRequiredService<AeroLinkDbContext>();Guid? scopedProjectId=null;
+    var db=context.RequestServices.GetRequiredService<AeroLinkDbContext>();
+    Guid? activeBuildId=null;
+    if(context.Request.Headers.TryGetValue("X-AeroLink-Build-Context",out var rawBuildContext))
+    {
+        if(!Guid.TryParse(rawBuildContext.FirstOrDefault(),out var parsedBuildId))
+        {context.Response.StatusCode=StatusCodes.Status400BadRequest;await context.Response.WriteAsJsonAsync(new{error="The active build context is invalid.",code="build_context_invalid"});return;}
+        var selectedBuild=await db.Releases.AsNoTracking().Where(x=>x.Id==parsedBuildId)
+            .Select(x=>new{x.Id,x.ProjectId,x.IsReleased,x.Version,ProgramId=db.Projects.Where(p=>p.Id==x.ProjectId).Select(p=>p.ProgramId).Single()})
+            .SingleOrDefaultAsync(context.RequestAborted);
+        if(selectedBuild is null)
+        {context.Response.StatusCode=StatusCodes.Status404NotFound;await context.Response.WriteAsJsonAsync(new{error="The selected build no longer exists.",code="build_context_not_found"});return;}
+        if(!user.IsAdministrator&&!user.Programs.Any(x=>x.ProgramId==selectedBuild.ProgramId))
+        {context.Response.StatusCode=StatusCodes.Status403Forbidden;await context.Response.WriteAsJsonAsync(new{error="You are not authorized to enter this build.",code="build_context_forbidden"});return;}
+        if(context.Request.Query.TryGetValue("projectId",out var contextProject)&&Guid.TryParse(contextProject.FirstOrDefault(),out var requestedProject)&&requestedProject!=selectedBuild.ProjectId)
+        {context.Response.StatusCode=StatusCodes.Status409Conflict;await context.Response.WriteAsJsonAsync(new{error="The request addresses a different project than the active build.",code="build_project_mismatch"});return;}
+        if(context.Request.Query.TryGetValue("releaseId",out var contextRelease)&&Guid.TryParse(contextRelease.FirstOrDefault(),out var requestedRelease)&&requestedRelease!=selectedBuild.Id)
+        {context.Response.StatusCode=StatusCodes.Status409Conflict;await context.Response.WriteAsJsonAsync(new{error="The request addresses a different build than the active workspace.",code="build_context_mismatch"});return;}
+        activeBuildId=selectedBuild.Id;
+
+        var primaryMutationPrefixes=new[]{"/api/scr","/api/baseline","/api/build","/api/requirement","/api/enterprise-requirements","/api/test","/api/evidence","/api/release","/api/document","/api/trace","/api/problem-report","/api/controlled-editing","/api/edit-sessions","/api/content/images","/api/reqif","/api/publication"};
+        var unsafeBuildMutation=context.Request.Method is not ("GET" or "HEAD" or "OPTIONS" or "TRACE")
+            &&primaryMutationPrefixes.Any(prefix=>path.StartsWith(prefix,StringComparison.OrdinalIgnoreCase));
+        if(selectedBuild.IsReleased&&unsafeBuildMutation)
+        {context.Response.StatusCode=StatusCodes.Status409Conflict;await context.Response.WriteAsJsonAsync(new{error=$"Build {selectedBuild.Version} is released and read-only. Exit this workspace and select an in-work build to make changes.",code="released_build_read_only"});return;}
+    }
+
+    Guid? scopedProjectId=null;
     if(context.Request.Query.TryGetValue("projectId",out var rawProject)&&Guid.TryParse(rawProject.FirstOrDefault(),out var queryProject))scopedProjectId=queryProject;
     var segments=path.Split('/',StringSplitOptions.RemoveEmptyEntries);if(scopedProjectId is null&&segments.Length>=3&&Guid.TryParse(segments[2],out var resourceId))
     {scopedProjectId=segments[1] switch{"scrs"=>await db.SystemChangeRequests.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"baselines"=>await db.CandidateBaselines.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"builds"=>await db.SoftwareBuilds.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"requirements"=>await db.Requirements.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"documents"=>await db.ControlledDocuments.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"traceability"=>await db.CandidateBaselines.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"release-campaigns"=>await db.ReleaseCampaigns.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"test-executions"=>await db.TestExecutions.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"trace-links"=>await db.RequirementTraces.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),"evidence"=>await db.EvidenceRecords.Where(x=>x.Id==resourceId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(context.RequestAborted),_=>null};}
     if(scopedProjectId is not null&&!user.IsAdministrator){var programId=await db.Projects.Where(x=>x.Id==scopedProjectId).Select(x=>(Guid?)x.ProgramId).SingleOrDefaultAsync(context.RequestAborted);if(programId is not null&&!user.Programs.Any(x=>x.ProgramId==programId)){context.Response.StatusCode=StatusCodes.Status403Forbidden;await context.Response.WriteAsJsonAsync(new{error="You are not authorized for this Program.",code="program_scope_forbidden"});return;}}
+    if(activeBuildId is not null&&segments.Length>=3&&Guid.TryParse(segments[2],out var buildOwnedResourceId))
+    {
+        Guid? resourceBuildId=segments[1] switch{
+            "scrs"=>await db.SystemChangeRequests.Where(x=>x.Id==buildOwnedResourceId).Select(x=>(Guid?)x.TargetReleaseId).SingleOrDefaultAsync(context.RequestAborted),
+            "baselines"=>await db.CandidateBaselines.Where(x=>x.Id==buildOwnedResourceId).Select(x=>(Guid?)x.ReleaseId).SingleOrDefaultAsync(context.RequestAborted),
+            "builds"=>await db.SoftwareBuilds.Where(x=>x.Id==buildOwnedResourceId).Select(x=>(Guid?)x.ReleaseId).SingleOrDefaultAsync(context.RequestAborted),
+            "documents"=>await db.ControlledDocuments.Where(x=>x.Id==buildOwnedResourceId).Select(x=>(Guid?)x.ReleaseId).SingleOrDefaultAsync(context.RequestAborted),
+            "release-campaigns"=>await db.ReleaseCampaigns.Where(x=>x.Id==buildOwnedResourceId).Select(x=>(Guid?)x.ReleaseId).SingleOrDefaultAsync(context.RequestAborted),
+            "releases"=>await db.Releases.Where(x=>x.Id==buildOwnedResourceId).Select(x=>(Guid?)x.Id).SingleOrDefaultAsync(context.RequestAborted),
+            "verification-impact"=>await db.VerificationImpactItems.Where(x=>x.Id==buildOwnedResourceId).Select(x=>(Guid?)x.ReleaseId).SingleOrDefaultAsync(context.RequestAborted),
+            "problem-reports"=>await db.ProblemReportLinks.Where(x=>x.ProblemReportId==buildOwnedResourceId&&x.ArtifactType=="Release").Select(x=>(Guid?)x.ArtifactId).SingleOrDefaultAsync(context.RequestAborted),
+            "test-executions"=>await (from execution in db.TestExecutions.Where(x=>x.Id==buildOwnedResourceId)
+                join build in db.SoftwareBuilds on execution.SoftwareBuildId equals build.Id into buildRows
+                from build in buildRows.DefaultIfEmpty()
+                select execution.ReleaseId ?? (Guid?)build.ReleaseId).SingleOrDefaultAsync(context.RequestAborted),
+            _=>null};
+        if(resourceBuildId is not null&&resourceBuildId!=activeBuildId)
+        {context.Response.StatusCode=StatusCodes.Status409Conflict;await context.Response.WriteAsJsonAsync(new{error="This controlled record belongs to a different build. Exit the workspace and select that build explicitly.",code="cross_build_resource"});return;}
+    }
     await next();
 });
 

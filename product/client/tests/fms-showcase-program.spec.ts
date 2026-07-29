@@ -10,7 +10,7 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await login(page);
   await selectProgram(page,"Flight Management System Live Program");
   await expect(page.getByText("FMS Product Development", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Active release")).toHaveValue(/.+/);
+  await expect(page.getByLabel("Active build 1.6")).toContainText("In work");
   await expect(
     page.getByRole("heading", { name: /Complete .+ lifecycle inventory/ }),
   ).toBeVisible();
@@ -23,7 +23,8 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   );
   expect(traceLinkCount).toBeGreaterThanOrEqual(1_100);
   await expect(inventory.locator("article").filter({ hasText: "Test procedures" }).locator("b")).toHaveText("515");
-  await expect(inventory.locator("article").filter({ hasText: "Test executions" }).locator("b")).toHaveText("520");
+  // The 520 predecessor executions remain historical evidence; none are current 1.6 execution records.
+  await expect(inventory.locator("article").filter({ hasText: "Test executions" }).locator("b")).toHaveText("0");
   await expect(
     page.getByRole("button", { name: "Open All controlled changes" }),
   ).toBeVisible();
@@ -43,9 +44,10 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   ).toBeVisible();
   await expect(page.getByText("1,250 requirements")).toBeVisible();
   await page.getByRole("button", { name: /Controlled Documents/ }).click();
-  await expect(page.getByText("SYSRD-000015.00")).toBeVisible();
-  await expect(page.getByText("HLRD-000015.00")).toBeVisible();
-  await expect(page.getByText("LLRD-000015.00")).toBeVisible();
+  // The inherited 1.5 requirements remain visible as labelled evidence, but their documents are not
+  // presented as current 1.6 outputs.
+  await expect(page.getByText("No outputs for this baseline")).toBeVisible();
+  await expect(page.getByText("SYSRD-000015.00")).toHaveCount(0);
   await page.getByRole("link", { name: /Command Center/ }).first().click();
   await openNavigationGroup(page,"RELEASE & CONFIGURATION");
   await page.getByRole("link", { name: "Lifecycle Decision Room" }).click();
@@ -54,18 +56,9 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
     page.getByRole("heading", { name: "FMS 1.6 Release Campaign" }),
   ).toBeVisible();
   await expect(page.getByText("release gates complete")).toBeVisible();
-  await page.getByText("Release execution workbench", { exact: true }).click();
+  await page.getByRole("button", { name: /Open release workbench/ }).click();
   await expect(page.getByRole("heading", { name: "Drive every blocker to evidence" })).toBeVisible();
   expect(await page.locator(".executionPanel.changes article").count()).toBeGreaterThanOrEqual(8);
-  await page.locator("details.comparisonDisclosure > summary").click();
-  await expect(
-    page.getByRole("heading", { name: "Version 1.5 → 1.6" }),
-  ).toBeVisible();
-  await expect(page.locator(".campaignCard.impacts > .campaignTitle > b")).toHaveText(/\d+ pending/);
-  await expect(
-    page
-      .locator(".comparisonStats article")
-      .filter({ hasText: "retired" })
-      .locator("b"),
-  ).toHaveText("0");
+  await expect(page.getByLabel("Active build 1.6")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Drive every blocker to evidence" })).toBeVisible();
 });

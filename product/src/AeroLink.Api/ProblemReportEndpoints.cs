@@ -34,13 +34,18 @@ public static class ProblemReportEndpoints
     private static async Task<IResult> CreateAsync(CreateProblemReportRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.TestEngineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+        if (request.ReleaseId is not null && !await db.Releases.AnyAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct))
+            return Results.BadRequest(new { error = "The selected build does not belong to this project." });
         await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         try
         {
             var now = DateTimeOffset.UtcNow; var actor = http.UserAccount();
             var item = new ProblemReport(request.ProjectId, await IdentifierAllocator.NextProblemReportAsync(db, ct), request.Title, request.Problem, request.Analysis ?? "", actor.UserName, now,
                 request.Classification ?? "Software anomaly", request.Severity ?? ProblemReportSeverity.Major, request.Priority ?? ProblemReportPriority.Normal, request.Origin ?? "Manual report", request.AffectedConfiguration ?? "");
-            db.ProblemReports.Add(item); AddRevision(db, item, "ProblemReportCreated", actor.UserName, now);
+            db.ProblemReports.Add(item);
+            if (request.ReleaseId is not null)
+                db.ProblemReportLinks.Add(new ProblemReportLink(item.Id, "Release", request.ReleaseId.Value, "BuildScope", actor.UserName, now));
+            AddRevision(db, item, "ProblemReportCreated", actor.UserName, now);
             await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
             return Results.Created($"/api/problem-reports/{item.Id}", Detail(item, [], []));
         }
@@ -61,7 +66,15 @@ public static class ProblemReportEndpoints
             var item = new ProblemReport(execution.ProjectId, await IdentifierAllocator.NextProblemReportAsync(db, ct), request.Title ?? $"Failed execution {execution.Id.ToString()[..8]}", request.Problem ?? execution.Determination,
                 request.Analysis ?? "Created from failed verification execution.", actor.UserName, now, request.Classification ?? "Verification failure", request.Severity ?? ProblemReportSeverity.Major,
                 request.Priority ?? ProblemReportPriority.High, "Test execution", request.AffectedConfiguration ?? execution.Configuration);
+            var executionReleaseId = await db.SoftwareBuilds.AsNoTracking().Where(x => x.Id == execution.SoftwareBuildId).Select(x => (Guid?)x.ReleaseId).SingleOrDefaultAsync(ct);
+            // A current build may own corrective work raised from predecessor evidence. The execution link
+            // retains the historical origin; an explicit selected build owns the new problem report.
+            var releaseId = request.ReleaseId ?? executionReleaseId;
+            if (releaseId is not null && !await db.Releases.AnyAsync(x => x.Id == releaseId && x.ProjectId == execution.ProjectId, ct))
+                return Results.BadRequest(new { error = "The selected build does not belong to this project." });
             db.ProblemReports.Add(item); db.ProblemReportLinks.Add(new ProblemReportLink(item.Id, "TestExecution", execution.Id, "OriginatingFailure", actor.UserName, now));
+            if (releaseId is not null)
+                db.ProblemReportLinks.Add(new ProblemReportLink(item.Id, "Release", releaseId.Value, "BuildScope", actor.UserName, now));
             AddRevision(db, item, "ProblemReportCreatedFromFailedExecution", actor.UserName, now);
             await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
             return Results.Created($"/api/problem-reports/{item.Id}", Detail(item, [new ProblemReportLinkView("TestExecution", execution.Id, "OriginatingFailure", actor.UserName, now)], []));
@@ -70,10 +83,12 @@ public static class ProblemReportEndpoints
         catch (DbUpdateException) { return Results.Conflict(new { error = "A problem report number was allocated concurrently. Retry the create request.", code = "number_allocation_conflict" }); }
     }
 
-    private static async Task<IResult> ListAsync(Guid projectId, string? search, ProblemReportState? state, ProblemReportSeverity? severity, bool? blockersOnly, int? page, int? pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(Guid projectId, Guid? releaseId, string? search, ProblemReportState? state, ProblemReportSeverity? severity, bool? blockersOnly, int? page, int? pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var query = db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId);
+        if (releaseId is not null)
+            query = query.Where(x => db.ProblemReportLinks.Any(link => link.ProblemReportId == x.Id && link.ArtifactType == "Release" && link.ArtifactId == releaseId));
         if (state is not null) query = query.Where(x => x.State == state);
         if (severity is not null) query = query.Where(x => x.Severity == severity);
         if (blockersOnly == true) query = query.Where(x => x.IsReleaseBlocker && string.IsNullOrEmpty(x.WaiverRationale));
@@ -83,10 +98,13 @@ public static class ProblemReportEndpoints
         return Results.Ok(new { page = current, pageSize = size, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)size), items = items.Select(Summary) });
     }
 
-    private static async Task<IResult> DashboardAsync(Guid projectId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> DashboardAsync(Guid projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
-        var reports = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var query = db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId);
+        if (releaseId is not null)
+            query = query.Where(x => db.ProblemReportLinks.Any(link => link.ProblemReportId == x.Id && link.ArtifactType == "Release" && link.ArtifactId == releaseId));
+        var reports = await query.ToListAsync(ct);
         var active = reports.Where(x => x.State is ProblemReportState.Open or ProblemReportState.Investigating or ProblemReportState.ResolutionProposed or ProblemReportState.AwaitingClosureApproval).ToList();
         return Results.Ok(new
         {
@@ -317,8 +335,8 @@ public static class ProblemReportEndpoints
     }
 
     private sealed record ProblemReportLinkView(string ArtifactType, Guid ArtifactId, string Relationship, string AddedBy, DateTimeOffset AddedAt);
-    private sealed record CreateProblemReportRequest(Guid ProjectId, string Title, string Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? Origin, string? AffectedConfiguration);
-    private sealed record CreateProblemReportFromExecutionRequest(string? Title, string? Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? AffectedConfiguration);
+    private sealed record CreateProblemReportRequest(Guid ProjectId, Guid? ReleaseId, string Title, string Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? Origin, string? AffectedConfiguration);
+    private sealed record CreateProblemReportFromExecutionRequest(Guid? ReleaseId, string? Title, string? Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? AffectedConfiguration);
     private sealed record InvestigationRequest(long? ExpectedVersion, string Analysis, string? RootCause, string? Effects, string? Containment);
     private sealed record ResolutionRequest(long? ExpectedVersion, string CorrectiveAction);
     private sealed record VerificationRequest(long? ExpectedVersion, Guid TestExecutionId);

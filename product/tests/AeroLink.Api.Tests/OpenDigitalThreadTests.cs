@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -51,7 +52,8 @@ public sealed class OpenDigitalThreadTests
     public async Task ReqIf_export_can_be_downloaded_and_revalidated_as_an_import_preview()
     {
         using var factory=new AeroLinkApiFactory();using var client=factory.CreateClient();await BootstrapAndLoginAsync(client);await SecurityBoundaryTests.AuthorizeMutationsAsync(client);var projectId=await CreateProjectAsync(factory);
-        using var exported=await client.PostAsJsonAsync("/api/reqif/exports",new{projectId});Assert.Equal(HttpStatusCode.Created,exported.StatusCode);var exportBody=await exported.Content.ReadFromJsonAsync<JsonElement>();var downloadUrl=exportBody.GetProperty("downloadUrl").GetString();
+        using var scope=factory.Services.CreateScope();var releaseId=await scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>().Releases.Where(x=>x.ProjectId==projectId).Select(x=>x.Id).SingleAsync();
+        using var exported=await client.PostAsJsonAsync("/api/reqif/exports",new{projectId,releaseId});Assert.Equal(HttpStatusCode.Created,exported.StatusCode);var exportBody=await exported.Content.ReadFromJsonAsync<JsonElement>();var downloadUrl=exportBody.GetProperty("downloadUrl").GetString();
         var package=await client.GetByteArrayAsync(downloadUrl);Assert.True(package.Length>100);
         using var form=new MultipartFormDataContent();form.Add(new ByteArrayContent(package),"file","round-trip.reqifz");using var preview=await client.PostAsync($"/api/reqif/imports/preview?projectId={projectId}",form);Assert.Equal(HttpStatusCode.OK,preview.StatusCode);var body=await preview.Content.ReadFromJsonAsync<JsonElement>();Assert.Equal("1.0",body.GetProperty("preview").GetProperty("reqIfVersion").GetString());Assert.Equal("Preview",body.GetProperty("job").GetProperty("state").GetString());Assert.Contains("No requirements",body.GetProperty("preview").GetProperty("warnings")[0].GetString());
     }
@@ -63,5 +65,5 @@ public sealed class OpenDigitalThreadTests
     }
 
     private static async Task<Guid> CreateProjectAsync(AeroLinkApiFactory factory)
-    {using var scope=factory.Services.CreateScope();var db=scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();var program=new ProgramRecord("Connected Program","CONN");var project=new ProjectRecord(program.Id,"Connected Product","Connected Product");db.AddRange(program,project);await db.SaveChangesAsync();return project.Id;}
+    {using var scope=factory.Services.CreateScope();var db=scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();var program=new ProgramRecord("Connected Program","CONN");var project=new ProjectRecord(program.Id,"Connected Product","Connected Product");var release=new SoftwareRelease(project.Id,"1.0",false);db.AddRange(program,project,release);await db.SaveChangesAsync();return project.Id;}
 }

@@ -413,8 +413,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("test_executions"); b.HasKey(x => x.Id); b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.ExecutedBy).HasMaxLength(100).IsRequired(); b.Property(x => x.Configuration).HasMaxLength(4000);
             b.Property(x => x.Determination).HasMaxLength(8000).IsRequired(); b.Property(x => x.EvidenceReference).HasMaxLength(2000);
-            b.HasIndex(x => new { x.ProjectId, x.ExecutedAt }); b.HasIndex(x => x.ProcedureRevisionId); b.HasIndex(x => x.SoftwareBuildId);
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.ExecutedAt }); b.HasIndex(x => x.ProcedureRevisionId); b.HasIndex(x => x.SoftwareBuildId);
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SoftwareBuild>().WithMany().HasForeignKey(x => x.SoftwareBuildId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<TestExecution>().WithMany().HasForeignKey(x => x.RetestOfExecutionId).OnDelete(DeleteBehavior.Restrict);
@@ -835,7 +836,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         foreach(var entry in ChangeTracker.Entries<SoftwareBuild>().Where(x=>x.State is EntityState.Added or EntityState.Modified))
             pending.Add((entry.Entity.ProjectId,entry.State==EntityState.Added?"aerolink.software-build.recorded":"aerolink.software-build.changed","SoftwareBuild",entry.Entity.Id,new{entry.Entity.BuildNumber,state=entry.Entity.State.ToString(),entry.Entity.ReleaseId,entry.Entity.BaselineId},entry.Entity.RecordedBy));
         foreach(var entry in ChangeTracker.Entries<TestExecution>().Where(x=>x.State==EntityState.Added))
-            pending.Add((entry.Entity.ProjectId,"aerolink.test-execution.recorded","TestExecution",entry.Entity.Id,new{outcome=entry.Entity.Outcome.ToString(),entry.Entity.ProcedureRevisionId,entry.Entity.SoftwareBuildId,entry.Entity.RetestOfExecutionId,entry.Entity.ExecutedAt},entry.Entity.ExecutedBy));
+            pending.Add((entry.Entity.ProjectId,"aerolink.test-execution.recorded","TestExecution",entry.Entity.Id,new{outcome=entry.Entity.Outcome.ToString(),entry.Entity.ReleaseId,entry.Entity.ProcedureRevisionId,entry.Entity.SoftwareBuildId,entry.Entity.RetestOfExecutionId,entry.Entity.ExecutedAt},entry.Entity.ExecutedBy));
         if(pending.Count==0)return;
         var projectIds=pending.Select(x=>x.ProjectId).Distinct().ToList();
         var subscriptions=await WebhookSubscriptions.AsNoTracking().Where(x=>projectIds.Contains(x.ProjectId)&&x.IsEnabled).ToListAsync(ct);

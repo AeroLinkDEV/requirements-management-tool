@@ -147,19 +147,20 @@ public sealed class TestExecution
     private TestExecution() { }
     public TestExecution(Guid projectId, Guid procedureRevisionId, Guid? softwareBuildId, Guid? retestOfExecutionId,
         TestOutcome outcome, string executedBy, string configuration, string determination, string evidenceReference,
-        DateTimeOffset executedAt, DateTimeOffset recordedAt)
+        DateTimeOffset executedAt, DateTimeOffset recordedAt, Guid? releaseId = null)
     {
         if (string.IsNullOrWhiteSpace(executedBy)) throw new DomainException("The person making the result determination is required.");
         if (string.IsNullOrWhiteSpace(determination)) throw new DomainException("A human result determination is required.");
         if (outcome != TestOutcome.Blocked && string.IsNullOrWhiteSpace(evidenceReference))
             throw new DomainException("Pass and Fail results require an evidence reference.");
-        Id = Guid.NewGuid(); ProjectId = projectId; ProcedureRevisionId = procedureRevisionId;
+        Id = Guid.NewGuid(); ProjectId = projectId; ReleaseId = releaseId; ProcedureRevisionId = procedureRevisionId;
         SoftwareBuildId = softwareBuildId; RetestOfExecutionId = retestOfExecutionId; Outcome = outcome;
         ExecutedBy = executedBy.Trim(); Configuration = configuration.Trim(); Determination = determination.Trim();
         EvidenceReference = evidenceReference.Trim(); ExecutedAt = executedAt; RecordedAt = recordedAt;
     }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
+    public Guid? ReleaseId { get; private set; }
     public Guid ProcedureRevisionId { get; private set; }
     public Guid? SoftwareBuildId { get; private set; }
     public Guid? RetestOfExecutionId { get; private set; }

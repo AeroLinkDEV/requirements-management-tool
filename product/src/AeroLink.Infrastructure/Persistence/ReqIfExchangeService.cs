@@ -23,12 +23,19 @@ public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore
     private const long MaxExpandedBytes = 150L * 1024 * 1024;
     private const int MaxEntries = 5000;
 
-    public async Task<ReqIfExportResult> ExportAsync(Guid projectId, string actor, DateTimeOffset now, CancellationToken ct)
+    public async Task<ReqIfExportResult> ExportAsync(Guid projectId, Guid? baselineId, string actor, DateTimeOffset now, CancellationToken ct)
     {
-        var artifacts = await db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId).OrderBy(x => x.BaseNumber).ToListAsync(ct);
+        var selectedMembers = baselineId is null
+            ? null
+            : await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId).ToListAsync(ct);
+        var selectedArtifactIds = selectedMembers?.Select(x => x.ArtifactId).ToHashSet();
+        var selectedRevisionIds = selectedMembers?.Select(x => x.RevisionId).ToHashSet();
+        var artifacts = await db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && (selectedArtifactIds == null || selectedArtifactIds.Contains(x.Id))).OrderBy(x => x.BaseNumber).ToListAsync(ct);
         var artifactIds = artifacts.Select(x => x.Id).ToList();
-        var allRevisions = await db.RequirementRevisions.AsNoTracking().Where(x => artifactIds.Contains(x.ArtifactId)).ToListAsync(ct);
-        var revisions = allRevisions.GroupBy(x => x.ArtifactId).Select(x => x.OrderByDescending(r => r.Revision).First()).ToList();
+        var allRevisions = await db.RequirementRevisions.AsNoTracking().Where(x => artifactIds.Contains(x.ArtifactId) && (selectedRevisionIds == null || selectedRevisionIds.Contains(x.Id))).ToListAsync(ct);
+        var revisions = selectedRevisionIds is null
+            ? allRevisions.GroupBy(x => x.ArtifactId).Select(x => x.OrderByDescending(r => r.Revision).First()).ToList()
+            : allRevisions;
         var revisionIds = revisions.Select(x => x.Id).ToList();
         var revisionArtifactIds = revisions.Select(x => x.ArtifactId).ToHashSet();
         var profiles = await db.RequirementRevisionProfiles.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId)).ToDictionaryAsync(x => x.RevisionId, ct);
@@ -56,7 +63,7 @@ public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore
             }
             var manifestEntry = zip.CreateEntry("aerolink-manifest.json", CompressionLevel.Optimal);
             await using var manifestTarget = manifestEntry.Open();
-            await JsonSerializer.SerializeAsync(manifestTarget, new { format = "ReqIF 1.2", projectId, generatedAt = now, requirements = revisions.Count, hierarchyNodes = exportedNodeCount, relations = traces.Count, attachments = attachments.Count, sha256 = attachments.ToDictionary(x => AttachmentPath(x), x => x.Sha256) }, cancellationToken: ct);
+            await JsonSerializer.SerializeAsync(manifestTarget, new { format = "ReqIF 1.2", projectId, baselineId, generatedAt = now, requirements = revisions.Count, hierarchyNodes = exportedNodeCount, relations = traces.Count, attachments = attachments.Count, sha256 = attachments.ToDictionary(x => AttachmentPath(x), x => x.Sha256) }, cancellationToken: ct);
         }
         package.Position = 0;
         var fileName = $"aerolink-{projectId:N}-{now:yyyyMMddHHmmss}.reqifz";

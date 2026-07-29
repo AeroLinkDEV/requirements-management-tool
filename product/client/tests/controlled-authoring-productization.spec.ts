@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { APIRequestContext, Page } from '@playwright/test'
-import { apiBase, apiLogin, login, openNavigationGroup } from './auth'
+import { apiBase, apiLogin, login, openNavigationGroup, selectProgram as enterProgram } from './auth'
 
 async function createWorkspace(request:APIRequestContext,prefix:string){
   await apiLogin(request)
@@ -12,7 +12,7 @@ async function createWorkspace(request:APIRequestContext,prefix:string){
 
 async function selectProgram(page:Page,programName:string){
   await login(page)
-  await page.locator('.program > select:not(.releaseSelector)').selectOption({label:programName})
+  await enterProgram(page,programName)
 }
 
 async function openPageFromPalette(page:Page,label:string){

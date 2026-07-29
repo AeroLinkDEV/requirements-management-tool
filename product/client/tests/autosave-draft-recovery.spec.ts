@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, login, openNavigationGroup } from './auth'
+import { apiBase, login, openNavigationGroup, selectProgram } from './auth'
 
 /**
  * Autosave protects typing, never the record. What is asserted here is that work survives a reload without
@@ -20,8 +20,7 @@ test('unfinished authoring survives a reload, is offered rather than applied, an
   })
   expect(created.ok(), await created.text()).toBeTruthy()
   const workspace = await created.json()
-  await page.reload()
-  await page.locator('.program > select:not(.releaseSelector)').selectOption({ label: programName })
+  await selectProgram(page, programName)
 
   const openAuthoring = async () => {
     await openNavigationGroup(page, 'ENGINEERING')

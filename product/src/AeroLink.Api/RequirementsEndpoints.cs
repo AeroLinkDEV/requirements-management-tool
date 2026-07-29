@@ -62,7 +62,7 @@ public static class RequirementsEndpoints
 
         // Enterprise Requirements Workspace: configurable schemas, structured specifications,
         // collaboration, saved views, governed bulk operations, redlines, and onboarding.
-        app.MapGet("/api/enterprise-requirements/workspace", async (Guid projectId, Guid? specificationId, Guid? sectionId, string? search, string? level, string? verification, string? tag,string? state,string? owner,string? sourceScr,Guid? baselineId,bool? openComments,string? coverageState,string? sort,int page, int pageSize,
+        app.MapGet("/api/enterprise-requirements/workspace", async (Guid projectId, Guid? releaseId, Guid? specificationId, Guid? sectionId, string? search, string? level, string? verification, string? tag,string? state,string? owner,string? sourceScr,Guid? baselineId,bool? openComments,string? coverageState,string? sort,int page, int pageSize,
             HttpContext http, AeroLinkDbContext db, EnterpriseRequirementsService enterprise, CancellationToken ct) =>
         {
             if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
@@ -86,10 +86,16 @@ public static class RequirementsEndpoints
             // headings were rendered as labels with counts beside them and could not be acted on, so a reader
             // could see that a section held forty requirements and had no way to see which forty.
             if(sectionId is not null)artifacts=artifacts.Where(x=>db.SpecificationNodes.Any(n=>n.ParentId==sectionId&&n.RequirementArtifactId==x.Id));
-            var current=from artifact in artifacts
-                        join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId
-                        where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)
-                        select new{artifact,revision};
+            var effectiveBaselineId=baselineId??(releaseId is null?null:await BuildScope.EffectiveBaselineAsync(db,projectId,releaseId.Value,ct));
+            var current=effectiveBaselineId is not null
+                ? from artifact in artifacts
+                  join member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==effectiveBaselineId) on artifact.Id equals member.ArtifactId
+                  join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id
+                  select new{artifact,revision}
+                : from artifact in artifacts
+                  join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId
+                  where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)
+                  select new{artifact,revision};
             if(!string.IsNullOrWhiteSpace(search)){var q=search.Trim().ToLower();current=current.Where(x=>x.artifact.BaseNumber.ToLower().Contains(q)||x.revision.Statement.ToLower().Contains(q)||x.revision.Rationale.ToLower().Contains(q));}
             if(!string.IsNullOrWhiteSpace(verification)){var v=verification.Trim().ToLower();current=current.Where(x=>x.revision.VerificationMethod.ToLower()==v);}
             // Exact tag membership against the normalized index, not a substring of the serialized array —
@@ -126,18 +132,25 @@ public static class RequirementsEndpoints
             var specificationIds=specificationRows.Select(x=>x.Id).ToList();var sectionRows=await db.SpecificationNodes.AsNoTracking().Where(n=>specificationIds.Contains(n.SpecificationId)&&n.Type==SpecificationNodeType.Section).OrderBy(n=>n.Position).Select(n=>new{n.Id,n.SpecificationId,n.Heading,n.Position,count=db.SpecificationNodes.Count(c=>c.ParentId==n.Id)}).ToListAsync(ct);
             var specifications=specificationRows.Select(x=>new{x.Id,x.DocumentNumber,x.Title,x.Level,x.Description,x.nodeCount,sections=sectionRows.Where(s=>s.SpecificationId==x.Id).Select(s=>new{s.Id,s.Heading,s.Position,s.count})}).ToList();
             var views=await db.SavedRequirementViews.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.OwnerId==http.UserAccount().Id||x.IsShared)).OrderBy(x=>x.Name).Select(x=>new{x.Id,x.Name,x.QueryJson,x.ColumnsJson,x.IsShared,owned=x.OwnerId==http.UserAccount().Id}).ToListAsync(ct);
-            timer.Stop();return Results.Ok(new{page,pageSize,totalCount=total,totalPages=(int)Math.Ceiling(total/(double)pageSize),queryElapsedMs=timer.ElapsedMilliseconds,schemas,specifications,views,items=rows.Select(x=>{profiles.TryGetValue(x.revisionId,out var profile);commentCounts.TryGetValue(x.Id,out var comments);return new{x.Id,x.BaseNumber,displayNumber=$"{x.BaseNumber}.{x.Revision:D2}",x.level,x.revisionId,x.Revision,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceScrId,x.CreatedAt,richText=profile?.RichText??x.Statement,attributesJson=profile?.AttributesJson??"{}",tagsJson=profile?.TagsJson??"[]",commentCount=comments?.Count??0,openCommentCount=comments?.Open??0,coverageState=coverageStates.TryGetValue(x.revisionId,out var rowCoverage)?rowCoverage:RequirementCoverageState.Uncovered};})});
+            var build=releaseId is null?null:await db.Releases.AsNoTracking().Where(x=>x.Id==releaseId&&x.ProjectId==projectId).Select(x=>new{x.Id,x.Version,x.IsReleased}).SingleOrDefaultAsync(ct);
+            timer.Stop();return Results.Ok(new{page,pageSize,totalCount=total,totalPages=(int)Math.Ceiling(total/(double)pageSize),queryElapsedMs=timer.ElapsedMilliseconds,effectiveBaselineId,build,schemas,specifications,views,items=rows.Select(x=>{profiles.TryGetValue(x.revisionId,out var profile);commentCounts.TryGetValue(x.Id,out var comments);return new{x.Id,x.BaseNumber,displayNumber=$"{x.BaseNumber}.{x.Revision:D2}",x.level,x.revisionId,x.Revision,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceScrId,x.CreatedAt,richText=profile?.RichText??x.Statement,attributesJson=profile?.AttributesJson??"{}",tagsJson=profile?.TagsJson??"[]",commentCount=comments?.Count??0,openCommentCount=comments?.Open??0,coverageState=coverageStates.TryGetValue(x.revisionId,out var rowCoverage)?rowCoverage:RequirementCoverageState.Uncovered};})});
         });
 
-        app.MapGet("/api/enterprise-requirements/{artifactId:guid}", async (Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
+        app.MapGet("/api/enterprise-requirements/{artifactId:guid}", async (Guid artifactId,Guid? releaseId,HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
         {
             var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();
             if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();
-            var history=await (from r in db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId) join s in db.SystemChangeRequests.AsNoTracking() on r.SourceScrId equals s.Id orderby r.Revision descending select new{r.Id,r.Revision,displayNumber=artifact.BaseNumber+"."+(r.Revision<10?"0":"")+r.Revision,r.Statement,r.Rationale,r.VerificationMethod,state=r.State.ToString(),r.SourceScrId,sourceScr=s.BaseNumber+"."+(s.Revision<10?"0":"")+s.Revision,r.CreatedAt}).ToListAsync(ct);
+            var effectiveBaselineId=releaseId is null?null:await BuildScope.EffectiveBaselineAsync(db,artifact.ProjectId,releaseId.Value,ct);
+            if(releaseId is not null&&(effectiveBaselineId is null||!await db.BaselineRequirements.AnyAsync(x=>x.BaselineId==effectiveBaselineId&&x.ArtifactId==artifactId,ct)))return Results.NotFound(new{error="This requirement is not primary content in the active build.",code="cross_build_requirement"});
+            var history=await (from r in db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId)
+                               join s in db.SystemChangeRequests.AsNoTracking() on r.SourceScrId equals s.Id
+                               join b in db.CandidateBaselines.AsNoTracking() on r.EffectiveBaselineId equals b.Id
+                               join release in db.Releases.AsNoTracking() on b.ReleaseId equals release.Id
+                               orderby r.Revision descending select new{r.Id,r.Revision,displayNumber=artifact.BaseNumber+"."+(r.Revision<10?"0":"")+r.Revision,r.Statement,r.Rationale,r.VerificationMethod,state=r.State.ToString(),r.SourceScrId,sourceScr=s.BaseNumber+"."+(s.Revision<10?"0":"")+s.Revision,r.CreatedAt,originBuild=release.Version,isHistorical=releaseId!=null&&release.Id!=releaseId}).ToListAsync(ct);
             var revisionIds=history.Select(x=>x.Id).ToList();var profiles=await db.RequirementRevisionProfiles.AsNoTracking().Where(x=>revisionIds.Contains(x.RevisionId)).ToListAsync(ct);
             var placements=await (from n in db.SpecificationNodes.AsNoTracking().Where(x=>x.RequirementArtifactId==artifactId) join spec in db.RequirementSpecifications.AsNoTracking() on n.SpecificationId equals spec.Id join parent in db.SpecificationNodes.AsNoTracking() on n.ParentId equals parent.Id select new{spec.Id,spec.DocumentNumber,spec.Title,section=parent.Heading,n.Position}).ToListAsync(ct);
             var traces=await db.RequirementTraces.AsNoTracking().CountAsync(x=>revisionIds.Contains(x.SourceRevisionId)||revisionIds.Contains(x.TargetRevisionId),ct);var tests=await db.TestCoverage.AsNoTracking().CountAsync(x=>revisionIds.Contains(x.RequirementRevisionId),ct);
-            return Results.Ok(new{artifact.Id,artifact.BaseNumber,level=artifact.Level.ToString(),history=history.Select(x=>new{x.Id,x.Revision,x.displayNumber,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceScrId,x.sourceScr,x.CreatedAt,richText=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.RichText,attributesJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.AttributesJson??"{}",tagsJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.TagsJson??"[]"}),placements,traceCount=traces,testCoverageCount=tests});
+            return Results.Ok(new{artifact.Id,artifact.BaseNumber,level=artifact.Level.ToString(),activeBuildId=releaseId,effectiveBaselineId,history=history.Select(x=>new{x.Id,x.Revision,x.displayNumber,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceScrId,x.sourceScr,x.CreatedAt,x.originBuild,x.isHistorical,richText=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.RichText,attributesJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.AttributesJson??"{}",tagsJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.TagsJson??"[]"}),placements,traceCount=traces,testCoverageCount=tests});
         });
 
         app.MapGet("/api/enterprise-requirements/{artifactId:guid}/redline",async(Guid artifactId,Guid fromRevisionId,Guid toRevisionId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
@@ -389,4 +402,5 @@ public static class RequirementsEndpoints
             return Results.File(store.OpenRead(item.StorageKey),item.ContentType,enableRangeProcessing:true);
         });
     }
+
 }

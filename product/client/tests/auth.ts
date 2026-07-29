@@ -19,6 +19,8 @@ export async function login(page:Page,userName='admin',options:{openProject?:boo
   await expect(page.getByRole('heading',{name:/Create your first program|Projects/})).toBeVisible()
   if(options.openProject!==false&&await page.getByRole('heading',{name:'Projects'}).count()){
     await page.getByRole('link',{name:'Open FMS Product Development'}).click()
+    await expect(page.getByRole('heading',{name:'Software Builds'})).toBeVisible()
+    await page.getByRole('button',{name:'Open build 1.6'}).click()
     await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
   }
 }
@@ -38,17 +40,20 @@ export async function showcaseSeed(request:APIRequestContext){
   return cachedShowcase
 }
 export async function selectProgram(page:Page,label:string){
-  const accessibleSelector=page.getByRole('combobox',{name:'Active program'})
-  const legacySelector=page.locator('.program > select:not(.releaseSelector)')
-  const activeProgram=page.locator('.activeProgram')
-  await expect.poll(async()=>{
-    const selector=await accessibleSelector.count()?accessibleSelector:legacySelector
-    if(await selector.count())return (await selector.locator('option').allTextContents()).includes(label)
-    return (await activeProgram.textContent())?.trim()===label
-  },{message:`Wait for Program context "${label}"`,timeout:30_000}).toBe(true)
-  const selector=await accessibleSelector.count()?accessibleSelector:legacySelector
-  if(await selector.count())await selector.selectOption({label})
-  else await expect(activeProgram).toHaveText(label)
+  const response=await page.request.get(`${apiBase}/api/workspaces`)
+  const body=await response.text()
+  expect(response.ok(),body).toBeTruthy()
+  const workspaces=JSON.parse(body) as {
+    program:{id:string;name:string};
+    projects:{project:{id:string};releases:{id:string;isReleased:boolean}[]}[]
+  }[]
+  const workspace=workspaces.find(item=>item.program.name===label)
+  expect(workspace,`Program context "${label}"`).toBeTruthy()
+  const project=workspace!.projects[0]
+  const release=project?.releases.find(item=>!item.isReleased)??project?.releases[0]
+  expect(project&&release,`Build workspace for "${label}"`).toBeTruthy()
+  await page.goto(`/programs/${workspace!.program.id}/projects/${project.project.id}/releases/${release!.id}/command-center`)
+  await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
 }
 export async function openNavigationGroup(page:Page,name:string){
   const currentName:{[key:string]:string}={

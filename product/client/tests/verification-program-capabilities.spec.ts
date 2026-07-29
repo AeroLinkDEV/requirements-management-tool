@@ -46,10 +46,19 @@ test('verification actions follow authority in the selected Program',async({page
     }
     const requirementsResponse=await request.get(`${apiBase}/api/requirements?projectId=${workspace.project.id}&baselineId=${baseline.id}&scope=System&includeRetired=false&page=1&pageSize=10`)
     expect(requirementsResponse.ok(),await requirementsResponse.text()).toBeTruthy()
-    return (await requirementsResponse.json()).items[0].revisionId as string
+    const requirementRevisionId=(await requirementsResponse.json()).items[0].revisionId as string
+    const buildResponse=await request.post(`${apiBase}/api/builds`,{data:{
+      projectId:workspace.project.id,
+      releaseId:workspace.release.id,
+      baselineId:baseline.id,
+      buildNumber:`${label.replaceAll(' ','-')}-${suffix}`,
+      description:`${label} verification fixture`,
+    }})
+    expect(buildResponse.ok(),await buildResponse.text()).toBeTruthy()
+    return {requirementRevisionId,buildId:(await buildResponse.json()).id as string}
   }
-  const testRequirementId=await prepareExactRequirement(testWorkspace,'Test authority')
-  const approvalRequirementId=await prepareExactRequirement(approvalWorkspace,'Approval authority')
+  const testTarget=await prepareExactRequirement(testWorkspace,'Test authority')
+  const approvalTarget=await prepareExactRequirement(approvalWorkspace,'Approval authority')
 
   const usersResponse=await request.get(`${apiBase}/api/admin/users`)
   expect(usersResponse.ok(),await usersResponse.text()).toBeTruthy()
@@ -103,14 +112,14 @@ test('verification actions follow authority in the selected Program',async({page
     }
     return created
   }
-  const testProcedure=await createProcedure(testWorkspace.project.id,testRequirementId,'Test-authority approved procedure')
-  const approvalProcedure=await createProcedure(approvalWorkspace.project.id,approvalRequirementId,'Approval-only approved procedure')
-  await createProcedure(approvalWorkspace.project.id,approvalRequirementId,'Approval-only draft procedure',false)
-  for(const [workspace,procedure] of [[testWorkspace,testProcedure],[approvalWorkspace,approvalProcedure]]){
+  const testProcedure=await createProcedure(testWorkspace.project.id,testTarget.requirementRevisionId,'Test-authority approved procedure')
+  const approvalProcedure=await createProcedure(approvalWorkspace.project.id,approvalTarget.requirementRevisionId,'Approval-only approved procedure')
+  await createProcedure(approvalWorkspace.project.id,approvalTarget.requirementRevisionId,'Approval-only draft procedure',false)
+  for(const [workspace,procedure,buildId] of [[testWorkspace,testProcedure,testTarget.buildId],[approvalWorkspace,approvalProcedure,approvalTarget.buildId]]){
     const recorded=await request.post(`${apiBase}/api/test-executions`,{data:{
       projectId:workspace.project.id,
       procedureRevisionId:procedure.revisionId,
-      softwareBuildId:null,
+      softwareBuildId:buildId,
       retestOfExecutionId:null,
       outcome:'Pass',
       executedBy:'ignored-client-identity',
@@ -137,10 +146,9 @@ test('verification actions follow authority in the selected Program',async({page
   await page.getByLabel('Password').fill(rotatedPassword)
   await page.getByRole('button',{name:/Sign in securely/}).click()
   await expect(page.getByRole('heading',{name:'Projects'})).toBeVisible()
-  await page.getByRole('link',{name:'Open FMS Product Development'}).click()
+  await page.goto(`/programs/${testWorkspace.program.id}/projects/${testWorkspace.project.id}/releases/${testWorkspace.release.id}/command-center`)
   await expect(page.getByRole('heading',{name:/Command Center/})).toBeVisible()
 
-  await page.getByLabel('Active program').selectOption({label:`Test Authority ${suffix}`})
   await openNavigationGroup(page,'VERIFICATION')
   await page.getByRole('link',{name:'System Verification'}).click()
   await expect(page.getByRole('heading',{name:'Verification & Evidence'})).toBeVisible()
@@ -157,7 +165,8 @@ test('verification actions follow authority in the selected Program',async({page
   await page.getByRole('button',{name:/Execution history/}).click()
   await expect(page.getByText('Upload evidence',{exact:true})).toBeVisible()
 
-  await page.getByLabel('Active program').selectOption({label:`Approval Authority ${suffix}`})
+  await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification`)
+  await expect(page.getByRole('heading',{name:'Verification & Evidence'})).toBeVisible()
   await expect(page.getByRole('button',{name:/New Test Procedure/})).toBeDisabled()
   await page.getByRole('button',{name:/Test procedures/}).click()
   const draftRow=page.locator('.procedureRow').filter({hasText:'Approval-only draft procedure'})

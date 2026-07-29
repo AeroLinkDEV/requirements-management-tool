@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, login, openNavigationGroup } from './auth'
+import { apiBase, login, openNavigationGroup, selectProgram } from './auth'
 
 /**
  * A recorded review procedure is only worth having if a team can actually record one, see it, and revise it
@@ -20,8 +20,7 @@ test('a team records its review procedure, puts it in force, and revises it with
     },
   })
   expect(created.ok(), await created.text()).toBeTruthy()
-  await page.reload()
-  await page.locator('.program > select:not(.releaseSelector)').selectOption({ label: programName })
+  await selectProgram(page, programName)
 
   await openNavigationGroup(page, 'ADMINISTRATION')
   await page.getByRole('link', { name: /Review Workflows/ }).click()

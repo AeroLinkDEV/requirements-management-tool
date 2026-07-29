@@ -42,8 +42,8 @@ test('successful login opens the accessible Projects selector before the current
   await expect(page).toHaveURL(selectorUrl)
 
   await active.press('Enter')
-  await expect(page).toHaveURL(/\/programs\/[^/]+\/projects\/[^/]+\/releases\/[^/]+\/command-center$/)
-  await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
+  await expect(page).toHaveURL(/\/projects\/fms-product-development\/builds$/)
+  await expect(page.getByRole('heading', { name: 'Software Builds' })).toBeVisible()
 })
 
 test('the project grid collapses cleanly without horizontal scrolling', async ({ page }) => {
@@ -67,16 +67,20 @@ test('the project grid collapses cleanly without horizontal scrolling', async ({
   }
 })
 
-test('an authenticated project route survives refresh and FMS opens through its existing deep route', async ({ page }) => {
+test('the project and build selectors survive refresh before entering a build-specific deep route', async ({ page }) => {
   await login(page, 'admin', { openProject: false })
   await page.reload()
 
   await expect(page).toHaveURL(/\/projects$/)
   await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible()
   await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
+  await expect(page).toHaveURL(/\/projects\/fms-product-development\/builds$/)
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Software Builds' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Open build 1.6' }).click()
   const workspaceUrl = page.url()
   await page.reload()
-
   await expect(page).toHaveURL(workspaceUrl)
   await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
 })

@@ -9,6 +9,10 @@ const canonical = (input: RequestInfo | URL) => new URL(address(input), window.l
 const csrfExempt = (url: URL) =>
   url.pathname === '/api/auth/login' || url.pathname === '/api/setup/bootstrap'
 const isApi = (url: URL) => url.pathname.startsWith('/api/')
+const routeBuildContext = () => {
+  const match = window.location.pathname.match(/^\/programs\/[^/]+\/projects\/[^/]+\/releases\/([^/]+)/i)
+  return match ? decodeURIComponent(match[1]) : undefined
+}
 
 const loadCsrf = async (requestUrl: URL) => {
   const endpoint = new URL('/api/auth/csrf', requestUrl)
@@ -46,12 +50,14 @@ export function installProtectedFetch() {
     const method = (init.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
     const next: RequestInit = { ...init, credentials: init.credentials ?? 'include' }
     const retryInput = input instanceof Request ? input.clone() : input
+    const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined))
+    const buildContext = isApi(url) ? routeBuildContext() : undefined
+    if (buildContext) headers.set('X-AeroLink-Build-Context', buildContext)
 
     if (unsafe.has(method) && isApi(url) && !csrfExempt(url)) {
-      const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined))
       headers.set('X-AeroLink-CSRF', await csrfFor(url))
-      next.headers = headers
     }
+    if ([...headers].length) next.headers = headers
 
     let response = await nativeFetch(input, next)
 

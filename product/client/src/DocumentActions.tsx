@@ -53,7 +53,7 @@ export default function DocumentActions({ api, projectId, release, targets, head
     }
     let cancelled = false;
     setLoaded(false);
-    fetch(`${api}/api/documents?projectId=${projectId}`)
+    fetch(`${api}/api/documents?projectId=${projectId}&releaseId=${release.id}`)
       .then((response) => (response.ok ? (response.json() as Promise<ApprovedDocument[]>) : []))
       .then((rows) => {
         if (cancelled) return;
