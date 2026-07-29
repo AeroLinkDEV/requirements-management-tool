@@ -45,7 +45,7 @@ test('Program scope protects dashboards, signatures, impacts, directories, and b
 
  const impact=await scoped.put(`${apiBase}/api/impact-dispositions/${campaign.impacts[0].id}`,{data:{state:'Addressed',rationale:'Unauthorized cross-Program mutation.'}});expect(impact.status(),await impact.text()).toBe(403)
  const directory=await scoped.get(`${apiBase}/api/directory?programId=${showcase.programId}`);expect(directory.status(),await directory.text()).toBe(403)
- const dashboard=await scoped.get(`${apiBase}/api/dashboard`);expect(dashboard.ok(),await dashboard.text()).toBeTruthy();expect((await dashboard.json()).totalScrs).toBe(0)
+ const dashboard=await scoped.get(`${apiBase}/api/dashboard`);expect(dashboard.ok(),await dashboard.text()).toBeTruthy();const dashboardBody=await dashboard.json();expect(dashboardBody.system.total+dashboardBody.software.total).toBe(0)
  const signatures=await scoped.get(`${apiBase}/api/signatures?artifactId=${signedArtifact.id}`);expect(signatures.ok(),await signatures.text()).toBeTruthy();expect(await signatures.json()).toEqual([])
  for(const path of [`/api/traceability?projectId=${scopedWorkspace.project.id}&baselineId=${showcase.releasedBaselineId}&page=1&pageSize=10`,`/api/verification-coverage?projectId=${scopedWorkspace.project.id}&baselineId=${showcase.releasedBaselineId}`]){const response=await scoped.get(`${apiBase}${path}`);expect(response.status(),`${path}: ${await response.text()}`).toBe(400);expect((await response.json()).code).toBe('baseline_project_mismatch')}
  await scoped.dispose()

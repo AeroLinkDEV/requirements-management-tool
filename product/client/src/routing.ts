@@ -46,6 +46,11 @@ export type AppRoute = {
 const decoded = (value: string | undefined) => value ? decodeURIComponent(value) : undefined;
 
 export function parseRoute(pathname: string, search = ""): AppRoute {
+  const embeddedQuery = pathname.indexOf("?");
+  if (embeddedQuery >= 0 && !search) {
+    search = pathname.slice(embeddedQuery);
+    pathname = pathname.slice(0, embeddedQuery);
+  }
   const parts = pathname.split("/").filter(Boolean);
   const query = new URLSearchParams(search);
   if (!parts.length || (parts.length === 1 && parts[0] === "projects"))
@@ -63,7 +68,7 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "System" };
   if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
   if (path === "systems/change-requests/new") return { ...base, view: "createSystemScr", discipline: "system", artifactId: query.get("requirement") || undefined };
-  if (path === "software/change-requests/new") return { ...base, view: "createSoftwareChange", discipline: "software", artifactId: query.get("requirement") || undefined };
+  if (path === "software/change-requests/new") return { ...base, view: "createSoftwareChange", discipline: "software", artifactId: query.get("requirement") || undefined, artifactKind: query.get("level") === "HLR" ? "HighLevel" : query.get("level") === "LLR" ? "LowLevel" : undefined };
   if (tail[0] === "systems" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[2]) };
   if (tail[0] === "software" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "software", artifactId: decoded(tail[2]) };
   // Compatibility for links created before typed change-request routes existed. The detail view replaces this
@@ -78,14 +83,13 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (tail[0] === "system-verification" && tail[1]) return { ...base, view: "verification", discipline: "systemTest", artifactId: decoded(tail[1]) };
   if (tail[0] === "software-verification" && tail[1]) return { ...base, view: "verification", discipline: "softwareTest", artifactId: decoded(tail[1]) };
   if (path === "software-verification") return { ...base, view: "verification", discipline: "softwareTest" };
-  if (path === "problem-reports") return { ...base, view: "problemReports", discipline: "system" };
+  if (path === "problem-reports") return { ...base, view: "notFound", discipline: "system" };
   if (path === "traceability") return { ...base, view: "lifecycle", discipline: "system" };
   // The focused artifact is part of the address, not just component state. Without it the route rewrote
   // itself to a bare /traceability, the app re-read that URL, and the requirement the reader arrived from
   // was cleared before the thread could open on it.
   if (tail[0] === "traceability" && tail[1]) return { ...base, view: "lifecycle", discipline: "system", artifactId: decoded(tail[1]) };
-  if (path === "release-planning") return { ...base, view: "planning", discipline: "system" };
-  if (path === "baselines") return { ...base, view: "baselines", discipline: "system" };
+  if (path === "release-planning" || path === "baselines") return { ...base, view: "notFound", discipline: "system" };
   if (path === "release-readiness" || path === "release-campaign") return { ...base, view: "release", discipline: "system" };
   if (tail[0] === "release-readiness" && tail[1] === "changes" && tail[2]) return { ...base, view: "releaseImpact", discipline: "system", artifactId: decoded(tail[2]) };
   if (path === "release-readiness/evidence") return { ...base, view: "releaseDecision", discipline: "system" };
@@ -94,7 +98,12 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "integration-command-center") return { ...base, view: "integrations", discipline: "system" };
   if (path === "administration") return { ...base, view: "admin", discipline: "system" };
   if (path === "review-workflows") return { ...base, view: "reviewWorkflows", discipline: "system" };
-  if (tail[0] === "artifacts" && tail[1] && tail[2]) return { ...base, view: "artifact", discipline: "system", artifactKind: decoded(tail[1]), artifactId: decoded(tail[2]) };
+  if (tail[0] === "artifacts" && tail[1] && tail[2]) {
+    const artifactKind = decoded(tail[1]);
+    if (artifactKind && ["problem-report", "baseline", "build"].includes(artifactKind))
+      return { ...base, view: "notFound", discipline: "system" };
+    return { ...base, view: "artifact", discipline: "system", artifactKind, artifactId: decoded(tail[2]) };
+  }
   return { ...base, view: "notFound", discipline: "system" };
 }
 
@@ -119,7 +128,13 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "dashboard": return `${root}/command-center`;
     case "mywork": return `${root}/my-work`;
     case "createSystemScr": return `${root}/systems/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;
-    case "createSoftwareChange": return `${root}/software/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;
+    case "createSoftwareChange": {
+      const query = new URLSearchParams();
+      if (artifactId) query.set("requirement", artifactId);
+      if (artifactKind === "HighLevel") query.set("level", "HLR");
+      if (artifactKind === "LowLevel") query.set("level", "LLR");
+      return `${root}/software/change-requests/new${query.size ? `?${query}` : ""}`;
+    }
     case "scr": return `${root}/${discipline === "software" ? "software" : "systems"}/change-requests/${artifactId}`;
     case "history": return historyPath(discipline === "software" ? "software" : "systems");
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;

@@ -104,7 +104,6 @@ type Props = {
   user: AuthUser;
   onBack: () => void;
   onOpenScr: (id: string) => void;
-  onOpenPlanning: () => void;
   onOpenVerification: () => void;
   onOpenDocuments: () => void;
 };
@@ -116,7 +115,6 @@ export default function ReleaseCampaignCenter({
   user,
   onBack,
   onOpenScr,
-  onOpenPlanning,
   onOpenVerification,
   onOpenDocuments,
 }: Props) {
@@ -287,7 +285,7 @@ export default function ReleaseCampaignCenter({
     );
   const actionForGate = (gate: Gate) => {
     if (gate.evaluationState === "WaitingForPrerequisite")
-      return { label: "Open Product Versions", run: onOpenPlanning };
+      return { label: "Awaiting governed prerequisite", run: () => undefined };
     if (["coverage", "verification", "evidence"].includes(gate.code))
       return { label: "Open Verification", run: onOpenVerification };
     if (["traceability", "documents"].includes(gate.code))
@@ -414,7 +412,7 @@ export default function ReleaseCampaignCenter({
             Create a campaign from an eligible candidate baseline before
             collecting release evidence and authority.
           </p>
-          <button onClick={onOpenPlanning}>Open Product Versions</button>
+          <button onClick={onBack}>Return to Command Center</button>
         </section>
       )}
       {!loading && detail && (

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { login, openNavigationGroup, selectProgram } from './auth'
+import { login, openNavigationGroup, openNewSystemChangeRequest, selectProgram } from './auth'
 
 // Where a requirement goes in the document, chosen by the author writing it.
 //
@@ -11,7 +11,7 @@ test('an author chooses the section a new requirement goes in', async ({ page })
   await login(page)
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
-  await page.getByRole('link', { name: 'New System SCR' }).click()
+  await openNewSystemChangeRequest(page)
   await page.getByRole('button', { name: '+ Introduce System requirement' }).click()
 
   // The sections come from the specification for this requirement's level. Offering every section in the project
@@ -45,7 +45,7 @@ test('modifying a requirement offers to leave it where it already is', async ({ 
   await login(page)
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
-  await page.getByRole('link', { name: 'New System SCR' }).click()
+  await openNewSystemChangeRequest(page)
   await page.getByRole('button', { name: 'Modify existing' }).first().click()
 
   // Before a requirement is chosen there is nothing to keep, so the default reads as a move rather than a stay.

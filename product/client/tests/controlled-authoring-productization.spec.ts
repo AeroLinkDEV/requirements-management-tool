@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { APIRequestContext, Page } from '@playwright/test'
-import { apiBase, apiLogin, login, openNavigationGroup, selectProgram as enterProgram } from './auth'
+import { apiBase, apiLogin, login, openNewSoftwareChangeRequest, openNewSystemChangeRequest, openNavigationGroup, selectProgram as enterProgram } from './auth'
 
 async function createWorkspace(request:APIRequestContext,prefix:string){
   await apiLogin(request)
@@ -15,24 +15,17 @@ async function selectProgram(page:Page,programName:string){
   await enterProgram(page,programName)
 }
 
-async function openPageFromPalette(page:Page,label:string){
-  await page.getByRole('button',{name:/Search & navigate/}).click()
-  const palette=page.getByRole('dialog',{name:'Quick navigation'})
-  await palette.getByPlaceholder(/Search pages/).fill(label)
-  await palette.getByRole('link',{name:new RegExp(label)}).click()
-}
-
 test('System proposal identity and stages are controlled from the first screen', async ({page,request})=>{
   const programName=await createWorkspace(request,'System Authoring')
   await selectProgram(page,programName)
   await openNavigationGroup(page,'SYSTEMS ENGINEERING')
-  await page.getByRole('link',{name:'New System SCR'}).click()
+  await openNewSystemChangeRequest(page)
 
   const stages=page.getByRole('navigation',{name:'Change authoring progress'})
   await expect(stages).toBeVisible()
   await expect(stages.getByText('Change case',{exact:true})).toBeVisible()
   await expect(stages.getByText('Requirement changes',{exact:true})).toBeVisible()
-  await expect(stages.getByText('Impact & readiness',{exact:true})).toBeVisible()
+  await expect(stages.getByText('Impact & readiness',{exact:true})).toHaveCount(0)
 
   // Nothing is assumed about what this change does. The editor used to pre-seed an Introduce proposal, which
   // decided that before the author had said — and because it arrived with an identifier already allocated it
@@ -58,11 +51,11 @@ test('System proposal identity and stages are controlled from the first screen',
   await expect(page.getByLabel('Identifier')).toHaveValue(/^SYSR-\d{6}$/)
 })
 
-test('Software Draft closes impacts before an explicitly selected reviewer signs',async ({page,request})=>{
+test('Software Draft keeps downstream impact with consuming engineers before an explicitly selected reviewer signs',async ({page,request})=>{
   test.setTimeout(120_000)
   const programName=await createWorkspace(request,'Software Authoring')
   await selectProgram(page,programName)
-  await openPageFromPalette(page,'New Software SWCR')
+  await openNewSoftwareChangeRequest(page,'HLR')
 
   await page.getByRole('button',{name:'+ Introduce HLR'}).click()
   await expect(page.getByLabel('Identifier')).toHaveValue(/^HLR-\d{6}$/)
@@ -77,12 +70,11 @@ test('Software Draft closes impacts before an explicitly selected reviewer signs
   await page.getByRole('button',{name:'Save SWCR Draft'}).click()
 
   await expect(page.getByRole('heading',{name:'Control software authoring readiness'})).toBeVisible()
-  await expect(page.getByRole('button',{name:'Configure & Submit Review'})).toHaveCount(0)
+  await expect(page.getByRole('button',{name:'Configure & Submit Review'})).toBeVisible()
   await page.getByRole('button',{name:'Check out & edit'}).click()
   await expect(page.getByRole('textbox',{name:'Author',exact:true})).toHaveValue('software.author')
-  const impacts=page.locator('.editorColumns aside select')
-  await expect(impacts).toHaveCount(5)
-  for(let index=0;index<5;index++)await impacts.nth(index).selectOption('Not Affected')
+  await expect(page.getByText('Known downstream context',{exact:true})).toBeVisible()
+  await expect(page.locator('.editorColumns aside select')).toHaveCount(0)
   const checkIn=page.getByRole('button',{name:'Save & check in'})
   await expect(checkIn).toBeEnabled({timeout:30_000})
   await checkIn.click()

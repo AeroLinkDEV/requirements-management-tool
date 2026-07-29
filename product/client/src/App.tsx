@@ -1,10 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
-import { changeRequestStateLabel } from './presentation'
 import type { ComponentType, FormEvent } from "react";
 import CommandPalette from "./CommandPalette";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
-import { identityInitials, identityLabel } from "./presentation";
 import { readRoute, routePath } from "./routing";
 import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
 import {
@@ -107,45 +105,23 @@ function WorkspaceLoading() {
   );
 }
 
-type Scr = {
-  id: string;
-  displayNumber: string;
-  title: string;
-  state: string;
-  authorId: string;
-  // Which build this change is allocated to. The state alone cannot say whether it has shipped.
-  targetReleaseId: string;
-  requirementCount: number;
-  updatedAt: string;
-};
-type Metrics = {
-  totalScrs: number;
+type ChangeMetrics = {
+  total: number;
   draft: number;
   inReview: number;
   approved: number;
-  // Counted across the project, not the selected build: work that has been put away is by definition not part
-  // of the build in hand. Systems and software keep separate shelves.
-  deferredSystem: number;
-  deferredSoftware: number;
+  deferred: number;
 };
-type Overview = {
-  systemRequirements: number;
-  highLevelRequirements: number;
-  lowLevelRequirements: number;
-  historicalScrs: number;
-  historicalSwcrs: number;
-  activeRequests: number;
-  traceLinks: number;
-  testProcedures: number;
-  testExecutions: number;
-  controlledDocuments: number;
-  softwareBuilds: number;
+type VerificationMetrics = {
+  totalChangeRequests: number;
+  triagedChangeRequests: number;
+  openDecisions: number;
+  resolvedDecisions: number;
 };
-type CampaignSummary = {
-  id: string;
-  releaseId: string;
-  state: string;
-  readiness: { percent: number; readyForRelease: boolean };
+type Metrics = {
+  system: ChangeMetrics;
+  software: ChangeMetrics;
+  verification: { system: VerificationMetrics; hlr: VerificationMetrics; llr: VerificationMetrics };
 };
 type Release = { id: string; version: string; isReleased: boolean };
 type Workspace = {
@@ -186,10 +162,9 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
     </a>;
   };
   const engineeringView = ["createSystemScr","createSoftwareChange","history","requirements","scr"].includes(view);
-  const releaseView = ["planning","baselines","release","releaseImpact","releaseDecision","releaseOperations","enterprise"].includes(view);
+  const releaseView = ["release","releaseImpact","releaseDecision","releaseOperations","enterprise"].includes(view);
   const engineeringScope:Discipline = discipline==="software" ? "software" : "system";
   const verificationScope:Discipline = discipline==="softwareTest"||discipline==="software" ? "softwareTest" : "systemTest";
-  const newChangeView:View = engineeringScope==="software" ? "createSoftwareChange" : "createSystemScr";
   return (
     <aside className="appNavigation">
       <div className="brand"><span aria-hidden="true">▲</span><b>AeroLink</b></div>
@@ -207,9 +182,9 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       </div>
       <nav className="primaryNavigation" aria-label="Primary navigation">
         <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
-        <details className="navGroup" open={engineeringView}><summary>ENGINEERING</summary><div className="navScopeSwitch" role="group" aria-label="Engineering scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{!release?.isReleased&&item("New Change Request",newChangeView,"+",engineeringScope,engineeringScope==="software"?"New Software SWCR":"New System SCR")}</details>
-        <details className="navGroup" open={view==="verification"||view==="problemReports"||view==="lifecycle"}><summary>ASSURANCE</summary><div className="navScopeSwitch" role="group" aria-label="Assurance scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{item("Verification","verification","✓",verificationScope,verificationScope==="softwareTest"?"Software Verification":"System Verification")}{item("Problem Reports","problemReports","!","system","Issue lifecycle records")}{item("Digital Thread","lifecycle","↗","system","Traceability & Outputs / Digital Thread")}</details>
-        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Baselines","baselines","⌘")}{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}</details>
+        <details className="navGroup" open={engineeringView}><summary>ENGINEERING</summary><div className="navScopeSwitch" role="group" aria-label="Engineering scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}</details>
+        <details className="navGroup" open={view==="verification"||view==="lifecycle"}><summary>ASSURANCE</summary><div className="navScopeSwitch" role="group" aria-label="Assurance scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{item("Verification","verification","✓",verificationScope,verificationScope==="softwareTest"?"Software Verification":"System Verification")}{item("Digital Thread","lifecycle","↗","system","Traceability & Outputs / Digital Thread")}</details>
+        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("Review Workflows","reviewWorkflows","⇉","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","↗","system","Integration Command Center")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
       </nav>
       <footer><PersonAvatar userName={user.userName} displayName={user.displayName} size="large"/><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="accountSecurity" onClick={()=>setSecurityOpen(true)}>Account security</button><button className="signOut" onClick={onSignOut}>Sign out</button><button className="workspaceDisplay" onClick={onDisplay} aria-label="Open workspace display settings"><span>Aa</span><div><b>Workspace display</b><small>{density} density</small></div><i aria-hidden="true">›</i></button></footer>
@@ -221,17 +196,15 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
 function App() {
   const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
   const [initialRoute] = useState<AppRoute>(() => readRoute());
-  const [scrs, setScrs] = useState<Scr[]>([]),
-    [metrics, setMetrics] = useState<Metrics>({
-      totalScrs: 0,
-      draft: 0,
-      inReview: 0,
-      approved: 0,
-      deferredSystem: 0,
-      deferredSoftware: 0,
+  const [metrics, setMetrics] = useState<Metrics>({
+      system:{total:0,draft:0,inReview:0,approved:0,deferred:0},
+      software:{total:0,draft:0,inReview:0,approved:0,deferred:0},
+      verification:{
+        system:{totalChangeRequests:0,triagedChangeRequests:0,openDecisions:0,resolvedDecisions:0},
+        hlr:{totalChangeRequests:0,triagedChangeRequests:0,openDecisions:0,resolvedDecisions:0},
+        llr:{totalChangeRequests:0,triagedChangeRequests:0,openDecisions:0,resolvedDecisions:0},
+      },
     }),
-    [overview, setOverview] = useState<Overview>(),
-    [campaigns, setCampaigns] = useState<CampaignSummary[]>([]),
     [workspaces, setWorkspaces] = useState<Workspace[]>([]),
     [activeId, setActiveId] = useState(initialRoute.programId ?? ""),
     [selectedProjectId, setSelectedProjectId] = useState(initialRoute.projectId ?? ""),
@@ -294,21 +267,11 @@ function App() {
     if (!project) return;
     setDashboardLoading(true);
     try {
-      const [a, b, c, d] = await Promise.all([
-        fetch(
-          `${API}/api/scrs?projectId=${project.project.id}&releaseId=${release?.id ?? ""}`,
-        ),
-        fetch(
-          `${API}/api/dashboard?projectId=${project.project.id}&releaseId=${release?.id ?? ""}`,
-        ),
-        fetch(`${API}/api/showcase/overview?projectId=${project.project.id}&releaseId=${release?.id ?? ""}`),
-        fetch(`${API}/api/release-campaigns?projectId=${project.project.id}&releaseId=${release?.id ?? ""}`),
-      ]);
-      const page = await a.json();
-      setScrs(Array.isArray(page.items) ? page.items : []);
-      setMetrics(await b.json());
-      if (c.ok) setOverview(await c.json());
-      if (d.ok) setCampaigns(await d.json());
+      const response = await fetch(
+        `${API}/api/dashboard?projectId=${project.project.id}&releaseId=${release?.id ?? ""}`,
+      );
+      if (!response.ok) throw new Error("Dashboard unavailable.");
+      setMetrics(await response.json());
     } catch {
       setConnected(false);
     } finally {
@@ -438,8 +401,8 @@ function App() {
   if(view==="builds")return <SoftwareBuildsLanding api={API} user={user} releases={project?.releases??[]} onProjectOverview={showProjects} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;setSelectedReleaseId(selected.id);setView("dashboard");history.pushState({},"",routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} context={context} density={density} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
   const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
-  const scopedLabel=view==="history"?`${historyTypeIntent==="All"?"All":discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
-  const scopeSwitch=view==="history"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={historyTypeIntent==="All"} onClick={()=>navigate("history",discipline,undefined,undefined,false,historyStateIntent,"All")}>All</button><button aria-pressed={historyTypeIntent!=="All"&&discipline!=="software"} onClick={()=>navigate("history","system",undefined,undefined,false,historyStateIntent,"System")}>System</button><button aria-pressed={historyTypeIntent!=="All"&&discipline==="software"} onClick={()=>navigate("history","software",undefined,undefined,false,historyStateIntent,"Software")}>Software</button></div>:view==="requirements"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={discipline!=="software"} onClick={()=>navigate(view,"system")}>System</button><button aria-pressed={discipline==="software"} onClick={()=>navigate(view,"software")}>Software</button></div>:view==="verification"?<div className="contextScopeSwitch" role="group" aria-label="Verification scope"><button aria-pressed={discipline!=="softwareTest"} onClick={()=>navigate("verification","systemTest")}>System</button><button aria-pressed={discipline==="softwareTest"} onClick={()=>navigate("verification","softwareTest")}>Software</button></div>:null;
+  const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
+  const scopeSwitch=view==="history"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={discipline!=="software"} onClick={()=>navigate("history","system",undefined,undefined,false,historyStateIntent,"System")}>System</button><button aria-pressed={discipline==="software"} onClick={()=>navigate("history","software",undefined,undefined,false,historyStateIntent,"Software")}>Software</button></div>:view==="requirements"?<div className="contextScopeSwitch" role="group" aria-label="Engineering scope"><button aria-pressed={discipline!=="software"} onClick={()=>navigate(view,"system")}>System</button><button aria-pressed={discipline==="software"} onClick={()=>navigate(view,"software")}>Software</button></div>:view==="verification"?<div className="contextScopeSwitch" role="group" aria-label="Verification scope"><button aria-pressed={discipline!=="softwareTest"} onClick={()=>navigate("verification","systemTest")}>System</button><button aria-pressed={discipline==="softwareTest"} onClick={()=>navigate("verification","softwareTest")}>Software</button></div>:null;
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b><span>Build {release?.version}</span><b aria-hidden="true">›</b><strong>{scopedLabel}</strong></nav><div className="contextActions">{scopeSwitch}<span className="contextReleaseState">{release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
   const palette=context?<CommandPalette api={API} context={context} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
@@ -473,10 +436,7 @@ function App() {
             </button>
           </>
         ) : (
-          <p>
-            This product has no in-work build yet. Plan the next version under Product Versions, then raise the
-            change against it.
-          </p>
+          <p>This product has no in-work build available for a new change request.</p>
         )}
       </main>,
     );
@@ -489,6 +449,7 @@ function App() {
         releaseId={release.id}
         releaseVersion={release.version}
         scope={view === "createSystemScr" ? "System" : "Software"}
+        softwareLevel={view === "createSoftwareChange" && (selectedArtifactKind === "HighLevel" || selectedArtifactKind === "LowLevel") ? selectedArtifactKind : undefined}
         user={user}
         sourceRequirementId={selectedArtifactId || undefined}
         onCancel={() => navigate("dashboard")}
@@ -536,15 +497,16 @@ function App() {
         projectId={project.project.id}
         releases={release ? [release] : []}
         activeReleaseId={release?.id??""}
-        scope={historyTypeIntent??(discipline === "software" ? "Software" : "System")}
+        scope={discipline === "software" ? "Software" : "System"}
         initialStateIntent={historyStateIntent}
         onStateIntentChange={(stateIntent)=>{
           setHistoryStateIntent(stateIntent);
           if(context)history.replaceState({},"",routePath(context,"history",discipline,undefined,undefined,stateIntent,historyTypeIntent));
         }}
-        onTypeIntentChange={(typeIntent)=>navigate("history",typeIntent==="Software"?"software":typeIntent==="System"?"system":discipline,undefined,undefined,true,historyStateIntent,typeIntent)}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}
+        onCreateSystem={() => navigate("createSystemScr","system")}
+        onCreateSoftware={(level) => navigate("createSoftwareChange","software",undefined,level)}
       />
     );
   if (view === "requirements" && project)
@@ -558,7 +520,7 @@ function App() {
         initialArtifactId={view === "requirements" ? selectedArtifactId || undefined : undefined}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}
-        onProposeChange={(id) => navigate(discipline === "software" ? "createSoftwareChange" : "createSystemScr", discipline, id)}
+        onProposeChange={(id, level) => navigate(discipline === "software" ? "createSoftwareChange" : "createSystemScr", discipline, id, level)}
         onOpenRequirement={(id) => navigate("requirements",discipline,id)}
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
         onOpenTraceability={(artifactId) => navigate("lifecycle", discipline, artifactId, artifactId ? "requirement" : undefined)}
@@ -618,7 +580,6 @@ function App() {
         onOpenImpact={(id) => navigate("releaseImpact","system",id)}
         onOpenDecision={() => navigate("releaseDecision")}
         onBackToReadiness={() => navigate("release")}
-        onOpenPlanning={() => navigate("planning")}
         onOpenVerification={() => navigate("verification","systemTest")}
         onOpenDocuments={() => navigate("lifecycle")}
         onOpenOperations={() => navigate("releaseOperations")}
@@ -634,7 +595,6 @@ function App() {
         user={user}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}
-        onOpenPlanning={() => navigate("planning")}
         onOpenVerification={() => navigate("verification",discipline === "software" ? "softwareTest" : "systemTest")}
         onOpenDocuments={() => navigate("lifecycle")}
       />
@@ -702,22 +662,21 @@ function App() {
         onBack={() => navigate("dashboard")}
       />
     );
-  const activeCampaign=campaigns.find(x=>x.releaseId===release?.id);
-  const dashboardScope:Discipline=discipline==="software"?"software":"system";
-  const referenceRelease=[...(project?.releases??[])].reverse().find(x=>x.isReleased);
-  const releaseAction=release?.isReleased
-    ? {label:"View product versions →",target:"planning" as View}
-    : !activeCampaign
-      ? {label:"Set up release readiness →",target:"planning" as View}
-      : activeCampaign.readiness.readyForRelease
-        ? {label:"Review release package →",target:"release" as View}
-        : {label:"Resolve release blockers →",target:"release" as View};
-  const dashboardMetrics:{label:string;value:number;color:string;accessibleLabel:string;stateIntent?:HistoryStateIntent}[]=[
-    {label:"Total changes",value:metrics.totalScrs,color:"#1d66f5",accessibleLabel:"All controlled changes"},
-    {label:"In draft",value:metrics.draft,color:"#a16a12",accessibleLabel:"Draft changes",stateIntent:"Draft"},
-    {label:"In review",value:metrics.inReview,color:"#7552d6",accessibleLabel:"Changes awaiting review",stateIntent:"InReview"},
-    {label:"Approved / selected",value:metrics.approved,color:"#16815f",accessibleLabel:"Approved and baseline-selected changes",stateIntent:"ApprovedOrSelected"},
-  ];
+  const openChanges=(area:"system"|"software",stateIntent?:HistoryStateIntent)=>
+    navigate("history",area,undefined,undefined,false,stateIntent,area==="software"?"Software":"System");
+  const changeCard=(title:string,area:"system"|"software",summary:ChangeMetrics)=>
+    <section className={`dashboardAreaCard ${area}`}>
+      <header><div><span>{area==="system"?"SYSTEMS":"SOFTWARE"}</span><h2>{title}</h2></div><i>{area==="system"?"SYS":"SW"}</i></header>
+      <button className="dashboardTotal" onClick={()=>openChanges(area)}><strong>{summary.total}</strong><span>Total changes</span><small>Open {area} change requests →</small></button>
+      <div className="dashboardStateGrid">
+        <button onClick={()=>openChanges(area,"Draft")}><b>{summary.draft}</b><span>Draft</span></button>
+        <button onClick={()=>openChanges(area,"InReview")}><b>{summary.inReview}</b><span>In review</span></button>
+        <button onClick={()=>openChanges(area,"ApprovedOrSelected")}><b>{summary.approved}</b><span>Approved</span></button>
+      </div>
+      {summary.deferred>0&&<button className="dashboardDeferred" onClick={()=>openChanges(area,"Deferred")}><b>{summary.deferred}</b><span>Deferred changes remain visible in Build {release?.version}</span><em>Open →</em></button>}
+    </section>;
+  const verificationRow=(label:string,summary:VerificationMetrics)=>
+    <article><div><b>{label}</b><span>{summary.triagedChangeRequests} of {summary.totalChangeRequests} change requests triaged</span></div><strong>{summary.openDecisions}</strong><small>open decision{summary.openDecisions===1?"":"s"}</small><em>{summary.resolvedDecisions} resolved</em></article>;
   return (
     <div className="shell">
       {navigation}
@@ -729,148 +688,42 @@ function App() {
               {release?.version}
             </p>
             <h1>Command Center</h1>
-            <p>
-              Assurance status, release readiness, and work requiring attention.
-            </p>
+            <p>Build-scoped systems, software, and verification work.</p>
           </div>
           <div className={`connection ${connected ? "ok" : ""}`}>
             <i /> {connected ? "Live data" : "API offline"}
           </div>
         </header>
-        <section className="release">
+        <section className={`release buildSummary ${release?.isReleased?"released":"inWork"}`}>
           <div>
-            <span className="tag">ACTIVE RELEASE</span>
+            <span className="tag">ACTIVE BUILD</span>
             <h2>
               {project?.project.softwareProduct} {release?.version}
             </h2>
             <p>
               {release?.isReleased
-                ? "Released reference version"
-                : "Development release"}
+                ? "Released historical workspace · read-only"
+                : "Current development workspace"}
             </p>
           </div>
-          <div className="readiness">
-            <b>
-              {activeCampaign?.readiness.percent ?? 0}
-              %
-            </b>
-            <span>Release readiness</span>
-            <div>
-              <i
-                style={{
-                  width: `${activeCampaign?.readiness.percent ?? 0}%`,
-                }}
-              />
-            </div>
-          </div>
-          <button onClick={() => navigate(releaseAction.target)}>{releaseAction.label}</button>
+          <div className="buildStateSeal"><b>{release?.isReleased?"✓ Released":"In Work"}</b><span>{release?.isReleased?"This build is complete; no readiness percentage is needed.":"Changes and verification triage are shown below."}</span></div>
+          <button onClick={() => navigate("release")}>Lifecycle Decision Room →</button>
         </section>
-        <section className="metrics" aria-busy={dashboardLoading} aria-label="Change request metrics">
-          {dashboardLoading ? Array.from({length:4},(_,index)=><div className="dashboardSkeleton" key={index}><span className="skeletonLine medium"/><i className="skeletonMetric"/><span className="skeletonLine short"/></div>) : dashboardMetrics.map(({label,value,color,accessibleLabel,stateIntent}) => (
-            <button
-              key={label}
-              type="button"
-              aria-label={`Open ${accessibleLabel}`}
-              onClick={()=>navigate("history",dashboardScope,undefined,undefined,false,stateIntent,"All")}
-              style={{ "--accent": color } as React.CSSProperties}
-            >
-              <span>{label}</span>
-              <strong>{value}</strong>
-              <small>Open matching records →</small>
-            </button>
-          ))}
-        </section>
-        {overview && overview.systemRequirements > 0 && (
-          <section className="programInventory">
-            <div>
-              <p className="eyebrow">{referenceRelease?`RELEASED ${referenceRelease.version} PRODUCT BASELINE`:"CONTROLLED PRODUCT FOUNDATION"}</p>
-              <h3>Complete {project?.project.softwareProduct??"product"} lifecycle inventory</h3>
-              <span>
-                {release?.isReleased?`Release ${release.version} is the selected controlled context.`:`Release ${release?.version??"in work"} inherits this controlled foundation.`}
-              </span>
-            </div>
-            {[
-              ["System requirements", overview.systemRequirements],
-              ["HLR", overview.highLevelRequirements],
-              ["LLR", overview.lowLevelRequirements],
-              ["Trace links", overview.traceLinks],
-              ["Test procedures", overview.testProcedures],
-              ["Test executions", overview.testExecutions],
-            ].map(([label, value]) => (
-              <article key={String(label)}>
-                <b>{Number(value).toLocaleString()}</b>
-                <small>{label}</small>
-              </article>
-            ))}
-          </section>
-        )}
-        <section className="grid">
-          <div className="panel work">
-            <div className="panelhead">
-              <div>
-                <h3>Change request flow</h3>
-                <p>Controlled changes targeting this release</p>
+        <section className="dashboardTriptych" aria-busy={dashboardLoading} aria-label="Build work summary">
+          {dashboardLoading?<>{Array.from({length:3},(_,index)=><div className="dashboardSkeleton dashboardAreaCard" key={index}><span className="skeletonLine medium"/><i className="skeletonMetric"/><span className="skeletonLine"/></div>)}</>:<>
+            {changeCard("System change control","system",metrics.system)}
+            {changeCard("Software change control","software",metrics.software)}
+            <section className="dashboardAreaCard verification">
+              <header><div><span>VERIFICATION</span><h2>Change triage</h2></div><i>V&amp;V</i></header>
+              <p className="verificationIntro">Engineering impact decisions for change requests in Build {release?.version}. Procedure redesign remains in the Verification workspace.</p>
+              <div className="verificationTriageRows">
+                {verificationRow("System",metrics.verification.system)}
+                {verificationRow("Software HLR",metrics.verification.hlr)}
+                {verificationRow("Software LLR",metrics.verification.llr)}
               </div>
-              {release?.isReleased ? (
-                <button onClick={() => navigate("history",dashboardScope)}>
-                  Search released changes
-                </button>
-              ) : (
-                <button onClick={() => navigate(dashboardScope==="software"?"createSoftwareChange":"createSystemScr",dashboardScope)}>+ New {dashboardScope==="software"?"Software SWCR":"System SCR"}</button>
-              )}
-            </div>
-            {dashboardLoading ? (
-              <div className="dashboardRowSkeletons" aria-label="Loading change requests">{Array.from({length:4},(_,index)=><div className="row dashboardSkeleton" key={index}><span className="skeletonAvatar"/><div><span className="skeletonLine medium"/><span className="skeletonLine"/></div><span className="skeletonPill"/><span className="skeletonLine"/></div>)}</div>
-            ) : scrs.length ? (
-              scrs.slice(0,5).map((scr) => (
-                <div
-                  className="row"
-                  key={scr.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => navigate("scr",dashboardScope,scr.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      navigate("scr",dashboardScope,scr.id);
-                    }
-                  }}
-                >
-                  <div className="scricon">SCR</div>
-                  <div>
-                    <b>
-                      {scr.displayNumber} · {scr.title}
-                    </b>
-                    <p>{scr.requirementCount} requirement change{scr.requirementCount === 1 ? "" : "s"} · <span className="personMeta"><i>{identityInitials(scr.authorId)}</i>{identityLabel(scr.authorId)}</span></p>
-                  </div>
-                  <span className={`state ${scr.state.toLowerCase()}`} data-state={scr.state}>
-                    {changeRequestStateLabel(
-                      scr.state,
-                      project?.releases.find((item) => item.id === scr.targetReleaseId),
-                    )}
-                  </span>
-                  <time>{new Date(scr.updatedAt).toLocaleDateString()}</time>
-                </div>
-              ))
-            ) : (
-              <div className="empty">
-                <b>{release?.isReleased?"No controlled changes in this released build":"Your controlled lifecycle starts here"}</b>
-                <p>{release?.isReleased?"This historical workspace remains read-only.":"No change requests exist in this new workspace yet."}</p>
-                <button onClick={() => release?.isReleased?navigate("history",dashboardScope):navigate("createSystemScr")}>
-                  {release?.isReleased?"Search released changes →":"Create first SCR →"}
-                </button>
-              </div>
-            )}
-            {scrs.length>5&&<div className="panelFooter"><span>Showing the 5 most recent of {scrs.length} change requests</span><button onClick={()=>navigate("history",dashboardScope)}>View complete history →</button></div>}
-          </div>
-          <div className="panel attention">
-            <div className="panelhead">
-              <div>
-                <h3>{metrics.totalScrs?"Release attention":"Workspace readiness"}</h3>
-                <p>{metrics.totalScrs?"The decisions and work that need focus now":"Foundation for controlled development"}</p>
-              </div>
-            </div>
-            {metrics.totalScrs?<><button className={metrics.inReview?"signal amber":"signal green"} onClick={()=>navigate(metrics.inReview?"mywork":"history",dashboardScope,undefined,undefined,false,metrics.inReview?undefined:"InReview",metrics.inReview?undefined:"All")}><b>Awaiting review decisions</b><strong>{metrics.inReview}</strong><p>{metrics.inReview?"Open the accountable review queue":"No change requests are waiting for review"}</p></button><button className={metrics.draft?"signal blue":"signal green"} onClick={()=>navigate("history",dashboardScope,undefined,undefined,false,"Draft","All")}><b>Draft change packages</b><strong>{metrics.draft}</strong><p>{metrics.draft?"Open controlled work in progress":"No draft change packages remain"}</p></button><button className={(dashboardScope==="software"?metrics.deferredSoftware:metrics.deferredSystem)?"signal blue":"signal green"} onClick={()=>navigate("history",dashboardScope,undefined,undefined,false,"Deferred","All")}><b>Deferred {dashboardScope==="software"?"software":"system"} changes</b><strong>{dashboardScope==="software"?metrics.deferredSoftware:metrics.deferredSystem}</strong><p>{(dashboardScope==="software"?metrics.deferredSoftware:metrics.deferredSystem)?"Approved or in-work changes put away for another release":"Nothing is set aside for a later release"}</p></button><button className={activeCampaign?.readiness.readyForRelease?"signal green":"signal amber"} onClick={()=>navigate(activeCampaign?"release":"planning")}><b>Release readiness</b><strong>{activeCampaign?.readiness.percent??0}%</strong><p>{activeCampaign?.readiness.readyForRelease?"Review the complete release package":"Open the next release-readiness action"}</p></button></>:<><div className="signal green"><b>Program workspace</b><strong>✓</strong><p>{active?.program.name} is configured</p></div><div className="signal blue"><b>Initial release</b><strong>✓</strong><p>{release?.version} establishes the starting context</p></div><button className="signal amber" disabled={release?.isReleased} onClick={()=>{if(!release?.isReleased)navigate(dashboardScope==="software"?"createSoftwareChange":"createSystemScr",dashboardScope)}}><b>{release?.isReleased?"Released build":"Next action"}</b><strong>{release?.isReleased?"✓":"1"}</strong><p>{release?.isReleased?"Historical workspace · read-only":"Create the first controlled change request →"}</p></button></>}
-          </div>
+              <button className="verificationOpen" onClick={()=>navigate("verification","systemTest")}>Open Verification →</button>
+            </section>
+          </>}
         </section>
       </main></div></div>
       {overlays}

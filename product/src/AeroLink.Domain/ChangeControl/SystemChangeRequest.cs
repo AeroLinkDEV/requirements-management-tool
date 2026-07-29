@@ -20,6 +20,7 @@ public sealed class SystemChangeRequest
         ChangeRequestType type = ChangeRequestType.System,
         string? problemRich = null, string? analysisRich = null, string? solutionRich = null)
     {
+        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A change request title is required.");
         Id = Guid.NewGuid();
         BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
         Revision = revision;
@@ -317,8 +318,6 @@ public sealed class SystemChangeRequest
             throw new DomainException("Problem, Analysis, and Solution are required before review.");
         if (_requirementChanges.Count == 0)
             throw new DomainException("At least one requirement change is required before review.");
-        foreach(var change in _requirementChanges)
-            RequirementAuthoringJson.EnsureCompleteImpactDispositions(change.ImpactDispositionJson, change.DisplayNumber);
     }
 
     /// <summary>

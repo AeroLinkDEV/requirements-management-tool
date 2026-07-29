@@ -190,7 +190,7 @@ public static class BaselineEndpoints
             var baseline = await baselines.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
             var scr = await scrs.GetAsync(request.ScrId, ct); if (scr is null) return Results.NotFound();
-            try { EnsureImpactDispositions(scr); baseline.Select(scr, http.UserAccount().UserName, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
+            try { baseline.Select(scr, http.UserAccount().UserName, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
@@ -218,10 +218,6 @@ public static class BaselineEndpoints
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
             try
             {
-                var scrIds = baseline.Selections.Select(x => x.ScrId).ToList();
-                var selected = await db.SystemChangeRequests.AsNoTracking().Where(x => scrIds.Contains(x.Id))
-                    .Include(x => x.RequirementChanges).ToListAsync(ct);
-                foreach (var scr in selected) EnsureImpactDispositions(scr);
                 baseline.Freeze(http.UserAccount().UserName, DateTimeOffset.UtcNow);
                 await repository.SaveAsync(ct);
                 return Results.Ok(ApiMap.Baseline(baseline));
@@ -293,9 +289,4 @@ public static class BaselineEndpoints
         });
     }
 
-    private static void EnsureImpactDispositions(SystemChangeRequest scr)
-    {
-        foreach (var change in scr.RequirementChanges)
-            RequirementAuthoringJson.EnsureCompleteImpactDispositions(change.ImpactDispositionJson, change.DisplayNumber);
-    }
 }

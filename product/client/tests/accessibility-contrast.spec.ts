@@ -17,11 +17,8 @@ const surfaces = [
   ['Requirements Explorer', '/systems/requirements'],
   ['Change Requests', '/systems/change-requests'],
   ['Verification', '/system-verification'],
-  ['Problem Reports', '/problem-reports'],
   ['Digital Thread', '/traceability'],
-  ['Baselines', '/baselines'],
   ['Release Readiness', '/release-readiness'],
-  ['Release Planning', '/release-planning'],
   ['People & Authority', '/administration'],
   ['Enterprise Control', '/enterprise-control'],
 ] as const

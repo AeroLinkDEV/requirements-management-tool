@@ -10,13 +10,19 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
 
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()
   await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
-  await expect(page.getByText('Release attention')).toBeVisible()
+  await expect(page.getByRole('heading',{name:'System change control'})).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Software change control'})).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Change triage'})).toBeVisible()
+  await expect(page.getByText('Release attention')).toHaveCount(0)
+  await expect(page.getByText('Change request flow')).toHaveCount(0)
   await expect(page.locator('.navGroup > summary')).toHaveText(['ENGINEERING','ASSURANCE','RELEASE','ADMINISTRATION'])
-  await expect(page.getByRole('button',{name:'Open Changes awaiting review'})).toBeVisible()
 
   await openNavigationGroup(page,'SYSTEMS ENGINEERING')
   await page.getByRole('link',{name:'System Change Requests'}).click()
   await expect(page.getByRole('heading',{name:'System Change Requests'})).toBeVisible()
+  await expect(page.getByRole('button',{name:'+ New System Change Request'})).toBeVisible()
+  await expect(page.getByLabel('System change request type filter')).toHaveCount(0)
+  await expect(page.getByLabel('Release filter')).toHaveCount(0)
   const context=await page.locator('.contextBar').evaluate(element=>{
     const box=element.getBoundingClientRect()
     const nav=element.querySelector('nav')!
@@ -28,9 +34,8 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
     .filter(element=>{const box=element.getBoundingClientRect();return box.width>0&&box.height>0&&(element.textContent||'').trim().length>0&&Number(getComputedStyle(element).fontSize.replace('px',''))<12})
     .map(element=>({text:(element.textContent||'').trim().slice(0,40),size:getComputedStyle(element).fontSize})))
   expect(tinyText).toEqual([])
-  await expect(page.getByRole('button',{name:'Record Software Build'})).toBeHidden()
-  await page.getByRole('button',{name:/^Software Builds/}).click()
-  await expect(page.getByRole('button',{name:'Record Software Build'})).toBeVisible()
+  await expect(page.getByRole('button',{name:'Record Software Build'})).toHaveCount(0)
+  await expect(page.locator('.historyTabs')).toHaveCount(0)
 
   await page.getByRole('link',{name:/Command Center/}).click()
   await openNavigationGroup(page,'SYSTEMS ENGINEERING')
@@ -39,7 +44,8 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   await expect(page.getByLabel('Rows per page')).toHaveValue('25')
   await expect(page.locator('.reqTable article')).toHaveCount(25)
   await expect(page.locator('.requirementInspector')).toBeVisible()
-  await expect(page.getByRole('button',{name:/Change authority.*Requirement.*Evidence/})).toBeVisible()
+  await expect(page.getByText(/Controlled revision/)).toHaveCount(0)
+  await expect(page.getByText(/No open discussion decisions/)).toHaveCount(0)
   await page.getByLabel('Search requirements').fill('SYSR-000150')
   await expect(page.getByRole('button',{name:/Remove Search: SYSR-000150 filter/})).toBeVisible()
   await page.getByRole('button',{name:/Remove Search: SYSR-000150 filter/}).click()

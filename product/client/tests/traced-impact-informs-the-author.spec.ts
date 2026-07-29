@@ -1,20 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { login, openNavigationGroup, selectProgram } from './auth'
+import { login, openNewSystemChangeRequest, selectProgram } from './auth'
 
-// What the traces already record, shown to the person deciding impact.
-//
-// A proposal asks its author to close five impact decisions, two of which — trace relationships and verification
-// coverage — are answerable from links the product already holds. Those links were visible on the requirements
-// explorer and nowhere near the author, so the decision was made from memory beside a database that knew.
-//
-// The line this journey holds is that informing is not deciding: the panel is read-only, and the five
-// dispositions stay Pending until a person sets them.
-test('a modified requirement shows what the traces record, without deciding anything', async ({ page }) => {
+// The author can see the live trace without being asked to perform downstream engineering triage.
+test('a modified requirement shows read-only downstream context without author impact controls', async ({ page }) => {
   test.setTimeout(180_000)
   await login(page)
   await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
-  await page.getByRole('link', { name: 'New System SCR' }).click()
+  await openNewSystemChangeRequest(page)
 
   // Nothing to trace before a requirement is chosen, and nothing for an introduction — a requirement that does
   // not exist yet has nothing downstream.
@@ -33,15 +25,11 @@ test('a modified requirement shows what the traces record, without deciding anyt
   await expect(traced).toBeVisible({ timeout: 30_000 })
   await expect(traced.getByText('Requirements derived from this one')).toBeVisible()
   await expect(traced.getByText('Procedures that verify it')).toBeVisible()
-  // Said plainly, because a reader must not take this for the decision.
-  await expect(traced.getByText(/You still decide each disposition below/)).toBeVisible()
+  await expect(traced.getByText(/does not ask the author to make an impact decision/)).toBeVisible()
 
   // Read-only: the panel offers no control of any kind.
   await expect(traced.locator('select, input, button')).toHaveCount(0)
 
-  // And the five decisions are untouched. Seeing the evidence must not close the gate.
-  const dispositions = page.locator('.editorColumns aside select')
-  await expect(dispositions).toHaveCount(5)
-  for (let index = 0; index < 5; index++) await expect(dispositions.nth(index)).toHaveValue('Pending')
-  await expect(page.getByText('0/5 impact decisions complete')).toBeVisible()
+  await expect(page.locator('.editorColumns aside select')).toHaveCount(0)
+  await expect(page.getByText(/lifecycle impact/i)).toHaveCount(0)
 })

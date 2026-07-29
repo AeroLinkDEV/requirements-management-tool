@@ -26,14 +26,13 @@ public sealed class EnterpriseAuthoringTests
     }
 
     [Fact]
-    public void Controlled_requirement_proposals_freeze_rich_content_and_require_impact_dispositions()
+    public void Controlled_requirement_proposals_freeze_rich_content_without_author_owned_impact_gates()
     {
         var now=DateTimeOffset.UtcNow;var scr=new SystemChangeRequest("SWCR-00000001",0,Guid.NewGuid(),Guid.NewGuid(),"Controlled proposal","Problem","Analysis","Solution","author",now,ChangeRequestType.Software);var pending="{\"trace\":\"Pending\",\"verification\":\"Affected\",\"documents\":\"Not Affected\",\"baseline\":\"Affected\",\"collaboration\":\"Not Affected\"}";
         scr.AddRequirementChange("author","HLR-00000001",1,RequirementLevel.HighLevel,RequirementChangeKind.Modify,"The FMS software shall navigate.","Controlled rationale.","Test",now,"**The FMS software** shall navigate.","{\"criticality\":\"Safety Significant\"}",pending);
         // Supporting content that arrives as plain text is adopted as a single paragraph rather than
         // rejected, so nothing an author already wrote is lost to the storage format changing under them.
-        Assert.Equal("**The FMS software** shall navigate.",RichContent.ToPlainText(scr.RequirementChanges.Single().RichText));Assert.Throws<DomainException>(()=>scr.SubmitForReview("author",[new("reviewer","Reviewer")],now));
-        var complete=pending.Replace("\"Pending\"","\"Affected\"");scr.UpdateDraft("author",scr.Title,scr.Problem,scr.Analysis,scr.Solution,[new("HLR-00000001",1,RequirementLevel.HighLevel,RequirementChangeKind.Modify,"The FMS software shall navigate.","Controlled rationale.","Test","**The FMS software** shall navigate.","{}",complete)],now.AddMinutes(1));
+        Assert.Equal("**The FMS software** shall navigate.",RichContent.ToPlainText(scr.RequirementChanges.Single().RichText));
         var cycle=scr.SubmitForReview("author",[new("reviewer","Reviewer")],now.AddMinutes(2));Assert.Equal(64,cycle.SnapshotHash.Length);
     }
 
@@ -43,13 +42,14 @@ public sealed class EnterpriseAuthoringTests
     [InlineData("{\"trace\":\"Affected\",\"verification\":\"Affected\",\"documents\":\"Affected\",\"baseline\":\"Affected\",\"collaboration\":\"Pending\"}")]
     [InlineData("{\"trace\":\"Affected\",\"verification\":\"Affected\",\"documents\":\"Affected\",\"baseline\":\"Affected\",\"collaboration\":\"Affected\",\"invented\":\"Affected\"}")]
     [InlineData("not-json")]
-    public void Review_rejects_incomplete_malformed_or_unknown_impact_dispositions(string dispositions)
+    public void Review_ignores_legacy_author_impact_disposition_metadata(string dispositions)
     {
         var now=DateTimeOffset.UtcNow;
         var scr=new SystemChangeRequest("SCR-00000001",0,Guid.NewGuid(),Guid.NewGuid(),"Proposal","Problem","Analysis","Solution","author",now);
         scr.AddRequirementChange("author","SYSR-00000001",0,RequirementLevel.System,RequirementChangeKind.Introduce,
             "The FMS shall navigate.","Rationale","Test",now,impactDispositionJson:dispositions);
-        Assert.Throws<DomainException>(()=>scr.SubmitForReview("author",[new("reviewer","Reviewer")],now));
+        var cycle=scr.SubmitForReview("author",[new("reviewer","Reviewer")],now);
+        Assert.Equal(ReviewCycleState.Active,cycle.State);
     }
 
     [Fact]

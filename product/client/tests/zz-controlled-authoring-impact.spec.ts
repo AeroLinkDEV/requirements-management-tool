@@ -64,11 +64,9 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await expect(preview.getByRole("columnheader", { name: "Mode" })).toBeVisible();
   await expect(preview.getByRole("cell", { name: "Round robin" })).toBeVisible();
 
-  const dispositions = page.locator(".editorColumns aside select");
-  expect(await dispositions.count()).toBe(5);
-  for (let i = 0; i < 5; i++)
-    await dispositions.nth(i).selectOption("Affected");
+  await expect(page.getByText("Known downstream context", { exact: true })).toBeVisible();
+  await expect(page.locator(".editorColumns aside select")).toHaveCount(0);
   await page.getByRole("button", { name: "Save & check in" }).click();
-  await expect(page.getByText("Requirement impact")).toBeVisible();
+  await expect(page.getByText("Requirement impact")).toHaveCount(0);
   await expect(page.getByText(/Record version/)).toBeVisible();
 });

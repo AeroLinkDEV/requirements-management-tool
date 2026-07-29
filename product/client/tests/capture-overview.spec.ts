@@ -50,11 +50,6 @@ test('capture the product surfaces used by the overview video', async ({ page })
   await page.locator('.historyRow').first().click()
   await shot('change-request-detail')
 
-  // Baselines only show their contents once a candidate is opened.
-  await visit('/baselines', 'baselines-list', 2400)
-  await page.locator('.baselineCard').first().click()
-  await shot('baselines-detail')
-
   // Verification renders nothing until a materialized baseline is chosen, so choose one before capturing.
   await page.goto(new URL(root + '/system-verification', page.url()).toString(), { waitUntil: 'load' })
   await page.waitForTimeout(2200)

@@ -42,10 +42,10 @@ type Screen = "readiness" | "impact" | "decision";
 const compactNumber = (value?: string) => value?.replace(/-0{2}(\d{6})(?=\.|$)/, "-$1") ?? "";
 const countLabel = (value: number, noun: string) => `${value.toLocaleString()} ${noun}${value === 1 ? "" : "s"}`;
 
-export default function LifecycleDecisionRoom({ api, projectId, activeReleaseId, releases, user, screen, selectedScrId, onBack, onOpenScr, onOpenImpact, onOpenDecision, onBackToReadiness, onOpenPlanning, onOpenVerification, onOpenDocuments, onOpenOperations }: {
+export default function LifecycleDecisionRoom({ api, projectId, activeReleaseId, releases, user, screen, selectedScrId, onBack, onOpenScr, onOpenImpact, onOpenDecision, onBackToReadiness, onOpenVerification, onOpenDocuments, onOpenOperations }: {
   api: string; projectId: string; activeReleaseId: string; releases: { id: string; version: string }[]; user: AuthUser; screen: Screen; selectedScrId?: string;
   onBack: () => void; onOpenScr: (id: string) => void; onOpenImpact: (id: string) => void; onOpenDecision: () => void; onBackToReadiness: () => void;
-  onOpenPlanning: () => void; onOpenVerification: () => void; onOpenDocuments: () => void; onOpenOperations: () => void;
+  onOpenVerification: () => void; onOpenDocuments: () => void; onOpenOperations: () => void;
 }) {
   const [detail, setDetail] = useState<CampaignDetail>();
   const [comparison, setComparison] = useState<Comparison>();
@@ -117,7 +117,7 @@ export default function LifecycleDecisionRoom({ api, projectId, activeReleaseId,
   const activeApproval = detail?.approvals.find((item) => item.state === "Active");
 
   const openGate = (item: Gate) => {
-    if (item.evaluationState === "WaitingForPrerequisite") onOpenPlanning();
+    if (item.evaluationState === "WaitingForPrerequisite") setNotice("This governed prerequisite is not available in the simplified workspace.");
     else if (["coverage", "verification", "evidence"].includes(item.code)) onOpenVerification();
     else if (["traceability", "documents"].includes(item.code)) onOpenDocuments();
     else if (item.code === "release_approval") onOpenDecision();
@@ -136,7 +136,7 @@ export default function LifecycleDecisionRoom({ api, projectId, activeReleaseId,
   };
 
   if (loading) return <main className="decisionRoom decisionState"><div className="decisionLoader" /><h1>Building the decision view</h1><p>Connecting release scope, evidence, and authority…</p></main>;
-  if (!detail) return <main className="decisionRoom decisionState"><span>◇</span><h1>Set up release readiness</h1><p>{error || "Create a release campaign before opening the Lifecycle Decision Room."}</p><button onClick={onOpenPlanning}>Open Product Versions</button></main>;
+  if (!detail) return <main className="decisionRoom decisionState"><span>◇</span><h1>Release readiness is not configured</h1><p>{error || "No lifecycle decision package is available for this build."}</p><button onClick={onBack}>Return to Command Center</button></main>;
 
   return <main className="decisionRoom">
     {error && <div className="decisionAlert" role="alert">{error}<button onClick={() => setError("")}>×</button></div>}

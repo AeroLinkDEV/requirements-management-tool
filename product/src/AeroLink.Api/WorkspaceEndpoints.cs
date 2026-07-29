@@ -211,13 +211,49 @@ public static class WorkspaceEndpoints
             if (projectId is not null && !await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
             var allowedProjects = actor.IsAdministrator ? null : await db.Projects.AsNoTracking().Where(x => actor.Programs.Select(p => p.ProgramId).Contains(x.ProgramId)).Select(x => x.Id).ToListAsync(ct);
             var source = db.SystemChangeRequests.AsNoTracking().Where(x => (allowedProjects == null || allowedProjects.Contains(x.ProjectId)) && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.TargetReleaseId == releaseId));
+            var requests = await source.Select(x => new { x.Id, x.Type, x.State }).ToListAsync(ct);
+            var requestIds = requests.Select(x => x.Id).ToList();
+            var impacts = await db.VerificationImpactItems.AsNoTracking()
+                .Where(x => requestIds.Contains(x.ChangeRequestId))
+                .Select(x => new { x.ChangeRequestId, x.RequirementChangeId, x.ProcedureId, x.State })
+                .ToListAsync(ct);
+            var requirementChangeIds = impacts.Where(x => x.RequirementChangeId is not null).Select(x => x.RequirementChangeId!.Value).ToList();
+            var requirementLevels = await db.RequirementChanges.AsNoTracking().Where(x => requirementChangeIds.Contains(x.Id))
+                .Select(x => new { x.Id, x.Level }).ToDictionaryAsync(x => x.Id, x => x.Level, ct);
+            var procedureIds = impacts.Where(x => x.ProcedureId is not null).Select(x => x.ProcedureId!.Value).ToList();
+            var procedureLevels = await db.TestProcedures.AsNoTracking().Where(x => procedureIds.Contains(x.Id))
+                .Select(x => new { x.Id, x.Level }).ToDictionaryAsync(x => x.Id, x => x.Level, ct);
+            ChangeDashboardSummary ChangeSummary(ChangeRequestType type)
+            {
+                var rows = requests.Where(x => x.Type == type).ToList();
+                return new(rows.Count, rows.Count(x => x.State == ScrState.Draft), rows.Count(x => x.State == ScrState.InReview),
+                    rows.Count(x => x.State is ScrState.Approved or ScrState.SelectedForBaseline), rows.Count(x => x.State == ScrState.Deferred));
+            }
+            VerificationDashboardSummary VerificationSummary(string area)
+            {
+                var areaRequestIds = requests.Where(x => area == "System" ? x.Type == ChangeRequestType.System : x.Type == ChangeRequestType.Software).Select(x => x.Id).ToHashSet();
+                var rows = impacts.Where(x =>
+                {
+                    if (!areaRequestIds.Contains(x.ChangeRequestId)) return false;
+                    if (area == "System") return true;
+                    if (x.RequirementChangeId is Guid requirementChangeId && requirementLevels.TryGetValue(requirementChangeId, out var requirementLevel))
+                        return area == "HLR" ? requirementLevel == RequirementLevel.HighLevel : requirementLevel == RequirementLevel.LowLevel;
+                    if (x.ProcedureId is Guid procedureId && procedureLevels.TryGetValue(procedureId, out var procedureLevel))
+                        return area == "HLR" ? procedureLevel == TestProcedureLevel.HighLevel : procedureLevel == TestProcedureLevel.LowLevel;
+                    return false;
+                }).ToList();
+                var grouped = rows.GroupBy(x => x.ChangeRequestId).ToList();
+                return new(grouped.Count, grouped.Count(group => group.All(x => x.State == VerificationImpactState.Resolved)),
+                    rows.Count(x => x.State != VerificationImpactState.Resolved), rows.Count(x => x.State == VerificationImpactState.Resolved));
+            }
             return Results.Ok(new {
-                totalScrs = await source.CountAsync(ct),
-                draft = await source.CountAsync(x => x.State == ScrState.Draft, ct),
-                inReview = await source.CountAsync(x => x.State == ScrState.InReview, ct),
-                approved = await source.CountAsync(x => x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline, ct),
-                deferredSystem = await source.CountAsync(x => x.State == ScrState.Deferred && x.Type == ChangeRequestType.System, ct),
-                deferredSoftware = await source.CountAsync(x => x.State == ScrState.Deferred && x.Type == ChangeRequestType.Software, ct)
+                system = ChangeSummary(ChangeRequestType.System),
+                software = ChangeSummary(ChangeRequestType.Software),
+                verification = new {
+                    system = VerificationSummary("System"),
+                    hlr = VerificationSummary("HLR"),
+                    llr = VerificationSummary("LLR")
+                }
             });
         });
 
@@ -398,3 +434,6 @@ public static class WorkspaceEndpoints
         // merge endpoints remain available for artifacts configured for optimistic editing.
     }
 }
+
+internal sealed record ChangeDashboardSummary(int Total, int Draft, int InReview, int Approved, int Deferred);
+internal sealed record VerificationDashboardSummary(int TotalChangeRequests, int TriagedChangeRequests, int OpenDecisions, int ResolvedDecisions);

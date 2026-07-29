@@ -3,7 +3,7 @@ import { apiBase, apiLogin, login, openNavigationGroup, selectProgram } from './
 
 const completeImpacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
 
-test('searches full history and proves exact software build contents', async ({ page, request }) => {
+test('searches scoped change history while dormant build management stays unreachable', async ({ page, request }) => {
   await apiLogin(request)
   const suffix=Date.now().toString().slice(-7),programName=`History Program ${suffix}`
   const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, { data: {
@@ -27,20 +27,25 @@ test('searches full history and proves exact software build contents', async ({ 
   await openNavigationGroup(page,'SOFTWARE ENGINEERING')
   await page.getByRole('link', { name: 'Software Change Requests' }).click()
   await expect(page.getByRole('heading', { name: 'Software Change Requests' })).toBeVisible()
-  await page.getByLabel('Search history').fill('round robin')
+  await page.getByLabel('Search change requests').fill('round robin')
   await expect(page.getByText(scr.displayNumber)).toBeVisible()
-  // The Requirement History tab used to be clicked here. It has been removed: it listed requirements as of the
-  // selected build, and every real programme opens on the in-work build, which has no materialized baseline
-  // yet — so it answered nothing for anybody who was not this test, which materializes one deliberately. That
-  // the materialized revision is reachable is still proven below, from the build's own contents.
-  await page.getByLabel('Search history').fill('')
+  await expect(page.locator('.historyTabs')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Record Software Build' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: /^Software Builds/ }).click()
-  await page.getByRole('button', { name: 'Record Software Build' }).click()
-  await page.getByLabel('Build number').fill('FMS-3.3.0-rc1')
-  await page.getByLabel('Frozen baseline').selectOption(baseline.id)
-  await page.getByRole('button', { name: 'Record Build', exact: true }).click()
-  await page.getByRole('button', { name: /FMS-3.3.0-rc1/ }).click()
-  await expect(page.getByText(scr.displayNumber)).toBeVisible()
-  await expect(page.getByText(new RegExp(`${scr.requirementChanges[0].displayNumber}.*Introduce`))).toBeVisible()
+  // The implementation is retained for possible future reuse, but no product route exposes it.
+  const buildResponse = await request.post(`${apiBase}/api/builds`, { data: {
+    projectId: workspace.project.id, releaseId: workspace.release.id, baselineId: baseline.id,
+    buildNumber: 'FMS-3.3.0-rc1', description: 'Dormant build-management contract probe',
+  } })
+  expect(buildResponse.ok(), await buildResponse.text()).toBeTruthy()
+  const build = await buildResponse.json()
+  const detail = await request.get(`${apiBase}/api/builds/${build.id}`)
+  expect(detail.ok(), await detail.text()).toBeTruthy()
+  expect((await detail.json()).scrs.map((item:{id:string})=>item.id)).toContain(scr.id)
+
+  const root = `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}`
+  for (const retired of ['release-planning', 'baselines']) {
+    await page.goto(`${root}/${retired}`)
+    await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
+  }
 })
