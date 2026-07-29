@@ -862,6 +862,32 @@ Future entries use:
   discover is not an isolated fixture. Seeding stays idempotent and applies to databases seeded before this
   existed, so an upgrade reconciles rather than duplicating.
 
+### DEC-069 - Controlled Numbers Come From a Sequence, and Gaps Are the Accepted Cost
+
+- **Date:** 2026-07-29
+- **Status:** Accepted
+- **Decision:** Every controlled identifier (`SCR`, `SWCR`, `SYSR`, `HLR`, `LLR`, `SYSTP`, `HLRTP`, `LLRTP`,
+  `PR`) and every controlled attachment version is claimed by a single atomic increment against a row in
+  `identifier_sequences`, keyed by prefix — repository-wide, not per Program or Project. Attachment versions
+  use one sequence per logical file. A number is spent when it is handed out, so an abandoned or rolled-back
+  create leaves a permanent gap.
+- **Rationale:** Numbers were derived by loading every identifier sharing a prefix, taking the maximum in
+  application memory and adding one, with a unique index as the only backstop. Two overlapping creates read
+  the same maximum and chose the same number, so one of them failed and a person had to resubmit work the
+  product had already accepted; the same applied to two uploads of one logical file, where the losing upload
+  failed after its bytes were already stored. The cost also grew with the identifier set on every single
+  create. Scope is the prefix because that is what the existing unique indexes on the base numbers have
+  always enforced — a per-Project scope would need those indexes relaxed and would change what an identifier
+  means.
+- **Consequences:** Contiguity is not a property of the numbering and nothing in the product infers meaning
+  from it. Reusing a number that a failed attempt may already have displayed, exported or been referenced by
+  is the worse failure, so gaps are correct rather than tolerated. A sequence row is created on first use
+  from the highest identifier already recorded, which lets an existing database adopt this without a data
+  migration that has to know every prefix in use; if two writers seed the same prefix at once, the unique
+  index on `Scope` settles it and both then claim from the surviving row. The claim commits on its own
+  connection statement rather than as part of the caller's save, which is what makes the number spent at the
+  moment it is issued rather than at commit.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

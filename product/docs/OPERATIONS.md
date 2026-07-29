@@ -211,3 +211,19 @@ npm.cmd run test:e2e
 Playwright starts disposable APIs and SQLite databases and does not reuse the live API. `test:production`
 serves the compiled client and API on one origin, performs protected writes, and verifies their durable server
 state; `test:e2e` exercises the wider development-client journey matrix.
+
+## Controlled numbering: scope and gaps
+
+Controlled numbers are issued from `identifier_sequences`, one row per prefix, by a single atomic increment.
+Two things follow that operators should expect rather than investigate:
+
+- **Numbering is repository-wide per prefix, not per Program or Project.** `SYSR-000123` is unique across the
+  whole database; two Projects share one `SYSR` run. This is what the unique indexes on the base numbers have
+  always enforced.
+- **Gaps are normal.** A number is spent the moment it is handed out, so a create that is abandoned or fails
+  after allocation consumes its number permanently. Nothing in the product infers meaning from contiguity, and
+  reissuing a number that a failed attempt may already have displayed or exported would be worse than a gap.
+  A missing number is not evidence of a deleted record.
+
+On first use after upgrading, each prefix seeds its sequence from the highest identifier already recorded, so
+an existing database continues its numbering rather than restarting it. No operator action is required.
