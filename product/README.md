@@ -5,9 +5,16 @@ comes from the actual API and persistence layer. The former `showcase/` prototyp
 2026-07-24 (DEC-046); design reference now lives in `design/mockups` and
 [DESIGN_VISION_AND_DASHBOARDS.md](../DESIGN_VISION_AND_DASHBOARDS.md).
 
-For project-wide orientation, start at [PROJECT_STATE.md](../PROJECT_STATE.md).
+For project-wide orientation, start at [PROJECT_STATE.md](../PROJECT_STATE.md), then read the
+[current product handoff](../CURRENT_PRODUCT_HANDOFF_2026-07-29.md).
 
 ## Current vertical slice
+
+The current entry path is login → Projects → FMS Product Development → Software Builds → one explicit
+build-scoped workspace. Build 1.5 is released/read-only; Build 1.6 is in work. System and Software remain
+separate, while Command Center summarizes System, Software and Verification. Problem Reports, Product Versions,
+Candidate Baselines and the old Change Request Software Builds view are deliberately dormant in the UI even
+though underlying lifecycle implementation remains.
 
 The 2026-07-13 enterprise control increment adds durable URL routing and context restoration, a keyboard command palette, Program-aware universal artifact search, authoritative artifact detail links, SCR/SWCR exclusive checkout, renewable leases, server autosave snapshots, read-only observers, check-in/discard, forced-unlock auditing, authentication throttling, Program-scope enforcement, isolated browser-test infrastructure, and verified backup/restore operations.
 
@@ -36,12 +43,12 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 - reusable, revision-controlled test procedures with many-to-many links to exact requirement revisions
 - externally executed Pass, Fail, and Blocked results with configuration, human determination, and evidence references
 - immutable retest chains and release/build-specific coverage and verified-status dashboards
-- governed FMS 1.6 release campaign with nine computed readiness gates, explicit impact dispositions, build selection, and ordered release approval
+- governed FMS 1.6 release campaign with nine computed readiness gates, consuming-engineer/release impact dispositions, build selection, and ordered release approval; detailed planning/baseline UI is currently dormant
 - checksum-protected evidence upload, download, and exact test-execution linkage with cross-project isolation
 - live 1.5-to-1.6 comparison covering effective and proposed requirement changes
 - deterministic, downloadable SYSRD, HLR SWRD, LLR SWRD, and three test-procedure documents in DOCX and PDF
 - formal atomic release that binds the approved baseline, selected build, controlled outputs, and release manifest hash
-- integrated release-execution workbench connecting change inputs, impact disposition, baseline materialization, build control, outputs, verification, and approval
+- retained release-execution workbench connecting change inputs, release impact disposition, baseline materialization, build control, outputs, verification, and approval; not all of this workbench is exposed in the current UI
 - predecessor-aware reconciliation that creates only target-baseline-valid versioned trace and coverage links while exposing genuinely new coverage gaps
 - exact JSON verification-manifest export and atomic bulk import of hundreds of build-specific results with shared checksum-protected campaign evidence
 - professional DOCX/PDF publication of SCRs, requirements, and test procedures with editorial covers, named approval provenance, document-control registers, revision history, and controlled-copy markings
@@ -54,8 +61,8 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 - checksum-recorded CSV/XLSX onboarding with row validation and a controlled commit boundary that creates a Draft SCR/SWCR instead of bypassing approval
 - provider-compatible PostgreSQL/SQLite persistence, versioned migration, and deterministic workspace synchronization for existing Programs
 - direct “analyze impact and propose change” workflow from an approved requirement into its proposed next revision inside a Draft SCR/SWCR; no parallel requirement-approval path
-- controlled structured-text authoring with lists, tables, aerospace symbols, exact references, Program fields, safe preview, and five mandatory impact-disposition categories included in the review snapshot hash
-- schema-validated proposal attributes with server-owned derived state, durable authored section placement, and fail-closed impact checks at review, baseline selection, freeze, and materialization
+- controlled structured-text authoring with lists, tables, aerospace symbols, exact references, Program fields, safe preview, and read-only downstream trace context
+- schema-validated proposal attributes with server-owned derived state and durable authored section placement; downstream impact decisions belong to consuming engineers rather than the change author (DEC-071)
 - canonical System/Software change-request routes and frozen reviewer principal/authority fields shared by review, work queues, notifications, audit, Jira links, and signature evidence
 - relationship-aware impact intelligence spanning parent/child requirements, verification procedures, baselines, builds, documents, active change packages, comments, and assigned follow-up
 - requirement watchers, threaded notifications, accountable assignments, due/overdue work queues, completion concurrency, and a combined engineering operations center

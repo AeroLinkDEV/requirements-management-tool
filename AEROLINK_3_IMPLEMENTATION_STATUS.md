@@ -1,6 +1,6 @@
 # AeroLink 3.0 — Implementation Status
 
-**Status date:** 2026-07-28  
+**Status date:** 2026-07-29
 **Authority:** This record summarizes implementation evidence and limitations. The detailed workstream contract remains `AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md`.
 
 > This file sat at 2026-07-24 through fifteen merges while `PROJECT_STATE.md` named it the authority for
@@ -31,6 +31,12 @@ endpoint, a field that was read-only where it mattered, and a read-side filter n
 workstream can be implemented and evidenced and still be unreachable, and this scorecard does not currently
 distinguish those. Acceptance evidence should name the path a user takes, not only the capability.
 
+The 28 July review backlog was then delivered through focused PRs #140–#165. PR #166 added the Projects
+selector, #167 made build selection an explicit route-owned workspace context, and #168 simplified the active
+showcase around System, Software and Verification. These increments improve correctness and reachability but do
+not complete an AeroLink 3.0 workstream. Current product scope, dormant modules and remaining issues are recorded
+in [CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).
+
 ## Overall position
 
 AeroLink has a substantial controlled-lifecycle product foundation and a green releasable `main`, but **AeroLink 3.0 is not complete**. Completion requires every workstream acceptance gate, safe migration proof, production operations evidence, workload qualification, and security closure.
@@ -42,12 +48,12 @@ No entry in this file claims certification, regulatory compliance, or tool quali
 | Workstream | Status | Implemented evidence | Remaining acceptance boundary |
 | --- | --- | --- | --- |
 | 1. Universal controlled editing | In progress | Shared policy registry; complete SCR/SWCR checkout, renewable lease, autosave snapshots, recovery, check-in/discard, contention and forced unlock | Connect the shared resolver and editing contract to all nine controlled draft families; add complete two-user and lifecycle-transition coverage for each family |
-| 2. Full problem-report lifecycle | In progress | Problem-report references and lifecycle links exist in parts of the product | First-class PR identity/revisions, investigation and disposition workflow, closure approval/reopen, release blocker/waiver rules, publications, dashboards, API/events and complete bidirectional acceptance journey |
-| 3. Product-line configuration and reuse | In progress | Configuration-aware baseline and integration foundations exist; Workstream 3 delivery has begun | Complete streams, controlled change sets, retained three-way conflicts, reusable libraries, synchronization decisions, variants, composite configurations and configuration-correct outputs |
+| 2. Full problem-report lifecycle | In progress; active UI dormant | Problem-report references, lifecycle links and corrective routing exist in retained implementation; #168 intentionally removes Problem Reports from supported navigation/search/routes | A future product decision must first restore or redesign the surface; only then complete first-class PR identity/revisions, investigation/disposition, closure approval/reopen, release blocker/waiver rules, publications, dashboards, API/events and a bidirectional acceptance journey |
+| 3. Product-line configuration and reuse | In progress | Configuration-aware baselines, exact build-scoped routes, released 1.5 read-only workspace, in-work 1.6 workspace, lineage and integration foundations exist | Complete streams, controlled change sets, retained three-way conflicts, reusable libraries, synchronization decisions, variants, composite configurations and configuration-correct outputs |
 | 4. Enterprise identity and account assurance | Delivered slice; remainder deferred | Local accounts, Program membership, sessions, MFA/recovery and security audit; trusted provider and Program-scoped external-group role-mapping domain contracts; durable provider/mapping persistence with an applied additive migration, administrator-only administration API, fail-closed audited role resolution, and PostgreSQL smoke coverage that exercises the migrated tables | **Deferred by decision (2026-07-24), not in progress:** OIDC/SAML login/logout; SCIM; break-glass; step-up; account recovery and password expiration; administrator session inventory; provider health; administration UI. See the Workstream 4 decision record in the completion contract |
 | 5. Resumable interchange and monitored integrations | In progress | ReqIF binary integrity/provenance, mapping versioning, OSLC consumer monitoring/replay and integration completion evidence; **a named Jira connector with field mapping and link-back**; **email delivery of approval notifications through a transactional outbox** | Confirm the complete acceptance gate across interrupted large import, durable checkpoints, cancellation/restart, idempotent replay, conditional writes, provider/consumer configuration-aware links, queues and dead letters. Email delivery has never been exercised against a real SMTP relay |
 | 6. Rich technical content and controlled publications | In progress | Controlled SYSRD/SWRD, change, test, traceability and release outputs; valid DOCX/PDF generation and document control; **rich authored content — tables, figures and symbols stored as structure, never markup — in requirements and change-request narrative, reproduced in DOCX and PDF**; **approved template revisions that decide what a generated document contains**, replacing a template body no generator opened | Controlled equations, exact redlines across every field, reproducibility proof and verified release-package manifests |
-| 7. Quality, evidence and portfolio intelligence | In progress | Role-aware dashboards, drill-down foundations, traceability/completeness measures and qualification datasets | Objective/evidence expectation records, blockers/waivers, historical event-time metrics, PR/review/verification trends, permission-safe cross-Program aggregation, metric contracts and controlled exports |
+| 7. Quality, evidence and portfolio intelligence | In progress | Build-scoped three-way System/Software/Verification Command Center, drill-down foundations, traceability/completeness measures and qualification datasets | The broader Verification redesign remains pending; objective/evidence expectation records, blockers/waivers, historical event-time metrics, review/verification trends, permission-safe cross-Program aggregation, metric contracts and controlled exports remain |
 | 8. Production operations and qualification | In progress | One-click local startup, diagnostics, integrity-manifested backup, isolated restore validation, PostgreSQL migration smoke and mixed-workload tools; **a production-build launcher serving the client from the API on one origin, gated by browser journeys against that artifact** (DEC-052); **both launchers waiting on a readiness check that opens a database connection** rather than on liveness; **an authenticated 150-session HTTP load harness** whose first run found the product refusing sign-in to 121 of 150 users | Structured telemetry, dependency checks, alerts/runbooks, retention holds, scheduled protected off-device backups, scheduled restore drills, measured RPO/RTO, safe upgrade workflow, and a published 150-user/50,000-requirement workload result. The workspace query still caps the page at ~380ms; the costed path is in `CAPABILITY_ROADMAP.md` and is deliberately not started |
 
 ## Current accepted delivery focus
@@ -92,16 +98,17 @@ contract — the first commitment to deploy AeroLink for an organization authent
 directory — and in the order given there. Issue #34 may close only when that sequence is either completed
 and evidenced, or formally withdrawn from the program.
 
-The active focus is the reconciled product-review remediation backlog in issues #99-#139. It is being delivered
-in dependency order: production mutation/test gates; controlled-change correctness and authorization;
-verification/readiness/traceability; content/audit/accessibility/maintainability; then operations, integrity,
-reconciliation and repository governance. This work repairs reachability, correctness and qualification inside
-existing workstreams; it does not by itself move a scorecard boundary or resume Workstream 4 federation.
+The reconciled product-review backlog is mostly delivered. Its still-open applicable issues are #100, #101,
+#102, #106, #110, #112, #113, #115 and #132. #131 and #133 were closed as superseded/not planned after
+DEC-071 and DEC-072; neither should be restored as a regression fix. This work repairs reachability,
+correctness and qualification inside existing workstreams; it does not by itself move a scorecard boundary or
+resume Workstream 4 federation.
 
-The first controlled-change correctness increment closes proposal metadata loss and lifecycle bypasses:
-schema-governed authored attributes, server-authoritative derived state, durable specification placement, and
-canonical impact dispositions now share one contract across browser, API, domain, check-in and materialization
-(DEC-062). Legacy gaps are reported rather than silently invented or rewritten.
+The first controlled-change correctness increment closed proposal metadata loss and lifecycle bypasses:
+schema-governed authored attributes, server-authoritative derived state and durable specification placement
+share one contract across browser, API, domain, check-in and materialization (DEC-062). DEC-071 later
+superseded only DEC-062's author impact-disposition requirement: consuming engineers now own downstream impact
+decisions, while the author's live trace remains informational.
 
 The second controlled-change correctness increment makes record context and approval attribution consistent
 (DEC-063): canonical typed SCR/SWCR URLs survive every supported entry path, and review rows retain the selected

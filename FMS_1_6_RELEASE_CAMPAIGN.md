@@ -12,6 +12,13 @@ The live FMS workspace is no longer only a static 1.5 data demonstration. It inc
 
 The campaign is deliberately incomplete at seed time. Managers and engineers can see real blockers, disposition impacted items, choose the verification build, inspect evidence, compare releases, and progress the release through ordered approval. The product does not manufacture a green status.
 
+> **Current-surface qualification — 2026-07-29.** The lifecycle and server-side campaign model described
+> here remains implemented, but Product Versions and Candidate Baselines are intentionally hidden in the
+> current UI (DEC-072). Do not interpret the detailed workflow below as a presently exposed demonstration path.
+> Lifecycle Decision Room remains visible; restoring or redesigning the hidden planning/baseline surfaces
+> requires a new product decision. Release-campaign impact dispositions below are consuming-engineer/release
+> decisions and are not the author impact selectors superseded by DEC-071.
+
 ## Campaign Lifecycle
 
 1. **Planning** — approved SCRs and SWCRs are selected, impacts are reviewed, and the candidate baseline is assembled.

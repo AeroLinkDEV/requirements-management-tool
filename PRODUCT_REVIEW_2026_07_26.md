@@ -13,6 +13,10 @@ This file records the disposition of each. It is a working record, not a product
 > beside the declared disposition in the proposal card, read-only, exactly as this file argued it should.
 >
 > Retained as the record of what was found and what was decided. Nothing here is outstanding work.
+>
+> **Later decision:** DEC-071 supersedes DEC-059's author-owned disposition model. The computed trace remains
+> visible as read-only context, but consuming engineers—not the change author—now decide downstream impact.
+> Do not use the historical conclusions below to restore the removed author-impact selectors.
 
 ## What was wrong, and is now fixed
 

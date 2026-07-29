@@ -27,9 +27,10 @@ Liveness is available at `/health/live`. Deployment orchestrators should use `/h
 ## Requirement proposal integrity reconciliation
 
 After upgrading, create an Enterprise integrity checkpoint from **Enterprise Control**. A checkpoint in
-`Attention` reports the count of legacy requirement proposals whose five impact dispositions are missing,
-malformed, unknown, or still Pending. Those records cannot enter review, be selected into a candidate baseline,
-freeze, or materialize until corrected.
+`Attention` reports failed enterprise jobs or unresolved merge conflicts; `Failed` reports missing, altered or
+unreadable controlled attachment content. Author impact dispositions are no longer an integrity invariant
+(DEC-071), so a checkpoint does not report or block on their absence. Historical disposition JSON remains
+untouched.
 
 An authenticated Program member can read
 `GET /api/authoring/attribute-gaps?projectId=<project-guid>` to inventory proposals missing the standard
