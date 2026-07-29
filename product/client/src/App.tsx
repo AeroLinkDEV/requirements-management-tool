@@ -563,6 +563,8 @@ function App() {
         releaseId={release.id}
         scope={discipline === "softwareTest" ? "Software" : "System"}
         user={user}
+        // Carried in the route, so refreshing or going back returns to the same remediation.
+        correctiveProblemReportId={selectedArtifactKind === "problem-report" ? selectedArtifactId || undefined : undefined}
         onBack={() => navigate("dashboard")}
       />
     );
@@ -573,7 +575,7 @@ function App() {
         projectId={project.project.id}
         user={user}
         onBack={() => navigate("dashboard")}
-        onOpenVerification={() => navigate("verification", "systemTest")}
+        onOpenVerification={(target) => navigate("verification", target?.discipline === "software" ? "softwareTest" : "systemTest", target?.problemReportId, target ? "problem-report" : undefined)}
       />
     );
   if (view === "lifecycle" && project)

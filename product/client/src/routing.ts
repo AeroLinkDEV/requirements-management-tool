@@ -70,6 +70,10 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "software/requirements") return { ...base, view: "requirements", discipline: "software", savedViewId: query.get("view") || undefined };
   if (tail[0] === "requirements" && tail[1]) return { ...base, view: "requirements", discipline: query.get("discipline") === "software" ? "software" : "system", artifactId: decoded(tail[1]) };
   if (path === "system-verification") return { ...base, view: "verification", discipline: "systemTest" };
+  // The problem report a corrective action came from is part of the address, so refresh and back return to
+  // the same remediation rather than to a generic workspace.
+  if (tail[0] === "system-verification" && tail[1]) return { ...base, view: "verification", discipline: "systemTest", artifactId: decoded(tail[1]) };
+  if (tail[0] === "software-verification" && tail[1]) return { ...base, view: "verification", discipline: "softwareTest", artifactId: decoded(tail[1]) };
   if (path === "software-verification") return { ...base, view: "verification", discipline: "softwareTest" };
   if (path === "problem-reports") return { ...base, view: "problemReports", discipline: "system" };
   if (path === "traceability") return { ...base, view: "lifecycle", discipline: "system" };
@@ -114,7 +118,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "scr": return `${root}/${discipline === "software" ? "software" : "systems"}/change-requests/${artifactId}`;
     case "history": return historyPath(discipline === "software" ? "software" : "systems");
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
-    case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification`;
+    case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
     case "problemReports": return `${root}/problem-reports`;
     case "lifecycle": return artifactId ? `${root}/traceability/${encodeURIComponent(artifactId)}` : `${root}/traceability`;
     case "planning": return `${root}/release-planning`;
