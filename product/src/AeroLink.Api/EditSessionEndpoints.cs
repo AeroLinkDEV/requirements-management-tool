@@ -154,11 +154,28 @@ public static class EditSessionEndpoints
             var conflicts=await db.ArtifactMergeConflicts.CountAsync(x=>x.ProjectId==request.ProjectId&&x.ResolvedAt==null,ct);
             var impactJson=await(from change in db.RequirementChanges.AsNoTracking() join scr in db.SystemChangeRequests.AsNoTracking() on change.ScrId equals scr.Id where scr.ProjectId==request.ProjectId select change.ImpactDispositionJson).ToListAsync(ct);
             var impactViolations=impactJson.Count(x=>!RequirementAuthoringJson.HasCompleteImpactDispositions(x));
-            var missing=attachments.Count(x=>!store.Exists(x.StorageKey));
-            var material=$"{request.ProjectId:N}|{artifactCount}|{revisionCount}|{attachments.Count}|{attachments.Sum(x=>x.Size)}|{failedJobs}|{conflicts}|{missing}|{impactViolations}";
+            // Every stored digest is recomputed from the file it names. This counted the files that existed
+            // and hashed the counts, so an altered attachment left a Healthy checkpoint behind for as long
+            // as the file was still there and the totals still matched — "integrity verified" over a
+            // measurement that had never read a byte of controlled content.
+            var missing=0;var mismatched=0;var unreadable=0;var digests=new List<string>();
+            foreach(var item in attachments.OrderBy(x=>x.StorageKey,StringComparer.Ordinal))
+            {
+                if(!store.Exists(item.StorageKey)){missing++;digests.Add($"{item.Id:N}:missing");continue;}
+                try
+                {
+                    var actual=await store.ComputeSha256Async(item.StorageKey,ct);
+                    if(!string.Equals(actual,item.Sha256,StringComparison.OrdinalIgnoreCase))mismatched++;
+                    digests.Add($"{item.Id:N}:{actual}");
+                }
+                catch(IOException){unreadable++;digests.Add($"{item.Id:N}:unreadable");}
+            }
+            // The manifest is over the content identities rather than the totals, so it is stable for an
+            // unchanged repository and moves the moment a byte does.
+            var material=$"{request.ProjectId:N}|{artifactCount}|{revisionCount}|{attachments.Count}|{attachments.Sum(x=>x.Size)}|{failedJobs}|{conflicts}|{impactViolations}|{string.Join('|',digests)}";
             var hash=EnterpriseRequirementsService.Hash(Encoding.UTF8.GetBytes(material));
-            var state=missing>0?IntegrityCheckpointState.Failed:failedJobs+conflicts+impactViolations>0?IntegrityCheckpointState.Attention:IntegrityCheckpointState.Healthy;
-            var checkpoint=new EnterpriseIntegrityCheckpoint(request.ProjectId,artifactCount,revisionCount,attachments.Count,attachments.Sum(x=>x.Size),failedJobs,conflicts,hash,state,$"{missing} missing file(s); {failedJobs} failed job(s); {conflicts} open merge conflict(s); {impactViolations} invalid impact-disposition proposal(s).",http.UserAccount().UserName,DateTimeOffset.UtcNow);
+            var state=missing+mismatched+unreadable>0?IntegrityCheckpointState.Failed:failedJobs+conflicts+impactViolations>0?IntegrityCheckpointState.Attention:IntegrityCheckpointState.Healthy;
+            var checkpoint=new EnterpriseIntegrityCheckpoint(request.ProjectId,artifactCount,revisionCount,attachments.Count,attachments.Sum(x=>x.Size),failedJobs,conflicts,hash,state,$"{attachments.Count-missing-unreadable} attachment digest(s) recomputed; {mismatched} altered; {missing} missing file(s); {unreadable} unreadable file(s); {failedJobs} failed job(s); {conflicts} open merge conflict(s); {impactViolations} invalid impact-disposition proposal(s).",http.UserAccount().UserName,DateTimeOffset.UtcNow);
             db.EnterpriseIntegrityCheckpoints.Add(checkpoint);await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-hardening/integrity-checkpoints/{checkpoint.Id}",new{checkpoint.Id,state=checkpoint.State.ToString(),checkpoint.ManifestHash,checkpoint.Detail});
         });
     }
