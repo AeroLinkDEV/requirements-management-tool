@@ -9,6 +9,7 @@ export function usePasswordVisibilityControls() {
       document.querySelectorAll<HTMLInputElement>('input[type="password"]').forEach((input) => {
         if (input.hasAttribute(enhanced)) return;
         input.setAttribute(enhanced, "true");
+        input.parentElement?.classList.add("hasPasswordVisibility");
         const button = document.createElement("button");
         button.type = "button";
         button.className = "passwordVisibility";
@@ -24,16 +25,7 @@ export function usePasswordVisibilityControls() {
           button.setAttribute("aria-pressed", String(!visible));
           button.textContent = visible ? "◎" : "◉";
         });
-        const label = input.closest("label");
-        if (label?.parentElement) {
-          const wrapper = document.createElement("div");
-          wrapper.className = "hasPasswordVisibility";
-          label.replaceWith(wrapper);
-          wrapper.append(label, button);
-        } else {
-          input.parentElement?.classList.add("hasPasswordVisibility");
-          input.insertAdjacentElement("afterend", button);
-        }
+        input.insertAdjacentElement("afterend", button);
       });
     };
     enhance();
