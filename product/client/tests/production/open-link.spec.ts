@@ -45,8 +45,19 @@ test('an unknown record and an unauthenticated reader are answered identically',
   await login(page)
   await selectProgram(page, 'Flight Management System Live Program')
   await page.goto(`${baseURL}/open/scr/11111111-1111-1111-1111-111111111111`, { waitUntil: 'load' })
+  // Read the address only once the app has settled. The resolver decides where to send an unresolvable link
+  // after the session is known, so sampling the path on `load` alone catches it mid-decision and returns
+  // whichever answer won that run — this assertion failed in both directions before the wait was added.
+  await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible({ timeout: 30_000 })
   const signedInUnknown = new URL(page.url()).pathname
 
+  // Each reader is returned to their own starting point and told nothing about the record: signed out that is
+  // the sign-in page, signed in it is the Projects portal. They stopped being the same address when the portal
+  // was added, and that is right — bouncing a signed-in reader to the sign-in page would be the defect.
+  //
+  // What this proves is that neither reader is given a Not Found for a record they may not see. What it does
+  // not prove is that an unknown record and a real record outside the reader's Programs are indistinguishable;
+  // that needs a second account with no access to the record, which this fixture does not have.
   expect(signedOut).toBe('/')
-  expect(signedInUnknown).toBe('/')
+  expect(signedInUnknown).toBe('/projects')
 })
