@@ -34,7 +34,7 @@ type Requirement={revisionId:string;displayNumber:string;statement:string}
 type Procedure={id:string;revisionId:string;displayNumber:string;title:string;ownerId:string;state:string;objective:string;requirementCount:number;lastOutcome?:string}
 type Execution={id:string;procedureRevisionId:string;displayNumber:string;title:string;outcome:string;executedBy:string;determination:string;evidenceReference:string;executedAt:string;retestOfExecutionId?:string;evidence:{id:string;originalFileName:string;size:number;sha256:string}[]}
 type Coverage={total:number;covered:number;verified:number;uncovered:number;items:{revisionId:string;displayNumber:string;statement:string;covered:boolean;verified:boolean;coveredBy:{procedureId:string;revisionId:string;displayNumber:string;title:string;state:string;isSuspect:boolean;coverageState:"Confirmed"|"Suspect";latestOutcome?:string;latestExecutionId?:string}[]}[]}
-type ImpactItem={id:string;testChangeReviewId:string;trigger:string;state:string;subjectDisplayNumber:string;declaredVerificationMethod:string;requirementRevisionId?:string;procedureId?:string;assignedEngineerId?:string;assignedByLeadId?:string;assignedAt?:string;outcome?:string;procedureChangeAction?:string;preReleaseEvidenceRequired:boolean;resolutionRationale:string;resolvedBy?:string;resolvedAt?:string;raisedAt:string;blocksBaselineApproval:boolean;resolvedProcedure?:{id:string;revisionId:string;displayNumber:string;title:string;level:string;state:string;configuration:{requirementRevisionId?:string;procedureRevisionId:string}};decisionHistory:{id:string;action:string;outcome?:string;procedureId?:string;procedureRevisionId?:string;rationale:string;actor:string;occurredAt:string}[]}
+type ImpactItem={id:string;testChangeReviewId:string;awaitsPreReleaseEvidence?:boolean;holdsRelease?:boolean;trigger:string;state:string;subjectDisplayNumber:string;declaredVerificationMethod:string;requirementRevisionId?:string;procedureId?:string;assignedEngineerId?:string;assignedByLeadId?:string;assignedAt?:string;outcome?:string;procedureChangeAction?:string;preReleaseEvidenceRequired:boolean;resolutionRationale:string;resolvedBy?:string;resolvedAt?:string;raisedAt:string;blocksBaselineApproval:boolean;resolvedProcedure?:{id:string;revisionId:string;displayNumber:string;title:string;level:string;state:string;configuration:{requirementRevisionId?:string;procedureRevisionId:string}};decisionHistory:{id:string;action:string;outcome?:string;procedureId?:string;procedureRevisionId?:string;rationale:string;actor:string;occurredAt:string}[]}
 type TestChangeReview={id:string;discipline:string;state:string;sourceChangeRequestNumber:string;displayNumber:string;coveredChangeRequests:{id:string;number:string;originating:boolean}[];assignedEngineerId?:string;submittedBy?:string;submittedAt?:string;approvedBy?:string;approvedAt?:string;approvalRationale:string;totalItems:number;resolvedItems:number;preReleaseEvidenceItems:number}
 type CorrectiveAction={problemReportId:string;problemReportNumber:string;available:boolean;discipline:string|null;reason:string;executionId?:string;procedureId?:string;procedureRevisionId?:string;procedureNumber?:string;procedureTitle?:string;requiredRole:string}
 type Props={api:string;programId:string;projectId:string;releaseId:string;buildName:string;readOnly:boolean;scope:'System'|'Software';user:AuthUser;correctiveProblemReportId?:string;onBack:()=>void}
@@ -165,7 +165,7 @@ export default function VerificationCenter({api,programId,projectId,releaseId,bu
   :review.discipline!=='System')
  const scopedReviewIds=new Set(scopedReviews.map(review=>review.id))
  const scopedImpact=impact.filter(item=>scopedReviewIds.has(item.testChangeReviewId))
- const outstandingImpact=scopedImpact.filter(x=>x.blocksBaselineApproval)
+ const outstandingImpact=scopedImpact.filter(x=>(x.holdsRelease??x.blocksBaselineApproval))
  const mineImpact=outstandingImpact.filter(x=>x.assignedEngineerId===user.userName)
  /**
   * The queue, grouped by the thing that created it.
@@ -178,22 +178,22 @@ export default function VerificationCenter({api,programId,projectId,releaseId,bu
  const impactGroups=[
   {trigger:'RequirementIntroduced',heading:'New requirements need a procedure',
    hint:'An approved change introduced these. Nothing verifies them yet.',
-    items:scopedImpact.filter(x=>x.trigger==='RequirementIntroduced'&&x.blocksBaselineApproval)},
+    items:scopedImpact.filter(x=>x.trigger==='RequirementIntroduced'&&(x.holdsRelease??x.blocksBaselineApproval))},
   {trigger:'RequirementModified',heading:'Changed requirements — coverage is suspect until reconfirmed',
    hint:'The wording moved under an existing procedure. Open the procedure and judge whether it still verifies the requirement.',
-    items:scopedImpact.filter(x=>x.trigger==='RequirementModified'&&x.blocksBaselineApproval)},
+    items:scopedImpact.filter(x=>x.trigger==='RequirementModified'&&(x.holdsRelease??x.blocksBaselineApproval))},
   {trigger:'ProcedureOrphaned',heading:'Retired requirements leave procedures covering nothing',
    hint:'The requirement these verified is no longer effective in this release.',
-    items:scopedImpact.filter(x=>x.trigger==='ProcedureOrphaned'&&x.blocksBaselineApproval)},
+    items:scopedImpact.filter(x=>x.trigger==='ProcedureOrphaned'&&(x.holdsRelease??x.blocksBaselineApproval))},
   {trigger:'RequirementIntroducedResolved',heading:'New requirement verification decisions',
    hint:'Recorded procedure coverage and explicit no-test determinations for introduced requirements.',
-    items:scopedImpact.filter(x=>x.trigger==='RequirementIntroduced'&&!x.blocksBaselineApproval)},
+    items:scopedImpact.filter(x=>x.trigger==='RequirementIntroduced'&&!(x.holdsRelease??x.blocksBaselineApproval))},
   {trigger:'RequirementModifiedResolved',heading:'Changed requirement verification decisions',
    hint:'Recorded applicability decisions for changed exact requirement revisions.',
-    items:scopedImpact.filter(x=>x.trigger==='RequirementModified'&&!x.blocksBaselineApproval)},
+    items:scopedImpact.filter(x=>x.trigger==='RequirementModified'&&!(x.holdsRelease??x.blocksBaselineApproval))},
   {trigger:'ProcedureOrphanedResolved',heading:'Retired requirement procedure decisions',
    hint:'Recorded dispositions for procedures left without an effective requirement.',
-    items:scopedImpact.filter(x=>x.trigger==='ProcedureOrphaned'&&!x.blocksBaselineApproval)},
+    items:scopedImpact.filter(x=>x.trigger==='ProcedureOrphaned'&&!(x.holdsRelease??x.blocksBaselineApproval))},
  ]
  const impactLabels:Record<string,string>={RequirementIntroduced:'New requirement',RequirementModified:'Modified requirement',ProcedureOrphaned:'Orphaned procedure'}
  const visibleRequirements=requirements.filter(x=>!requirementQuery.trim()||`${x.displayNumber} ${x.statement}`.toLowerCase().includes(requirementQuery.trim().toLowerCase())).slice(0,40)

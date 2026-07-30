@@ -77,12 +77,12 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
             new("impact_disposition","Impact analysis dispositioned",impacts.Count > 0 && disposed == impacts.Count,disposed,impacts.Count,$"{impacts.Count-disposed} impact findings remain pending.","Disposition requirement, trace, verification, and document impacts."),
             new("baseline","Requirement baseline materialized",baseline.State is CandidateBaselineState.Frozen or CandidateBaselineState.Released && baseline.RequirementsMaterializedAt is not null,baseline.RequirementsMaterializedAt is null?0:1,1,"The release needs an exact frozen and materialized requirement set.","Freeze the candidate and materialize its requirements."),
             new("verification_impact","Verification impact decided",impactDecided == verificationImpacts.Count,impactDecided,verificationImpacts.Count,undecided.Count==0?"Every new, modified, and orphaned requirement in this release has a recorded verification decision.":$"{undecided.Count} changed requirement(s) await a verification decision: {string.Join(", ",undecided.Take(3).Select(x=>x.SubjectDisplayNumber))}.","Assign each item to a test engineer, then record an approved procedure or a confirmation that no test is required."),
-            new("test_change_reviews","Test change reviews approved",
+            new("test_change_reviews","Test change requests approved",
                 testChangeReviews.Count > 0 && approvedTestChangeReviews == testChangeReviews.Count,
                 approvedTestChangeReviews,testChangeReviews.Count,
                 testChangeReviews.Count == 0
-                    ? "No controlled test change reviews have been raised for this software build."
-                    : $"{testChangeReviews.Count-approvedTestChangeReviews} System, HLR, or LLR test change review(s) still require approval.",
+                    ? "No controlled test change requests have been raised for this software build."
+                    : $"{testChangeReviews.Count-approvedTestChangeReviews} System, HLR, or LLR test change request(s) still require approval.",
                 "Complete every procedure decision, submit each discipline review, and record test-lead approval."),
             baselineMaterialized
                 ? new("traceability","Trace network complete",members.Count > 0 && tracedDerivedIds.Count == derivedIds.Count,tracedDerivedIds.Count,derivedIds.Count,

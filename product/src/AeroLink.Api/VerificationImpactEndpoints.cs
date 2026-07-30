@@ -286,6 +286,38 @@ public static class VerificationImpactEndpoints
     {
         var exactIds = items.Where(x => x.ResolvedProcedureRevisionId is not null)
             .Select(x => x.ResolvedProcedureRevisionId!.Value).Distinct().ToList();
+
+        // Which resolved items still owe the evidence they designated as a prerequisite to releasing.
+        //
+        // `BlocksBaselineApproval` answers one question — is this decision still outstanding — and a reader
+        // took it for the whole answer. An item resolved with "evidence required before release" reported
+        // that it blocked nothing, and the workspace queue, which filters on exactly that, stopped showing
+        // it. The release could not ship until its evidence arrived, and the one place a verification
+        // engineer looks for outstanding work had quietly dropped it.
+        //
+        // Computed the same way the release readiness gate computes it, against the latest run for the
+        // procedure revision the item resolved to, so the queue and the gate cannot disagree.
+        var evidenceOwedIds = new HashSet<Guid>();
+        var pendingEvidence = items
+            .Where(x => x.PreReleaseEvidenceRequired && x.ResolvedProcedureRevisionId is not null)
+            .ToList();
+        if (pendingEvidence.Count != 0)
+        {
+            var revisionIds = pendingEvidence.Select(x => x.ResolvedProcedureRevisionId!.Value).Distinct().ToList();
+            // Materialized before ordering: SQLite cannot translate an ORDER BY over a DateTimeOffset.
+            var runs = (await db.TestExecutions.AsNoTracking()
+                    .Where(x => revisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct))
+                .GroupBy(x => x.ProcedureRevisionId)
+                .ToDictionary(group => group.Key,
+                    group => group.OrderByDescending(x => x.ExecutedAt).ThenByDescending(x => x.RecordedAt).First().Id);
+            var runIds = runs.Values.ToList();
+            var evidenced = (await db.TestExecutionEvidence.AsNoTracking()
+                .Where(x => runIds.Contains(x.TestExecutionId)).Select(x => x.TestExecutionId).Distinct().ToListAsync(ct))
+                .ToHashSet();
+            foreach (var item in pendingEvidence)
+                if (!runs.TryGetValue(item.ResolvedProcedureRevisionId!.Value, out var runId) || !evidenced.Contains(runId))
+                    evidenceOwedIds.Add(item.Id);
+        }
         var exactRows = exactIds.Count == 0
             ? []
             : await LoadProcedureRowsAsync(db, exactIds, [], ct);
@@ -349,6 +381,10 @@ public static class VerificationImpactEndpoints
                 x.ResolvedAt,
                 x.RaisedAt,
                 x.BlocksBaselineApproval,
+                // Resolved, and still holding the release until its designated evidence is captured.
+                awaitsPreReleaseEvidence = evidenceOwedIds.Contains(x.Id),
+                // What a reader actually wants to know: is this item holding the build, for any reason.
+                holdsRelease = x.BlocksBaselineApproval || evidenceOwedIds.Contains(x.Id),
                 decisionHistory = history.Where(h => h.VerificationImpactItemId == x.Id).Select(h => new
                 {
                     h.Id,
