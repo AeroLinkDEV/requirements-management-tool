@@ -14,7 +14,7 @@ import { apiLogin, login, openNavigationGroup, selectProgram } from './auth'
 test('verification opens on the queue the release created, grouped by cause', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'VERIFICATION')
   await page.getByRole('link', { name: 'System Verification' }).click()

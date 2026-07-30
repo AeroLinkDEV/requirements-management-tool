@@ -20,7 +20,7 @@ test("a verification gap can be filtered to, read, and acted on from the require
   // open before the test touches anything.
   await page.setViewportSize({ width: 1440, height: 900 });
   await apiLogin(request);
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page, "Flight Management System Live Program");
   await openNavigationGroup(page, "SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "System Requirements Explorer" }).click();

@@ -11,7 +11,7 @@ async function createWorkspace(request:APIRequestContext,prefix:string){
 }
 
 async function selectProgram(page:Page,programName:string){
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await enterProgram(page,programName)
 }
 

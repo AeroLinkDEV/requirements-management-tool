@@ -83,3 +83,48 @@ export async function openNewSoftwareChangeRequest(page:Page,level:'HLR'|'LLR'='
   await page.getByRole('button',{name:'+ New Software Change Request'}).click()
   await page.getByRole('button',{name:new RegExp(`^${level} change request`)}).click()
 }
+
+/**
+ * Waits for a surface to have painted, instead of sleeping for a fixed period.
+ *
+ * The design and contrast audits visited each surface and then slept one second before measuring. Thirteen
+ * surfaces in two densities is twenty-six seconds of a thirty-five second test spent waiting on a timer that
+ * was neither long enough to be a guarantee nor short enough to be cheap.
+ *
+ * `networkidle` is not usable here: System Operations reloads every 2.5 seconds and the Integration Command
+ * Center every 5, so those surfaces are never idle by that definition. Every surface does render a `main`, so
+ * the signal is that element carrying real text.
+ *
+ * Both waits swallow their timeout on purpose. A surface that never paints is a genuine failure, and the audit
+ * that follows reports it as one — `crashed` names the surface, where a timeout here would only name this
+ * helper.
+ */
+export async function surfacePainted(page: Page, minimumCharacters = 60) {
+  await page.locator('main').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
+  await page.waitForFunction(
+    minimum => ((document.querySelector('main')?.textContent) ?? '').trim().length >= minimum,
+    minimumCharacters,
+    { timeout: 5_000 },
+  ).catch(() => {})
+}
+
+/**
+ * Waits until the document stops growing, for the measurements that compare one layout against another.
+ *
+ * `surfacePainted` is the right signal for "is there something to audit", but not for "how tall is it": the
+ * verification workspace keeps loading datasets after its first paint, and a height sampled mid-load made
+ * compact look taller than comfortable. Two consecutive equal readings is a settled layout; the poll interval
+ * is a poll, not a guess at how long rendering takes.
+ */
+export async function layoutSettled(page: Page, timeoutMs = 15_000) {
+  const height = () => page.evaluate(() => document.documentElement.scrollHeight)
+  let previous = -1
+  let stable = 0
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs && stable < 2) {
+    const current = await height()
+    stable = current === previous ? stable + 1 : 0
+    previous = current
+    if (stable < 2) await page.waitForTimeout(120)
+  }
+}

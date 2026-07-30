@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiLogin, login, selectProgram } from './auth'
+import { apiLogin, login, selectProgram, surfacePainted, layoutSettled } from './auth'
 
 /**
  * Enforces the design contract across every routed surface rather than one screen.
@@ -46,8 +46,10 @@ type Density = 'comfortable' | 'compact'
 async function useDensity(page: import('@playwright/test').Page, density: Density) {
   await page.evaluate(value => localStorage.setItem('aerolink-density', value), density)
   await page.reload({ waitUntil: 'load' })
-  await page.waitForTimeout(400)
-  expect(await page.evaluate(() => document.documentElement.dataset.density)).toBe(density)
+  // Polled rather than slept before. The attribute is the signal, so waiting for it and asserting it are the
+  // same act, and it resolves the moment the preference has been applied instead of at a fixed 400ms.
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.density), { timeout: 10_000 })
+    .toBe(density)
 }
 
 const auditSurface = (minimum: number) => {
@@ -87,7 +89,7 @@ test('every surface honours the readability floor and target sizes in both densi
   test.setTimeout(360_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
 
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
@@ -97,7 +99,7 @@ test('every surface honours the readability floor and target sizes in both densi
     await useDensity(page, density)
     for (const [name, path] of surfaces) {
       await page.goto(new URL(portalPaths.has(path) ? path : root + path, page.url()).toString(), { waitUntil: 'load' })
-      await page.waitForTimeout(1000)
+      await surfacePainted(page)
       const report = await page.evaluate(auditSurface, READABLE_MINIMUM)
       const where = `${name} [${density}]`
 
@@ -116,7 +118,7 @@ test('compact density fits materially more on the screen than comfortable', asyn
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
 
@@ -128,7 +130,10 @@ test('compact density fits materially more on the screen than comfortable', asyn
     await useDensity(page, density)
     for (const path of measured) {
       await page.goto(new URL(root + path, page.url()).toString(), { waitUntil: 'load' })
-      await page.waitForTimeout(1000)
+      // This test compares one height against another, so painted is not enough — the surface has to have
+      // stopped growing, or the two densities are measured at different points in their loading.
+      await surfacePainted(page)
+      await layoutSettled(page)
       const height = await page.evaluate(() => {
         const main = document.querySelector('.workspaceView > main') as HTMLElement | null
         return main ? main.scrollHeight : document.documentElement.scrollHeight
@@ -161,7 +166,7 @@ test('compact density shows more records at once where the list scrolls inside a
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
   const visibleRows: Record<string, number> = {}
@@ -193,7 +198,7 @@ test('opening the requirement inspector does not push the page sideways', async 
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
 

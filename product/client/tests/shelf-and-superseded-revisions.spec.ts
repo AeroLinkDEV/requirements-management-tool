@@ -26,7 +26,7 @@ test('a change request goes on the shelf with its state remembered, and comes ba
     requirementChanges: [{ level: 'System', kind: 'Introduce', statement: 'The FMS shall sequence oceanic waypoints.', rationale: 'New', verificationMethod: 'Test', impactDispositionJson:completeImpacts }],
   } })).json()
 
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, programName)
   await page.goto(`/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/change-requests/${scr.id}`)
 
@@ -69,7 +69,7 @@ test('superseded revisions collapse under the newest one and expand on request',
   const next = await request.post(`${apiBase}/api/scrs/${scr.id}/next-revision`, { data: {} })
   expect(next.ok(), await next.text()).toBeTruthy()
 
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, programName)
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'System Change Requests' }).click()

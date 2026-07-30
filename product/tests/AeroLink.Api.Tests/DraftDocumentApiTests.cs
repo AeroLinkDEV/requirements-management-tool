@@ -16,12 +16,13 @@ namespace AeroLink.Api.Tests;
 /// requirement and modifies one high-level requirement — and retires nothing. So the branch that removes a
 /// requirement was the one nobody would notice was wrong, which is exactly the branch worth a test.
 /// </summary>
-public sealed class DraftDocumentApiTests
+[Collection(ShowcaseApiCollection.Name)]
+public sealed class DraftDocumentApiTests(ShowcaseApiFixture showcase)
 {
     [Fact]
     public async Task A_draft_applies_introductions_modifications_and_retirements_and_ignores_unapproved_change()
     {
-        using var factory = new AeroLinkApiFactory();
+        using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
         await BootstrapAsync(client);
 
@@ -30,7 +31,7 @@ public sealed class DraftDocumentApiTests
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var summary = await new FmsShowcaseSeeder(db).EnsureSeededAsync();
+            var summary = showcase.Summary;
             releaseId = summary.ActiveReleaseId;
 
             // Two requirements already in the released baseline: one will be reworded, one taken out. The
@@ -103,15 +104,10 @@ public sealed class DraftDocumentApiTests
     [Fact]
     public async Task An_in_work_test_procedure_document_is_available_as_a_living_draft()
     {
-        using var factory = new AeroLinkApiFactory();
+        using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
         await BootstrapAsync(client);
-        Guid releaseId;
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            releaseId = (await new FmsShowcaseSeeder(db).EnsureSeededAsync()).ActiveReleaseId;
-        }
+        var releaseId = showcase.Summary.ActiveReleaseId;
 
         // Test-procedure documents now live in Assurance. The in-work build exposes their latest approved
         // procedure content as an explicitly non-approved living draft.

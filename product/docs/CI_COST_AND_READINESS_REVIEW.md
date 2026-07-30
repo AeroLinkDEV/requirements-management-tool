@@ -162,3 +162,41 @@ The full main/nightly/manual gate remains intentionally larger.
 - The path classifier is conservative but cannot infer runtime coupling beyond its rules.
 - The Requirements Explorer test now uses semantic loading state, but the product does not yet expose a dedicated immutable readiness contract.
 - No claim is made that GitHub Actions billing will fall by an exact percentage until several weeks of run data are compared.
+
+## Test time: where it went, measured 2026-07-30
+
+Measured rather than estimated, because three of the changes that looked obvious were wrong.
+
+**Before.** Backend suite 192s wall. Browser journeys 336s. CI critical path ~7 minutes, set by the backend
+job at 390s (49s restore+build, 341s tests) — not by the browser journeys, which is where the attention had
+been going.
+
+**What actually cost the time.** Six infrastructure tests each seeded the FMS showcase from scratch: 260 CPU
+seconds against a 189-second assembly, for a dataset identical every time. Three API tests did the same inside
+their own `WebApplicationFactory`: 177 of that assembly's 552 CPU seconds, against a median test of 3.9s. In
+the journeys, two audit specs spent 48 of their 65 seconds asleep on fixed timers — thirteen surfaces in two
+densities, one second each.
+
+**After.** Backend 192s → 98s. Journeys 336s → 246s, slowest test 34.7s → 7.7s. Same 396 backend tests and 79
+journeys passing.
+
+**How.** `ShowcaseUpgradeTests` adopted the template-copy fixture the suite already had; `ShowcaseApiFixture`
+is the same idea behind the API boundary. Fixed sleeps became conditions — `surfacePainted` for "is there
+something to audit", `layoutSettled` for the comparisons that measure height, and polled assertions where the
+assertion was already the condition.
+
+**Three things deliberately not done, because measuring killed them:**
+
+- *Run the test assemblies in parallel.* They already are. 192s wall against 304s of summed assembly time —
+  `dotnet test` on the solution overlaps them.
+- *Build the API once and share it between the browser jobs as an artifact.* The three per-job builds run in
+  parallel, so centralising them adds a serial ~50s stage that every browser job then waits on. It makes wall
+  clock worse. CI already sets `AEROLINK_E2E_SKIP_BUILD`, so there is no redundant build inside a job.
+- *Add a third journey shard.* Total journey work is now ~246s, so two shards are ~123s each against a
+  ~200s+ backend job. A third runner would buy nothing on the critical path and cost a runner.
+
+**What is left, and why it is where it stops.** The journeys run `workers: 1` because every test shares one
+API and one showcase database, and they mutate it. Sharding is the parallelism, and two shards is already past
+the point where the backend job dominates. The remaining ~3s per journey is fixed cost — a browser context, a
+sign-in, and a navigation — which only per-worker isolation would remove. That is a larger change than the
+time it would save.

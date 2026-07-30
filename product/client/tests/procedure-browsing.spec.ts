@@ -12,7 +12,7 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   test.setTimeout(240_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await apiLogin(request);
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page, "Flight Management System Live Program");
 
   const workspaces = await (await page.request.get(`${apiBase}/api/workspaces`)).json();

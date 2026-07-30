@@ -7,7 +7,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
 }) => {
   test.setTimeout(75_000);
   await apiLogin(request);
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page,"Flight Management System Live Program");
   await openNavigationGroup(page,"SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "System Requirements Explorer" }).click();

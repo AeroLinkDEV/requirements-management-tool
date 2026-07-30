@@ -4,7 +4,7 @@ import { login, openNewSystemChangeRequest, selectProgram } from './auth'
 // The author can see the live trace without being asked to perform downstream engineering triage.
 test('a modified requirement shows read-only downstream context without author impact controls', async ({ page }) => {
   test.setTimeout(180_000)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNewSystemChangeRequest(page)
 

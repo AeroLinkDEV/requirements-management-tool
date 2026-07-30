@@ -19,7 +19,7 @@ test("market evolution views stay live, legible, and visually contained", async 
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await apiLogin(request);
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page,"Flight Management System Live Program");
 
   await openNavigationGroup(page, "SYSTEMS ENGINEERING");

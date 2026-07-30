@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiLogin, login, selectProgram } from './auth'
+import { apiLogin, login, selectProgram, surfacePainted } from './auth'
 
 /**
  * WCAG 2.2 AA contrast, measured on rendered pixels rather than asserted in a document.
@@ -120,7 +120,7 @@ test('every surface meets WCAG 2.2 AA contrast in both densities', async ({ page
   test.setTimeout(360_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
 
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
@@ -131,11 +131,13 @@ test('every surface meets WCAG 2.2 AA contrast in both densities', async ({ page
   for (const density of ['comfortable', 'compact'] as const) {
     await page.evaluate(value => localStorage.setItem('aerolink-density', value), density)
     await page.reload({ waitUntil: 'load' })
-    await page.waitForTimeout(400)
+    // The attribute is the signal that the density took effect, so wait for it rather than for 400ms.
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.density), { timeout: 10_000 })
+      .toBe(density)
 
     for (const [name, path] of surfaces) {
       await page.goto(new URL(portalPaths.has(path) ? path : root + path, page.url()).toString(), { waitUntil: 'load' })
-      await page.waitForTimeout(1000)
+      await surfacePainted(page)
       const report = await page.evaluate(auditContrast)
       unresolvedTotal += report.unresolved
       for (const failure of report.failures) {

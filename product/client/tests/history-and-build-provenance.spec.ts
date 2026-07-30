@@ -22,7 +22,7 @@ test('searches scoped change history while dormant build management stays unreac
   const historyResponse = await request.get(`${apiBase}/api/history/scrs?projectId=${workspace.project.id}&page=1&pageSize=50`)
   const historyBody = await historyResponse.text(); expect(historyResponse.status(), historyBody).toBe(200); expect(JSON.parse(historyBody).totalCount).toBe(1)
 
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, programName)
   await openNavigationGroup(page,'SOFTWARE ENGINEERING')
   await page.getByRole('link', { name: 'Software Change Requests' }).click()

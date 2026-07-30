@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { apiBase, apiLogin, login, selectProgram, showcaseSeed } from './auth'
+import { apiBase, apiLogin, login, selectProgram, showcaseSeed , surfacePainted } from './auth'
 
 /**
  * No surface prints the account somebody signs in with where it means to name a person.
@@ -80,7 +80,7 @@ test('no surface names a person by their account', async ({ page, request }) => 
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(request)
   const { projectId } = await showcaseSeed(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
 
   const links = page.locator('nav[aria-label="Primary navigation"] a[href]')
@@ -92,7 +92,7 @@ test('no surface names a person by their account', async ({ page, request }) => 
   const offenders: string[] = []
   for (const route of routes) {
     await page.goto(route, { waitUntil: 'load' })
-    await page.waitForTimeout(900)
+    await surfacePainted(page)
     for (const hit of await accountsOnScreen(page, seededAccounts)) {
       offenders.push(`${route.replace(/^.*\/releases\/[^/]+/, '')}: ${hit}`)
     }

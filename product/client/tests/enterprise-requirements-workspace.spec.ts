@@ -9,7 +9,7 @@ test("requirements stay read-only while controlled proposals and imports move in
   const viewName = `System requirement 150 review ${Date.now()}`;
   const commentText = `Please confirm coverage with @test.engineer before baseline ${Date.now()}.`;
   await apiLogin(request);
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page,"Flight Management System Live Program");
   await openNavigationGroup(page,"SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "System Requirements Explorer" }).click();

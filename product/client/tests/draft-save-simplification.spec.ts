@@ -3,7 +3,7 @@ import { apiLogin, login, openNewSystemChangeRequest, selectProgram } from './au
 
 test('a Draft needs only a title and never consumes an identifier for an empty form', async ({ page, request }) => {
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNewSystemChangeRequest(page)
 

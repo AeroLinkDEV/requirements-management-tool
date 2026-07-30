@@ -29,7 +29,7 @@ async function createWorkspace(request: APIRequestContext, prefix: string) {
 }
 
 async function openNewSystemScr(page: Page, programName: string) {
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, programName)
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await openNewSystemChangeRequest(page)
@@ -67,7 +67,7 @@ test('the change case keeps every space the author types', async ({ page, reques
 test('modifying a requirement shows the approved wording beside the proposed wording', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await openNewSystemChangeRequest(page)
@@ -116,7 +116,7 @@ test('modifying a requirement shows the approved wording beside the proposed wor
 test('a specification section filters to the requirements it holds', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
@@ -141,23 +141,26 @@ test('a specification section filters to the requirements it holds', async ({ pa
   expect(sectionCount, 'the section should report how many requirements it holds').toBeGreaterThan(0)
 
   await sections.first().click()
-  await page.waitForTimeout(1500)
-  await expect(sections.first()).toHaveAttribute('aria-pressed', 'true')
+  // toHaveAttribute retries on its own, so the sleep only delayed a check that was already waiting.
+  await expect(sections.first()).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 })
 
+  // The pressed attribute flips before the list behind it has re-rendered, so the narrowing is what to wait
+  // for. Polling the count is both the wait and the assertion; reading it once raced the refresh.
+  await expect.poll(total, { timeout: 15_000 }).toBeLessThan(beforeFilter)
   const afterFilter = await total()
   expect(afterFilter, 'selecting a section must narrow the list').toBeLessThan(beforeFilter)
   expect(afterFilter, 'and it should show exactly the number the heading promised').toBe(sectionCount)
 
   // Pressing it again returns to the whole specification, so the control is a toggle rather than a trap.
   await sections.first().click()
-  await page.waitForTimeout(1500)
-  expect(await total()).toBe(beforeFilter)
+  // Polled rather than slept: `total()` is a one-shot read, so the wait has to be the condition itself.
+  await expect.poll(total, { timeout: 15_000 }).toBe(beforeFilter)
 })
 
 test('the System explorer never lists software requirements, whatever else is filtered', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'System Requirements Explorer' }).click()

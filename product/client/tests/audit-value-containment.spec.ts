@@ -15,7 +15,7 @@ test("a long unbroken audit value wraps instead of taking the page sideways", as
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1265, height: 900 });
   await apiLogin(request);
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page, "Flight Management System Live Program");
   await openNavigationGroup(page, "SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "Change Requests" }).click();

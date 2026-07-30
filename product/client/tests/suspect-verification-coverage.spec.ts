@@ -109,7 +109,7 @@ test('modified requirement coverage stays suspect until an exact approved proced
   )
   expect(assignmentResponse.ok(), await assignmentResponse.text()).toBeTruthy()
 
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'VERIFICATION')
   await page.getByRole('link', { name: 'System Verification' }).click()

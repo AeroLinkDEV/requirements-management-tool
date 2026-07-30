@@ -16,7 +16,7 @@ test("opening the Digital Thread from a requirement focuses that requirement and
   test.setTimeout(180_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await apiLogin(request);
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page, "Flight Management System Live Program");
   await openNavigationGroup(page, "SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "System Requirements Explorer" }).click();

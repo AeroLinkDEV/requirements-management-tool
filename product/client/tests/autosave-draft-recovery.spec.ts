@@ -8,7 +8,7 @@ import { apiBase, login, openNewSystemChangeRequest, selectProgram } from './aut
  */
 test('unfinished authoring survives a reload, is offered rather than applied, and can be discarded', async ({ page }) => {
   test.setTimeout(90_000)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
 
   const suffix = Date.now().toString().slice(-7)
   const programName = `Autosave ${suffix}`

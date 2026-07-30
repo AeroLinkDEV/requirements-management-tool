@@ -19,7 +19,7 @@ test("the copied saved-view link reopens the view and applies its filters", asyn
 
   await apiLogin(request);
   await page.context().grantPermissions(["clipboard-write"]);
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page, "Flight Management System Live Program");
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, "");
 
