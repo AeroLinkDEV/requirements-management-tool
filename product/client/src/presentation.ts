@@ -153,3 +153,16 @@ export const targetsFor = (scope: 'System' | 'Software', level?: string): Docume
   if (level === 'LowLevel') return [low]
   return [high, low]
 }
+
+/**
+ * The one official software-build name, mirroring SoftwareBuildIdentifier.FromVersion on the server.
+ *
+ * This existed as three separate copies — the navigation identity, the builds landing page, and the domain —
+ * and two of them read the minor part as a count and multiplied it by ten, so `1.10` produced `SW-01.100`.
+ * The minor part is the decimal it is written as: `1.6` is six tenths and `1.10` is ten hundredths.
+ */
+export const officialBuildName = (version: string) => {
+  const [major, minor = ''] = (version ?? '').split('.')
+  const fraction = minor.length === 1 ? Number(minor) * 10 : Number(minor)
+  return `SW-${String(Number(major)).padStart(2, '0')}.${String(fraction).padStart(2, '0')}`
+}

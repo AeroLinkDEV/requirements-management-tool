@@ -1,6 +1,7 @@
 import type { AuthUser } from "./IdentityCenter";
 import PortalHeader from "./PortalHeader";
 import { ProjectIcon } from "./ProjectsLanding";
+import { officialBuildName } from "./presentation";
 import "./SoftwareBuildsLanding.css";
 
 export type SelectableRelease = {
@@ -29,14 +30,6 @@ const softwareBuilds: readonly BuildDefinition[] = [
   { id: "fms-1-5", version: "1.5", status: "released", statusLabel: "Released", title: "Stability release", description: "Reliability improvements and defect remediation.", isAccessible: true, isReleased: true, isReadOnly: true, isCurrent: false, sortOrder: 3 },
   { id: "fms-1-6", version: "1.6", status: "in-work", statusLabel: "In Work", title: "Current in-work build", description: "Ongoing enhancements and integration for the upcoming release.", isAccessible: true, isReleased: false, isReadOnly: false, isCurrent: true, sortOrder: 4 },
 ];
-
-// Mirrors SoftwareBuildIdentifier.FromVersion: the minor part is the decimal it is written as, so `1.6` is
-// SW-01.60 and `1.10` is SW-01.10. If the two ever disagree the page shows a name the server will not accept.
-const officialBuildName = (version: string) => {
-  const [major, minor = ""] = version.split(".");
-  const fraction = minor.length === 1 ? Number(minor) * 10 : Number(minor);
-  return `SW-${String(Number(major)).padStart(2, "0")}.${String(fraction).padStart(2, "0")}`;
-};
 
 function MetadataIcon({ kind }: { kind: "owner" | "created" | "phase" }) {
   const path = kind === "owner"

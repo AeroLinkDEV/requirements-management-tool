@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { ComponentType, FormEvent } from "react";
 import CommandPalette from "./CommandPalette";
+import { officialBuildName } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
 import { readRoute, routePath } from "./routing";
@@ -155,9 +156,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
   const release = project?.releases.find(x => x.id === selectedReleaseId) ?? project?.releases.at(-1);
-  const officialBuild = release
-    ? `SW-${String(Number(release.version.split(".")[0])).padStart(2, "0")}.${String(Number(release.version.split(".")[1]) * 10).padStart(2, "0")}`
-    : "";
+  const officialBuild = release ? officialBuildName(release.version) : "";
   const item = (label:string,target:View,icon:string,area:Discipline="system",accessibleLabel=label) => {
     const activeItem = (view===target || (target==="history" && view==="scr") || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area;
     // Fetched on hover or keyboard focus, so the workspace's code is usually already here by the time the
@@ -180,7 +179,9 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
         <small>ACTIVE CONTEXT</small>
         <strong className="activeProgram" title={active?.program.name}>{active?.program.name}</strong>
         <span title={project?.project.name}>{project?.project.name}</span>
-        <div className="activeBuildIdentity" aria-label={`Active software build ${officialBuild}`}>
+        {/* "Active build <version>" stays contiguous so the informal version a person reads elsewhere —
+            the breadcrumb says "Build 1.6" — is how this can be found by name too. */}
+        <div className="activeBuildIdentity" aria-label={`Active build ${release?.version} (${officialBuild})`}>
           <small>BUILD</small>
           <strong>{officialBuild}</strong>
           <span>{release?.isReleased ? "Released · read-only" : "In work"}</span>
