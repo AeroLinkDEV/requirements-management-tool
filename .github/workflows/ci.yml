@@ -28,7 +28,7 @@ concurrency:
 jobs:
   changes:
     name: Classify changed product areas
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       backend: ${{ steps.classify.outputs.backend }}
@@ -106,7 +106,7 @@ jobs:
   warm-chromium-cache:
     name: Warm the Chromium cache
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 10
     steps:
       - name: Check out repository
@@ -115,7 +115,7 @@ jobs:
         id: chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
+          path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Install Node.js
         if: steps.chromium.outputs.cache-hit != 'true'
@@ -124,8 +124,8 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: product/client/package-lock.json
-      # No `--with-deps`: only the browser binary is being cached, and the apt packages this would install are
-      # thrown away with the runner. The jobs that read this cache install them for themselves.
+      # Only the browser binary is cached. There is no dependency install on Windows — `--with-deps` installs
+      # apt packages and has no Windows equivalent.
       - name: Download Chromium
         if: steps.chromium.outputs.cache-hit != 'true'
         working-directory: product/client
@@ -133,12 +133,22 @@ jobs:
           npm ci
           npx playwright install chromium
 
+  # Every gate in this workflow runs on Windows, because Windows is the only platform this product is installed,
+  # run, demonstrated and debugged on. A Linux gate proves something about a configuration nobody ships, and it
+  # actively misleads: the connection-lifetime defect fixed in #173 was visible only as a locked SQLite file on
+  # Windows, and the identical bug produced a green Linux suite. Windows refuses to delete or overwrite an open
+  # file where Linux allows it, and the evidence store, backup, restore drill and integrity scan all walk the
+  # file system. Path length, separators and case-insensitivity sit in the same category.
+  #
+  # Windows minutes bill at roughly twice Linux and the runners are slower to provision. That is the price of
+  # testing what is actually shipped, and it is a better trade than paying less for evidence about a platform
+  # that will never be used.
   validate:
     name: Build, test, and exercise product journeys
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -187,15 +197,11 @@ jobs:
           echo "Classify the changed paths in the changes job, or mark the change as documentation-only."
           exit 1
 
-  # The journeys run on Linux. They were Windows-only for as long as the Playwright config launched both
-  # servers through a PowerShell prologue, which also meant they could not be run on a Linux development
-  # machine at all. The config now passes configuration through webServer.env, so the same suite runs on
-  # either platform; Linux runners are faster and bill at a lower rate.
   browser-pr:
     name: Browser journeys (${{ matrix.shard }}/2)
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.browser == 'true'
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 20
     strategy:
       fail-fast: true
@@ -233,19 +239,15 @@ jobs:
         id: chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
+          path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Install client and Chromium
         working-directory: product/client
         run: |
           npm ci
-          # The cache holds the browser binary. The system libraries it links against are apt packages that
-          # live outside it, so they are installed either way — `install-deps` alone on a hit.
-          if [ "${{ steps.chromium.outputs.cache-hit }}" = "true" ]; then
-            npx playwright install-deps chromium
-          else
-            npx playwright install --with-deps chromium
-          fi
+          # No dependency install: `--with-deps` and `install-deps` install apt packages and do not apply on
+          # Windows. The cache holds the browser binary, which is the whole of what is needed here.
+          npx playwright install chromium
       - name: Run browser journey shard
         working-directory: product/client
         env:
@@ -275,7 +277,7 @@ jobs:
     name: Browser journeys on the production build
     needs: changes
     if: github.event_name != 'push' && needs.changes.outputs.browser == 'true'
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 20
     steps:
       - name: Check out repository
@@ -305,17 +307,15 @@ jobs:
         id: chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
+          path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Install client and Chromium
         working-directory: product/client
         run: |
           npm ci
-          if [ "${{ steps.chromium.outputs.cache-hit }}" = "true" ]; then
-            npx playwright install-deps chromium
-          else
-            npx playwright install --with-deps chromium
-          fi
+          # `--with-deps` installs apt packages and does not apply on Windows; the cached browser binary is all
+          # that is needed.
+          npx playwright install chromium
       - name: Build the client and run the production journeys
         working-directory: product/client
         env:
@@ -339,7 +339,7 @@ jobs:
     # is identical to the one browser-pr tested minutes earlier, so re-running the journeys on push buys
     # no information. validate and postgresql-smoke still run on every push as the safety net.
     if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.browser == 'true'
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -364,7 +364,7 @@ jobs:
         id: chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
+          path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Restore, build, and install browser dependencies
         working-directory: product/client
@@ -372,11 +372,9 @@ jobs:
           dotnet restore ../src/AeroLink.Api/AeroLink.Api.csproj
           dotnet build ../src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
           npm ci
-          if [ "${{ steps.chromium.outputs.cache-hit }}" = "true" ]; then
-            npx playwright install-deps chromium
-          else
-            npx playwright install --with-deps chromium
-          fi
+          # `--with-deps` installs apt packages and does not apply on Windows; the cached browser binary is all
+          # that is needed.
+          npx playwright install chromium
       - name: Run full browser shard
         working-directory: product/client
         env:
@@ -389,70 +387,6 @@ jobs:
           name: playwright-full-${{ matrix.shard }}-${{ github.run_attempt }}
           path: |
             product/client/playwright-report
-            product/client/test-results/test-timings.json
-          if-no-files-found: ignore
-          retention-days: 14
-
-  # AeroLink is deployed on-premises and is run from Windows engineering workstations, so Windows stays a
-  # supported platform even though the everyday gate is Linux. This job is the platform assurance: one
-  # unsharded pass on the nightly schedule, rather than paying the Windows rate on every pull request.
-  browser-windows:
-    name: Browser journeys on Windows
-    needs: changes
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install .NET 10
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
-        with:
-          dotnet-version: 10.0.x
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: product/client/package-lock.json
-      - name: Restore, build, and install browser dependencies
-        working-directory: product/client
-        run: |
-          dotnet restore ../src/AeroLink.Api/AeroLink.Api.csproj
-          dotnet build ../src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
-          npm ci
-          # Deliberately uncached, unlike the Linux jobs. This one runs weekly and nothing else populates a
-          # Windows entry, so a cache would sit unused for seven days — exactly the point at which GitHub
-          # evicts it — and pay the download every time regardless, for the cost of a cache step that always
-          # misses. The Linux jobs cache because pull requests keep their entry warm.
-          npx playwright install chromium
-      # Windows is the deployment platform, and until this step existed nothing had ever type-checked or
-      # built the client on it. The journeys alone could not: Playwright serves them through `vite dev`,
-      # which transpiles per file without checking types. `RichContent.tsx` and `richContent.ts` were
-      # therefore two modules on Linux and one on Windows for as long as they both existed, and every
-      # Windows build failed while every gate stayed green. Run the same three commands the Linux job runs.
-      - name: Lint, type-check, and build client on Windows
-        working-directory: product/client
-        run: |
-          npm run lint
-          npm run typecheck
-          npm run build
-      - name: Run the full suite on Windows
-        working-directory: product/client
-        env:
-          AEROLINK_E2E_SKIP_BUILD: "true"
-        run: npx playwright test
-      - name: Upload Windows diagnostics
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: playwright-windows-${{ github.run_attempt }}
-          path: |
-            product/client/playwright-report
-            product/client/test-results
-          if-no-files-found: ignore
-          retention-days: 7
-
   postgresql-smoke:
     name: PostgreSQL migrations and secure bootstrap
     needs: changes
@@ -560,3 +494,65 @@ jobs:
           path: postgres-api.log
           if-no-files-found: ignore
           retention-days: 7
+  # What a green tick on this run actually means.
+  #
+  # Every job above is conditional, and a skipped job is not a failed one — so a run whose journeys never ran
+  # reports success exactly like a run where they all passed. That is how a commit landed on main with every
+  # browser journey skipped and a green tick beside it, and why "CI is green" could not be used as evidence
+  # without opening the run and reading which jobs had actually executed.
+  #
+  # This job always runs, fails if anything it waited on failed, and writes down what was and was not
+  # validated. It is the one check worth requiring for a merge: it cannot be skipped into a pass, and its
+  # summary says in words what the tick is claiming.
+  gate:
+    name: Report what this run validated
+    if: always()
+    needs: [changes, validate, browser-pr, browser-production, postgresql-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Summarise and enforce
+        env:
+          VALIDATE: ${{ needs.validate.result }}
+          BROWSER: ${{ needs.browser-pr.result }}
+          PRODUCTION: ${{ needs.browser-production.result }}
+          POSTGRESQL: ${{ needs.postgresql-smoke.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+        run: |
+          set -euo pipefail
+          describe() {
+            case "$2" in
+              success) echo "- **$1**: ran and passed" ;;
+              failure) echo "- **$1**: FAILED" ;;
+              cancelled) echo "- **$1**: cancelled" ;;
+              *) echo "- **$1**: did not run" ;;
+            esac
+          }
+          {
+            echo "## What this run validated"
+            echo
+            describe "Backend suites and client validation" "$VALIDATE"
+            describe "Browser journeys" "$BROWSER"
+            describe "Browser journeys on the production build" "$PRODUCTION"
+            describe "PostgreSQL migrations and secure bootstrap" "$POSTGRESQL"
+            echo
+            if [ "$DOCS_ONLY" = "true" ]; then
+              echo "Classified as a documentation-only change, so no product gate ran. This tick is not evidence about the product."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # A skipped job is deliberate and allowed; a failed one is not. Reading each result explicitly rather
+          # than relying on this job's own dependency behaviour, which treats a skipped dependency as a reason
+          # to skip and would take this reporter down with it.
+          failed=""
+          for pair in "validate:$VALIDATE" "browser-pr:$BROWSER" "browser-production:$PRODUCTION" "postgresql-smoke:$POSTGRESQL"; do
+            name="${pair%%:*}"
+            result="${pair#*:}"
+            case "$result" in
+              failure|cancelled) failed="$failed $name" ;;
+            esac
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::These gates did not pass:$failed"
+            exit 1
+          fi

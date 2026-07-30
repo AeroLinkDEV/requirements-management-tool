@@ -136,7 +136,16 @@ test('a deep link reloads, because the server falls back to the client', async (
   const reloaded = await page.reload({ waitUntil: 'load' })
   expect(reloaded?.status(), 'reloading a client route must serve the client, not 404').toBe(200)
   await expect(headings.first()).toBeVisible({ timeout: 30_000 })
-  expect(await headings.first().textContent()).toBe(before)
+  // Polled rather than sampled once. `headings.first()` is whichever heading renders first, and on a slower
+  // machine the app paints the Command Center heading while it resolves the deep-linked route — so a single
+  // read raced the router and compared the wrong heading. This failed the first time these journeys ran on
+  // Windows and had passed on Linux throughout, which is the same "fast enough to look correct" trap that
+  // measuring a surface before it settled produced twice elsewhere in this suite.
+  //
+  // If the route genuinely never resolves, this still fails after the timeout — waiting properly is what
+  // tells the two apart.
+  await expect.poll(async () => (await headings.first().textContent())?.trim(), { timeout: 30_000 })
+    .toBe(before?.trim())
 
   // An unmatched API path must stay an API error rather than be handed the document, or a mistyped route
   // becomes a JSON parse failure somewhere far from its cause.
