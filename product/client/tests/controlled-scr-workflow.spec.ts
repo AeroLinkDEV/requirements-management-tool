@@ -34,7 +34,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByRole('button',{name:'New Test Procedure'})).toBeDisabled()
   await expect(page.getByRole('button',{name:'New Test Procedure'})).toHaveAttribute(
     'title',
-    'Materialize the candidate requirement baseline before creating a procedure.',
+    'Materialize the software build requirements before creating a procedure.',
   )
   await page.getByRole('button',{name:'Command Center'}).click()
 

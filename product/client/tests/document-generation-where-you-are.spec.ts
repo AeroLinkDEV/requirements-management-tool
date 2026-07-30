@@ -62,23 +62,7 @@ test('the software explorer offers the document for the level being read', async
   await expect(drafts.getByText(/Low-Level/)).toHaveCount(0)
 })
 
-test('the controlled documents tab asks whether you want released or draft', async ({ page }) => {
-  test.setTimeout(120_000)
-  await login(page)
-  await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'Digital Thread' }).click()
-  await page.getByRole('button', { name: /Controlled Documents/ }).click()
-
-  // Released first: it is the answer to "what did we ship".
-  const chooser = page.getByRole('group', { name: 'Which documents' })
-  await expect(chooser.getByRole('button', { name: 'Released documents' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByRole('button', { name: 'Generate / refresh outputs' })).toBeVisible()
-
-  await chooser.getByRole('button', { name: 'Draft documents' }).click()
-  const drafts = page.getByRole('region', { name: /Draft documents for/ })
-  await expect(drafts).toBeVisible()
-  // All three requirement documents, and none of the released machinery, because they are not the same thing.
-  await expect(drafts.getByRole('link', { name: 'Draft DOCX' })).toHaveCount(3)
-  await expect(page.getByRole('button', { name: 'Generate / refresh outputs' })).toHaveCount(0)
-})
+// A third test asserted the opposite contract — a Controlled Documents tab on the Digital Thread with a
+// Released/Draft toggle, so the reader chose. Build-scoped workspaces removed both the tab and the choice on
+// purpose: the build decides, which is what the two tests above now prove for the in-work and released cases.
+// Keeping a test for a question the product deliberately stopped asking would have locked in the old model.

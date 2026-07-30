@@ -1,6 +1,7 @@
 import type { AuthUser } from "./IdentityCenter";
 import PortalHeader from "./PortalHeader";
 import { ProjectIcon } from "./ProjectsLanding";
+import { officialBuildName } from "./presentation";
 import "./SoftwareBuildsLanding.css";
 
 export type SelectableRelease = {
@@ -29,11 +30,6 @@ const softwareBuilds: readonly BuildDefinition[] = [
   { id: "fms-1-5", version: "1.5", status: "released", statusLabel: "Released", title: "Stability release", description: "Reliability improvements and defect remediation.", isAccessible: true, isReleased: true, isReadOnly: true, isCurrent: false, sortOrder: 3 },
   { id: "fms-1-6", version: "1.6", status: "in-work", statusLabel: "In Work", title: "Current in-work build", description: "Ongoing enhancements and integration for the upcoming release.", isAccessible: true, isReleased: false, isReadOnly: false, isCurrent: true, sortOrder: 4 },
 ];
-
-const officialBuildName = (version: string) => {
-  const [major, minor] = version.split(".").map(Number);
-  return `SW-${String(major).padStart(2, "0")}.${String(minor * 10).padStart(2, "0")}`;
-};
 
 function MetadataIcon({ kind }: { kind: "owner" | "created" | "phase" }) {
   const path = kind === "owner"
@@ -115,16 +111,22 @@ export default function SoftwareBuildsLanding({
                     </div>
                     <h3>{build.title}</h3>
                     <p>{build.description}</p>
+                    {/*
+                      The visible label is "Open build", so the accessible name has to contain that text
+                      (WCAG 2.2 AA, Label in Name). "Open software build …" split those two words apart,
+                      which broke the requirement and every locator that identified a build by its version.
+                      Both identifiers are named because the card itself shows both.
+                    */}
                     <button
                       type="button"
                       disabled={!enabled}
                       onClick={() => release && onOpenBuild(release)}
-                      aria-label={`Open software build ${officialBuildName(build.version)}`}
+                      aria-label={`Open build ${build.version} (${officialBuildName(build.version)})`}
                     >
                       <span aria-hidden="true">↗</span> Open build
                     </button>
-                    {build.isReadOnly && enabled && <small>Informally Build {build.version} Â· read-only historical workspace</small>}
-                    {build.isCurrent && <small>Informally Build {build.version} Â· active development workspace</small>}
+                    {build.isReadOnly && enabled && <small>Informally Build {build.version} · read-only historical workspace</small>}
+                    {build.isCurrent && <small>Informally Build {build.version} · active development workspace</small>}
                   </article>
                   {index < softwareBuilds.length - 1 && <span className="buildConnector" aria-hidden="true">→</span>}
                 </li>

@@ -57,7 +57,7 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
 
   await page.getByRole('link',{name:/Command Center/}).click()
   await openNavigationGroup(page,'VERIFICATION')
-  await page.getByRole('link',{name:'Traceability & Outputs'}).click()
+  await page.getByRole('link',{name:'Digital Thread'}).click()
   await expect(page.getByText('1,250 requirements')).toBeVisible()
   await expect(page.getByRole('heading',{name:'Digital Thread'})).toBeVisible()
   await expect(page.locator('.digitalThreadStage')).toBeVisible()
@@ -70,7 +70,7 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   await page.getByRole('link',{name:'System Verification'}).click()
   // Verification opens on the work an approved change created, not on the coverage inventory. The inventory
   // is one tab across, which is the right distance for a question asked occasionally.
-  await expect(page.getByRole('heading',{name:'Change impact'})).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Test procedure alignment'})).toBeVisible()
   await page.getByRole('button',{name:/Requirement coverage/}).click()
   await expect(page.getByRole('heading',{name:'Requirement coverage'})).toBeVisible()
   await expect(page.getByRole('heading',{name:'Test procedures'})).toBeHidden()

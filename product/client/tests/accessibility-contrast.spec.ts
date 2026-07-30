@@ -21,7 +21,12 @@ const surfaces = [
   ['Release Readiness', '/release-readiness'],
   ['People & Authority', '/administration'],
   ['Enterprise Control', '/enterprise-control'],
+  // The post-login portal, addressed from the site root rather than from inside a software build.
+  ['Projects', '/projects'],
+  ['Software Builds', '/projects/fms-product-development/builds'],
 ] as const
+
+const portalPaths = new Set<string>(['/projects', '/projects/fms-product-development/builds'])
 
 const auditContrast = () => {
   const parse = (value: string): [number, number, number, number] | null => {
@@ -129,7 +134,7 @@ test('every surface meets WCAG 2.2 AA contrast in both densities', async ({ page
     await page.waitForTimeout(400)
 
     for (const [name, path] of surfaces) {
-      await page.goto(new URL(root + path, page.url()).toString(), { waitUntil: 'load' })
+      await page.goto(new URL(portalPaths.has(path) ? path : root + path, page.url()).toString(), { waitUntil: 'load' })
       await page.waitForTimeout(1000)
       const report = await page.evaluate(auditContrast)
       unresolvedTotal += report.unresolved

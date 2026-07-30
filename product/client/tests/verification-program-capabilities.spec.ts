@@ -162,7 +162,7 @@ test('verification actions follow authority in the selected Program',async({page
   await page.getByLabel('Outcome').selectOption('Blocked')
   await expect(page.getByLabel('Evidence reference')).not.toHaveAttribute('required','')
   await page.locator('.resultForm').getByRole('button',{name:'Cancel'}).click()
-  await page.getByRole('button',{name:/Execution history/}).click()
+  await page.getByRole('button',{name:/Evidence & results/}).click()
   await expect(page.getByText('Upload evidence',{exact:true})).toBeVisible()
 
   await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification`)
@@ -174,6 +174,6 @@ test('verification actions follow authority in the selected Program',async({page
   const approvedRow=page.locator('.procedureRow').filter({hasText:'Approval-only approved procedure'})
   await expect(approvedRow.getByRole('button',{name:'Record result'})).toHaveCount(0)
   await expect(approvedRow.getByText(/Test Engineer authority is required/)).toBeVisible()
-  await page.getByRole('button',{name:/Execution history/}).click()
+  await page.getByRole('button',{name:/Evidence & results/}).click()
   await expect(page.getByText('Upload evidence',{exact:true})).toHaveCount(0)
 })

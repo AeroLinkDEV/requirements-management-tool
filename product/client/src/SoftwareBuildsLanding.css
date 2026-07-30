@@ -58,7 +58,8 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .buildProjectContent dl > div:first-child { padding-left: 0; border-left: 0; }
 .buildProjectContent dl svg { width: 25px; height: 25px; color: #60758c; }
 .buildProjectContent dl span { display: flex; flex-direction: column; gap: 2px; }
-.buildProjectContent dt { color: #758395; font-size: 11px; }
+/* 12px is the readability floor the design guard enforces; #758395 was also only 3.87:1 on white. */
+.buildProjectContent dt { color: var(--ink-500); font-size: 12px; }
 .buildProjectContent dd { margin: 0; color: var(--ink-800); font-size: 12px; font-weight: 650; }
 
 .buildLineage { margin-top: 20px; }
@@ -82,7 +83,7 @@ body:has(.buildsLandingPage) { min-width: 0; }
 }
 .buildCardTop { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .buildVersion { min-width: 64px; height: 42px; display: grid; place-items: center; box-sizing: border-box; padding: 0 9px; border: 1px solid #c7d0da; border-radius: 22px; white-space: nowrap; font: 700 14px var(--font-display); }
-.buildStatus { border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: 750; line-height: 1; }
+.buildStatus { border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 750; line-height: 1; }
 .buildStatus.released { border: 1px solid #91cfa5; background: #e9f7ed; color: #207044; }
 .buildStatus.in-work { border: 1px solid #58a2d4; background: #eef7fd; color: #12659d; }
 .softwareBuildCard h3 { margin: 14px 0 5px; font: 650 14px var(--font-display); }
@@ -90,7 +91,7 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .softwareBuildCard button { min-height: 38px; border: 1px solid #278aca; border-radius: 7px; background: white; color: #136eaa; font: 650 13px var(--font-body); cursor: pointer; }
 .softwareBuildCard button:hover:not(:disabled) { background: #f0f8fd; border-color: #0e6fae; }
 .softwareBuildCard button:disabled { border-color: #d9dee5; background: #f5f6f8; color: #a8b0bb; cursor: not-allowed; }
-.softwareBuildCard small { margin-top: 7px; color: #718096; font-size: 10px; text-align: center; }
+.softwareBuildCard small { margin-top: 7px; color: var(--ink-500); font-size: 12px; text-align: center; }
 .softwareBuildCard.current { border-color: #278cd2; background: linear-gradient(145deg, #fff 15%, #edf7ff); box-shadow: 0 0 0 1px rgba(39, 140, 210, .14), 0 12px 27px rgba(20, 96, 151, .1); }
 .softwareBuildCard.current .buildVersion { border-color: #2d92d3; color: #105f98; }
 .softwareBuildCard.current button { background: #0878df; border-color: #0878df; color: white; }
@@ -100,7 +101,7 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .buildDetailsHelper > span { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 50%; background: #edf6ff; color: #167fd0; font-size: 27px; }
 .buildDetailsHelper div { flex: 1; }
 .buildDetailsHelper h2 { margin: 0 0 3px; font: 650 13px var(--font-display); }
-.buildDetailsHelper p { margin: 0; color: #5e6f82; font-size: 11px; }
+.buildDetailsHelper p { margin: 0; color: var(--ink-500); font-size: 12px; }
 .buildDetailsHelper button:disabled { opacity: .65; cursor: not-allowed; }
 
 @media (max-width: 1050px) {

@@ -349,7 +349,9 @@
   justify-content: center;
   gap: 5px;
   padding: 24px;
-  color: #67798b;
+  /* Was a one-off #67798b, which is 4.48:1 on white — under AA by two hundredths at this 13px weight. The
+     design token is 5.33:1 and is what every other muted line on this surface already uses. */
+  color: var(--ink-500);
   text-align: center;
 }
 

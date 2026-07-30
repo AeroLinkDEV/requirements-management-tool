@@ -38,10 +38,13 @@ public static class VerificationImpactEndpoints
                 .Select(x => x.ProjectId).SingleOrDefaultAsync(ct);
             if (projectId == Guid.Empty) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
-            var reviews = await db.TestChangeReviews.AsNoTracking()
-                .Where(x => x.ReleaseId == releaseId)
+            // Ordered in memory on purpose: SQLite cannot translate an ORDER BY over a DateTimeOffset and
+            // throws, which took this whole endpoint to a 500 and left the workspace looking simply empty.
+            var reviews = (await db.TestChangeReviews.AsNoTracking()
+                    .Where(x => x.ReleaseId == releaseId)
+                    .ToListAsync(ct))
                 .OrderBy(x => x.State).ThenBy(x => x.Discipline).ThenBy(x => x.CreatedAt)
-                .ToListAsync(ct);
+                .ToList();
             var reviewIds = reviews.Select(x => x.Id).ToList();
             var items = await db.VerificationImpactItems.AsNoTracking()
                 .Where(x => reviewIds.Contains(x.TestChangeReviewId)).ToListAsync(ct);
