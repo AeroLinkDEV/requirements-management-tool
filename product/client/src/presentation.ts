@@ -166,3 +166,46 @@ export const officialBuildName = (version: string) => {
   const fraction = minor.length === 1 ? Number(minor) * 10 : Number(minor)
   return `SW-${String(Number(major)).padStart(2, '0')}.${String(fraction).padStart(2, '0')}`
 }
+
+/**
+ * A Program role as a person would say it.
+ *
+ * These are stored as enum names — `TestLead`, `SoftwareQualityAnalyst` — and every surface that showed
+ * somebody's authority showed them exactly like that. A membership list is read by people deciding who to
+ * ask for something, and `SoftwareQualityAnalyst` is a database value wearing a job title's clothes.
+ */
+const programRoleLabels: Record<string, string> = {
+  Engineer: 'Engineer',
+  Reviewer: 'Reviewer',
+  Approver: 'Approver',
+  ConfigurationManager: 'Configuration Manager',
+  TestEngineer: 'Test Engineer',
+  TestLead: 'Test Engineering Lead',
+  ProgramManager: 'Program Manager',
+  Administrator: 'Administrator',
+  SystemEngineer: 'System Engineer',
+  SoftwareEngineer: 'Software Engineer',
+  SystemEngineeringLead: 'System Engineering Lead',
+  SoftwareEngineeringLead: 'Software Engineering Lead',
+  ProjectEngineeringLead: 'Project Engineering Lead',
+  EngineeringManager: 'Engineering Manager',
+  SoftwareQualityAnalyst: 'Software Quality Analyst',
+  Airworthiness: 'Airworthiness',
+}
+
+export const programRoleLabel = (role: string) => programRoleLabels[role] ?? role
+
+/**
+ * Every role somebody can be granted, grouped the way an organisation is: the people who do the engineering,
+ * the people who lead it, the people who assure it, and the people who run the Program.
+ *
+ * Ordered rather than alphabetical, because an alphabetical list puts Airworthiness first and Test Engineer
+ * last, which tells a reader nothing about how the roles relate.
+ */
+export const grantableProgramRoles: readonly string[] = [
+  'SystemEngineer', 'SoftwareEngineer', 'TestEngineer', 'Engineer',
+  'SystemEngineeringLead', 'SoftwareEngineeringLead', 'TestLead', 'ProjectEngineeringLead',
+  'EngineeringManager', 'ProgramManager',
+  'SoftwareQualityAnalyst', 'Airworthiness', 'Reviewer', 'Approver',
+  'ConfigurationManager', 'Administrator',
+]
