@@ -28,7 +28,7 @@ concurrency:
 jobs:
   changes:
     name: Classify changed product areas
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       backend: ${{ steps.classify.outputs.backend }}
@@ -106,7 +106,7 @@ jobs:
   warm-chromium-cache:
     name: Warm the Chromium cache
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 10
     steps:
       - name: Check out repository
@@ -115,7 +115,7 @@ jobs:
         id: chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
+          path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Install Node.js
         if: steps.chromium.outputs.cache-hit != 'true'
@@ -124,8 +124,8 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: product/client/package-lock.json
-      # No `--with-deps`: only the browser binary is being cached, and the apt packages this would install are
-      # thrown away with the runner. The jobs that read this cache install them for themselves.
+      # Only the browser binary is cached. There is no dependency install on Windows — `--with-deps` installs
+      # apt packages and has no Windows equivalent.
       - name: Download Chromium
         if: steps.chromium.outputs.cache-hit != 'true'
         working-directory: product/client
@@ -133,12 +133,22 @@ jobs:
           npm ci
           npx playwright install chromium
 
+  # Every gate in this workflow runs on Windows, because Windows is the only platform this product is installed,
+  # run, demonstrated and debugged on. A Linux gate proves something about a configuration nobody ships, and it
+  # actively misleads: the connection-lifetime defect fixed in #173 was visible only as a locked SQLite file on
+  # Windows, and the identical bug produced a green Linux suite. Windows refuses to delete or overwrite an open
+  # file where Linux allows it, and the evidence store, backup, restore drill and integrity scan all walk the
+  # file system. Path length, separators and case-insensitivity sit in the same category.
+  #
+  # Windows minutes bill at roughly twice Linux and the runners are slower to provision. That is the price of
+  # testing what is actually shipped, and it is a better trade than paying less for evidence about a platform
+  # that will never be used.
   validate:
     name: Build, test, and exercise product journeys
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -187,82 +197,11 @@ jobs:
           echo "Classify the changed paths in the changes job, or mark the change as documentation-only."
           exit 1
 
-  # Windows is where this product is installed, run, demonstrated and debugged. Until this job existed, no
-  # gate ran on it as a condition of merging: every pull-request check ran on Linux, and the one Windows job
-  # was weekly. Five consecutive merges — two of them migrations — went in with Linux-only evidence.
-  #
-  # That is not a theoretical exposure. Windows refuses to delete or overwrite an open file where Linux allows
-  # it, and a connection-lifetime defect fixed in #173 was visible *only* as a locked SQLite file on Windows;
-  # on Linux the same bug produced a green suite. Path length, separators and case-insensitivity sit in the
-  # same category, and the evidence store, backup, restore drill and integrity scan all walk the file system.
-  #
-  # This runs the same build and tests the Linux gate runs, on the platform that matters, and it is scoped by
-  # the same classifier so a documentation change still costs nothing. Windows minutes bill at roughly twice
-  # Linux, which is the reason the full journey suite stays weekly below rather than being duplicated here —
-  # the backend suite is where the platform-specific failures actually live.
-  validate-windows:
-    name: Build and test on Windows
-    needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install .NET 10
-        if: needs.changes.outputs.backend == 'true'
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
-        with:
-          dotnet-version: 10.0.x
-      - name: Cache NuGet packages
-        if: needs.changes.outputs.backend == 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.nuget/packages
-          key: nuget-windows-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.slnx') }}
-          restore-keys: nuget-windows-${{ runner.os }}-
-      # The file-locking and path behaviour this job exists for lives in the tests that touch SQLite files and
-      # the evidence store, which is most of the infrastructure and API suites.
-      - name: Restore, build, and test backend on Windows
-        if: needs.changes.outputs.backend == 'true'
-        run: |
-          dotnet restore product/AeroLink.slnx
-          dotnet build product/AeroLink.slnx --configuration Release --no-restore
-          dotnet test product/AeroLink.slnx --configuration Release --no-build --logger "console;verbosity=normal"
-      - name: Install Node.js
-        if: needs.changes.outputs.client == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: product/client/package-lock.json
-      # A case-only filename difference is two modules on Linux and one on Windows. That exact defect existed
-      # here once — `RichContent.tsx` and `richContent.ts` — and every Windows build failed while every gate
-      # stayed green, because nothing had ever type-checked the client on Windows.
-      - name: Lint, type-check, and build client on Windows
-        if: needs.changes.outputs.client == 'true'
-        working-directory: product/client
-        run: |
-          npm ci
-          npm run lint
-          npm run typecheck
-          npm run build
-      - name: Refuse a pass that validated nothing
-        if: needs.changes.outputs.backend != 'true' && needs.changes.outputs.client != 'true'
-        run: |
-          echo "::error::This gate ran no backend tests and no client validation, so its result is not evidence."
-          exit 1
-
-  # The journeys run on Linux. They were Windows-only for as long as the Playwright config launched both
-  # servers through a PowerShell prologue, which also meant they could not be run on a Linux development
-  # machine at all. The config now passes configuration through webServer.env, so the same suite runs on
-  # either platform; Linux runners are faster and bill at a lower rate. The Windows equivalent of this
-  # coverage is the weekly `browser-windows` job below, plus `validate-windows` above on every merge.
   browser-pr:
     name: Browser journeys (${{ matrix.shard }}/2)
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.browser == 'true'
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 20
     strategy:
       fail-fast: true
@@ -300,19 +239,15 @@ jobs:
         id: chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
+          path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Install client and Chromium
         working-directory: product/client
         run: |
           npm ci
-          # The cache holds the browser binary. The system libraries it links against are apt packages that
-          # live outside it, so they are installed either way — `install-deps` alone on a hit.
-          if [ "${{ steps.chromium.outputs.cache-hit }}" = "true" ]; then
-            npx playwright install-deps chromium
-          else
-            npx playwright install --with-deps chromium
-          fi
+          # No dependency install: `--with-deps` and `install-deps` install apt packages and do not apply on
+          # Windows. The cache holds the browser binary, which is the whole of what is needed here.
+          npx playwright install chromium
       - name: Run browser journey shard
         working-directory: product/client
         env:
@@ -342,7 +277,7 @@ jobs:
     name: Browser journeys on the production build
     needs: changes
     if: github.event_name != 'push' && needs.changes.outputs.browser == 'true'
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 20
     steps:
       - name: Check out repository
@@ -372,17 +307,15 @@ jobs:
         id: chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
+          path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Install client and Chromium
         working-directory: product/client
         run: |
           npm ci
-          if [ "${{ steps.chromium.outputs.cache-hit }}" = "true" ]; then
-            npx playwright install-deps chromium
-          else
-            npx playwright install --with-deps chromium
-          fi
+          # `--with-deps` installs apt packages and does not apply on Windows; the cached browser binary is all
+          # that is needed.
+          npx playwright install chromium
       - name: Build the client and run the production journeys
         working-directory: product/client
         env:
@@ -406,7 +339,7 @@ jobs:
     # is identical to the one browser-pr tested minutes earlier, so re-running the journeys on push buys
     # no information. validate and postgresql-smoke still run on every push as the safety net.
     if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.browser == 'true'
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -431,7 +364,7 @@ jobs:
         id: chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
+          path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
       - name: Restore, build, and install browser dependencies
         working-directory: product/client
@@ -439,11 +372,9 @@ jobs:
           dotnet restore ../src/AeroLink.Api/AeroLink.Api.csproj
           dotnet build ../src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
           npm ci
-          if [ "${{ steps.chromium.outputs.cache-hit }}" = "true" ]; then
-            npx playwright install-deps chromium
-          else
-            npx playwright install --with-deps chromium
-          fi
+          # `--with-deps` installs apt packages and does not apply on Windows; the cached browser binary is all
+          # that is needed.
+          npx playwright install chromium
       - name: Run full browser shard
         working-directory: product/client
         env:
@@ -456,70 +387,6 @@ jobs:
           name: playwright-full-${{ matrix.shard }}-${{ github.run_attempt }}
           path: |
             product/client/playwright-report
-            product/client/test-results/test-timings.json
-          if-no-files-found: ignore
-          retention-days: 14
-
-  # AeroLink is deployed on-premises and is run from Windows engineering workstations, so Windows stays a
-  # supported platform even though the everyday gate is Linux. This job is the platform assurance: one
-  # unsharded pass on the nightly schedule, rather than paying the Windows rate on every pull request.
-  browser-windows:
-    name: Browser journeys on Windows
-    needs: changes
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install .NET 10
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
-        with:
-          dotnet-version: 10.0.x
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: product/client/package-lock.json
-      - name: Restore, build, and install browser dependencies
-        working-directory: product/client
-        run: |
-          dotnet restore ../src/AeroLink.Api/AeroLink.Api.csproj
-          dotnet build ../src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
-          npm ci
-          # Deliberately uncached, unlike the Linux jobs. This one runs weekly and nothing else populates a
-          # Windows entry, so a cache would sit unused for seven days — exactly the point at which GitHub
-          # evicts it — and pay the download every time regardless, for the cost of a cache step that always
-          # misses. The Linux jobs cache because pull requests keep their entry warm.
-          npx playwright install chromium
-      # Windows is the deployment platform, and until this step existed nothing had ever type-checked or
-      # built the client on it. The journeys alone could not: Playwright serves them through `vite dev`,
-      # which transpiles per file without checking types. `RichContent.tsx` and `richContent.ts` were
-      # therefore two modules on Linux and one on Windows for as long as they both existed, and every
-      # Windows build failed while every gate stayed green. Run the same three commands the Linux job runs.
-      - name: Lint, type-check, and build client on Windows
-        working-directory: product/client
-        run: |
-          npm run lint
-          npm run typecheck
-          npm run build
-      - name: Run the full suite on Windows
-        working-directory: product/client
-        env:
-          AEROLINK_E2E_SKIP_BUILD: "true"
-        run: npx playwright test
-      - name: Upload Windows diagnostics
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: playwright-windows-${{ github.run_attempt }}
-          path: |
-            product/client/playwright-report
-            product/client/test-results
-          if-no-files-found: ignore
-          retention-days: 7
-
   postgresql-smoke:
     name: PostgreSQL migrations and secure bootstrap
     needs: changes
