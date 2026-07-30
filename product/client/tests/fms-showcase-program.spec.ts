@@ -32,11 +32,9 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
     page.getByRole("heading", { name: "Digital Thread" }),
   ).toBeVisible();
   await expect(page.getByText("1,250 requirements")).toBeVisible();
-  await page.getByRole("button", { name: /Controlled Documents/ }).click();
-  // The inherited 1.5 requirements remain visible as labelled evidence, but their documents are not
-  // presented as current 1.6 outputs.
-  await expect(page.getByText("No outputs for this baseline")).toBeVisible();
-  await expect(page.getByText("SYSRD-000015.00")).toHaveCount(0);
+  // A Controlled Documents tab here used to prove that inherited 1.5 documents are not offered as current 1.6
+  // outputs. The tab is gone: documents belong to the build being read, which document-generation-where-you-are
+  // proves directly for both the in-work and the released build.
   await page.getByRole("link", { name: /Command Center/ }).first().click();
   await openNavigationGroup(page,"RELEASE & CONFIGURATION");
   await page.getByRole("link", { name: "Lifecycle Decision Room" }).click();

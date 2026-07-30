@@ -64,6 +64,31 @@ public sealed class VerificationImpactApiTests
     }
 
     /// <summary>
+    /// The reviews listing ordered by a DateTimeOffset in the database, which SQLite refuses to translate, so
+    /// the endpoint returned 500 on every call. The client checked only `response.ok` before storing the
+    /// result, so the workspace rendered "No test change reviews" — a broken queue that read as an empty one.
+    /// Asserting the payload rather than the status, because a 200 carrying nothing is the failure this hides.
+    /// </summary>
+    [Fact]
+    public async Task The_reviews_listing_returns_the_reviews_an_approved_change_created()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory, ("lead.user", ProgramRole.TestLead));
+        await LoginAsync(client, "lead.user");
+
+        using var response = await client.GetAsync($"/api/releases/{fixture.ReleaseId}/test-change-reviews");
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
+
+        var reviews = JsonDocument.Parse(body).RootElement;
+        Assert.NotEmpty(reviews.EnumerateArray());
+        var review = reviews.EnumerateArray().First();
+        Assert.Equal("System", review.GetProperty("discipline").GetString());
+        Assert.Equal("Open", review.GetProperty("state").GetString());
+    }
+
+    /// <summary>
     /// Freezing is deliberately unguarded, and the queue holds back release approval instead. Freezing then
     /// materializing is what creates the requirement revisions a test engineer needs before a procedure can
     /// exist, so gating the freeze would have withheld the test team's own inputs.

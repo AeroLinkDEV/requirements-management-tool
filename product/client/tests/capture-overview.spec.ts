@@ -57,7 +57,7 @@ test('capture the product surfaces used by the overview video', async ({ page })
   await page.waitForTimeout(2600)
   for (const [tab, name] of [
     ['Test procedures', 'verification-procedures'],
-    ['Execution history', 'verification-executions'],
+    ['Evidence & results', 'verification-executions'],
   ] as const) {
     await page.getByRole('button', { name: new RegExp(tab, 'i') }).first().click()
     await page.waitForTimeout(2400)

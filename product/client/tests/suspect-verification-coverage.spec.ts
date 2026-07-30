@@ -113,14 +113,15 @@ test('modified requirement coverage stays suspect until an exact approved proced
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'VERIFICATION')
   await page.getByRole('link', { name: 'System Verification' }).click()
-  await page.getByLabel('Materialized baseline').selectOption(baseline.id)
+  // No baseline selector any more: verification is scoped to the build being read, and that build has exactly
+  // one software build — the one materialized above.
   await page.getByRole('button', { name: /Requirement coverage/ }).click()
   const coverageRow = page.locator('.coverageRow').filter({ hasText: `${baseNumber}.${String(revision).padStart(2, '0')}` })
   await expect(coverageRow.getByText('Suspect', { exact: true })).toBeVisible()
   const selectedProcedureLink = coverageRow.locator('small').filter({ hasText: approvedProcedure.displayNumber })
   await expect(selectedProcedureLink).toContainText('Suspect applicability')
 
-  await coverageRow.getByRole('button', { name: /Resolve in Change impact/ }).click()
+  await coverageRow.getByRole('button', { name: /Resolve in Procedure alignment/ }).click()
   const impactRow = page.locator('.impactRow').filter({ hasText: `${baseNumber}.${String(revision).padStart(2, '0')}` })
   await expect(impactRow).toBeVisible()
   await impactRow.getByRole('button', { name: /Record decision/ }).click()
@@ -141,7 +142,7 @@ test('modified requirement coverage stays suspect until an exact approved proced
   await expect(focusedProcedure).toContainText(approvedProcedure.displayNumber)
   await expect(focusedProcedure).toContainText(approvedProcedure.title)
 
-  await page.getByRole('button', { name: /^Change impact/ }).click()
+  await page.getByRole('button', { name: /^Procedure alignment/ }).click()
   await impactRow.getByRole('button', { name: /Reopen \/ change decision/ }).click()
   const reopen = page.getByRole('dialog', { name: 'Reopen verification decision' })
   await reopen.getByLabel('Reopen rationale').fill(
@@ -153,7 +154,7 @@ test('modified requirement coverage stays suspect until an exact approved proced
 
   await page.getByRole('button', { name: /Requirement coverage/ }).click()
   await expect(coverageRow.getByText('Suspect', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: /^Change impact/ }).click()
+  await page.getByRole('button', { name: /^Procedure alignment/ }).click()
   await impactRow.getByRole('button', { name: /Record decision/ }).click()
   const replacementDecision = page.getByRole('dialog', { name: 'Record verification decision' })
   await replacementDecision.getByLabel('Decision').selectOption('ProcedureCoverageConfirmed')
