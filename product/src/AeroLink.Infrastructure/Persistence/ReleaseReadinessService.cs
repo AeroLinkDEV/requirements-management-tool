@@ -62,13 +62,32 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         var undecided = verificationImpacts.Where(x => x.State != VerificationImpactState.Resolved).ToList();
         var testChangeReviews = await db.TestChangeReviews.AsNoTracking().Where(x => x.ReleaseId == campaign.ReleaseId).ToListAsync(ct);
         var approvedTestChangeReviews = testChangeReviews.Count(x => x.State == TestChangeReviewState.Approved);
-        var preReleaseProcedureRevisionIds = verificationImpacts
-            .Where(x => x.State == VerificationImpactState.Resolved && x.PreReleaseEvidenceRequired
-                && x.ResolvedProcedureRevisionId is not null)
-            .Select(x => x.ResolvedProcedureRevisionId!.Value).Distinct().ToHashSet();
-        var preReleaseRuns = latestRuns.Where(x => preReleaseProcedureRevisionIds.Contains(x.ProcedureRevisionId)).ToList();
-        var preReleaseRunIds = preReleaseRuns.Select(x => x.Id).ToHashSet();
-        var preReleaseEvidenceCount = evidenceRunIds.Count(x => preReleaseRunIds.Contains(x));
+        // What this build was planned to run, and whether it has run it.
+        //
+        // Loaded separately from the coverage-driven executions above, because a test set is not limited to
+        // procedures that cover a changed requirement: exercising an area the change makes worth re-testing
+        // is the other half of why a procedure is selected, and those procedures would be invisible here.
+        var selectedRevisionIds = await db.BuildTestSetEntries.AsNoTracking()
+            .Where(x => db.BuildTestSets.Any(set => set.Id == x.BuildTestSetId && set.ReleaseId == campaign.ReleaseId))
+            .Select(x => x.ProcedureRevisionId).Distinct().ToListAsync(ct);
+        var selectedLatest = selectedRevisionIds.Count == 0
+            ? []
+            : (await db.TestExecutions.AsNoTracking()
+                    .Where(x => selectedRevisionIds.Contains(x.ProcedureRevisionId)
+                        && (campaign.SoftwareBuildId == null || x.SoftwareBuildId == campaign.SoftwareBuildId))
+                    .ToListAsync(ct))
+                .GroupBy(x => x.ProcedureRevisionId)
+                .Select(group => group.OrderByDescending(x => x.ExecutedAt).ThenByDescending(x => x.RecordedAt).First())
+                .ToList();
+        var selectedPassed = selectedLatest.Count(x => x.Outcome == TestOutcome.Pass);
+        var selectedRunIds = selectedLatest.Select(x => x.Id).ToList();
+        var selectedEvidenced = selectedRunIds.Count == 0 ? 0 : await db.TestExecutionEvidence.AsNoTracking()
+            .Where(x => selectedRunIds.Contains(x.TestExecutionId)).Select(x => x.TestExecutionId).Distinct().CountAsync(ct);
+        // An empty set is only an answer when there was nothing to plan. A build that changed something and
+        // has selected nothing has not been planned yet, and a gate that passed it would be reporting
+        // "nothing left to run" about a decision nobody has made.
+        var nothingToTest = testChangeReviews.Count == 0;
+
         var integrated = requests.Count(x => x.State == ScrState.SelectedForBaseline); var disposed = impacts.Count(x => x.State != ImpactDispositionState.Pending);
         var baselineMaterialized = baseline.RequirementsMaterializedAt is not null;
         var gates = new List<ReadinessGate>
@@ -102,25 +121,32 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
                         ? "Inspect the selected changes and materialized manifest; a releasable baseline must contain an effective requirement population."
                         : "Approve every procedure being changed, then confirm the coverage each changed requirement needs.")
                 : WaitingForMaterializedBaseline("coverage", "Requirement coverage complete"),
+            // The gate codes stay as they were. They are what the decision room looks its blockers up by, and
+            // a build is rarely worth its whole suite whichever way the set of procedures was arrived at.
             baselineMaterialized
-                ? new("verification","Selected pre-release verification passed",
-                    preReleaseProcedureRevisionIds.Count == 0
-                        || (preReleaseRuns.Count == preReleaseProcedureRevisionIds.Count && preReleaseRuns.All(x=>x.Outcome==TestOutcome.Pass)),
-                    preReleaseRuns.Count(x=>x.Outcome==TestOutcome.Pass),preReleaseProcedureRevisionIds.Count,
-                    preReleaseProcedureRevisionIds.Count == 0
-                        ? "The approved test change reviews require no test execution before this build is released."
-                        : $"{preReleaseProcedureRevisionIds.Count-preReleaseRuns.Count(x=>x.Outcome==TestOutcome.Pass)} specifically selected pre-release procedure(s) lack a latest Pass.",
-                    "Execute only the procedures explicitly marked as requiring pre-release results. Remaining verification continues after release.")
-                : WaitingForMaterializedBaseline("verification", "Selected pre-release verification passed"),
+                ? new("verification","Selected test set has results",
+                    selectedRevisionIds.Count == 0 ? nothingToTest : selectedPassed == selectedRevisionIds.Count,
+                    selectedPassed,selectedRevisionIds.Count,
+                    selectedRevisionIds.Count == 0
+                        ? (nothingToTest
+                            ? "This build changed nothing that needs testing, so no procedures were selected."
+                            : "No procedures have been selected for this build yet.")
+                        : $"{selectedRevisionIds.Count-selectedPassed} procedure(s) in the selected test set lack a latest Pass.",
+                    selectedRevisionIds.Count == 0
+                        ? "Choose the procedures this build must run — those covering what changed, and any area worth re-exercising."
+                        : "Record a determination for every procedure in the set. Testing beyond it continues after release.")
+                : WaitingForMaterializedBaseline("verification", "Selected test set has results"),
             baselineMaterialized
-                ? new("evidence","Selected pre-release evidence captured",
-                    preReleaseProcedureRevisionIds.Count == 0 || preReleaseEvidenceCount == preReleaseProcedureRevisionIds.Count,
-                    preReleaseEvidenceCount,preReleaseProcedureRevisionIds.Count,
-                    preReleaseProcedureRevisionIds.Count == 0
-                        ? "No evidence packages were designated as a prerequisite to releasing this build."
-                        : $"{preReleaseProcedureRevisionIds.Count-preReleaseEvidenceCount} selected pre-release result(s) lack checksummed evidence.",
-                    "Upload evidence only for procedures explicitly designated as pre-release prerequisites.")
-                : WaitingForMaterializedBaseline("evidence", "Selected pre-release evidence captured"),
+                ? new("evidence","Selected test set results carry evidence",
+                    selectedRevisionIds.Count == 0 ? nothingToTest : selectedEvidenced == selectedRevisionIds.Count,
+                    selectedEvidenced,selectedRevisionIds.Count,
+                    selectedRevisionIds.Count == 0
+                        ? (nothingToTest
+                            ? "This build changed nothing that needs testing, so no evidence is owed."
+                            : "No procedures have been selected for this build yet.")
+                        : $"{selectedRevisionIds.Count-selectedEvidenced} result(s) in the selected test set lack checksummed evidence.",
+                    "Attach the evidence package for every result in the selected test set.")
+                : WaitingForMaterializedBaseline("evidence", "Selected test set results carry evidence"),
             new("problem_reports","Problem-report blockers resolved",problemBlockers.Count==0,0,problemBlockers.Count,problemBlockers.Count==0?"No unwaived controlled problem reports block this release.":$"{problemBlockers.Count} unwaived problem report blocker(s) remain: {string.Join(", ",problemBlockers.Take(3).Select(x=>x.DisplayNumber))}.","Resolve, formally disposition, or record an attributable waiver for every release-blocking problem report."),
             new("documents","Controlled outputs generated",docs.Select(x=>x.Type).Distinct().Count()>=6,docs.Select(x=>x.Type).Distinct().Count(),6,"The release package requires six controlled document types.","Generate SYSRD, both SWRDs, and three test-procedure documents."),
             new("release_approval","Release approval complete",campaign.Approvals.Count>0 && campaign.Approvals.All(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count==0?3:campaign.Approvals.Count,"Ordered release approval must be unanimous.","Start release review and collect every approval.")
