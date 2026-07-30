@@ -361,6 +361,44 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
     /// an exact requirement revision. Before materialisation there is nothing to link, so the same decision is
     /// applied later by <see cref="ApplyMaterializationAsync"/>.
     /// </summary>
+    /// <summary>
+    /// Moves a stranded procedure onto the requirement it now covers.
+    ///
+    /// The retirement that stranded it took away what the procedure was written against. Where the behaviour
+    /// itself did not go away — it moved to another requirement — the procedure is still the right procedure,
+    /// and this is what puts the link back. The old link is left where it is: it records that this procedure
+    /// once covered the retired revision, which is true and is the sort of thing an audit asks about.
+    ///
+    /// Every revision of the procedure is moved, not only its newest. A reader asking "what covers this
+    /// requirement" is asking about the procedure, and leaving earlier revisions pointing only at a retired
+    /// requirement would make the answer depend on which revision they happened to look at.
+    /// </summary>
+    public async Task<bool> ApplyRetargetedCoverageAsync(VerificationImpactItem item, DateTimeOffset now, CancellationToken ct)
+    {
+        if (item.Outcome != VerificationImpactOutcome.ProcedureRetargeted
+            || item.ProcedureId is null
+            || item.RetargetedRequirementRevisionId is null)
+            return false;
+
+        var revisionIds = await db.TestProcedureRevisions.AsNoTracking()
+            .Where(x => x.ProcedureId == item.ProcedureId.Value).Select(x => x.Id).ToListAsync(ct);
+        if (revisionIds.Count == 0) return false;
+
+        var target = item.RetargetedRequirementRevisionId.Value;
+        var already = await db.TestCoverage
+            .Where(x => x.RequirementRevisionId == target && revisionIds.Contains(x.ProcedureRevisionId))
+            .ToListAsync(ct);
+        var linked = false;
+        foreach (var revisionId in revisionIds)
+        {
+            var existing = already.SingleOrDefault(x => x.ProcedureRevisionId == revisionId);
+            if (existing is not null) { existing.ConfirmStillValid(item.ResolvedBy ?? "verification", now); linked = true; continue; }
+            db.TestCoverage.Add(new TestRequirementCoverage(revisionId, target));
+            linked = true;
+        }
+        return linked;
+    }
+
     public async Task<bool> ApplyResolvedCoverageAsync(VerificationImpactItem item, DateTimeOffset now, CancellationToken ct)
     {
         if (item.Outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed

@@ -30,7 +30,18 @@ public enum VerificationImpactOutcome
     /// <summary>The orphaned procedure is no longer needed and has been retired.</summary>
     ProcedureRetired,
     /// <summary>The orphaned procedure is deliberately kept despite covering no current requirement.</summary>
-    ProcedureRetained
+    ProcedureRetained,
+    /// <summary>
+    /// The orphaned procedure still tests something real, and is moved onto the requirement it now covers.
+    ///
+    /// Retiring a requirement removes what a procedure was written against, and the two answers available
+    /// until now were to retire the procedure with it or to keep it covering nothing. Neither fits the common
+    /// case: the behaviour was not withdrawn, it moved to another requirement, and the procedure that
+    /// exercises it is still the right procedure. Retiring it would throw away working verification and its
+    /// history; retaining it leaves a procedure in the library that answers for nothing and quietly stops
+    /// counting as coverage anywhere.
+    /// </summary>
+    ProcedureRetargeted
 }
 
 /// <summary>
@@ -138,6 +149,8 @@ public sealed class VerificationImpactItem
     public Guid? ResolvedProcedureId { get; private set; }
     /// <summary>The immutable approved procedure revision selected by the decision.</summary>
     public Guid? ResolvedProcedureRevisionId { get; private set; }
+    /// <summary>The requirement revision a retargeted procedure now covers.</summary>
+    public Guid? RetargetedRequirementRevisionId { get; private set; }
     public string ResolutionRationale { get; private set; } = "";
     public string? ResolvedBy { get; private set; }
     public DateTimeOffset? ResolvedAt { get; private set; }
@@ -170,7 +183,8 @@ public sealed class VerificationImpactItem
     /// </summary>
     public void Resolve(string actorId, VerificationImpactOutcome outcome, string rationale, DateTimeOffset now,
         Guid? procedureId = null, Guid? procedureRevisionId = null,
-        TestProcedureChangeAction? procedureChangeAction = null, bool preReleaseEvidenceRequired = false)
+        TestProcedureChangeAction? procedureChangeAction = null, bool preReleaseEvidenceRequired = false,
+        Guid? retargetedRequirementRevisionId = null)
     {
         EnsureUnresolved();
         if (!Enum.IsDefined(outcome)) throw new DomainException("An unknown verification outcome cannot be recorded.");
@@ -181,9 +195,17 @@ public sealed class VerificationImpactItem
         if (outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed
             && (procedureRevisionId is null || procedureRevisionId == Guid.Empty))
             throw new DomainException("Confirming coverage requires the exact approved procedure revision.");
-        if (outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed
+        if (outcome is not (VerificationImpactOutcome.ProcedureCoverageConfirmed or VerificationImpactOutcome.ProcedureRetargeted)
             && (procedureId is not null || procedureRevisionId is not null))
             throw new DomainException("Only confirmed coverage names a procedure.");
+        // Retargeting is the one decision that names a requirement rather than a procedure: the procedure is
+        // already known — it is the stranded one this item was raised about — and what the engineer is
+        // deciding is which requirement it now answers for.
+        if (outcome == VerificationImpactOutcome.ProcedureRetargeted
+            && (retargetedRequirementRevisionId is null || retargetedRequirementRevisionId == Guid.Empty))
+            throw new DomainException("Moving a procedure requires the requirement revision it now covers.");
+        if (outcome != VerificationImpactOutcome.ProcedureRetargeted && retargetedRequirementRevisionId is not null)
+            throw new DomainException("Only a retargeted procedure names the requirement it moves to.");
         var action = procedureChangeAction ?? (outcome == VerificationImpactOutcome.NoTestRequired
             ? TestProcedureChangeAction.NoTestRequired
             : TestProcedureChangeAction.LinkExisting);
@@ -193,6 +215,7 @@ public sealed class VerificationImpactItem
             throw new DomainException("Pre-release evidence can only be required for a selected test procedure.");
         ResolvedProcedureId = procedureId;
         ResolvedProcedureRevisionId = procedureRevisionId;
+        RetargetedRequirementRevisionId = retargetedRequirementRevisionId;
         Outcome = outcome;
         ProcedureChangeAction = action;
         PreReleaseEvidenceRequired = preReleaseEvidenceRequired;
@@ -251,7 +274,8 @@ public sealed class VerificationImpactItem
     private bool IsOutcomeValidForTrigger(VerificationImpactOutcome outcome) => Trigger switch
     {
         VerificationImpactTrigger.ProcedureOrphaned =>
-            outcome is VerificationImpactOutcome.ProcedureRetired or VerificationImpactOutcome.ProcedureRetained,
+            outcome is VerificationImpactOutcome.ProcedureRetired or VerificationImpactOutcome.ProcedureRetained
+                or VerificationImpactOutcome.ProcedureRetargeted,
         _ => outcome is VerificationImpactOutcome.ProcedureCoverageConfirmed or VerificationImpactOutcome.NoTestRequired
     };
 
