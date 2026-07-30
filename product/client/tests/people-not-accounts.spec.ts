@@ -83,6 +83,18 @@ test('no surface names a person by their account', async ({ page, request }) => 
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
 
+  // Asked for rather than hardcoded. The list below this was a fixed set of fifteen names, so an account added
+  // to the showcase after it was written was never looked for — the check would keep passing while the surface
+  // it was meant to guard printed a handle nobody had listed. The signed-in account is excluded because naming
+  // it is what the footer is for.
+  const accounts = await request.get(`${apiBase}/api/admin/users`)
+  expect(accounts.ok(), await accounts.text()).toBeTruthy()
+  const provisioned = ((await accounts.json()) as { userName: string }[])
+    .map(x => x.userName)
+    .filter(x => x !== 'admin')
+  expect(provisioned.length, 'the showcase should provision accounts to check for').toBeGreaterThan(5)
+  const checked = [...new Set([...seededAccounts, ...provisioned])]
+
   const links = page.locator('nav[aria-label="Primary navigation"] a[href]')
   await expect(links.first()).toBeAttached({ timeout: 30_000 })
   const routes = (
@@ -93,7 +105,7 @@ test('no surface names a person by their account', async ({ page, request }) => 
   for (const route of routes) {
     await page.goto(route, { waitUntil: 'load' })
     await surfacePainted(page)
-    for (const hit of await accountsOnScreen(page, seededAccounts)) {
+    for (const hit of await accountsOnScreen(page, checked)) {
       offenders.push(`${route.replace(/^.*\/releases\/[^/]+/, '')}: ${hit}`)
     }
   }
@@ -120,8 +132,52 @@ test('no surface names a person by their account', async ({ page, request }) => 
   const auditText = await page.locator('.auditRow').first().innerText()
   expect(auditText, 'the audit row should name a person').toMatch(/[A-Z][a-z]+ [A-Z][a-z]+/)
 
-  for (const hit of await accountsOnScreen(page, seededAccounts)) {
+  for (const hit of await accountsOnScreen(page, checked)) {
     offenders.push(`change request detail: ${hit}`)
+  }
+
+  // Everything above sees only what a route renders first, and most of this product's attribution is one click
+  // further in: the job engine, the concurrency ledger, the procedure list, the evidence trail. A tab nobody
+  // opened is a surface nobody audited, which is how the original handles survived a sweep of every route.
+  const sweepTabs = async (surface: string, tabs: string[]) => {
+    for (const tab of tabs) {
+      // Labels carry counts, so this matches on a substring rather than the whole accessible name.
+      const button = page.getByRole('button', { name: tab }).first()
+      if (await button.count() === 0) continue
+      await button.click()
+      await surfacePainted(page)
+      for (const hit of await accountsOnScreen(page, checked)) offenders.push(`${surface} › ${tab}: ${hit}`)
+    }
+  }
+
+  await page.goto(`${releaseRoot}/enterprise-control`, { waitUntil: 'load' })
+  await surfacePainted(page)
+  await page.getByRole('button', { name: 'Job engine' }).first().click()
+  // The job engine names whoever created a job, so a job is provisioned here rather than hoped for — an empty
+  // table would let this pass by finding nothing to look at. Queued through the control an operator uses.
+  await page.getByRole('button', { name: 'Queue integrity scan' }).first().click()
+  await expect(page.locator('.jobTable article').first()).toBeVisible({ timeout: 30_000 })
+  await sweepTabs('System Operations', [
+    'Operations', 'Content vault', 'Redlines', 'Query builder', 'Job engine',
+    'Concurrency', 'Product line', 'Assurance', 'Qualification',
+  ])
+
+  await page.goto(`${releaseRoot}/system-verification`, { waitUntil: 'load' })
+  await surfacePainted(page)
+  await sweepTabs('Verification', [
+    'Procedure alignment', 'Requirement coverage', 'Test procedures', 'Evidence & results',
+  ])
+
+  // A dialog is a surface too, and the ones that distribute or decide work are precisely where a person is
+  // named. Opened if the showcase has an item to open it on; skipped rather than failed if it does not, because
+  // this test is about attribution and not about the queue having content.
+  const assign = page.getByRole('button', { name: /^Assign/ }).first()
+  if (await assign.count() > 0) {
+    await assign.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.first()).toBeVisible({ timeout: 30_000 })
+    for (const hit of await accountsOnScreen(page, checked)) offenders.push(`assign dialog: ${hit}`)
+    await dialog.first().getByRole('button', { name: 'Cancel' }).click()
   }
 
   expect(offenders, `Surfaces naming a person by their account:\n  ${offenders.join('\n  ')}`).toEqual([])

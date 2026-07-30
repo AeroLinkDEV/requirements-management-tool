@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiLogin, login, selectProgram, surfacePainted } from './auth'
+import { apiLogin, login, selectProgram, surfacePainted, layoutSettled } from './auth'
 
 /**
  * WCAG 2.2 AA contrast, measured on rendered pixels rather than asserted in a document.
@@ -138,6 +138,9 @@ test('every surface meets WCAG 2.2 AA contrast in both densities', async ({ page
     for (const [name, path] of surfaces) {
       await page.goto(new URL(portalPaths.has(path) ? path : root + path, page.url()).toString(), { waitUntil: 'load' })
       await surfacePainted(page)
+      // Data-driven surfaces paint a header, then an empty state, then their rows. Measuring on first paint
+      // audited a transient "no matching accounts" that no settled page ever shows.
+      await layoutSettled(page)
       const report = await page.evaluate(auditContrast)
       unresolvedTotal += report.unresolved
       for (const failure of report.failures) {

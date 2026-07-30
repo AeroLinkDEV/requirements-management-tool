@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiLogin, login, openNavigationGroup, selectProgram } from "./auth";
+import { apiBase, apiLogin, login, openNavigationGroup, selectProgram } from "./auth";
 
 test("enterprise control proves content, queries, jobs, concurrency, redlines, and qualification", async ({
   page,
@@ -75,6 +75,21 @@ test("enterprise control proves content, queries, jobs, concurrency, redlines, a
     page.getByRole("link", { name: "Download" }).first(),
   ).toBeVisible();
 
+  // The project this workspace is scoped to, so the assertions below can read authoritative state rather than
+  // trusting the banners. Taken from the address because that is where the workspace's identity lives.
+  const projectId = new URL(page.url()).pathname.match(/\/projects\/([^/]+)/)?.[1];
+  expect(projectId, "the workspace address should carry its project").toBeTruthy();
+  const overview = async () => {
+    const response = await page.request.get(
+      `${apiBase}/api/enterprise-hardening/overview?projectId=${projectId}`,
+    );
+    expect(response.ok(), await response.text()).toBeTruthy();
+    return (await response.json()) as {
+      sessions: { id: string; version: number; state: string }[];
+      conflicts: { id: string }[];
+    };
+  };
+
   await page.getByRole("button", { name: "Concurrency" }).click();
   await page.getByRole("button", { name: "Open editing session" }).click();
   await page.getByRole("button", { name: "Simulate parallel session" }).click();
@@ -86,8 +101,38 @@ test("enterprise control proves content, queries, jobs, concurrency, redlines, a
   await expect(
     page.getByRole("heading", { name: "Resolve concurrent changes" }),
   ).toBeVisible();
+
+  // The conflict is real before it is resolved, recorded on the server rather than only announced on screen.
+  const contested = await overview();
+  expect(
+    contested.conflicts.length,
+    "a merge that requires resolution should be an unresolved conflict record",
+  ).toBeGreaterThan(0);
+  const contestedSession = contested.sessions.find(x => x.state === "Active");
+  expect(contestedSession, "the contested edit session should be active").toBeTruthy();
+
   await page.getByRole("button", { name: "Accept local resolution" }).click();
   await expect(page.getByText(/Three-way conflict resolved/)).toBeVisible();
+
+  // "Three-way conflict resolved" is a sentence on a screen. What matters is that the conflict record is no
+  // longer outstanding and the session advanced — this test previously asserted the sentence and nothing else,
+  // so a resolution that changed no stored state would have passed it.
+  await expect
+    .poll(async () => (await overview()).conflicts.length, { timeout: 30_000 })
+    .toBe(0);
+  // And it survives a reload, which is the difference between a resolution and a dismissed banner. Resolution
+  // records the outcome, resolver and time on the conflict rather than advancing the session, so the session is
+  // asserted to still be there with its draft — a resolve that discarded somebody's editing session would be a
+  // worse outcome than the conflict it settled.
+  await page.reload({ waitUntil: "load" });
+  await page.getByRole("button", { name: "Concurrency" }).click();
+  await expect(page.getByText("MERGE REQUIRED")).toHaveCount(0);
+  const afterReload = await overview();
+  expect(afterReload.conflicts.length, "the resolution must outlive the page").toBe(0);
+  expect(
+    afterReload.sessions.some(x => x.id === contestedSession!.id),
+    "resolving a conflict must not discard the editing session it belonged to",
+  ).toBe(true);
 
   await page.getByRole("button", { name: "Redlines" }).click();
   await expect(
