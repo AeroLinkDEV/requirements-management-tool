@@ -10,6 +10,7 @@ public sealed record AssignVerificationImpactRequest(string EngineerId);
 public sealed record ResolveVerificationImpactRequest(VerificationImpactOutcome Outcome, string Rationale, Guid? ProcedureId,
     TestProcedureChangeAction? ProcedureChangeAction = null, bool PreReleaseEvidenceRequired = false);
 public sealed record ReopenVerificationImpactRequest(string Rationale);
+public sealed record IncludeChangeRequestRequest(Guid ChangeRequestId);
 public sealed record SubmitTestChangeReviewRequest(string? Rationale = null);
 public sealed record ApproveTestChangeReviewRequest(string Rationale);
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
@@ -41,6 +42,7 @@ public static class VerificationImpactEndpoints
             // Ordered in memory on purpose: SQLite cannot translate an ORDER BY over a DateTimeOffset and
             // throws, which took this whole endpoint to a 500 and left the workspace looking simply empty.
             var reviews = (await db.TestChangeReviews.AsNoTracking()
+                    .Include(x => x.AdditionalSources)
                     .Where(x => x.ReleaseId == releaseId)
                     .ToListAsync(ct))
                 .OrderBy(x => x.State).ThenBy(x => x.Discipline).ThenBy(x => x.CreatedAt)
@@ -57,6 +59,12 @@ public static class VerificationImpactEndpoints
                 discipline = review.Discipline.ToString(),
                 state = review.State.ToString(),
                 review.SourceChangeRequestNumber,
+                review.DisplayNumber,
+                // Every change request this package answers for, the one it was raised from first. A reader
+                // scanning the list needs to see that two changes are being tested together without opening it.
+                coveredChangeRequests = new[] { new { id = review.ChangeRequestId, number = review.SourceChangeRequestNumber, originating = true } }
+                    .Concat(review.AdditionalSources.OrderBy(x => x.ChangeRequestNumber)
+                        .Select(x => new { id = x.ChangeRequestId, number = x.ChangeRequestNumber, originating = false })),
                 review.AssignedEngineerId,
                 review.SubmittedBy,
                 review.SubmittedAt,
@@ -121,6 +129,68 @@ public static class VerificationImpactEndpoints
                 await service.ApplyResolvedCoverageAsync(item, now, ct);
                 await db.SaveChangesAsync(ct);
                 return Results.Ok((await MapAsync([item], db, ct)).Single());
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        /// Folding another change request's test work into this package, and taking it back out.
+        ///
+        /// Whole change requests, because an engineer takes on a change's test work or they do not; splitting
+        /// one across two packages would leave "is this change covered?" with a partial answer that neither
+        /// package could give. A change already claimed elsewhere is refused by name rather than by a unique
+        /// index violation, so the engineer is told which package has it instead of being told to try again.
+        app.MapPost("/api/test-change-reviews/{id:guid}/change-requests", async (Guid id, IncludeChangeRequestRequest request,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.Include(x => x.AdditionalSources).SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build test change requests are read-only." });
+            if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
+                return Results.Forbid();
+
+            var change = await db.SystemChangeRequests.AsNoTracking()
+                .Where(x => x.Id == request.ChangeRequestId && x.ProjectId == review.ProjectId)
+                .Select(x => new { x.Id, x.DisplayNumber, x.TargetReleaseId }).SingleOrDefaultAsync(ct);
+            if (change is null) return Results.NotFound(new { error = "That change request is not in this Project." });
+            // A package governs one build's test work. Folding in a change allocated to a different build
+            // would put its procedures behind the wrong release gate.
+            if (change.TargetReleaseId != review.ReleaseId)
+                return Results.BadRequest(new { error = $"{change.DisplayNumber} is allocated to a different build." });
+
+            var claimedBy = await db.TestChangeRequestClaims.AsNoTracking()
+                .Where(x => x.ChangeRequestId == request.ChangeRequestId)
+                .Select(x => x.TestChangeReviewId).FirstOrDefaultAsync(ct);
+            if (claimedBy != Guid.Empty && claimedBy != id)
+            {
+                var holder = await db.TestChangeReviews.AsNoTracking().Where(x => x.Id == claimedBy)
+                    .Select(x => x.BaseNumber).SingleOrDefaultAsync(ct);
+                return Results.Conflict(new { error = $"{change.DisplayNumber} is already covered by {holder}." });
+            }
+
+            try
+            {
+                review.IncludeChangeRequest(http.UserAccount().UserName, change.Id, change.DisplayNumber, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { review.Id, review.DisplayNumber, covered = review.CoveredChangeRequestIds });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapDelete("/api/test-change-reviews/{id:guid}/change-requests/{changeRequestId:guid}", async (Guid id,
+            Guid changeRequestId, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.Include(x => x.AdditionalSources).SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build test change requests are read-only." });
+            if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
+                return Results.Forbid();
+            try
+            {
+                review.ExcludeChangeRequest(changeRequestId, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { review.Id, review.DisplayNumber, covered = review.CoveredChangeRequestIds });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });

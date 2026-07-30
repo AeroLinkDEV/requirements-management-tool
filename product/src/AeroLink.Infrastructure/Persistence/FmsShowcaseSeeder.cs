@@ -236,7 +236,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
                 if (!reviewsByRequestAndDiscipline.TryGetValue((request.Id, discipline), out var review))
                 {
                     review = new TestChangeReview(projectId, request.TargetReleaseId, request.Id,
-                        discipline, request.DisplayNumber, now);
+                        discipline, request.DisplayNumber, now,
+                        await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct));
                     db.TestChangeReviews.Add(review);
                     reviewsByRequestAndDiscipline.Add((request.Id, discipline), review);
                 }
