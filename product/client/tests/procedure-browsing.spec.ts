@@ -67,3 +67,47 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   await expect(page.getByText("No procedure matches these filters")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Clear the search or the filters to see the rest.")).toBeVisible();
 });
+
+/**
+ * A search result must not be overwritten by the reply to the search that preceded it.
+ *
+ * Changing a filter starts a second request while the first is still in flight, and nothing ordered the
+ * replies. The unfiltered query is by far the slower one — it scans every procedure's coverage back to the
+ * effective baseline — so the narrow filtered reply routinely arrived first and was then buried by the broad
+ * reply behind it. The reader typed a search, saw the procedure they wanted, and watched the whole list they
+ * had just filtered away come back over the top of it, with their search term still in the box.
+ *
+ * The race is real but timing-dependent, so it is not left to chance here: the unfiltered reply is held back
+ * until the filtered one has been delivered, which makes the stale reply land last every single run.
+ */
+test("a slow unfiltered reply cannot bury the search result that overtook it", async ({ page, request }) => {
+  test.setTimeout(240_000);
+  await apiLogin(request);
+  await login(page, 'admin', { openProject: false });
+  await selectProgram(page, "Flight Management System Live Program");
+
+  let filteredDelivered: () => void = () => {};
+  const filteredHasLanded = new Promise<void>(resolve => { filteredDelivered = resolve; });
+  await page.route("**/api/test-procedures?*", async route => {
+    const searching = new URL(route.request().url()).searchParams.get("search");
+    // The unfiltered reply is the one that used to win. It is made to lose, deterministically.
+    if (!searching) await filteredHasLanded;
+    await route.continue();
+    if (searching) filteredDelivered();
+  });
+
+  await page.getByRole("button", { name: /Search & navigate/ }).click();
+  const palette = page.getByRole("dialog", { name: "Quick navigation" });
+  await palette.getByPlaceholder(/Search pages/).fill("System Verification");
+  await palette.getByRole("link", { name: /System Verification/ }).click();
+  await page.getByRole("button", { name: /Test procedures/ }).click();
+
+  await page.getByLabel("Find a procedure").fill("SYSTP-000001");
+  const rows = page.locator(".procedureRow");
+  await expect(rows).toHaveCount(1, { timeout: 30_000 });
+
+  // The held reply is released by the assertion above having been satisfied; the list must not move.
+  await expect(rows).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.getByLabel("Find a procedure")).toHaveValue("SYSTP-000001");
+  await expect(rows.first().locator("b").first()).toHaveText(/^SYSTP-000001\./);
+});
