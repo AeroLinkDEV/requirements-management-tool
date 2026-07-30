@@ -21,9 +21,10 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
         using var showcase = showcaseFixture.Create(); var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-evidence-{Guid.NewGuid():N}");
         var options = showcase.Options;
         try
+            // The in-work build's campaign specifically: the released build now has its own closed one.
         {
             await using var db = showcase.Context(); var summary = showcaseFixture.Summary;
-            var campaign = await db.ReleaseCampaigns.SingleAsync(x => x.ProjectId == summary.ProjectId); Assert.Equal(ReleaseCampaignState.Verification, campaign.State);
+            var campaign = await db.ReleaseCampaigns.SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId); Assert.Equal(ReleaseCampaignState.Verification, campaign.State);
             Assert.Equal(32, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id)); Assert.Equal(8, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id && x.State == ImpactDispositionState.Addressed));
             var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default); Assert.False(readiness.ReadyForRelease); Assert.Contains(readiness.Gates, x => x.Code == "change_control" && x.Completed == 2 && x.Total == 7);
             var blocker = new ProblemReport(summary.ProjectId, "PR-00001", "Unresolved release-impacting failure", "A failed verification result remains unresolved.", "", "verification.engineer", DateTimeOffset.UtcNow);
@@ -65,7 +66,7 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
         try
         {
             await using var db = showcase.Context(); var summary = showcaseFixture.Summary;
-            var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleAsync(x => x.ProjectId == summary.ProjectId);
+            var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId);
             var baseline = await db.CandidateBaselines.Include(x => x.Selections).Include(x => x.Events).SingleAsync(x => x.Id == campaign.BaselineId);
             var requests = await db.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.ReviewCycles).ThenInclude(x => x.Steps).Where(x => x.TargetReleaseId == campaign.ReleaseId).ToListAsync();
             var now = new DateTimeOffset(2025, 1, 10, 14, 0, 0, TimeSpan.Zero);
