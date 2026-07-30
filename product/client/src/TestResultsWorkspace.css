@@ -1,0 +1,48 @@
+/* The test set reads as a checklist a build is measured against, not as a table to be scanned for data. */
+.testResultsPage { display: flex; flex-direction: column; gap: 18px; }
+.testResultsPage > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+
+.testSetSummary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.testSetSummary article {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff;
+}
+.testSetSummary b { font: 750 26px var(--font-display); color: var(--ink-900); }
+.testSetSummary span { color: var(--ink-500); font-size: 13px; }
+
+.testSetCard { padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.testSetCard .cardTitle { margin-bottom: 12px; }
+.testSetCard .cardTitle h2 { margin: 0; font: 750 17px var(--font-display); }
+.testSetCard .cardTitle p { margin: 2px 0 0; color: var(--ink-500); font-size: 13px; }
+
+.testSetRow {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head actions" "body actions" "meta actions";
+  gap: 2px 12px; padding: 12px 0; border-top: 1px solid var(--line);
+}
+.testSetRow > div:first-child { grid-area: head; display: flex; align-items: baseline; gap: 10px; }
+.testSetRow p { grid-area: body; margin: 0; min-width: 0; }
+.testSetRow small { grid-area: meta; color: var(--ink-500); }
+.testSetRowActions { grid-area: actions; display: flex; gap: 6px; align-items: flex-start; }
+.testSetRow b { font: 750 14px var(--font-display); }
+.testSetRow i {
+  font-style: normal; font-size: 12px; font-weight: 650;
+  padding: 2px 8px; border-radius: 999px; background: #eef2f6; color: var(--ink-500);
+}
+.testSetRow i.pass { background: #e6f6ee; color: #1d7a4d; }
+.testSetRow i.fail { background: #fdecec; color: #b3261e; }
+.testSetRow i.blocked { background: #fdf3e2; color: #8a5a00; }
+
+.testSetEmpty { display: flex; flex-direction: column; gap: 4px; padding: 20px; border: 1px dashed var(--line); border-radius: 10px; }
+.testSetEmpty b { font: 750 15px var(--font-display); }
+.testSetEmpty span { color: var(--ink-500); font-size: 13px; }
+
+.testSetSearch { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.testSetSearch span { font-size: 13px; color: var(--ink-500); }
+
+.testSetCandidates { display: flex; flex-direction: column; max-height: 320px; overflow-y: auto; }
+.testSetCandidates label { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.testSetCandidates b { font: 750 13px var(--font-display); }
+.testSetCandidates span { color: var(--ink-500); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.testSetNoCandidates { color: var(--ink-500); font-size: 13px; padding: 12px 0; }
+
+.testSetActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
