@@ -1,0 +1,38 @@
+# Line endings are decided here rather than by each machine's Git configuration.
+#
+# Without this file, `core.autocrlf=true` gave every Windows working tree CRLF while CI checked the same files
+# out as LF on Linux. Two consequences, one cosmetic and one not:
+#
+#   * every commit printed "LF will be replaced by CRLF" for every file it touched, which is noise that trains
+#     you to ignore warnings;
+#   * anything line-ending sensitive behaved differently locally than in CI, and scripted multi-line edits
+#     (`perl -0pi -e 's/...\n.../'`) silently matched nothing on Windows and everything on Linux. A
+#     substitution that quietly changes no bytes is worse than one that fails, because the check that follows
+#     it passes for the wrong reason.
+#
+# So text is LF everywhere, including in the working tree, and the exceptions below are the files where the
+# platform genuinely cares.
+* text=auto eol=lf
+
+# Windows shells are the exception. Batch interpreters are sensitive to line endings around labels and `goto`,
+# and there is no reason to find out the hard way — these are launched by double-click on Windows and nowhere
+# else.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary, so Git must never look inside or translate anything.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.dll binary
+*.exe binary
+*.db binary
