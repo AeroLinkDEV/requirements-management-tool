@@ -38,6 +38,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<TestRequirementCoverage> TestCoverage => Set<TestRequirementCoverage>();
     public DbSet<TestExecution> TestExecutions => Set<TestExecution>();
     public DbSet<TestChangeReview> TestChangeReviews => Set<TestChangeReview>();
+    public DbSet<TestChangeRequestClaim> TestChangeRequestClaims => Set<TestChangeRequestClaim>();
     public DbSet<VerificationImpactItem> VerificationImpactItems => Set<VerificationImpactItem>();
     public DbSet<VerificationImpactDecisionHistory> VerificationImpactDecisionHistory => Set<VerificationImpactDecisionHistory>();
     public DbSet<RequirementTraceLink> RequirementTraces => Set<RequirementTraceLink>();
@@ -370,11 +371,34 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.RequirementRevisionId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<TestChangeRequestClaim>(b =>
+        {
+            b.ToTable("test_change_request_claims"); b.HasKey(x => x.Id);
+            // The identifier comes from the constructor, not the store. Without this, a claim added to a
+            // package that is already tracked is discovered through the navigation with its key already set,
+            // and EF reads that as an existing row to update — which then updates nothing, because there is
+            // no such row. Every other child collection here is only ever built alongside a brand new parent,
+            // so this is the first place it could bite.
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.Property(x => x.ChangeRequestNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.ClaimedBy).HasMaxLength(100).IsRequired();
+            // The rule the database holds rather than the aggregate: a change request belongs to at most one
+            // test change request. Two engineers claiming the same change from two packages would otherwise
+            // both succeed, and "is this change's test work covered?" would have two answers that could be
+            // approved with contradictory procedure decisions.
+            b.HasIndex(x => x.ChangeRequestId).IsUnique();
+            b.HasIndex(x => x.TestChangeReviewId);
+        });
+
         modelBuilder.Entity<TestChangeReview>(b =>
         {
             b.ToTable("test_change_reviews"); b.HasKey(x => x.Id);
             b.Property(x => x.Discipline).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.SourceChangeRequestNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.BaseNumber).HasMaxLength(40).IsRequired();
+            b.Ignore(x => x.DisplayNumber);
+            b.HasMany(x => x.AdditionalSources).WithOne().HasForeignKey(x => x.TestChangeReviewId).OnDelete(DeleteBehavior.Cascade);
+            b.Navigation(x => x.AdditionalSources).UsePropertyAccessMode(PropertyAccessMode.Field);
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.AssignedEngineerId).HasMaxLength(100);
             b.Property(x => x.SubmittedBy).HasMaxLength(100);

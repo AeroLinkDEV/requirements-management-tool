@@ -64,7 +64,8 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
             if (!reviews.TryGetValue(discipline, out var review))
             {
                 review = new TestChangeReview(request.ProjectId, request.TargetReleaseId, request.Id,
-                    discipline, request.DisplayNumber, now);
+                    discipline, request.DisplayNumber, now,
+                    await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct));
                 db.TestChangeReviews.Add(review);
                 reviews.Add(discipline, review);
             }
@@ -296,7 +297,8 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
             };
             if (!reviews.TryGetValue(discipline, out var review))
             {
-                review = new TestChangeReview(projectId, releaseId, changeRequestId, discipline, sourceNumber, now);
+                review = new TestChangeReview(projectId, releaseId, changeRequestId, discipline, sourceNumber, now,
+                    await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct));
                 db.TestChangeReviews.Add(review);
                 reviews.Add(discipline, review);
             }
