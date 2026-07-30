@@ -70,6 +70,32 @@ public sealed class PreReleaseEvidenceVisibilityTests
         return new(project.Id, release.Id, item.Id, procedure.Id, revision.Id);
     }
 
+    /// <summary>
+    /// A decision that asks for evidence before release puts the procedure in the build's test set.
+    ///
+    /// The release gate stopped reading the flag and now measures the set. A decision that set only the flag
+    /// would be recorded and unenforced — the worst of the two, because it reads as having been acted on.
+    /// </summary>
+    [Fact]
+    public async Task Asking_for_evidence_before_release_puts_the_procedure_in_the_builds_test_set()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "evidence.lead");
+        await ResolveRequiringEvidenceAsync(client, fixture);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var entries = await db.BuildTestSetEntries.AsNoTracking()
+            .Where(x => db.BuildTestSets.Any(set => set.Id == x.BuildTestSetId && set.ReleaseId == fixture.ReleaseId))
+            .ToListAsync();
+
+        var entry = Assert.Single(entries);
+        Assert.Equal(fixture.ProcedureRevisionId, entry.ProcedureRevisionId);
+        Assert.Equal(TestSelectionReason.ChangedRequirement, entry.Reason);
+    }
+
     private static async Task LoginAsync(HttpClient client, string user)
     {
         using var login = await client.PostAsJsonAsync("/api/auth/login",

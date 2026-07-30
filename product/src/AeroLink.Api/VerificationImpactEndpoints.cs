@@ -98,7 +98,7 @@ public static class VerificationImpactEndpoints
         });
 
         app.MapPost("/api/verification-impact/{id:guid}/resolve", async (Guid id, ResolveVerificationImpactRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, VerificationImpactService service, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, VerificationImpactService service, BuildTestSetService testSets, CancellationToken ct) =>
         {
             var item = await db.VerificationImpactItems.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (item is null) return Results.NotFound();
@@ -151,6 +151,22 @@ public static class VerificationImpactEndpoints
                     item.ResolutionRationale, actor, now));
                 await service.ApplyResolvedCoverageAsync(item, now, ct);
                 await service.ApplyRetargetedCoverageAsync(item, now, ct);
+                // Asking for evidence before release is saying this build must run that procedure, so it goes
+                // into the build's test set — which is what the release gate now measures. Setting only the
+                // flag would leave the decision recorded and unenforced, because the gate stopped reading it.
+                if (item.PreReleaseEvidenceRequired && item.ResolvedProcedureRevisionId is not null)
+                {
+                    var discipline = await db.TestChangeReviews.AsNoTracking()
+                        .Where(x => x.Id == item.TestChangeReviewId)
+                        .Select(x => (TestChangeReviewDiscipline?)x.Discipline).SingleOrDefaultAsync(ct);
+                    if (discipline is not null)
+                    {
+                        var sets = await testSets.EnsureForReleaseAsync(item.ProjectId, item.ReleaseId, ct);
+                        sets.SingleOrDefault(x => x.Discipline == discipline)?.Include(actor,
+                            item.ResolvedProcedureRevisionId.Value, TestSelectionReason.ChangedRequirement,
+                            $"Required before release by {item.SubjectDisplayNumber}.", now);
+                    }
+                }
                 await db.SaveChangesAsync(ct);
                 return Results.Ok((await MapAsync([item], db, ct)).Single());
             }

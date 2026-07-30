@@ -90,9 +90,14 @@ public static class ReleaseCampaignEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapGet("/api/release-campaigns/{id:guid}", async (Guid id, AeroLinkDbContext db, ReleaseReadinessService readiness, CancellationToken ct) =>
+        app.MapGet("/api/release-campaigns/{id:guid}", async (Guid id, AeroLinkDbContext db, ReleaseReadinessService readiness, BuildTestSetService testSets, CancellationToken ct) =>
         {
             var campaign = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+            // The build's test sets are created the first time somebody looks at its readiness, and carry
+            // forward every procedure the old "evidence required before release" checkbox had pointed at.
+            // Done here rather than when a build is created, because a build that predates the test set has
+            // to acquire one anyway and both cases then collapse into the same path.
+            await testSets.EnsureForReleaseAsync(campaign.ProjectId, campaign.ReleaseId, ct);
             var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == campaign.ReleaseId, ct); var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == campaign.BaselineId, ct);
             var impacts = await (from impact in db.ImpactDispositions.AsNoTracking().Where(x => x.CampaignId == id) join scr in db.SystemChangeRequests.AsNoTracking() on impact.ScrId equals scr.Id orderby scr.BaseNumber, impact.Kind select new { impact.Id, impact.ScrId, scr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, scr.Title, kind = impact.Kind.ToString(), impact.ArtifactReference, impact.Description, state = impact.State.ToString(), impact.Rationale, impact.DispositionedBy, impact.DispositionedAt }).ToListAsync(ct);
             var changes = await db.SystemChangeRequests.AsNoTracking().Where(x => x.TargetReleaseId == campaign.ReleaseId).OrderBy(x => x.BaseNumber).Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, x.Title, type = x.Type.ToString(), state = x.State.ToString(), x.AuthorId, requirementCount = x.RequirementChanges.Count, included = db.BaselineSelections.Any(s => s.BaselineId == baseline.Id && s.ScrId == x.Id) }).ToListAsync(ct);
