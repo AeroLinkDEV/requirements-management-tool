@@ -1,5 +1,6 @@
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -8,7 +9,8 @@ namespace AeroLink.Api;
 
 public sealed record AssignVerificationImpactRequest(string EngineerId);
 public sealed record ResolveVerificationImpactRequest(VerificationImpactOutcome Outcome, string Rationale, Guid? ProcedureId,
-    TestProcedureChangeAction? ProcedureChangeAction = null, bool PreReleaseEvidenceRequired = false);
+    TestProcedureChangeAction? ProcedureChangeAction = null, bool PreReleaseEvidenceRequired = false,
+    Guid? RetargetedRequirementRevisionId = null);
 public sealed record ReopenVerificationImpactRequest(string Rationale);
 public sealed record IncludeChangeRequestRequest(Guid ChangeRequestId);
 public sealed record SubmitTestChangeReviewRequest(string? Rationale = null);
@@ -115,18 +117,40 @@ public static class VerificationImpactEndpoints
                     error = "Coverage can only be confirmed against an approved procedure in this Project."
                 });
 
+            // A procedure can only be moved onto a requirement that is actually in this Project and still
+            // active. Without this check a stale identifier from a reloaded page would attach verification to
+            // a requirement that had itself been retired, which is the fault this decision exists to avoid.
+            if (request.Outcome == VerificationImpactOutcome.ProcedureRetargeted)
+            {
+                if (request.RetargetedRequirementRevisionId is null)
+                    return Results.BadRequest(new { error = "Moving a procedure requires the requirement revision it now covers." });
+                var reachable = await (from revision in db.RequirementRevisions.AsNoTracking()
+                                       join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                                       where revision.Id == request.RetargetedRequirementRevisionId
+                                             && artifact.ProjectId == item.ProjectId
+                                             && revision.State == RequirementRevisionState.Active
+                                       select revision.Id).AnyAsync(ct);
+                if (!reachable)
+                    return Results.BadRequest(new
+                    {
+                        error = "A procedure can only be moved onto an active requirement revision in this Project."
+                    });
+            }
+
             try
             {
                 var now = DateTimeOffset.UtcNow;
                 var actor = http.UserAccount().UserName;
                 item.Resolve(actor, request.Outcome, request.Rationale, now,
                     selectedProcedure?.ProcedureId, selectedProcedure?.RevisionId,
-                    request.ProcedureChangeAction, request.PreReleaseEvidenceRequired);
+                    request.ProcedureChangeAction, request.PreReleaseEvidenceRequired,
+                    request.RetargetedRequirementRevisionId);
                 db.VerificationImpactDecisionHistory.Add(new VerificationImpactDecisionHistory(
                     item.Id, VerificationImpactHistoryAction.Resolved, item.Outcome,
                     item.ResolvedProcedureId, item.ResolvedProcedureRevisionId,
                     item.ResolutionRationale, actor, now));
                 await service.ApplyResolvedCoverageAsync(item, now, ct);
+                await service.ApplyRetargetedCoverageAsync(item, now, ct);
                 await db.SaveChangesAsync(ct);
                 return Results.Ok((await MapAsync([item], db, ct)).Single());
             }
@@ -380,6 +404,7 @@ public static class VerificationImpactEndpoints
                 x.ResolvedBy,
                 x.ResolvedAt,
                 x.RaisedAt,
+                x.RetargetedRequirementRevisionId,
                 x.BlocksBaselineApproval,
                 // Resolved, and still holding the release until its designated evidence is captured.
                 awaitsPreReleaseEvidence = evidenceOwedIds.Contains(x.Id),
