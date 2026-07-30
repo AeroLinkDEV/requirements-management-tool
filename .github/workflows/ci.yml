@@ -494,3 +494,65 @@ jobs:
           path: postgres-api.log
           if-no-files-found: ignore
           retention-days: 7
+  # What a green tick on this run actually means.
+  #
+  # Every job above is conditional, and a skipped job is not a failed one — so a run whose journeys never ran
+  # reports success exactly like a run where they all passed. That is how a commit landed on main with every
+  # browser journey skipped and a green tick beside it, and why "CI is green" could not be used as evidence
+  # without opening the run and reading which jobs had actually executed.
+  #
+  # This job always runs, fails if anything it waited on failed, and writes down what was and was not
+  # validated. It is the one check worth requiring for a merge: it cannot be skipped into a pass, and its
+  # summary says in words what the tick is claiming.
+  gate:
+    name: Report what this run validated
+    if: always()
+    needs: [changes, validate, browser-pr, browser-production, postgresql-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Summarise and enforce
+        env:
+          VALIDATE: ${{ needs.validate.result }}
+          BROWSER: ${{ needs.browser-pr.result }}
+          PRODUCTION: ${{ needs.browser-production.result }}
+          POSTGRESQL: ${{ needs.postgresql-smoke.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+        run: |
+          set -euo pipefail
+          describe() {
+            case "$2" in
+              success) echo "- **$1**: ran and passed" ;;
+              failure) echo "- **$1**: FAILED" ;;
+              cancelled) echo "- **$1**: cancelled" ;;
+              *) echo "- **$1**: did not run" ;;
+            esac
+          }
+          {
+            echo "## What this run validated"
+            echo
+            describe "Backend suites and client validation" "$VALIDATE"
+            describe "Browser journeys" "$BROWSER"
+            describe "Browser journeys on the production build" "$PRODUCTION"
+            describe "PostgreSQL migrations and secure bootstrap" "$POSTGRESQL"
+            echo
+            if [ "$DOCS_ONLY" = "true" ]; then
+              echo "Classified as a documentation-only change, so no product gate ran. This tick is not evidence about the product."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # A skipped job is deliberate and allowed; a failed one is not. Reading each result explicitly rather
+          # than relying on this job's own dependency behaviour, which treats a skipped dependency as a reason
+          # to skip and would take this reporter down with it.
+          failed=""
+          for pair in "validate:$VALIDATE" "browser-pr:$BROWSER" "browser-production:$PRODUCTION" "postgresql-smoke:$POSTGRESQL"; do
+            name="${pair%%:*}"
+            result="${pair#*:}"
+            case "$result" in
+              failure|cancelled) failed="$failed $name" ;;
+            esac
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::These gates did not pass:$failed"
+            exit 1
+          fi
