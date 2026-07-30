@@ -18,6 +18,16 @@
   color: #69798b;
 }
 
+/* The label, the build's name and the sentence explaining it are three separate statements, and inline
+   elements set side by side gave them no separation at all: the banner read
+   "ACTIVE SOFTWARE BUILDSW-01.60Baseline and software build are one controlled configuration." */
+.verificationContextIdentity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
 .verificationContext {
   display: flex;
   gap: 16px;

@@ -112,7 +112,10 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
         ("software.lead", "Software Engineering Lead", "software.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
         ("systems.lead", "Systems Engineering Lead", "systems.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
         ("engineering.manager", "Engineering Manager", "engineering.manager@aerolink.local", [ProgramRole.ProgramManager, ProgramRole.Approver]),
-        ("manager.reviewer", "Engineering Manager", "manager.reviewer@aerolink.local", [ProgramRole.ProgramManager, ProgramRole.Approver]),
+        // Named, like the rest of the cast. "Engineering Manager" is what this person does, not who they are,
+        // and an approval step that reads it as a name leaves the reader unable to tell a colleague from a job
+        // title. The title still says Engineering Manager — it is derived from the account, not the name.
+        ("manager.reviewer", "Olivia Chen", "manager.reviewer@aerolink.local", [ProgramRole.ProgramManager, ProgramRole.Approver]),
         ("program.manager", "Olivia Chen", "olivia.chen@aerolink.local", [ProgramRole.ProgramManager, ProgramRole.Approver]),
         ("release.manager", "Daniel Reyes", "daniel.reyes@aerolink.local", [ProgramRole.ConfigurationManager, ProgramRole.ProgramManager]),
         ("cm.fms", "Configuration Manager", "configuration@aerolink.local", [ProgramRole.ConfigurationManager]),

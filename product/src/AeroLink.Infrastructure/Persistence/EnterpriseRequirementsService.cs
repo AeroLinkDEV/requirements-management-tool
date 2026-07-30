@@ -18,8 +18,8 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
 {
     private static readonly (RequirementLevel Level,string SchemaKey,string SchemaName,string SpecNumber,string SpecTitle)[] Defaults=
     [
-        (RequirementLevel.System,"SYSTEM-REQ","System Requirement","SYSRD-000001","System Requirements Specification"),
-        (RequirementLevel.HighLevel,"HLR","High-Level Software Requirement","HLRD-000001","High-Level Software Requirements Specification"),
+        (RequirementLevel.System,"SYSTEM-REQ","System Requirement","SYSRD-000001","System Requirements Document"),
+        (RequirementLevel.HighLevel,"HLR","High-Level Software Requirement","HLRD-000001","High-Level Software Requirements Document"),
         (RequirementLevel.LowLevel,"LLR","Low-Level Software Requirement","LLRD-000001","Low-Level Software Requirements Specification")
     ];
 
@@ -59,7 +59,15 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
         await db.SaveChangesAsync(ct);
         var specs=await db.RequirementSpecifications.Where(x=>x.ProjectId==projectId).ToListAsync(ct);
         foreach(var item in Defaults)
-            if(specs.All(x=>x.Level!=item.Level.ToString())){var spec=new RequirementSpecification(projectId,item.SpecNumber,item.SpecTitle,item.Level.ToString(),$"Authoritative structured {item.SpecTitle.ToLowerInvariant()}.",actor,now);db.RequirementSpecifications.Add(spec);specs.Add(spec);}
+        {
+            var existing=specs.SingleOrDefault(x=>x.Level==item.Level.ToString());
+            if(existing is null){var spec=new RequirementSpecification(projectId,item.SpecNumber,item.SpecTitle,item.Level.ToString(),$"Authoritative structured {item.SpecTitle.ToLowerInvariant()}.",actor,now);db.RequirementSpecifications.Add(spec);specs.Add(spec);continue;}
+            // The default title is authoritative and is applied to Projects that already exist. These were
+            // "System Requirements Specification"; the product calls the artefact a document everywhere else,
+            // and a library that names the same thing two ways makes a reader wonder whether they are two
+            // things. Only the name moves — the number, the content and its history are untouched.
+            if(existing.Title!=item.SpecTitle)db.Entry(existing).Property(x=>x.Title).CurrentValue=item.SpecTitle;
+        }
         await db.SaveChangesAsync(ct);
         var sections=await db.SpecificationNodes.Where(x=>specs.Select(s=>s.Id).Contains(x.SpecificationId)&&x.Type==SpecificationNodeType.Section).ToListAsync(ct);
         foreach(var spec in specs)
