@@ -11,7 +11,7 @@ async function openPageFromPalette(page:Page,label:string){
 
 test('author creates, edits, submits, and sequentially approves an SCR', async ({ page }) => {
   test.setTimeout(60_000)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   const suffix=Date.now().toString().slice(-7),programName=`Browser Workflow ${suffix}`
   if(await page.getByLabel('Program name').count()){
     await page.getByLabel('Program name').fill(programName)

@@ -232,12 +232,29 @@ public sealed class SecurityBoundaryTests
     }
 }
 
-internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool allowDemoAccounts = false) : WebApplicationFactory<Program>
+internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool allowDemoAccounts = false,
+    string? showcaseTemplate = null) : WebApplicationFactory<Program>
 {
     public const string BootstrapSecret = "test-bootstrap-secret-0123456789-abcdef";
     public const string AdministratorPassword = "Bootstrap-Admin!2026";
     public const string MemberPassword = "Program-Member!2026";
-    private readonly string _databasePath = Path.Combine(Path.GetTempPath(), $"aerolink-api-tests-{Guid.NewGuid():N}.db");
+    private readonly string _databasePath = NewDatabase(showcaseTemplate);
+
+    /// <summary>
+    /// A private database file, optionally starting as a copy of an already-seeded showcase.
+    ///
+    /// Three tests in this assembly seeded the FMS showcase inside their own factory, which is 40 to 60 seconds
+    /// each and was 177 of the assembly's 552 CPU-seconds for a dataset identical all three times. The copy
+    /// happens before the host starts, so the API opens a database that is already populated and its startup
+    /// EnsureCreated finds nothing to do.
+    /// </summary>
+    private static string NewDatabase(string? template)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-api-tests-{Guid.NewGuid():N}.db");
+        if (template is not null) File.Copy(template, path);
+        return path;
+    }
+
     private readonly string _evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-api-evidence-{Guid.NewGuid():N}");
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

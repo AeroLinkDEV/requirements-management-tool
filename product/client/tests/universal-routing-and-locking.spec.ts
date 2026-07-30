@@ -24,7 +24,9 @@ test('deep links survive refresh, universal search resolves fragments, and check
  await page.getByRole('dialog').getByRole('link').filter({hasText:draft.displayNumber}).click()
  await page.getByRole('button',{name:'Check out & edit'}).click()
  await page.getByLabel('Title').fill(`Autosaved controlled checkout ${Date.now()}`)
- await page.waitForTimeout(3200);await expect(page.locator('.autosaveState')).toContainText('Saved')
+ // No sleep before this: toContainText already retries until it matches or times out, so the 3.2 seconds were
+ // spent whether autosave took 300ms or the full debounce. The generous timeout keeps the slow case covered.
+ await expect(page.locator('.autosaveState')).toContainText('Saved', { timeout: 15_000 })
  const lockedUrl=page.url()
 
  const second=await browser.newContext();const reader=await second.newPage();await reader.goto(lockedUrl)

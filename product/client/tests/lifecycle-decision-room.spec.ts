@@ -5,7 +5,7 @@ test("Lifecycle Decision Room connects readiness, impact, evidence, people, and 
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1600, height: 1000 });
   await apiLogin(request);
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page,"Flight Management System Live Program");
 
   await openNavigationGroup(page, "RELEASE & CONFIGURATION");

@@ -13,7 +13,7 @@ import { login, openNavigationGroup, selectProgram } from './auth'
 // other.
 test('the requirements explorer offers the document for the build being read', async ({ page }) => {
   test.setTimeout(120_000)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
@@ -45,7 +45,7 @@ test('the requirements explorer offers the document for the build being read', a
 
 test('the software explorer offers the document for the level being read', async ({ page }) => {
   test.setTimeout(120_000)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'SOFTWARE ENGINEERING')
   await page.getByRole('link', { name: 'Software Requirements Explorer' }).click()

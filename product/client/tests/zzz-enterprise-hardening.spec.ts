@@ -8,7 +8,7 @@ test("enterprise control proves content, queries, jobs, concurrency, redlines, a
   test.setTimeout(120_000);
   const documentLabel = `FMS controlled interface note ${Date.now()}`;
   await apiLogin(request);
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page,"Flight Management System Live Program");
   await openNavigationGroup(page,"ADMINISTRATION");
   await page.getByRole("link", { name: /Enterprise Control/ }).click();

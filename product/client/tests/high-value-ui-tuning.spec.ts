@@ -5,7 +5,7 @@ test('workspace tuning persists and quick navigation provides previews and recen
   test.setTimeout(90_000)
   await page.setViewportSize({width:1440,height:900})
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page,'Flight Management System Live Program')
 
   await page.getByRole('button',{name:'Open workspace display settings'}).click()

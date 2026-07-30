@@ -39,7 +39,7 @@ test("a checked-in change reads as a narrative and keeps its technical evidence 
     { data: { expectedVersion: lock.version } });
   expect(checkIn.ok(), await checkIn.text()).toBe(true);
 
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page, "Flight Management System Live Program");
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, "");
   await page.goto(new URL(`${root}/systems/change-requests/${scr.id}`, page.url()).toString(), { waitUntil: "load" });

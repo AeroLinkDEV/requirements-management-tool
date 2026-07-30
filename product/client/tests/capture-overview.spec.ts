@@ -23,7 +23,7 @@ test('capture the product surfaces used by the overview video', async ({ page })
   test.skip(process.env.CAPTURE !== '1', 'Set CAPTURE=1 to refresh docs/overview-video/shots.')
   test.setTimeout(300_000)
 
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
 

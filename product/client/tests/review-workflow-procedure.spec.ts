@@ -7,7 +7,7 @@ import { apiBase, login, openNavigationGroup, selectProgram } from './auth'
  */
 test('a team records its review procedure, puts it in force, and revises it without losing the prior version', async ({ page }) => {
   test.setTimeout(60_000)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
 
   // Its own workspace. Putting a procedure in force changes what a valid submission looks like for every
   // change request in that project, so doing it in the shared one would silently invalidate other journeys.

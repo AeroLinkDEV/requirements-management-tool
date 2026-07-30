@@ -15,7 +15,7 @@ test.use({ timezoneId: 'America/Toronto' })
 test('the execution time field is prefilled with local wall time, not the UTC clock', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'VERIFICATION')
   await page.getByRole('link', { name: 'System Verification' }).click()

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { apiLogin, login, selectProgram } from './auth'
+import { apiLogin, login, selectProgram , surfacePainted } from './auth'
 
 /**
  * The product must never appear to claim certification or tool qualification.
@@ -80,7 +80,7 @@ test('no surface presents a certification or tool-qualification claim', async ({
   test.setTimeout(300_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
 
   const links = page.locator('nav[aria-label="Primary navigation"] a[href]')
@@ -92,7 +92,7 @@ test('no surface presents a certification or tool-qualification claim', async ({
   const violations: string[] = []
   for (const route of routes) {
     await page.goto(route, { waitUntil: 'load' })
-    await page.waitForTimeout(700)
+    await surfacePainted(page)
     for (const claim of await claimsOn(page)) violations.push(`${route.replace(/^.*\/releases\/[^/]+/, '')}: ${claim}`)
   }
 
@@ -113,7 +113,7 @@ test('no surface presents a certification or tool-qualification claim', async ({
 
 test('the assurance surface states the boundary rather than leaving it to be inferred', async ({ page, request }) => {
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
 
   const links = page.locator('nav[aria-label="Primary navigation"] a[href]')

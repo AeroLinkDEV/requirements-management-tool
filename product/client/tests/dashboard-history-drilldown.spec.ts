@@ -4,7 +4,7 @@ import { apiLogin, login, selectProgram } from './auth'
 test('System and Software dashboard metrics open shareable, build-scoped History drill-downs', async ({ page, request }) => {
   test.setTimeout(60_000)
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page,'Flight Management System Live Program')
 
   await page.locator('.dashboardAreaCard.system .dashboardStateGrid button').filter({hasText:'Draft'}).click()

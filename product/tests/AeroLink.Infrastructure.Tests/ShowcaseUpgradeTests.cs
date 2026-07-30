@@ -13,12 +13,15 @@ namespace AeroLink.Infrastructure.Tests;
 ///
 /// The existing seeder test seeds a fresh database and calls the current seeder twice, which cannot see this:
 /// both passes are the current version. These start from a database made to look like an older seed.
+///
+/// Each of these four seeded the showcase itself to reach that starting position — 26 to 61 seconds each, 160
+/// seconds for a dataset that was identical all four times and that none of them set out to prove. They take a
+/// copy of the shared template instead. What they exercise is unchanged: each still owns a private database and
+/// rewinds, interrupts and upgrades it without any other test seeing it.
 /// </summary>
-public sealed class ShowcaseUpgradeTests
+[Collection(ShowcaseCollection.Name)]
+public sealed class ShowcaseUpgradeTests(ShowcaseDatabaseFixture showcase)
 {
-    private static DbContextOptions<AeroLinkDbContext> Options(string path) =>
-        new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
-
     /// <summary>
     /// Rewinds a current database to the shape an older seed left behind: the verification-impact work gone,
     /// and no record of any upgrade step having run.
@@ -35,58 +38,48 @@ public sealed class ShowcaseUpgradeTests
     [Fact]
     public async Task An_older_database_is_reconciled_rather_than_left_in_a_state_the_product_calls_impossible()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"aerolink-upgrade-{Guid.NewGuid():N}.db");
-        try
-        {
-            await using var db = new AeroLinkDbContext(Options(path));
-            await db.Database.EnsureCreatedAsync();
-            var seeder = new FmsShowcaseSeeder(db);
-            var summary = await seeder.EnsureSeededAsync();
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+        var summary = showcase.Summary;
 
-            await RewindToPriorVersionAsync(db);
+        await RewindToPriorVersionAsync(db);
 
-            // The defect exactly as reported: approved changes, and nothing in the queue.
-            Assert.Empty(await db.VerificationImpactItems.ToListAsync());
-            var broken = await seeder.CheckInvariantsAsync(summary.ProgramId);
-            Assert.False(broken.Single(x => x.Key == "verification-impact").Holds);
+        // The defect exactly as reported: approved changes, and nothing in the queue.
+        Assert.Empty(await db.VerificationImpactItems.ToListAsync());
+        var broken = await seeder.CheckInvariantsAsync(summary.ProgramId);
+        Assert.False(broken.Single(x => x.Key == "verification-impact").Holds);
 
-            var applied = await seeder.UpgradeAsync(summary.ProgramId);
-            Assert.Contains(applied, x => x.StartsWith("verification-impact"));
-            Assert.NotEmpty(await db.VerificationImpactItems.ToListAsync());
+        var applied = await seeder.UpgradeAsync(summary.ProgramId);
+        Assert.Contains(applied, x => x.StartsWith("verification-impact"));
+        Assert.NotEmpty(await db.VerificationImpactItems.ToListAsync());
 
-            var healthy = await seeder.CheckInvariantsAsync(summary.ProgramId);
-            Assert.All(healthy, x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
-        }
-        finally { File.Delete(path); }
+        var healthy = await seeder.CheckInvariantsAsync(summary.ProgramId);
+        Assert.All(healthy, x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
     }
 
     [Fact]
     public async Task Re_running_the_upgrade_changes_nothing_and_records_each_step_once()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"aerolink-upgrade-idem-{Guid.NewGuid():N}.db");
-        try
-        {
-            await using var db = new AeroLinkDbContext(Options(path));
-            await db.Database.EnsureCreatedAsync();
-            var seeder = new FmsShowcaseSeeder(db);
-            var summary = await seeder.EnsureSeededAsync();
-            await RewindToPriorVersionAsync(db);
-            await seeder.UpgradeAsync(summary.ProgramId);
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+        var summary = showcase.Summary;
+        await RewindToPriorVersionAsync(db);
+        await seeder.UpgradeAsync(summary.ProgramId);
 
-            var impacts = await db.VerificationImpactItems.CountAsync();
-            var procedures = await db.TestProcedures.CountAsync();
+        var impacts = await db.VerificationImpactItems.CountAsync();
+        var procedures = await db.TestProcedures.CountAsync();
 
-            // Twice more, including a full re-seed, which is what a restart actually does.
-            Assert.Empty(await seeder.UpgradeAsync(summary.ProgramId));
-            await seeder.EnsureSeededAsync();
+        // Twice more, including a full re-seed, which is what a restart actually does.
+        Assert.Empty(await seeder.UpgradeAsync(summary.ProgramId));
+        await seeder.EnsureSeededAsync();
 
-            Assert.Equal(impacts, await db.VerificationImpactItems.CountAsync());
-            Assert.Equal(procedures, await db.TestProcedures.CountAsync());
-            var steps = await db.ShowcaseUpgradeSteps.AsNoTracking().ToListAsync();
-            Assert.Equal(steps.Select(x => x.StepKey).Distinct().Count(), steps.Count);
-            Assert.Single(await db.Programs.ToListAsync());
-        }
-        finally { File.Delete(path); }
+        Assert.Equal(impacts, await db.VerificationImpactItems.CountAsync());
+        Assert.Equal(procedures, await db.TestProcedures.CountAsync());
+        var steps = await db.ShowcaseUpgradeSteps.AsNoTracking().ToListAsync();
+        Assert.Equal(steps.Select(x => x.StepKey).Distinct().Count(), steps.Count);
+        Assert.Single(await db.Programs.ToListAsync());
     }
 
     /// <summary>
@@ -96,54 +89,44 @@ public sealed class ShowcaseUpgradeTests
     [Fact]
     public async Task An_interrupted_upgrade_resumes_at_the_step_it_stopped_on()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"aerolink-upgrade-resume-{Guid.NewGuid():N}.db");
-        try
-        {
-            await using var db = new AeroLinkDbContext(Options(path));
-            await db.Database.EnsureCreatedAsync();
-            var seeder = new FmsShowcaseSeeder(db);
-            var summary = await seeder.EnsureSeededAsync();
-            await RewindToPriorVersionAsync(db);
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+        var summary = showcase.Summary;
+        await RewindToPriorVersionAsync(db);
 
-            // Stopped after the first two steps: their rows exist, the impact work does not.
-            db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(summary.ProgramId, "release-campaign", "partial", DateTimeOffset.UtcNow));
-            db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(summary.ProgramId, "product-line", "partial", DateTimeOffset.UtcNow));
-            await db.SaveChangesAsync();
+        // Stopped after the first two steps: their rows exist, the impact work does not.
+        db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(summary.ProgramId, "release-campaign", "partial", DateTimeOffset.UtcNow));
+        db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(summary.ProgramId, "product-line", "partial", DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync();
 
-            var applied = await seeder.UpgradeAsync(summary.ProgramId);
-            Assert.DoesNotContain(applied, x => x.StartsWith("release-campaign"));
-            Assert.DoesNotContain(applied, x => x.StartsWith("product-line"));
-            Assert.Contains(applied, x => x.StartsWith("verification-impact"));
-            Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
-        }
-        finally { File.Delete(path); }
+        var applied = await seeder.UpgradeAsync(summary.ProgramId);
+        Assert.DoesNotContain(applied, x => x.StartsWith("release-campaign"));
+        Assert.DoesNotContain(applied, x => x.StartsWith("product-line"));
+        Assert.Contains(applied, x => x.StartsWith("verification-impact"));
+        Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
     }
 
     /// <summary>A reconciliation that discards somebody's work is worse than the gap it repairs.</summary>
     [Fact]
     public async Task User_authored_records_survive_the_upgrade()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"aerolink-upgrade-preserve-{Guid.NewGuid():N}.db");
-        try
-        {
-            await using var db = new AeroLinkDbContext(Options(path));
-            await db.Database.EnsureCreatedAsync();
-            var seeder = new FmsShowcaseSeeder(db);
-            var summary = await seeder.EnsureSeededAsync();
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+        var summary = showcase.Summary;
 
-            var mine = new ProblemReport(summary.ProjectId, "PR-90001", "Authored by a user", "Problem", "Analysis",
-                "someone", DateTimeOffset.UtcNow, "Engineering anomaly",
-                ProblemReportSeverity.Major,
-                ProblemReportPriority.Normal, "Manual report", "");
-            db.ProblemReports.Add(mine);
-            await db.SaveChangesAsync();
+        var mine = new ProblemReport(summary.ProjectId, "PR-90001", "Authored by a user", "Problem", "Analysis",
+            "someone", DateTimeOffset.UtcNow, "Engineering anomaly",
+            ProblemReportSeverity.Major,
+            ProblemReportPriority.Normal, "Manual report", "");
+        db.ProblemReports.Add(mine);
+        await db.SaveChangesAsync();
 
-            await RewindToPriorVersionAsync(db);
-            await seeder.UpgradeAsync(summary.ProgramId);
-            await seeder.EnsureSeededAsync();
+        await RewindToPriorVersionAsync(db);
+        await seeder.UpgradeAsync(summary.ProgramId);
+        await seeder.EnsureSeededAsync();
 
-            Assert.NotNull(await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x => x.ReportNumber == "PR-90001"));
-        }
-        finally { File.Delete(path); }
+        Assert.NotNull(await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x => x.ReportNumber == "PR-90001"));
     }
 }

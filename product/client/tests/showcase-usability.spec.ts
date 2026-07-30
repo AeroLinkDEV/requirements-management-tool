@@ -5,7 +5,7 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   test.setTimeout(90_000)
   await page.setViewportSize({width:1440,height:900})
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page,'Flight Management System Live Program')
 
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()

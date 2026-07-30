@@ -4,7 +4,7 @@ import { apiBase, apiLogin, login, openNavigationGroup, selectProgram, showcaseS
 test('upload, job, identity, and conflict failures stay visible without false success or stuck controls', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
 
   const administration = page.locator('.navGroup').filter({ has: page.locator('summary').filter({ hasText: 'ADMINISTRATION' }) })
@@ -99,7 +99,7 @@ test('a rejected approval preserves signature input and records no approval evid
   const procedure = await created.json()
   await engineer.dispose()
 
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'VERIFICATION')
   await page.getByRole('link', { name: 'System Verification' }).click()

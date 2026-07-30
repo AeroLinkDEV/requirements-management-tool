@@ -8,7 +8,7 @@ import { login, openNavigationGroup, openNewSystemChangeRequest, selectProgram }
 // already filtered by section, so the explorer had a filter nothing could aim.
 test('an author chooses the section a new requirement goes in', async ({ page }) => {
   test.setTimeout(120_000)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await openNewSystemChangeRequest(page)
@@ -42,7 +42,7 @@ test('an author chooses the section a new requirement goes in', async ({ page })
 
 test('modifying a requirement offers to leave it where it already is', async ({ page }) => {
   test.setTimeout(180_000)
-  await login(page)
+  await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await openNewSystemChangeRequest(page)

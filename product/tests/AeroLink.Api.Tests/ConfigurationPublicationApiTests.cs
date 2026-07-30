@@ -9,13 +9,14 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
 
-public sealed class ConfigurationPublicationApiTests
+[Collection(ShowcaseApiCollection.Name)]
+public sealed class ConfigurationPublicationApiTests(ShowcaseApiFixture showcase)
 {
     [Fact]
     public async Task Configuration_publications_are_resumable_integrity_checked_and_packaged_with_verifiable_manifest()
     {
-        using var factory=new AeroLinkApiFactory();using var client=factory.CreateClient();await BootstrapAsync(client);Guid projectId,activeBaselineId,releasedBaselineId,templateRevisionId;
-        using(var scope=factory.Services.CreateScope()){var db=scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();var summary=await new FmsShowcaseSeeder(db).EnsureSeededAsync();projectId=summary.ProjectId;var variants=await db.ProductVariants.AsNoTracking().Where(x=>x.ProjectId==projectId).ToListAsync();var active=variants.Single(x=>x.VariantKey=="FMS-1.6");var released=variants.Single(x=>x.VariantKey=="FMS-1.5");activeBaselineId=await db.ProductVariantBaselines.Where(x=>x.VariantId==active.Id).OrderByDescending(x=>x.Revision).Select(x=>x.Id).FirstAsync();releasedBaselineId=await db.ProductVariantBaselines.Where(x=>x.VariantId==released.Id).OrderByDescending(x=>x.Revision).Select(x=>x.Id).FirstAsync();templateRevisionId=await db.DocumentTemplateRevisions.Select(x=>x.Id).SingleAsync();}
+        using var factory=showcase.CreateFactory();using var client=factory.CreateClient();await BootstrapAsync(client);Guid projectId,activeBaselineId,releasedBaselineId,templateRevisionId;
+        using(var scope=factory.Services.CreateScope()){var db=scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();var summary=showcase.Summary;projectId=summary.ProjectId;var variants=await db.ProductVariants.AsNoTracking().Where(x=>x.ProjectId==projectId).ToListAsync();var active=variants.Single(x=>x.VariantKey=="FMS-1.6");var released=variants.Single(x=>x.VariantKey=="FMS-1.5");activeBaselineId=await db.ProductVariantBaselines.Where(x=>x.VariantId==active.Id).OrderByDescending(x=>x.Revision).Select(x=>x.Id).FirstAsync();releasedBaselineId=await db.ProductVariantBaselines.Where(x=>x.VariantId==released.Id).OrderByDescending(x=>x.Revision).Select(x=>x.Id).FirstAsync();templateRevisionId=await db.DocumentTemplateRevisions.Select(x=>x.Id).SingleAsync();}
         var libraries=await client.GetFromJsonAsync<JsonElement>($"/api/product-line/libraries?projectId={projectId}");var library=Assert.Single(libraries.EnumerateArray());Assert.Equal(2,library.GetProperty("decisionHistory").GetArrayLength());Assert.Equal(2,library.GetProperty("reuses").GetArrayLength());
         var pdf=await Post(client,"/api/publications/configuration-jobs",new{variantBaselineId=activeBaselineId,format="pdf",templateRevisionId,previousVariantBaselineId=releasedBaselineId,idempotencyKey="acceptance-pdf"});var pdfId=pdf.GetProperty("id").GetGuid();
         var resumed=await Post(client,"/api/publications/configuration-jobs",new{variantBaselineId=activeBaselineId,format="pdf",templateRevisionId,previousVariantBaselineId=releasedBaselineId,idempotencyKey="acceptance-pdf"});Assert.Equal(pdfId,resumed.GetProperty("id").GetGuid());Assert.True(resumed.GetProperty("reused").GetBoolean());

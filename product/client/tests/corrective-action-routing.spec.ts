@@ -78,7 +78,7 @@ test("a corrective action opens the discipline, report and procedure it belongs 
   test.setTimeout(240_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await apiLogin(request);
-  await login(page);
+  await login(page, 'admin', { openProject: false });
   await selectProgram(page, "Flight Management System Live Program");
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, "");
 
