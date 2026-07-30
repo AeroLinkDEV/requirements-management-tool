@@ -137,6 +137,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             ("verification-impact", ReconcileVerificationImpactAsync),
             ("test-change-reviews", EnsureTestChangeReviewsAsync),
             ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
+            ("approver-identity", ReconcileApproverIdentityAsync),
         };
 
         foreach (var step in steps)
@@ -148,6 +149,49 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             applied.Add($"{step.Key}: {detail ?? "No change required."}");
         }
         return applied;
+    }
+
+    /// <summary>
+    /// Gives the showcase's approval steps back the names of the people who hold them.
+    ///
+    /// The showcase submitted its reviews naming approvers "Engineering Lead" and "Engineering Manager". Those
+    /// are jobs, not people, and an approval step is the one place where the difference matters most: the
+    /// panel exists to tell a reader who is being waited on. It answered with a job title and then, having
+    /// spent the name on that, had nothing left to say about their authority.
+    ///
+    /// Only the two literal strings the showcase itself wrote are repaired, matched together with the account
+    /// that carries them. A name recorded by an actual reviewer is evidence and is never rewritten here — a
+    /// controlled tool that quietly edits who signed something is worse than one that displays it awkwardly.
+    /// </summary>
+    private async Task<string?> ReconcileApproverIdentityAsync(Guid programId, CancellationToken ct)
+    {
+        var seededNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["lead.reviewer"] = "Maya Patel",
+            ["manager.reviewer"] = "Olivia Chen",
+        };
+        var placeholders = new[] { "Engineering Lead", "Engineering Manager" };
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleAsync(ct);
+        var cycleIds = await db.ReviewCycles
+            .Where(cycle => db.SystemChangeRequests.Any(scr => scr.Id == cycle.ScrId && scr.ProjectId == projectId))
+            .Select(cycle => cycle.Id).ToListAsync(ct);
+        var steps = await db.ApprovalSteps
+            .Where(step => cycleIds.Contains(step.ReviewCycleId) && placeholders.Contains(step.ApproverName))
+            .ToListAsync(ct);
+
+        var repaired = 0;
+        foreach (var step in steps)
+        {
+            if (!seededNames.TryGetValue(step.ApproverId, out var person)) continue;
+            // Written through the tracked property rather than the domain, which deliberately keeps a recorded
+            // approver name immutable. This is the seeder correcting its own past output, not the product
+            // editing an approval.
+            db.Entry(step).Property(x => x.ApproverName).CurrentValue = person;
+            repaired++;
+        }
+        if (repaired == 0) return "Approval steps already name people.";
+        await db.SaveChangesAsync(ct);
+        return $"Named the people behind {repaired} approval steps.";
     }
 
     private async Task<string?> EnsureTestChangeReviewsAsync(Guid programId, CancellationToken ct)
@@ -495,8 +539,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             var request = new SystemChangeRequest(number, 0, projectId, releaseId, i == 1 ? "Introduce oceanic round-robin waypoint sequencing" : $"FMS 1.6 change package {i}", "Operational feedback or a product improvement requires controlled change.", "The impact to requirements, traces, and verification has been assessed.", "Update the applicable FMS behavior and verification assets.", type == ChangeRequestType.System ? "systems.author" : "software.author", now.AddDays(i), type);
             if (i == 1) request.AddRequirementChange(request.AuthorId, "SYSR-000151", 0, RequirementLevel.System, RequirementChangeKind.Introduce, "The FMS shall support configurable round-robin sequencing of eligible oceanic waypoints.", "New FMS 1.6 capability.", "Test", now);
             else { var level = i <= 4 ? RequirementLevel.HighLevel : RequirementLevel.LowLevel; var prefix = level == RequirementLevel.HighLevel ? "HLR" : "LLR"; var max = level == RequirementLevel.HighLevel ? 400 : 700; var idx = ((i * 37) % max) + 1; var row = current[$"{prefix}-{idx:D6}"]; request.AddRequirementChange(request.AuthorId, $"{prefix}-{idx:D6}", row.Revision.Revision + 1, level, RequirementChangeKind.Modify, CurrentStatement(level, idx) + " The behavior shall include the approved FMS 1.6 refinement.", "Product improvement or corrective action.", "Test", now); }
-            if (i <= 2) { request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Engineering Lead")], now.AddDays(i).AddHours(1)); request.ApproveActiveStage("lead.reviewer", now.AddDays(i).AddHours(2)); }
-            else if (i <= 4) request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Engineering Lead"), new("manager.reviewer", "Engineering Manager")], now.AddDays(i).AddHours(1));
+            if (i <= 2) { request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Maya Patel")], now.AddDays(i).AddHours(1)); request.ApproveActiveStage("lead.reviewer", now.AddDays(i).AddHours(2)); }
+            else if (i <= 4) request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Maya Patel"), new("manager.reviewer", "Olivia Chen")], now.AddDays(i).AddHours(1));
             else if (i == 8) request.Defer(request.AuthorId, "Deferred from FMS 1.6 pending operational priority confirmation.", now.AddDays(i).AddHours(2));
             result.Add(request);
         }

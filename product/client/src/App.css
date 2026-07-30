@@ -71,10 +71,12 @@
   font-size: 13px;
 }
 
+/* Two things on one line — which build, and what may be done to it — rather than the three-cell grid this
+   was when a standing "BUILD" label occupied the first row. */
 .program .activeBuildIdentity {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
   gap: 2px 8px;
   margin-top: 3px;
   border: 1px solid #3a5c83;
@@ -82,9 +84,8 @@
   background: #0b1a30;
   padding: 9px 10px;
 }
-.program .activeBuildIdentity small { grid-column: 1; grid-row: 1; font-size: 12px; }
-.program .activeBuildIdentity strong { display: block; grid-column: 1; grid-row: 2; color: white; font: 750 17px var(--font-display); }
-.program .activeBuildIdentity span { grid-column: 2; grid-row: 1 / 3; color: #8cded1; font-size: 12px; white-space: normal; }
+.program .activeBuildIdentity strong { color: white; font: 750 17px var(--font-display); }
+.program .activeBuildIdentity span { color: #8cded1; font-size: 12px; white-space: normal; }
 .program .exitBuild {
   min-height: 34px;
   border: 1px solid #3a5576;

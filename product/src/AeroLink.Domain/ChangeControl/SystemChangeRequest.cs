@@ -227,7 +227,11 @@ public sealed class SystemChangeRequest
         if (State != ScrState.Approved) throw new DomainException("Only an approved SCR can be selected for a baseline.");
         State = ScrState.SelectedForBaseline;
         UpdatedAt = now;
-        Audit("SelectedForBaseline", actorId, $"Selected {DisplayNumber} for a candidate baseline.", now);
+        // Says what happened to the change, not what happened to the baseline. Selection into a candidate
+        // baseline is the mechanism; being allocated to a build is the fact a reader opened the history for.
+        // The event type is unchanged, because it names an event that is already recorded thousands of times
+        // and renaming it would make the old entries and the new ones look like different things.
+        Audit("SelectedForBaseline", actorId, $"Allocated {DisplayNumber} to the build.", now);
     }
 
     public void UnmarkSelectedForBaseline(string actorId, DateTimeOffset now)

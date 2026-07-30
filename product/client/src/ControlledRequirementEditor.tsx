@@ -545,7 +545,6 @@ export default function ControlledRequirementEditor({
             <section className="tracedImpact" aria-label={`Recorded links for proposal ${index + 1}`}>
               <header>
                 <b>Live trace for {item.baseNumber}</b>
-                <span>This does not ask the author to make an impact decision.</span>
               </header>
               {tracedBusy && !traced && <p className="tracedEmpty">Reading recorded links…</p>}
               {traced && (
@@ -555,8 +554,10 @@ export default function ControlledRequirementEditor({
                     <dd>
                       {traced.derivedRequirements.length
                         ? traced.derivedRequirements.map((row) => (
+                            // The level chip is dropped on purpose: HLR-000149 is a high-level requirement by
+                            // its identifier, so the chip restated the prefix the reader had just read.
                             <span className="tracedItem" key={row.id} title={row.statement}>
-                              {row.displayNumber} <i>{row.level}</i>
+                              {row.displayNumber}
                             </span>
                           ))
                         : <em>No derived requirements are recorded.</em>}
@@ -567,8 +568,11 @@ export default function ControlledRequirementEditor({
                     <dd>
                       {traced.coveringProcedures.length
                         ? traced.coveringProcedures.map((row) => (
+                            // Only suspect applicability earns a chip. "Approved" was the answer for almost
+                            // every procedure listed, so it distinguished nothing and buried the one value
+                            // that needed to stand out.
                             <span className={`tracedItem${row.isSuspect ? " suspect" : ""}`} key={row.revisionId} title={row.title}>
-                              {row.displayNumber} <i>{row.isSuspect ? "Suspect applicability" : row.state}</i>
+                              {row.displayNumber} {row.isSuspect && <i>Suspect applicability</i>}
                             </span>
                           ))
                         : <em>No covering procedures are recorded.</em>}
@@ -576,7 +580,7 @@ export default function ControlledRequirementEditor({
                   </div>
                 </dl>
               )}
-              {traced?.coveringProcedures.some((row) => row.isSuspect) && <p className="tracedWarning">Changed wording made this applicability suspect. Resolve it through Verification â†’ Change impact; the procedure remains approved, but it does not count as confirmed coverage.</p>}
+              {traced?.coveringProcedures.some((row) => row.isSuspect) && <p className="tracedWarning">Changed wording made this applicability suspect. Resolve it through Verification → Change impact; the procedure remains approved, but it does not count as confirmed coverage.</p>}
             </section>
           )}
           {item.kind === "Introduce" && <div className="tracedImpact tracedEmpty"><b>New requirement</b><p>No earlier lifecycle trace exists. Downstream teams will establish the necessary traceability and verification after approval.</p></div>}

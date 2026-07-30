@@ -10,6 +10,7 @@ import type {
   RequirementLevel,
 } from "./ControlledRequirementEditor";
 import PersonPicker from "./PersonPicker";
+import { demoPerson } from "./PeopleRegistry";
 import ControlledAttachments from "./ControlledAttachments";
 import ScrJiraLink from "./ScrJiraLink";
 import { PersonName } from "./People";
@@ -33,6 +34,52 @@ type Requirement = {
   impactDispositionJson: string;
   targetSectionId?: string;
 };
+/// What this change does to the requirement, as a noun.
+///
+/// The chip beside a proposal read "HighLevel · Modify". The level was already settled by the identifier —
+/// HLR-000149 is a high-level requirement and cannot be anything else — so it spent the space repeating
+/// something the reader had just read. What was left described the change as an instruction to somebody
+/// rather than as the thing being proposed.
+const changeKindLabel = (kind: string) =>
+  kind === "Introduce" ? "Introduction" : kind === "Modify" ? "Modification" : kind === "Retire" ? "Retirement" : kind;
+
+/// What this approver is to the review: their recorded stage, their authority, or the role they hold here.
+///
+/// This printed "Authority unresolved" whenever neither of the first two was populated, which on the showcase
+/// is always. That is an internal admission that a field is empty, dressed up as a fact about a colleague.
+const approverRole = (step: { approverId: string; stageName: string; authority: string }) =>
+  step.stageName || step.authority || demoPerson(step.approverId)?.role || "Reviewer";
+
+/// Where an approver stands, said the way somebody waiting on them would say it.
+///
+/// The old line paired every step with its stored state — "Active", "Pending" — which describes rows in a
+/// table, not people in a queue. "Pending" in particular was given to everybody who had not been reached
+/// yet, so second-in-line and sixth-in-line read identically, and neither told the reader whose move it was.
+///
+/// A parallel review has no queue: everyone is being waited on at once, so everyone says so.
+const approvalStanding = (cycle: { mode: string; steps: { position: number; state: string }[] }, step: { position: number; state: string }) => {
+  if (step.state === "Approved") return "Approved";
+  if (cycle.mode === "Parallel" || step.state === "Active") return "Awaiting approval";
+  const ahead = cycle.steps.filter((other) => other.position < step.position && other.state !== "Approved").length;
+  if (ahead <= 1) return "Next in line for approval";
+  return `Waiting on ${ahead} earlier approvals`;
+};
+
+/// The headline of an audit entry, written for a reader rather than derived from a type name.
+///
+/// Splitting the stored event name on its capitals produced "Scr Approved" and "Scr Created" — the product's
+/// own abbreviation title-cased by an algorithm that had no idea it was one. "Selected For Baseline" was
+/// worse than untidy: selection is an internal step, and what actually happened, the thing a reader came to
+/// find out, is that the change was allocated to a build. So that one says which build.
+const auditEventTitle = (eventType: string, buildVersion: string) => {
+  if (eventType === "SelectedForBaseline") return buildVersion ? `Allocated to Build ${buildVersion}` : "Allocated to a build";
+  return eventType
+    .replace(/([A-Z])/g, " $1").trim().split(/\s+/)
+    .map((word) => (word === "Scr" ? "SCR" : word === "Swcr" ? "SWCR" : word))
+    .map((word, index) => (index === 0 || word === word.toUpperCase() ? word : word.toLowerCase()))
+    .join(" ");
+};
+
 type Step = {
   position: number;
   approverId: string;
@@ -1079,7 +1126,7 @@ export default function ScrWorkspace({
               {scr.requirementChanges.map((item) => {
                 return (
                   <article className="requirementView" key={item.id}>
-                    <div><b>{item.displayNumber}</b><span>{item.level} · {item.kind}</span></div>
+                    <div><b>{item.displayNumber}</b><span>{changeKindLabel(item.kind)}</span></div>
                     <p>{item.kind === "Retire" && !item.statement ? "Requirement will be retired." : item.statement}</p>
                     <footer><small>{item.verificationMethod} · {item.rationale || "No rationale recorded"}</small><em>Downstream impact assessed after approval</em></footer>
                   </article>
@@ -1088,9 +1135,9 @@ export default function ScrWorkspace({
             </section>
 
             <section className="workspaceCard">
-              <div className="workspaceTitle"><div><h2>Audit history</h2><p>Append-only material events</p></div></div>
+              <div className="workspaceTitle"><div><h2>Audit history</h2></div></div>
               {scr.audit.map((event, index) => (
-                <div className="auditRow" key={`${event.occurredAt}-${index}`}><i /><div><b>{event.eventType.replace(/([A-Z])/g, " $1").trim()}</b><p>{auditSummary(event)}</p><AuditEvidence event={event} /><small><PersonName userName={event.actorId} /> · {new Date(event.occurredAt).toLocaleString()}</small></div></div>
+                <div className="auditRow" key={`${event.occurredAt}-${index}`}><i /><div><b>{auditEventTitle(event.eventType, targetRelease?.version ?? "")}</b><p>{auditSummary(event)}</p><AuditEvidence event={event} /><small><PersonName userName={event.actorId} /> · {new Date(event.occurredAt).toLocaleString()}</small></div></div>
               ))}
             </section>
           </div>
@@ -1133,10 +1180,10 @@ export default function ScrWorkspace({
 
             {latest && (
               <section className="workspaceCard">
-                <div className="workspaceTitle"><div><h2>Review cycle {latest.sequence}</h2><p>{stateLabel(latest.state)} · {latest.snapshotHash.slice(0, 12)}…</p></div></div>
+                <div className="workspaceTitle"><div><h2>Review cycle {latest.sequence}</h2><p>{stateLabel(latest.state)}</p></div></div>
                 <div className="approvalPath">
                   {latest.steps.map((step) => (
-                    <div className={`approvalStep ${step.state.toLowerCase()}`} key={step.position}><span>{step.state === "Approved" ? "✓" : step.position + 1}</span><div><b><PersonName userName={step.approverId} displayName={step.approverName} /></b><small>{step.stageName || step.authority || "Authority unresolved"} · {stateLabel(step.state)}</small></div></div>
+                    <div className={`approvalStep ${step.state.toLowerCase()}`} key={step.position}><span>{step.state === "Approved" ? "✓" : step.position + 1}</span><div><b><PersonName userName={step.approverId} displayName={step.approverName} /></b><small>{approverRole(step)} · {approvalStanding(latest, step)}</small></div></div>
                   ))}
                 </div>
                 {latest.closureReason && <div className="closure"><b>Closure reason</b><p>{latest.closureReason}</p></div>}

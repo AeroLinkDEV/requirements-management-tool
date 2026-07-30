@@ -7,8 +7,14 @@
   font-size: 14px;
   font-weight: 750;
   line-height: 1.35;
+  /* Two lines before it gives up, rather than one. "Flight Management System Live Program" was cut to
+     "Flight Management System Li…" in a panel headed ACTIVE CONTEXT, which is the one place the reader
+     should not have to guess which Program they are in. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .appNavigation footer > .personAvatar.large {

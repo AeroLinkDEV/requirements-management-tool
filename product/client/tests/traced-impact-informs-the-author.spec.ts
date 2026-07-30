@@ -25,10 +25,14 @@ test('a modified requirement shows read-only downstream context without author i
   await expect(traced).toBeVisible({ timeout: 30_000 })
   await expect(traced.getByText('Requirements derived from this one')).toBeVisible()
   await expect(traced.getByText('Procedures that verify it')).toBeVisible()
-  await expect(traced.getByText(/does not ask the author to make an impact decision/)).toBeVisible()
-
-  // Read-only: the panel offers no control of any kind.
+  // Read-only: the panel offers no control of any kind. This, not a sentence, is what makes it read-only.
   await expect(traced.locator('select, input, button')).toHaveCount(0)
+
+  // The panel says what is downstream and stops there. It used to narrate what it was not asking the author
+  // to do, and to chip every listed record with a level the identifier already states and a state that was
+  // "Approved" for nearly all of them — three ways of spending the reader's attention on nothing.
+  await expect(traced.getByText(/does not ask the author to make an impact decision/)).toHaveCount(0)
+  await expect(traced.getByText(/HighLevel|LowLevel/)).toHaveCount(0)
 
   await expect(page.locator('.editorColumns aside select')).toHaveCount(0)
   await expect(page.getByText(/lifecycle impact/i)).toHaveCount(0)
