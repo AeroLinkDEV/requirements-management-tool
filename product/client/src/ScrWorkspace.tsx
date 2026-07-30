@@ -669,6 +669,36 @@ export default function ScrWorkspace({
     }, "The change request could not be deferred.");
   };
 
+  /**
+   * Stopping a review that should not be running, and putting the change request back in Draft.
+   *
+   * Asked for twice on purpose. A review in flight has people's attention booked against it, and the person
+   * cancelling it is usually not the person who will next look at it — so the reason is the message to them.
+   * The confirmation names the change request, because this control sits next to the review status and a
+   * misplaced click should not silently unwind somebody's queue.
+   */
+  const cancelReview = async () => {
+    if (!scr) return;
+    if (!window.confirm(`Stop the review of ${scr.displayNumber} and return it to Draft at the same revision?`)) return;
+    const reason = window.prompt(`Why is the review of ${scr.displayNumber} being cancelled?`);
+    if (reason === null) return;
+    if (!reason.trim()) { setError("Say why this review is being cancelled."); return; }
+    await withBusy(async () => {
+      const response = await fetch(`${api}/api/scrs/${scr.id}/cancel-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason, expectedVersion: scr.version }),
+      });
+      if (!response.ok) {
+        setError(((await response.json()) as { error?: string }).error || "The review could not be cancelled.");
+        return;
+      }
+      await load();
+      await onChanged();
+      setSaved("Review cancelled. Back in Draft at the same revision.");
+    }, "The review could not be cancelled.");
+  };
+
   const reinstate = async () => {
     if (!scr) return;
     await withBusy(async () => {
@@ -832,6 +862,14 @@ export default function ScrWorkspace({
   const isSignedFor = scr.state === "Approved" || scr.state === "SelectedForBaseline";
   const revisable = isSignedFor && targetRelease?.isReleased === false;
   const scrFacts = { state: scr.state, deferredFromState: scr.deferredFromState, targetRelease };
+  // People with a stake in this review: whoever wrote it, anybody it is waiting on, and whoever is
+  // accountable for the Program. Deliberately not everyone with access — halting a review one has no part in
+  // should not be an accident anybody can have. The server enforces the same set.
+  const canCancelReview = scr.state === "InReview" && (
+    user.isAdministrator ||
+    scr.authorId.toLowerCase() === user.userName.toLowerCase() ||
+    (latest?.steps ?? []).some((step) => step.approverId.toLowerCase() === user.userName.toLowerCase()) ||
+    user.programs.some((membership) => membership.roles.includes("ProgramManager")));
   // Any state can go on the shelf except one already picked into a candidate baseline, which has to be taken out
   // of it first — an explicit, attributable act rather than a side effect of deferring. A released build's work is
   // history and cannot be shelved either.
@@ -1194,6 +1232,13 @@ export default function ScrWorkspace({
                       <><button type="button" disabled={busy} onClick={() => setSigning(true)}>Review & electronically approve</button><textarea placeholder="Reason for requested changes" value={reason} onChange={(event) => setReason(event.target.value)} /><button type="button" className="danger" disabled={busy || !reason.trim()} onClick={() => void call("request-changes", { expectedVersion: scr.version, reason })}>Request changes</button></>
                     ) : (
                       <div className="snapshotNote"><b>Waiting for assigned reviewer</b><p>Only the assigned identity can act on this stage.</p></div>
+                    )}
+                    {/* Stopping the review is not the same decision as rejecting the content, so it does not
+                        sit behind the reviewer's controls. An author who submitted too early, or a lead who
+                        can see the change is being reworked, previously had to ask the active reviewer to
+                        reject work everybody already knew was going to change. */}
+                    {canCancelReview && (
+                      <button type="button" className="secondary" disabled={busy} onClick={() => void cancelReview()}>Cancel review</button>
                     )}
                   </div>
                 )}

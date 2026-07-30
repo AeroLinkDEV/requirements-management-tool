@@ -64,6 +64,33 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        /// Stopping a review that should not be running.
+        ///
+        /// Scoped to people with a stake in it: the author, anybody named as an approver on the active cycle,
+        /// a Program manager, and an administrator. Deliberately not "anyone with access" — that would let
+        /// somebody with no part in a change halt a review they have nothing to do with, and a controlled tool
+        /// should not make that an accident anybody can have.
+        app.MapPost("/api/scrs/{id:guid}/cancel-review", async (Guid id, CancelReviewRequest request, HttpContext http,
+            IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount();
+            var isApprover = scr.ActiveReviewCycle?.Steps
+                .Any(step => string.Equals(step.ApproverId, actor.UserName, StringComparison.OrdinalIgnoreCase)) ?? false;
+            var isLead = await http.HasProjectRoleAsync(db, identity, scr.ProjectId, ct, ProgramRole.ProgramManager);
+            if (!CanAdminister(scr, actor) && !isApprover && !isLead) return Results.Forbid();
+            if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion)
+                return Results.Conflict(new { error = "This change request changed after it was opened. Refresh before cancelling the review.", code = "stale_version" });
+            try
+            {
+                scr.CancelReview(actor.UserName, request.Reason ?? "", DateTimeOffset.UtcNow);
+                await repository.SaveAsync(ct);
+                return Results.Ok(ApiMap.ScrDetail(scr));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         app.MapPost("/api/scrs/{id:guid}/reinstate", async (Guid id, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();

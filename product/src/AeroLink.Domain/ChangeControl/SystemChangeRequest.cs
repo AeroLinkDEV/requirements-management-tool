@@ -158,6 +158,34 @@ public sealed class SystemChangeRequest
         Audit("ChangesRequested", actorId, $"Returned {DisplayNumber} to Draft at the same revision: {reason}", now);
     }
 
+    /// <summary>
+    /// Takes a change request out of review and puts it back in Draft, at the same revision.
+    ///
+    /// `RequestChanges` already did something close to this, and only the reviewer whose turn it was could do
+    /// it — which is the wrong shape for the common case. An author who submitted too early, or a lead who can
+    /// see the review is pointless because the change is being reworked, had no way to stop it. Their only
+    /// options were to wait for a reviewer to reject work everybody already knew was going to change, or to
+    /// ask that reviewer to do it for them.
+    ///
+    /// The two are kept apart deliberately. Requesting changes is a reviewer's decision about the content and
+    /// is recorded as one; cancelling is a decision to stop the review itself, and reads that way in the
+    /// history. Both land in Draft at the same revision, because neither is a rejection of the record.
+    ///
+    /// Who may do it is decided by the caller, which knows the actor's Program roles. What is settled here is
+    /// that a reason is required: a review that stopped for no recorded reason leaves the next reader unable
+    /// to tell whether it was withdrawn, superseded, or abandoned by accident.
+    /// </summary>
+    public void CancelReview(string actorId, string reason, DateTimeOffset now)
+    {
+        EnsureInReview();
+        if (string.IsNullOrWhiteSpace(actorId)) throw new DomainException("A cancelling actor is required.");
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("Say why this review is being cancelled.");
+        ActiveReviewCycle!.Cancel(reason, now);
+        State = ScrState.Draft;
+        UpdatedAt = now;
+        Audit("ReviewCancelled", actorId, $"Cancelled the review of {DisplayNumber} and returned it to Draft at the same revision: {reason.Trim()}", now);
+    }
+
     public void ReplaceFutureApprover(string actorId, int position, ApproverSelection replacement,
         DateTimeOffset now, ReviewWorkflowSpecification? workflow = null, bool administratorAuthority = false)
     {
