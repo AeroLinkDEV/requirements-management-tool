@@ -138,6 +138,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             ("test-change-reviews", EnsureTestChangeReviewsAsync),
             ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
             ("approver-identity", ReconcileApproverIdentityAsync),
+            ("released-campaign", EnsureReleasedCampaignAsync),
         };
 
         foreach (var step in steps)
@@ -494,6 +495,80 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         foreach(var (variant,reuse) in new[]{(released,releasedReuse),(active,activeReuse)})
         {var components=await db.VariantComponentSelections.AsNoTracking().Where(x=>x.VariantId==variant.Id).Select(x=>new{revisionId=x.ComponentRevisionId,x.ApplicabilityJson}).ToListAsync(ct);var manifest=JsonSerializer.Serialize(new{format="AeroLink product-variant-manifest/v2",variant=variant.VariantKey,components,libraries=new[]{new{reuseId=reuse.Id,libraryId=library.Id,selectedRevisionId=reuse.SelectedRevisionId,latestUpstreamRevisionId=reuse.LatestUpstreamRevisionId,mode=reuse.Mode.ToString(),syncState=reuse.SynchronizationState.ToString(),reuse.ApplicabilityJson}}});var next=(await db.ProductVariantBaselines.Where(x=>x.VariantId==variant.Id).MaxAsync(x=>(int?)x.Revision,ct)??0)+1;db.ProductVariantBaselines.Add(new ProductVariantBaseline(variant.Id,next,manifest,Hash(manifest),actor,now.AddDays(3)));}
         var templateBody=JsonSerializer.Serialize(new{titlePrefix="Configured System Requirements",subtitle="Exact product-line requirements, traceability, verification evidence, and controlled rich content"});var template=new DocumentTemplate(projectId,"TPL-00001","AeroLink configured SYSRD",templateBody,actor,now);var templateRevision=template.Approve(actor,now);var templateSnapshot=JsonSerializer.Serialize(new{template.TemplateNumber,template.Title,templateKind="SYSRD",organization="AeroLink Flight Systems",body=JsonSerializer.Deserialize<object>(templateBody)});db.AddRange(template,new DocumentTemplateRevision(template.Id,templateRevision,"SYSRD","AeroLink Flight Systems",templateBody,Hash(templateSnapshot),actor,now));await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// The campaign that shipped Build 1.5, complete and closed.
+    ///
+    /// Only the in-work build had one, so opening the decision room on a released build answered "Release
+    /// readiness is not configured" — which reads as a fault in the product rather than as what it was, a
+    /// page with nothing to describe. A released build is the one case where the decision room has the whole
+    /// story to tell: everything that was being tracked, and every approval that let it ship.
+    ///
+    /// Built by driving the same lifecycle a real campaign goes through — verification, an ordered review,
+    /// each approval in turn, then release — rather than by writing the finished state into the tables. A
+    /// closed campaign assembled by hand would show the right words above evidence that never happened, and
+    /// the invariants that guard the real path would never have been asked.
+    ///
+    /// Nothing on the page can be acted on afterwards, and that needs no work here: a released campaign
+    /// refuses every mutation in the domain, which is where it belongs rather than in the buttons.
+    ///
+    /// Dated to the week after the 1.5 software build was produced, so the story reads in the order it
+    /// happened and no approval is signed after the release it authorized.
+    /// </summary>
+    private async Task<string?> EnsureReleasedCampaignAsync(Guid programId, CancellationToken ct)
+    {
+        var project = await db.Projects.SingleAsync(x => x.ProgramId == programId, ct);
+        var release = await db.Releases.SingleOrDefaultAsync(x => x.ProjectId == project.Id && x.Version == "1.5", ct);
+        if (release is null) return "This Program has no released build.";
+        if (await db.ReleaseCampaigns.AnyAsync(x => x.ReleaseId == release.Id, ct)) return "The released build already has its campaign.";
+        var baseline = await db.CandidateBaselines.SingleOrDefaultAsync(x => x.ReleaseId == release.Id, ct);
+        var build = await db.SoftwareBuilds.SingleOrDefaultAsync(x => x.ReleaseId == release.Id, ct);
+        // Without both, there is nothing real to point the campaign at, and a campaign referring to nothing
+        // would be worse than the empty page it replaces.
+        if (baseline is null || build is null) return "The released build has no baseline or software build to describe.";
+
+        var now = new DateTimeOffset(2024, 6, 17, 14, 0, 0, TimeSpan.Zero);
+        var campaign = new ReleaseCampaign(project.Id, release.Id, baseline.Id, "FMS 1.5 Release Campaign", "release.manager", now);
+        campaign.StartVerification("release.manager", now.AddHours(1));
+        campaign.SelectVerificationBuild(build.Id, "release.manager", now.AddHours(2));
+        campaign.RecordExecutionProgress("VerificationCompleted",
+            "Every procedure required for the 1.5 configuration was executed and its determination recorded.",
+            "test.engineer", now.AddDays(1));
+        db.ReleaseCampaigns.Add(campaign);
+
+        var requests = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
+            .Where(x => x.TargetReleaseId == release.Id).OrderBy(x => x.BaseNumber).ToListAsync(ct);
+        var addressed = 0;
+        foreach (var request in requests)
+        {
+            var dispositions = request.RequirementChanges
+                .Select(change => new ChangeImpactDisposition(campaign.Id, request.Id, ImpactKind.Requirement, change.DisplayNumber,
+                    $"Confirm the proposed {change.Kind} requirement revision is complete and correctly allocated."))
+                .ToList();
+            dispositions.Add(new(campaign.Id, request.Id, ImpactKind.Traceability, request.DisplayNumber,
+                "Update and review all upstream and downstream trace links affected by this change."));
+            dispositions.Add(new(campaign.Id, request.Id, ImpactKind.Verification, request.DisplayNumber,
+                "Update test coverage and execute the required verification on the released 1.5 build."));
+            dispositions.Add(new(campaign.Id, request.Id, ImpactKind.Document, request.DisplayNumber,
+                "Regenerate every controlled output affected by this change."));
+            // All addressed: this is a build that shipped, and an outstanding item on it would say the
+            // opposite of what the record shows.
+            foreach (var item in dispositions)
+                item.Disposition(ImpactDispositionState.Addressed,
+                    "Completed and verified before the 1.5 release review opened.", "release.manager", now.AddDays(1).AddHours(1));
+            db.ImpactDispositions.AddRange(dispositions);
+            addressed += dispositions.Count;
+        }
+
+        var manifest = Hash($"FMS 1.5 release manifest {baseline.ContentHash} {build.BuildNumber}");
+        campaign.BeginReleaseReview("release.manager",
+            [("program.manager", "Olivia Chen"), ("cm.fms", "Daniel Reyes")], manifest, now.AddDays(2));
+        campaign.Approve("program.manager", now.AddDays(3));
+        campaign.Approve("cm.fms", now.AddDays(4));
+        campaign.Release(build.Id, manifest, "release.manager", now.AddDays(5));
+        await db.SaveChangesAsync(ct);
+        return $"Recorded the closed 1.5 release campaign with {addressed} addressed impacts and two signed approvals.";
     }
 
     private async Task EnsureReleaseCampaignAsync(Guid programId, CancellationToken ct)
