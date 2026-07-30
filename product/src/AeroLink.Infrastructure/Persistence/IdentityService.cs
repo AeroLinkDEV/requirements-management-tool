@@ -54,7 +54,11 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
     public async Task<bool> ConfirmPasswordAsync(Guid userId, string password, CancellationToken ct) { var hash = await db.UserAccounts.Where(x => x.Id == userId).Select(x => x.PasswordHash).SingleAsync(ct); return VerifyPassword(password, hash); }
     public async Task<bool> HasRoleAsync(AuthenticatedUser user, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)
     {
-        if (user.IsAdministrator) return true; if (user.Programs.Any(x => x.ProgramId == programId && x.Roles.Contains(role.ToString()))) return true;
+        if (user.IsAdministrator) return true;
+        // A more precise job title must never remove capability: somebody recorded as a System Engineer is
+        // an engineer, and every place that asks for Engineer has to accept them.
+        var accepted = ProgramRoleAuthority.Satisfying(role).Select(x => x.ToString()).ToList();
+        if (user.Programs.Any(x => x.ProgramId == programId && x.Roles.Any(accepted.Contains))) return true;
         var delegations = await db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == programId && x.DelegateUserId == user.Id && x.Role == role && x.RevokedAt == null).ToListAsync(ct);
         return delegations.Any(x => x.StartsAt <= now && x.EndsAt > now);
     }
@@ -63,7 +67,10 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
         var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId && x.State == AccountState.Active, ct);
         if (account is null) return false;
         if (account.UserName == SystemAdministratorUserName) return true;
-        if (await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.Role == role, ct)) return true;
+        // The same implication as the overload above. Two copies of this check exist and both are reached
+        // from live authorization paths, so a rule applied to only one of them is a rule that holds by luck.
+        var accepted = ProgramRoleAuthority.Satisfying(role);
+        if (await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == userId && x.ProgramId == programId && accepted.Contains(x.Role), ct)) return true;
         var delegations = await db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == programId && x.DelegateUserId == userId && x.Role == role && x.RevokedAt == null).ToListAsync(ct);
         return delegations.Any(x => x.StartsAt <= now && x.EndsAt > now);
     }
@@ -104,14 +111,14 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
     [
         ("admin", "AeroLink Administrator", "admin@aerolink.local", [ProgramRole.Administrator]),
         ("engineer.demo", "Sean Engineer", "sean.engineer@aerolink.local", [ProgramRole.Engineer]),
-        ("systems.author", "Systems Requirements Author", "systems.author@aerolink.local", [ProgramRole.Engineer]),
-        ("software.author", "Software Requirements Author", "software.author@aerolink.local", [ProgramRole.Engineer]),
+        ("systems.author", "Systems Requirements Author", "systems.author@aerolink.local", [ProgramRole.Engineer, ProgramRole.SystemEngineer]),
+        ("software.author", "Software Requirements Author", "software.author@aerolink.local", [ProgramRole.Engineer, ProgramRole.SoftwareEngineer]),
         ("systems.reviewer", "Systems Engineer", "systems.reviewer@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
         ("assurance.reviewer", "Development Assurance Reviewer", "assurance@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
         ("lead.reviewer", "Maya Patel", "maya.patel@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
-        ("software.lead", "Software Engineering Lead", "software.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
-        ("systems.lead", "Systems Engineering Lead", "systems.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
-        ("engineering.manager", "Engineering Manager", "engineering.manager@aerolink.local", [ProgramRole.ProgramManager, ProgramRole.Approver]),
+        ("software.lead", "Software Engineering Lead", "software.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver, ProgramRole.SoftwareEngineeringLead]),
+        ("systems.lead", "Systems Engineering Lead", "systems.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver, ProgramRole.SystemEngineeringLead]),
+        ("engineering.manager", "Engineering Manager", "engineering.manager@aerolink.local", [ProgramRole.ProgramManager, ProgramRole.Approver, ProgramRole.EngineeringManager]),
         // Named, like the rest of the cast. "Engineering Manager" is what this person does, not who they are,
         // and an approval step that reads it as a name leaves the reader unable to tell a colleague from a job
         // title. The title still says Engineering Manager — it is derived from the account, not the name.
@@ -120,7 +127,12 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
         ("release.manager", "Daniel Reyes", "daniel.reyes@aerolink.local", [ProgramRole.ConfigurationManager, ProgramRole.ProgramManager]),
         ("cm.fms", "Configuration Manager", "configuration@aerolink.local", [ProgramRole.ConfigurationManager]),
         ("test.author", "Verification Author", "test.author@aerolink.local", [ProgramRole.TestEngineer]),
-        ("test.engineer", "Ethan Brooks", "ethan.brooks@aerolink.local", [ProgramRole.TestEngineer])
+        ("test.engineer", "Ethan Brooks", "ethan.brooks@aerolink.local", [ProgramRole.TestEngineer]),
+        // The two oversight roles, and the lead who answers for the Project as a whole. They read everything
+        // in the Program, which membership alone grants, and hold no authority over engineering content.
+        ("airworthiness.lead", "Priya Raman", "priya.raman@aerolink.local", [ProgramRole.Airworthiness]),
+        ("quality.analyst", "Marcus Hale", "marcus.hale@aerolink.local", [ProgramRole.SoftwareQualityAnalyst]),
+        ("project.lead", "Nadia Okoro", "nadia.okoro@aerolink.local", [ProgramRole.ProjectEngineeringLead])
     ];
     private static readonly string[] FirstNames = ["Avery","Blake","Cameron","Casey","Devon","Emerson","Finley","Harper","Jordan","Kai","Logan","Morgan","Parker","Quinn","Reese","Riley","Rowan","Sage","Sawyer","Taylor","Alex","Jamie","Robin"];
     private static readonly string[] LastNames = ["Anderson","Bennett","Campbell","Chen","Clarke","Dubois","Evans","Foster","Garcia","Gupta","Harris","Ibrahim","Johnson","Kim","Lewis","Martin","Nguyen","Patel","Robinson","Wilson"];

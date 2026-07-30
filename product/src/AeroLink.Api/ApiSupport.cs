@@ -46,6 +46,18 @@ static class DirectoryTitles
         if(userName.StartsWith("software.lead"))return "Software Engineering Lead";
         if(userName.StartsWith("engineering.manager"))return "Engineering Manager";
         if(userName.StartsWith("configuration"))return "Configuration Management Specialist";
+        if(userName.StartsWith("airworthiness"))return "Airworthiness";
+        if(userName.StartsWith("quality"))return "Software Quality Analyst";
+        if(userName.StartsWith("project.lead"))return "Project Engineering Lead";
+        if(roles.Contains("SystemEngineeringLead"))return "System Engineering Lead";
+        if(roles.Contains("SoftwareEngineeringLead"))return "Software Engineering Lead";
+        if(roles.Contains("ProjectEngineeringLead"))return "Project Engineering Lead";
+        if(roles.Contains("EngineeringManager"))return "Engineering Manager";
+        if(roles.Contains("Airworthiness"))return "Airworthiness";
+        if(roles.Contains("SoftwareQualityAnalyst"))return "Software Quality Analyst";
+        if(roles.Contains("TestLead"))return "Test Engineering Lead";
+        if(roles.Contains("SystemEngineer"))return "System Engineer";
+        if(roles.Contains("SoftwareEngineer"))return "Software Engineer";
         if(roles.Contains("ProgramManager"))return "Program Manager";
         if(roles.Contains("TestEngineer"))return "Test Engineer";
         if(roles.Contains("Approver"))return "Designated Approver";

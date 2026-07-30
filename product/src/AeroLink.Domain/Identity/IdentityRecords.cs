@@ -6,7 +6,50 @@ public enum AccountState { Active, Disabled, Locked }
 // TestLead holds distribution authority over verification work: impact items raised by an approved change
 // land with the lead, who assigns them to an individual TestEngineer. Roles persist as strings, so the
 // position of a new member in this list carries no meaning.
-public enum ProgramRole { Engineer, Reviewer, Approver, ConfigurationManager, TestEngineer, TestLead, ProgramManager, Administrator }
+/// <summary>
+/// What somebody is in a Program.
+///
+/// The first eight are the authority the product enforces: who may author, sign, freeze a baseline, record a
+/// determination, run a release, administer accounts. The rest name the jobs an aerospace engineering
+/// organisation actually has, so a membership list reads like the team rather than like a permission matrix.
+///
+/// The two sets are deliberately not merged. A System Engineer and a Software Engineer differ in what they
+/// work on, not in what the product will let them do, and encoding that difference as authority would mean
+/// the tool refusing work on the strength of a job title — which is a decision for a Program to make about
+/// its people, not for a requirements tool to make about a Program. `EngineeringAuthority` below records
+/// which of these job roles carry an engineer's authority so that giving somebody a more precise title never
+/// takes capability away from them.
+/// </summary>
+public enum ProgramRole
+{
+    Engineer, Reviewer, Approver, ConfigurationManager, TestEngineer, TestLead, ProgramManager, Administrator,
+    SystemEngineer, SoftwareEngineer, SystemEngineeringLead, SoftwareEngineeringLead, ProjectEngineeringLead,
+    EngineeringManager, SoftwareQualityAnalyst, Airworthiness
+}
+
+/// <summary>
+/// Job roles that carry an engineer's authority.
+///
+/// Somebody recorded as a System Engineer is an engineer, and the product has thirty-odd places that ask for
+/// `Engineer` before allowing authoring or controlled editing. Without this, replacing a person's generic
+/// Engineer membership with the precise title they actually hold would silently take away the work they do
+/// every day — the worst kind of change, because it looks like a tidy-up and lands as a lockout.
+///
+/// Airworthiness and Software Quality Analyst are deliberately absent. They read everything in the Program,
+/// which membership alone already grants, and neither is an engineering authority over its content.
+/// </summary>
+public static class ProgramRoleAuthority
+{
+    private static readonly ProgramRole[] EngineeringAuthority =
+    [
+        ProgramRole.SystemEngineer, ProgramRole.SoftwareEngineer, ProgramRole.SystemEngineeringLead,
+        ProgramRole.SoftwareEngineeringLead, ProgramRole.ProjectEngineeringLead, ProgramRole.EngineeringManager
+    ];
+
+    /// <summary>Every role that satisfies a request for <paramref name="required"/>, including itself.</summary>
+    public static IReadOnlyList<ProgramRole> Satisfying(ProgramRole required) =>
+        required == ProgramRole.Engineer ? [ProgramRole.Engineer, .. EngineeringAuthority] : [required];
+}
 public enum ExternalIdentityProtocol { OpenIdConnect, Saml2 }
 
 public sealed class ExternalIdentityProvider
