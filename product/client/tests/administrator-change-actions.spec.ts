@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, showcaseSeed } from './auth'
+import { apiBase, apiLogin, firstSectionId, login, showcaseSeed } from './auth'
 
 const completeImpacts = JSON.stringify({
   trace: 'Not Affected',
@@ -35,6 +35,7 @@ test('administrator actions work identically for another authors System and Soft
         requirementChanges: [{
           level: discipline.level,
           kind: 'Introduce',
+          targetSectionId: await firstSectionId(author, showcase.projectId, discipline.level),
           statement: `The ${discipline.type.toLowerCase()} change shall retain original authorship during administrator recovery.`,
           rationale: 'Controlled recovery must remain attributable.',
           verificationMethod: 'Inspection',

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, openNavigationGroup } from './auth'
+import { apiBase, apiLogin, firstSectionId, openNavigationGroup } from './auth'
 
 test('verification actions follow authority in the selected Program',async({page,request,playwright})=>{
   test.setTimeout(90_000)
@@ -25,7 +25,7 @@ test('verification actions follow authority in the selected Program',async({page
       projectId:workspace.project.id,targetReleaseId:workspace.release.id,type:'System',
       title:`${label} exact verification target`,problem:'A controlled target is required.',
       analysis:'Procedure authoring must bind to a materialized revision.',solution:'Introduce one exact revision.',
-      requirementChanges:[{level:'System',kind:'Introduce',statement:`The ${label.toLowerCase()} product shall expose an exact verification target.`,rationale:'Capability qualification.',verificationMethod:'Test',impactDispositionJson:impacts}],
+      requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:await firstSectionId(request,workspace.project.id),statement:`The ${label.toLowerCase()} product shall expose an exact verification target.`,rationale:'Capability qualification.',verificationMethod:'Test',impactDispositionJson:impacts}],
     }})
     expect(draftResponse.ok(),await draftResponse.text()).toBeTruthy()
     const draft=await draftResponse.json()

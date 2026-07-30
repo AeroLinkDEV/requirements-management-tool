@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, showcaseSeed } from './auth'
+import { apiBase, apiLogin, firstSectionId, login, showcaseSeed } from './auth'
 
 const completeImpacts = JSON.stringify({
   trace: 'Not Affected',
@@ -26,6 +26,7 @@ test('configured reviewer identity remains canonical from assignment through sig
     requirementChanges: [{
       level: 'System',
       kind: 'Introduce',
+      targetSectionId: await firstSectionId(request, showcase.projectId),
       statement: 'The FMS shall preserve canonical reviewer attribution.',
       rationale: 'Controlled approval evidence cannot name another participant.',
       verificationMethod: 'Inspection',

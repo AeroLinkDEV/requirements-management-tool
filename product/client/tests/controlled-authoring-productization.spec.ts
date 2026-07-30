@@ -66,6 +66,8 @@ test('Software Draft keeps downstream impact with consuming engineers before an 
   await page.getByLabel('Analysis',{exact:true}).fill('Identity, content, impacts, and review authority must remain attributable.')
   await page.getByLabel('Solution').fill('Use one staged controlled proposal experience.')
   await page.getByLabel('Requirement statement').fill('The software shall require explicit review readiness decisions.')
+  // A new requirement must be given a place in the document before it can be sent for review.
+  await page.getByLabel('Section for proposal 1').selectOption({ index: 1 })
   await page.getByRole('textbox',{name:'Author',exact:true}).fill('software.author')
   await page.getByRole('button',{name:'Save SWCR Draft'}).click()
 
