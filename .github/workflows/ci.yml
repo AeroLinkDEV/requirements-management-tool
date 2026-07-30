@@ -76,6 +76,18 @@ jobs:
           # pattern also pointed at AeroLink.Infrastructure/Migrations/, which does not exist — migrations
           # live under Persistence/Migrations/ — so that alternative had never matched a file.
           printf '%s\n' "$files" | grep -Eqi '^product/(src/AeroLink.Api|src/AeroLink.Infrastructure|tests)/.*(migration|database|identity|auth|bootstrap|postgres|persistence)|^product/src/AeroLink.Infrastructure/Persistence/Migrations/|^\.github/workflows/ci\.yml$' && postgresql=true || true
+          # A change that is neither documentation nor recognised product code used to select nothing: the gate
+          # ran, every step skipped on its condition, and the job reported success having executed no test at
+          # all. A launcher script, a root configuration file or a new top-level directory all landed there.
+          #
+          # Anything unclassified now runs the full backend and client validation rather than nothing. Being
+          # slower on a file nobody anticipated is the right trade against a green tick that means nothing, and
+          # the guard in the validate job below makes the same rule machine-checkable rather than a convention.
+          if [[ "$docs_only" == "false" && "$backend" == "false" && "$client" == "false" ]]; then
+            echo "Unclassified product change; running full validation rather than reporting a skipped pass."
+            backend=true
+            client=true
+          fi
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "backend=$backend" >> "$GITHUB_OUTPUT"
           echo "client=$client" >> "$GITHUB_OUTPUT"
@@ -163,6 +175,17 @@ jobs:
           npm run lint
           npm run typecheck
           npm run build
+
+      # This job is a required gate, so it must never pass without having proved something. Every step above is
+      # conditional, and a combination of conditions that skipped all of them still reported success — a green
+      # tick that had run no test, no build and no type-check. The classifier now avoids selecting nothing, and
+      # this refuses to be the evidence for a change it did not examine even if that ever regresses.
+      - name: Refuse a pass that validated nothing
+        if: needs.changes.outputs.backend != 'true' && needs.changes.outputs.client != 'true'
+        run: |
+          echo "::error::This gate ran no backend tests and no client validation, so its result is not evidence."
+          echo "Classify the changed paths in the changes job, or mark the change as documentation-only."
+          exit 1
 
   # The journeys run on Linux. They were Windows-only for as long as the Playwright config launched both
   # servers through a PowerShell prologue, which also meant they could not be run on a Linux development
