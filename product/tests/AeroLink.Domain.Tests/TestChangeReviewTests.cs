@@ -46,6 +46,22 @@ public sealed class TestChangeReviewTests
     }
 
     [Fact]
+    public void The_engineer_who_submitted_a_review_cannot_approve_it()
+    {
+        var review = Create();
+        review.Submit("test.lead", true, Now.AddMinutes(1));
+
+        // Casing differs because an actor name reaching the domain is whatever the caller passed; the rule is
+        // about the person, not the spelling.
+        Assert.Throws<DomainException>(() => review.Approve("Test.Lead", "Looks fine to me.", Now.AddMinutes(2)));
+        Assert.Equal(TestChangeReviewState.InReview, review.State);
+        Assert.Null(review.ApprovedBy);
+
+        review.Approve("test.approver", "Independently reviewed the procedure decisions.", Now.AddMinutes(3));
+        Assert.Equal(TestChangeReviewState.Approved, review.State);
+    }
+
+    [Fact]
     public void Reviewer_can_return_a_submitted_review_to_work()
     {
         var review = Create();

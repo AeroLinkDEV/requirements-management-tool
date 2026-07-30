@@ -31,7 +31,14 @@ const surfaces = [
   // `input` rule. Neither was ever measured, because a hardcoded list does not grow when the product does.
   ['Review Procedures', '/review-workflows'],
   ['New Change Request', '/systems/change-requests/new'],
+  // The post-login portal. These are not release-scoped, so they are addressed from the site root — and they
+  // are in this list because the two surfaces added after it was last edited were the only ones never measured.
+  ['Projects', '/projects'],
+  ['Software Builds', '/projects/fms-product-development/builds'],
 ] as const
+
+/** Surfaces addressed from the site root rather than from inside a software build. */
+const portalPaths = new Set<string>(['/projects', '/projects/fms-product-development/builds'])
 
 type Density = 'comfortable' | 'compact'
 
@@ -89,7 +96,7 @@ test('every surface honours the readability floor and target sizes in both densi
   for (const density of ['comfortable', 'compact'] as const) {
     await useDensity(page, density)
     for (const [name, path] of surfaces) {
-      await page.goto(new URL(root + path, page.url()).toString(), { waitUntil: 'load' })
+      await page.goto(new URL(portalPaths.has(path) ? path : root + path, page.url()).toString(), { waitUntil: 'load' })
       await page.waitForTimeout(1000)
       const report = await page.evaluate(auditSurface, READABLE_MINIMUM)
       const where = `${name} [${density}]`

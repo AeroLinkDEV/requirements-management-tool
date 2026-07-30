@@ -19,7 +19,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  const systemDraftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Introduce authenticated system acceptance requirement',problem:'Acceptance authority must be explicit',analysis:'A controlled System requirement is needed',solution:'Introduce the requirement through an SCR',requirementChanges:[{level:'System',kind:'Introduce',statement:'The FMS shall retain authenticated acceptance authority.',rationale:'Supports controlled acceptance.',verificationMethod:'Inspection'}]}})
  expect(systemDraftResponse.status(),await systemDraftResponse.text()).toBe(201)
  const systemDraft=await systemDraftResponse.json()
- expect(systemDraft.baseNumber).toMatch(/^SCR-\d{8}$/)
+ expect(systemDraft.baseNumber).toMatch(/^SCR-\d{5}$/)
  expect(systemDraft.authorId).toBe('admin')
  expect(systemDraft.requirementChanges[0].displayNumber).toMatch(/^SYSR-\d{6}\.00$/)
  const partialLookup=await request.get(`${apiBase}/api/authoring/requirements?projectId=${project.id}&scope=System&search=0150&limit=8`)
@@ -40,7 +40,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  const mixedSoftware=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Allocate HLR and LLR changes together',problem:'Both software levels require coordinated change',analysis:'The allocation crosses high and low level software requirements',solution:'Review both exact proposals in one SWCR',requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The software shall coordinate acceptance state.',rationale:'High-level allocation.',verificationMethod:'Test'},{level:'LowLevel',kind:'Introduce',statement:'The acceptance component shall persist the coordinated state.',rationale:'Low-level implementation.',verificationMethod:'Test'}]}})
  expect(mixedSoftware.status(),await mixedSoftware.text()).toBe(201)
  const mixed=await mixedSoftware.json()
- expect(mixed.baseNumber).toMatch(/^SWCR-\d{8}$/)
+ expect(mixed.baseNumber).toMatch(/^SWCR-\d{5}$/)
  expect(mixed.requirementChanges.map((x:any)=>x.level)).toEqual(['HighLevel','LowLevel'])
 
  const reviewDraftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Sequential activation acceptance',problem:'Ordered authority must be proven',analysis:'Only the current reviewer may act',solution:'Exercise two controlled stages',requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The software shall activate one sequential reviewer at a time.',rationale:'Prevents out-of-order approval.',verificationMethod:'Test',impactDispositionJson:completeImpacts}]}})
@@ -90,7 +90,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  }})
  expect(draftResponse.status(),await draftResponse.text()).toBe(201)
  const draft=await draftResponse.json()
- expect(draft.baseNumber).toMatch(/^SWCR-\d{8}$/)
+ expect(draft.baseNumber).toMatch(/^SWCR-\d{5}$/)
  expect(draft.authorId).toBe('admin')
  expect(draft.requirementChanges[0].displayNumber).toMatch(/^HLR-\d{6}\.00$/)
 
@@ -159,7 +159,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  }
 
  const searchKinds=new Set<string>()
- for(const query of ['SCR','SWCR','SYSR','SWBL','SYSRD','1.5','FMS-1.5.0','SYSTP-000001','evidence/fms-1.5']){
+ for(const query of ['SCR','SWCR','SYSR','SW-01','SYSRD','1.5','FMS-1.5.0','SYSTP-000001','evidence/fms-1.5']){
   const response=await request.get(`${apiBase}/api/search?projectId=${project.id}&query=${encodeURIComponent(query)}&limit=50`)
   expect(response.ok(),await response.text()).toBeTruthy()
   for(const item of (await response.json()).items)searchKinds.add(item.kind)

@@ -30,9 +30,12 @@ const softwareBuilds: readonly BuildDefinition[] = [
   { id: "fms-1-6", version: "1.6", status: "in-work", statusLabel: "In Work", title: "Current in-work build", description: "Ongoing enhancements and integration for the upcoming release.", isAccessible: true, isReleased: false, isReadOnly: false, isCurrent: true, sortOrder: 4 },
 ];
 
+// Mirrors SoftwareBuildIdentifier.FromVersion: the minor part is the decimal it is written as, so `1.6` is
+// SW-01.60 and `1.10` is SW-01.10. If the two ever disagree the page shows a name the server will not accept.
 const officialBuildName = (version: string) => {
-  const [major, minor] = version.split(".").map(Number);
-  return `SW-${String(major).padStart(2, "0")}.${String(minor * 10).padStart(2, "0")}`;
+  const [major, minor = ""] = version.split(".");
+  const fraction = minor.length === 1 ? Number(minor) * 10 : Number(minor);
+  return `SW-${String(Number(major)).padStart(2, "0")}.${String(fraction).padStart(2, "0")}`;
 };
 
 function MetadataIcon({ kind }: { kind: "owner" | "created" | "phase" }) {
@@ -115,11 +118,17 @@ export default function SoftwareBuildsLanding({
                     </div>
                     <h3>{build.title}</h3>
                     <p>{build.description}</p>
+                    {/*
+                      The visible label is "Open build", so the accessible name has to contain that text
+                      (WCAG 2.2 AA, Label in Name). "Open software build …" split those two words apart,
+                      which broke the requirement and every locator that identified a build by its version.
+                      Both identifiers are named because the card itself shows both.
+                    */}
                     <button
                       type="button"
                       disabled={!enabled}
                       onClick={() => release && onOpenBuild(release)}
-                      aria-label={`Open software build ${officialBuildName(build.version)}`}
+                      aria-label={`Open build ${build.version} (${officialBuildName(build.version)})`}
                     >
                       <span aria-hidden="true">↗</span> Open build
                     </button>

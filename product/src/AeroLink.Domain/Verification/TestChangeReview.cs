@@ -74,7 +74,12 @@ public sealed class TestChangeReview
     {
         if (State != TestChangeReviewState.InReview)
             throw new DomainException("Only a submitted test change review can be approved.");
-        ApprovedBy = Required(actorId, "approver");
+        var approver = Required(actorId, "approver");
+        // One person holding TestLead could otherwise submit a package of test-procedure decisions and approve
+        // it themselves, which makes the approval a formality rather than an independent judgement.
+        if (string.Equals(approver, SubmittedBy, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("A test change review cannot be approved by the engineer who submitted it.");
+        ApprovedBy = approver;
         ApprovalRationale = Required(rationale, "approval rationale");
         ApprovedAt = now;
         State = TestChangeReviewState.Approved;
