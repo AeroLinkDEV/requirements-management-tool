@@ -229,9 +229,16 @@ public static class ChangeRequestEndpoints
         });
 
         /// The sections a requirement of a given level can be placed in, for the picker on a proposal.
-        app.MapGet("/api/authoring/sections", async (Guid projectId, RequirementLevel level, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/authoring/sections", async (Guid projectId, RequirementLevel level, HttpContext http,
+            AeroLinkDbContext db, EnterpriseRequirementsService requirements, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            // A Project's requirements documents are built the first time its requirements are synchronized,
+            // which is whenever somebody first opens the explorer. An author who reached the change request
+            // form before anyone had done that was offered no sections at all — and then refused at submission
+            // for not choosing one, because by then something else had built them. Asked for here, so the
+            // question and the answer are about the same document.
+            await requirements.SynchronizeProjectAsync(projectId, http.UserAccount().UserName, ct);
             // Scoped by level, because a requirement's level fixes which specification it belongs to. Offering
             // every section in the project would let an author file a low-level requirement in the system
             // document, which nothing downstream would accept and nothing here would have refused.
@@ -239,9 +246,22 @@ public static class ChangeRequestEndpoints
                               join spec in db.RequirementSpecifications.AsNoTracking() on node.SpecificationId equals spec.Id
                               where spec.ProjectId == projectId && spec.Level == level.ToString()
                                  && node.Type == SpecificationNodeType.Section
-                              orderby node.Position
-                              select new { node.Id, node.Heading, node.Position, specification = spec.DocumentNumber }).ToListAsync(ct);
-            return Results.Ok(rows);
+                              select new { node.Id, node.ParentId, node.Heading, node.Position, specification = spec.DocumentNumber }).ToListAsync(ct);
+            // Numbered and ordered here, depth first, so every caller meets the sections in the order the
+            // document presents them and nobody has to reconstruct "4.1.1" from a flat list.
+            var numbering = SpecificationNumbering.Number(rows.Select(x => (x.Id, x.ParentId, x.Position, x.Heading)));
+            var specifications = rows.ToDictionary(x => x.Id, x => x.specification);
+            var positions = rows.ToDictionary(x => x.Id, x => x.Position);
+            return Results.Ok(numbering.Select(section => new
+            {
+                section.Id,
+                section.ParentId,
+                section.Number,
+                section.Depth,
+                section.Heading,
+                Position = positions[section.Id],
+                specification = specifications[section.Id],
+            }));
         });
 
         // Detection only: missing authored metadata cannot be reconstructed honestly by a backfill. Returning
@@ -426,7 +446,7 @@ public static class ChangeRequestEndpoints
                 foreach (var change in scr.RequirementChanges)
                 {
                     var sectionError = await TargetSectionRefusalAsync(db, scr.ProjectId, change.Level,
-                        change.TargetSectionId, ct);
+                        change.TargetSectionId, ct, change.Kind);
                     if (sectionError is not null) return Results.BadRequest(new { error = sectionError });
                 }
                 var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
@@ -563,9 +583,35 @@ public static class ChangeRequestEndpoints
     }
 
     private static async Task<string?> TargetSectionRefusalAsync(AeroLinkDbContext db, Guid projectId,
-        RequirementLevel level, Guid? targetSectionId, CancellationToken ct)
+        RequirementLevel level, Guid? targetSectionId, CancellationToken ct,
+        RequirementChangeKind? kind = null)
     {
-        if (targetSectionId is null) return null;
+        // A new requirement has to be given a section. The author could previously leave this alone and defer
+        // it to whoever assembled the baseline, which sounds harmless and is not: the requirement lands
+        // wherever a backfill puts it, and the person who knew where it belonged — the one writing it — has
+        // by then moved on. A modification may still be left where it already is, because it already has an
+        // answer; a retirement has no section to be in at all.
+        //
+        // Checked when the change request is submitted, not while it is being written. A draft is somebody's
+        // unfinished work and refusing to save it because a later field is empty helps nobody; what must not
+        // happen is a reviewer being asked to approve a requirement with no place in the document. `kind` is
+        // supplied only by the submit path for that reason.
+        if (targetSectionId is null)
+        {
+            if (kind != RequirementChangeKind.Introduce) return null;
+            // Only when there is something to choose. A Project's requirements documents are built the first
+            // time its requirements are synchronized, so a Project new enough to have none would otherwise be
+            // unable to author its first requirement at all — refused for not picking from an empty list.
+            var choices = await (from node in db.SpecificationNodes.AsNoTracking()
+                                 join specification in db.RequirementSpecifications.AsNoTracking()
+                                     on node.SpecificationId equals specification.Id
+                                 where node.Type == SpecificationNodeType.Section &&
+                                       specification.ProjectId == projectId && specification.Level == level.ToString()
+                                 select node.Id).AnyAsync(ct);
+            return choices
+                ? $"Choose the {level} requirements document section this new requirement belongs in."
+                : null;
+        }
         var exists = await (from node in db.SpecificationNodes.AsNoTracking()
                             join specification in db.RequirementSpecifications.AsNoTracking()
                                 on node.SpecificationId equals specification.Id

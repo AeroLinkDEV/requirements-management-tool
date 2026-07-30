@@ -19,9 +19,20 @@ test('an author chooses the section a new requirement goes in', async ({ page })
   const section = page.getByLabel('Section for proposal 1')
   await expect(section).toBeVisible()
   const options = await section.locator('option').allTextContents()
-  // A default that changes nothing, plus the real sections.
-  expect(options[0]).toBe('Decide when the baseline is assembled')
+  // A prompt that cannot be chosen, plus the real sections. The prompt used to be "Decide when the baseline
+  // is assembled", which took the decision away from the only person who knew the answer and handed it to
+  // whoever later assembled the baseline — by which time the requirement had landed wherever a backfill put
+  // it. A new requirement goes somewhere on purpose.
+  expect(options[0]).toBe('Choose a section…')
+  // Asserted on the attribute: Playwright's toBeDisabled() only recognises button/select/input/textarea, so
+  // an <option> reads as enabled to it however the DOM is marked.
+  await expect(section.locator('option').first()).toHaveAttribute('disabled', '')
   expect(options.length).toBeGreaterThan(1)
+
+  // Numbered from the document's structure rather than from text typed into the heading, and the sub-sections
+  // beneath section 4 read as being inside it.
+  expect(options[1]).toMatch(/^1 \S/)
+  expect(options.some((option) => option.trim().startsWith('4.1 '))).toBeTruthy()
 
   await section.selectOption({ index: 1 })
   const selectedSection = await section.inputValue()

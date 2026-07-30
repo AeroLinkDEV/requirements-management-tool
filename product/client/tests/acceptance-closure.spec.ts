@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin } from './auth'
+import { apiBase, apiLogin, firstSectionId } from './auth'
 
 const completeImpacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
 
@@ -11,12 +11,17 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(fms).toBeTruthy()
  const project=fms.projects[0].project
  const releases=fms.projects[0].releases
+ // A new requirement cannot be sent for review without a place in the document. Which section is not what
+ // this journey is about, so it takes the first of each.
+ const sysSection=await firstSectionId(request,project.id,'System')
+ const hlrSection=await firstSectionId(request,project.id,'HighLevel')
+ const llrSection=await firstSectionId(request,project.id,'LowLevel')
  const released=releases.find((x:any)=>x.version==='1.5')
  const active=releases.find((x:any)=>x.version==='1.6')
  expect(released.isReleased).toBeTruthy()
  expect(active.isReleased).toBeFalsy()
 
- const systemDraftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Introduce authenticated system acceptance requirement',problem:'Acceptance authority must be explicit',analysis:'A controlled System requirement is needed',solution:'Introduce the requirement through an SCR',requirementChanges:[{level:'System',kind:'Introduce',statement:'The FMS shall retain authenticated acceptance authority.',rationale:'Supports controlled acceptance.',verificationMethod:'Inspection'}]}})
+ const systemDraftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Introduce authenticated system acceptance requirement',problem:'Acceptance authority must be explicit',analysis:'A controlled System requirement is needed',solution:'Introduce the requirement through an SCR',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:sysSection,statement:'The FMS shall retain authenticated acceptance authority.',rationale:'Supports controlled acceptance.',verificationMethod:'Inspection'}]}})
  expect(systemDraftResponse.status(),await systemDraftResponse.text()).toBe(201)
  const systemDraft=await systemDraftResponse.json()
  expect(systemDraft.baseNumber).toMatch(/^SCR-\d{5}$/)
@@ -30,20 +35,20 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(modifiedSystem.status(),await modifiedSystem.text()).toBe(201)
  expect((await modifiedSystem.json()).requirementChanges[0].displayNumber).toBe(`${existingSystem.baseNumber}.${String(existingSystem.nextRevision).padStart(2,'0')}`)
  const systemCandidates=await (await request.get(`${apiBase}/api/authoring/requirements?projectId=${project.id}&scope=System&search=SYSR-&limit=3`)).json()
- const publicationDraft=await (await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Publication category acceptance',problem:'All change categories need an explicit publication',analysis:'Introduced, old/new modified, and retired records must remain reviewable',solution:'Render each category in the exact SCR',requirementChanges:[{level:'System',kind:'Introduce',statement:'The FMS shall publish every controlled change category.',rationale:'Publication completeness.',verificationMethod:'Inspection'},{baseNumber:systemCandidates[0].baseNumber,level:'System',kind:'Modify',statement:systemCandidates[0].statement+' The published wording shall show this proposed revision.',rationale:'Old and new comparison.',verificationMethod:systemCandidates[0].verificationMethod},{baseNumber:systemCandidates[1].baseNumber,level:'System',kind:'Retire',statement:'',rationale:'The obsolete behavior is retired while history remains.',verificationMethod:systemCandidates[1].verificationMethod}]}})).json()
+ const publicationDraft=await (await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Publication category acceptance',problem:'All change categories need an explicit publication',analysis:'Introduced, old/new modified, and retired records must remain reviewable',solution:'Render each category in the exact SCR',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:sysSection,statement:'The FMS shall publish every controlled change category.',rationale:'Publication completeness.',verificationMethod:'Inspection'},{baseNumber:systemCandidates[0].baseNumber,level:'System',kind:'Modify',statement:systemCandidates[0].statement+' The published wording shall show this proposed revision.',rationale:'Old and new comparison.',verificationMethod:systemCandidates[0].verificationMethod},{baseNumber:systemCandidates[1].baseNumber,level:'System',kind:'Retire',statement:'',rationale:'The obsolete behavior is retired while history remains.',verificationMethod:systemCandidates[1].verificationMethod}]}})).json()
  const publicationPdf=await request.get(`${apiBase}/api/scrs/${publicationDraft.id}/download?format=pdf`)
  expect(publicationPdf.ok(),await publicationPdf.text()).toBeTruthy()
  const publicationText=(await publicationPdf.body()).toString('latin1')
  expect(publicationText).toContain('NEW REQUIREMENTS')
  expect(publicationText).toContain('MODIFIED REQUIREMENTS - OLD AND NEW')
  expect(publicationText).toContain('RETIRED REQUIREMENTS')
- const mixedSoftware=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Allocate HLR and LLR changes together',problem:'Both software levels require coordinated change',analysis:'The allocation crosses high and low level software requirements',solution:'Review both exact proposals in one SWCR',requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The software shall coordinate acceptance state.',rationale:'High-level allocation.',verificationMethod:'Test'},{level:'LowLevel',kind:'Introduce',statement:'The acceptance component shall persist the coordinated state.',rationale:'Low-level implementation.',verificationMethod:'Test'}]}})
+ const mixedSoftware=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Allocate HLR and LLR changes together',problem:'Both software levels require coordinated change',analysis:'The allocation crosses high and low level software requirements',solution:'Review both exact proposals in one SWCR',requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall coordinate acceptance state.',rationale:'High-level allocation.',verificationMethod:'Test'},{level:'LowLevel',kind:'Introduce',targetSectionId:llrSection,statement:'The acceptance component shall persist the coordinated state.',rationale:'Low-level implementation.',verificationMethod:'Test'}]}})
  expect(mixedSoftware.status(),await mixedSoftware.text()).toBe(201)
  const mixed=await mixedSoftware.json()
  expect(mixed.baseNumber).toMatch(/^SWCR-\d{5}$/)
  expect(mixed.requirementChanges.map((x:any)=>x.level)).toEqual(['HighLevel','LowLevel'])
 
- const reviewDraftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Sequential activation acceptance',problem:'Ordered authority must be proven',analysis:'Only the current reviewer may act',solution:'Exercise two controlled stages',requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The software shall activate one sequential reviewer at a time.',rationale:'Prevents out-of-order approval.',verificationMethod:'Test',impactDispositionJson:completeImpacts}]}})
+ const reviewDraftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Sequential activation acceptance',problem:'Ordered authority must be proven',analysis:'Only the current reviewer may act',solution:'Exercise two controlled stages',requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall activate one sequential reviewer at a time.',rationale:'Prevents out-of-order approval.',verificationMethod:'Test',impactDispositionJson:completeImpacts}]}})
  const reviewDraft=await reviewDraftResponse.json()
  const sequentialResponse=await request.post(`${apiBase}/api/scrs/${reviewDraft.id}/submit`,{data:{expectedVersion:reviewDraft.version,mode:'Sequential',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
  expect(sequentialResponse.ok(),await sequentialResponse.text()).toBeTruthy()
@@ -67,7 +72,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(returnedDraft.state).toBe('Draft')
  expect(returnedDraft.revision).toBe(reviewDraft.revision)
 
- const parallelDraft=await (await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Parallel unanimity acceptance',problem:'Independent reviews must run concurrently',analysis:'Both signatures remain mandatory',solution:'Activate all parallel reviewers',requirementChanges:[{level:'LowLevel',kind:'Introduce',statement:'The component shall require unanimous parallel review.',rationale:'Independent assurance.',verificationMethod:'Inspection',impactDispositionJson:completeImpacts}]}})).json()
+ const parallelDraft=await (await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Parallel unanimity acceptance',problem:'Independent reviews must run concurrently',analysis:'Both signatures remain mandatory',solution:'Activate all parallel reviewers',requirementChanges:[{level:'LowLevel',kind:'Introduce',targetSectionId:llrSection,statement:'The component shall require unanimous parallel review.',rationale:'Independent assurance.',verificationMethod:'Inspection',impactDispositionJson:completeImpacts}]}})).json()
  const parallelResponse=await request.post(`${apiBase}/api/scrs/${parallelDraft.id}/submit`,{data:{expectedVersion:parallelDraft.version,mode:'Parallel',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
  expect(parallelResponse.ok(),await parallelResponse.text()).toBeTruthy()
  expect((await parallelResponse.json()).reviewCycles.at(-1).steps.map((x:any)=>x.state)).toEqual(['Active','Active'])
@@ -78,7 +83,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
 
  const invalidDerived=await request.post(`${apiBase}/api/scr-drafts`,{data:{
   projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Invalid derived proposal',problem:'Rationale omitted',analysis:'Derived classification needs justification',solution:'Reject incomplete proposal',
-  requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The software shall reject incomplete derived proposals.',rationale:'',verificationMethod:'Test',isDerived:true}]
+  requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall reject incomplete derived proposals.',rationale:'',verificationMethod:'Test',isDerived:true}]
  }})
  expect(invalidDerived.status()).toBe(400)
  expect(await invalidDerived.text()).toContain('explicit engineering rationale')
@@ -86,7 +91,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  const suffix=Date.now().toString().slice(-6)
  const draftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{
   projectId:project.id,targetReleaseId:active.id,type:'Software',title:`Derived guidance continuity ${suffix}`,problem:'Guidance continuity needs an internal safety monitor',analysis:'The behavior is derived from software architecture rather than a direct system allocation',solution:'Introduce a derived HLR with explicit rationale',
-  requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The software shall monitor derived guidance continuity.',rationale:'Architecture safety analysis requires an independent continuity monitor.',verificationMethod:'Test',isDerived:true,impactDispositionJson:completeImpacts}]
+  requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall monitor derived guidance continuity.',rationale:'Architecture safety analysis requires an independent continuity monitor.',verificationMethod:'Test',isDerived:true,impactDispositionJson:completeImpacts}]
  }})
  expect(draftResponse.status(),await draftResponse.text()).toBe(201)
  const draft=await draftResponse.json()

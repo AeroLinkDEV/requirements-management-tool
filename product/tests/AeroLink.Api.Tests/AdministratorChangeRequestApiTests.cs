@@ -190,6 +190,13 @@ public sealed class AdministratorChangeRequestApiTests
         var prefix = type == ChangeRequestType.System ? "SCR" : "SWCR";
         var requirement = type == ChangeRequestType.System ? "SYSR" : "HLR";
         var level = type == ChangeRequestType.System ? RequirementLevel.System : RequirementLevel.HighLevel;
+        // A new requirement cannot be sent for review without a place in the document, so the scenario gives
+        // its proposals one. Which section is not what this test is about.
+        var specification = new RequirementSpecification(project.Id, "SPEC-000001", "Requirements Document",
+            level.ToString(), "Seeded specification.", "test.setup", now);
+        var section = new SpecificationNode(specification.Id, null, 1000, SpecificationNodeType.Section,
+            "Functional Behavior", null, "test.setup", now);
+        db.AddRange(specification, section);
         var ready = Ready($"{prefix}-00900", $"{requirement}-00000900", "Governed ready change");
         var approved = Ready($"{prefix}-00901", $"{requirement}-00000901", "Approved governed change");
         approved.SubmitForReview("change.author",
@@ -207,7 +214,7 @@ public sealed class AdministratorChangeRequestApiTests
                 "Problem", "Analysis", "Solution", "change.author", now, type);
             item.AddRequirementChange("change.author", requirementNumber, 0, level,
                 RequirementChangeKind.Introduce, "The product shall preserve governed state.",
-                "Controlled rationale.", "Test", now);
+                "Controlled rationale.", "Test", now, targetSectionId: section.Id);
             return item;
         }
     }

@@ -128,3 +128,21 @@ export async function layoutSettled(page: Page, timeoutMs = 15_000) {
     if (stable < 2) await page.waitForTimeout(120)
   }
 }
+
+/**
+ * The first section of a Project's requirements document for one level.
+ *
+ * A new requirement cannot be sent for review without a section, so any journey that builds a change request
+ * through the API and then submits it has to name one. Which section is not the point of those journeys, so
+ * they take the first.
+ */
+export async function firstSectionId(request: APIRequestContext, projectId: string,
+  level: 'System' | 'HighLevel' | 'LowLevel' = 'System') {
+  const response = await request.get(`${apiBase}/api/authoring/sections?projectId=${projectId}&level=${level}`)
+  if (!response.ok()) throw new Error(`sections ${response.status()}: ${await response.text()}`)
+  const sections = await response.json()
+  // A Project builds its requirements documents the first time its requirements are synchronized, so one
+  // created moments ago by a journey has no sections yet. There is nothing to choose and nothing to send;
+  // the API asks for a section only where sections exist.
+  return sections.length ? (sections[0].id as string) : undefined
+}

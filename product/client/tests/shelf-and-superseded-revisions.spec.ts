@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, openNavigationGroup, selectProgram } from './auth'
+import { apiBase, apiLogin, firstSectionId, login, openNavigationGroup, selectProgram } from './auth'
 
 const completeImpacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
 
@@ -23,7 +23,7 @@ test('a change request goes on the shelf with its state remembered, and comes ba
   const scr = await (await request.post(`${apiBase}/api/scr-drafts`, { data: {
     projectId: workspace.project.id, targetReleaseId: workspace.release.id, type: 'System',
     title: 'Oceanic waypoint sequencing', problem: 'P', analysis: 'A', solution: 'S',
-    requirementChanges: [{ level: 'System', kind: 'Introduce', statement: 'The FMS shall sequence oceanic waypoints.', rationale: 'New', verificationMethod: 'Test', impactDispositionJson:completeImpacts }],
+    requirementChanges: [{ level: 'System', kind: 'Introduce', targetSectionId: await firstSectionId(request, workspace.project.id), statement: 'The FMS shall sequence oceanic waypoints.', rationale: 'New', verificationMethod: 'Test', impactDispositionJson:completeImpacts }],
   } })).json()
 
   await login(page, 'admin', { openProject: false })
@@ -62,7 +62,7 @@ test('superseded revisions collapse under the newest one and expand on request',
   const scr = await (await request.post(`${apiBase}/api/scr-drafts`, { data: {
     projectId: workspace.project.id, targetReleaseId: workspace.release.id, type: 'System',
     title: 'Oceanic waypoint sequencing', problem: 'P', analysis: 'A', solution: 'S',
-    requirementChanges: [{ level: 'System', kind: 'Introduce', statement: 'The FMS shall sequence oceanic waypoints.', rationale: 'New', verificationMethod: 'Test', impactDispositionJson:completeImpacts }],
+    requirementChanges: [{ level: 'System', kind: 'Introduce', targetSectionId: await firstSectionId(request, workspace.project.id), statement: 'The FMS shall sequence oceanic waypoints.', rationale: 'New', verificationMethod: 'Test', impactDispositionJson:completeImpacts }],
   } })).json()
   await request.post(`${apiBase}/api/scrs/${scr.id}/submit`, { data: { approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }] } })
   await request.post(`${apiBase}/api/scrs/${scr.id}/approve`, { data: { password: 'AeroLink!2026', meaning: 'Approved.' } })

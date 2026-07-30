@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } from './auth'
+import { apiBase, apiLogin, firstSectionId, login, openNavigationGroup, selectProgram, showcaseSeed } from './auth'
 
 /**
  * Surfaces that describe people, history and builds have to do it in the words a colleague would use.
@@ -10,7 +10,7 @@ import { apiBase, apiLogin, login, openNavigationGroup, selectProgram, showcaseS
  * internal step reported in place of the outcome somebody came to read.
  */
 
-const draftBody = (projectId: string, releaseId: string, title: string) => ({
+const draftBody = (projectId: string, releaseId: string, title: string, sectionId?: string) => ({
   projectId,
   targetReleaseId: releaseId,
   type: 'System',
@@ -24,6 +24,7 @@ const draftBody = (projectId: string, releaseId: string, title: string) => ({
     statement: 'The FMS shall record who is being waited on.',
     rationale: 'Review legibility.',
     verificationMethod: 'Test',
+    targetSectionId: sectionId,
   }],
 })
 
@@ -35,7 +36,8 @@ test('a review cycle names the person waiting, their role, and whose turn it is'
   // Built here rather than found, so the queue wording is exercised against a review that is genuinely
   // mid-flight with somebody second in line.
   const created = await request.post(`${apiBase}/api/scr-drafts`,
-    { data: draftBody(showcase.projectId, showcase.activeReleaseId, `Review legibility ${Date.now()}`) })
+    { data: draftBody(showcase.projectId, showcase.activeReleaseId, `Review legibility ${Date.now()}`,
+      await firstSectionId(request, showcase.projectId)) })
   expect(created.ok(), await created.text()).toBeTruthy()
   const draft = await created.json()
   const submitted = await request.post(`${apiBase}/api/scrs/${draft.id}/submit`, { data: {

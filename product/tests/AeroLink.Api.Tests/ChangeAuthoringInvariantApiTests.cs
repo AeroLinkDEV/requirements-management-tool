@@ -145,7 +145,7 @@ public sealed class ChangeAuthoringInvariantApiTests
             {
                 new { level = "System", kind = "Introduce", statement = "The FMS shall require dispositions.",
                     rationale = "Lifecycle integrity", verificationMethod = "Test",
-                    impactDispositionJson = "{}" }
+                    impactDispositionJson = "{}", targetSectionId = scenario.SystemSectionId }
             }
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);

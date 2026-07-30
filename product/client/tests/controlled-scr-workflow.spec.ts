@@ -57,6 +57,8 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByLabel('Analysis', { exact: true }).fill('SCR content, reviewers, and history must remain attributable.')
   await page.getByLabel('Solution').fill('Add an ordered and auditable approval workflow.')
   await page.getByLabel('Requirement statement').fill('The software shall enforce ordered SCR approval.')
+  // A new requirement must be given a place in the document before it can be sent for review.
+  await page.getByLabel('Section for proposal 1').selectOption({ index: 1 })
   await page.getByRole('button', { name: 'Save SWCR Draft' }).click()
 
   await expect(page.getByRole('heading', { name: 'Introduce controlled browser workflow' })).toBeVisible()

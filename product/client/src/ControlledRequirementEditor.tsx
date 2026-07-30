@@ -37,6 +37,11 @@ type TracedImpact = {
 
 type SpecificationSection = {
   id: string;
+  parentId?: string;
+  /** Read off the document's structure — "4", "4.1", "4.1.1" — never stored in the heading. */
+  number: string;
+  /** How many sections this one sits under, so the list can show the shape of the document. */
+  depth: number;
   heading: string;
   position: number;
   specification: string;
@@ -348,11 +353,20 @@ export default function ControlledRequirementEditor({
                   Previously selected section is unavailable — choose another
                 </option>
               )}
-              <option value="">
-                {item.kind === "Modify" ? "Leave where it is" : "Decide when the baseline is assembled"}
+              {/* A new requirement has to be given a section, so its placeholder cannot be chosen. This used
+                  to offer "Decide when the baseline is assembled", which deferred the decision from the one
+                  person who knew the answer — the author writing it — to whoever later assembled the
+                  baseline, by which time the requirement had already landed wherever a backfill put it.
+                  A modification may still be left alone: it already has a section. */}
+              <option value="" disabled={item.kind !== "Modify"}>
+                {item.kind === "Modify" ? "Leave where it is" : "Choose a section…"}
               </option>
               {sections.map((section) => (
-                <option value={section.id} key={section.id}>{section.heading}</option>
+                // Indented by depth and numbered from the structure, so 4.1.1 reads as being inside 4.1.
+                // `&nbsp;` rather than padding, because an <option> takes no styling in most browsers.
+                <option value={section.id} key={section.id}>
+                  {`${"  ".repeat(section.depth)}${section.number} ${section.heading}`}
+                </option>
               ))}
             </select>
             <small>

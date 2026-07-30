@@ -20,7 +20,7 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
     [
         (RequirementLevel.System,"SYSTEM-REQ","System Requirement","SYSRD-000001","System Requirements Document"),
         (RequirementLevel.HighLevel,"HLR","High-Level Software Requirement","HLRD-000001","High-Level Software Requirements Document"),
-        (RequirementLevel.LowLevel,"LLR","Low-Level Software Requirement","LLRD-000001","Low-Level Software Requirements Specification")
+        (RequirementLevel.LowLevel,"LLR","Low-Level Software Requirement","LLRD-000001","Low-Level Software Requirements Document")
     ];
 
     public async Task SynchronizeProjectAsync(Guid projectId,string actor,CancellationToken ct=default)
@@ -71,7 +71,35 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
         await db.SaveChangesAsync(ct);
         var sections=await db.SpecificationNodes.Where(x=>specs.Select(s=>s.Id).Contains(x.SpecificationId)&&x.Type==SpecificationNodeType.Section).ToListAsync(ct);
         foreach(var spec in specs)
-            for(var i=1;i<=5;i++)if(sections.All(x=>x.SpecificationId!=spec.Id||x.Position!=i*1000)){var section=new SpecificationNode(spec.Id,null,i*1000,SpecificationNodeType.Section,$"{i}. {SectionName(i)}",null,actor,now);db.SpecificationNodes.Add(section);sections.Add(section);}
+            for(var i=1;i<=5;i++)if(sections.All(x=>x.SpecificationId!=spec.Id||x.ParentId!=null||x.Position!=i*1000)){var section=new SpecificationNode(spec.Id,null,i*1000,SpecificationNodeType.Section,SectionName(i),null,actor,now);db.SpecificationNodes.Add(section);sections.Add(section);}
+        // Headings used to carry their own number — "1. Functional Behavior". A stored number is wrong the
+        // moment a section is inserted above it, and it cannot express 4.1.1 at all without every heading
+        // below being rewritten by hand. The number is now read off the structure instead, so these are
+        // stripped where they were written. Only the leading numeral moves; the heading itself is untouched.
+        foreach(var section in sections)
+        {
+            var stripped=SpecificationNumbering.WithoutLeadingNumber(section.Heading);
+            if(stripped!=section.Heading)db.Entry(section).Property(x=>x.Heading).CurrentValue=stripped;
+        }
+        await db.SaveChangesAsync(ct);
+        // A requirements document has depth. Integrity and Monitoring is where it shows first: built-in test
+        // and annunciation are separate concerns that a reader looks for separately, and an author filing a
+        // requirement should be placing it in a structure rather than picking from a flat list of five.
+        //
+        // Their numbers — 4.1 and 4.2 — are not written anywhere. They are read off their position beneath
+        // their parent, so inserting a section above them renumbers them and this code never learns of it.
+        foreach(var spec in specs)
+        {
+            var parent=sections.Where(x=>x.SpecificationId==spec.Id&&x.ParentId is null).OrderBy(x=>x.Position).Skip(3).FirstOrDefault();
+            if(parent is null)continue;
+            for(var i=0;i<DefaultSubsections.Length;i++)
+            {
+                var position=(i+1)*1000;
+                if(sections.Any(x=>x.ParentId==parent.Id&&x.Position==position))continue;
+                var child=new SpecificationNode(spec.Id,parent.Id,position,SpecificationNodeType.Section,DefaultSubsections[i],null,actor,now);
+                db.SpecificationNodes.Add(child);sections.Add(child);
+            }
+        }
         await db.SaveChangesAsync(ct);
 
         var artifacts=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderBy(x=>x.BaseNumber).ToListAsync(ct);
@@ -102,7 +130,10 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
             }
             if(!placed.Contains(artifact.Id))
             {
-                var spec=specs.Single(x=>x.Level==artifact.Level.ToString());var bucket=(StableNumber(artifact.BaseNumber)%5)+1;var parent=sections.Single(x=>x.SpecificationId==spec.Id&&x.Position==bucket*1000);
+                // Top level only. Positions are unique within a parent, not within the document, so once a
+                // section had sub-sections beneath it there were two nodes at position 1000 and this asked for
+                // the single one.
+                var spec=specs.Single(x=>x.Level==artifact.Level.ToString());var bucket=(StableNumber(artifact.BaseNumber)%5)+1;var parent=sections.Single(x=>x.SpecificationId==spec.Id&&x.ParentId==null&&x.Position==bucket*1000);
                 db.SpecificationNodes.Add(new(spec.Id,parent.Id,StableNumber(artifact.BaseNumber),SpecificationNodeType.Requirement,"",artifact.Id,actor,now));
             }
         }
@@ -219,6 +250,8 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
     private static IEnumerable<string> Tokenize(string value)=>value.Split((char[]?)null,StringSplitOptions.RemoveEmptyEntries);
     private static string NormalizeHeader(string value)=>new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
     private static int StableNumber(string value)=>int.TryParse(new string(value.Where(char.IsDigit).ToArray()),out var n)?n:Math.Abs(value.GetHashCode());
+    private static readonly string[] DefaultSubsections=["Built-In Test","Fault Annunciation"];
+
     private static string SectionName(int i)=>i switch{1=>"Functional Behavior",2=>"Navigation and Guidance",3=>"Data and Interfaces",4=>"Integrity and Monitoring",_=>"Operational Constraints"};
 
     private static List<string[]> ParseCsv(string text)
