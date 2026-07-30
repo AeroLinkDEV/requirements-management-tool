@@ -585,7 +585,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<EnterpriseOperationJob>(b =>
         {
-            b.ToTable("enterprise_operation_jobs"); b.HasKey(x=>x.Id); b.Property(x=>x.JobType).HasMaxLength(80).IsRequired(); b.Property(x=>x.RequestJson).IsRequired(); b.Property(x=>x.ResultJson).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.IdempotencyKey).HasMaxLength(120).IsRequired();b.Property(x=>x.LastError).HasMaxLength(4000);b.HasIndex(x=>new{x.ProjectId,x.CreatedAt});b.HasIndex(x=>new{x.ProjectId,x.IdempotencyKey}).IsUnique();
+            b.ToTable("enterprise_operation_jobs"); b.HasKey(x=>x.Id); b.Property(x=>x.JobType).HasMaxLength(80).IsRequired(); b.Property(x=>x.RequestJson).IsRequired(); b.Property(x=>x.ResultJson).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.IdempotencyKey).HasMaxLength(120).IsRequired();b.Property(x=>x.LastError).HasMaxLength(4000);b.HasIndex(x=>new{x.ProjectId,x.CreatedAt});b.Property(x=>x.ClaimedBy).HasMaxLength(150);b.Property(x=>x.ErrorHistoryJson).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.IdempotencyKey}).IsUnique();
+            // The claim reads by state and the recovery sweep reads by lease, so both are indexed rather than
+            // scanned: queue selection has to stay bounded as the job table grows.
+            b.HasIndex(x=>new{x.State,x.CreatedAt});b.HasIndex(x=>x.LeaseExpiresAt);
         });
         modelBuilder.Entity<RequirementInterchangeJob>(b =>
         {

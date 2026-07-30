@@ -20,7 +20,7 @@ public sealed class EnterpriseHardeningTests
     {
         var now=DateTimeOffset.UtcNow;var session=new ArtifactEditSession(Guid.NewGuid(),"Requirement",Guid.NewGuid(),null,"a".PadLeft(64,'a'),"{}","engineer",now);
         session.Save("{\"statement\":\"draft\"}",1,now.AddMinutes(1));Assert.Equal(2,session.Version);Assert.Throws<DomainException>(()=>session.Save("{}",1,now));
-        var job=new EnterpriseOperationJob(Guid.NewGuid(),"BackgroundRepositoryExport","{}",100,"engineer",now,"stable-key");job.Start(now);job.ReportProgress(50,now);job.Fail("temporary",now);job.Retry(now);Assert.Equal(EnterpriseJobState.Preview,job.State);job.Start(now);job.Complete(100,0,"{}",now);Assert.Equal(EnterpriseJobState.Completed,job.State);Assert.Equal(2,job.Attempt);
+        var job=new EnterpriseOperationJob(Guid.NewGuid(),"BackgroundRepositoryExport","{}",100,"engineer",now,"stable-key");job.RunInline("engineer",now);job.ReportProgress(50,now);job.Fail("temporary",now);job.Retry(now);Assert.Equal(EnterpriseJobState.Preview,job.State);job.RunInline("engineer",now);job.Complete(100,0,"{}",now);Assert.Equal(EnterpriseJobState.Completed,job.State);Assert.Equal(2,job.Attempt);
     }
 
     [Fact]

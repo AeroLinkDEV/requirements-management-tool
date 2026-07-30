@@ -210,13 +210,126 @@ public sealed class EnterpriseOperationJob
     public int Attempt { get; private set; }
     public int ProgressPercent { get; private set; }
     public string? LastError { get; private set; }
-    public void Start(DateTimeOffset now){if(State is not (EnterpriseJobState.Preview or EnterpriseJobState.Failed))throw new DomainException("Only previewed or failed jobs can start.");State=EnterpriseJobState.Running;StartedAt=now;UpdatedAt=now;Attempt++;LastError=null;}
-    public void ReportProgress(int percent,DateTimeOffset now){if(State!=EnterpriseJobState.Running)throw new DomainException("Only running jobs report progress.");ProgressPercent=Math.Clamp(percent,0,99);UpdatedAt=now;}
-    public void Complete(int succeeded,int failed,string result,DateTimeOffset now){State=failed==0?EnterpriseJobState.Completed:EnterpriseJobState.Failed;SucceededCount=succeeded;FailedCount=failed;ResultJson=result;ProgressPercent=100;CompletedAt=now;UpdatedAt=now;LastError=failed==0?null:$"{failed} item(s) failed.";}
-    public void Fail(string error,DateTimeOffset now){State=EnterpriseJobState.Failed;LastError=error.Trim();UpdatedAt=now;CompletedAt=now;}
-    public void Retry(DateTimeOffset now){if(State!=EnterpriseJobState.Failed)throw new DomainException("Only failed jobs can be retried.");State=EnterpriseJobState.Preview;ProgressPercent=0;CompletedAt=null;UpdatedAt=now;LastError=null;}
-    public void Cancel(DateTimeOffset now){if(State is EnterpriseJobState.Completed or EnterpriseJobState.Cancelled)throw new DomainException("This job is already final.");State=EnterpriseJobState.Cancelled;UpdatedAt=now;CompletedAt=now;}
+    /// <summary>Which worker holds this job, so an abandoned claim can be told from a live one.</summary>
+    public string? ClaimedBy { get; private set; }
+    public DateTimeOffset? ClaimedAt { get; private set; }
+    /// <summary>When the claim stops being believed. A worker that dies stops renewing this.</summary>
+    public DateTimeOffset? LeaseExpiresAt { get; private set; }
+    /// <summary>
+    /// Every error this job has ever reported, oldest first, one line each.
+    ///
+    /// `LastError` alone meant a retry erased why the previous attempt failed, which is the history an operator
+    /// needs most: a job that fails the same way four times is a different problem from one that fails four
+    /// different ways.
+    /// </summary>
+    public string ErrorHistoryJson { get; private set; }="[]";
+    /// <summary>Incremented on every transition, so a stale worker cannot write over a newer decision.</summary>
+    public long Version { get; private set; }
+
+    /// <summary>
+    /// Takes ownership for a bounded period. The caller is responsible for having won the claim — the atomic
+    /// conditional update lives in the worker, because only the database can decide a race between processes.
+    /// </summary>
+    public void Claim(string worker,DateTimeOffset now,TimeSpan lease)
+    {
+        if(State is not (EnterpriseJobState.Preview or EnterpriseJobState.Failed))throw new DomainException("Only previewed or failed jobs can start.");
+        if(lease<=TimeSpan.Zero)throw new DomainException("A job lease must be a positive duration.");
+        State=EnterpriseJobState.Running;StartedAt=now;UpdatedAt=now;Attempt++;LastError=null;
+        ClaimedBy=string.IsNullOrWhiteSpace(worker)?throw new DomainException("A claiming worker must identify itself."):worker.Trim();
+        ClaimedAt=now;LeaseExpiresAt=now+lease;Touch();
+    }
+
+    /// <summary>
+    /// Claims the job for the request that is about to do the work itself, rather than for a background worker.
+    /// The lease still exists so that a request which dies mid-way leaves a recoverable job rather than one
+    /// stuck Running for ever.
+    /// </summary>
+    public void RunInline(string actor,DateTimeOffset now)=>Claim(actor,now,TimeSpan.FromMinutes(5));
+
+    /// <summary>Extends the lease while work continues, and reports progress in the same act.</summary>
+    public void Heartbeat(int percent,DateTimeOffset now,TimeSpan lease)
+    {
+        ReportProgress(percent,now);
+        LeaseExpiresAt=now+lease;
+    }
+
+    /// <summary>True once nobody has renewed the lease, which is the only evidence that a worker is gone.</summary>
+    public bool LeaseExpired(DateTimeOffset now)=>State==EnterpriseJobState.Running&&LeaseExpiresAt is not null&&LeaseExpiresAt<=now;
+
+    /// <summary>
+    /// Returns an abandoned job to the queue so another worker can take it, or fails it for good once it has
+    /// used up its attempts. A crash is otherwise indistinguishable from work still in progress.
+    /// </summary>
+    public void RecoverExpiredLease(DateTimeOffset now,int maximumAttempts)
+    {
+        if(!LeaseExpired(now))throw new DomainException("Only a job whose lease has expired can be recovered.");
+        Release();
+        var reason=$"Worker stopped responding; lease expired after attempt {Attempt}.";
+        if(Attempt>=maximumAttempts){State=EnterpriseJobState.Failed;CompletedAt=now;LastError=reason;}
+        else{State=EnterpriseJobState.Preview;ProgressPercent=0;CompletedAt=null;LastError=reason;}
+        Record(reason,now);UpdatedAt=now;Touch();
+    }
+
+    public void ReportProgress(int percent,DateTimeOffset now){if(State!=EnterpriseJobState.Running)throw new DomainException("Only running jobs report progress.");ProgressPercent=Math.Clamp(percent,0,99);UpdatedAt=now;Touch();}
+
+    /// <summary>
+    /// Records the outcome, and only for a job still running.
+    ///
+    /// This used to accept any state, so a worker holding a stale entity could write Completed over a
+    /// cancellation an operator had already made — the job reported success for work somebody stopped.
+    /// </summary>
+    public void Complete(int succeeded,int failed,string result,DateTimeOffset now)
+    {
+        if(State!=EnterpriseJobState.Running)throw new DomainException("Only a running job can record an outcome.");
+        State=failed==0?EnterpriseJobState.Completed:EnterpriseJobState.Failed;SucceededCount=succeeded;FailedCount=failed;ResultJson=result;ProgressPercent=100;CompletedAt=now;UpdatedAt=now;
+        LastError=failed==0?null:$"{failed} item(s) failed.";
+        if(failed!=0)Record(LastError!,now);
+        Release();Touch();
+    }
+
+    public void Fail(string error,DateTimeOffset now)
+    {
+        if(State is EnterpriseJobState.Completed or EnterpriseJobState.Cancelled)throw new DomainException("This job is already final.");
+        State=EnterpriseJobState.Failed;LastError=error.Trim();UpdatedAt=now;CompletedAt=now;Record(error,now);Release();Touch();
+    }
+
+    /// <summary>
+    /// Hands the job back for another attempt without recording an outcome, for a shutdown rather than a
+    /// failure. A process stopping is not the job failing, and must not consume an attempt's evidence.
+    /// </summary>
+    public void ReleaseForShutdown(DateTimeOffset now)
+    {
+        if(State!=EnterpriseJobState.Running)return;
+        State=EnterpriseJobState.Preview;ProgressPercent=0;CompletedAt=null;UpdatedAt=now;
+        var reason="Worker shut down before finishing; returned to the queue.";
+        LastError=reason;Record(reason,now);Release();Touch();
+    }
+
+    public void Retry(DateTimeOffset now){if(State!=EnterpriseJobState.Failed)throw new DomainException("Only failed jobs can be retried.");State=EnterpriseJobState.Preview;ProgressPercent=0;CompletedAt=null;UpdatedAt=now;LastError=null;Release();Touch();}
+    public void Cancel(DateTimeOffset now){if(State is EnterpriseJobState.Completed or EnterpriseJobState.Cancelled)throw new DomainException("This job is already final.");State=EnterpriseJobState.Cancelled;UpdatedAt=now;CompletedAt=now;Release();Touch();}
+
+    private void Release(){ClaimedBy=null;ClaimedAt=null;LeaseExpiresAt=null;}
+    private void Touch()=>Version++;
+
+    /// <summary>Appends to the error history, keeping the most recent twenty so it cannot grow without bound.</summary>
+    private void Record(string error,DateTimeOffset now)
+    {
+        var trimmed=(error??"").Trim();
+        if(trimmed.Length==0)return;
+        var entries=ErrorHistory().ToList();
+        entries.Add(new JobErrorRecord(Attempt,now,trimmed.Length>500?trimmed[..500]:trimmed));
+        ErrorHistoryJson=System.Text.Json.JsonSerializer.Serialize(entries.TakeLast(20));
+    }
+
+    public IReadOnlyList<JobErrorRecord> ErrorHistory()
+    {
+        try { return System.Text.Json.JsonSerializer.Deserialize<List<JobErrorRecord>>(ErrorHistoryJson)??[]; }
+        catch (System.Text.Json.JsonException) { return []; }
+    }
 }
+
+/// <summary>One attempt's failure, kept so a retry does not erase why the attempt before it failed.</summary>
+public sealed record JobErrorRecord(int Attempt,DateTimeOffset OccurredAt,string Error);
 
 public sealed class RequirementInterchangeJob
 {
