@@ -225,6 +225,7 @@ app.MapChangeRequestEndpoints();
 app.MapRequirementsEndpoints();
 app.MapBaselineEndpoints();
 app.MapVerificationEndpoints();
+app.MapAeroLinkBuildTestSetEndpoints();
 app.MapReleaseCampaignEndpoints();
 app.MapEditSessionEndpoints();
 app.MapAdministrationEndpoints();
