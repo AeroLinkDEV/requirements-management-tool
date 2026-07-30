@@ -9,6 +9,12 @@ export function usePasswordVisibilityControls() {
       document.querySelectorAll<HTMLInputElement>('input[type="password"]').forEach((input) => {
         if (input.hasAttribute(enhanced)) return;
         input.setAttribute(enhanced, "true");
+        // These fields are labelled by wrapping — `<label>New password<input/></label>` — so every descendant
+        // of the label contributes to the field's accessible name. Adding a button inside it renamed the field
+        // to "New password Reveal typed characters" for anyone using a screen reader. Pinning the name the
+        // label already provided, before the button is inserted, keeps the field called what it is called.
+        const labelled = input.parentElement?.textContent?.trim();
+        if (labelled && !input.hasAttribute("aria-label")) input.setAttribute("aria-label", labelled);
         input.parentElement?.classList.add("hasPasswordVisibility");
         const button = document.createElement("button");
         button.type = "button";

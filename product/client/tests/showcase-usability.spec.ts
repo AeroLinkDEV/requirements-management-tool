@@ -57,7 +57,7 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
 
   await page.getByRole('link',{name:/Command Center/}).click()
   await openNavigationGroup(page,'VERIFICATION')
-  await page.getByRole('link',{name:'Traceability & Outputs'}).click()
+  await page.getByRole('link',{name:'Digital Thread'}).click()
   await expect(page.getByText('1,250 requirements')).toBeVisible()
   await expect(page.getByRole('heading',{name:'Digital Thread'})).toBeVisible()
   await expect(page.locator('.digitalThreadStage')).toBeVisible()

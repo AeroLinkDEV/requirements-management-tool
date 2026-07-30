@@ -91,7 +91,7 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .softwareBuildCard button { min-height: 38px; border: 1px solid #278aca; border-radius: 7px; background: white; color: #136eaa; font: 650 13px var(--font-body); cursor: pointer; }
 .softwareBuildCard button:hover:not(:disabled) { background: #f0f8fd; border-color: #0e6fae; }
 .softwareBuildCard button:disabled { border-color: #d9dee5; background: #f5f6f8; color: #a8b0bb; cursor: not-allowed; }
-.softwareBuildCard small { margin-top: 7px; color: #718096; font-size: 10px; text-align: center; }
+.softwareBuildCard small { margin-top: 7px; color: var(--ink-500); font-size: 12px; text-align: center; }
 .softwareBuildCard.current { border-color: #278cd2; background: linear-gradient(145deg, #fff 15%, #edf7ff); box-shadow: 0 0 0 1px rgba(39, 140, 210, .14), 0 12px 27px rgba(20, 96, 151, .1); }
 .softwareBuildCard.current .buildVersion { border-color: #2d92d3; color: #105f98; }
 .softwareBuildCard.current button { background: #0878df; border-color: #0878df; color: white; }

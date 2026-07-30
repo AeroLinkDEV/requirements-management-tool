@@ -125,8 +125,8 @@ export default function SoftwareBuildsLanding({
                     >
                       <span aria-hidden="true">↗</span> Open build
                     </button>
-                    {build.isReadOnly && enabled && <small>Informally Build {build.version} Â· read-only historical workspace</small>}
-                    {build.isCurrent && <small>Informally Build {build.version} Â· active development workspace</small>}
+                    {build.isReadOnly && enabled && <small>Informally Build {build.version} · read-only historical workspace</small>}
+                    {build.isCurrent && <small>Informally Build {build.version} · active development workspace</small>}
                   </article>
                   {index < softwareBuilds.length - 1 && <span className="buildConnector" aria-hidden="true">→</span>}
                 </li>

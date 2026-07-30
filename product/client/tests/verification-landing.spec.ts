@@ -21,7 +21,7 @@ test('verification opens on the queue the release created, grouped by cause', as
   await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible({ timeout: 30_000 })
 
   // Landing on the queue, without anybody clicking a tab.
-  await expect(page.getByRole('heading', { name: 'Change impact' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Test procedure alignment' })).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('.impactSummary')).toBeVisible()
 
   const summary = page.locator('.impactSummary article')

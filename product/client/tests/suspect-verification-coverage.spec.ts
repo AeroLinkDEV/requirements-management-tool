@@ -61,17 +61,15 @@ test('modified requirement coverage stays suspect until an exact approved proced
   })
   expect(approved.ok(), await approved.text()).toBeTruthy()
 
-  const suffix = Date.now().toString().slice(-2)
-  const baselineResponse = await request.post(`${apiBase}/api/baselines`, { data: {
-    baseNumber: `SW-98.${suffix}`,
-    revision: 0,
-    projectId: showcase.projectId,
-    releaseId: showcase.activeReleaseId,
-    predecessorBaselineId: showcase.releasedBaselineId,
-    name: `Suspect coverage ${suffix}`,
-  } })
-  expect(baselineResponse.ok(), await baselineResponse.text()).toBeTruthy()
-  const baseline = await baselineResponse.json()
+  // The in-work build's own baseline, rather than a throwaway second one. A release now carries exactly one
+  // software build, because the build number is derived from the release version — two would collide on the
+  // same name. The end state is what it always was: a materialized baseline on the in-work release.
+  const baselinesResponse = await request.get(
+    `${apiBase}/api/baselines?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`,
+  )
+  expect(baselinesResponse.ok(), await baselinesResponse.text()).toBeTruthy()
+  const baseline = (await baselinesResponse.json())[0]
+  expect(baseline, 'the in-work software build').toBeTruthy()
   for (const [path, data] of [
     ['selections', { scrId: draft.id }],
     ['freeze', {}],
