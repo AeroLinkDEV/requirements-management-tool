@@ -39,6 +39,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<TestExecution> TestExecutions => Set<TestExecution>();
     public DbSet<TestChangeReview> TestChangeReviews => Set<TestChangeReview>();
     public DbSet<TestChangeRequestClaim> TestChangeRequestClaims => Set<TestChangeRequestClaim>();
+    public DbSet<BuildTestSet> BuildTestSets => Set<BuildTestSet>();
+    public DbSet<BuildTestSetEntry> BuildTestSetEntries => Set<BuildTestSetEntry>();
     public DbSet<VerificationImpactItem> VerificationImpactItems => Set<VerificationImpactItem>();
     public DbSet<VerificationImpactDecisionHistory> VerificationImpactDecisionHistory => Set<VerificationImpactDecisionHistory>();
     public DbSet<RequirementTraceLink> RequirementTraces => Set<RequirementTraceLink>();
@@ -371,6 +373,33 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.RequirementRevisionId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<BuildTestSet>(b =>
+        {
+            b.ToTable("build_test_sets"); b.HasKey(x => x.Id);
+            b.Property(x => x.Discipline).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Version).IsConcurrencyToken();
+            // One set per build per discipline. Two would mean two answers to "what is this build running",
+            // and the release gate would have to guess which one it is measured against.
+            b.HasIndex(x => new { x.ReleaseId, x.Discipline }).IsUnique();
+            b.HasMany(x => x.Entries).WithOne().HasForeignKey(x => x.BuildTestSetId).OnDelete(DeleteBehavior.Cascade);
+            b.Navigation(x => x.Entries).UsePropertyAccessMode(PropertyAccessMode.Field);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BuildTestSetEntry>(b =>
+        {
+            b.ToTable("build_test_set_entries"); b.HasKey(x => x.Id);
+            // Set in the constructor, not by the store. Without this an entry added to a set that is already
+            // tracked arrives through the navigation with its key set and EF reads it as a row to update.
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.Property(x => x.Reason).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Note).HasMaxLength(1000).IsRequired();
+            b.Property(x => x.AddedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.BuildTestSetId, x.ProcedureRevisionId }).IsUnique();
+            b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<TestChangeRequestClaim>(b =>
         {
             b.ToTable("test_change_request_claims"); b.HasKey(x => x.Id);
