@@ -135,6 +135,8 @@ test('modified requirement coverage stays suspect until an exact approved proced
   }
   await openPackage()
   await expect(decisionRow.first()).toBeVisible({ timeout: 30_000 })
+  const packageRow = decisionRow.first().locator('xpath=ancestor::article[contains(@class,"coverageRow")]')
+  await packageRow.getByRole('button', { name: 'Take it on' }).click()
 
   const decide = async (rationale: string) => {
     await decisionRow.first().getByRole('button', { name: 'Decide' }).click()

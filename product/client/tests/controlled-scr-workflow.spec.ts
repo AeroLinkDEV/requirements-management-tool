@@ -42,9 +42,9 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByRole('navigation', { name: 'Change authoring progress' })).toBeVisible()
   // The author chooses the first change; the editor no longer assumes one.
   await page.getByRole('button',{name:'+ Introduce HLR'}).click()
-  await expect(page.getByLabel('Identifier')).toHaveValue(/^HLR-\d{6}$/)
+  await expect(page.getByLabel('Identifier')).toHaveValue('Provisional — assigned at check-in')
   await expect(page.getByLabel('Identifier')).not.toBeEditable()
-  await expect(page.getByLabel('Revision')).toHaveValue('00')
+  await expect(page.getByLabel('Revision')).toHaveValue('Pending')
   await expect(page.getByLabel('Revision')).not.toBeEditable()
   await expect(page.getByRole('textbox',{name:'Level',exact:true})).toHaveValue('Software HLR')
   await expect(page.getByRole('textbox',{name:'Level',exact:true})).not.toBeEditable()

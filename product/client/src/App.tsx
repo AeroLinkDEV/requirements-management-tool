@@ -404,6 +404,11 @@ function App() {
     );
   const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
   const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");if(context){const path=routePath(context,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+  const openVerificationProcedure=(procedure?:{procedureId:string;revisionId?:string;displayNumber?:string;level?:string})=>{
+    const area:Discipline=procedure?.level==="System"?"systemTest":"softwareTest";
+    setView("testingCoverage");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(procedure?.level??"");
+    if(context){const path=routePath(context,"testingCoverage",area,undefined,procedure?.level);const params=new URLSearchParams();if(procedure?.displayNumber)params.set("procedure",procedure.displayNumber);if(procedure?.procedureId)params.set("procedureId",procedure.procedureId);if(procedure?.revisionId)params.set("procedureRevisionId",procedure.revisionId);history.pushState({},"",`${path}${params.size?`?${params}`:""}`)}
+  };
   if(location.pathname==="/")history.replaceState({},"","/projects");
   const signOut=async()=>{
     // Signing out must not be able to fail. Logout is a mutation, so the patched fetch first fetches a CSRF
@@ -545,7 +550,7 @@ function App() {
         onOpenRequirement={(id) => navigate("requirements",discipline,id)}
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
         onOpenTraceability={(artifactId) => navigate("lifecycle", discipline, artifactId, artifactId ? "requirement" : undefined)}
-        onOpenVerification={() => navigate("testingCoverage", discipline === "software" ? "softwareTest" : "systemTest")}
+        onOpenVerification={openVerificationProcedure}
       />
     );
   // The two paths a build.s verification work splits into.
@@ -686,6 +691,8 @@ function App() {
         onBack={() => navigate("dashboard")}
         onOpenScr={(id, resolved) => navigate("scr",resolved,id)}
         onOpenRelease={() => navigate("release")}
+        onOpenVerification={(resolved) => navigate("testingCoverage", resolved === "System" ? "systemTest" : "softwareTest", undefined,
+          resolved === "LowLevelSoftware" ? "LowLevel" : resolved === "HighLevelSoftware" ? "HighLevel" : undefined)}
       />
     );
   if (view === "admin" && active)

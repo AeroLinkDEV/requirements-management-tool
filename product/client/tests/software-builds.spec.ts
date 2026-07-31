@@ -47,6 +47,21 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
   await expect(page).toHaveURL(build15Url)
   await expect(page.getByLabel('Active build 1.5')).toBeVisible()
 
+  await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
+  await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
+  await page.getByLabel('Search requirements').fill('SYSR-000001')
+  await page.getByRole('button', { name: /SYSR-000001\.00/ }).first().click()
+  await page.getByRole('button', { name: 'Trace & impact' }).click()
+  await page.getByRole('button', { name: /SYSTP-000001\.00.*Open test procedure/ }).click()
+  const procedureHistory = page.getByRole('dialog', { name: /History of SYSTP-000001/ })
+  await expect(procedureHistory).toBeVisible()
+  await expect(procedureHistory.locator('.revisionList li.selectedRevision')).toContainText('SYSTP-000001.00')
+  await expect(procedureHistory.locator('.revisionList li.selectedRevision')).toContainText('Selected exact revision')
+  const procedureUrl = page.url()
+  await page.reload()
+  await expect(page).toHaveURL(procedureUrl)
+  await expect(page.getByRole('dialog', { name: /History of SYSTP-000001/ })).toBeVisible()
+
   const refusal = await page.evaluate(async (base) => {
     const response = await fetch(`${base}/api/scr-drafts`, {
       method: 'POST',
@@ -88,6 +103,20 @@ test('Build 1.6 keeps editing capability, scopes search, and labels predecessor 
 
   if (process.env.AEROLINK_BUILD_16_SCREENSHOT)
     await page.screenshot({ path: process.env.AEROLINK_BUILD_16_SCREENSHOT, fullPage: true })
+})
+
+test('an authenticated invalid build deep link stays authenticated and shows not found', async ({ page }) => {
+  await login(page)
+  const validUrl = new URL(page.url())
+  const parts = validUrl.pathname.split('/')
+  const releaseIndex = parts.indexOf('releases') + 1
+  parts[releaseIndex] = '00000000-0000-0000-0000-000000000000'
+
+  await page.goto(parts.join('/'))
+
+  await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
+  await expect(page.getByLabel('Username')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Return to Command Center' })).toBeVisible()
 })
 
 test('the build lineage stacks without horizontal scrolling on mobile', async ({ page }) => {

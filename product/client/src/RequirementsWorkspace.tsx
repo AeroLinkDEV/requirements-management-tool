@@ -164,7 +164,7 @@ type Props = {
   onOpenRequirement: (id: string) => void;
   onCloseRequirement: () => void;
   onOpenTraceability: (artifactId?: string) => void;
-  onOpenVerification: () => void;
+  onOpenVerification: (procedure?: { procedureId: string; revisionId?: string; displayNumber?: string; level?: string }) => void;
 };
 
 const parseTags = (json: string) => {
@@ -1291,7 +1291,7 @@ export default function RequirementsWorkspace({
                 {impact?.children.map((item) => <button type="button" className="traceRelation linkedArtifact" key={item.id} onClick={() => onOpenRequirement(item.id)}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level} · Open requirement →</small></button>)}
                 {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
                 <h3>Verification coverage</h3>
-                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.revisionId ?? item.id}><button type="button" className="linkedArtifactText" onClick={onOpenVerification}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · Open test procedure →</small></button><small>{unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button onClick={onOpenVerification}>Resolve in Verification →</button>}</article>; })}
+                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; const target = { procedureId: item.id, revisionId: item.revisionId, displayNumber: item.displayNumber, level: item.level }; return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.revisionId ?? item.id}><button type="button" className="linkedArtifactText" onClick={() => onOpenVerification(target)}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · Open test procedure →</small></button><small>{unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button type="button" onClick={() => onOpenVerification(target)}>Resolve in Verification →</button>}</article>; })}
                 {!impact?.tests.length && <div className="traceEmpty attention"><span>No verification procedure currently covers this revision.</span></div>}
               </div>
             )}

@@ -51,6 +51,8 @@
 .procedureHistoryModal h2 { margin: 4px 0 2px; font: 750 20px var(--font-display); }
 .revisionList { display: flex; flex-direction: column; gap: 10px; margin: 16px 0; padding: 0; list-style: none; }
 .revisionList li { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-top: 1px solid var(--line); }
+.revisionList li.selectedRevision { margin-inline: -10px; padding: 10px; border: 1px solid var(--accent, #1769d2); border-radius: 8px; background: rgb(23 105 210 / 5%); }
+.revisionList li.selectedRevision > strong { color: #1769d2; font-size: 12px; }
 .revisionList b { font: 750 14px var(--font-display); }
 .revisionList i { font-style: normal; font-size: 12px; color: var(--ink-500); }
 .revisionList small, .revisionDriver, .revisionCovers { color: var(--ink-500); font-size: 12px; }

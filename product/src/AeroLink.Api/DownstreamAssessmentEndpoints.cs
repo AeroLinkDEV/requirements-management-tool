@@ -17,9 +17,16 @@ public static class DownstreamAssessmentEndpoints
     public static void MapDownstreamAssessmentEndpoints(this WebApplication app)
     {
         app.MapGet("/api/downstream-assessments", async (Guid projectId, Guid releaseId,
-            RequirementLevel? targetLevel, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            RequirementLevel? targetLevel, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var released = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId && x.ProjectId == projectId)
+                .Select(x => (bool?)x.IsReleased).SingleOrDefaultAsync(ct);
+            if (released is null) return Results.NotFound();
+            var actor = http.UserAccount().UserName;
+            var canEngineer = !released.Value && await http.HasProjectRoleAsync(db, identity, projectId, ct,
+                ProgramRole.Engineer, ProgramRole.ProgramManager);
+            var canApprove = !released.Value && await http.HasProjectRoleAsync(db, identity, projectId, ct, ProgramRole.Approver);
             var source = db.DownstreamChangeAssessments.AsNoTracking().Include(x => x.ChangeRequestLinks)
                 .Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId);
             if (targetLevel is not null) source = source.Where(x => x.TargetLevel == targetLevel);
@@ -50,7 +57,20 @@ public static class DownstreamAssessmentEndpoints
                     linkedChangeRequests = x.ChangeRequestLinks.OrderBy(link => link.ChangeRequestNumber).Select(link => new
                     {
                         link.ChangeRequestId, link.ChangeRequestNumber, link.LinkedBy, link.LinkedAt
-                    })
+                    }),
+                    capabilities = new
+                    {
+                        canAssign = canEngineer && x.State == DownstreamAssessmentState.Open && x.AssignedEngineerId == null,
+                        canEdit = canEngineer && x.State == DownstreamAssessmentState.Open
+                            && string.Equals(x.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
+                        canSubmit = canEngineer && x.State == DownstreamAssessmentState.Open
+                            && x.Outcome != DownstreamAssessmentOutcome.Pending
+                            && string.Equals(x.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
+                        canApprove = canApprove && x.State == DownstreamAssessmentState.InReview
+                            && string.Equals(x.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase),
+                        canReturn = canApprove && x.State == DownstreamAssessmentState.InReview
+                            && string.Equals(x.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase)
+                    }
                 };
             }));
         });

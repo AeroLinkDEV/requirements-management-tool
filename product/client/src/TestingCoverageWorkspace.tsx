@@ -13,9 +13,10 @@ type CoverageItem = {
   statement: string
   covered: boolean
   verified: boolean
+  disposition: 'Covered' | 'Suspect' | 'Uncovered'
   coveredBy: { procedureId: string; revisionId: string; displayNumber: string; title: string; state: string; coverageState: 'Confirmed' | 'Suspect' }[]
 }
-type Coverage = { total: number; covered: number; verified: number; uncovered: number; items: CoverageItem[] }
+type Coverage = { total: number; covered: number; suspect: number; verified: number; uncovered: number; items: CoverageItem[] }
 type ChangeRequestCover = { id: string; number: string; originating: boolean }
 type TestChangeRequest = {
   id: string
@@ -27,6 +28,7 @@ type TestChangeRequest = {
   totalItems: number
   resolvedItems: number
   coveredChangeRequests: ChangeRequestCover[]
+  capabilities: { canAssign: boolean; canDecide: boolean; canSubmit: boolean; canApprove: boolean; canReturn: boolean }
 }
 type Procedure = { id: string; revisionId: string; displayNumber: string; title: string; state: string; requirementCount: number; ownerId: string; selectedApproverId?: string }
 type ImpactItem = {
@@ -49,10 +51,15 @@ type Revision = {
   state: string
   authorId: string
   createdAt: string
+  objective: string
+  preconditions: string
+  steps: string
+  expectedResult: string
+  selected: boolean
   drivenBy: { changeRequest: string; package: string; subjectDisplayNumber: string; action: string }[]
   covers: string[]
 }
-type History = { id: string; baseNumber: string; title: string; ownerId: string; createdAt: string; revisions: Revision[] }
+type History = { id: string; baseNumber: string; title: string; ownerId: string; createdAt: string; selectedRevisionId?: string; revisions: Revision[] }
 
 const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'Software HLR' : 'Software LLR'
@@ -108,6 +115,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   // Seeded from the address, so a shared or reloaded worklist opens on the list it names rather than on the
   // unfiltered first page.
   const opening = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()
+  const openingProcedureId = opening.get('procedureId') ?? ''
+  const openingProcedureRevisionId = opening.get('procedureRevisionId') ?? ''
   const [procedureState, setProcedureState] = useState(opening.get('procedureState') ?? '')
   const [procedureOutcome, setProcedureOutcome] = useState(opening.get('procedureOutcome') ?? '')
   const [procedurePage, setProcedurePage] = useState(Number(opening.get('procedurePage') ?? '1') || 1)
@@ -162,9 +171,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       setCoverage({
         items,
         total: items.length,
-        covered: items.filter(x => x.covered).length,
+        covered: items.filter(x => x.disposition === 'Covered').length,
+        suspect: items.filter(x => x.disposition === 'Suspect').length,
         verified: items.filter(x => x.verified).length,
-        uncovered: items.filter(x => !x.covered).length,
+        uncovered: items.filter(x => x.disposition === 'Uncovered').length,
       })
     }
     if (nextRequests) setRequests(nextRequests)
@@ -240,8 +250,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
 
   const mine = requests.filter(x => x.discipline === discipline)
   const unstarted = mine.filter(x => x.state === 'Open' && !x.assignedEngineerId)
-  const uncovered = coverage?.items.filter(x => !x.covered) ?? []
-  const suspect = coverage?.items.filter(x => x.coveredBy.some(link => link.coverageState === 'Suspect')) ?? []
+  const uncovered = coverage?.items.filter(x => x.disposition === 'Uncovered') ?? []
+  const suspect = coverage?.items.filter(x => x.disposition === 'Suspect') ?? []
 
   const act = async (work: () => Promise<void>, failure: string) => {
     if (busy) return
@@ -258,11 +268,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   // which is the state this queue exists to make impossible.
   const takeOn = (request: TestChangeRequest) => act(async () => {
     const items = impact.filter(x => x.testChangeReviewId === request.id && x.state === 'Open')
-    for (const item of items)
-      await apiRequest(`${api}/api/verification-impact/${item.id}/assign`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ engineerId: user.userName }),
-      })
+    await apiRequest(`${api}/api/test-change-reviews/${request.id}/assign`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ engineerId: user.userName }),
+    })
     setSaved(`${request.displayNumber} is yours — ${items.length} decision${items.length === 1 ? '' : 's'}.`)
   }, 'The package could not be assigned.')
 
@@ -338,12 +347,18 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     setSaved(`${procedure.displayNumber} approved and available to run.`)
   }, 'The approval could not be recorded.')
 
-  const openHistory = async (procedureId: string) => {
+  const openHistory = useCallback(async (procedureId: string, procedureRevisionId?: string) => {
     setError('')
-    const response = await fetch(`${api}/api/test-procedures/${procedureId}/history`)
+    const params = new URLSearchParams({ releaseId })
+    if (procedureRevisionId) params.set('revisionId', procedureRevisionId)
+    const response = await fetch(`${api}/api/test-procedures/${procedureId}/history?${params}`)
     if (!response.ok) { setError('That procedure’s history could not be read.'); return }
     setHistory(await response.json())
-  }
+  }, [api, releaseId])
+
+  useEffect(() => {
+    if (openingProcedureId) void openHistory(openingProcedureId, openingProcedureRevisionId || undefined)
+  }, [openHistory, openingProcedureId, openingProcedureRevisionId])
 
   return (
     <main className="testingCoveragePage">
@@ -389,15 +404,15 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               <button type="button" className="quiet" onClick={() => setOpened(current => current === request.id ? '' : request.id)}>
                 {opened === request.id ? 'Hide decisions' : 'Decisions'}
               </button>
-              {!readOnly && request.state === 'Open' && !request.assignedEngineerId && (
+              {request.capabilities.canAssign && (
                 <button type="button" className="quiet" disabled={busy} onClick={() => void takeOn(request)}>Take it on</button>
               )}
               {/* Submission is offered only once every decision is recorded. The server refuses otherwise, and
                   offering an action that will be refused is a worse answer than not offering it. */}
-              {!readOnly && request.state === 'Open' && request.totalItems > 0 && request.resolvedItems === request.totalItems && (
+              {request.capabilities.canSubmit && request.totalItems > 0 && request.resolvedItems === request.totalItems && (
                 <button type="button" disabled={busy} onClick={() => setSubmitting(request)}>Send for approval</button>
               )}
-              {!readOnly && request.state === 'InReview' && request.selectedApproverId === user.userName && (
+              {request.capabilities.canApprove && (
                 <>
                   <button type="button" disabled={busy} onClick={() => {
                     const rationale = window.prompt(`Why is ${request.displayNumber} approved?`)
@@ -421,7 +436,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                       {item.assignedEngineerId ? <> · <PersonName userName={item.assignedEngineerId} /></> : ''}
                       {item.resolutionRationale ? ` · ${item.resolutionRationale}` : ''}
                     </small>
-                    {!readOnly && item.state !== 'Resolved' && (
+                    {request.capabilities.canDecide && item.state !== 'Resolved' && (
                       <button type="button" className="quiet" disabled={busy} onClick={() => {
                         setOutcome(item.trigger === 'ProcedureOrphaned' ? 'ProcedureRetired' : 'ProcedureCoverageConfirmed')
                         setResolving(item)
@@ -430,7 +445,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     {/* A decision can be wrong, and a decision nobody can revisit is a decision people work
                         around. Reopening keeps what was decided in immutable history, returns the item to the
                         release gate, and puts any coverage it claimed back to suspect. */}
-                    {!readOnly && item.state === 'Resolved' && (
+                    {request.capabilities.canDecide && item.state === 'Resolved' && (
                       <button type="button" className="quiet" disabled={busy} onClick={() => setReopening(item)}>Reopen / change decision…</button>
                     )}
                     {!!item.decisionHistory?.length && (
@@ -748,10 +763,13 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <small>Created by <PersonName userName={history.ownerId} /> on {new Date(history.createdAt).toLocaleDateString()}</small>
             <ol className="revisionList">
               {history.revisions.map(revision => (
-                <li key={revision.id}>
+                <li key={revision.id} className={revision.selected ? 'selectedRevision' : undefined}>
                   <b>{revision.displayNumber}</b>
                   <i>{revision.state}</i>
+                  {revision.selected && <strong>{history.revisions[0]?.id === revision.id ? 'Selected exact revision' : 'Selected historical build revision'}</strong>}
                   <small>Written by <PersonName userName={revision.authorId} /> on {new Date(revision.createdAt).toLocaleDateString()}</small>
+                  <p>{revision.objective}</p>
+                  <details><summary>Controlled procedure content</summary><dl><dt>Preconditions</dt><dd>{revision.preconditions}</dd><dt>Steps</dt><dd>{revision.steps}</dd><dt>Expected result</dt><dd>{revision.expectedResult}</dd></dl></details>
                   {/* What made somebody write this revision. Reached through the verification decision that
                       resolved to it, which is the record that actually connects a procedure to a change. */}
                   {revision.drivenBy.length

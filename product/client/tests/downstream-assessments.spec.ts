@@ -1,12 +1,23 @@
 import { expect, test } from '@playwright/test'
 import { apiLogin, login, openNavigationGroup, showcaseSeed } from './auth'
 
-test('software engineers receive build-scoped downstream assessments from approved System changes', async ({page,request}) => {
+test('downstream assessment actions follow authority and submit without a form-navigation no-op', async ({page,request,browser}) => {
   const showcase=await showcaseSeed(request)
   await apiLogin(request)
   const apiResponse=await request.get(`${process.env.AEROLINK_E2E_API_BASE}/api/downstream-assessments?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)
   expect(apiResponse.ok(),await apiResponse.text()).toBeTruthy()
   expect((await apiResponse.json()).length).toBeGreaterThan(0)
+
+  const unauthorizedContext=await browser.newContext()
+  const unauthorized=await unauthorizedContext.newPage()
+  await login(unauthorized,'systems.reviewer')
+  await openNavigationGroup(unauthorized,'SOFTWARE ENGINEERING')
+  await unauthorized.getByRole('link',{name:'Software Change Requests'}).click()
+  const unauthorizedQueue=unauthorized.locator('.downstreamQueue')
+  await expect(unauthorizedQueue.getByRole('button',{name:'Take it on'})).toHaveCount(0)
+  await expect(unauthorizedQueue).toContainText('Software engineering authority is required')
+  await unauthorizedContext.close()
+
   await login(page)
   await openNavigationGroup(page,'SOFTWARE ENGINEERING')
   await page.getByRole('link',{name:'Software Change Requests'}).click()
@@ -18,4 +29,19 @@ test('software engineers receive build-scoped downstream assessments from approv
   await expect(queue.getByRole('button',{name:'Take it on'}).first()).toBeVisible()
   await expect(queue).toContainText('One Draft may answer several assessments')
   await expect(page.getByRole('heading',{name:'Software Change Requests'})).toBeVisible()
+
+  const assessment=queue.locator('.downstreamAssessment').filter({hasText:'SCR-00031.00'}).first()
+  await assessment.getByRole('button',{name:'Take it on'}).click()
+  await expect(assessment.getByRole('button',{name:'No change required'})).toBeVisible()
+  page.once('dialog',async dialog=>{await dialog.accept('No software requirement change is required for this build.')})
+  await assessment.getByRole('button',{name:'No change required'}).click()
+  const approver=assessment.getByLabel(/Approver for SCR-00031\.00/)
+  await approver.fill('software.lead')
+  await assessment.locator('.personSuggestions button[data-user-name="software.lead"]').click()
+  await assessment.getByRole('button',{name:'Send for approval'}).click()
+  await expect(assessment).toContainText('Awaiting approval')
+  await page.reload()
+  const persisted=page.locator('.downstreamAssessment').filter({hasText:'SCR-00031.00'}).first()
+  await expect(persisted).toContainText('Awaiting approval')
+  await expect(persisted.locator('.personName[title="software.lead"]')).toBeVisible()
 })

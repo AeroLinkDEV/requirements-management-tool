@@ -9,6 +9,10 @@ const canonical = (input: RequestInfo | URL) => new URL(address(input), window.l
 const csrfExempt = (url: URL) =>
   url.pathname === '/api/auth/login' || url.pathname === '/api/setup/bootstrap'
 const isApi = (url: URL) => url.pathname.startsWith('/api/')
+const acceptsBuildContext = (url: URL) => isApi(url)
+  && !url.pathname.startsWith('/api/auth/')
+  && url.pathname !== '/api/workspaces'
+  && !url.pathname.startsWith('/api/setup/')
 const routeBuildContext = () => {
   const match = window.location.pathname.match(/^\/programs\/[^/]+\/projects\/[^/]+\/releases\/([^/]+)/i)
   return match ? decodeURIComponent(match[1]) : undefined
@@ -51,7 +55,7 @@ export function installProtectedFetch() {
     const next: RequestInit = { ...init, credentials: init.credentials ?? 'include' }
     const retryInput = input instanceof Request ? input.clone() : input
     const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined))
-    const buildContext = isApi(url) ? routeBuildContext() : undefined
+    const buildContext = acceptsBuildContext(url) ? routeBuildContext() : undefined
     if (buildContext) headers.set('X-AeroLink-Build-Context', buildContext)
 
     if (unsafe.has(method) && isApi(url) && !csrfExempt(url)) {

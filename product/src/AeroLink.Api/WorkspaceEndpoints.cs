@@ -295,7 +295,22 @@ public static class WorkspaceEndpoints
             var authoredDrafts = (await db.SystemChangeRequests.AsNoTracking().Where(x => x.AuthorId == actor.UserName && x.State == ScrState.Draft && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.TargetReleaseId == releaseId))
                 .Select(x => new { id = x.Id, type = "Draft to complete", artifact = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, title = x.Title, priority = "Normal", dueAt = x.UpdatedAt.AddDays(10), ageDays = (int)(now - x.UpdatedAt).TotalDays, route = "scr", discipline = x.Type == ChangeRequestType.Software ? "software" : "system" }).ToListAsync(ct))
                 .OrderByDescending(x => x.dueAt).ToList();
-            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).ToList();
+            var assignedTestWork = (await db.TestChangeReviews.AsNoTracking().Where(x =>
+                    x.AssignedEngineerId == actor.UserName && x.State == TestChangeReviewState.Open
+                    && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.ReleaseId == releaseId))
+                .ToListAsync(ct)).OrderBy(x => x.UpdatedAt).Select(x => new
+                {
+                    id = x.Id,
+                    type = "Test change request",
+                    artifact = x.DisplayNumber,
+                    title = "Resolve verification impact decisions",
+                    priority = "High",
+                    dueAt = x.UpdatedAt.AddDays(5),
+                    ageDays = (int)(now - x.UpdatedAt).TotalDays,
+                    route = "testingCoverage",
+                    discipline = x.Discipline.ToString()
+                }).ToList();
+            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(assignedTestWork).ToList();
             return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now), drafts = authoredDrafts.Count }, tasks });
         });
 
