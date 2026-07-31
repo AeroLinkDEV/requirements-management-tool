@@ -76,17 +76,18 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   // observed nothing, so demanding evidence of it would be demanding evidence of an absence.
   const [outcome, setOutcome] = useState<'Pass' | 'Fail' | 'Blocked'>('Pass')
 
-  // Only the newest reply may write the screen. Typing in the search box starts a request while the previous
-  // one is still in flight, and the broad reply is the slow one — see VerificationCenter for the same guard
-  // and the defect that made it necessary.
-  const ticket = useRef(0)
+  // One ticket per loader, not one for the page. Sharing a counter between two independent loaders makes
+  // each cancel the other: the candidate search runs on mount behind a debounce, bumps the count, and the
+  // set that was already in flight discards what it read — silently, because nothing failed.
+  const loadTicket = useRef(0)
+  const candidateTicket = useRef(0)
 
   const load = useCallback(async () => {
-    const mine = ++ticket.current
+    const mine = ++loadTicket.current
     const response = await fetch(`${api}/api/releases/${releaseId}/test-sets`)
     if (!response.ok) {
       recordClientOperationFailure('verification.testSet.load', new Error(`HTTP ${response.status}`))
-      if (mine === ticket.current) setError('The test set for this build could not be loaded.')
+      if (mine === loadTicket.current) setError('The test set for this build could not be loaded.')
       return
     }
     const body = await response.json()
@@ -94,7 +95,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
     // the procedure rather than about anything that shipped.
     const builds = await fetch(`${api}/api/builds?projectId=${projectId}&releaseId=${releaseId}`)
     const built = builds.ok ? await builds.json() : []
-    if (mine !== ticket.current) return
+    if (mine !== loadTicket.current) return
     setSets(body)
     setBuildId(current => built.some((x: { id: string }) => x.id === current) ? current : built[0]?.id ?? '')
   }, [api, projectId, releaseId])
@@ -102,13 +103,13 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   useEffect(() => { void load() }, [load])
 
   useEffect(() => {
-    const mine = ++ticket.current
+    const mine = ++candidateTicket.current
     const timer = setTimeout(async () => {
       const scope = discipline === 'System' ? 'System' : 'Software'
       const response = await fetch(`${api}/api/test-procedures?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}&search=${encodeURIComponent(query)}&state=Approved&page=1&pageSize=25`)
       if (!response.ok) return
       const paged = await response.json()
-      if (mine !== ticket.current) return
+      if (mine !== candidateTicket.current) return
       setCandidates(paged.items.map((x: { revisionId: string; displayNumber: string; title: string; state: string }) => x))
     }, 200)
     return () => clearTimeout(timer)

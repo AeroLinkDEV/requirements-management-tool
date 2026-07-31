@@ -87,13 +87,19 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
 
-  // Only the newest reply may write the screen — see VerificationCenter for the defect that made this
-  // necessary: a filtered list overwritten by the slower unfiltered reply behind it.
-  const ticket = useRef(0)
+  // One ticket per loader, not one for the page.
+  //
+  // Only the newest reply of a given loader may write the screen — but the two loaders here are independent,
+  // and sharing a counter made each of them cancel the other. The procedure search runs on mount behind a
+  // debounce, bumps the count, and the coverage load that was already in flight then discards everything it
+  // read: no packages, no coverage, no impact, and no error, because nothing failed. It presented as the
+  // software HLR queue being empty while the API demonstrably returned a package for that build.
+  const loadTicket = useRef(0)
+  const procedureTicket = useRef(0)
   const scope = discipline === 'System' ? 'System' : 'Software'
 
   const load = useCallback(async () => {
-    const mine = ++ticket.current
+    const mine = ++loadTicket.current
     const [coverageResponse, requestResponse, impactResponse] = await Promise.all([
       fetch(`${api}/api/verification-coverage?projectId=${projectId}&buildId=${releaseId}`),
       fetch(`${api}/api/releases/${releaseId}/test-change-reviews`),
@@ -102,7 +108,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     const nextCoverage = coverageResponse.ok ? await coverageResponse.json() : undefined
     const nextRequests = requestResponse.ok ? await requestResponse.json() : undefined
     const nextImpact = impactResponse.ok ? await impactResponse.json() : undefined
-    if (mine !== ticket.current) return
+    if (mine !== loadTicket.current) return
     if (nextCoverage) setCoverage(nextCoverage)
     if (nextRequests) setRequests(nextRequests)
     if (nextImpact) setImpact(nextImpact)
@@ -115,12 +121,12 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   useEffect(() => { void load() }, [load])
 
   useEffect(() => {
-    const mine = ++ticket.current
+    const mine = ++procedureTicket.current
     const timer = setTimeout(async () => {
       const response = await fetch(`${api}/api/test-procedures?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}&search=${encodeURIComponent(query)}&page=1&pageSize=25`)
       if (!response.ok) return
       const paged = await response.json()
-      if (mine !== ticket.current) return
+      if (mine !== procedureTicket.current) return
       setProcedures(paged.items)
       setTotal(paged.totalCount)
     }, 200)

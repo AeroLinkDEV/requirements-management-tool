@@ -20,14 +20,10 @@ test('coverage opens on the work the build created, then the inventory behind it
 
   // The queue first: the packages this build's approved changes created.
   await expect(page.getByRole('heading', { name: 'Test change requests' })).toBeVisible()
-  // Whether there are packages depends on what the showcase has approved, and asserting a count here would
-  // be asserting the fixture rather than the page. What the page owes either way is a straight answer: every
-  // package it lists carries its own controlled number, and when there are none it says so rather than
-  // rendering an empty region somebody has to interpret.
+  // Numbered as controlled records rather than borrowing the number of the change that raised them. The
+  // showcase raises one System package for the in-work build, so this is a fact about the page.
   const packages = page.locator('.coverageRow').filter({ hasText: /TCR-/ })
-  const listed = await packages.count()
-  if (listed === 0) await expect(page.getByText(/No System test change requests for this build/)).toBeVisible()
-  else await expect(packages.first()).toContainText(/SYSTCR-\d{6}\.\d{2}/)
+  await expect(packages.first()).toContainText(/SYSTCR-\d{6}\.\d{2}/, { timeout: 30_000 })
 
   // The counts a reader plans against.
   const summary = page.getByRole('region', { name: 'Coverage summary' })
@@ -40,6 +36,41 @@ test('coverage opens on the work the build created, then the inventory behind it
   await page.getByLabel('Find a procedure').fill('SYSTP-000001')
   const row = page.locator('.coverageRow').filter({ hasText: 'SYSTP-000001' })
   await expect(row.first()).toBeVisible({ timeout: 30_000 })
+})
+
+/**
+ * The decisions inside a package, worked on this page.
+ *
+ * A test change request is a package of decisions and its state is the sum of them, so a queue that could
+ * only be looked at was a queue nobody could act on — and the tabbed workspace could not be retired while
+ * the only place to record a decision was inside it.
+ */
+test('a package opens onto its decisions, and each one is an explicit judgement', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
+
+  const first = page.locator('.coverageRow').filter({ hasText: /SYSTCR-/ }).first()
+  await expect(first).toBeVisible({ timeout: 30_000 })
+  await first.getByRole('button', { name: 'Decisions' }).click()
+
+  const undecided = first.locator('.decisionList li').filter({ has: page.getByRole('button', { name: 'Decide' }) })
+  await expect(undecided.first()).toBeVisible({ timeout: 30_000 })
+  await undecided.first().getByRole('button', { name: 'Decide' }).click()
+
+  const decide = page.getByRole('dialog', { name: /Decide / })
+  await expect(decide).toBeVisible({ timeout: 30_000 })
+  // Every value is a judgement somebody made. There is deliberately none meaning "nobody looked", because a
+  // requirement must never reach an approved baseline without a decision against it.
+  await decide.getByLabel('Decision').selectOption('NoTestRequired')
+  await decide.getByLabel('Rationale').fill('Verified by inspection against the approved design note.')
+  await decide.getByRole('button', { name: 'Record decision' }).click()
+
+  await expect(decide).toHaveCount(0, { timeout: 30_000 })
+  await expect(page.getByRole('status')).toContainText('Decision recorded')
 })
 
 /**
@@ -85,6 +116,12 @@ test('software HLR and LLR each have their own coverage page', async ({ page }) 
   await page.getByRole('link', { name: 'Software HLR Testing Coverage' }).click()
   await expect(page).toHaveURL(/software-verification\/hlr\/coverage$/, { timeout: 30_000 })
   await expect(page.getByText('VERIFICATION / SOFTWARE HLR')).toBeVisible()
+  // The showcase raises one HLR package for this build. This page reported none for a while, and nothing had
+  // failed: two loaders on the page shared one "only the newest reply may write the screen" counter, so the
+  // procedure search cancelled the load that was fetching the packages. Asserting the package here is what
+  // stops that returning as an empty queue nobody can distinguish from having no work.
+  await expect(page.locator('.coverageRow').filter({ hasText: /TCR-/ }).first())
+    .toContainText(/HLRTCR-\d{6}\.\d{2}/, { timeout: 30_000 })
 
   await page.getByRole('link', { name: 'Software LLR Testing Coverage' }).click()
   await expect(page).toHaveURL(/software-verification\/llr\/coverage$/, { timeout: 30_000 })
