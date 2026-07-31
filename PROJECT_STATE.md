@@ -1,6 +1,6 @@
 # Project State — Start Here
 
-**Last updated: 2026-07-29.**
+**Last updated: 2026-07-31.**
 
 This is the orientation record for anyone — human or model — picking up AeroLink. It answers *what
 exists, what is true today, what is deliberately not being built, and where to start*. Every other
@@ -180,12 +180,31 @@ is labelled with its originating build without changing workspace context.
 The active navigation deliberately hides Problem Reports, Product Versions, Candidate Baselines and the old
 Change Request Software Builds view (DEC-072). Their implementation remains dormant for potential future reuse;
 it is neither a supported route nor dead code to reconnect or delete without a new decision. Lifecycle Decision
-Room remains visible. Verification now separates governed procedure-alignment reviews from evidence/results:
-approved changes create System, Software HLR, and/or Software LLR Test Change Reviews, while only procedures
-explicitly marked during that review require passing evidence before release (DEC-073).
+Room remains visible.
+
+Verification is two pages per discipline rather than one workspace with four tabs (DEC-077). **Testing
+Coverage** answers "what are this build's requirements tested by, and what test work has nobody picked up" —
+it carries the test change request queue, the requirement coverage inventory, the controlled procedure
+library with its filters and paging, procedure authoring, independent approval, and the verification
+decisions inside each package including reopening one. **Test Results** answers "what does this build have
+to run, and what happened when it was run" — the build test set, the recorded determinations with their
+evidence, run history, retests, and the corrective action a problem report sends somebody here to perform.
+System has one pair; software has two, HLR and LLR, because that work is planned, done and approved
+separately. `/system-verification` and `/software-verification` are now a chooser between the pages rather
+than a workspace of their own.
+
+A build's test work is scoped by a **Build Test Set** — one per build per discipline, a working list rather
+than a controlled artefact, recording who put each procedure in it and why (changed requirement, coverage
+area, corrective action, or simply chosen). The release gates measure that set. The older
+"evidence required before release" flag on an individual decision no longer has a control that sets it; it
+survives server-side only as one of the inputs that seeds a new set (DEC-073 superseded by DEC-076).
+
+Approved changes still create System, Software HLR and/or Software LLR **Test Change Requests** — controlled
+records with their own numbers and revisions, which may cover more than one requirement change request and
+may also be raised by hand when a set of changes is best tested together.
 
 The restart-ready description, routes, issue state and validation evidence are in
-[CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).
+[CURRENT_PRODUCT_HANDOFF_2026-07-31.md](CURRENT_PRODUCT_HANDOFF_2026-07-31.md).
 
 ## The demonstration dataset
 

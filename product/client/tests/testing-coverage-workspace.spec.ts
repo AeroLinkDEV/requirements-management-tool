@@ -165,7 +165,10 @@ test('a procedure is created here as a Draft and needs somebody else to approve 
   const created = page.locator('.procedureLibrary .coverageRow').filter({ hasText: title }).first()
   await expect(created).toBeVisible({ timeout: 30_000 })
   await expect(created).toContainText('Awaiting approval')
-  await expect(created.getByRole('button', { name: 'Review & approve' })).toBeVisible()
+  // Offered to somebody else, not to the author. The product refuses an author signing for their own work, so
+  // the page says why the control is absent rather than presenting one the server would refuse.
+  await expect(created.getByRole('button', { name: 'Review & approve' })).toHaveCount(0)
+  await expect(created).toContainText('Independent approval is required before execution.')
 })
 
 /**

@@ -2,54 +2,66 @@ import { expect, test } from '@playwright/test'
 import { apiLogin, login, openNavigationGroup, selectProgram } from './auth'
 
 /**
- * Verification opens on the work an approved change created.
+ * Verification is a fork, not a workspace.
  *
- * It used to open on requirement coverage — the inventory of what the release contains — with the outstanding
- * count shown only as a badge on a tab nobody had reason to click. Somebody arriving to do verification work
- * saw a table of everything and no sign of the items the last approval had just made their problem.
- *
- * The inventory has not gone anywhere. It is one tab across, which is the right distance for a question asked
- * occasionally rather than the first thing in the way.
+ * It used to be one page with four tabs, and which tab held an answer was something a reader had to know
+ * before they could ask. The two questions people actually arrive with — "what is tested, and what has nobody
+ * picked up?" and "what did we run, and what happened?" — are now two pages, and this is the choice between
+ * them. Nothing is computed on the chooser on purpose: waiting on counts would make the reader wait to be
+ * shown two links they were always going to be shown.
  */
-test('verification opens on the queue the release created, grouped by cause', async ({ page, request }) => {
+test('verification offers the two pages by name, and both open on real work', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'VERIFICATION')
+  await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('link', { name: 'System Verification' }).click()
-  await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
 
-  // Landing on the queue, without anybody clicking a tab.
-  await expect(page.getByRole('heading', { name: 'Test procedure alignment' })).toBeVisible({ timeout: 30_000 })
-  await expect(page.locator('.impactSummary')).toBeVisible()
+  const cards = page.locator('.landingCards button')
+  await expect(cards).toHaveCount(2)
+  await expect(cards.nth(0)).toContainText('Testing Coverage')
+  await expect(cards.nth(1)).toContainText('Test Results')
 
-  const summary = page.locator('.impactSummary article')
-  await expect(summary).toHaveCount(4)
-  await expect(summary.nth(0)).toContainText('Undecided')
-  await expect(summary.nth(3)).toContainText('Release gate')
+  await cards.nth(0).click()
+  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
+  expect(page.url()).toContain('/system-verification/coverage')
 
-  // The demonstration release carries impact items, so the grouping below is genuinely exercised rather than
-  // skipped past. Asserted rather than assumed, because a check that passes by finding nothing to look at is
-  // worse than no check — this suite has already produced one of those.
-  const rows = page.locator('.impactRow')
-  const rowCount = await rows.count()
-  expect(rowCount, 'FMSLIVE should carry verification impact for the in-work release').toBeGreaterThan(0)
+  // The queue is above the inventory, because a reader arriving to do work needs what nobody has picked up
+  // before they need the wall of everything. Asserted rather than assumed: a check that passes by finding
+  // nothing to look at is worse than no check, and this suite has already produced one of those.
+  await expect(page.getByRole('heading', { name: 'Test change requests' })).toBeVisible()
+  // Waited for rather than counted: count() does not retry, so reading it the moment the heading paints
+  // reports zero packages on a build that has them — which is indistinguishable from a genuinely empty queue.
+  const packages = page.locator('.coverageRow').filter({ hasText: /TCR-/ })
+  await expect(packages.first(), 'FMSLIVE should carry test change work for the in-work build').toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Test procedures' })).toBeVisible()
 
-  // Grouped by what created the work, because the three causes need different things done to them.
-  expect(await page.locator('.impactGroup').count(), 'items should be grouped by cause').toBeGreaterThan(0)
-  const headings = await page.locator('.impactGroupHead b').allInnerTexts()
-  expect(
-    headings.every(heading =>
-      /New requirements need a procedure|Changed requirements|Retired requirements|New requirement verification decisions|Changed requirement verification decisions|Retired requirement procedure decisions/.test(heading),
-    ),
-    `unexpected group headings: ${headings.join(' | ')}`,
-  ).toBeTruthy()
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
+  await page.locator('.landingCards button').nth(1).click()
+  await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
+  expect(page.url()).toContain('/system-verification/results')
+})
 
-  // Every row sits inside exactly one group, so nothing is stranded outside the grouping.
-  expect(await page.locator('.impactGroup .impactRow').count()).toBe(rowCount)
+/**
+ * Software is four destinations rather than two with a switch on them, because HLR and LLR test work is
+ * planned, done and approved by different people.
+ */
+test('software verification offers an HLR pair and an LLR pair', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  await apiLogin(request)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('button', { name: 'Software', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
 
-  // The coverage inventory is still reachable, one tab across.
-  await page.getByRole('button', { name: /Requirement coverage/ }).click()
-  await expect(page.getByRole('heading', { name: 'Requirement coverage' })).toBeVisible()
+  await expect(page.locator('.landingCards button')).toHaveCount(4)
+  const llr = page.locator('section').filter({ hasText: 'Software LLR' }).last()
+  await llr.getByRole('button', { name: /Open Test Results/ }).click()
+  await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
+  expect(page.url()).toContain('/software-verification/llr/results')
+  await expect(page.getByText('VERIFICATION / SOFTWARE LLR')).toBeVisible()
 })

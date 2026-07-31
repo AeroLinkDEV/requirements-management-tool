@@ -8,19 +8,28 @@ type Result={id:string;kind:string;identifier:string;title:string;state:string;d
 type Props={api:string;context:RouteContext;open:boolean;onClose:()=>void;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void}
 type PaletteEntry={key:string;category:'page'|'artifact';label:string;detail:string;state?:string;view:View;discipline:Discipline;artifactId?:string;artifactKind?:string;icon:string;updatedAt?:string}
 
-const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:string;icon:string}[]=[
+const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:string;icon:string;artifactKind?:string}[]=[
   {label:'Command Center',view:'dashboard',discipline:'system',detail:'Program health and next actions',icon:'⌂'},
   {label:'My Work',view:'mywork',discipline:'system',detail:'Reviews, signatures, and owned drafts',icon:'◎'},
   {label:'System Requirements Explorer',view:'requirements',discipline:'system',detail:'Read, trace, and compare controlled system requirements',icon:'≡'},
   {label:'Software Requirements Explorer',view:'requirements',discipline:'software',detail:'Read, trace, and compare controlled HLRs and LLRs',icon:'≡'},
-  {label:'System Verification',view:'verification',discipline:'systemTest',detail:'Coverage, procedures, and immutable results',icon:'✓'},
-  {label:'Software Verification',view:'verification',discipline:'softwareTest',detail:'Software coverage and test evidence',icon:'✓'},
+  {label:'System Verification',view:'verification',discipline:'systemTest',detail:'The two halves of system test work',icon:'✓'},
+  {label:'Software Verification',view:'verification',discipline:'softwareTest',detail:'The two halves of software test work, HLR and LLR',icon:'✓'},
+  // The pages themselves, not only the fork between them. Somebody who knows they want results should not
+  // have to arrive at a chooser first, and the software pairs are separate destinations rather than one page
+  // with a switch on it.
+  {label:'System Testing Coverage',view:'testingCoverage',discipline:'systemTest',detail:'What the requirements are tested by, and what nobody has picked up',icon:'◫'},
+  {label:'System Test Results',view:'testResults',discipline:'systemTest',detail:'What this build runs, and the determinations recorded against it',icon:'▦'},
+  {label:'Software HLR Testing Coverage',view:'testingCoverage',discipline:'softwareTest',artifactKind:'HighLevel',detail:'High-level software requirement coverage and test change requests',icon:'◫'},
+  {label:'Software HLR Test Results',view:'testResults',discipline:'softwareTest',artifactKind:'HighLevel',detail:'High-level software test set and recorded determinations',icon:'▦'},
+  {label:'Software LLR Testing Coverage',view:'testingCoverage',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Low-level software requirement coverage and test change requests',icon:'◫'},
+  {label:'Software LLR Test Results',view:'testResults',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Low-level software test set and recorded determinations',icon:'▦'},
   {label:'Digital Thread',view:'lifecycle',discipline:'system',detail:'Traceability and outputs across the released evidence path',icon:'↗'},
   {label:'Lifecycle Decision Room',view:'release',discipline:'system',detail:'Release readiness, change impact, evidence, and authority',icon:'◆'},
   {label:'System Operations',view:'enterprise',discipline:'system',detail:'Operational controls and integrity',icon:'◈'},
 ]
 
-const commandEntries:PaletteEntry[]=commandDefinitions.map(item=>({...item,key:`page-${item.view}-${item.discipline}`,category:'page'}))
+const commandEntries:PaletteEntry[]=commandDefinitions.map(item=>({...item,key:`page-${item.view}-${item.discipline}-${item.artifactKind??''}`,category:'page'}))
 const recentKey='aerolink-recent-destinations'
 const hiddenViews=new Set<View>(['planning','baselines','problemReports'])
 const hiddenArtifactKinds=new Set(['baseline','build','problem-report'])
@@ -42,7 +51,7 @@ export default function CommandPalette({api,context,open,onClose,onNavigate}:Pro
   const remember=(entry:PaletteEntry)=>{const next=[entry,...readRecent().filter(item=>item.key!==entry.key)].slice(0,5);localStorage.setItem(recentKey,JSON.stringify(next));setRecent(next)}
   const openEntry=(entry:PaletteEntry)=>{remember(entry);onNavigate(entry.view,entry.discipline,entry.artifactId,entry.artifactKind);onClose()}
   const keyDown=(event:React.KeyboardEvent<HTMLInputElement>)=>{if(event.key==='Escape'){onClose();return}if(event.key==='ArrowDown'){event.preventDefault();setActiveIndex(index=>(index+1)%Math.max(entries.length,1))}if(event.key==='ArrowUp'){event.preventDefault();setActiveIndex(index=>(index-1+Math.max(entries.length,1))%Math.max(entries.length,1))}if(event.key==='Enter'&&active){event.preventDefault();openEntry(active)}}
-  const render=(entry:PaletteEntry,index:number)=><a key={entry.key} href={entry.category==='artifact'?artifactPath(context,entry.artifactKind!,entry.artifactId!,entry.discipline):routePath(context,entry.view,entry.discipline)} data-active={index===activeIndex} aria-current={index===activeIndex?'true':undefined} onMouseEnter={()=>setActiveIndex(index)} onFocus={()=>setActiveIndex(index)} onClick={event=>{event.preventDefault();openEntry(entry)}}><i className={entry.category==='artifact'?'kind':''}>{entry.icon}</i><div><b>{entry.label}</b><span>{entry.detail}</span></div>{entry.state&&<em>{stateLabel(entry.state)}</em>}</a>
+  const render=(entry:PaletteEntry,index:number)=><a key={entry.key} href={entry.category==='artifact'?artifactPath(context,entry.artifactKind!,entry.artifactId!,entry.discipline):routePath(context,entry.view,entry.discipline,undefined,entry.artifactKind)} data-active={index===activeIndex} aria-current={index===activeIndex?'true':undefined} onMouseEnter={()=>setActiveIndex(index)} onFocus={()=>setActiveIndex(index)} onClick={event=>{event.preventDefault();openEntry(entry)}}><i className={entry.category==='artifact'?'kind':''}>{entry.icon}</i><div><b>{entry.label}</b><span>{entry.detail}</span></div>{entry.state&&<em>{stateLabel(entry.state)}</em>}</a>
   let cursor=0
   return <div className="paletteBackdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose()}} role="presentation"><section className="commandPalette" role="dialog" aria-modal="true" aria-label="Quick navigation"><header><span aria-hidden="true">⌕</span><input ref={input} value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search pages, change requests, requirements, and tests…" onKeyDown={keyDown} aria-label="Search AeroLink"/><kbd>Esc</kbd></header><div className="paletteWorkspace"><div className="paletteResults">
     {showingRecent&&<div className="paletteGroup"><small>RECENT DESTINATIONS</small>{recent.map(entry=>render(entry,cursor++))}</div>}

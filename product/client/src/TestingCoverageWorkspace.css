@@ -73,3 +73,50 @@
 .decisionModal label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-500); }
 .decisionModal textarea { min-height: 80px; }
 .decisionActions { display: flex; gap: 8px; margin-top: 6px; }
+
+/* Browsing the inventory. The software side renders 440 of these, so finding one had to stop meaning
+   scrolling — search narrows by name, the two filters narrow by what somebody actually wants to see. */
+.procedureFilters { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin: 10px 0 6px; }
+.procedureFilters label { display: flex; flex-direction: column; gap: 4px; }
+.procedureFilters label span { color: var(--ink-600); font-size: 12px; font-weight: 650; }
+.procedureFilters select { min-height: 34px; border: 1px solid #d9e1e9; border-radius: 8px; background: white; padding: 0 8px; font-size: 13px; }
+.procedurePager { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 10px; }
+.procedurePager span { color: var(--ink-600); font-size: 12px; }
+
+/* What was decided before now, kept where the decision is. A reopened item without its history reads as if
+   nobody ever decided anything, which is the opposite of what an auditable record is for. */
+.decisionHistory { grid-column: 1 / -1; margin-top: 6px; }
+.decisionHistory summary { color: var(--ink-600); font-size: 12px; cursor: pointer; }
+.decisionHistory article { border-left: 2px solid var(--line-200); margin-top: 6px; padding-left: 10px; }
+.decisionHistory article b { display: block; color: var(--ink-900); font-size: 13px; }
+.decisionHistory article span { color: var(--ink-500); font-size: 12px; }
+.decisionHistory article p { margin: 3px 0 0; color: var(--ink-600); font-size: 12px; line-height: 1.45; }
+
+/* Said rather than hidden, so an absent control reads as authority rather than as a missing feature. */
+.procedureHold { max-width: 320px; color: #7a5a13; font-size: 12px; line-height: 1.45; }
+
+/* Said plainly when a build has nothing materialized. An empty requirement list in the create form reads as a
+   broken page; this reads as work that has not happened yet. */
+.materializationPrerequisite {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, .65fr);
+  gap: 20px;
+  margin-top: 14px;
+  border: 1px solid #d6c186;
+  border-left: 4px solid #a97716;
+  border-radius: 10px;
+  background: #fffaf0;
+  padding: 16px 18px;
+  color: #394b5e;
+}
+.materializationPrerequisite p { margin: 5px 0 0; font-size: 13px; line-height: 1.55; }
+.materializationPrerequisite > div:last-child { border-left: 1px solid #e1d3ab; padding-left: 20px; }
+.materializationPrerequisite span {
+  display: block;
+  margin-bottom: 5px;
+  color: #765613;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}

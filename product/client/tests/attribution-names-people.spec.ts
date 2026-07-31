@@ -16,16 +16,15 @@ test("test procedure authorship names a person rather than the account that sign
   await apiLogin(request);
   await login(page, 'admin', { openProject: false });
   await selectProgram(page, "Flight Management System Live Program");
-  await openNavigationGroup(page, "VERIFICATION");
-  await page.getByRole("link", { name: "System Verification" }).click();
-  await expect(page.getByRole("heading", { name: "Verification & Evidence" })).toBeVisible({ timeout: 30_000 });
+  await openNavigationGroup(page, "ASSURANCE");
+  await page.getByRole("link", { name: "System Testing Coverage" }).click();
+  await expect(page.getByRole("heading", { name: "Testing Coverage" })).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole("button", { name: /Test procedures/ }).click();
-  const rows = page.locator(".procedureRow");
+  const rows = page.locator(".procedureLibrary .coverageRow");
   await expect(rows.first()).toBeVisible();
 
   await expect(rows.first().getByText("Ethan Brooks")).toBeVisible();
   // The account stays reachable for anyone reconciling against the identity provider, just not as the label.
   await expect(rows.first().locator(".personName")).toHaveAttribute("title", "test.author");
-  await expect(page.locator(".procedureRow", { hasText: "authored by test.author" })).toHaveCount(0);
+  await expect(page.locator(".procedureLibrary .coverageRow", { hasText: "authored by test.author" })).toHaveCount(0);
 });

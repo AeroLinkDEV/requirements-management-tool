@@ -47,3 +47,42 @@ test('legacy context-free change-request routes remain loadable until detail can
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/change-requests/legacy-a'))
     .toMatchObject({ view: 'scr', discipline: 'system', artifactId: 'legacy-a' })
 })
+
+/**
+ * The six verification pages, and the corrective action that hangs off one of them.
+ *
+ * The software level rides on artifactKind rather than on a Discipline value, so a round trip through the
+ * address is the only thing that proves HLR and LLR are actually distinct destinations rather than the same
+ * page reached twice.
+ */
+test('each verification page round-trips, and a results route may carry a problem report', () => {
+  const pages = [
+    { view: 'testingCoverage', discipline: 'systemTest', kind: undefined, path: 'system-verification/coverage' },
+    { view: 'testResults', discipline: 'systemTest', kind: undefined, path: 'system-verification/results' },
+    { view: 'testingCoverage', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/coverage' },
+    { view: 'testResults', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/results' },
+    { view: 'testingCoverage', discipline: 'softwareTest', kind: 'LowLevel', path: 'software-verification/llr/coverage' },
+    { view: 'testResults', discipline: 'softwareTest', kind: 'LowLevel', path: 'software-verification/llr/results' },
+  ] as const
+
+  for (const page of pages) {
+    const address = routePath(context, page.view, page.discipline, undefined, page.kind)
+    expect(address).toBe(`/programs/program-a/projects/project-a/releases/release-a/${page.path}`)
+    expect(parseRoute(address)).toMatchObject(
+      page.kind
+        ? { view: page.view, discipline: page.discipline, artifactKind: page.kind }
+        : { view: page.view, discipline: page.discipline },
+    )
+  }
+
+  // The branch root is the chooser between the two, and carries nothing else.
+  expect(routePath(context, 'verification', 'systemTest')).toBe('/programs/program-a/projects/project-a/releases/release-a/system-verification')
+  expect(parseRoute(routePath(context, 'verification', 'softwareTest'))).toMatchObject({ view: 'verification', discipline: 'softwareTest' })
+
+  // "results" must not be read as the name of a problem report, which is why the page routes are matched
+  // before the rule that reads a trailing segment as one.
+  const corrective = routePath(context, 'testResults', 'softwareTest', 'report-a', 'LowLevel')
+  expect(corrective).toBe('/programs/program-a/projects/project-a/releases/release-a/software-verification/llr/results/report-a')
+  expect(parseRoute(corrective)).toMatchObject({ view: 'testResults', discipline: 'softwareTest', artifactKind: 'LowLevel', artifactId: 'report-a' })
+  expect(parseRoute(routePath(context, 'testResults', 'systemTest', 'report-b'))).toMatchObject({ view: 'testResults', discipline: 'systemTest', artifactId: 'report-b' })
+})

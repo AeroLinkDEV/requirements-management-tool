@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PersonName } from './People'
+import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import './TestResultsWorkspace.css'
 
@@ -46,6 +47,20 @@ type Execution = {
   evidence: { id: string; originalFileName: string }[]
 }
 type Candidate = { revisionId: string; displayNumber: string; title: string; state: string }
+/// What a problem report is asking somebody to do here: run a named procedure again and record the result.
+type CorrectiveAction = {
+  problemReportId: string
+  problemReportNumber: string
+  available: boolean
+  discipline: string | null
+  reason: string
+  executionId?: string
+  procedureId?: string
+  procedureRevisionId?: string
+  procedureNumber?: string
+  procedureTitle?: string
+  requiredRole: string
+}
 
 /// Why a procedure was chosen, said the way somebody would say it.
 const reasonLabel = (reason: string) => reason === 'ChangedRequirement' ? 'Covers a change'
@@ -65,15 +80,23 @@ const reasonLabel = (reason: string) => reason === 'ChangedRequirement' ? 'Cover
  * progresses, and a procedure added after a defect is found is the normal case rather than an exception.
  * Every entry records who put it there and why, so the shape of the plan survives the people who made it.
  */
-export default function TestResultsWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, onOpenProcedure }: {
+export default function TestResultsWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, programId, user, correctiveProblemReportId, onOpenProcedure }: {
   api: string
   projectId: string
   releaseId: string
   discipline: TestDiscipline
   buildName: string
   readOnly: boolean
+  programId: string
+  user: AuthUser
+  /// Carried in the route, so refreshing or going back returns to the same remediation.
+  correctiveProblemReportId?: string
   onOpenProcedure?: (procedureRevisionId: string) => void
 }) {
+  // Recording a determination is a Test Engineer's act, and the server refuses anybody else. Reflected here
+  // so the page says who may do it rather than offering a control that answers 403.
+  const roles = user.programs.find(program => program.programId === programId)?.roles ?? []
+  const canTest = !readOnly && (user.isAdministrator || roles.includes('TestEngineer'))
   const [sets, setSets] = useState<TestSet[]>([])
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [query, setQuery] = useState('')
@@ -92,6 +115,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   // Set when a retest supersedes a specific earlier run rather than simply the latest one, which is what a
   // corrective action does: it answers a named failure, not "whatever happened last".
   const [supersedes, setSupersedes] = useState<Execution>()
+  const [corrective, setCorrective] = useState<CorrectiveAction>()
 
   // One ticket per loader, not one for the page. Sharing a counter between two independent loaders makes
   // each cancel the other: the candidate search runs on mount behind a debounce, bumps the count, and the
@@ -123,6 +147,21 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   }, [api, projectId, releaseId])
 
   useEffect(() => { void load() }, [load])
+
+  // Arriving from a problem report. The page says which record is being corrected and offers the retest
+  // against the procedure that failed, rather than leaving somebody to find it among everything the build
+  // runs. A corrective retest answers a named execution, which is why the run itself is carried.
+  useEffect(() => {
+    if (!correctiveProblemReportId) { setCorrective(undefined); return }
+    let cancelled = false
+    void (async () => {
+      const response = await fetch(`${api}/api/problem-reports/${correctiveProblemReportId}/corrective-action`)
+      if (!response.ok || cancelled) return
+      const target = await response.json() as CorrectiveAction
+      if (!cancelled) setCorrective(target)
+    })()
+    return () => { cancelled = true }
+  }, [api, correctiveProblemReportId])
 
   useEffect(() => {
     const mine = ++candidateTicket.current
@@ -213,6 +252,25 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
       {error && <div className="workspaceError" role="alert" aria-live="assertive">{error}</div>}
       {saved && <div className="workspaceSaved" role="status">{saved}</div>}
 
+      {corrective && (
+        <section className="correctiveBanner" role="status" aria-label="Corrective verification action">
+          <div>
+            <p className="eyebrow">CORRECTING {corrective.problemReportNumber}</p>
+            <b>{corrective.procedureNumber
+              ? `Record a passing successor execution against ${corrective.procedureNumber}`
+              : 'Record a passing successor execution'}</b>
+            <p>{corrective.reason}</p>
+          </div>
+          {(() => {
+            if (readOnly) return <span className="correctiveHint">This build is released. Its results are read-only.</span>
+            const target = set?.procedures.find(x => x.procedureRevisionId === corrective.procedureRevisionId)
+            if (!target) return <span className="correctiveHint">Add {corrective.procedureNumber ?? 'the procedure'} to this build&apos;s test set below, then record its result.</span>
+            const failed = executions.find(x => x.id === corrective.executionId)
+            return <button type="button" disabled={busy} onClick={() => { setOutcome('Pass'); setSupersedes(failed); setRecording(target) }}>Record successor execution →</button>
+          })()}
+        </section>
+      )}
+
       <section className="testSetSummary" aria-label="Test set progress">
         <article><b>{set?.procedures.length ?? 0}</b><span>In the test set</span></article>
         <article><b>{run.length}</b><span>Recorded</span></article>
@@ -245,12 +303,15 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
               {procedure.hasEvidence ? ' · evidence attached' : procedure.latestOutcome ? ' · no evidence yet' : ''}
             </small>
             <div className="testSetRowActions">
-              {!readOnly && (
-                <button type="button" disabled={busy} onClick={() => { setOutcome("Pass"); setRecording(procedure) }}>
-                  {procedure.latestOutcome ? 'Record retest' : 'Record result'}
-                </button>
+              {!readOnly && (canTest
+                ? (
+                  <button type="button" disabled={busy} onClick={() => { setOutcome("Pass"); setRecording(procedure) }}>
+                    {procedure.latestOutcome ? 'Record retest' : 'Record result'}
+                  </button>
+                )
+                : <span className="procedureHold">Test Engineer authority is required to record results in this Program.</span>
               )}
-              {!readOnly && procedure.latestExecutionId && !procedure.hasEvidence && (
+              {canTest && procedure.latestExecutionId && !procedure.hasEvidence && (
                 <label className="evidenceAttach">
                   <span>Attach evidence</span>
                   <input type="file" aria-label={`Attach evidence for ${procedure.displayNumber}`} onChange={event => {
@@ -282,7 +343,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
                       <small><PersonName userName={run.executedBy} /> · {run.determination}</small>
                       {run.evidence.length > 0 && <span className="runEvidence">{run.evidence.length} evidence file{run.evidence.length === 1 ? '' : 's'}</span>}
                       {run.retestOfExecutionId && <span className="runEvidence">retest</span>}
-                      {!readOnly && run.outcome !== 'Pass' && (
+                      {canTest && run.outcome !== 'Pass' && (
                         <button type="button" className="quiet" disabled={busy} onClick={() => { setOutcome('Pass'); setSupersedes(run); setRecording(procedure) }}>Retest this run</button>
                       )}
                     </li>
@@ -355,7 +416,18 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
                 <option value="Blocked">Blocked</option>
               </select>
             </label>
-            <label>Executed at<input type="datetime-local" name="executedAt" defaultValue={localWallTimeNow()} required /></label>
+            {/* Who is signing this determination, stated rather than assumed. It is the authenticated account
+                either way — the server takes it from the session — but somebody recording a result on a
+                shared rig needs to see whose name is going on it before they commit. */}
+            <label>Executed by / human determination owner
+              <input value={`${user.displayName} (${user.userName})`} readOnly aria-readonly="true" />
+            </label>
+            <label>Execution time
+              <input type="datetime-local" name="executedAt" defaultValue={localWallTimeNow()} required />
+              {/* The field is a wall clock and the record is an instant. Saying which zone the wall clock is
+                  in is the difference between a reader trusting the time and having to work it out. */}
+              <small>Local time, {Intl.DateTimeFormat().resolvedOptions().timeZone}. Stored as an exact instant.</small>
+            </label>
             <label>Configuration under test<input name="configuration" placeholder="Build, rig, data set" required /></label>
             <label>Determination<textarea name="determination" placeholder="What the run showed, and why it means what it means." required /></label>
             <label>Evidence reference{outcome === "Blocked" ? " (optional)" : ""}<input name="evidenceReference" placeholder="Where the recorded evidence lives" required={outcome !== "Blocked"} /></label>

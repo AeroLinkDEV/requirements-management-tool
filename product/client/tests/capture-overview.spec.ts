@@ -50,19 +50,9 @@ test('capture the product surfaces used by the overview video', async ({ page })
   await page.locator('.historyRow').first().click()
   await shot('change-request-detail')
 
-  // Verification renders nothing until a materialized baseline is chosen, so choose one before capturing.
-  await page.goto(new URL(root + '/system-verification', page.url()).toString(), { waitUntil: 'load' })
-  await page.waitForTimeout(2200)
-  await page.locator('select').first().selectOption({ label: '1.5 · Released' })
-  await page.waitForTimeout(2600)
-  for (const [tab, name] of [
-    ['Test procedures', 'verification-procedures'],
-    ['Evidence & results', 'verification-executions'],
-  ] as const) {
-    await page.getByRole('button', { name: new RegExp(tab, 'i') }).first().click()
-    await page.waitForTimeout(2400)
-    await shot(name)
-  }
+  // The two pages a build's verification work splits into, each addressable in its own right.
+  await visit('/system-verification/coverage', 'verification-coverage', 2600)
+  await visit('/system-verification/results', 'verification-results', 2600)
 
   expect(true).toBe(true)
 })

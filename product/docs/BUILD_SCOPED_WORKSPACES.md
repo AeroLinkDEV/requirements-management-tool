@@ -80,9 +80,10 @@ discipline: System, Software HLR, or Software LLR. A mixed-level software reques
 independent reviews. Verification engineers decide whether to create, link, modify, retire, or omit a test
 procedure; the review cannot be submitted until every item is decided, and an approver closes it.
 
-Procedure alignment is always a release gate. Execution evidence is a release gate only for the subset of
-procedures explicitly marked **Evidence required before software-build release** during the Test Change Review.
-All other execution/evidence work may continue after release. A failed post-release test remains evidence
+Procedure alignment is always a release gate. Execution evidence is a release gate for the build's **test
+set** — the procedures somebody decided this build has to run (DEC-076). The older per-decision mark,
+**Evidence required before software-build release**, no longer has a control that sets it and survives only as
+one of the inputs that seeds a new set. Execution work outside the set may continue after release. A failed post-release test remains evidence
 against that released software build. If software caused the failure, correction is made through a change
 request in a later software build; the released build is never rewritten.
 

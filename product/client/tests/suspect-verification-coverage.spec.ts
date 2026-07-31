@@ -111,65 +111,62 @@ test('modified requirement coverage stays suspect until an exact approved proced
 
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'VERIFICATION')
-  await page.getByRole('link', { name: 'System Verification' }).click()
-  // No baseline selector any more: verification is scoped to the build being read, and that build has exactly
-  // one software build — the one materialized above.
-  await page.getByRole('button', { name: /Requirement coverage/ }).click()
-  const coverageRow = page.locator('.coverageRow').filter({ hasText: `${baseNumber}.${String(revision).padStart(2, '0')}` })
-  await expect(coverageRow.getByText('Suspect', { exact: true })).toBeVisible()
-  const selectedProcedureLink = coverageRow.locator('small').filter({ hasText: approvedProcedure.displayNumber })
-  await expect(selectedProcedureLink).toContainText('Suspect applicability')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
 
-  await coverageRow.getByRole('button', { name: /Resolve in Procedure alignment/ }).click()
-  const impactRow = page.locator('.impactRow').filter({ hasText: `${baseNumber}.${String(revision).padStart(2, '0')}` })
-  await expect(impactRow).toBeVisible()
-  await impactRow.getByRole('button', { name: /Record decision/ }).click()
-  const decision = page.getByRole('dialog', { name: 'Record verification decision' })
-  await decision.getByLabel('Decision').selectOption('ProcedureCoverageConfirmed')
-  await decision.getByLabel('Covering procedure').selectOption(approvedProcedure.procedureId)
-  await decision.getByLabel('Rationale').fill('The exact approved procedure still exercises the clarified deterministic response.')
-  await decision.getByRole('button', { name: 'Record decision' }).click()
+  // The whole inventory, because this requirement is covered — it is the applicability of that coverage that
+  // is in question, and the page opens on what has no coverage at all.
+  const subject = `${baseNumber}.${String(revision).padStart(2, '0')}`
+  const showAll = page.getByRole('button', { name: /Show all \d+ requirements/ })
+  await expect(showAll).toBeVisible({ timeout: 30_000 })
+  await showAll.click()
+  const coverageRow = page.locator('.fullCoverage .coverageRow').filter({ hasText: subject })
+  await expect(coverageRow.getByText('Suspect', { exact: true })).toBeVisible({ timeout: 30_000 })
 
-  await expect(impactRow.locator('.impactState').getByText('Coverage confirmed', { exact: true })).toBeVisible()
-  await expect(impactRow.locator('.impactAssignment')).toContainText('Assigned to')
-  await expect(impactRow.getByText('Exact procedure coverage', { exact: true })).toBeVisible()
-  await expect(impactRow).toContainText(approvedProcedure.displayNumber)
-  await expect(impactRow).toContainText(approvedProcedure.revisionId)
-  await expect(impactRow).toContainText('Decided by')
-  await impactRow.getByRole('button', { name: /Open selected procedure/ }).click()
-  const focusedProcedure = page.locator('.procedureRow.focused')
-  await expect(focusedProcedure).toContainText(approvedProcedure.displayNumber)
-  await expect(focusedProcedure).toContainText(approvedProcedure.title)
+  // The decision itself is made inside the package that raised it, which is where the work is queued.
+  const decisionRow = page.locator('.decisionList li').filter({ hasText: subject })
+  const openPackage = async () => {
+    if (await decisionRow.count() > 0 && await decisionRow.first().isVisible()) return
+    for (const button of await page.locator('.coverageRow').getByRole('button', { name: /decision/i }).all()) {
+      await button.click()
+      if (await decisionRow.count() > 0 && await decisionRow.first().isVisible()) return
+    }
+  }
+  await openPackage()
+  await expect(decisionRow.first()).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole('button', { name: /^Procedure alignment/ }).click()
-  await impactRow.getByRole('button', { name: /Reopen \/ change decision/ }).click()
+  const decide = async (rationale: string) => {
+    await decisionRow.first().getByRole('button', { name: 'Decide' }).click()
+    const dialog = page.getByRole('dialog', { name: `Decide ${subject}` })
+    await dialog.getByLabel('Decision').selectOption('ProcedureCoverageConfirmed')
+    await dialog.getByLabel('Covering procedure').selectOption(approvedProcedure.procedureId)
+    await dialog.getByLabel('Rationale').fill(rationale)
+    await dialog.getByRole('button', { name: 'Record decision' }).click()
+    await expect(dialog).toHaveCount(0, { timeout: 30_000 })
+  }
+
+  await decide('The exact approved procedure still exercises the clarified deterministic response.')
+  await expect(decisionRow.first()).toContainText('Coverage confirmed')
+
+  // A decision can be reconsidered. What was decided stays in history, and the requirement returns to suspect.
+  await decisionRow.first().getByRole('button', { name: /Reopen \/ change decision/ }).click()
   const reopen = page.getByRole('dialog', { name: 'Reopen verification decision' })
   await reopen.getByLabel('Reopen rationale').fill(
     'A second review must preserve the first decision while restoring the release gate.',
   )
   await reopen.getByRole('button', { name: 'Reopen decision' }).click()
-  await expect(impactRow.getByText(/Assigned · admin/)).toBeVisible()
-  await expect(impactRow.getByRole('button', { name: /Record decision/ })).toBeVisible()
+  await expect(reopen).toHaveCount(0, { timeout: 30_000 })
+  await expect(decisionRow.first().getByRole('button', { name: 'Decide' })).toBeVisible({ timeout: 30_000 })
+  await expect(coverageRow.getByText('Suspect', { exact: true })).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole('button', { name: /Requirement coverage/ }).click()
-  await expect(coverageRow.getByText('Suspect', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: /^Procedure alignment/ }).click()
-  await impactRow.getByRole('button', { name: /Record decision/ }).click()
-  const replacementDecision = page.getByRole('dialog', { name: 'Record verification decision' })
-  await replacementDecision.getByLabel('Decision').selectOption('ProcedureCoverageConfirmed')
-  await replacementDecision.getByLabel('Covering procedure').selectOption(approvedProcedure.procedureId)
-  await replacementDecision.getByLabel('Rationale').fill(
-    'The repeat review confirms the same exact controlled procedure revision.',
-  )
-  await replacementDecision.getByRole('button', { name: 'Record decision' }).click()
-  await expect(impactRow.locator('.impactState').getByText('Coverage confirmed', { exact: true })).toBeVisible()
-  await impactRow.getByText(/Decision history · 3/).click()
-  await expect(impactRow.getByText('Decision reopened')).toBeVisible()
+  await decide('The repeat review confirms the same exact controlled procedure revision.')
+  await expect(decisionRow.first()).toContainText('Coverage confirmed')
+  await decisionRow.first().getByText(/Decision history · 3/).click()
+  await expect(decisionRow.first().getByText('Decision reopened')).toBeVisible()
 
-  await page.getByRole('button', { name: /Requirement coverage/ }).click()
-  await expect(coverageRow.getByText('Verified', { exact: true })).toBeVisible()
-  await expect(selectedProcedureLink).not.toContainText('Suspect applicability')
+  await expect(coverageRow.getByText('Verified', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(coverageRow.locator('small').filter({ hasText: approvedProcedure.displayNumber })).not.toContainText('Suspect')
 
   const finalCoverageResponse = await request.get(
     `${apiBase}/api/verification-coverage?projectId=${showcase.projectId}&baselineId=${baseline.id}`,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PersonName } from './People'
 import { SignatureDialog } from './IdentityCenter'
+import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './TestingCoverageWorkspace.css'
@@ -37,6 +38,7 @@ type ImpactItem = {
   outcome?: string
   resolutionRationale: string
   holdsRelease?: boolean
+  decisionHistory: { id: string; action: string; outcome?: string; rationale: string; actor: string; occurredAt: string }[]
 }
 type Revision = {
   id: string
@@ -65,24 +67,31 @@ const disciplineLabel = (discipline: TestDiscipline) =>
  * change request is approved, so nothing goes unnoticed; an engineer can also raise one deliberately when a
  * set of changes is best tested together.
  */
-export default function TestingCoverageWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, user }: {
+export default function TestingCoverageWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, programId, user }: {
   api: string
   projectId: string
   releaseId: string
   discipline: TestDiscipline
   buildName: string
   readOnly: boolean
-  user: { userName: string }
+  programId: string
+  user: AuthUser
 }) {
+  // Authority is per Program, and it is the server that enforces it. Reflecting it here is about not offering
+  // somebody a control that will refuse them — an approval they cannot give is worse than no button at all.
+  const roles = user.programs.find(program => program.programId === programId)?.roles ?? []
+  const canTest = !readOnly && (user.isAdministrator || roles.includes('TestEngineer'))
+  const canApprove = !readOnly && (user.isAdministrator || roles.includes('Approver'))
   const [coverage, setCoverage] = useState<Coverage>()
   const [requests, setRequests] = useState<TestChangeRequest[]>([])
   const [procedures, setProcedures] = useState<Procedure[]>([])
   const [total, setTotal] = useState(0)
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(typeof location !== 'undefined' ? new URLSearchParams(location.search).get('procedure') ?? '' : '')
   const [history, setHistory] = useState<History>()
   const [impact, setImpact] = useState<ImpactItem[]>([])
   const [opened, setOpened] = useState('')
   const [resolving, setResolving] = useState<ImpactItem>()
+  const [reopening, setReopening] = useState<ImpactItem>()
   const [outcome, setOutcome] = useState('ProcedureCoverageConfirmed')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -91,6 +100,13 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [approving, setApproving] = useState<Procedure>()
   const [showAll, setShowAll] = useState(false)
   const [revision, setRevision] = useState(0)
+  // Seeded from the address, so a shared or reloaded worklist opens on the list it names rather than on the
+  // unfiltered first page.
+  const opening = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()
+  const [procedureState, setProcedureState] = useState(opening.get('procedureState') ?? '')
+  const [procedureOutcome, setProcedureOutcome] = useState(opening.get('procedureOutcome') ?? '')
+  const [procedurePage, setProcedurePage] = useState(Number(opening.get('procedurePage') ?? '1') || 1)
+  const lastDiscreteState = useRef<string | null>(null)
   const [requirements, setRequirements] = useState<{ revisionId: string; displayNumber: string; statement: string }[]>([])
 
   // One ticket per loader, not one for the page.
@@ -161,10 +177,53 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
 
   useEffect(() => { void load() }, [load])
 
+  // The worklist is in the address, so it can be reloaded, shared and stepped back through.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const before = params.toString()
+    const apply = (key: string, value: string) => { if (value) params.set(key, value); else params.delete(key) }
+    apply('procedure', query)
+    apply('procedureState', procedureState)
+    apply('procedureOutcome', procedureOutcome)
+    apply('procedurePage', procedurePage > 1 ? String(procedurePage) : '')
+    // Seeded from what the address already says, so the reader's first change after a reload still earns a
+    // history entry rather than being mistaken for arrival.
+    const discrete = `${procedureState}|${procedureOutcome}|${procedurePage}`
+    if (lastDiscreteState.current === null) lastDiscreteState.current = discrete
+    if (params.toString() === before) return
+    const next = `${location.pathname}${params.toString() ? `?${params}` : ''}`
+    // Choosing a filter or a page is somewhere the reader went, so it earns a history entry and the back
+    // button returns to the previous list. Typing in the search box is not somewhere they went; pushing per
+    // keystroke would mean pressing back a dozen times to leave one search.
+    const push = discrete !== lastDiscreteState.current
+    lastDiscreteState.current = discrete
+    // window.history explicitly: this component has its own `history` — the revision history of a procedure —
+    // and the bare name resolves to that, which throws rather than navigating.
+    if (push) window.history.pushState({}, '', next); else window.history.replaceState({}, '', next)
+  }, [query, procedureState, procedureOutcome, procedurePage])
+
+  // The browser's own navigation must move the list, not just the address bar.
+  useEffect(() => {
+    const restore = () => {
+      const params = new URLSearchParams(location.search)
+      setQuery(params.get('procedure') ?? '')
+      setProcedureState(params.get('procedureState') ?? '')
+      setProcedureOutcome(params.get('procedureOutcome') ?? '')
+      setProcedurePage(Number(params.get('procedurePage') ?? '1') || 1)
+    }
+    addEventListener('popstate', restore)
+    return () => removeEventListener('popstate', restore)
+  }, [])
+
+  // Browsing, not just searching. The software side of the demonstration Program carries 440 procedures, so
+  // a list that could only be searched meant knowing the number of the thing you were looking for before you
+  // could look for it. State and latest result are how somebody actually narrows this: "the drafts", "what
+  // failed last time".
   useEffect(() => {
     const mine = ++procedureTicket.current
     const timer = setTimeout(async () => {
-      const response = await fetch(`${api}/api/test-procedures?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}&search=${encodeURIComponent(query)}&page=1&pageSize=25`)
+      const filters = `&state=${procedureState}&outcome=${procedureOutcome}&page=${procedurePage}&pageSize=25`
+      const response = await fetch(`${api}/api/test-procedures?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}&search=${encodeURIComponent(query)}${filters}`)
       if (!response.ok) return
       const paged = await response.json()
       if (mine !== procedureTicket.current) return
@@ -172,7 +231,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       setTotal(paged.totalCount)
     }, 200)
     return () => clearTimeout(timer)
-  }, [api, projectId, releaseId, scope, query, revision])
+  }, [api, projectId, releaseId, scope, query, procedureState, procedureOutcome, procedurePage, revision])
 
   const mine = requests.filter(x => x.discipline === discipline)
   const unstarted = mine.filter(x => x.state === 'Open' && !x.assignedEngineerId)
@@ -217,6 +276,15 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     setResolving(undefined)
     setSaved(`Decision recorded for ${item.subjectDisplayNumber}.`)
   }, 'The decision could not be recorded.')
+
+  const reopen = (item: ImpactItem, rationale: string) => act(async () => {
+    await apiRequest(`${api}/api/verification-impact/${item.id}/reopen`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rationale }),
+    })
+    setReopening(undefined)
+    setSaved(`${item.subjectDisplayNumber} is open again. What was decided stays in its history.`)
+  }, 'The decision could not be reopened.')
 
   const advance = (request: TestChangeRequest, action: 'submit' | 'approve' | 'return', rationale?: string) => act(async () => {
     await apiRequest(`${api}/api/test-change-reviews/${request.id}/${action}`, {
@@ -351,6 +419,27 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                         setResolving(item)
                       }}>Decide</button>
                     )}
+                    {/* A decision can be wrong, and a decision nobody can revisit is a decision people work
+                        around. Reopening keeps what was decided in immutable history, returns the item to the
+                        release gate, and puts any coverage it claimed back to suspect. */}
+                    {!readOnly && item.state === 'Resolved' && (
+                      <button type="button" className="quiet" disabled={busy} onClick={() => setReopening(item)}>Reopen / change decision…</button>
+                    )}
+                    {!!item.decisionHistory?.length && (
+                      <details className="decisionHistory">
+                        <summary>Decision history · {item.decisionHistory.length}</summary>
+                        {item.decisionHistory.map(entry => (
+                          <article key={entry.id}>
+                            <b>{entry.action === 'Reopened' ? 'Decision reopened'
+                              : entry.outcome === 'ProcedureCoverageConfirmed' ? 'Coverage confirmed'
+                              : entry.outcome === 'NoTestRequired' ? 'No test required'
+                              : entry.outcome}</b>
+                            <span><PersonName userName={entry.actor} /> · {new Date(entry.occurredAt).toLocaleString()}</span>
+                            <p>{entry.rationale}</p>
+                          </article>
+                        ))}
+                      </details>
+                    )}
                   </li>
                 ))}
                 {!impact.some(x => x.testChangeReviewId === request.id) && <li className="decisionNone">This package has no decisions recorded against it.</li>}
@@ -377,7 +466,13 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               <article className={`coverageRow ${item.covered ? '' : 'attention'}`} key={`all-${item.revisionId}`}>
                 <div>
                   <b>{item.displayNumber}</b>
-                  <i>{!item.covered ? 'No procedure' : item.coveredBy.some(x => x.coverageState === 'Suspect') ? 'Suspect' : item.verified ? 'Verified' : 'Covered'}</i>
+                  {/* Suspect is read before "no procedure". A requirement whose only procedure was written
+                      against an earlier revision is not covered — but saying nothing is testing it hides the
+                      procedure somebody has to reconfirm or replace, which is the actual work. */}
+                  <i>{item.verified ? 'Verified'
+                    : item.coveredBy.some(x => x.coverageState === 'Suspect') ? 'Suspect'
+                    : item.covered ? 'Covered'
+                    : 'No procedure'}</i>
                 </div>
                 <p>{item.statement}</p>
                 {item.coveredBy.length > 0 && <small>{item.coveredBy.map(x => `${x.displayNumber} (${x.state})`).join(', ')}</small>}
@@ -416,12 +511,60 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         <div className="cardTitle">
           <h2>Test procedures</h2>
           <p>{total} controlled {scope.toLowerCase()} procedure{total === 1 ? '' : 's'}. Open one to see who wrote it and what changed it.</p>
-          {!readOnly && <button type="button" onClick={() => setCreating(true)}>+ New test procedure</button>}
+          {!readOnly && (
+            <button
+              type="button"
+              disabled={!canTest || !requirements.length}
+              title={requirements.length ? undefined : 'Materialize the software build requirements before creating a procedure.'}
+              onClick={() => setCreating(true)}
+            >+ New test procedure</button>
+          )}
         </div>
-        <label className="coverageSearch">
-          <span>Find a procedure</span>
-          <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Procedure number or title" />
-        </label>
+
+        {/* A project with nothing materialized has no exact revisions to bind a procedure to. Said plainly,
+            because the alternative is a create form whose requirement list is empty for no stated reason —
+            which reads as a broken page rather than as work that has not happened yet. */}
+        {!requirements.length && (
+          <section className="materializationPrerequisite" role="status">
+            <div>
+              <b>Procedure authoring waits for governed requirement materialization</b>
+              <p>
+                This build has no immutable requirement revisions yet, so a new procedure cannot be bound to an
+                exact target. Existing inherited procedures remain visible against their predecessor revisions;
+                planned work for new or modified requirements stays in the test change requests above and
+                cannot count as confirmed coverage yet.
+              </p>
+            </div>
+            <div>
+              <span>Current limitation</span>
+              <b>Requirement materialization is not exposed in this workspace.</b>
+            </div>
+          </section>
+        )}
+        <div className="procedureFilters">
+          <label className="coverageSearch">
+            <span>Find a procedure</span>
+            <input value={query} onChange={event => { setQuery(event.target.value); setProcedurePage(1) }} placeholder="Procedure number or title" />
+          </label>
+          <label>
+            <span>Procedure state</span>
+            <select value={procedureState} onChange={event => { setProcedureState(event.target.value); setProcedurePage(1) }}>
+              <option value="">All states</option>
+              <option value="Draft">Draft</option>
+              <option value="InReview">In review</option>
+              <option value="Approved">Approved</option>
+            </select>
+          </label>
+          <label>
+            <span>Latest result</span>
+            <select value={procedureOutcome} onChange={event => { setProcedureOutcome(event.target.value); setProcedurePage(1) }}>
+              <option value="">All outcomes</option>
+              <option value="Pass">Pass</option>
+              <option value="Fail">Fail</option>
+              <option value="Blocked">Blocked</option>
+            </select>
+          </label>
+        </div>
         {procedures.map(procedure => (
           <article className="coverageRow" key={procedure.id}>
             <div><b>{procedure.displayNumber}</b><i>{procedure.state === 'Draft' ? 'Awaiting approval' : procedure.state}</i></div>
@@ -432,13 +575,26 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                   an author approving their own, which is what makes the approval independent rather than a
                   formality — so this is offered and may still be declined. */}
               {!readOnly && procedure.state === 'Draft' && (
-                <button type="button" disabled={busy} onClick={() => setApproving(procedure)}>Review &amp; approve</button>
+                canApprove && procedure.ownerId !== user.userName
+                  ? <button type="button" disabled={busy} onClick={() => setApproving(procedure)}>Review &amp; approve</button>
+                  : <span className="procedureHold">{procedure.ownerId === user.userName ? 'Independent approval is required before execution.' : 'Approver authority is required in this Program.'}</span>
               )}
               <button type="button" className="quiet" onClick={() => void openHistory(procedure.id)}>History</button>
             </div>
           </article>
         ))}
-        {!procedures.length && <p className="coverageNone">{query ? 'No procedure matches that.' : 'This build has no controlled procedures yet.'}</p>}
+        {!procedures.length && (
+          <p className="coverageNone">
+            {query || procedureState || procedureOutcome ? 'No procedure matches that. Clear the search or the filters to see the rest.' : 'This build has no controlled procedures yet.'}
+          </p>
+        )}
+        {total > 25 && (
+          <div className="procedurePager">
+            <button type="button" disabled={procedurePage <= 1} onClick={() => setProcedurePage(value => Math.max(1, value - 1))}>Previous</button>
+            <span>Page {procedurePage} of {Math.max(1, Math.ceil(total / 25))}</span>
+            <button type="button" disabled={procedurePage >= Math.ceil(total / 25)} onClick={() => setProcedurePage(value => value + 1)}>Next</button>
+          </div>
+        )}
       </section>
 
       {creating && (
@@ -478,6 +634,26 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           onCancel={() => setApproving(undefined)}
           onSign={(password, meaning) => approveProcedure(approving, password, meaning)}
         />
+      )}
+
+      {reopening && (
+        <div className="decisionModal" role="dialog" aria-label="Reopen verification decision">
+          <form onSubmit={event => {
+            event.preventDefault()
+            void reopen(reopening, String(new FormData(event.currentTarget).get('rationale') ?? ''))
+          }}>
+            <p className="eyebrow">VERIFICATION DECISION</p>
+            <h2>Reopen {reopening.subjectDisplayNumber}</h2>
+            <p>The current decision stays in immutable history. Reopening returns this item to the release gate, and any coverage it claimed goes back to suspect.</p>
+            <label>Reopen rationale
+              <textarea name="rationale" required placeholder="Why the recorded decision must be reconsidered" />
+            </label>
+            <div className="decisionActions">
+              <button type="button" className="quiet" onClick={() => setReopening(undefined)}>Cancel</button>
+              <button type="submit" disabled={busy}>Reopen decision</button>
+            </div>
+          </form>
+        </div>
       )}
 
       {resolving && (

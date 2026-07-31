@@ -17,12 +17,15 @@ test('the execution time field is prefilled with local wall time, not the UTC cl
   await apiLogin(request)
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'VERIFICATION')
-  await page.getByRole('link', { name: 'System Verification' }).click()
-  await expect(page.getByRole('heading', { name: 'Verification & Evidence' })).toBeVisible({ timeout: 30_000 })
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Test Results' }).click()
+  await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole('button', { name: /Test procedures/ }).click()
-  await page.locator('.procedureRow').first().getByRole('button', { name: 'Record result' }).click()
+  // A determination is recorded against a procedure this build is set to run, so one is put in the set first.
+  await page.getByLabel('Find an approved procedure').fill('SYSTP-000001')
+  await page.locator('.testSetCandidates label').first().locator('input[type="checkbox"]').check()
+  await page.getByRole('button', { name: 'Add — covers a change' }).click()
+  await page.locator('.testSetRow').first().getByRole('button', { name: /Record result|Record retest/ }).click()
 
   const field = page.getByLabel('Execution time')
   await expect(field).toBeVisible()

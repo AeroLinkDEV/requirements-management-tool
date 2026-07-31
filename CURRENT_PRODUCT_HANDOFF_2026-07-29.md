@@ -99,6 +99,12 @@ Digital Thread remains available from that tab and the Assurance navigation.
 
 ### Verification
 
+> **Superseded on 31 July.** The tabbed workspace described below no longer exists — verification is now
+> Testing Coverage and Test Results, one pair per discipline, and the pre-release evidence mark has been
+> replaced by the build test set. See
+> [CURRENT_PRODUCT_HANDOFF_2026-07-31.md](CURRENT_PRODUCT_HANDOFF_2026-07-31.md) and DEC-076/DEC-077. The
+> discipline, build and approval boundaries stated here are unchanged.
+
 The Command Center summarizes verification as System, Software HLR and Software LLR triage. The Verification
 workspace is split conceptually into **pre-release procedure alignment** and **evidence & results**.
 

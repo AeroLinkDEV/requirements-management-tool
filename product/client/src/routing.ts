@@ -96,17 +96,20 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   // through the shell — breadcrumbs, navigation highlighting, scope switches — and adding values to it means
   // auditing every comparison for one that silently treats an unrecognised value as System. artifactKind
   // already carries exactly HighLevel and LowLevel for software change requests.
+  //
+  // A results route may carry the problem report a corrective action came from, so refresh and back return
+  // to the same remediation rather than to a generic workspace. It hangs off results rather than off the
+  // branch root because recording the successor determination is the whole of what it asks for.
   if (path === "system-verification/coverage") return { ...base, view: "testingCoverage", discipline: "systemTest" };
   if (path === "system-verification/results") return { ...base, view: "testResults", discipline: "systemTest" };
+  if (tail[0] === "system-verification" && tail[1] === "results" && tail[2]) return { ...base, view: "testResults", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (path === "software-verification/hlr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: "HighLevel" };
   if (path === "software-verification/hlr/results") return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "HighLevel" };
+  if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "results" && tail[3]) return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "HighLevel", artifactId: decoded(tail[3]) };
   if (path === "software-verification/llr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: "LowLevel" };
   if (path === "software-verification/llr/results") return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "LowLevel" };
+  if (tail[0] === "software-verification" && tail[1] === "llr" && tail[2] === "results" && tail[3]) return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "LowLevel", artifactId: decoded(tail[3]) };
   if (path === "system-verification") return { ...base, view: "verification", discipline: "systemTest" };
-  // The problem report a corrective action came from is part of the address, so refresh and back return to
-  // the same remediation rather than to a generic workspace.
-  if (tail[0] === "system-verification" && tail[1]) return { ...base, view: "verification", discipline: "systemTest", artifactId: decoded(tail[1]) };
-  if (tail[0] === "software-verification" && tail[1]) return { ...base, view: "verification", discipline: "softwareTest", artifactId: decoded(tail[1]) };
   if (path === "software-verification") return { ...base, view: "verification", discipline: "softwareTest" };
   if (path === "problem-reports") return { ...base, view: "notFound", discipline: "system" };
   if (path === "traceability") return { ...base, view: "lifecycle", discipline: "system" };
@@ -163,9 +166,9 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "scr": return `${root}/${discipline === "software" ? "software" : "systems"}/change-requests/${artifactId}`;
     case "history": return historyPath(discipline === "software" ? "software" : "systems");
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
-    case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
+    case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification`;
     case "testingCoverage": return `${root}/${verificationBranch(discipline, artifactKind)}/coverage`;
-    case "testResults": return `${root}/${verificationBranch(discipline, artifactKind)}/results`;
+    case "testResults": return `${root}/${verificationBranch(discipline, artifactKind)}/results${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
     case "documents": {
       if (discipline === "systemTest" || discipline === "softwareTest")
         return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification/documents`;
