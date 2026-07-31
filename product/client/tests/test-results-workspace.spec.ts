@@ -88,3 +88,61 @@ test('software HLR and LLR each have their own test set', async ({ page }) => {
   await page.reload({ waitUntil: 'load' })
   await expect(page.getByText('VERIFICATION / SOFTWARE LLR')).toBeVisible({ timeout: 30_000 })
 })
+
+/**
+ * A determination read beside the ones before it.
+ *
+ * A result read alone says what happened. Read with its history it says whether the build is getting better
+ * or worse — and a retest can then answer the specific failure rather than whatever happened last, which is
+ * what a corrective action is for.
+ */
+test('a procedure shows every run against this build, and a failure can be retested by name', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Test Results' }).click()
+  await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
+
+  await page.getByLabel('Find an approved procedure').fill('SYSTP-000001')
+  await page.locator('.testSetCandidates label').first().locator('input[type="checkbox"]').check()
+  await page.getByRole('button', { name: 'Add — covers a change' }).click()
+
+  const row = page.locator('.testSetRow').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+
+  // Record a failure, so there is something a retest can answer. Determinations are immutable and this
+  // build's procedure keeps every run ever recorded against it, so each run is found by its own text
+  // rather than by position — a journey that asserted "the first run" would be asserting the last time
+  // this journey ran.
+  const failure = `Waypoint dropped at the oceanic transition ${Date.now()}`
+  await row.getByRole('button', { name: /Record result|Record retest/ }).click()
+  const record = page.getByRole('dialog', { name: /Record a result for SYSTP-000001/ })
+  await record.getByLabel('Outcome').selectOption('Fail')
+  await record.getByLabel('Configuration under test').fill('FMS rig 2, data set B')
+  await record.getByLabel('Determination').fill(failure)
+  await record.getByLabel('Evidence reference').fill('rig2/oceanic-fail.log')
+  await record.getByRole('button', { name: 'Record determination' }).click()
+  await expect(record).toHaveCount(0, { timeout: 30_000 })
+
+  await row.getByRole('button', { name: 'Runs' }).click()
+  const failed = row.locator('.runList li').filter({ hasText: failure })
+  await expect(failed).toHaveCount(1)
+  await expect(failed).toContainText('Fail')
+
+  // The retest names the run it answers rather than simply the latest.
+  const answer = `Sequencing held after the correction ${Date.now()}`
+  await failed.getByRole('button', { name: 'Retest this run' }).click()
+  const retest = page.getByRole('dialog', { name: /Record a result for SYSTP-000001/ })
+  await retest.getByLabel('Configuration under test').fill('FMS rig 2, corrected build')
+  await retest.getByLabel('Determination').fill(answer)
+  await retest.getByLabel('Evidence reference').fill('rig2/oceanic-retest.log')
+  await retest.getByRole('button', { name: 'Record determination' }).click()
+  await expect(retest).toHaveCount(0, { timeout: 30_000 })
+
+  await expect(row).toContainText('Pass')
+  // The panel is still open — the button now reads 'Hide runs', so clicking again would collapse it.
+  const answered = row.locator('.runList li').filter({ hasText: answer })
+  await expect(answered).toContainText('retest', { timeout: 30_000 })
+  await expect(answered).toContainText('Pass')
+})
