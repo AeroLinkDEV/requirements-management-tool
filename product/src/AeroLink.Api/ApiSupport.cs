@@ -9,6 +9,7 @@ using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 
 // Support shared by more than one endpoint module: reading the actor off the request, allocating the next
 // controlled identifier, and mapping an aggregate to the shape the browser reads.
@@ -94,6 +95,9 @@ static class ProblemReportIntegrationMap
 
 static class ApiMap
 {
+    private static readonly Regex LegacyRequirementNumber = new(@"\b(SYSR|HLR|LLR)-0*([0-9]{1,6})(\.[0-9]{2})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    public static string CanonicalAuditDetail(string detail) => LegacyRequirementNumber.Replace(detail, match =>
+        $"{match.Groups[1].Value.ToUpperInvariant()}-{int.Parse(match.Groups[2].Value):D6}{match.Groups[3].Value}");
     public static object Workspace(ProgramRecord program, ProjectRecord project, SoftwareRelease release) => new
     {
         program = new { program.Id, program.Name, program.Code },
@@ -110,7 +114,7 @@ static class ApiMap
         state = x.State.ToString(), deferredFromState = x.DeferredFromState?.ToString(), x.CreatedAt, x.UpdatedAt,
         requirementChanges = x.RequirementChanges.Select(r => new { r.Id, r.BaseNumber, r.Revision, r.DisplayNumber, level = r.Level.ToString(), kind = r.Kind.ToString(), r.Statement, r.Rationale, r.VerificationMethod,r.RichText,r.AttributesJson,r.ImpactDispositionJson,r.TargetSectionId }),
         reviewCycles = x.ReviewCycles.OrderBy(c => c.Sequence).Select(c => new { c.Id, c.Sequence, mode=c.Mode.ToString(), state = c.State.ToString(), c.SnapshotHash, c.StartedAt, c.CompletedAt, c.ClosureReason, steps = c.Steps.OrderBy(s => s.Position).Select(s => new { s.Position, s.ApproverId, s.ApproverName, s.Authority, s.StageName, state = s.State.ToString(), s.DecidedAt }) }),
-        audit = x.AuditEvents.OrderByDescending(a => a.OccurredAt).Select(a => new { a.EventType, a.ActorId, a.Detail, a.OccurredAt, a.EvidenceJson, a.SchemaVersion })
+        audit = x.AuditEvents.OrderByDescending(a => a.OccurredAt).Select(a => new { a.EventType, a.ActorId, Detail = CanonicalAuditDetail(a.Detail), a.OccurredAt, a.EvidenceJson, a.SchemaVersion })
     };
     public static object Baseline(CandidateBaseline x) => new { x.Id, x.DisplayNumber, x.Name, x.ProjectId, x.ReleaseId, x.PredecessorBaselineId, state = x.State.ToString(), x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, selectionCount = x.Selections.Count };
     public static object BaselineDetail(CandidateBaseline x, IReadOnlyList<SystemChangeRequest> selected) => new

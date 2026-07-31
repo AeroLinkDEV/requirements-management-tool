@@ -34,7 +34,7 @@ test('System proposal identity and stages are controlled from the first screen',
   await expect(page.getByLabel('Identifier')).toHaveCount(0)
   await page.getByRole('button',{name:'+ Introduce System requirement'}).click()
 
-  await expect(page.getByLabel('Identifier')).toHaveValue(/^SYSR-\d{6}$/)
+  await expect(page.getByLabel('Identifier')).toHaveValue('Provisional — assigned at check-in')
   await expect(page.getByRole('textbox',{name:'Level',exact:true})).toHaveValue('System')
   await expect(page.getByLabel('Change type')).toHaveValue('Introduce')
   await expect(page.getByLabel('Identifier')).not.toBeEditable()
@@ -48,7 +48,7 @@ test('System proposal identity and stages are controlled from the first screen',
   await expect(page.getByLabel('Identifier')).toHaveValue('Awaiting controlled selection')
   await expect(page.getByText('Select the requirement to modify')).toBeVisible()
   await page.getByLabel('Change type').selectOption('Introduce')
-  await expect(page.getByLabel('Identifier')).toHaveValue(/^SYSR-\d{6}$/)
+  await expect(page.getByLabel('Identifier')).toHaveValue('Provisional — assigned at check-in')
 })
 
 test('Software Draft keeps downstream impact with consuming engineers before an explicitly selected reviewer signs',async ({page,request})=>{
@@ -58,7 +58,7 @@ test('Software Draft keeps downstream impact with consuming engineers before an 
   await openNewSoftwareChangeRequest(page,'HLR')
 
   await page.getByRole('button',{name:'+ Introduce HLR'}).click()
-  await expect(page.getByLabel('Identifier')).toHaveValue(/^HLR-\d{6}$/)
+  await expect(page.getByLabel('Identifier')).toHaveValue('Provisional — assigned at check-in')
   await expect(page.getByRole('textbox',{name:'Level',exact:true})).toHaveValue('Software HLR')
   await expect(page.getByText('SWR-000001')).toHaveCount(0)
   await page.getByLabel('Title').fill('Control software authoring readiness')

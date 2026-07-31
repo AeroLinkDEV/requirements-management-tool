@@ -254,7 +254,9 @@ export default function ControlledRequirementEditor({
   }, [api, projectId, item.kind, item.baseNumber]);
 
   const derived = item.isDerived ?? attributes.derived === true;
-  const displayNumber = item.baseNumber
+  const displayNumber = item.kind === "Introduce"
+    ? `New ${levelLabel(item.level)} requirement`
+    : item.baseNumber
     ? `${item.baseNumber}.${String(item.revision).padStart(2, "0")}`
     : "Select an existing controlled requirement";
 
@@ -321,16 +323,18 @@ export default function ControlledRequirementEditor({
         <label>
           Identifier
           <input
-            value={item.baseNumber || "Awaiting controlled selection"}
+            value={item.kind === "Introduce" ? "Provisional — assigned at check-in" : item.baseNumber || "Awaiting controlled selection"}
             readOnly
             aria-readonly="true"
           />
-          <small>Server-issued and immutable in this proposal.</small>
+          <small>{item.kind === "Introduce"
+            ? "No controlled number has been issued. The server assigns the authoritative immutable identifier at check-in."
+            : "Existing controlled identifier; immutable in this proposal."}</small>
         </label>
         <label>
           Revision
           <input
-            value={item.baseNumber ? String(item.revision).padStart(2, "0") : "Pending"}
+            value={item.kind === "Introduce" ? "Pending" : item.baseNumber ? String(item.revision).padStart(2, "0") : "Pending"}
             readOnly
             aria-readonly="true"
           />
@@ -403,7 +407,7 @@ export default function ControlledRequirementEditor({
                   <option value={option.value} key={option.value}>{option.label}</option>
                 ))}
               </select>
-              <small>Changing this re-issues the identifier above.</small>
+              <small>Changing this resets the controlled identity selection above.</small>
             </>
           ) : (
             <input value={item.kind} readOnly aria-readonly="true" />

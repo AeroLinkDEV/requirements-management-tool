@@ -36,12 +36,15 @@ public static class VerificationImpactEndpoints
         });
 
         app.MapGet("/api/releases/{releaseId:guid}/test-change-reviews", async (Guid releaseId,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
-            var projectId = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
-                .Select(x => x.ProjectId).SingleOrDefaultAsync(ct);
-            if (projectId == Guid.Empty) return Results.NotFound();
-            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
+                .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
+            if (release is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, release.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount().UserName;
+            var canTest = !release.IsReleased && await http.HasProjectRoleAsync(db, identity, release.ProjectId, ct, ProgramRole.TestEngineer);
+            var canApprove = !release.IsReleased && await http.HasProjectRoleAsync(db, identity, release.ProjectId, ct, ProgramRole.Approver);
             // Ordered in memory on purpose: SQLite cannot translate an ORDER BY over a DateTimeOffset and
             // throws, which took this whole endpoint to a 500 and left the workspace looking simply empty.
             var reviews = (await db.TestChangeReviews.AsNoTracking()
@@ -80,7 +83,61 @@ public static class VerificationImpactEndpoints
                 totalItems = items.Count(x => x.TestChangeReviewId == review.Id),
                 resolvedItems = items.Count(x => x.TestChangeReviewId == review.Id && x.State == VerificationImpactState.Resolved),
                 preReleaseEvidenceItems = items.Count(x => x.TestChangeReviewId == review.Id && x.PreReleaseEvidenceRequired)
+                ,capabilities = new
+                {
+                    canAssign = canTest && review.State == TestChangeReviewState.Open && review.AssignedEngineerId == null,
+                    canDecide = canTest && review.State == TestChangeReviewState.Open
+                        && string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
+                    canSubmit = canTest && review.State == TestChangeReviewState.Open
+                        && string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
+                    canApprove = canApprove && review.State == TestChangeReviewState.InReview
+                        && string.Equals(review.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase),
+                    canReturn = canApprove && review.State == TestChangeReviewState.InReview
+                        && string.Equals(review.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase)
+                }
             }));
+        });
+
+        app.MapPost("/api/test-change-reviews/{id:guid}/assign", async (Guid id, AssignVerificationImpactRequest request,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build test change requests are read-only." });
+
+            var actor = http.UserAccount().UserName;
+            var selfClaim = string.Equals(actor, request.EngineerId, StringComparison.OrdinalIgnoreCase);
+            var mayClaim = selfClaim && await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestEngineer);
+            var mayAssign = await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestLead);
+            if (!mayClaim && !mayAssign) return Results.Forbid();
+
+            var target = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.UserName == request.EngineerId.Trim().ToLowerInvariant() && x.State == AccountState.Active, ct);
+            if (target is null) return Results.BadRequest(new { error = "Select an active AeroLink test engineer." });
+            var programId = await db.Projects.AsNoTracking().Where(x => x.Id == review.ProjectId)
+                .Select(x => x.ProgramId).SingleAsync(ct);
+            if (!await identity.HasRoleAsync(target.Id, programId, ProgramRole.TestEngineer, DateTimeOffset.UtcNow, ct))
+                return Results.BadRequest(new { error = $"{target.DisplayName} does not hold Test Engineer authority for this Program." });
+
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                var items = await db.VerificationImpactItems.Where(x => x.TestChangeReviewId == id).ToListAsync(ct);
+                if (items.Count == 0) return Results.BadRequest(new { error = "This test change request has no verification decisions to assign." });
+                review.Assign(actor, target.UserName, now);
+                var assignedItems = items.Where(x => x.State != VerificationImpactState.Resolved).ToList();
+                foreach (var item in assignedItems)
+                    item.AssignToEngineer(actor, target.UserName, now);
+                db.SecurityAuditEvents.Add(new("TestChangeReviewAssigned", actor, review.Id.ToString(), "Success",
+                    $"{review.DisplayNumber} assigned to {target.UserName}; {assignedItems.Count} open decisions assigned atomically.",
+                    http.Connection.RemoteIpAddress?.ToString() ?? "unknown", now));
+                await db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+                return Results.Ok(new { review.Id, review.AssignedEngineerId, assignedItems = assignedItems.Count });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
         app.MapPost("/api/verification-impact/{id:guid}/assign", async (Guid id, AssignVerificationImpactRequest request,

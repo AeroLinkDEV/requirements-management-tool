@@ -110,7 +110,8 @@ public static class VerificationCoverageProjection
     public static async Task<List<VerificationCoverageLinkProjection>> ForRequirementRevisionsAsync(
         AeroLinkDbContext db,
         IReadOnlyCollection<Guid> requirementRevisionIds,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool buildScoped = false)
     {
         if (requirementRevisionIds.Count == 0) return [];
         var ids = requirementRevisionIds.Distinct().ToList();
@@ -137,8 +138,8 @@ public static class VerificationCoverageProjection
                           // row labelled Suspect, and both were describing the same link.
                           !coverage.IsSuspect
                           && revision.State == TestProcedureState.Approved
-                          && !db.TestProcedureRevisions.Any(sibling => sibling.ProcedureId == procedure.Id
-                              && sibling.State != TestProcedureState.Approved)
+                          && (buildScoped || !db.TestProcedureRevisions.Any(sibling => sibling.ProcedureId == procedure.Id
+                              && sibling.State != TestProcedureState.Approved))
                               ? "Confirmed" : "Suspect"))
             .ToListAsync(ct);
     }

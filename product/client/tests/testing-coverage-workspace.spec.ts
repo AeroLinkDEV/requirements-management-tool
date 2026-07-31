@@ -55,6 +55,7 @@ test('a package opens onto its decisions, and each one is an explicit judgement'
 
   const first = page.locator('.coverageRow').filter({ hasText: /SYSTCR-/ }).first()
   await expect(first).toBeVisible({ timeout: 30_000 })
+  await first.getByRole('button', { name: 'Take it on' }).click()
   await first.getByRole('button', { name: 'Decisions' }).click()
 
   const undecided = first.locator('.decisionList li').filter({ has: page.getByRole('button', { name: 'Decide' }) })

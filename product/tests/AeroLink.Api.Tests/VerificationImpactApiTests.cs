@@ -339,4 +339,45 @@ public sealed class VerificationImpactApiTests
             new { outcome = "NoTestRequired", rationale = "I wrote it, it is fine." });
         Assert.Equal(HttpStatusCode.Forbidden, cannotResolve.StatusCode);
     }
+
+    [Fact]
+    public async Task Test_engineer_self_claim_assigns_the_whole_test_change_request_atomically()
+    {
+        using var factory = new AeroLinkApiFactory();
+        var fixture = await SeedAsync(factory,
+            ("eng.user", ProgramRole.TestEngineer), ("reviewer.user", ProgramRole.Approver));
+
+        Guid reviewId;
+        using (var engineer = factory.CreateClient())
+        {
+            await LoginAsync(engineer, "eng.user");
+            var reviews = await engineer.GetFromJsonAsync<JsonElement>(
+                $"/api/releases/{fixture.ReleaseId}/test-change-reviews");
+            var review = reviews[0];
+            reviewId = review.GetProperty("id").GetGuid();
+            Assert.True(review.GetProperty("capabilities").GetProperty("canAssign").GetBoolean());
+
+            using var claimed = await engineer.PostAsJsonAsync(
+                $"/api/test-change-reviews/{reviewId}/assign", new { engineerId = "eng.user" });
+            Assert.Equal(HttpStatusCode.OK, claimed.StatusCode);
+
+            var refreshed = await engineer.GetFromJsonAsync<JsonElement>(
+                $"/api/releases/{fixture.ReleaseId}/test-change-reviews");
+            Assert.Equal("eng.user", refreshed[0].GetProperty("assignedEngineerId").GetString());
+            Assert.True(refreshed[0].GetProperty("capabilities").GetProperty("canDecide").GetBoolean());
+            var work = await engineer.GetFromJsonAsync<JsonElement>(
+                $"/api/my-work?projectId={fixture.ProjectId}&releaseId={fixture.ReleaseId}");
+            Assert.Contains(work.GetProperty("tasks").EnumerateArray(), task =>
+                task.GetProperty("route").GetString() == "testingCoverage" && task.GetProperty("id").GetGuid() == reviewId);
+        }
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal("eng.user", (await db.TestChangeReviews.SingleAsync(x => x.Id == reviewId)).AssignedEngineerId);
+        var items = await db.VerificationImpactItems.Where(x => x.TestChangeReviewId == reviewId).ToListAsync();
+        Assert.NotEmpty(items);
+        Assert.All(items, item => Assert.Equal("eng.user", item.AssignedEngineerId));
+        Assert.Contains(await db.SecurityAuditEvents.AsNoTracking().ToListAsync(), audit =>
+            audit.EventType == "TestChangeReviewAssigned" && audit.Target == reviewId.ToString());
+    }
 }
