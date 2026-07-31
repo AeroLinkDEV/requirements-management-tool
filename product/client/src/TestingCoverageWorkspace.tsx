@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PersonName } from './People'
 import { SignatureDialog } from './IdentityCenter'
+import PersonPicker from './PersonPicker'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
@@ -22,11 +23,12 @@ type TestChangeRequest = {
   discipline: string
   state: string
   assignedEngineerId?: string
+  selectedApproverId?: string
   totalItems: number
   resolvedItems: number
   coveredChangeRequests: ChangeRequestCover[]
 }
-type Procedure = { id: string; revisionId: string; displayNumber: string; title: string; state: string; requirementCount: number; ownerId: string }
+type Procedure = { id: string; revisionId: string; displayNumber: string; title: string; state: string; requirementCount: number; ownerId: string; selectedApproverId?: string }
 type ImpactItem = {
   id: string
   testChangeReviewId: string
@@ -98,6 +100,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [saved, setSaved] = useState('')
   const [creating, setCreating] = useState(false)
   const [approving, setApproving] = useState<Procedure>()
+  const [submitting, setSubmitting] = useState<TestChangeRequest>()
+  const [reviewApprover, setReviewApprover] = useState({ userId: '', name: '' })
+  const [procedureApprover, setProcedureApprover] = useState({ userId: '', name: '' })
   const [showAll, setShowAll] = useState(false)
   const [revision, setRevision] = useState(0)
   // Seeded from the address, so a shared or reloaded worklist opens on the list it names rather than on the
@@ -286,14 +291,15 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     setSaved(`${item.subjectDisplayNumber} is open again. What was decided stays in its history.`)
   }, 'The decision could not be reopened.')
 
-  const advance = (request: TestChangeRequest, action: 'submit' | 'approve' | 'return', rationale?: string) => act(async () => {
+  const advance = (request: TestChangeRequest, action: 'submit' | 'approve' | 'return', rationale?: string, approverId?: string) => act(async () => {
     await apiRequest(`${api}/api/test-change-reviews/${request.id}/${action}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rationale: rationale ?? '' }),
+      body: JSON.stringify(action === 'submit' ? { approverId } : { rationale: rationale ?? '' }),
     })
     setSaved(action === 'submit' ? `${request.displayNumber} sent for approval.`
       : action === 'approve' ? `${request.displayNumber} approved.`
       : `${request.displayNumber} returned for more work.`)
+    if (action === 'submit') { setSubmitting(undefined); setReviewApprover({ userId: '', name: '' }) }
   }, 'The package could not be moved on.')
 
   const createProcedure = (form: FormData) => act(async () => {
@@ -312,10 +318,12 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         steps: form.get('steps'),
         expectedResult: form.get('expectedResult'),
         requirementRevisionIds,
+        approverId: procedureApprover.userId,
         level: discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel',
       }),
     })
     setCreating(false)
+    setProcedureApprover({ userId: '', name: '' })
     setSaved('Procedure created as a Draft. It needs independent approval before it can be run.')
   }, 'The procedure could not be created.')
 
@@ -387,9 +395,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               {/* Submission is offered only once every decision is recorded. The server refuses otherwise, and
                   offering an action that will be refused is a worse answer than not offering it. */}
               {!readOnly && request.state === 'Open' && request.totalItems > 0 && request.resolvedItems === request.totalItems && (
-                <button type="button" disabled={busy} onClick={() => void advance(request, 'submit')}>Send for approval</button>
+                <button type="button" disabled={busy} onClick={() => setSubmitting(request)}>Send for approval</button>
               )}
-              {!readOnly && request.state === 'InReview' && (
+              {!readOnly && request.state === 'InReview' && request.selectedApproverId === user.userName && (
                 <>
                   <button type="button" disabled={busy} onClick={() => {
                     const rationale = window.prompt(`Why is ${request.displayNumber} approved?`)
@@ -575,9 +583,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                   an author approving their own, which is what makes the approval independent rather than a
                   formality — so this is offered and may still be declined. */}
               {!readOnly && procedure.state === 'Draft' && (
-                canApprove && procedure.ownerId !== user.userName
+                canApprove && procedure.ownerId !== user.userName && procedure.selectedApproverId === user.userName
                   ? <button type="button" disabled={busy} onClick={() => setApproving(procedure)}>Review &amp; approve</button>
-                  : <span className="procedureHold">{procedure.ownerId === user.userName ? 'Independent approval is required before execution.' : 'Approver authority is required in this Program.'}</span>
+                  : <span className="procedureHold">{procedure.ownerId === user.userName ? 'Independent approval is required before execution.' : procedure.selectedApproverId ? <>Awaiting <PersonName userName={procedure.selectedApproverId} />.</> : 'A named approver is required.'}</span>
               )}
               <button type="button" className="quiet" onClick={() => void openHistory(procedure.id)}>History</button>
             </div>
@@ -619,9 +627,31 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               </select>
               <small>Choose one or more. Hold Ctrl to pick several.</small>
             </label>
+            <label>Independent approver</label>
+            <PersonPicker api={api} projectId={projectId} value={procedureApprover.userId} name={procedureApprover.name}
+              index={9101} label="Independent procedure approver" onSelect={setProcedureApprover} />
             <div className="decisionActions">
-              <button type="submit" disabled={busy}>Create procedure</button>
+              <button type="submit" disabled={busy || !procedureApprover.userId}>Create procedure</button>
               <button type="button" className="quiet" disabled={busy} onClick={() => setCreating(false)}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {submitting && (
+        <div className="decisionModal" role="dialog" aria-label={`Select approver for ${submitting.displayNumber}`}>
+          <form onSubmit={event => {
+            event.preventDefault()
+            if (reviewApprover.userId) void advance(submitting, 'submit', undefined, reviewApprover.userId)
+          }}>
+            <p className="eyebrow">INDEPENDENT REVIEW</p>
+            <h2>Send {submitting.displayNumber} for approval</h2>
+            <p>Select the person who will independently review this exact package of test-procedure decisions.</p>
+            <PersonPicker api={api} projectId={projectId} value={reviewApprover.userId} name={reviewApprover.name}
+              index={9102} label="Independent test change request approver" onSelect={setReviewApprover} />
+            <div className="decisionActions">
+              <button type="submit" disabled={busy || !reviewApprover.userId}>Send for approval</button>
+              <button type="button" className="quiet" onClick={() => setSubmitting(undefined)}>Cancel</button>
             </div>
           </form>
         </div>

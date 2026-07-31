@@ -97,7 +97,7 @@ public sealed class TestChangeRequestClaimTests
     {
         var package = Package();
         var now = DateTimeOffset.UtcNow;
-        package.Submit("test.engineer", everyItemResolved: true, now);
+        package.Submit("test.engineer", "test.approver", everyItemResolved: true, now);
 
         Assert.Throws<DomainException>(() =>
             package.IncludeChangeRequest("test.engineer", Guid.NewGuid(), "SCR-00033", now));

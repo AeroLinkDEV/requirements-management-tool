@@ -4,7 +4,7 @@ namespace AeroLink.Domain.Verification;
 
 /// <summary>The independently governed test-procedure discipline affected by an approved engineering change.</summary>
 public enum TestChangeReviewDiscipline { System, HighLevelSoftware, LowLevelSoftware }
-public enum TestChangeReviewState { Open, InReview, Approved }
+public enum TestChangeReviewState { Open, InReview, Approved, Superseded }
 
 /// <summary>
 /// A controlled package of test-procedure decisions raised from one approved change request.
@@ -67,10 +67,13 @@ public sealed class TestChangeReview
     public TestChangeReviewState State { get; private set; }
     public string? AssignedEngineerId { get; private set; }
     public string? SubmittedBy { get; private set; }
+    public string? SelectedApproverId { get; private set; }
     public DateTimeOffset? SubmittedAt { get; private set; }
     public string? ApprovedBy { get; private set; }
     public DateTimeOffset? ApprovedAt { get; private set; }
     public string ApprovalRationale { get; private set; } = "";
+    public Guid? SupersededByTestChangeRequestId { get; private set; }
+    public string SupersededReason { get; private set; } = "";
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; } = 1;
@@ -83,12 +86,15 @@ public sealed class TestChangeReview
         Touch(now);
     }
 
-    public void Submit(string actorId, bool everyItemResolved, DateTimeOffset now)
+    public void Submit(string actorId, string approverId, bool everyItemResolved, DateTimeOffset now)
     {
         EnsureOpen();
         if (!everyItemResolved)
             throw new DomainException("Every test-procedure decision must be completed before review.");
         SubmittedBy = Required(actorId, "submitting verification engineer");
+        SelectedApproverId = Required(approverId, "selected test change request approver");
+        if (string.Equals(SelectedApproverId, SubmittedBy, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("The test change request approver must be independent from its submitting engineer.");
         SubmittedAt = now;
         State = TestChangeReviewState.InReview;
         Touch(now);
@@ -99,6 +105,8 @@ public sealed class TestChangeReview
         if (State != TestChangeReviewState.InReview)
             throw new DomainException("Only a submitted test change review can be approved.");
         var approver = Required(actorId, "approver");
+        if (!string.Equals(approver, SelectedApproverId, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("Only the explicitly selected test change request approver can approve it.");
         // One person holding TestLead could otherwise submit a package of test-procedure decisions and approve
         // it themselves, which makes the approval a formality rather than an independent judgement.
         if (string.Equals(approver, SubmittedBy, StringComparison.OrdinalIgnoreCase))
@@ -118,6 +126,7 @@ public sealed class TestChangeReview
         Required(rationale, "return rationale");
         State = TestChangeReviewState.Open;
         SubmittedBy = null;
+        SelectedApproverId = null;
         SubmittedAt = null;
         Touch(now);
     }
@@ -166,6 +175,21 @@ public sealed class TestChangeReview
         if (releaseId == Guid.Empty) throw new DomainException("A test change review requires its software build.");
         if (releaseId == ReleaseId) return;
         ReleaseId = releaseId;
+        Touch(now);
+    }
+
+    /// <summary>
+    /// Keeps this package as historical evidence while making it impossible to mistake for current work.
+    /// A successor engineering-change revision requires a fresh package and fresh decisions.
+    /// </summary>
+    public void Supersede(Guid successorTestChangeRequestId, string reason, DateTimeOffset now)
+    {
+        if (State == TestChangeReviewState.Superseded) return;
+        if (successorTestChangeRequestId == Guid.Empty || successorTestChangeRequestId == Id)
+            throw new DomainException("A different successor test change request is required.");
+        SupersededByTestChangeRequestId = successorTestChangeRequestId;
+        SupersededReason = Required(reason, "supersession reason");
+        State = TestChangeReviewState.Superseded;
         Touch(now);
     }
 

@@ -24,6 +24,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<SoftwareBuild> SoftwareBuilds => Set<SoftwareBuild>();
     public DbSet<SystemChangeRequest> SystemChangeRequests => Set<SystemChangeRequest>();
     public DbSet<RequirementChange> RequirementChanges => Set<RequirementChange>();
+    public DbSet<DownstreamChangeAssessment> DownstreamChangeAssessments => Set<DownstreamChangeAssessment>();
+    public DbSet<DownstreamAssessmentChangeRequestLink> DownstreamAssessmentChangeRequestLinks => Set<DownstreamAssessmentChangeRequestLink>();
     public DbSet<ReviewCycle> ReviewCycles => Set<ReviewCycle>();
     public DbSet<ApprovalStep> ApprovalSteps => Set<ApprovalStep>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
@@ -243,6 +245,38 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasIndex(x => new { x.ScrId, x.BaseNumber, x.Revision }).IsUnique();
             b.HasIndex(x => x.BaseNumber);
         });
+        modelBuilder.Entity<DownstreamChangeAssessment>(b =>
+        {
+            b.ToTable("downstream_change_assessments"); b.HasKey(x => x.Id);
+            b.Property(x => x.SourceChangeRequestNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.TargetLevel).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.AssignedEngineerId).HasMaxLength(100);
+            b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.SubmittedBy).HasMaxLength(100);
+            b.Property(x => x.SelectedApproverId).HasMaxLength(100);
+            b.Property(x => x.ApprovedBy).HasMaxLength(100);
+            b.Property(x => x.SupersededReason).HasMaxLength(2000).IsRequired();
+            b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasIndex(x => new { x.SourceChangeRequestId, x.TargetLevel }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.TargetLevel, x.State });
+            b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.SourceChangeRequestId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<DownstreamChangeAssessment>().WithMany().HasForeignKey(x => x.SupersededByAssessmentId).OnDelete(DeleteBehavior.Restrict);
+            b.HasMany(x => x.ChangeRequestLinks).WithOne().HasForeignKey(x => x.AssessmentId).OnDelete(DeleteBehavior.Cascade);
+            b.Navigation(x => x.ChangeRequestLinks).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+        modelBuilder.Entity<DownstreamAssessmentChangeRequestLink>(b =>
+        {
+            b.ToTable("downstream_assessment_change_request_links"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.Property(x => x.ChangeRequestNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.LinkedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.AssessmentId, x.ChangeRequestId }).IsUnique();
+            // Not unique on ChangeRequestId: one SWCR may deliberately answer several upstream assessments.
+            b.HasIndex(x => x.ChangeRequestId);
+            b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<ReviewCycle>(b =>
         {
             b.ToTable("review_cycles"); b.HasKey(x => x.Id);
@@ -360,7 +394,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("test_procedure_revisions"); b.HasKey(x => x.Id); b.Property(x => x.Objective).HasMaxLength(4000).IsRequired();
             b.Property(x => x.Preconditions).HasMaxLength(8000); b.Property(x => x.Steps).HasMaxLength(16000).IsRequired();
             b.Property(x => x.ExpectedResult).HasMaxLength(8000).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
-            b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired(); b.HasIndex(x => new { x.ProcedureId, x.Revision }).IsUnique();
+            b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired(); b.Property(x => x.SelectedApproverId).HasMaxLength(100); b.HasIndex(x => new { x.ProcedureId, x.Revision }).IsUnique();
             b.HasOne<TestProcedure>().WithMany().HasForeignKey(x => x.ProcedureId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<TestRequirementCoverage>(b =>
@@ -425,6 +459,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Discipline).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.SourceChangeRequestNumber).HasMaxLength(40).IsRequired();
             b.Property(x => x.BaseNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.SelectedApproverId).HasMaxLength(100);
             b.Ignore(x => x.DisplayNumber);
             b.HasMany(x => x.AdditionalSources).WithOne().HasForeignKey(x => x.TestChangeReviewId).OnDelete(DeleteBehavior.Cascade);
             b.Navigation(x => x.AdditionalSources).UsePropertyAccessMode(PropertyAccessMode.Field);
@@ -433,12 +468,14 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.SubmittedBy).HasMaxLength(100);
             b.Property(x => x.ApprovedBy).HasMaxLength(100);
             b.Property(x => x.ApprovalRationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.SupersededReason).HasMaxLength(2000).IsRequired();
             b.Property(x => x.Version).IsConcurrencyToken();
             b.HasIndex(x => new { x.ChangeRequestId, x.Discipline }).IsUnique();
             b.HasIndex(x => new { x.ReleaseId, x.State, x.Discipline });
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestChangeReview>().WithMany().HasForeignKey(x => x.SupersededByTestChangeRequestId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<VerificationImpactItem>(b =>
         {

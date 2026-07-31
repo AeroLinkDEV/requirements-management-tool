@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { changeRequestAllocation, changeRequestState } from './presentation'
 import { identityInitials, identityLabel } from './presentation'
 import type { HistoryStateIntent } from './routing'
+import type { AuthUser } from './IdentityCenter'
+import DownstreamAssessmentQueue from './DownstreamAssessmentQueue'
 import './HistoryExplorer.css'
 import './Swrd.css'
 
@@ -13,12 +15,13 @@ type Props={
  initialStateIntent?:HistoryStateIntent;onStateIntentChange:(intent?:HistoryStateIntent)=>void;
  onBack:()=>void;onOpenScr:(id:string)=>void;onCreateSystem:()=>void;
  onCreateSoftware:(level:'HighLevel'|'LowLevel')=>void
+ user:AuthUser
 }
 
 const stateLabels:Record<HistoryStateIntent,string>={Draft:'Draft',InReview:'In review',Approved:'Approved',SelectedForBaseline:'Allocated to a build',Deferred:'Deferred',ApprovedOrSelected:'Approved or allocated'}
 const matchesStateIntent=(state:string,intent?:HistoryStateIntent)=>!intent||(intent==='ApprovedOrSelected'?(state==='Approved'||state==='SelectedForBaseline'):state===intent)
 
-export default function HistoryExplorer({api,projectId,releases,activeReleaseId,scope,initialStateIntent,onStateIntentChange,onBack,onOpenScr,onCreateSystem,onCreateSoftware}:Props){
+export default function HistoryExplorer({api,projectId,releases,activeReleaseId,scope,initialStateIntent,onStateIntentChange,onBack,onOpenScr,onCreateSystem,onCreateSoftware,user}:Props){
  const [query,setQuery]=useState(''),[stateIntent,setStateIntent]=useState<HistoryStateIntent|undefined>(initialStateIntent),[scrPage,setScrPage]=useState(1),[scrTotal,setScrTotal]=useState(0),[scrTotalPages,setScrTotalPages]=useState(1),[scrs,setScrs]=useState<Scr[]>([]),[softwareChoice,setSoftwareChoice]=useState(false),[error,setError]=useState('')
  const activeRelease=releases.find(x=>x.id===activeReleaseId)
  const load=useCallback(async()=>{const params=new URLSearchParams({projectId,page:String(scrPage),pageSize:'50',releaseId:activeReleaseId,type:scope});if(stateIntent)params.set('state',stateIntent);if(query)params.set('search',query)
@@ -51,6 +54,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
   </header>
   {softwareChoice&&<section className="softwareChangeChoice" aria-label="Choose software requirement level"><div><span>NEW SOFTWARE CHANGE REQUEST</span><h2>Which software level is changing?</h2><p>The selected level keeps this change request focused while it moves through review.</p></div><button onClick={()=>startSoftware('HighLevel')}><b>HLR change request</b><span>High-level software behavior</span></button><button onClick={()=>startSoftware('LowLevel')}><b>LLR change request</b><span>Low-level implementation behavior</span></button><button className="choiceCancel" onClick={()=>setSoftwareChoice(false)}>Cancel</button></section>}
   {error&&<div className="workspaceError">{error}</div>}
+  {scope==='Software'&&<DownstreamAssessmentQueue api={api} projectId={projectId} releaseId={activeReleaseId} user={user} onOpenScr={onOpenScr}/>}
   <section className="historyTools"><div className="historyContext"><b>Build {activeRelease?.version}</b><span>{scope} area</span></div><div className="historyFilters"><input aria-label="Search change requests" value={query} onChange={e=>{setQuery(e.target.value);setScrPage(1)}} placeholder="Search number, title, statement, rationale…"/><select aria-label="Lifecycle state filter" value={stateIntent??''} onChange={e=>changeStateIntent(e.target.value?e.target.value as HistoryStateIntent:undefined)}><option value="">All lifecycle states</option><option value="Draft">Draft</option><option value="InReview">In review</option><option value="Approved">Approved</option><option value="SelectedForBaseline">Allocated to a build</option><option value="Deferred">Deferred</option><option value="ApprovedOrSelected">Approved or allocated</option></select></div></section>
   {stateIntent&&<div className="historyActiveFilter" role="status"><div><span>ACTIVE FILTER</span><b>{stateLabels[stateIntent]}</b><small>{scrTotal} matching {scope.toLowerCase()} record{scrTotal===1?'':'s'} in Build {activeRelease?.version}</small></div><button type="button" onClick={()=>changeStateIntent(undefined)} aria-label={`Clear ${stateLabels[stateIntent]} lifecycle filter`}>Clear filter ×</button></div>}
   <section className="historyTable"><div className="tableHead allocation"><span>Change request revision</span><span>Build allocation</span><span>State</span><span>Last activity</span></div>{visibleScrs.map(x=>{

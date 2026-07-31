@@ -89,7 +89,7 @@ test('verification actions follow authority in the selected Program',async({page
   const reviewerRequest=await playwright.request.newContext()
   const reviewerLogin=await reviewerRequest.post(`${apiBase}/api/auth/login`,{data:{userName:'systems.reviewer',password:'AeroLink!2026'}})
   expect(reviewerLogin.ok(),await reviewerLogin.text()).toBeTruthy()
-  const createProcedure=async(projectId:string,requirementRevisionId:string,title:string,approve=true)=>{
+  const createProcedure=async(projectId:string,requirementRevisionId:string,title:string,approve=true,approverId='systems.reviewer')=>{
     const createdResponse=await request.post(`${apiBase}/api/test-procedures`,{data:{
       projectId,
       baseNumber:'SERVER-ALLOCATED',
@@ -99,6 +99,7 @@ test('verification actions follow authority in the selected Program',async({page
       steps:'Exercise the approved behavior.',
       expectedResult:'The expected behavior is observed.',
       requirementRevisionIds:[requirementRevisionId],
+      approverId,
       level:'System',
     }})
     expect(createdResponse.ok(),await createdResponse.text()).toBeTruthy()
@@ -114,7 +115,7 @@ test('verification actions follow authority in the selected Program',async({page
   }
   const testProcedure=await createProcedure(testWorkspace.project.id,testTarget.requirementRevisionId,'Test-authority approved procedure')
   const approvalProcedure=await createProcedure(approvalWorkspace.project.id,approvalTarget.requirementRevisionId,'Approval-only approved procedure')
-  await createProcedure(approvalWorkspace.project.id,approvalTarget.requirementRevisionId,'Approval-only draft procedure',false)
+  await createProcedure(approvalWorkspace.project.id,approvalTarget.requirementRevisionId,'Approval-only draft procedure',false,userName)
   for(const [workspace,procedure,buildId] of [[testWorkspace,testProcedure,testTarget.buildId],[approvalWorkspace,approvalProcedure,approvalTarget.buildId]]){
     const recorded=await request.post(`${apiBase}/api/test-executions`,{data:{
       projectId:workspace.project.id,

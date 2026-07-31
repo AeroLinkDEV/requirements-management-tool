@@ -34,7 +34,7 @@ public sealed class FmsShowcaseSeederTests
             Assert.True(await db.RequirementRevisions.GroupBy(x => x.ArtifactId).AllAsync(x => x.Count() >= 1));
             var active = db.SystemChangeRequests.Where(x => x.TargetReleaseId == first.ActiveReleaseId);
             Assert.Equal(8, await active.CountAsync()); Assert.Equal(2, await active.CountAsync(x => x.State == ScrState.SelectedForBaseline));
-            Assert.Equal(2, await active.CountAsync(x => x.State == ScrState.InReview)); Assert.Equal(3, await active.CountAsync(x => x.State == ScrState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ScrState.Deferred));
+            Assert.Equal(1, await active.CountAsync(x => x.State == ScrState.Approved)); Assert.Equal(1, await active.CountAsync(x => x.State == ScrState.InReview)); Assert.Equal(3, await active.CountAsync(x => x.State == ScrState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ScrState.Deferred));
         }
         finally { File.Delete(path); }
     }

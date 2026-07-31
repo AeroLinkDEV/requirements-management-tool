@@ -251,12 +251,25 @@ public static class VerificationEndpoints
                 items = items.Select(x => { var latest = revisions.Where(r => r.ProcedureId == x.Id).OrderByDescending(r => r.Revision).FirstOrDefault(); var lastRun = latest is null ? null : executions.Where(e => e.ProcedureRevisionId == latest.Id).OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).FirstOrDefault();
                 return new { x.Id, displayNumber = latest is null ? x.BaseNumber : x.BaseNumber + "." + latest.Revision.ToString("D2"), x.Title, x.OwnerId, level = x.Level.ToString(),
                     revisionId = latest?.Id, revision = latest?.Revision, state = latest?.State.ToString(), objective = latest?.Objective,
+                    selectedApproverId = latest?.SelectedApproverId,
                     requirementCount = latest is null ? 0 : coverage.Count(c => c.ProcedureRevisionId == latest.Id), lastOutcome = lastRun?.Outcome.ToString(), lastExecutedAt = lastRun?.ExecutedAt }; }) });
         });
 
         app.MapPost("/api/test-procedures", async (CreateTestProcedureRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.TestEngineer))return Results.Forbid();
+            if (request.RequirementRevisionIds.Count == 0)
+                return Results.BadRequest(new { error = "Select at least one exact requirement revision from a materialized baseline.", code = "materialized_requirement_required" });
+            if (string.IsNullOrWhiteSpace(request.ApproverId))
+                return Results.BadRequest(new { error = "Select an independent procedure approver." });
+            var selectedApprover = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.UserName == request.ApproverId.Trim().ToLowerInvariant() && x.State == AccountState.Active, ct);
+            if (selectedApprover is null) return Results.BadRequest(new { error = "Select an active AeroLink procedure approver." });
+            var procedureProgramId = await db.Projects.Where(x => x.Id == request.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
+            if (!await identity.HasRoleAsync(selectedApprover.Id, procedureProgramId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
+                return Results.BadRequest(new { error = $"{selectedApprover.DisplayName} does not hold Approver authority for this Program." });
+            if (string.Equals(selectedApprover.UserName, http.UserAccount().UserName, StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest(new { error = "The procedure approver must be independent from its author." });
             await using var transaction=await db.Database.BeginTransactionAsync(IsolationLevel.Serializable,ct);
             var requirementIds = request.RequirementRevisionIds.Distinct().ToList();
             if (requirementIds.Count == 0)
@@ -272,9 +285,13 @@ public static class VerificationEndpoints
                                                    select member.Id).AnyAsync(ct))
                 return Results.Conflict(new { error = "The release package is frozen while approval is in progress.", code = "release_package_frozen" });
             try { var actor = http.UserAccount().UserName; var baseNumber=await IdentifierAllocator.NextTestProcedureAsync(db,request.Level,ct);var procedure = new TestProcedure(request.ProjectId, baseNumber, request.Title, actor, DateTimeOffset.UtcNow, request.Level);
-                var revision = new TestProcedureRevision(procedure.Id, 0, request.Objective, request.Preconditions, request.Steps, request.ExpectedResult, TestProcedureState.Draft, actor, DateTimeOffset.UtcNow);
-                db.AddRange(procedure, revision); db.TestCoverage.AddRange(requirementIds.Select(id => new TestRequirementCoverage(revision.Id, id))); await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);
-                return Results.Created($"/api/test-procedures/{procedure.Id}", new { procedure.Id, revisionId = revision.Id, displayNumber = procedure.BaseNumber + ".00", state = revision.State.ToString() }); }
+                var revision = new TestProcedureRevision(procedure.Id, 0, request.Objective, request.Preconditions, request.Steps, request.ExpectedResult, TestProcedureState.Draft, actor, DateTimeOffset.UtcNow, selectedApprover.UserName);
+                db.AddRange(procedure, revision); db.TestCoverage.AddRange(requirementIds.Select(id => new TestRequirementCoverage(revision.Id, id)));
+                db.UserNotifications.Add(new(request.ProjectId, selectedApprover.UserName, "ProcedureApprovalRequested",
+                    $"Review procedure {procedure.BaseNumber}.00", $"{http.UserAccount().DisplayName} selected you to approve this controlled test procedure revision.",
+                    "verification", procedure.Id, DateTimeOffset.UtcNow));
+                await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);
+                return Results.Created($"/api/test-procedures/{procedure.Id}", new { procedure.Id, revisionId = revision.Id, displayNumber = procedure.BaseNumber + ".00", state = revision.State.ToString(), revision.SelectedApproverId }); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (DbUpdateException) { return Results.Conflict(new { error = "Another test procedure was created at the same instant. Submit again to receive the next server number." }); }
         });

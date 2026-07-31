@@ -58,8 +58,9 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         // recorded confirmation that no test is required. A release with no requirement changes raises none,
         // and is complete by having nothing to decide.
         var verificationImpacts = await db.VerificationImpactItems.AsNoTracking().Where(x => x.ReleaseId == campaign.ReleaseId).ToListAsync(ct);
-        var impactDecided = verificationImpacts.Count(x => x.State == VerificationImpactState.Resolved);
-        var undecided = verificationImpacts.Where(x => x.State != VerificationImpactState.Resolved).ToList();
+        var currentImpacts = verificationImpacts.Where(x => x.State != VerificationImpactState.Superseded).ToList();
+        var impactDecided = currentImpacts.Count(x => x.State == VerificationImpactState.Resolved);
+        var undecided = currentImpacts.Where(x => x.State != VerificationImpactState.Resolved).ToList();
         var testChangeReviews = await db.TestChangeReviews.AsNoTracking().Where(x => x.ReleaseId == campaign.ReleaseId).ToListAsync(ct);
         var approvedTestChangeReviews = testChangeReviews.Count(x => x.State == TestChangeReviewState.Approved);
         // What this build was planned to run, and whether it has run it.

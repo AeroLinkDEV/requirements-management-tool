@@ -54,6 +54,15 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
         var reviews = await db.TestChangeReviews
             .Where(x => x.ChangeRequestId == request.Id)
             .ToDictionaryAsync(x => x.Discipline, ct);
+        var priorRequestIds = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => x.ProjectId == request.ProjectId && x.BaseNumber == request.BaseNumber && x.Revision < request.Revision)
+            .Select(x => x.Id).ToListAsync(ct);
+        var priorReviews = await db.TestChangeReviews
+            .Where(x => priorRequestIds.Contains(x.ChangeRequestId) && x.State != TestChangeReviewState.Superseded)
+            .ToListAsync(ct);
+        var priorReviewIds = priorReviews.Select(x => x.Id).ToList();
+        var priorItems = await db.VerificationImpactItems
+            .Where(x => priorReviewIds.Contains(x.TestChangeReviewId)).ToListAsync(ct);
 
         var raised = 0;
         foreach (var change in request.RequirementChanges)
@@ -68,6 +77,12 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
                     await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct));
                 db.TestChangeReviews.Add(review);
                 reviews.Add(discipline, review);
+                foreach (var historical in priorReviews.Where(x => x.Discipline == discipline))
+                {
+                    historical.Supersede(review.Id,
+                        $"{request.DisplayNumber} supersedes the source revision. Its verification decisions require an updated test change request.", now);
+                    foreach (var historicalItem in priorItems.Where(x => x.TestChangeReviewId == historical.Id)) historicalItem.Supersede(now);
+                }
             }
             var display = ArtifactNumberDisplay(change);
             VerificationImpactItem? item = change.Kind switch
@@ -275,7 +290,8 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
         if (orphanedProcedures.Count == 0) return 0;
 
         var alreadyRaised = await db.VerificationImpactItems
-            .Where(x => x.Trigger == VerificationImpactTrigger.ProcedureOrphaned && x.State != VerificationImpactState.Resolved)
+            .Where(x => x.Trigger == VerificationImpactTrigger.ProcedureOrphaned
+                && x.State != VerificationImpactState.Resolved && x.State != VerificationImpactState.Superseded)
             .Select(x => x.ProcedureId).ToListAsync(ct);
         var covered = alreadyRaised.Where(x => x is not null).Select(x => x!.Value).ToHashSet();
         var changeRequestId = retired[0].ChangeRequestId;
@@ -312,7 +328,8 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
     /// <summary>Unresolved items are what hold a baseline back from approval.</summary>
     public Task<List<VerificationImpactItem>> OutstandingForReleaseAsync(Guid releaseId, CancellationToken ct)
         => db.VerificationImpactItems.AsNoTracking()
-            .Where(x => x.ReleaseId == releaseId && x.State != VerificationImpactState.Resolved)
+            .Where(x => x.ReleaseId == releaseId && x.State != VerificationImpactState.Resolved
+                && x.State != VerificationImpactState.Superseded)
             .OrderBy(x => x.Trigger).ThenBy(x => x.SubjectDisplayNumber)
             .ToListAsync(ct);
 
