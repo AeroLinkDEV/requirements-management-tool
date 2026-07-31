@@ -15,7 +15,22 @@ type SetProcedure = {
   addedBy: string
   addedAt: string
   latestOutcome?: string | null
+  latestExecutionId?: string | null
+  latestExecutedAt?: string | null
   hasEvidence: boolean
+}
+
+/**
+ * The moment a person's determination becomes the record.
+ *
+ * AeroLink never executes anything. Somebody ran the procedure, decided what it showed, and this is where
+ * they say so — which is why the determination is written by hand and required, rather than derived from the
+ * outcome they picked. "Pass" is a verdict; the determination is the reasoning behind it, and a release
+ * reconstructed years later needs the second one.
+ */
+const localWallTimeNow = () => {
+  const now = new Date(), pad = (value: number) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
 }
 type TestSet = { id: string; discipline: TestDiscipline; releaseId: string; version: number; procedures: SetProcedure[] }
 type Candidate = { revisionId: string; displayNumber: string; title: string; state: string }
@@ -54,6 +69,12 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
+  const [recording, setRecording] = useState<SetProcedure>()
+  const [buildId, setBuildId] = useState('')
+  // Tracked so the evidence field can be required exactly where the product requires it. A Pass or a Fail
+  // is a claim about what was observed and has to say where the observation is recorded; a Blocked run
+  // observed nothing, so demanding evidence of it would be demanding evidence of an absence.
+  const [outcome, setOutcome] = useState<'Pass' | 'Fail' | 'Blocked'>('Pass')
 
   // Only the newest reply may write the screen. Typing in the search box starts a request while the previous
   // one is still in flight, and the broad reply is the slow one — see VerificationCenter for the same guard
@@ -69,8 +90,14 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
       return
     }
     const body = await response.json()
-    if (mine === ticket.current) setSets(body)
-  }, [api, releaseId])
+    // The build a result is recorded against. A determination that named no build would be a statement about
+    // the procedure rather than about anything that shipped.
+    const builds = await fetch(`${api}/api/builds?projectId=${projectId}&releaseId=${releaseId}`)
+    const built = builds.ok ? await builds.json() : []
+    if (mine !== ticket.current) return
+    setSets(body)
+    setBuildId(current => built.some((x: { id: string }) => x.id === current) ? current : built[0]?.id ?? '')
+  }, [api, projectId, releaseId])
 
   useEffect(() => { void load() }, [load])
 
@@ -110,6 +137,38 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
     setChosen([])
     setSaved(`${ids.length} procedure${ids.length === 1 ? '' : 's'} considered for this build.`)
   }, 'The procedures could not be added to the test set.')
+
+  const recordResult = (procedure: SetProcedure, form: FormData) => act(async () => {
+    const determination = String(form.get('determination') ?? '').trim()
+    if (!determination) { setError('Say what the run showed. A verdict without reasoning cannot be read back.'); return }
+    await apiRequest(`${api}/api/test-executions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectId,
+        procedureRevisionId: procedure.procedureRevisionId,
+        softwareBuildId: buildId || null,
+        // A retest names the run it supersedes, so a failure and its remedy stay attached to each other.
+        retestOfExecutionId: procedure.latestExecutionId ?? null,
+        outcome: form.get('outcome'),
+        configuration: form.get('configuration'),
+        determination,
+        evidenceReference: form.get('evidenceReference'),
+        executedAt: new Date(String(form.get('executedAt'))).toISOString(),
+      }),
+    })
+    setRecording(undefined)
+    setSaved(`Recorded against ${procedure.displayNumber}.`)
+  }, 'The result could not be recorded.')
+
+  const attachEvidence = (procedure: SetProcedure, file: File) => act(async () => {
+    if (!procedure.latestExecutionId) { setError('Record a result before attaching its evidence.'); return }
+    const body = new FormData()
+    body.append('file', file)
+    body.append('projectId', projectId)
+    const evidence = await apiRequest<{ id: string }>(`${api}/api/evidence`, { method: 'POST', body })
+    await apiRequest(`${api}/api/test-executions/${procedure.latestExecutionId}/evidence/${evidence.id}`, { method: 'POST' })
+    setSaved(`Evidence attached to ${procedure.displayNumber}.`)
+  }, 'The evidence could not be stored and linked to this result.')
 
   const exclude = (procedureRevisionId: string) => act(async () => {
     await apiRequest(`${api}/api/releases/${releaseId}/test-sets/${discipline}/procedures/${procedureRevisionId}`, { method: 'DELETE' })
@@ -160,6 +219,21 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
               {procedure.hasEvidence ? ' · evidence attached' : procedure.latestOutcome ? ' · no evidence yet' : ''}
             </small>
             <div className="testSetRowActions">
+              {!readOnly && (
+                <button type="button" disabled={busy} onClick={() => { setOutcome("Pass"); setRecording(procedure) }}>
+                  {procedure.latestOutcome ? 'Record retest' : 'Record result'}
+                </button>
+              )}
+              {!readOnly && procedure.latestExecutionId && !procedure.hasEvidence && (
+                <label className="evidenceAttach">
+                  <span>Attach evidence</span>
+                  <input type="file" aria-label={`Attach evidence for ${procedure.displayNumber}`} onChange={event => {
+                    const file = event.target.files?.[0]
+                    event.target.value = ''
+                    if (file) void attachEvidence(procedure, file)
+                  }} />
+                </label>
+              )}
               {onOpenProcedure && <button type="button" className="quiet" onClick={() => onOpenProcedure(procedure.procedureRevisionId)}>Open</button>}
               {!readOnly && <button type="button" className="quiet" disabled={busy} onClick={() => void exclude(procedure.procedureRevisionId)}>Remove</button>}
             </div>
@@ -210,6 +284,34 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
             </button>
           </div>
         </section>
+      )}
+
+      {recording && (
+        <div className="recordResultModal" role="dialog" aria-label={`Record a result for ${recording.displayNumber}`}>
+          <form onSubmit={event => { event.preventDefault(); void recordResult(recording, new FormData(event.currentTarget)) }}>
+            <p className="eyebrow">HUMAN DETERMINATION</p>
+            <h2>{recording.displayNumber}</h2>
+            <p>{recording.title}</p>
+            {/* AeroLink never executes anything. Somebody ran this and decided what it showed; the form asks
+                for that decision and for the reasoning behind it, because a verdict alone cannot be read back
+                years later by somebody reconstructing why a build was released. */}
+            <label>Outcome
+              <select name="outcome" value={outcome} onChange={event => setOutcome(event.target.value as "Pass" | "Fail" | "Blocked")}>
+                <option value="Pass">Pass</option>
+                <option value="Fail">Fail</option>
+                <option value="Blocked">Blocked</option>
+              </select>
+            </label>
+            <label>Executed at<input type="datetime-local" name="executedAt" defaultValue={localWallTimeNow()} required /></label>
+            <label>Configuration under test<input name="configuration" placeholder="Build, rig, data set" required /></label>
+            <label>Determination<textarea name="determination" placeholder="What the run showed, and why it means what it means." required /></label>
+            <label>Evidence reference{outcome === "Blocked" ? " (optional)" : ""}<input name="evidenceReference" placeholder="Where the recorded evidence lives" required={outcome !== "Blocked"} /></label>
+            <div className="recordResultActions">
+              <button type="submit" disabled={busy}>Record determination</button>
+              <button type="button" className="quiet" disabled={busy} onClick={() => setRecording(undefined)}>Cancel</button>
+            </div>
+          </form>
+        </div>
       )}
     </main>
   )

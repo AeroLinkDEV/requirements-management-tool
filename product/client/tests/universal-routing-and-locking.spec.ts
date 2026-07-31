@@ -35,5 +35,10 @@ test('deep links survive refresh, universal search resolves fragments, and check
  // The point of the assertion is unchanged — a reader sees who holds the lock and cannot take it.
  await expect(reader.getByText('Read-only while checked out')).toBeVisible();await expect(reader.getByRole('button',{name:/Read only · Daniel Reyes/})).toBeDisabled()
  await second.close()
- await page.getByRole('button',{name:'Discard checkout'}).click();await expect(page.getByRole('button',{name:'Check out & edit'})).toBeVisible()
+ // Discarding a checkout releases the lock on the server and the workspace reloads what it holds. The wait
+ // is the suite's 30 seconds rather than the 5-second default, because this is a server round-trip and the
+ // default has now failed three separate assertions in this suite on a loaded runner — each time reading as
+ // "the control never came back" when it had simply not come back yet.
+ await page.getByRole('button',{name:'Discard checkout'}).click()
+ await expect(page.getByRole('button',{name:'Check out & edit'})).toBeVisible({timeout:30_000})
 })
