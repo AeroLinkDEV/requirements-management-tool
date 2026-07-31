@@ -1,0 +1,57 @@
+/* Attention first, inventory second: the rows that need somebody are marked, the rest recede. */
+.testingCoveragePage { display: flex; flex-direction: column; gap: 18px; }
+
+.coverageSummary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.coverageSummary article {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff;
+}
+.coverageSummary article.attention { border-color: #e0b45c; background: #fffaf0; }
+.coverageSummary b { font: 750 26px var(--font-display); color: var(--ink-900); }
+.coverageSummary span { color: var(--ink-500); font-size: 13px; }
+
+.coverageCard { padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.coverageCard .cardTitle { margin-bottom: 12px; }
+.coverageCard .cardTitle h2 { margin: 0; font: 750 17px var(--font-display); }
+.coverageCard .cardTitle p { margin: 2px 0 0; color: var(--ink-500); font-size: 13px; }
+
+.coverageRow {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "head actions" "body actions" "meta actions";
+  gap: 2px 12px; padding: 12px 0; border-top: 1px solid var(--line);
+}
+.coverageRow.attention { border-left: 3px solid #e0b45c; padding-left: 10px; }
+.coverageRow > div:first-child { grid-area: head; display: flex; align-items: baseline; gap: 10px; }
+.coverageRow p { grid-area: body; margin: 0; min-width: 0; }
+.coverageRow small { grid-area: meta; color: var(--ink-500); }
+.coverageRowActions { grid-area: actions; display: flex; gap: 6px; align-items: flex-start; }
+.coverageRow b { font: 750 14px var(--font-display); }
+.coverageRow i {
+  font-style: normal; font-size: 12px; font-weight: 650;
+  padding: 2px 8px; border-radius: 999px; background: #eef2f6; color: var(--ink-500);
+}
+.coverageRow.attention i { background: #fdf3e2; color: #8a5a00; }
+
+.coverageEmpty { display: flex; flex-direction: column; gap: 4px; padding: 20px; border: 1px dashed var(--line); border-radius: 10px; }
+.coverageEmpty b { font: 750 15px var(--font-display); }
+.coverageEmpty span { color: var(--ink-500); font-size: 13px; }
+.coverageNone { color: var(--ink-500); font-size: 13px; padding: 12px 0; }
+
+.coverageSearch { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.coverageSearch span { font-size: 13px; color: var(--ink-500); }
+
+.procedureHistoryModal {
+  position: fixed; inset: 0; display: grid; place-items: center;
+  background: rgba(11, 26, 48, .45); padding: 24px; z-index: 60;
+}
+.procedureHistoryModal > div {
+  width: min(620px, 100%); max-height: 80vh; overflow-y: auto;
+  padding: 22px; border-radius: 14px; background: #fff;
+}
+.procedureHistoryModal h2 { margin: 4px 0 2px; font: 750 20px var(--font-display); }
+.revisionList { display: flex; flex-direction: column; gap: 10px; margin: 16px 0; padding: 0; list-style: none; }
+.revisionList li { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-top: 1px solid var(--line); }
+.revisionList b { font: 750 14px var(--font-display); }
+.revisionList i { font-style: normal; font-size: 12px; color: var(--ink-500); }
+.revisionList small, .revisionDriver, .revisionCovers { color: var(--ink-500); font-size: 12px; }
+.revisionDriver.quiet { color: #9aa6b2; }
