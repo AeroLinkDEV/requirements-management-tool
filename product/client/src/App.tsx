@@ -560,6 +560,7 @@ function App() {
           : "System"}
         buildName={`Build ${release.version}`}
         readOnly={release.isReleased}
+        user={user}
       />
     );
 

@@ -25,6 +25,18 @@ type TestChangeRequest = {
   coveredChangeRequests: ChangeRequestCover[]
 }
 type Procedure = { id: string; revisionId: string; displayNumber: string; title: string; state: string; requirementCount: number; ownerId: string }
+type ImpactItem = {
+  id: string
+  testChangeReviewId: string
+  trigger: string
+  state: string
+  subjectDisplayNumber: string
+  declaredVerificationMethod: string
+  assignedEngineerId?: string
+  outcome?: string
+  resolutionRationale: string
+  holdsRelease?: boolean
+}
 type Revision = {
   id: string
   displayNumber: string
@@ -52,13 +64,14 @@ const disciplineLabel = (discipline: TestDiscipline) =>
  * change request is approved, so nothing goes unnoticed; an engineer can also raise one deliberately when a
  * set of changes is best tested together.
  */
-export default function TestingCoverageWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly }: {
+export default function TestingCoverageWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, user }: {
   api: string
   projectId: string
   releaseId: string
   discipline: TestDiscipline
   buildName: string
   readOnly: boolean
+  user: { userName: string }
 }) {
   const [coverage, setCoverage] = useState<Coverage>()
   const [requests, setRequests] = useState<TestChangeRequest[]>([])
@@ -66,6 +79,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [total, setTotal] = useState(0)
   const [query, setQuery] = useState('')
   const [history, setHistory] = useState<History>()
+  const [impact, setImpact] = useState<ImpactItem[]>([])
+  const [opened, setOpened] = useState('')
+  const [resolving, setResolving] = useState<ImpactItem>()
+  const [outcome, setOutcome] = useState('ProcedureCoverageConfirmed')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
@@ -77,15 +94,18 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
 
   const load = useCallback(async () => {
     const mine = ++ticket.current
-    const [coverageResponse, requestResponse] = await Promise.all([
+    const [coverageResponse, requestResponse, impactResponse] = await Promise.all([
       fetch(`${api}/api/verification-coverage?projectId=${projectId}&buildId=${releaseId}`),
       fetch(`${api}/api/releases/${releaseId}/test-change-reviews`),
+      fetch(`${api}/api/releases/${releaseId}/verification-impact`),
     ])
     const nextCoverage = coverageResponse.ok ? await coverageResponse.json() : undefined
     const nextRequests = requestResponse.ok ? await requestResponse.json() : undefined
+    const nextImpact = impactResponse.ok ? await impactResponse.json() : undefined
     if (mine !== ticket.current) return
     if (nextCoverage) setCoverage(nextCoverage)
     if (nextRequests) setRequests(nextRequests)
+    if (nextImpact) setImpact(nextImpact)
     if (!requestResponse.ok) {
       recordClientOperationFailure('verification.coverage.load', new Error(`HTTP ${requestResponse.status}`))
       setError('The test change requests for this build could not be loaded.')
@@ -120,10 +140,43 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     finally { setBusy(false) }
   }
 
+  // Taking a package on assigns every decision in it. A package half-assigned has no owner anybody can name,
+  // which is the state this queue exists to make impossible.
   const takeOn = (request: TestChangeRequest) => act(async () => {
-    await apiRequest(`${api}/api/verification-impact/${request.id}/assign`, { method: 'POST' }).catch(() => undefined)
-    setSaved(`${request.displayNumber} is yours.`)
+    const items = impact.filter(x => x.testChangeReviewId === request.id && x.state === 'Open')
+    for (const item of items)
+      await apiRequest(`${api}/api/verification-impact/${item.id}/assign`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engineerId: user.userName }),
+      })
+    setSaved(`${request.displayNumber} is yours — ${items.length} decision${items.length === 1 ? '' : 's'}.`)
   }, 'The package could not be assigned.')
+
+  const resolve = (item: ImpactItem, form: FormData) => act(async () => {
+    const chosen = String(form.get('outcome'))
+    await apiRequest(`${api}/api/verification-impact/${item.id}/resolve`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        outcome: chosen,
+        rationale: form.get('rationale'),
+        procedureId: chosen === 'ProcedureCoverageConfirmed' ? String(form.get('procedureId') || '') || null : null,
+        procedureChangeAction: chosen === 'NoTestRequired' ? 'NoTestRequired' : form.get('procedureChangeAction') || null,
+        retargetedRequirementRevisionId: chosen === 'ProcedureRetargeted' ? String(form.get('retargeted') || '') || null : null,
+      }),
+    })
+    setResolving(undefined)
+    setSaved(`Decision recorded for ${item.subjectDisplayNumber}.`)
+  }, 'The decision could not be recorded.')
+
+  const advance = (request: TestChangeRequest, action: 'submit' | 'approve' | 'return', rationale?: string) => act(async () => {
+    await apiRequest(`${api}/api/test-change-reviews/${request.id}/${action}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rationale: rationale ?? '' }),
+    })
+    setSaved(action === 'submit' ? `${request.displayNumber} sent for approval.`
+      : action === 'approve' ? `${request.displayNumber} approved.`
+      : `${request.displayNumber} returned for more work.`)
+  }, 'The package could not be moved on.')
 
   const openHistory = async (procedureId: string) => {
     setError('')
@@ -172,10 +225,52 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               {request.resolvedItems} of {request.totalItems} decisions recorded
               {request.assignedEngineerId ? <> · <PersonName userName={request.assignedEngineerId} /></> : ' · nobody has picked this up'}
             </small>
-            {!readOnly && request.state === 'Open' && !request.assignedEngineerId && (
-              <div className="coverageRowActions">
+            <div className="coverageRowActions">
+              <button type="button" className="quiet" onClick={() => setOpened(current => current === request.id ? '' : request.id)}>
+                {opened === request.id ? 'Hide decisions' : 'Decisions'}
+              </button>
+              {!readOnly && request.state === 'Open' && !request.assignedEngineerId && (
                 <button type="button" className="quiet" disabled={busy} onClick={() => void takeOn(request)}>Take it on</button>
-              </div>
+              )}
+              {/* Submission is offered only once every decision is recorded. The server refuses otherwise, and
+                  offering an action that will be refused is a worse answer than not offering it. */}
+              {!readOnly && request.state === 'Open' && request.totalItems > 0 && request.resolvedItems === request.totalItems && (
+                <button type="button" disabled={busy} onClick={() => void advance(request, 'submit')}>Send for approval</button>
+              )}
+              {!readOnly && request.state === 'InReview' && (
+                <>
+                  <button type="button" disabled={busy} onClick={() => {
+                    const rationale = window.prompt(`Why is ${request.displayNumber} approved?`)
+                    if (rationale?.trim()) void advance(request, 'approve', rationale)
+                  }}>Approve</button>
+                  <button type="button" className="quiet" disabled={busy} onClick={() => {
+                    const rationale = window.prompt(`Why is ${request.displayNumber} going back?`)
+                    if (rationale?.trim()) void advance(request, 'return', rationale)
+                  }}>Return</button>
+                </>
+              )}
+            </div>
+            {opened === request.id && (
+              <ul className="decisionList">
+                {impact.filter(x => x.testChangeReviewId === request.id).map(item => (
+                  <li key={item.id}>
+                    <b>{item.subjectDisplayNumber}</b>
+                    <i>{item.state === 'Resolved' ? (item.outcome ?? 'Resolved') : item.state}</i>
+                    <small>
+                      Author declared {item.declaredVerificationMethod || 'no method'}
+                      {item.assignedEngineerId ? <> · <PersonName userName={item.assignedEngineerId} /></> : ''}
+                      {item.resolutionRationale ? ` · ${item.resolutionRationale}` : ''}
+                    </small>
+                    {!readOnly && item.state !== 'Resolved' && (
+                      <button type="button" className="quiet" disabled={busy} onClick={() => {
+                        setOutcome(item.trigger === 'ProcedureOrphaned' ? 'ProcedureRetired' : 'ProcedureCoverageConfirmed')
+                        setResolving(item)
+                      }}>Decide</button>
+                    )}
+                  </li>
+                ))}
+                {!impact.some(x => x.testChangeReviewId === request.id) && <li className="decisionNone">This package has no decisions recorded against it.</li>}
+              </ul>
             )}
           </article>
         ))}
@@ -224,6 +319,59 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         ))}
         {!procedures.length && <p className="coverageNone">{query ? 'No procedure matches that.' : 'This build has no controlled procedures yet.'}</p>}
       </section>
+
+      {resolving && (
+        <div className="decisionModal" role="dialog" aria-label={`Decide ${resolving.subjectDisplayNumber}`}>
+          <form onSubmit={event => { event.preventDefault(); void resolve(resolving, new FormData(event.currentTarget)) }}>
+            <p className="eyebrow">VERIFICATION DECISION</p>
+            <h2>{resolving.subjectDisplayNumber}</h2>
+            {/* Every outcome is an explicit judgement. There is deliberately no value meaning "nobody looked",
+                because a requirement must never reach an approved baseline without somebody having decided. */}
+            <label>Decision
+              <select name="outcome" value={outcome} onChange={event => setOutcome(event.target.value)}>
+                {resolving.trigger === 'ProcedureOrphaned' ? (
+                  <>
+                    <option value="ProcedureRetired">Procedure retired</option>
+                    <option value="ProcedureRetargeted">Procedure moved to another requirement</option>
+                    <option value="ProcedureRetained">Procedure deliberately retained</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="ProcedureCoverageConfirmed">An approved procedure covers this</option>
+                    <option value="NoTestRequired">No test required</option>
+                  </>
+                )}
+              </select>
+            </label>
+            {outcome === 'ProcedureCoverageConfirmed' && (
+              <label>Covering procedure
+                <select name="procedureId" required>
+                  <option value="">Choose an approved procedure…</option>
+                  {procedures.filter(x => x.state === 'Approved').map(x => (
+                    <option key={x.id} value={x.id}>{x.displayNumber} · {x.title.slice(0, 60)}</option>
+                  ))}
+                </select>
+                <small>Only approved procedures in this Project. Search above to bring more into this list.</small>
+              </label>
+            )}
+            {outcome === 'ProcedureRetargeted' && (
+              <label>Requirement it moves to
+                <select name="retargeted" required>
+                  <option value="">Choose a requirement…</option>
+                  {(coverage?.items ?? []).map(x => (
+                    <option key={x.revisionId} value={x.revisionId}>{x.displayNumber} · {x.statement.slice(0, 60)}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label>Rationale<textarea name="rationale" placeholder="Why this is the right answer for this requirement." required /></label>
+            <div className="decisionActions">
+              <button type="submit" disabled={busy}>Record decision</button>
+              <button type="button" className="quiet" disabled={busy} onClick={() => setResolving(undefined)}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {history && (
         <div className="procedureHistoryModal" role="dialog" aria-label={`History of ${history.baseNumber}`}>
