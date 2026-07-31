@@ -129,6 +129,13 @@ test('verification actions follow authority in the selected Program',async({page
       executedAt:new Date().toISOString(),
     }})
     expect(recorded.ok(),await recorded.text()).toBeTruthy()
+    // Put the procedure in the build's test set as the administrator. Choosing what a build runs is a lead's
+    // decision and neither of the accounts under test holds that authority — which is the point of this
+    // journey, so the set is prepared here rather than through the page.
+    const included=await request.post(`${apiBase}/api/releases/${workspace.release.id}/test-sets/System/procedures`,{
+      data:{procedureRevisionIds:[procedure.revisionId],reason:'Chosen',note:'Prepared for the capability journey.'},
+    })
+    expect(included.ok(),await included.text()).toBeTruthy()
   }
   await reviewerRequest.dispose()
 
@@ -149,31 +156,36 @@ test('verification actions follow authority in the selected Program',async({page
   await page.goto(`/programs/${testWorkspace.program.id}/projects/${testWorkspace.project.id}/releases/${testWorkspace.release.id}/command-center`)
   await expect(page.getByRole('heading',{name:/Command Center/})).toBeVisible()
 
-  await openNavigationGroup(page,'VERIFICATION')
-  await page.getByRole('link',{name:'System Verification'}).click()
-  await expect(page.getByRole('heading',{name:'Verification & Evidence'})).toBeVisible()
-  await expect(page.getByRole('button',{name:/New Test Procedure/})).toBeEnabled()
-  await page.getByRole('button',{name:/Test procedures/}).click()
-  const testRow=page.locator('.procedureRow').filter({hasText:'Test-authority approved procedure'})
-  await expect(testRow.getByRole('button',{name:'Record result'})).toBeVisible()
-  await testRow.getByRole('button',{name:'Record result'}).click()
+  // Test Engineer authority in this Program: procedures can be written, and results recorded against the
+  // build's test set.
+  await openNavigationGroup(page,'ASSURANCE')
+  await page.getByRole('link',{name:'System Testing Coverage'}).click()
+  await expect(page.getByRole('heading',{name:'Testing Coverage'})).toBeVisible({timeout:30_000})
+  await expect(page.getByRole('button',{name:/New test procedure/})).toBeEnabled()
+
+  await page.getByRole('link',{name:'System Test Results'}).click()
+  await expect(page.getByRole('heading',{name:'Test Results'})).toBeVisible({timeout:30_000})
+  const testRow=page.locator('.testSetRow').filter({hasText:'Test-authority approved procedure'})
+  await expect(testRow).toBeVisible({timeout:30_000})
+  await testRow.getByRole('button',{name:/Record result|Record retest/}).click()
   await expect(page.getByLabel('Executed by / human determination owner')).toHaveAttribute('readonly','')
   await expect(page.getByLabel('Evidence reference')).toHaveAttribute('required','')
   await page.getByLabel('Outcome').selectOption('Blocked')
   await expect(page.getByLabel('Evidence reference')).not.toHaveAttribute('required','')
-  await page.locator('.resultForm').getByRole('button',{name:'Cancel'}).click()
-  await page.getByRole('button',{name:/Evidence & results/}).click()
-  await expect(page.getByText('Upload evidence',{exact:true})).toBeVisible()
+  await page.getByRole('button',{name:'Cancel'}).click()
 
-  await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification`)
-  await expect(page.getByRole('heading',{name:'Verification & Evidence'})).toBeVisible()
-  await expect(page.getByRole('button',{name:/New Test Procedure/})).toBeDisabled()
-  await page.getByRole('button',{name:/Test procedures/}).click()
-  const draftRow=page.locator('.procedureRow').filter({hasText:'Approval-only draft procedure'})
-  await expect(draftRow.getByRole('button',{name:'Review & approve'})).toBeVisible()
-  const approvedRow=page.locator('.procedureRow').filter({hasText:'Approval-only approved procedure'})
-  await expect(approvedRow.getByRole('button',{name:'Record result'})).toHaveCount(0)
-  await expect(approvedRow.getByText(/Test Engineer authority is required/)).toBeVisible()
-  await page.getByRole('button',{name:/Evidence & results/}).click()
-  await expect(page.getByText('Upload evidence',{exact:true})).toHaveCount(0)
+  // Approver authority without Test Engineer authority: a draft can be signed for, and nothing can be run.
+  await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification/coverage`)
+  await expect(page.getByRole('heading',{name:'Testing Coverage'})).toBeVisible({timeout:30_000})
+  await expect(page.getByRole('button',{name:/New test procedure/})).toBeDisabled()
+  const draftRow=page.locator('.procedureLibrary .coverageRow').filter({hasText:'Approval-only draft procedure'})
+  await expect(draftRow.getByRole('button',{name:'Review & approve'})).toBeVisible({timeout:30_000})
+
+  await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification/results`)
+  await expect(page.getByRole('heading',{name:'Test Results'})).toBeVisible({timeout:30_000})
+  // Nothing on this page offers to record a determination. The set may be empty here — choosing what a build
+  // runs is a lead's job and this account is neither — so the assertion is that no recording control exists
+  // at all, which is what an account without Test Engineer authority must see either way.
+  await expect(page.getByRole('button',{name:'Record result'})).toHaveCount(0)
+  await expect(page.getByRole('button',{name:'Record retest'})).toHaveCount(0)
 })

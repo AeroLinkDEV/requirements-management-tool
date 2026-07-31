@@ -91,6 +91,12 @@ The abbreviation `SRD` is not used on its own because it is ambiguous.
 
 **Test Step**: An ordered instruction within a procedure, with expected outcome and any required inputs or conditions.
 
+**Test Change Request**: A controlled record of the test work an approved change creates, one per affected discipline — System, Software HLR, Software LLR. It carries its own number and revisions, may cover more than one requirement change request, and may also be raised deliberately when a set of changes is best tested together. Claiming one claims every decision inside it.
+
+**Verification Decision**: The explicit judgement recorded against each requirement inside a test change request — an approved procedure covers it, no test is required, a procedure is retired, retargeted or deliberately retained. There is deliberately no value meaning nobody looked. A decision may be reopened: what was decided stays in immutable history, the item returns to the release gate, and any coverage it claimed goes back to suspect.
+
+**Build Test Set**: The procedures a particular build has to run, one set per build per discipline. A working list rather than a controlled artefact, recording who added each entry and why — because a requirement changed, because the change makes an area worth re-exercising, because a corrective action demands it, or simply because somebody chose it. Release gates measure recorded results against this set.
+
 **Test Suite**: A named grouping or execution context for procedures, such as a real-engine or simulated-engine campaign. The precise suite/configuration distinction remains open.
 
 **Test Execution**: An immutable historical record of running an exact procedure revision under a defined configuration. Execution occurs outside the platform initially; its data is entered or imported.

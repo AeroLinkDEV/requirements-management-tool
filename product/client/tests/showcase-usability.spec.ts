@@ -67,14 +67,12 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   expect(await traceDetails.count()).toBeGreaterThan(0)
   await expect(traceDetails.first()).not.toHaveAttribute('open','')
 
+  // Verification is a fork between two pages rather than a workspace with tabs: the question a reader
+  // arrives with decides which page they open, and both are named on the way in.
   await page.getByRole('link',{name:'System Verification'}).click()
-  // Verification opens on the work an approved change created, not on the coverage inventory. The inventory
-  // is one tab across, which is the right distance for a question asked occasionally.
-  await expect(page.getByRole('heading',{name:'Test procedure alignment'})).toBeVisible()
-  await page.getByRole('button',{name:/Requirement coverage/}).click()
-  await expect(page.getByRole('heading',{name:'Requirement coverage'})).toBeVisible()
-  await expect(page.getByRole('heading',{name:'Test procedures'})).toBeHidden()
-  await page.getByRole('button',{name:/Test procedures/}).click()
+  await expect(page.getByRole('heading',{name:'Verification'})).toBeVisible()
+  await page.getByRole('button',{name:'Open Testing Coverage →'}).click()
+  await expect(page.getByRole('heading',{name:'Test change requests'})).toBeVisible()
   await expect(page.getByRole('heading',{name:'Test procedures'})).toBeVisible()
 
   await openNavigationGroup(page,'RELEASE & CONFIGURATION')

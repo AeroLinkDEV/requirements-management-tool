@@ -103,3 +103,38 @@ test("a corrective action opens the discipline, report and procedure it belongs 
   await expect(page.getByText(system.report.displayNumber)).toHaveCount(0)
   await expect(page.getByText(software.report.displayNumber)).toHaveCount(0)
 });
+
+/**
+ * Where a corrective action actually lands.
+ *
+ * "Record a passing successor execution" is an instruction to run something again and say what happened, so
+ * it opens Test Results — with the report named, and the retest offered against the procedure that failed
+ * rather than against whatever the build ran last. The report is part of the address, so refreshing or going
+ * back returns to the same remediation instead of to a page with nothing selected.
+ */
+test("a corrective action opens Test Results, names the report, and survives a reload", async ({ page, request }) => {
+  test.setTimeout(240_000);
+  await apiLogin(request);
+  await login(page, 'admin', { openProject: false });
+  await selectProgram(page, "Flight Management System Live Program");
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, "");
+
+  const workspaces = await (await page.request.get(`${apiBase}/api/workspaces`)).json();
+  const fms = workspaces.find((x: { program: { name: string } }) => x.program.name === "Flight Management System Live Program");
+  const projectId = fms.projects[0].project.id;
+  const releaseId = fms.projects[0].releases.find((x: { isReleased: boolean }) => !x.isReleased).id;
+
+  const raised = await raiseReport(page, projectId, releaseId, "Software");
+  const address = new URL(`${root}/software-verification/hlr/results/${raised.report.id}`, page.url()).toString();
+  await page.goto(address, { waitUntil: "load" });
+
+  const banner = page.getByRole("status", { name: "Corrective verification action" });
+  await expect(banner).toBeVisible({ timeout: 30_000 });
+  await expect(banner).toContainText(`CORRECTING ${raised.report.displayNumber}`);
+  await expect(banner).toContainText("successor execution");
+
+  await page.reload({ waitUntil: "load" });
+  await expect(page.getByRole("heading", { name: "Test Results" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("status", { name: "Corrective verification action" })).toContainText(raised.report.displayNumber);
+  expect(page.url()).toContain(raised.report.id);
+});

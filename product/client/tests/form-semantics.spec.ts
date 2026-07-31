@@ -243,20 +243,30 @@ test('verification, review and administration forms carry the same semantics', a
   await inspect(page, 'Review procedure', failures)
   await labelActivatesControl(page, 'Name', 'Review procedure', failures)
 
-  // Verification's own forms open from the workspace rather than from a route, so they are opened the way a
+  // Verification's own forms open from the page rather than from a route, so they are opened the way a
   // verification engineer opens them. A dialog is where required fields and choice groups actually live.
-  await page.goto(new URL(root + '/system-verification', page.url()).toString(), { waitUntil: 'load' })
+  await page.goto(new URL(root + '/system-verification/results', page.url()).toString(), { waitUntil: 'load' })
   await surfacePainted(page)
-  await page.getByRole('button', { name: /Test procedures/ }).first().click()
   await layoutSettled(page)
-  const record = page.getByRole('button', { name: 'Record result' }).first()
+  const record = page.getByRole('button', { name: /^Record (result|retest)$/ }).first()
   if (await record.count() > 0) {
     await record.click()
-    await expect(page.locator('.resultForm')).toBeVisible({ timeout: 30_000 })
+    await expect(page.locator('.recordResultModal')).toBeVisible({ timeout: 30_000 })
     await inspect(page, 'Record verification result', failures)
-    for (const label of ['Outcome', 'Configuration', 'Evidence reference']) {
+    for (const label of ['Outcome', 'Configuration under test', 'Evidence reference']) {
       await labelActivatesControl(page, label, 'Record verification result', failures)
     }
+  }
+
+  // The other half: authoring a procedure, which is a longer form and the only one on the coverage page.
+  await page.goto(new URL(root + '/system-verification/coverage', page.url()).toString(), { waitUntil: 'load' })
+  await surfacePainted(page)
+  await layoutSettled(page)
+  await page.getByRole('button', { name: '+ New test procedure' }).click()
+  await expect(page.getByRole('dialog', { name: 'Create a test procedure' })).toBeVisible({ timeout: 30_000 })
+  await inspect(page, 'Create a test procedure', failures)
+  for (const label of ['Title', 'Objective', 'Expected result']) {
+    await labelActivatesControl(page, label, 'Create a test procedure', failures)
   }
 
   expect(failures, `Form semantics defects:\n  ${failures.join('\n  ')}`).toEqual([])

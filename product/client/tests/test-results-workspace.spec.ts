@@ -17,40 +17,42 @@ test('a lead chooses what the build runs, and the set says why each procedure is
   await page.getByRole('link', { name: 'System Test Results' }).click()
 
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
-  // Nothing is chosen by default. A build that silently inherited the whole suite would have had no decision
-  // made about it, and the gate would measure it against work nobody intended to do.
-  await expect(page.getByText('Nothing has been chosen for this build yet')).toBeVisible()
 
-  await page.getByLabel('Find an approved procedure').fill('SYSTP-000001')
-  const candidate = page.locator('.testSetCandidates label').first()
-  await expect(candidate).toBeVisible({ timeout: 30_000 })
-  await candidate.locator('input[type="checkbox"]').check()
+  // A build does not silently inherit the whole suite; what it runs is a decision somebody made. Asserted as
+  // "fewer than everything approved" rather than "empty", because this is one shared database and the other
+  // journeys in this suite legitimately put procedures in this same set — a test that demanded an empty set
+  // would be asserting the order it happened to run in.
+  await page.getByLabel('Find an approved procedure').fill('SYSTP-0000')
+  const candidates = page.locator('.testSetCandidates label')
+  await expect(candidates.first()).toBeVisible({ timeout: 30_000 })
+  const chosen = candidates.first()
+  const number = ((await chosen.locator('b').textContent()) ?? '').trim()
+  expect(number, 'a candidate must be offered by its controlled number').toMatch(/SYSTP-\d{6}\.\d{2}/)
+  await chosen.locator('input[type="checkbox"]').check()
 
   // The two routes a lead arrives by are recorded separately, because "we tested this because it changed"
   // and "we tested this because we swept the area" are different answers to why a build ran what it ran.
   await page.getByRole('button', { name: 'Add — area sweep' }).click()
 
-  const row = page.locator('.testSetRow')
+  const row = page.locator('.testSetRow').filter({ hasText: number })
   await expect(row).toHaveCount(1, { timeout: 30_000 })
   await expect(row).toContainText('Area sweep')
+  // Chosen, not inherited: it left the candidate list because it is now in the set.
+  await expect(page.locator('.testSetCandidates label').filter({ hasText: number })).toHaveCount(0)
   // Whatever the build has recorded against it, said plainly. The showcase has already run this one, so the
   // assertion is on there being a determination rather than on which — the point is that the plan and the
   // result are read together, not that a particular procedure passed.
   await expect(row.locator('i')).toHaveText(/Pass|Fail|Blocked|Not run/)
   await expect(page.getByText('Nothing has been chosen for this build yet')).toHaveCount(0)
 
-  // The counts a lead plans against, and the same facts the release gate reads.
-  const summary = page.getByRole('region', { name: 'Test set progress' })
-  await expect(summary).toContainText('1')
-
   // A determination is a person's judgement, recorded by them. AeroLink never executes anything, so this is
   // the only way a result exists at all — and the page is called Test Results, so being unable to record one
   // would have been a page that could not do the thing it is named for.
   await row.getByRole('button', { name: /Record result|Record retest/ }).click()
-  const record = page.getByRole('dialog', { name: /Record a result for SYSTP-000001/ })
+  const record = page.getByRole('dialog', { name: new RegExp(`Record a result for ${number.replace(/\./g, '\\.')}`) })
   await expect(record).toBeVisible({ timeout: 30_000 })
   await record.getByLabel('Configuration under test').fill('FMS rig 2, data set B')
-  await record.getByLabel('Determination').fill('Sequencing held across the oceanic transition with no dropped waypoint.')
+  await record.getByLabel('Determination', { exact: true }).fill('Sequencing held across the oceanic transition with no dropped waypoint.')
   // A Pass claims something was observed, so the product requires it to say where that observation lives.
   await record.getByLabel('Evidence reference').fill('rig2/oceanic-2026-07-30.log')
   await record.getByRole('button', { name: 'Record determination' }).click()
@@ -58,11 +60,12 @@ test('a lead chooses what the build runs, and the set says why each procedure is
   await expect(record).toHaveCount(0, { timeout: 30_000 })
   await expect(row).toContainText('Pass')
   // The run is now attachable: evidence belongs to a result, and there was no result before this.
-  await expect(row.getByLabel(/Attach evidence for SYSTP-000001/)).toBeAttached()
+  await expect(row.getByLabel(new RegExp(`Attach evidence for ${number.replace(/\./g, '\\.')}`))).toBeAttached()
 
+  // Taken back out again: the set is a working list and what it holds is reversible. The determination it
+  // already carries is not — removing the plan never removes the record.
   await row.getByRole('button', { name: 'Remove' }).click()
-  await expect(page.locator('.testSetRow')).toHaveCount(0, { timeout: 30_000 })
-  await expect(page.getByText('Nothing has been chosen for this build yet')).toBeVisible()
+  await expect(page.locator('.testSetRow').filter({ hasText: number })).toHaveCount(0, { timeout: 30_000 })
 })
 
 /**
@@ -104,12 +107,19 @@ test('a procedure shows every run against this build, and a failure can be retes
   await page.getByRole('link', { name: 'System Test Results' }).click()
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
 
-  await page.getByLabel('Find an approved procedure').fill('SYSTP-000001')
-  await page.locator('.testSetCandidates label').first().locator('input[type="checkbox"]').check()
+  // Whichever approved procedure this build is not already set to run. One shared database means the set is
+  // whatever the rest of the suite has left in it, so this takes what is offered rather than naming one and
+  // failing when another journey got there first.
+  await page.getByLabel('Find an approved procedure').fill('SYSTP-0000')
+  const candidate = page.locator('.testSetCandidates label').first()
+  await expect(candidate).toBeVisible({ timeout: 30_000 })
+  const number = ((await candidate.locator('b').textContent()) ?? '').trim()
+  const escaped = number.replace(/\./g, '\\.')
+  await candidate.locator('input[type="checkbox"]').check()
   await page.getByRole('button', { name: 'Add — covers a change' }).click()
 
-  const row = page.locator('.testSetRow').first()
-  await expect(row).toBeVisible({ timeout: 30_000 })
+  const row = page.locator('.testSetRow').filter({ hasText: number })
+  await expect(row).toHaveCount(1, { timeout: 30_000 })
 
   // Record a failure, so there is something a retest can answer. Determinations are immutable and this
   // build's procedure keeps every run ever recorded against it, so each run is found by its own text
@@ -117,10 +127,10 @@ test('a procedure shows every run against this build, and a failure can be retes
   // this journey ran.
   const failure = `Waypoint dropped at the oceanic transition ${Date.now()}`
   await row.getByRole('button', { name: /Record result|Record retest/ }).click()
-  const record = page.getByRole('dialog', { name: /Record a result for SYSTP-000001/ })
+  const record = page.getByRole('dialog', { name: new RegExp(`Record a result for ${escaped}`) })
   await record.getByLabel('Outcome').selectOption('Fail')
   await record.getByLabel('Configuration under test').fill('FMS rig 2, data set B')
-  await record.getByLabel('Determination').fill(failure)
+  await record.getByLabel('Determination', { exact: true }).fill(failure)
   await record.getByLabel('Evidence reference').fill('rig2/oceanic-fail.log')
   await record.getByRole('button', { name: 'Record determination' }).click()
   await expect(record).toHaveCount(0, { timeout: 30_000 })
@@ -133,9 +143,9 @@ test('a procedure shows every run against this build, and a failure can be retes
   // The retest names the run it answers rather than simply the latest.
   const answer = `Sequencing held after the correction ${Date.now()}`
   await failed.getByRole('button', { name: 'Retest this run' }).click()
-  const retest = page.getByRole('dialog', { name: /Record a result for SYSTP-000001/ })
+  const retest = page.getByRole('dialog', { name: new RegExp(`Record a result for ${escaped}`) })
   await retest.getByLabel('Configuration under test').fill('FMS rig 2, corrected build')
-  await retest.getByLabel('Determination').fill(answer)
+  await retest.getByLabel('Determination', { exact: true }).fill(answer)
   await retest.getByLabel('Evidence reference').fill('rig2/oceanic-retest.log')
   await retest.getByRole('button', { name: 'Record determination' }).click()
   await expect(retest).toHaveCount(0, { timeout: 30_000 })

@@ -26,17 +26,17 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
     await selectProgram(page,programName)
   }
 
-  await openPageFromPalette(page,'Software Verification')
+  await openPageFromPalette(page,'Software HLR Testing Coverage')
   await expect(page.getByText('Procedure authoring waits for governed requirement materialization')).toBeVisible()
   await expect(page.getByText(/no immutable requirement revisions yet/)).toBeVisible()
   await expect(page.getByText(/Existing inherited procedures remain visible/)).toBeVisible()
   await expect(page.getByText(/Requirement materialization is not exposed/)).toBeVisible()
-  await expect(page.getByRole('button',{name:'New Test Procedure'})).toBeDisabled()
-  await expect(page.getByRole('button',{name:'New Test Procedure'})).toHaveAttribute(
+  await expect(page.getByRole('button',{name:'+ New test procedure'})).toBeDisabled()
+  await expect(page.getByRole('button',{name:'+ New test procedure'})).toHaveAttribute(
     'title',
     'Materialize the software build requirements before creating a procedure.',
   )
-  await page.getByRole('button',{name:'Command Center'}).click()
+  await page.getByRole('link',{name:'Command Center'}).click()
 
   await openNewSoftwareChangeRequest(page,'HLR')
   await expect(page.getByRole('navigation', { name: 'Change authoring progress' })).toBeVisible()

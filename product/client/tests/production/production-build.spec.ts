@@ -294,23 +294,28 @@ test('verification mutation failures retain the engineer input and only confirme
 
   await login(page)
   await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'VERIFICATION')
-  await page.getByRole('link', { name: 'System Verification' }).click()
-  await page.getByRole('button', { name: /Test procedures/ }).click()
-  // The list is paged, so a procedure created through the API is found rather than scrolled to.
-  await page.getByLabel('Find a procedure').fill(procedure.displayNumber.replace(/\.\d{2}$/, ''))
-  const row = page.locator('.procedureRow').filter({ hasText: procedure.displayNumber })
-  await expect(row).toBeVisible()
-  await row.getByRole('button', { name: 'Record result' }).click()
-  const form = page.locator('form.resultForm')
-  await form.getByLabel('Configuration').fill('Production qualification rig')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Test Results' }).click()
+  await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
+
+  // A determination is recorded against a procedure the build is set to run, so the one created through the
+  // API is put in the set first. The candidate list is paged, so it is searched rather than scrolled to.
+  await page.getByLabel('Find an approved procedure').fill(procedure.displayNumber.replace(/\.\d{2}$/, ''))
+  await page.locator('.testSetCandidates label').first().locator('input[type="checkbox"]').check()
+  await page.getByRole('button', { name: 'Add — covers a change' }).click()
+  const row = page.locator('.testSetRow').filter({ hasText: procedure.displayNumber })
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.getByRole('button', { name: /Record result|Record retest/ }).click()
+
+  const form = page.locator('.recordResultModal form')
+  await form.getByLabel('Configuration under test').fill('Production qualification rig')
   await form.getByLabel('Evidence reference').fill('evidence/production-mutation.json')
-  await form.getByLabel('Human determination', { exact: true }).fill('The compiled client recorded the protected result exactly once.')
+  await form.getByLabel('Determination', { exact: true }).fill('The compiled client recorded the protected result exactly once.')
 
   await page.route('**/api/test-executions', route => route.abort('connectionfailed'))
-  await form.getByRole('button', { name: 'Record immutable result' }).click()
+  await form.getByRole('button', { name: 'Record determination' }).click()
   await expect(page.getByRole('alert')).toContainText(/Failed to fetch|could not/i)
-  await expect(form.getByLabel('Human determination', { exact: true })).toHaveValue('The compiled client recorded the protected result exactly once.')
+  await expect(form.getByLabel('Determination', { exact: true })).toHaveValue('The compiled client recorded the protected result exactly once.')
 
   await page.unroute('**/api/test-executions')
   await page.route('**/api/test-executions', route => route.fulfill({
@@ -318,14 +323,15 @@ test('verification mutation failures retain the engineer input and only confirme
     contentType: 'application/json',
     body: JSON.stringify({ error: 'A conflicting result version is already being reviewed.' }),
   }))
-  await form.getByRole('button', { name: 'Record immutable result' }).click()
+  await form.getByRole('button', { name: 'Record determination' }).click()
   await expect(page.getByRole('alert')).toContainText('A conflicting result version is already being reviewed.')
   await expect(form).toBeVisible()
 
   await page.unroute('**/api/test-executions')
-  await form.getByRole('button', { name: 'Record immutable result' }).click()
-  await expect(page.getByRole('heading', { name: 'Execution history' })).toBeVisible()
-  await expect(page.locator('.executionRow').filter({ hasText: procedure.displayNumber })).toContainText('compiled client recorded')
+  await form.getByRole('button', { name: 'Record determination' }).click()
+  await expect(form).toHaveCount(0, { timeout: 30_000 })
+  await row.getByRole('button', { name: 'Runs' }).click()
+  await expect(row.locator('.runList li').filter({ hasText: 'compiled client recorded' })).toBeVisible({ timeout: 30_000 })
 
   const executionsResponse = await request.get(`/api/test-executions?projectId=${showcase.projectId}`)
   expect(executionsResponse.ok(), await executionsResponse.text()).toBeTruthy()

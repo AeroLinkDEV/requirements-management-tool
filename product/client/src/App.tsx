@@ -58,7 +58,7 @@ const ScrEditor = lazyView(() => import("./ScrEditor"));
 const ScrWorkspace = lazyView(() => import("./ScrWorkspace"));
 const BaselineCenter = lazyView(() => import("./BaselineCenter"));
 const HistoryExplorer = lazyView(() => import("./HistoryExplorer"));
-const VerificationCenter = lazyView(() => import("./VerificationCenter"));
+const VerificationLanding = lazyView(() => import("./VerificationLanding"));
 const DocumentCenter = lazyView(() => import("./DocumentCenter"));
 const ProblemReportCenter = lazyView(() => import("./ProblemReportCenter"));
 const LifecycleExplorer = lazyView(() => import("./LifecycleExplorer"));
@@ -80,7 +80,7 @@ const viewCode: Partial<Record<View, { warm: () => void }>> = {
   baselines: BaselineCenter,
   history: HistoryExplorer,
   requirements: RequirementsWorkspace,
-  verification: VerificationCenter,
+  verification: VerificationLanding,
   testResults: TestResultsWorkspace,
   testingCoverage: TestingCoverageWorkspace,
   documents: DocumentCenter,
@@ -544,11 +544,10 @@ function App() {
         onOpenRequirement={(id) => navigate("requirements",discipline,id)}
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
         onOpenTraceability={(artifactId) => navigate("lifecycle", discipline, artifactId, artifactId ? "requirement" : undefined)}
-        onOpenVerification={() => navigate("verification", discipline === "software" ? "softwareTest" : "systemTest")}
+        onOpenVerification={() => navigate("testingCoverage", discipline === "software" ? "softwareTest" : "systemTest")}
       />
     );
-  // The two paths a build's verification work splits into. Built alongside the tabbed workspace rather than
-  // replacing it: the tabs are removed once both pages are finished, so nothing is unreachable in between.
+  // The two paths a build.s verification work splits into.
   if (view === "testingCoverage" && project && release)
     return inShell(
       <TestingCoverageWorkspace
@@ -558,8 +557,9 @@ function App() {
         discipline={discipline === "softwareTest"
           ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
-        buildName={`Build ${release.version}`}
+        buildName={`Build `}
         readOnly={release.isReleased}
+        programId={active?.program.id ?? ""}
         user={user}
       />
     );
@@ -575,24 +575,20 @@ function App() {
           : "System"}
         buildName={`Build ${release.version}`}
         readOnly={release.isReleased}
-        onOpenProcedure={() => navigate("verification", discipline)}
+        programId={active?.program.id ?? ""}
+        user={user}
+        // Carried in the route, so refreshing or going back returns to the same remediation.
+        correctiveProblemReportId={selectedArtifactId || undefined}
+        onOpenProcedure={() => navigate("testingCoverage", discipline, undefined, selectedArtifactKind)}
       />
     );
 
   if (view === "verification" && project && release)
     return inShell(
-      <VerificationCenter
-        api={API}
-        programId={active?.program.id ?? ""}
-        projectId={project.project.id}
-        releaseId={release.id}
-        buildName={`SW-${String(Number(release.version.split(".")[0])).padStart(2, "0")}.${String(Number(release.version.split(".")[1]) * 10).padStart(2, "0")}`}
-        readOnly={release.isReleased}
+      <VerificationLanding
         scope={discipline === "softwareTest" ? "Software" : "System"}
-        user={user}
-        // Carried in the route, so refreshing or going back returns to the same remediation.
-        correctiveProblemReportId={selectedArtifactKind === "problem-report" ? selectedArtifactId || undefined : undefined}
-        onBack={() => navigate("dashboard")}
+        buildName={`Build ${release.version}`}
+        onOpen={(target, level) => navigate(target, discipline, undefined, level)}
       />
     );
   if (view === "documents" && project && release)
@@ -617,7 +613,7 @@ function App() {
         readOnly={release?.isReleased ?? false}
         user={user}
         onBack={() => navigate("dashboard")}
-        onOpenVerification={(target) => navigate("verification", target?.discipline === "software" ? "softwareTest" : "systemTest", target?.problemReportId, target ? "problem-report" : undefined)}
+        onOpenVerification={(target) => navigate("testResults", target?.discipline === "software" ? "softwareTest" : "systemTest", target?.problemReportId, target?.discipline === "software" ? "HighLevel" : undefined)}
       />
     );
   if (view === "lifecycle" && project)
@@ -646,7 +642,7 @@ function App() {
         onOpenImpact={(id) => navigate("releaseImpact","system",id)}
         onOpenDecision={() => navigate("releaseDecision")}
         onBackToReadiness={() => navigate("release")}
-        onOpenVerification={() => navigate("verification","systemTest")}
+        onOpenVerification={() => navigate("testingCoverage","systemTest")}
         onOpenDocuments={() => navigate("lifecycle")}
         onOpenOperations={() => navigate("releaseOperations")}
       />
@@ -661,7 +657,7 @@ function App() {
         user={user}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}
-        onOpenVerification={() => navigate("verification",discipline === "software" ? "softwareTest" : "systemTest")}
+        onOpenVerification={() => navigate("testingCoverage",discipline === "software" ? "softwareTest" : "systemTest")}
         onOpenDocuments={() => navigate("lifecycle")}
       />
     );

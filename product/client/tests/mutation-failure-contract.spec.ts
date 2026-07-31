@@ -101,12 +101,11 @@ test('a rejected approval preserves signature input and records no approval evid
 
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'VERIFICATION')
-  await page.getByRole('link', { name: 'System Verification' }).click()
-  await page.getByRole('button', { name: /Test procedures/ }).click()
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
   // The list is paged, so a procedure created through the API is found rather than scrolled to.
   await page.getByLabel('Find a procedure').fill(title)
-  const row = page.locator('.procedureRow').filter({ hasText: title })
+  const row = page.locator('.procedureLibrary .coverageRow').filter({ hasText: title })
   await expect(row).toBeVisible()
   await row.getByRole('button', { name: 'Review & approve' }).click()
   const dialog = page.locator('.signatureModal')

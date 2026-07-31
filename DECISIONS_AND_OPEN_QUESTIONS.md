@@ -956,7 +956,7 @@ Future entries use:
 ### DEC-073 - One Official Software-Build Identity and Governed Test Change Reviews
 
 - **Date:** 2026-07-29
-- **Status:** Accepted
+- **Status:** Accepted; the pre-release evidence flag is superseded by DEC-076 and the workspace shape by DEC-077
 - **Decision:** A baseline and software build are one product concept. The official identifier derives from the
   release version (`1.6` becomes `SW-01.60`); “Build 1.6” is informal wording. SCR/SWCR identifiers use five
   digits for existing and future records. Every approved change request creates one controlled Test Change
@@ -971,6 +971,66 @@ Future entries use:
   release. A failure remains attached to the tested released build, and software-caused correction occurs in a
   later build rather than mutating the released one. The verification workspace exposes the active official
   software-build identity without a build selector.
+
+### DEC-074 - Controlled Test Change Requests, Raised Automatically and by Hand
+
+- **Date:** 2026-07-30
+- **Status:** Accepted
+- **Decision:** A Test Change Review is a controlled record — a Test Change Request — with its own number and
+  revisions. One may cover more than one requirement change request, and an engineer may raise one deliberately
+  rather than waiting for a change approval to raise it. Claiming a package claims the whole of it.
+- **Rationale:** Two change requests whose requirement changes are best tested together should be one piece of
+  test work, and a package half-assigned has no owner anybody can name. Some test work is worth doing before a
+  change approval exists.
+- **Consequences:** Numbers are claimed atomically from a per-prefix sequence, like every other controlled
+  identifier. The queue on Testing Coverage is where a package is picked up or started.
+
+### DEC-075 - Sixteen Named Program Roles
+
+- **Date:** 2026-07-30
+- **Status:** Accepted
+- **Decision:** The Program role vocabulary names system, software and test engineering leads, project
+  engineering lead, program manager, engineering manager, system engineer, software engineer, test engineer,
+  software quality analyst and airworthiness, alongside the existing control roles. A precise job title never
+  removes capability: a role that implies another satisfies it (`ProgramRoleAuthority.Satisfying`).
+- **Rationale:** The product owner wanted the roles identified before their authority is tuned. Naming a
+  person's actual job is what makes an assignment readable; making the specific role a superset of the general
+  one is what stops naming it taking capability away.
+- **Consequences:** Authority checks accept any satisfying role. Which role may do what remains open and is
+  expected to change.
+
+### DEC-076 - A Build's Test Scope Is a Set, and the Gates Measure It
+
+- **Date:** 2026-07-30
+- **Status:** Accepted
+- **Decision:** Each build carries one **Build Test Set** per discipline — a working list, with history, of the
+  procedures that build has to run, recording who added each and why (changed requirement, coverage area,
+  corrective action, chosen). Release gates measure results against that set. It replaces the per-decision
+  "evidence required before release" flag as the thing the gates read.
+- **Rationale:** A build is rarely worth its whole test suite, and testing decisions are made from two
+  directions at once: what changed, and which areas the change makes worth re-exercising. A flag on an
+  individual decision could express neither.
+- **Consequences:** An empty set is only an answer when there is no test work at all — with test change reviews
+  present, an empty set holds the gate rather than passing it. Choosing the set is a lead's decision (Test Lead
+  or Program manager); recording determinations against it is a Test Engineer's.
+
+### DEC-077 - Verification Is Two Pages Per Discipline, Not Four Tabs
+
+- **Date:** 2026-07-31
+- **Status:** Accepted
+- **Decision:** The tabbed verification workspace is replaced by **Testing Coverage** and **Test Results**, one
+  pair per discipline — System, Software HLR, Software LLR. `/system-verification` and `/software-verification`
+  become a chooser between them. The software level rides on the existing `artifactKind` rather than on a new
+  discipline value.
+- **Rationale:** The four tabs answered two questions, and which tab held an answer was something a reader had
+  to know before they could ask. HLR and LLR test work is planned, done and approved separately, so it is two
+  destinations rather than one page with a switch. Adding discipline values would have meant auditing every
+  comparison that silently treats an unrecognised value as System.
+- **Consequences:** Everything that lived only in the tabs moved: procedure authoring, independent approval,
+  the coverage inventory, procedure filters and paging with their addressable worklist, decision reopening and
+  history, run history and retest, and the corrective action a problem report routes to — now on the Test
+  Results page, at `…/results/{problemReportId}`. The "evidence required before release" checkbox is gone; the
+  server field remains only as one of the inputs that seeds a new test set.
 
 ## Working Assumptions
 

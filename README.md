@@ -1,7 +1,7 @@
 # Aerospace Development Assurance Platform
 
 > **New here — human or model? Read [PROJECT_STATE.md](PROJECT_STATE.md) first, then the
-> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).** They record what
+> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-07-31.md).** They record what
 > exists today, what is deliberately excluded, where delivery stands, and the known limitations. The
 > documents indexed below are durable definitions and historical records; `PROJECT_STATE.md` describes
 > the present.
@@ -58,7 +58,8 @@ demonstrations use the `FMSLIVE` dataset described in
 | Document | Purpose |
 | --- | --- |
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
-| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-07-29.md) | Restart-ready account of PRs #140–#168, build-scoped navigation, dormant UI, aligned issues and next conversations |
+| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-07-31.md) | Restart-ready account of the verification rebuild (PRs #191–#208), where things stand, and lessons worth not relearning |
+| [Previous product handoff](CURRENT_PRODUCT_HANDOFF_2026-07-29.md) | PRs #140–#168, build-scoped navigation, dormant UI, aligned issues — accurate except for verification |
 | [Project vision](PROJECT_VISION.md) | Problem, audience, value, ambition, and success definition |
 | [Scope and boundaries](SCOPE_AND_BOUNDARIES.md) | Current, future, and excluded capabilities |
 | [Domain model and glossary](DOMAIN_MODEL_AND_GLOSSARY.md) | Shared vocabulary and lifecycle concepts |

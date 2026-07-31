@@ -162,11 +162,11 @@ test('no surface names a person by their account', async ({ page, request }) => 
     'Concurrency', 'Product line', 'Assurance', 'Qualification',
   ])
 
-  await page.goto(`${releaseRoot}/system-verification`, { waitUntil: 'load' })
-  await surfacePainted(page)
-  await sweepTabs('Verification', [
-    'Procedure alignment', 'Requirement coverage', 'Test procedures', 'Evidence & results',
-  ])
+  for (const [surface, path] of [['Testing Coverage', 'coverage'], ['Test Results', 'results']] as const) {
+    await page.goto(`${releaseRoot}/system-verification/${path}`, { waitUntil: 'load' })
+    await surfacePainted(page)
+    for (const hit of await accountsOnScreen(page, checked)) offenders.push(`${surface}: ${hit}`)
+  }
 
   // A dialog is a surface too, and the ones that distribute or decide work are precisely where a person is
   // named. Opened if the showcase has an item to open it on; skipped rather than failed if it does not, because
