@@ -69,6 +69,7 @@ const RequirementsWorkspace = lazyView(() => import("./RequirementsWorkspace"));
 const IntegrationCommandCenter = lazyView(() => import("./IntegrationCommandCenter"));
 const ReviewWorkflowCenter = lazyView(() => import("./ReviewWorkflowCenter"));
 const TestResultsWorkspace = lazyView(() => import("./TestResultsWorkspace"));
+const TestingCoverageWorkspace = lazyView(() => import("./TestingCoverageWorkspace"));
 const ArtifactRecordPage = lazyView(() => import("./ArtifactRecordPage"));
 
 /** Which code a navigation target needs, so hovering the entry can start fetching it. */
@@ -81,6 +82,7 @@ const viewCode: Partial<Record<View, { warm: () => void }>> = {
   requirements: RequirementsWorkspace,
   verification: VerificationCenter,
   testResults: TestResultsWorkspace,
+  testingCoverage: TestingCoverageWorkspace,
   documents: DocumentCenter,
   problemReports: ProblemReportCenter,
   lifecycle: LifecycleExplorer,
@@ -200,8 +202,8 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
         <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
         <details className="navGroup" open={engineeringView}><summary>ENGINEERING</summary><div className="navScopeSwitch" role="group" aria-label="Engineering scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{item("Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Software Engineering Documents":"System Engineering Documents")}</details>
         <details className="navGroup" open={view==="verification"||view==="lifecycle"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}><summary>ASSURANCE</summary><div className="navScopeSwitch" role="group" aria-label="Assurance scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{item("Verification","verification","✓",verificationScope,verificationScope==="softwareTest"?"Software Verification":"System Verification")}{verificationScope==="softwareTest"
-          ? <>{item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}{item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}</>
-          : item("Test Results","testResults","▦","systemTest","System Test Results")}{item("Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Software Assurance Documents":"System Assurance Documents")}{item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>
+          ? <>{item("HLR Testing Coverage","testingCoverage","◫","softwareTest","Software HLR Testing Coverage","HighLevel")}{item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}{item("LLR Testing Coverage","testingCoverage","◫","softwareTest","Software LLR Testing Coverage","LowLevel")}{item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}</>
+          : <>{item("Testing Coverage","testingCoverage","◫","systemTest","System Testing Coverage")}{item("Test Results","testResults","▦","systemTest","System Test Results")}</>}{item("Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Software Assurance Documents":"System Assurance Documents")}{item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>
         <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("Review Workflows","reviewWorkflows","⇉","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","↗","system","Integration Command Center")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
       </nav>
@@ -547,6 +549,21 @@ function App() {
     );
   // The two paths a build's verification work splits into. Built alongside the tabbed workspace rather than
   // replacing it: the tabs are removed once both pages are finished, so nothing is unreachable in between.
+  if (view === "testingCoverage" && project && release)
+    return inShell(
+      <TestingCoverageWorkspace
+        api={API}
+        projectId={project.project.id}
+        releaseId={release.id}
+        discipline={discipline === "softwareTest"
+          ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
+          : "System"}
+        buildName={`Build ${release.version}`}
+        readOnly={release.isReleased}
+        user={user}
+      />
+    );
+
   if (view === "testResults" && project && release)
     return inShell(
       <TestResultsWorkspace

@@ -43,6 +43,23 @@ test('a lead chooses what the build runs, and the set says why each procedure is
   const summary = page.getByRole('region', { name: 'Test set progress' })
   await expect(summary).toContainText('1')
 
+  // A determination is a person's judgement, recorded by them. AeroLink never executes anything, so this is
+  // the only way a result exists at all — and the page is called Test Results, so being unable to record one
+  // would have been a page that could not do the thing it is named for.
+  await row.getByRole('button', { name: /Record result|Record retest/ }).click()
+  const record = page.getByRole('dialog', { name: /Record a result for SYSTP-000001/ })
+  await expect(record).toBeVisible({ timeout: 30_000 })
+  await record.getByLabel('Configuration under test').fill('FMS rig 2, data set B')
+  await record.getByLabel('Determination').fill('Sequencing held across the oceanic transition with no dropped waypoint.')
+  // A Pass claims something was observed, so the product requires it to say where that observation lives.
+  await record.getByLabel('Evidence reference').fill('rig2/oceanic-2026-07-30.log')
+  await record.getByRole('button', { name: 'Record determination' }).click()
+
+  await expect(record).toHaveCount(0, { timeout: 30_000 })
+  await expect(row).toContainText('Pass')
+  // The run is now attachable: evidence belongs to a result, and there was no result before this.
+  await expect(row.getByLabel(/Attach evidence for SYSTP-000001/)).toBeAttached()
+
   await row.getByRole('button', { name: 'Remove' }).click()
   await expect(page.locator('.testSetRow')).toHaveCount(0, { timeout: 30_000 })
   await expect(page.getByText('Nothing has been chosen for this build yet')).toBeVisible()

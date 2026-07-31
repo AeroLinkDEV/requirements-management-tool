@@ -162,6 +162,10 @@ public static class BuildTestSetEndpoints
                         entry.AddedBy,
                         entry.AddedAt,
                         latestOutcome = run?.Outcome.ToString(),
+                        // The run itself, so evidence can be attached to it and a failure can be retested
+                        // without the reader having to find the execution again somewhere else.
+                        latestExecutionId = run?.Id,
+                        latestExecutedAt = run?.ExecutedAt,
                         hasEvidence = run is not null && evidenced.Contains(run.Id),
                     };
                 }).ToList(),

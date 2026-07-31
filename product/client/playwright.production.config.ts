@@ -42,6 +42,9 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report-production' }]],
   fullyParallel: false,
   workers: 1,
+  // The same fifteen seconds as the development journeys, and for the same reason: these assertions wait on
+  // a server round-trip, and the five-second default is shorter than that work on a loaded runner.
+  expect: { timeout: 15_000 },
   use: {
     baseURL: origin,
     trace: 'retain-on-failure',

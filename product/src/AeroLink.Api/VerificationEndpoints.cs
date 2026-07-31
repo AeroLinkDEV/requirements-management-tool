@@ -115,6 +115,76 @@ public static class VerificationEndpoints
         // The workspace rendered every procedure it was given — 440 cards on the software side — with no
         // search, filter or page. This returns a bounded page and the total, and every predicate below runs
         // in the database, because a page of twenty-five that costs a full table read is not paging.
+        /// How a procedure came to say what it says.
+        ///
+        /// A procedure is read by somebody deciding whether to trust it, and "who wrote this, when, and what
+        /// made them change it" is most of that decision. Its revisions were reachable only by reading the
+        /// procedure itself, one revision at a time, with no way to see what drove any of them.
+        ///
+        /// The change request behind a revision is not recorded on the revision — it is reached through the
+        /// verification decision that resolved to it, which is the record that actually connects the two. A
+        /// revision written outside that path has no change request, and says so rather than guessing.
+        app.MapGet("/api/test-procedures/{id:guid}/history", async (Guid id, HttpContext http,
+            AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var procedure = await db.TestProcedures.AsNoTracking()
+                .Where(x => x.Id == id)
+                .Select(x => new { x.Id, x.ProjectId, x.BaseNumber, x.Title, x.OwnerId, x.Level, x.CreatedAt })
+                .SingleOrDefaultAsync(ct);
+            if (procedure is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, procedure.ProjectId, ct)) return Results.Forbid();
+
+            var revisions = (await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => x.ProcedureId == id).ToListAsync(ct))
+                .OrderByDescending(x => x.Revision).ToList();
+            var revisionIds = revisions.Select(x => x.Id).ToList();
+
+            // What each revision answered for: the verification decision that resolved to it, the package
+            // that decision belonged to, and the change request that package was raised from.
+            var drivers = await (from item in db.VerificationImpactItems.AsNoTracking()
+                                 join review in db.TestChangeReviews.AsNoTracking() on item.TestChangeReviewId equals review.Id
+                                 where item.ResolvedProcedureRevisionId != null && revisionIds.Contains(item.ResolvedProcedureRevisionId.Value)
+                                 select new
+                                 {
+                                     RevisionId = item.ResolvedProcedureRevisionId!.Value,
+                                     item.SubjectDisplayNumber,
+                                     ChangeRequest = review.SourceChangeRequestNumber,
+                                     Package = review.BaseNumber,
+                                     Action = item.ProcedureChangeAction,
+                                 }).ToListAsync(ct);
+
+            // The requirements each revision covers, so a reader sees what it is for without leaving the page.
+            var coverage = await (from link in db.TestCoverage.AsNoTracking()
+                                  join revision in db.RequirementRevisions.AsNoTracking() on link.RequirementRevisionId equals revision.Id
+                                  join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                                  where revisionIds.Contains(link.ProcedureRevisionId)
+                                  select new { link.ProcedureRevisionId, artifact.BaseNumber, revision.Revision }).ToListAsync(ct);
+
+            return Results.Ok(new
+            {
+                procedure.Id,
+                procedure.BaseNumber,
+                procedure.Title,
+                level = procedure.Level.ToString(),
+                procedure.OwnerId,
+                procedure.CreatedAt,
+                revisions = revisions.Select(revision => new
+                {
+                    revision.Id,
+                    displayNumber = $"{procedure.BaseNumber}.{revision.Revision:D2}",
+                    revision.Revision,
+                    state = revision.State.ToString(),
+                    revision.AuthorId,
+                    revision.CreatedAt,
+                    drivenBy = drivers.Where(x => x.RevisionId == revision.Id)
+                        .Select(x => new { x.ChangeRequest, x.Package, x.SubjectDisplayNumber, action = x.Action.ToString() })
+                        .Distinct().ToList(),
+                    covers = coverage.Where(x => x.ProcedureRevisionId == revision.Id)
+                        .Select(x => $"{x.BaseNumber}.{x.Revision:D2}").Distinct().OrderBy(x => x).ToList(),
+                }).ToList(),
+            });
+        });
+
         app.MapGet("/api/test-procedures", async (Guid projectId, Guid? releaseId, string? search, string? scope, string? state,
             string? owner, string? outcome, Guid? requirementRevisionId, string? sort, int? page, int? pageSize,
             HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
