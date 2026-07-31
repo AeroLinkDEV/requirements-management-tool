@@ -33,6 +33,18 @@ const localWallTimeNow = () => {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
 }
 type TestSet = { id: string; discipline: TestDiscipline; releaseId: string; version: number; procedures: SetProcedure[] }
+type Execution = {
+  id: string
+  procedureRevisionId: string
+  displayNumber: string
+  outcome: string
+  executedBy: string
+  determination: string
+  evidenceReference: string
+  executedAt: string
+  retestOfExecutionId?: string
+  evidence: { id: string; originalFileName: string }[]
+}
 type Candidate = { revisionId: string; displayNumber: string; title: string; state: string }
 
 /// Why a procedure was chosen, said the way somebody would say it.
@@ -75,6 +87,11 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   // is a claim about what was observed and has to say where the observation is recorded; a Blocked run
   // observed nothing, so demanding evidence of it would be demanding evidence of an absence.
   const [outcome, setOutcome] = useState<'Pass' | 'Fail' | 'Blocked'>('Pass')
+  const [executions, setExecutions] = useState<Execution[]>([])
+  const [showRuns, setShowRuns] = useState('')
+  // Set when a retest supersedes a specific earlier run rather than simply the latest one, which is what a
+  // corrective action does: it answers a named failure, not "whatever happened last".
+  const [supersedes, setSupersedes] = useState<Execution>()
 
   // One ticket per loader, not one for the page. Sharing a counter between two independent loaders makes
   // each cancel the other: the candidate search runs on mount behind a debounce, bumps the count, and the
@@ -95,7 +112,12 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
     // the procedure rather than about anything that shipped.
     const builds = await fetch(`${api}/api/builds?projectId=${projectId}&releaseId=${releaseId}`)
     const built = builds.ok ? await builds.json() : []
+    // Every run against this build, so a determination can be read with the ones before it. A result read
+    // alone says what happened; read with its history it says whether the build is getting better or worse.
+    const runs = await fetch(`${api}/api/test-executions?projectId=${projectId}&releaseId=${releaseId}`)
+    const ran = runs.ok ? await runs.json() : []
     if (mine !== loadTicket.current) return
+    setExecutions(ran)
     setSets(body)
     setBuildId(current => built.some((x: { id: string }) => x.id === current) ? current : built[0]?.id ?? '')
   }, [api, projectId, releaseId])
@@ -149,7 +171,9 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
         procedureRevisionId: procedure.procedureRevisionId,
         softwareBuildId: buildId || null,
         // A retest names the run it supersedes, so a failure and its remedy stay attached to each other.
-        retestOfExecutionId: procedure.latestExecutionId ?? null,
+        // When a specific earlier run was chosen it is that one, not merely the latest — a corrective action
+        // answers a named failure.
+        retestOfExecutionId: supersedes?.id ?? procedure.latestExecutionId ?? null,
         outcome: form.get('outcome'),
         configuration: form.get('configuration'),
         determination,
@@ -158,6 +182,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
       }),
     })
     setRecording(undefined)
+    setSupersedes(undefined)
     setSaved(`Recorded against ${procedure.displayNumber}.`)
   }, 'The result could not be recorded.')
 
@@ -235,9 +260,36 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
                   }} />
                 </label>
               )}
+              {procedure.latestExecutionId && (
+                <button type="button" className="quiet" onClick={() => setShowRuns(current => current === procedure.procedureRevisionId ? '' : procedure.procedureRevisionId)}>
+                  {showRuns === procedure.procedureRevisionId ? 'Hide runs' : 'Runs'}
+                </button>
+              )}
               {onOpenProcedure && <button type="button" className="quiet" onClick={() => onOpenProcedure(procedure.procedureRevisionId)}>Open</button>}
               {!readOnly && <button type="button" className="quiet" disabled={busy} onClick={() => void exclude(procedure.procedureRevisionId)}>Remove</button>}
             </div>
+            {/* Every run against this build, newest first. A determination read alone says what happened;
+                read beside the ones before it, it says whether the build is getting better or worse — and a
+                retest can then answer the specific failure rather than whatever happened last. */}
+            {showRuns === procedure.procedureRevisionId && (
+              <ol className="runList">
+                {executions
+                  .filter(x => x.procedureRevisionId === procedure.procedureRevisionId)
+                  .map(run => (
+                    <li key={run.id}>
+                      <i className={run.outcome.toLowerCase()}>{run.outcome}</i>
+                      <b>{new Date(run.executedAt).toLocaleDateString()}</b>
+                      <small><PersonName userName={run.executedBy} /> · {run.determination}</small>
+                      {run.evidence.length > 0 && <span className="runEvidence">{run.evidence.length} evidence file{run.evidence.length === 1 ? '' : 's'}</span>}
+                      {run.retestOfExecutionId && <span className="runEvidence">retest</span>}
+                      {!readOnly && run.outcome !== 'Pass' && (
+                        <button type="button" className="quiet" disabled={busy} onClick={() => { setOutcome('Pass'); setSupersedes(run); setRecording(procedure) }}>Retest this run</button>
+                      )}
+                    </li>
+                  ))}
+                {!executions.some(x => x.procedureRevisionId === procedure.procedureRevisionId) && <li className="runNone">No run is recorded against this build yet.</li>}
+              </ol>
+            )}
           </article>
         ))}
       </section>

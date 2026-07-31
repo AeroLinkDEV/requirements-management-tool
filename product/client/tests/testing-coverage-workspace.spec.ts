@@ -34,7 +34,7 @@ test('coverage opens on the work the build created, then the inventory behind it
   // procedure by number.
   await expect(page.getByRole('heading', { name: 'Test procedures' })).toBeVisible()
   await page.getByLabel('Find a procedure').fill('SYSTP-000001')
-  const row = page.locator('.coverageRow').filter({ hasText: 'SYSTP-000001' })
+  const row = page.locator('.procedureLibrary .coverageRow').filter({ hasText: 'SYSTP-000001' })
   await expect(row.first()).toBeVisible({ timeout: 30_000 })
 })
 
@@ -89,7 +89,7 @@ test('a procedure says who wrote it and what drove each revision', async ({ page
   await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
 
   await page.getByLabel('Find a procedure').fill('SYSTP-000001')
-  const row = page.locator('.coverageRow').filter({ hasText: 'SYSTP-000001' }).first()
+  const row = page.locator('.procedureLibrary .coverageRow').filter({ hasText: 'SYSTP-000001' }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.getByRole('button', { name: 'History' }).click()
 
@@ -126,4 +126,117 @@ test('software HLR and LLR each have their own coverage page', async ({ page }) 
   await page.getByRole('link', { name: 'Software LLR Testing Coverage' }).click()
   await expect(page).toHaveURL(/software-verification\/llr\/coverage$/, { timeout: 30_000 })
   await expect(page.getByText('VERIFICATION / SOFTWARE LLR')).toBeVisible()
+})
+
+/**
+ * Creating a procedure, and approving somebody else's.
+ *
+ * Both lived only in the tabbed workspace, which is why it could not be retired. A procedure is created as a
+ * Draft and cannot be run until somebody other than its author has signed for it — the product refuses an
+ * author approving their own, which is what makes the approval independent rather than a formality.
+ */
+test('a procedure is created here as a Draft and needs somebody else to approve it', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
+
+  await page.getByRole('button', { name: '+ New test procedure' }).click()
+  const form = page.getByRole('dialog', { name: 'Create a test procedure' })
+  await expect(form).toBeVisible({ timeout: 30_000 })
+  const title = `Oceanic sequencing regression ${Date.now()}`
+  await form.getByLabel('Title').fill(title)
+  await form.getByLabel('Objective').fill('Prove sequencing holds across the oceanic transition.')
+  await form.getByLabel('Preconditions').fill('FMS rig 2 loaded with the current build.')
+  await form.getByLabel('Steps').fill('Enter the oceanic route, then force a transition.')
+  await form.getByLabel('Expected result').fill('No waypoint is dropped.')
+  // A procedure that verifies nothing is not a controlled procedure, so this is required rather than linked
+  // afterwards — an unlinked procedure never counts as coverage and would look like work already done.
+  await form.getByLabel('Requirements it verifies').selectOption({ index: 0 })
+  await form.getByRole('button', { name: 'Create procedure' }).click()
+
+  await expect(form).toHaveCount(0, { timeout: 30_000 })
+  await expect(page.getByRole('status')).toContainText('needs independent approval')
+
+  // It is findable by its own controlled number, in Draft, with the approval offered.
+  await page.getByLabel('Find a procedure').fill(title)
+  const created = page.locator('.procedureLibrary .coverageRow').filter({ hasText: title }).first()
+  await expect(created).toBeVisible({ timeout: 30_000 })
+  await expect(created).toContainText('Awaiting approval')
+  await expect(created.getByRole('button', { name: 'Review & approve' })).toBeVisible()
+})
+
+/**
+ * The approval, given by somebody other than the author.
+ *
+ * A Draft procedure cannot be run, and the signature that lifts it is what makes the coverage it claims worth
+ * anything. It is recorded here rather than in a separate workspace, because the person who sees the gap is
+ * the person who closes it.
+ */
+test('a Draft procedure is approved here by a second person, and only then counts as coverage', async ({ page, browser }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
+
+  await page.getByRole('button', { name: '+ New test procedure' }).click()
+  const form = page.getByRole('dialog', { name: 'Create a test procedure' })
+  const title = `Transition hold regression ${Date.now()}`
+  await form.getByLabel('Title').fill(title)
+  await form.getByLabel('Objective').fill('Prove the transition hold is honoured.')
+  await form.getByLabel('Preconditions').fill('FMS rig 1 loaded with the current build.')
+  await form.getByLabel('Steps').fill('Arm the hold, then cross the transition.')
+  await form.getByLabel('Expected result').fill('The hold is honoured.')
+  await form.getByLabel('Requirements it verifies').selectOption({ index: 0 })
+  await form.getByRole('button', { name: 'Create procedure' }).click()
+  await expect(form).toHaveCount(0, { timeout: 30_000 })
+
+  // The author cannot sign for their own work, so the approval is taken by somebody else — in their own
+  // browser context rather than by signing out of this one. Signing out and straight back in raced the
+  // session cookie on CI: the sign-in page had not replaced the workspace by the time the next journey step
+  // looked for the username field, and the journey sat there until it timed out.
+  const second = await browser.newContext()
+  const approver = await second.newPage()
+  await login(approver, 'systems.lead', { openProject: false })
+  await selectProgram(approver, 'Flight Management System Live Program')
+  await openNavigationGroup(approver, 'ASSURANCE')
+  await approver.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await approver.getByLabel('Find a procedure').fill(title)
+  const row = approver.locator('.procedureLibrary .coverageRow').filter({ hasText: title }).first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.getByRole('button', { name: 'Review & approve' }).click()
+
+  const signature = approver.locator('.signatureModal')
+  await signature.getByLabel('Re-enter your password').fill('AeroLink!2026')
+  await signature.getByRole('button', { name: 'Sign & approve' }).click()
+  await expect(signature).toHaveCount(0, { timeout: 30_000 })
+  await expect(row).toContainText('Approved')
+  await expect(row.getByRole('button', { name: 'Review & approve' })).toHaveCount(0)
+  await second.close()
+})
+
+/**
+ * The whole inventory, on request.
+ *
+ * The page opens on what is not covered, because that is the work. The full list is still needed to answer
+ * "is this specific requirement tested?", so it is one toggle away rather than a separate page.
+ */
+test('the full requirement coverage table is one toggle away', async ({ page }) => {
+  test.setTimeout(120_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
+
+  const toggle = page.getByRole('button', { name: /Show all \d+ requirements/ })
+  await expect(toggle).toBeVisible({ timeout: 30_000 })
+  const listed = Number(/Show all (d+)/.exec((await toggle.textContent()) ?? '')?.[1] ?? 0)
+  await toggle.click()
+  await expect(page.getByRole('button', { name: 'Show only what needs attention' })).toBeVisible()
+  await expect(page.locator('.coverageCard .coverageRow')).toHaveCount(listed, { timeout: 30_000 })
 })

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PersonName } from './People'
+import { SignatureDialog } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './TestingCoverageWorkspace.css'
@@ -86,6 +87,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [approving, setApproving] = useState<Procedure>()
+  const [showAll, setShowAll] = useState(false)
+  const [revision, setRevision] = useState(0)
+  const [requirements, setRequirements] = useState<{ revisionId: string; displayNumber: string; statement: string }[]>([])
 
   // One ticket per loader, not one for the page.
   //
@@ -100,23 +106,58 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
 
   const load = useCallback(async () => {
     const mine = ++loadTicket.current
-    const [coverageResponse, requestResponse, impactResponse] = await Promise.all([
-      fetch(`${api}/api/verification-coverage?projectId=${projectId}&buildId=${releaseId}`),
+
+    // Coverage is asked for by configuration, not by release.
+    //
+    // A release is a plan; what carries requirements is a materialized baseline or the software build that
+    // froze one. A build in work has neither of its own yet and carries its predecessor's, which is exactly
+    // what build-context calls the effective baseline. Passing the release id here answers 400 — and because
+    // a failed coverage read leaves the section empty rather than loud, it read as "this build has no
+    // requirements at all" on a page whose whole job is to say what is untested.
+    const context = await fetch(`${api}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)
+    const effective = context.ok ? (await context.json())?.effectiveBaselineId : undefined
+    const builds = await fetch(`${api}/api/builds?projectId=${projectId}`)
+    const build = builds.ok ? (await builds.json()).find((x: { releaseId: string }) => x.releaseId === releaseId) : undefined
+    const configuration = build ? `buildId=${build.id}` : effective ? `baselineId=${effective}` : ''
+
+    const [coverageResponse, requestResponse, impactResponse, requirementResponse] = await Promise.all([
+      configuration ? fetch(`${api}/api/verification-coverage?projectId=${projectId}&${configuration}`) : undefined,
       fetch(`${api}/api/releases/${releaseId}/test-change-reviews`),
       fetch(`${api}/api/releases/${releaseId}/verification-impact`),
+      // The requirements a new procedure can be written against — read from the effective baseline rather
+      // than from the coverage list, so an author is not blocked when coverage cannot be computed.
+      effective
+        ? fetch(`${api}/api/requirements?projectId=${projectId}&baselineId=${effective}&scope=${scope}&includeRetired=false&page=1&pageSize=200`)
+        : undefined,
     ])
-    const nextCoverage = coverageResponse.ok ? await coverageResponse.json() : undefined
+    const rawCoverage = coverageResponse?.ok ? await coverageResponse.json() as Coverage : undefined
     const nextRequests = requestResponse.ok ? await requestResponse.json() : undefined
     const nextImpact = impactResponse.ok ? await impactResponse.json() : undefined
+    const listed = requirementResponse?.ok ? (await requirementResponse.json()).items : undefined
     if (mine !== loadTicket.current) return
-    if (nextCoverage) setCoverage(nextCoverage)
+    if (rawCoverage) {
+      // Coverage is computed for the whole configuration; this page speaks for one discipline.
+      const items = rawCoverage.items.filter(x => scope === 'System' ? x.displayNumber.startsWith('SYSR-') : !x.displayNumber.startsWith('SYSR-'))
+      setCoverage({
+        items,
+        total: items.length,
+        covered: items.filter(x => x.covered).length,
+        verified: items.filter(x => x.verified).length,
+        uncovered: items.filter(x => !x.covered).length,
+      })
+    }
     if (nextRequests) setRequests(nextRequests)
     if (nextImpact) setImpact(nextImpact)
+    if (listed) setRequirements(listed)
     if (!requestResponse.ok) {
       recordClientOperationFailure('verification.coverage.load', new Error(`HTTP ${requestResponse.status}`))
       setError('The test change requests for this build could not be loaded.')
     }
-  }, [api, projectId, releaseId])
+    if (coverageResponse && !coverageResponse.ok) {
+      recordClientOperationFailure('verification.coverage.load', new Error(`HTTP ${coverageResponse.status}`))
+      setError('The requirement coverage for this build could not be read.')
+    }
+  }, [api, projectId, releaseId, scope])
 
   useEffect(() => { void load() }, [load])
 
@@ -131,7 +172,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       setTotal(paged.totalCount)
     }, 200)
     return () => clearTimeout(timer)
-  }, [api, projectId, releaseId, scope, query])
+  }, [api, projectId, releaseId, scope, query, revision])
 
   const mine = requests.filter(x => x.discipline === discipline)
   const unstarted = mine.filter(x => x.state === 'Open' && !x.assignedEngineerId)
@@ -141,7 +182,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const act = async (work: () => Promise<void>, failure: string) => {
     if (busy) return
     setBusy(true); setError(''); setSaved('')
-    try { await work(); await load() }
+    // Both lists are re-read, not just coverage. Creating and approving a procedure change the inventory,
+    // and refreshing only the coverage side left the row that was just approved still reading "Awaiting
+    // approval" until the reader happened to type in the search box.
+    try { await work(); await load(); setRevision(current => current + 1) }
     catch (problem) { recordClientOperationFailure('verification.coverage.change', problem); setError(operationError(problem, failure)) }
     finally { setBusy(false) }
   }
@@ -183,6 +227,40 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       : action === 'approve' ? `${request.displayNumber} approved.`
       : `${request.displayNumber} returned for more work.`)
   }, 'The package could not be moved on.')
+
+  const createProcedure = (form: FormData) => act(async () => {
+    const requirementRevisionIds = form.getAll('requirement').map(String).filter(Boolean)
+    if (!requirementRevisionIds.length) { setError('A procedure has to say which requirements it verifies.'); return }
+    await apiRequest(`${api}/api/test-procedures`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectId,
+        // The server issues the controlled number. A client that chose one would be choosing it twice under
+        // concurrency, which is the whole reason identifiers are claimed from a sequence.
+        baseNumber: 'SERVER-ALLOCATED',
+        title: form.get('title'),
+        objective: form.get('objective'),
+        preconditions: form.get('preconditions'),
+        steps: form.get('steps'),
+        expectedResult: form.get('expectedResult'),
+        requirementRevisionIds,
+        level: discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel',
+      }),
+    })
+    setCreating(false)
+    setSaved('Procedure created as a Draft. It needs independent approval before it can be run.')
+  }, 'The procedure could not be created.')
+
+  // Approval is a signature, and it is somebody else's. A procedure approved by its own author is a
+  // formality rather than an independent judgement, which the server refuses and this does not offer.
+  const approveProcedure = (procedure: Procedure, password: string, meaning: string) => act(async () => {
+    await apiRequest(`${api}/api/test-procedures/${procedure.revisionId}/approve`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password, meaning }),
+    })
+    setApproving(undefined)
+    setSaved(`${procedure.displayNumber} approved and available to run.`)
+  }, 'The approval could not be recorded.')
 
   const openHistory = async (procedureId: string) => {
     setError('')
@@ -282,6 +360,33 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         ))}
       </section>
 
+      <section className="coverageCard">
+        <div className="cardTitle">
+          <h2>Requirement coverage</h2>
+          <p>Every effective requirement in this build and the procedures that verify it.</p>
+        </div>
+        {/* Attention first, then everything. A reader arriving to do work needs the requirements that cannot
+            be verified as things stand; a reader answering "is this build covered" needs the whole set. The
+            second is much the longer list, so it is asked for rather than imposed. */}
+        <button type="button" className="quiet" onClick={() => setShowAll(current => !current)}>
+          {showAll ? 'Show only what needs attention' : `Show all ${coverage?.total ?? 0} requirements`}
+        </button>
+        {showAll && (
+          <div className="fullCoverage">
+            {(coverage?.items ?? []).map(item => (
+              <article className={`coverageRow ${item.covered ? '' : 'attention'}`} key={`all-${item.revisionId}`}>
+                <div>
+                  <b>{item.displayNumber}</b>
+                  <i>{!item.covered ? 'No procedure' : item.coveredBy.some(x => x.coverageState === 'Suspect') ? 'Suspect' : item.verified ? 'Verified' : 'Covered'}</i>
+                </div>
+                <p>{item.statement}</p>
+                {item.coveredBy.length > 0 && <small>{item.coveredBy.map(x => `${x.displayNumber} (${x.state})`).join(', ')}</small>}
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
       {(uncovered.length > 0 || suspect.length > 0) && (
         <section className="coverageCard">
           <div className="cardTitle">
@@ -304,10 +409,14 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         </section>
       )}
 
-      <section className="coverageCard">
+      {/* Its own class as well as the shared card: requirement rows and procedure rows both render as
+          .coverageRow, and a reader — or a test — looking for a procedure by number would otherwise match
+          the requirement that names it as its coverage. */}
+      <section className="coverageCard procedureLibrary">
         <div className="cardTitle">
           <h2>Test procedures</h2>
           <p>{total} controlled {scope.toLowerCase()} procedure{total === 1 ? '' : 's'}. Open one to see who wrote it and what changed it.</p>
+          {!readOnly && <button type="button" onClick={() => setCreating(true)}>+ New test procedure</button>}
         </div>
         <label className="coverageSearch">
           <span>Find a procedure</span>
@@ -319,12 +428,57 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <p>{procedure.title}</p>
             <small>{procedure.requirementCount} exact requirement link{procedure.requirementCount === 1 ? '' : 's'} · authored by <PersonName userName={procedure.ownerId} /></small>
             <div className="coverageRowActions">
+              {/* A Draft cannot be run, so approving it is the action that matters here. The server refuses
+                  an author approving their own, which is what makes the approval independent rather than a
+                  formality — so this is offered and may still be declined. */}
+              {!readOnly && procedure.state === 'Draft' && (
+                <button type="button" disabled={busy} onClick={() => setApproving(procedure)}>Review &amp; approve</button>
+              )}
               <button type="button" className="quiet" onClick={() => void openHistory(procedure.id)}>History</button>
             </div>
           </article>
         ))}
         {!procedures.length && <p className="coverageNone">{query ? 'No procedure matches that.' : 'This build has no controlled procedures yet.'}</p>}
       </section>
+
+      {creating && (
+        <div className="decisionModal" role="dialog" aria-label="Create a test procedure">
+          <form onSubmit={event => { event.preventDefault(); void createProcedure(new FormData(event.currentTarget)) }}>
+            <p className="eyebrow">CONTROLLED PROCEDURE</p>
+            <h2>New {disciplineLabel(discipline)} test procedure</h2>
+            <p>The server issues the next controlled number. It is created as a Draft and needs independent approval before it can be run.</p>
+            <label>Title<input name="title" required /></label>
+            <label>Objective<textarea name="objective" required /></label>
+            <label>Preconditions<textarea name="preconditions" required /></label>
+            <label>Steps<textarea name="steps" required /></label>
+            <label>Expected result<textarea name="expectedResult" required /></label>
+            {/* A procedure that verifies nothing is not a controlled procedure. The requirements are chosen
+                here rather than linked afterwards, because a procedure with no exact link never counts as
+                coverage and would sit in the library looking like work that had been done. */}
+            <label>Requirements it verifies
+              <select name="requirement" multiple size={6} required>
+                {requirements.map(item => (
+                  <option key={item.revisionId} value={item.revisionId}>{item.displayNumber} · {item.statement.slice(0, 70)}</option>
+                ))}
+              </select>
+              <small>Choose one or more. Hold Ctrl to pick several.</small>
+            </label>
+            <div className="decisionActions">
+              <button type="submit" disabled={busy}>Create procedure</button>
+              <button type="button" className="quiet" disabled={busy} onClick={() => setCreating(false)}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {approving && (
+        <SignatureDialog
+          title={`Approve ${approving.displayNumber}`}
+          meaning="I approve this exact test procedure revision for controlled verification use."
+          onCancel={() => setApproving(undefined)}
+          onSign={(password, meaning) => approveProcedure(approving, password, meaning)}
+        />
+      )}
 
       {resolving && (
         <div className="decisionModal" role="dialog" aria-label={`Decide ${resolving.subjectDisplayNumber}`}>

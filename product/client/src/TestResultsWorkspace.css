@@ -67,3 +67,14 @@
 .recordResultModal label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-500); }
 .recordResultModal textarea { min-height: 90px; }
 .recordResultActions { display: flex; gap: 8px; margin-top: 6px; }
+
+.runList { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; margin: 8px 0 0; padding: 10px 0 0; list-style: none; border-top: 1px dashed var(--line); }
+.runList li { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto auto; align-items: baseline; gap: 8px; }
+.runList b { font: 750 12px var(--font-display); }
+.runList i { font-style: normal; font-size: 11px; font-weight: 650; padding: 1px 7px; border-radius: 999px; background: #eef2f6; color: var(--ink-500); }
+.runList i.pass { background: #e6f6ee; color: #1d7a4d; }
+.runList i.fail { background: #fdecec; color: #b3261e; }
+.runList i.blocked { background: #fdf3e2; color: #8a5a00; }
+.runList small { color: var(--ink-500); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runEvidence { color: var(--ink-500); font-size: 11px; }
+.runNone { display: block; color: var(--ink-500); font-size: 12px; }
