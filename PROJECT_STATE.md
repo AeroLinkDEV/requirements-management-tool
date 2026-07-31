@@ -494,3 +494,9 @@ reason the document set can be trusted.
   and lost to `.controlledEditor input { width: 100% }` — (0,1,0) against (0,1,1) — so the input rendered at
   1160px and pushed the page 106px off screen. The cascade lesson above is about load order; this is the same
   failure through the other mechanism, and the same fix applies. When a rule matters, make it win on purpose.
+# Current implementation checkpoint â€” 2026-07-31
+
+The current increment introduces controlled downstream change assessments between approved upstream change
+requests and consuming software engineering. See DEC-078/DEC-079, GitHub #209/#210, and
+`CURRENT_PRODUCT_HANDOFF_2026-07-31.md`. Its server, migration, review authority, showcase reconciliation,
+browser workflow, and production bundle have been qualified on `codex/downstream-change-assessments`.

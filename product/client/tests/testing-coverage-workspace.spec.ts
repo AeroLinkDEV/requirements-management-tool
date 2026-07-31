@@ -155,6 +155,8 @@ test('a procedure is created here as a Draft and needs somebody else to approve 
   // A procedure that verifies nothing is not a controlled procedure, so this is required rather than linked
   // afterwards — an unlinked procedure never counts as coverage and would look like work already done.
   await form.getByLabel('Requirements it verifies').selectOption({ index: 0 })
+  await form.getByLabel('Independent procedure approver').fill('systems.lead')
+  await form.locator('.personSuggestions button[data-user-name="systems.lead"]').click()
   await form.getByRole('button', { name: 'Create procedure' }).click()
 
   await expect(form).toHaveCount(0, { timeout: 30_000 })
@@ -168,7 +170,7 @@ test('a procedure is created here as a Draft and needs somebody else to approve 
   // Offered to somebody else, not to the author. The product refuses an author signing for their own work, so
   // the page says why the control is absent rather than presenting one the server would refuse.
   await expect(created.getByRole('button', { name: 'Review & approve' })).toHaveCount(0)
-  await expect(created).toContainText('Independent approval is required before execution.')
+  await expect(created).toContainText('Awaiting')
 })
 
 /**
@@ -195,6 +197,8 @@ test('a Draft procedure is approved here by a second person, and only then count
   await form.getByLabel('Steps').fill('Arm the hold, then cross the transition.')
   await form.getByLabel('Expected result').fill('The hold is honoured.')
   await form.getByLabel('Requirements it verifies').selectOption({ index: 0 })
+  await form.getByLabel('Independent procedure approver').fill('systems.lead')
+  await form.locator('.personSuggestions button[data-user-name="systems.lead"]').click()
   await form.getByRole('button', { name: 'Create procedure' }).click()
   await expect(form).toHaveCount(0, { timeout: 30_000 })
 
@@ -238,8 +242,8 @@ test('the full requirement coverage table is one toggle away', async ({ page }) 
 
   const toggle = page.getByRole('button', { name: /Show all \d+ requirements/ })
   await expect(toggle).toBeVisible({ timeout: 30_000 })
-  const listed = Number(/Show all (d+)/.exec((await toggle.textContent()) ?? '')?.[1] ?? 0)
+  const listed = Number(/Show all (\d+)/.exec((await toggle.textContent()) ?? '')?.[1] ?? 0)
   await toggle.click()
   await expect(page.getByRole('button', { name: 'Show only what needs attention' })).toBeVisible()
-  await expect(page.locator('.coverageCard .coverageRow')).toHaveCount(listed, { timeout: 30_000 })
+  await expect(page.locator('.fullCoverage .coverageRow')).toHaveCount(listed, { timeout: 30_000 })
 })

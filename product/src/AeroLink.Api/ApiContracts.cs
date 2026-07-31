@@ -42,7 +42,7 @@ record CreateReleaseCampaignRequest(Guid ProjectId, Guid ReleaseId, Guid Baselin
 record BaselineSelectionRequest(Guid ScrId);
 record EmptyMutationRequest();
 record CreateBuildRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, string BuildNumber, string Description);
-record CreateTestProcedureRequest(Guid ProjectId, string BaseNumber, string Title, string Objective, string Preconditions, string Steps, string ExpectedResult, List<Guid> RequirementRevisionIds, TestProcedureLevel Level = TestProcedureLevel.HighLevel);
+record CreateTestProcedureRequest(Guid ProjectId, string BaseNumber, string Title, string Objective, string Preconditions, string Steps, string ExpectedResult, List<Guid> RequirementRevisionIds, string ApproverId, TestProcedureLevel Level = TestProcedureLevel.HighLevel);
 record RecordTestExecutionRequest(Guid ProjectId, Guid ProcedureRevisionId, Guid? SoftwareBuildId, Guid? RetestOfExecutionId, TestOutcome Outcome, string Configuration, string Determination, string EvidenceReference, DateTimeOffset ExecutedAt);
 record DispositionImpactRequest(ImpactDispositionState State, string Rationale);
 record BulkDispositionImpactRequest(Guid? ScrId, ImpactDispositionState State, string Rationale);

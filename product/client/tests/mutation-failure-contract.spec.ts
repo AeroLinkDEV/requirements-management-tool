@@ -93,6 +93,7 @@ test('a rejected approval preserves signature input and records no approval evid
     steps: 'Attempt approval after authority is withdrawn.',
     expectedResult: 'The Draft and signature input remain available with no signature evidence.',
     requirementRevisionIds: [requirements.items[0].revisionId],
+    approverId: 'admin',
     level: 'System',
   } })
   expect(created.ok(), await created.text()).toBeTruthy()

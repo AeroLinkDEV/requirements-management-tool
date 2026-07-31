@@ -55,6 +55,7 @@ public static class DependencyInjection
         services.AddScoped<ChangeRequestOutputGenerator>();
         services.AddScoped<ReleaseExecutionService>();
         services.AddScoped<VerificationImpactService>();
+        services.AddScoped<DownstreamImpactService>();
         services.AddScoped<BuildTestSetService>();
         services.AddScoped<IdentityService>();
         services.AddScoped<IdentitySeeder>();

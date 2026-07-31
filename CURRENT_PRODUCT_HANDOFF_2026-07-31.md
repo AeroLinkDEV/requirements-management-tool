@@ -59,6 +59,27 @@ of it. Roles are named for real jobs, and a precise role satisfies the general o
 
 ## Where things stand
 
+### 2026-07-31 downstream-impact increment
+
+- Working branch: `codex/downstream-change-assessments`.
+- Accepted product model is recorded in DEC-078 and DEC-079. System approval raises HLR assessment work; HLR
+  approval raises LLR assessment work. Assessments support no-change, one-to-one, one-to-many, and consolidated
+  many-to-one SWCR mapping without prematurely consuming an SWCR number.
+- The data model, API, automatic raising service, supersession behavior, Software Change Requests queue, named
+  procedure/TCR approvers, and EF migration are implemented on the branch. The original approved work stays
+  readable when its source is revised, but is labelled out of date and excluded from active readiness.
+- The showcase seed defect that placed `HLR-000075.02` inside System `SCR-00032.01` is corrected at its source;
+  all System showcase packages now contain System requirement changes.
+- GitHub: #209 tracks this delivered increment. #210 is the deliberately separate prospective upward-trace
+  authoring/materialization increment; no unused placeholder schema was merged for work that is not enforced.
+- Qualification on the branch: 505 .NET tests passed after the seed expectation was updated (196 domain,
+  158 infrastructure, 151 API); lint, type-check and production build passed; the browser matrix reached
+  103 passed/1 skipped, its one stale selector was corrected and passed focused; 9 production journeys passed
+  and the one updated named-approver journey passed focused. The downstream queue has its own passing journey.
+- The PostgreSQL migration SQL was generated and inspected without applying it to the persistent demo database.
+  Applying migrations to that database remains an operator/startup action; never reset the demo database merely
+  to prove this increment.
+
 - `main` is clean, CI green, tree empty.
 - Backend: 499 tests (192 domain, 156 infrastructure, 151 API).
 - Browser journeys: 100 (1 skipped), plus 10 production-build journeys.

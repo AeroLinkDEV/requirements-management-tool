@@ -242,9 +242,10 @@ public static class WorkspaceEndpoints
                         return area == "HLR" ? procedureLevel == TestProcedureLevel.HighLevel : procedureLevel == TestProcedureLevel.LowLevel;
                     return false;
                 }).ToList();
-                var grouped = rows.GroupBy(x => x.ChangeRequestId).ToList();
-                return new(grouped.Count, grouped.Count(group => group.All(x => x.State == VerificationImpactState.Resolved)),
-                    rows.Count(x => x.State != VerificationImpactState.Resolved), rows.Count(x => x.State == VerificationImpactState.Resolved));
+                var current = rows.Where(x => x.State != VerificationImpactState.Superseded).ToList();
+                var currentGrouped = current.GroupBy(x => x.ChangeRequestId).ToList();
+                return new(currentGrouped.Count, currentGrouped.Count(group => group.All(x => x.State == VerificationImpactState.Resolved)),
+                    current.Count(x => x.State != VerificationImpactState.Resolved), current.Count(x => x.State == VerificationImpactState.Resolved));
             }
             return Results.Ok(new {
                 system = ChangeSummary(ChangeRequestType.System),
@@ -266,8 +267,13 @@ public static class WorkspaceEndpoints
                                  join user in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active) on membership.UserId equals user.Id
                                  select new { user.Id, user.UserName, user.DisplayName, user.Email, role = membership.Role.ToString() }).ToListAsync(ct);
             var people=members.GroupBy(x => new { x.Id, x.UserName, x.DisplayName, x.Email }).Select(x => {var roles=x.Select(r=>r.role).Order().ToList();return new{x.Key.Id,x.Key.UserName,x.Key.DisplayName,x.Key.Email,title=DirectoryTitles.For(x.Key.UserName,roles),roles};});
-            if(!string.IsNullOrWhiteSpace(search)){var q=search.Trim();people=people.Where(x=>x.DisplayName.Contains(q,StringComparison.OrdinalIgnoreCase)||x.UserName.Contains(q,StringComparison.OrdinalIgnoreCase)||x.Email.Contains(q,StringComparison.OrdinalIgnoreCase)||x.title.Contains(q,StringComparison.OrdinalIgnoreCase)||x.roles.Any(r=>r.Contains(q,StringComparison.OrdinalIgnoreCase)));}
-            return Results.Ok(people.OrderBy(x=>x.DisplayName).Take(Math.Clamp(limit??50,1,200)));
+            var q=search?.Trim()??"";
+            if(q.Length>0)people=people.Where(x=>x.DisplayName.Contains(q,StringComparison.OrdinalIgnoreCase)||x.UserName.Contains(q,StringComparison.OrdinalIgnoreCase)||x.Email.Contains(q,StringComparison.OrdinalIgnoreCase)||x.title.Contains(q,StringComparison.OrdinalIgnoreCase)||x.roles.Any(r=>r.Contains(q,StringComparison.OrdinalIgnoreCase)));
+            // Exact account/display-name matches lead the suggestions. Handles remain hidden in the picker,
+            // but typing a known person must not let ten same-titled generated accounts crowd them out.
+            return Results.Ok(people.OrderBy(x=>q.Length>0&&!string.Equals(x.UserName,q,StringComparison.OrdinalIgnoreCase)&&!string.Equals(x.DisplayName,q,StringComparison.OrdinalIgnoreCase))
+                .ThenBy(x=>q.Length>0&&!x.DisplayName.StartsWith(q,StringComparison.OrdinalIgnoreCase))
+                .ThenBy(x=>x.DisplayName).Take(Math.Clamp(limit??50,1,200)));
         });
 
         app.MapGet("/api/my-work", async (Guid? projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>

@@ -535,7 +535,7 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
+        app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, DownstreamImpactService downstreamImpact, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
@@ -546,6 +546,7 @@ public static class ChangeRequestEndpoints
                 // Approval is what settles the engineering decision, so verification work is raised here rather than
                 // waiting for baseline inclusion. Saved in the same unit of work as the approval itself.
                 await verificationImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct);
+                await downstreamImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct);
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });

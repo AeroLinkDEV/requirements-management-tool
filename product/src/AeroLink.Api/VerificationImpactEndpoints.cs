@@ -14,7 +14,7 @@ public sealed record ResolveVerificationImpactRequest(VerificationImpactOutcome 
 public sealed record ReopenVerificationImpactRequest(string Rationale);
 public sealed record IncludeChangeRequestRequest(Guid ChangeRequestId);
 public sealed record CreateTestChangeRequestRequest(TestChangeReviewDiscipline Discipline, Guid[] ChangeRequestIds);
-public sealed record SubmitTestChangeReviewRequest(string? Rationale = null);
+public sealed record SubmitTestChangeReviewRequest(string ApproverId);
 public sealed record ApproveTestChangeReviewRequest(string Rationale);
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
 
@@ -70,10 +70,13 @@ public static class VerificationImpactEndpoints
                         .Select(x => new { id = x.ChangeRequestId, number = x.ChangeRequestNumber, originating = false })),
                 review.AssignedEngineerId,
                 review.SubmittedBy,
+                review.SelectedApproverId,
                 review.SubmittedAt,
                 review.ApprovedBy,
                 review.ApprovedAt,
                 review.ApprovalRationale,
+                review.SupersededByTestChangeRequestId,
+                review.SupersededReason,
                 totalItems = items.Count(x => x.TestChangeReviewId == review.Id),
                 resolvedItems = items.Count(x => x.TestChangeReviewId == review.Id && x.State == VerificationImpactState.Resolved),
                 preReleaseEvidenceItems = items.Count(x => x.TestChangeReviewId == review.Id && x.PreReleaseEvidenceRequired)
@@ -321,10 +324,23 @@ public static class VerificationImpactEndpoints
                 return Results.Forbid();
             try
             {
+                if (string.IsNullOrWhiteSpace(request.ApproverId))
+                    return Results.BadRequest(new { error = "Select an independent test change request approver." });
+                var approver = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x =>
+                    x.UserName == request.ApproverId.Trim().ToLowerInvariant() && x.State == AccountState.Active, ct);
+                if (approver is null)
+                    return Results.BadRequest(new { error = "Select an active AeroLink test change request approver." });
+                var programId = await db.Projects.AsNoTracking().Where(x => x.Id == review.ProjectId)
+                    .Select(x => x.ProgramId).SingleAsync(ct);
+                if (!await identity.HasRoleAsync(approver.Id, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
+                    return Results.BadRequest(new { error = $"{approver.DisplayName} does not hold Approver authority for this Program." });
                 var allResolved = await db.VerificationImpactItems
                     .Where(x => x.TestChangeReviewId == id)
                     .AllAsync(x => x.State == VerificationImpactState.Resolved, ct);
-                review.Submit(http.UserAccount().UserName, allResolved, DateTimeOffset.UtcNow);
+                review.Submit(http.UserAccount().UserName, approver.UserName, allResolved, DateTimeOffset.UtcNow);
+                db.UserNotifications.Add(new(review.ProjectId, approver.UserName, "TestChangeRequestApprovalRequested",
+                    $"Review {review.DisplayNumber}", $"{http.UserAccount().DisplayName} selected you to approve this test change request.",
+                    "verification", review.Id, DateTimeOffset.UtcNow));
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new { review.Id, state = review.State.ToString() });
             }

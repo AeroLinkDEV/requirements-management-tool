@@ -102,8 +102,12 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         // impact queue while simultaneously showing approved changes that introduce and modify requirements —
         // the one state the product says is impossible.
         var verificationImpact = new VerificationImpactService(db);
+        var downstreamImpact = new DownstreamImpactService(db);
         foreach (var request in activeRequests.Where(x => x.State is ScrState.Approved or ScrState.SelectedForBaseline))
+        {
             await verificationImpact.RaiseForApprovedChangeRequestAsync(request, start.AddDays(305), ct);
+            await downstreamImpact.RaiseForApprovedChangeRequestAsync(request, start.AddDays(305), ct);
+        }
         await db.SaveChangesAsync(ct);
         var baseline16 = new CandidateBaseline("SW-01.60", 0, project.Id, release16.Id, baseline15.Id, "FMS 1.6 In-Work Software Build", "cm.fms", start.AddDays(310));
         foreach (var request in activeRequests.Where(x => x.State == ScrState.Approved).Take(2)) baseline16.Select(request, "cm.fms", start.AddDays(311));
@@ -135,6 +139,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             ("release-campaign", async (id, token) => { await EnsureReleaseCampaignAsync(id, token); return "Release campaign present."; }),
             ("product-line", async (id, token) => { await EnsureProductLineAsync(id, token); return "Product-line configuration present."; }),
             ("verification-impact", ReconcileVerificationImpactAsync),
+            ("downstream-impact", ReconcileDownstreamImpactAsync),
             ("test-change-reviews", EnsureTestChangeReviewsAsync),
             ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
             ("approver-identity", ReconcileApproverIdentityAsync),
@@ -353,7 +358,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             .ToHashSet();
         foreach (var review in releasedReviews)
         {
-            review.Submit("verification.engineer", !incompleteReviewIds.Contains(review.Id), now);
+            review.Submit("verification.engineer", "assurance.reviewer", !incompleteReviewIds.Contains(review.Id), now);
             review.Approve("assurance.reviewer",
                 "Historical procedure changes and exact coverage were approved for released software build SW-01.50.", now);
         }
@@ -428,6 +433,21 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         await db.SaveChangesAsync(ct);
         var raised = await db.VerificationImpactItems.CountAsync(ct) - before;
         return raised == 0 ? "Verification impact already complete." : $"Raised {raised} missing verification-impact item(s).";
+    }
+
+    private async Task<string?> ReconcileDownstreamImpactAsync(Guid programId, CancellationToken ct)
+    {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleOrDefaultAsync(ct);
+        if (projectId == Guid.Empty) return null;
+        var requests = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
+            .Where(x => x.ProjectId == projectId && (x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline))
+            .ToListAsync(ct);
+        var before = await db.DownstreamChangeAssessments.CountAsync(ct);
+        var service = new DownstreamImpactService(db);
+        foreach (var request in requests) await service.RaiseForApprovedChangeRequestAsync(request, DateTimeOffset.UtcNow, ct);
+        await db.SaveChangesAsync(ct);
+        var raised = await db.DownstreamChangeAssessments.CountAsync(ct) - before;
+        return raised == 0 ? "Downstream assessments already complete." : $"Raised {raised} missing downstream assessment(s).";
     }
 
     /// <summary>
@@ -614,9 +634,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             var system = i <= 2; var type = system ? ChangeRequestType.System : ChangeRequestType.Software; var number = system ? $"SCR-{30 + i:D5}" : $"SWCR-{75 + i - 2:D5}";
             var request = new SystemChangeRequest(number, 0, projectId, releaseId, i == 1 ? "Introduce oceanic round-robin waypoint sequencing" : $"FMS 1.6 change package {i}", "Operational feedback or a product improvement requires controlled change.", "The impact to requirements, traces, and verification has been assessed.", "Update the applicable FMS behavior and verification assets.", type == ChangeRequestType.System ? "systems.author" : "software.author", now.AddDays(i), type);
             if (i == 1) request.AddRequirementChange(request.AuthorId, "SYSR-000151", 0, RequirementLevel.System, RequirementChangeKind.Introduce, "The FMS shall support configurable round-robin sequencing of eligible oceanic waypoints.", "New FMS 1.6 capability.", "Test", now);
-            else { var level = i <= 4 ? RequirementLevel.HighLevel : RequirementLevel.LowLevel; var prefix = level == RequirementLevel.HighLevel ? "HLR" : "LLR"; var max = level == RequirementLevel.HighLevel ? 400 : 700; var idx = ((i * 37) % max) + 1; var row = current[$"{prefix}-{idx:D6}"]; request.AddRequirementChange(request.AuthorId, $"{prefix}-{idx:D6}", row.Revision.Revision + 1, level, RequirementChangeKind.Modify, CurrentStatement(level, idx) + " The behavior shall include the approved FMS 1.6 refinement.", "Product improvement or corrective action.", "Test", now); }
+            else { var level = system ? RequirementLevel.System : i <= 4 ? RequirementLevel.HighLevel : RequirementLevel.LowLevel; var prefix = level == RequirementLevel.System ? "SYSR" : level == RequirementLevel.HighLevel ? "HLR" : "LLR"; var max = level == RequirementLevel.System ? 150 : level == RequirementLevel.HighLevel ? 400 : 700; var idx = ((i * 37) % max) + 1; var row = current[$"{prefix}-{idx:D6}"]; request.AddRequirementChange(request.AuthorId, $"{prefix}-{idx:D6}", row.Revision.Revision + 1, level, RequirementChangeKind.Modify, CurrentStatement(level, idx) + " The behavior shall include the approved FMS 1.6 refinement.", "Product improvement or corrective action.", "Test", now); }
             if (i <= 2) { request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Maya Patel")], now.AddDays(i).AddHours(1)); request.ApproveActiveStage("lead.reviewer", now.AddDays(i).AddHours(2)); }
-            else if (i <= 4) request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Maya Patel"), new("manager.reviewer", "Olivia Chen")], now.AddDays(i).AddHours(1));
+            else if (i == 3) { request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Maya Patel"), new("manager.reviewer", "Olivia Chen")], now.AddDays(i).AddHours(1)); request.ApproveActiveStage("lead.reviewer", now.AddDays(i).AddHours(2)); request.ApproveActiveStage("manager.reviewer", now.AddDays(i).AddHours(3)); }
+            else if (i == 4) request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Maya Patel"), new("manager.reviewer", "Olivia Chen")], now.AddDays(i).AddHours(1));
             else if (i == 8) request.Defer(request.AuthorId, "Deferred from FMS 1.6 pending operational priority confirmation.", now.AddDays(i).AddHours(2));
             result.Add(request);
         }

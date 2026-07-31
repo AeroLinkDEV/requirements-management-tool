@@ -13,7 +13,7 @@ public enum VerificationImpactTrigger
     ProcedureOrphaned
 }
 
-public enum VerificationImpactState { Open, Assigned, Resolved }
+public enum VerificationImpactState { Open, Assigned, Resolved, Superseded }
 public enum VerificationImpactHistoryAction { Resolved, Reopened }
 public enum TestProcedureChangeAction { LinkExisting, CreateNew, ModifyExisting, RetireExisting, NoTestRequired }
 
@@ -160,7 +160,7 @@ public sealed class VerificationImpactItem
     public long Version { get; private set; } = 1;
 
     /// <summary>An item counts against the baseline-approval gate until it is resolved.</summary>
-    public bool BlocksBaselineApproval => State != VerificationImpactState.Resolved;
+    public bool BlocksBaselineApproval => State is not (VerificationImpactState.Resolved or VerificationImpactState.Superseded);
 
     /// <summary>The test lead distributes work to an individual verification engineer.</summary>
     public void AssignToEngineer(string leadActorId, string engineerId, DateTimeOffset now)
@@ -271,6 +271,13 @@ public sealed class VerificationImpactItem
         Touch(now);
     }
 
+    public void Supersede(DateTimeOffset now)
+    {
+        if (State == VerificationImpactState.Superseded) return;
+        State = VerificationImpactState.Superseded;
+        Touch(now);
+    }
+
     private bool IsOutcomeValidForTrigger(VerificationImpactOutcome outcome) => Trigger switch
     {
         VerificationImpactTrigger.ProcedureOrphaned =>
@@ -281,8 +288,8 @@ public sealed class VerificationImpactItem
 
     private void EnsureUnresolved()
     {
-        if (State == VerificationImpactState.Resolved)
-            throw new DomainException("A resolved verification impact item cannot be changed. Raise a new item instead.");
+        if (State is VerificationImpactState.Resolved or VerificationImpactState.Superseded)
+            throw new DomainException("A resolved or superseded verification impact item cannot be changed. Raise a new item instead.");
     }
 
     private void Touch(DateTimeOffset now) { UpdatedAt = now; Version++; }

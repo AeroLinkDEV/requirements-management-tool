@@ -1032,6 +1032,36 @@ Future entries use:
   Results page, at `…/results/{problemReportId}`. The "evidence required before release" checkbox is gone; the
   server field remains only as one of the inputs that seeds a new test set.
 
+### DEC-078 - Downstream Requirement Impact Is Assessed Before an SWCR Is Created
+
+- **Date:** 2026-07-31
+- **Status:** Accepted
+- **Decision:** Final approval of a System change raises an HLR downstream change assessment; final approval
+  of an HLR change raises an LLR assessment. The consuming engineer may conclude that no downstream change is
+  required or link one or more Draft SWCRs. A Draft SWCR may answer multiple assessments, so both one-to-one
+  and consolidated delivery remain possible without allocating empty controlled change-request numbers.
+- **Rationale:** The author of an upstream change cannot responsibly decide the consuming discipline's impact.
+  Creating an SWCR before that engineering conclusion falsely asserts that a downstream requirement change is
+  required and wastes a controlled identifier when the correct answer is no change.
+- **Consequences:** Assessments are build-scoped, assigned, independently approved by an explicitly selected
+  approver, and server-governed. Revising an approved source change creates fresh assessment work and marks the
+  earlier assessment and its verification work **Superseded â€” out of date, update required**. Historical rows
+  remain readable and attributable but do not satisfy current readiness or appear in active counts.
+
+### DEC-079 - Verification Approvals Name the Reviewer Up Front
+
+- **Date:** 2026-07-31
+- **Status:** Accepted
+- **Decision:** A test-procedure revision receives an explicitly selected independent approver when it is
+  created. A test change request receives one when its completed decisions are submitted. Only that active
+  Program approver can approve the exact revision or package.
+- **Rationale:** Role eligibility alone does not establish who owns a pending review and produced inconsistent
+  behavior between controlled artifacts. Named assignment makes the queue accountable while preserving the
+  server-side authority and independence checks.
+- **Consequences:** Existing historical records may have no selected approver; all newly authored procedures
+  and newly submitted test change requests require one. The server, not merely the button visibility, rejects
+  approval by another user or by the author/submitting engineer.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

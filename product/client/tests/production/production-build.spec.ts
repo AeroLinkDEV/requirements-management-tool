@@ -281,6 +281,7 @@ test('verification mutation failures retain the engineer input and only confirme
     steps: 'Record one externally determined result.',
     expectedResult: 'Exactly one immutable result exists after server confirmation.',
     requirementRevisionIds: [requirements.items[0].revisionId],
+    approverId: 'admin',
     level: 'System',
   } })
   expect(created.ok(), await created.text()).toBeTruthy()
@@ -301,8 +302,13 @@ test('verification mutation failures retain the engineer input and only confirme
   // A determination is recorded against a procedure the build is set to run, so the one created through the
   // API is put in the set first. The candidate list is paged, so it is searched rather than scrolled to.
   await page.getByLabel('Find an approved procedure').fill(procedure.displayNumber.replace(/\.\d{2}$/, ''))
-  await page.locator('.testSetCandidates label').first().locator('input[type="checkbox"]').check()
-  await page.getByRole('button', { name: 'Add — covers a change' }).click()
+  const candidate = page.getByRole('checkbox', { name: new RegExp(procedure.displayNumber.replace('.', '\\.')) })
+  await expect(candidate).toBeVisible({ timeout: 30_000 })
+  await candidate.check()
+  await expect(candidate).toBeChecked()
+  const addToSet = page.getByRole('button', { name: 'Add — covers a change' })
+  await expect(addToSet).toBeEnabled()
+  await addToSet.click()
   const row = page.locator('.testSetRow').filter({ hasText: procedure.displayNumber })
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.getByRole('button', { name: /Record result|Record retest/ }).click()

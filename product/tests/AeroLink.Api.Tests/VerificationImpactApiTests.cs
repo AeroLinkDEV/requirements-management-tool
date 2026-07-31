@@ -133,7 +133,8 @@ public sealed class VerificationImpactApiTests
     {
         using var factory = new AeroLinkApiFactory();
         var fixture = await SeedAsync(factory,
-            ("cm.user", ProgramRole.ConfigurationManager), ("eng.user", ProgramRole.TestEngineer));
+            ("cm.user", ProgramRole.ConfigurationManager), ("eng.user", ProgramRole.TestEngineer),
+            ("approver.user", ProgramRole.Approver));
 
         using (var engineer = factory.CreateClient())
         {
@@ -180,6 +181,7 @@ public sealed class VerificationImpactApiTests
                 steps = "Exercise the requirement.",
                 expectedResult = "The required behavior is observed.",
                 requirementRevisionIds = new[] { revisionId },
+                approverId = "approver.user",
                 level = "System"
             });
             Assert.Equal(HttpStatusCode.Created, created.StatusCode);

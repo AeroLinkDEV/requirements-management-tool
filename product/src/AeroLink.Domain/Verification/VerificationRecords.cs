@@ -38,14 +38,15 @@ public sealed class TestProcedureRevision
 {
     private TestProcedureRevision() { }
     public TestProcedureRevision(Guid procedureId, int revision, string objective, string preconditions,
-        string steps, string expectedResult, TestProcedureState state, string authorId, DateTimeOffset now)
+        string steps, string expectedResult, TestProcedureState state, string authorId, DateTimeOffset now,
+        string? selectedApproverId = null)
     {
         if (revision < 0) throw new DomainException("Test procedure revision cannot be negative.");
         if (string.IsNullOrWhiteSpace(objective) || string.IsNullOrWhiteSpace(steps) || string.IsNullOrWhiteSpace(expectedResult))
             throw new DomainException("Objective, steps, and expected result are required.");
         Id = Guid.NewGuid(); ProcedureId = procedureId; Revision = revision; Objective = objective.Trim();
         Preconditions = preconditions.Trim(); Steps = steps.Trim(); ExpectedResult = expectedResult.Trim();
-        State = state; AuthorId = authorId.Trim(); CreatedAt = now;
+        State = state; AuthorId = authorId.Trim(); SelectedApproverId = selectedApproverId?.Trim(); CreatedAt = now;
     }
     public Guid Id { get; private set; }
     public Guid ProcedureId { get; private set; }
@@ -56,6 +57,7 @@ public sealed class TestProcedureRevision
     public string ExpectedResult { get; private set; } = string.Empty;
     public TestProcedureState State { get; private set; }
     public string AuthorId { get; private set; } = string.Empty;
+    public string? SelectedApproverId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     public void UpdateDraft(string objective, string preconditions, string steps, string expectedResult, string actor)
@@ -72,6 +74,9 @@ public sealed class TestProcedureRevision
         if (State != TestProcedureState.Draft) throw new DomainException("Only a Draft test procedure revision can be approved.");
         if (string.Equals(AuthorId, approverId?.Trim(), StringComparison.OrdinalIgnoreCase))
             throw new DomainException("A test procedure author cannot approve their own revision.");
+        if (!string.IsNullOrWhiteSpace(SelectedApproverId)
+            && !string.Equals(SelectedApproverId, approverId?.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("Only the explicitly selected procedure approver can approve this revision.");
         State = TestProcedureState.Approved;
     }
 }

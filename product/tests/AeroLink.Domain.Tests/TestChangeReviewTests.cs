@@ -25,8 +25,8 @@ public sealed class TestChangeReviewTests
     {
         var review = Create();
 
-        Assert.Throws<DomainException>(() => review.Submit("test.engineer", false, Now.AddMinutes(1)));
-        review.Submit("test.engineer", true, Now.AddMinutes(2));
+        Assert.Throws<DomainException>(() => review.Submit("test.engineer", "test.approver", false, Now.AddMinutes(1)));
+        review.Submit("test.engineer", "test.approver", true, Now.AddMinutes(2));
 
         Assert.Equal(TestChangeReviewState.InReview, review.State);
         Assert.Equal("test.engineer", review.SubmittedBy);
@@ -36,7 +36,7 @@ public sealed class TestChangeReviewTests
     public void Independent_approval_records_rationale_and_closes_the_review()
     {
         var review = Create();
-        review.Submit("test.engineer", true, Now.AddMinutes(1));
+        review.Submit("test.engineer", "test.approver", true, Now.AddMinutes(1));
         review.Approve("test.approver", "Procedure decisions are complete and technically sound.", Now.AddMinutes(2));
 
         Assert.Equal(TestChangeReviewState.Approved, review.State);
@@ -49,7 +49,7 @@ public sealed class TestChangeReviewTests
     public void The_engineer_who_submitted_a_review_cannot_approve_it()
     {
         var review = Create();
-        review.Submit("test.lead", true, Now.AddMinutes(1));
+        review.Submit("test.lead", "test.approver", true, Now.AddMinutes(1));
 
         // Casing differs because an actor name reaching the domain is whatever the caller passed; the rule is
         // about the person, not the spelling.
@@ -65,7 +65,7 @@ public sealed class TestChangeReviewTests
     public void Reviewer_can_return_a_submitted_review_to_work()
     {
         var review = Create();
-        review.Submit("test.engineer", true, Now.AddMinutes(1));
+        review.Submit("test.engineer", "test.approver", true, Now.AddMinutes(1));
 
         review.ReturnToWork("test.approver", "Clarify the modified procedure.", Now.AddMinutes(2));
 

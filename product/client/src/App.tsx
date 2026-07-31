@@ -527,6 +527,7 @@ function App() {
         onOpenScr={(id) => navigate("scr",discipline,id)}
         onCreateSystem={() => navigate("createSystemScr","system")}
         onCreateSoftware={(level) => navigate("createSoftwareChange","software",undefined,level)}
+        user={user}
       />
     );
   if (view === "requirements" && project)
@@ -557,7 +558,7 @@ function App() {
         discipline={discipline === "softwareTest"
           ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
-        buildName={`Build `}
+        buildName={`Build ${release.version}`}
         readOnly={release.isReleased}
         programId={active?.program.id ?? ""}
         user={user}
