@@ -32,6 +32,17 @@ export default defineConfig({
   outputDir,
   fullyParallel: false,
   workers: 1,
+  // Fifteen seconds, not Playwright's five.
+  //
+  // Almost every assertion here waits on a server round-trip — a signed determination, a released lock, a
+  // refetched list — and on a loaded two-core runner five seconds is shorter than the work. Four separate
+  // assertions have failed that way, each reading as "the control never came back" when it simply had not
+  // come back yet, and each fix was to write the timeout out longhand at one more call site.
+  //
+  // Fifteen is well under the thirty this suite already writes explicitly where a wait is known to be long,
+  // and far enough above the work that a failure means something. A genuine hang still fails, fifteen
+  // seconds later, which is the trade: slower to report the real thing, and it reports the real thing.
+  expect: { timeout: 15_000 },
   reporter: [['list'], ['./tests/slow-test-reporter.ts'], ['html', { open: 'never', outputFolder: reportDir }]],
   use: {
     baseURL: `http://127.0.0.1:${e2eClientPort}`,
