@@ -13,6 +13,7 @@ public sealed record ResolveVerificationImpactRequest(VerificationImpactOutcome 
     Guid? RetargetedRequirementRevisionId = null);
 public sealed record ReopenVerificationImpactRequest(string Rationale);
 public sealed record IncludeChangeRequestRequest(Guid ChangeRequestId);
+public sealed record CreateTestChangeRequestRequest(TestChangeReviewDiscipline Discipline, Guid[] ChangeRequestIds);
 public sealed record SubmitTestChangeReviewRequest(string? Rationale = null);
 public sealed record ApproveTestChangeReviewRequest(string Rationale);
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
@@ -169,6 +170,80 @@ public static class VerificationImpactEndpoints
                 }
                 await db.SaveChangesAsync(ct);
                 return Results.Ok((await MapAsync([item], db, ct)).Single());
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        /// Raising a test change request deliberately.
+        ///
+        /// One is raised automatically whenever a change request is approved, so nothing ever goes unnoticed.
+        /// That is not the only way work arrives: a verification engineer may decide a set of changes is best
+        /// tested as one package of their own making, and until now the only way to express that was to let
+        /// the automatic packages appear and then fold them together.
+        ///
+        /// It takes the change requests it answers for up front, because a package that covers nothing has
+        /// nothing to decide and would sit in the queue looking like work.
+        app.MapPost("/api/releases/{releaseId:guid}/test-change-requests", async (Guid releaseId,
+            CreateTestChangeRequestRequest request, HttpContext http, AeroLinkDbContext db,
+            IdentityService identity, CancellationToken ct) =>
+        {
+            var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
+                .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
+            if (release is null) return Results.NotFound();
+            if (release.IsReleased) return Results.Conflict(new { error = "A released build takes no new test change requests." });
+            if (!await http.HasProjectRoleAsync(db, identity, release.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
+                return Results.Forbid();
+            if (request.ChangeRequestIds.Length == 0)
+                return Results.BadRequest(new { error = "Name the change requests this package answers for." });
+
+            var changes = await db.SystemChangeRequests.AsNoTracking()
+                .Where(x => request.ChangeRequestIds.Contains(x.Id) && x.ProjectId == release.ProjectId && x.TargetReleaseId == releaseId)
+                .Select(x => new { x.Id, x.DisplayNumber }).ToListAsync(ct);
+            if (changes.Count != request.ChangeRequestIds.Length)
+                return Results.BadRequest(new
+                {
+                    error = "A test change request can only answer for change requests allocated to this build.",
+                    code = "change_request_not_selectable"
+                });
+
+            // Already covered, by the package it was raised from or by one it was folded into. The check names
+            // the holder, so an engineer is told where the work went rather than told to try again.
+            //
+            // Originating cover is per discipline — one change request legitimately has System, HLR and LLR
+            // packages — while a folded-in claim is exclusive outright.
+            foreach (var change in changes)
+            {
+                var origin = await db.TestChangeReviews.AsNoTracking()
+                    .Where(x => x.ChangeRequestId == change.Id && x.Discipline == request.Discipline)
+                    .Select(x => x.BaseNumber).FirstOrDefaultAsync(ct);
+                var claimed = await db.TestChangeRequestClaims.AsNoTracking()
+                    .Where(x => x.ChangeRequestId == change.Id)
+                    .Join(db.TestChangeReviews.AsNoTracking(), claim => claim.TestChangeReviewId, review => review.Id, (_, review) => review.BaseNumber)
+                    .FirstOrDefaultAsync(ct);
+                var holder = origin ?? claimed;
+                if (holder is not null)
+                    return Results.Conflict(new { error = $"{change.DisplayNumber} is already covered by {holder}." });
+            }
+
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                var actor = http.UserAccount().UserName;
+                var first = changes[0];
+                var review = new TestChangeReview(release.ProjectId, releaseId, first.Id, request.Discipline,
+                    first.DisplayNumber, now, await IdentifierAllocator.NextTestChangeRequestAsync(db, request.Discipline, ct));
+                foreach (var extra in changes.Skip(1))
+                    review.IncludeChangeRequest(actor, extra.Id, extra.DisplayNumber, now);
+                db.TestChangeReviews.Add(review);
+                await db.SaveChangesAsync(ct);
+                return Results.Created($"/api/test-change-reviews/{review.Id}", new
+                {
+                    review.Id,
+                    review.DisplayNumber,
+                    discipline = review.Discipline.ToString(),
+                    state = review.State.ToString(),
+                    covered = review.CoveredChangeRequestIds,
+                });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });

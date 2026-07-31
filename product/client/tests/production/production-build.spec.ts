@@ -125,10 +125,19 @@ test('a deep link reloads, because the server falls back to the client', async (
   await selectProgram(page, 'Flight Management System Live Program')
 
   const routes = await navigationRoutes(page)
-  const deepLink = routes.find(href => href.includes('/change-requests')) ?? routes[1]
-  await page.goto(deepLink, { waitUntil: 'load' })
+  const deepLink = routes.find(href => href.includes('/change-requests'))
+  expect(deepLink, 'the navigation must offer a change-request route to deep link into').toBeTruthy()
+  await page.goto(deepLink!, { waitUntil: 'load' })
   const headings = page.locator('h1, h2, h3')
-  await expect(headings.first()).toBeVisible({ timeout: 30_000 })
+
+  // Waited for the page the address names, not for whichever heading paints first.
+  //
+  // The shell renders its own default heading while the router resolves the address, so reading the first
+  // heading once captured "Command Center" — and the reload then settled on the change-request page and was
+  // compared against a baseline that was never the deep-linked page at all. The comparison below was already
+  // polled for exactly this reason; the read it compares against had the same race and kept it.
+  await expect.poll(async () => (await headings.first().textContent())?.trim(), { timeout: 30_000 })
+    .toMatch(/Change Requests/)
   const before = await headings.first().textContent()
 
   // The reload is the test. With no fallback the server holds no file at this path and answers 404, so the
