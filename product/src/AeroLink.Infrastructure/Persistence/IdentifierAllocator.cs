@@ -18,6 +18,15 @@ using Microsoft.EntityFrameworkCore.Storage;
 // create leaves a permanent gap rather than returning its number to the pool.
 public static class IdentifierAllocator
 {
+    public static async Task<string> PreviewChangeRequestAsync(AeroLinkDbContext db, ChangeRequestType type, CancellationToken ct)
+    {
+        var prefix = type == ChangeRequestType.System ? "SCR" : "SWCR";
+        return FormatChangeRequest(prefix, await PreviewAsync(db, prefix, ct));
+    }
+
+    public static async Task<string> PreviewRequirementAsync(AeroLinkDbContext db, string prefix, CancellationToken ct) =>
+        Format(prefix, await PreviewAsync(db, prefix, ct));
+
     public static async Task<string> NextChangeRequestAsync(AeroLinkDbContext db, ChangeRequestType type, CancellationToken ct)
     {
         var prefix = type == ChangeRequestType.System ? "SCR" : "SWCR";
@@ -63,6 +72,20 @@ public static class IdentifierAllocator
     /// </summary>
     public static Task<int> ClaimAsync(AeroLinkDbContext db, string prefix, CancellationToken ct) =>
         ClaimAsync(db, prefix, () => SeedAsync(db, prefix.Trim().ToUpperInvariant(), ct), ct);
+
+    /// <summary>
+    /// Reads the number a create would claim without reserving it. Authoring uses this only as an advisory
+    /// preview; the create path still claims atomically and may receive a later number after concurrent work.
+    /// </summary>
+    private static async Task<int> PreviewAsync(AeroLinkDbContext db, string prefix, CancellationToken ct)
+    {
+        var scope = prefix.Trim().ToUpperInvariant();
+        var next = await db.IdentifierSequences.AsNoTracking()
+            .Where(x => x.Scope == scope)
+            .Select(x => (int?)x.NextValue)
+            .SingleOrDefaultAsync(ct);
+        return next ?? await SeedAsync(db, scope, ct);
+    }
 
     /// <summary>
     /// Claims from a sequence whose first value cannot be read off the identifier tables — a controlled

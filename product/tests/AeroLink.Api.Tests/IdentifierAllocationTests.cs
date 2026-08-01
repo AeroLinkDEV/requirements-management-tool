@@ -20,6 +20,36 @@ namespace AeroLink.Api.Tests;
 public sealed class IdentifierAllocationTests
 {
     [Fact]
+    public async Task Authoring_context_previews_do_not_claim_controlled_numbers()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory);
+
+        async Task<JsonElement> Preview(string type) =>
+            await client.GetFromJsonAsync<JsonElement>($"/api/authoring/context?projectId={projectId}&type={type}");
+
+        var firstSystem = await Preview("System");
+        var secondSystem = await Preview("System");
+        var firstSoftware = await Preview("Software");
+        var secondSoftware = await Preview("Software");
+
+        Assert.Equal("SCR-00001", firstSystem.GetProperty("changeRequestNumber").GetString());
+        Assert.Equal(firstSystem.GetRawText(), secondSystem.GetRawText());
+        Assert.Equal("SWCR-00001", firstSoftware.GetProperty("changeRequestNumber").GetString());
+        Assert.Equal(firstSoftware.GetRawText(), secondSoftware.GetRawText());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var previewedScopes = new[] { "SCR", "SWCR", "SYSR", "HLR", "LLR" };
+        Assert.Empty(await db.IdentifierSequences.AsNoTracking().Where(x => previewedScopes.Contains(x.Scope)).ToListAsync());
+
+        Assert.Equal("SCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, default));
+        Assert.Equal("SYSR-000001", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", default));
+    }
+
+    [Fact]
     public async Task Two_allocations_before_either_record_is_saved_do_not_collide()
     {
         using var factory = new AeroLinkApiFactory();
