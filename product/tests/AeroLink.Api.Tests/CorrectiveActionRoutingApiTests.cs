@@ -99,6 +99,12 @@ public sealed class CorrectiveActionRoutingApiTests
         Assert.Equal("PR-00001.00", system.GetProperty("problemReportNumber").GetString());
         Assert.Equal("TestEngineer", system.GetProperty("requiredRole").GetString());
 
+        using var detailResponse = await client.GetAsync($"/api/problem-reports/{fixture.SystemReportId}");
+        Assert.Equal(HttpStatusCode.OK, detailResponse.StatusCode);
+        var detail = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal(fixture.SystemProcedureNumber + ".01",
+            detail.GetProperty("links")[0].GetProperty("identifier").GetString());
+
         // The one the old behaviour got wrong: a software failure sent to System Verification.
         var software = await TargetAsync(client, fixture.SoftwareReportId);
         Assert.True(software.GetProperty("available").GetBoolean());

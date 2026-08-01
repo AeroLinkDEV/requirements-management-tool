@@ -145,10 +145,58 @@ export type DocumentTypeName =
 
 export type DocumentTarget = { type: DocumentTypeName; label: string }
 
+const documentTypeLabels: Record<DocumentTypeName, string> = {
+  Sysrd: 'System Requirements Document (SYSRD)',
+  SwrdHighLevel: 'High-Level Software Requirements Document (HLRD)',
+  SwrdLowLevel: 'Low-Level Software Requirements Document (LLRD)',
+  SystemTestProcedures: 'System Test Procedure Document (SYSTD)',
+  HighLevelTestProcedures: 'HLR Test Procedure Document (HLRTD)',
+  LowLevelTestProcedures: 'LLR Test Procedure Document (LLRTD)',
+}
+
+export const documentTypeLabel = (type: string) =>
+  documentTypeLabels[type as DocumentTypeName] ?? stateLabel(type)
+
+/** The controlled prefix printed at the start of a numbered artifact. */
+export const artifactAcronym = (identifier?: string, kind?: string) => {
+  const prefix = identifier?.trim().toUpperCase().match(/^([A-Z]+(?:-[A-Z]+)*)-/)?.[1]
+  if (prefix) return prefix
+  switch ((kind ?? '').replace(/[-_\s]/g, '').toLowerCase()) {
+    case 'changerequest': return 'CR'
+    case 'requirement': return 'REQ'
+    case 'testprocedure': return 'TP'
+    case 'problemreport': return 'PR'
+    case 'softwarebuild':
+    case 'build': return 'SW'
+    case 'document': return 'DOC'
+    default: return 'ID'
+  }
+}
+
+/** Human wording for a numbered artifact, derived from its authoritative identifier where necessary. */
+export const artifactTypeLabel = (kind: string, identifier?: string) => {
+  const acronym = artifactAcronym(identifier, kind)
+  const labels: Record<string, string> = {
+    SCR: 'System Change Request (SCR)', SWCR: 'Software Change Request (SWCR)',
+    SYSR: 'System Requirement (SYSR)', HLR: 'High-Level Software Requirement (HLR)',
+    LLR: 'Low-Level Software Requirement (LLR)',
+    SYSTCR: 'System Test Change Request (SYSTCR)', HLRTCR: 'HLR Test Change Request (HLRTCR)',
+    LLRTCR: 'LLR Test Change Request (LLRTCR)',
+    SYSTP: 'System Test Procedure (SYSTP)', HLRTP: 'HLR Test Procedure (HLRTP)',
+    LLRTP: 'LLR Test Procedure (LLRTP)', PR: 'Problem Report (PR)', SW: 'Software Build (SW)',
+    SYSRD: documentTypeLabels.Sysrd, HLRD: documentTypeLabels.SwrdHighLevel,
+    LLRD: documentTypeLabels.SwrdLowLevel,
+    SYSTD: documentTypeLabels.SystemTestProcedures,
+    HLRTD: documentTypeLabels.HighLevelTestProcedures,
+    LLRTD: documentTypeLabels.LowLevelTestProcedures,
+  }
+  return labels[acronym] ?? stateLabel(kind.replace(/-/g, ' '))
+}
+
 export const targetsFor = (scope: 'System' | 'Software', level?: string): DocumentTarget[] => {
-  if (scope === 'System') return [{ type: 'Sysrd', label: 'System Requirements Document' }]
-  const high: DocumentTarget = { type: 'SwrdHighLevel', label: 'Software Requirements Document — High-Level' }
-  const low: DocumentTarget = { type: 'SwrdLowLevel', label: 'Software Requirements Document — Low-Level' }
+  if (scope === 'System') return [{ type: 'Sysrd', label: documentTypeLabels.Sysrd }]
+  const high: DocumentTarget = { type: 'SwrdHighLevel', label: documentTypeLabels.SwrdHighLevel }
+  const low: DocumentTarget = { type: 'SwrdLowLevel', label: documentTypeLabels.SwrdLowLevel }
   if (level === 'HighLevel') return [high]
   if (level === 'LowLevel') return [low]
   return [high, low]

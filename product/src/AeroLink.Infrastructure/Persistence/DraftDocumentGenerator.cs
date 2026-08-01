@@ -268,23 +268,29 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         return (highest ?? 0) + 1;
     }
 
-    private static string DocumentNumber(ControlledDocumentType type, string version) => type switch
+    private static string DocumentNumber(ControlledDocumentType type, string version)
     {
-        ControlledDocumentType.Sysrd => "SYSRD-" + version.Replace(".", ""),
-        ControlledDocumentType.SwrdHighLevel => "SWRD-HLR-" + version.Replace(".", ""),
-        ControlledDocumentType.SwrdLowLevel => "SWRD-LLR-" + version.Replace(".", ""),
-        ControlledDocumentType.SystemTestProcedures => "SYTPD-" + version.Replace(".", ""),
-        ControlledDocumentType.HighLevelTestProcedures => "HLRTPD-" + version.Replace(".", ""),
-        _ => "LLRTPD-" + version.Replace(".", ""),
-    };
+        var digits = string.Concat(version.Where(char.IsDigit));
+        var suffix = int.TryParse(digits, out var number) ? number.ToString("D6") : digits;
+        var prefix = type switch
+        {
+            ControlledDocumentType.Sysrd => "SYSRD",
+            ControlledDocumentType.SwrdHighLevel => "HLRD",
+            ControlledDocumentType.SwrdLowLevel => "LLRD",
+            ControlledDocumentType.SystemTestProcedures => "SYSTD",
+            ControlledDocumentType.HighLevelTestProcedures => "HLRTD",
+            _ => "LLRTD",
+        };
+        return $"{prefix}-{suffix}";
+    }
 
     private static string DocumentTypeName(ControlledDocumentType type) => type switch
     {
-        ControlledDocumentType.Sysrd => "System Requirements Document",
-        ControlledDocumentType.SwrdHighLevel => "Software Requirements Document - High-Level",
-        ControlledDocumentType.SwrdLowLevel => "Software Requirements Document - Low-Level",
-        ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document",
-        ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedure Document",
-        _ => "LLR Test Procedure Document",
+        ControlledDocumentType.Sysrd => "System Requirements Document (SYSRD)",
+        ControlledDocumentType.SwrdHighLevel => "High-Level Software Requirements Document (HLRD)",
+        ControlledDocumentType.SwrdLowLevel => "Low-Level Software Requirements Document (LLRD)",
+        ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document (SYSTD)",
+        ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedure Document (HLRTD)",
+        _ => "LLR Test Procedure Document (LLRTD)",
     };
 }

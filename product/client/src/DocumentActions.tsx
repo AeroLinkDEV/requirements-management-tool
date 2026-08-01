@@ -85,7 +85,7 @@ export default function DocumentActions({ api, projectId, release, targets, head
         return (
           <div className="documentOutput" key={target.type}>
             <div>
-              <b>{target.label}</b>
+              <b>{target.label}{draft && <span className="draftStatus">Draft</span>}</b>
               <small>
                 {draft
                   ? `Draft for ${release.version} — released content plus every approved change, stamped DRAFT`

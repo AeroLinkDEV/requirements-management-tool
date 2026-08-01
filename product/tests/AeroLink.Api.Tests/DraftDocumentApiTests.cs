@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.IO.Compression;
 using System.Text;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Requirements;
@@ -73,6 +74,7 @@ public sealed class DraftDocumentApiTests(ShowcaseApiFixture showcase)
             var generator = scope.ServiceProvider.GetRequiredService<DraftDocumentGenerator>();
             var direct = await generator.GenerateAsync(releaseId, AeroLink.Domain.Traceability.ControlledDocumentType.Sysrd, "pdf", "Tester", default);
             Assert.NotNull(direct);
+            Assert.Contains("DRAFT_SYSRD-000016.", direct.FileName);
         }
 
         using var response = await client.GetAsync($"/api/releases/{releaseId}/draft-document?type=Sysrd&format=pdf");
@@ -117,6 +119,46 @@ public sealed class DraftDocumentApiTests(ShowcaseApiFixture showcase)
         var pdf = Encoding.Latin1.GetString(await response.Content.ReadAsByteArrayAsync());
         Assert.Contains("DRAFT - NOT APPROVED", pdf);
         Assert.Contains("System Test Procedure Document", pdf);
+        Assert.Contains("SYSTD", pdf);
+        Assert.Contains("DRAFT_SYSTD-000016.", response.Content.Headers.ContentDisposition?.FileName ?? "");
+    }
+
+    [Fact]
+    public async Task Drafts_keep_the_approved_document_acronym_and_docx_pages_share_the_draft_watermark()
+    {
+        using var factory = showcase.CreateFactory();
+        using var scope = factory.Services.CreateScope();
+        var generator = scope.ServiceProvider.GetRequiredService<DraftDocumentGenerator>();
+        var releaseId = showcase.Summary.ActiveReleaseId;
+        var expected = new[]
+        {
+            (AeroLink.Domain.Traceability.ControlledDocumentType.Sysrd, "SYSRD"),
+            (AeroLink.Domain.Traceability.ControlledDocumentType.SwrdHighLevel, "HLRD"),
+            (AeroLink.Domain.Traceability.ControlledDocumentType.SwrdLowLevel, "LLRD"),
+            (AeroLink.Domain.Traceability.ControlledDocumentType.SystemTestProcedures, "SYSTD"),
+            (AeroLink.Domain.Traceability.ControlledDocumentType.HighLevelTestProcedures, "HLRTD"),
+            (AeroLink.Domain.Traceability.ControlledDocumentType.LowLevelTestProcedures, "LLRTD"),
+        };
+
+        GeneratedOutput? highLevelDraft = null;
+        foreach (var (type, acronym) in expected)
+        {
+            var output = await generator.GenerateAsync(releaseId, type, "docx", "Tester", default);
+            Assert.NotNull(output);
+            Assert.StartsWith($"DRAFT_{acronym}-000016.", output.FileName);
+            if (type == AeroLink.Domain.Traceability.ControlledDocumentType.SwrdHighLevel) highLevelDraft = output;
+        }
+
+        Assert.NotNull(highLevelDraft);
+        using var archive = new ZipArchive(new MemoryStream(highLevelDraft.Content), ZipArchiveMode.Read);
+        var header = await ReadPartAsync(archive, "word/header1.xml");
+        var document = await ReadPartAsync(archive, "word/document.xml");
+        Assert.Contains("AeroLinkWatermark", header);
+        Assert.Contains("string=\"DRAFT\"", header);
+        Assert.Contains("<w:headerReference", document);
+        Assert.Contains("HLRD-000016", document);
+        Assert.Contains("High-Level Software Requirements Document (HLRD)", document);
+        Assert.DoesNotContain("SWRD-HLR", document);
     }
 
     /// <summary>Drives a change request through review to Approved the way the workflow does.</summary>
@@ -139,5 +181,13 @@ public sealed class DraftDocumentApiTests(ShowcaseApiFixture showcase)
         using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
+    }
+
+    private static async Task<string> ReadPartAsync(ZipArchive archive, string name)
+    {
+        var part = archive.GetEntry(name);
+        Assert.NotNull(part);
+        using var reader = new StreamReader(part!.Open());
+        return await reader.ReadToEndAsync();
     }
 }

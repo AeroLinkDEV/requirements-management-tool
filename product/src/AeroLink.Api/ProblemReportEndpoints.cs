@@ -77,7 +77,8 @@ public static class ProblemReportEndpoints
                 db.ProblemReportLinks.Add(new ProblemReportLink(item.Id, "Release", releaseId.Value, "BuildScope", actor.UserName, now));
             AddRevision(db, item, "ProblemReportCreatedFromFailedExecution", actor.UserName, now);
             await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
-            return Results.Created($"/api/problem-reports/{item.Id}", Detail(item, [new ProblemReportLinkView("TestExecution", execution.Id, "OriginatingFailure", actor.UserName, now)], []));
+            var identifier = await ResolveLinkIdentifierAsync("TestExecution", execution.Id, db, ct);
+            return Results.Created($"/api/problem-reports/{item.Id}", Detail(item, [new ProblemReportLinkView("TestExecution", execution.Id, identifier, "OriginatingFailure", actor.UserName, now)], []));
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (DbUpdateException) { return Results.Conflict(new { error = "A problem report number was allocated concurrently. Retry the create request.", code = "number_allocation_conflict" }); }
@@ -131,7 +132,7 @@ public static class ProblemReportEndpoints
         if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
         var links = (await db.ProblemReportLinks.AsNoTracking().Where(x => x.ProblemReportId == id).ToListAsync(ct)).OrderBy(x => x.AddedAt).ToList();
         var revisions = (await db.ProblemReportRevisions.AsNoTracking().Where(x => x.ProblemReportId == id).ToListAsync(ct)).OrderByDescending(x => x.OccurredAt).ToList();
-        return Results.Ok(Detail(report, links.Select(x => new ProblemReportLinkView(x.ArtifactType, x.ArtifactId, x.Relationship, x.AddedBy, x.AddedAt)), revisions));
+        return Results.Ok(Detail(report, await LinkViewsAsync(links, db, ct), revisions));
     }
 
     private static async Task<IResult> InvestigateAsync(Guid id, InvestigationRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "InvestigationRecorded", (report, actor, now) => report.BeginInvestigation(actor.UserName, request.Analysis, request.RootCause ?? "", request.Effects ?? "", request.Containment ?? "", now));
@@ -184,7 +185,7 @@ public static class ProblemReportEndpoints
         if (report.State != ProblemReportState.Closed) return Results.Conflict(new { error = "A controlled closure package is available only after independent closure approval." });
         var links = await db.ProblemReportLinks.AsNoTracking().Where(x => x.ProblemReportId == id).OrderBy(x => x.ArtifactType).ThenBy(x => x.ArtifactId).ToListAsync(ct);
         var revisions = (await db.ProblemReportRevisions.AsNoTracking().Where(x => x.ProblemReportId == id).ToListAsync(ct)).OrderBy(x => x.OccurredAt).ToList();
-        return Results.Ok(new { packageType = "ProblemReportClosurePackage", generatedAt = DateTimeOffset.UtcNow, generatorVersion = "AeroLink-3.0", report = Detail(report, links.Select(x => new ProblemReportLinkView(x.ArtifactType, x.ArtifactId, x.Relationship, x.AddedBy, x.AddedAt)), revisions), sourceHash = report.CanonicalHash(), manifest = new { report.DisplayNumber, report.Version, revisionEvidenceCount = revisions.Count, linkCount = links.Count } });
+        return Results.Ok(new { packageType = "ProblemReportClosurePackage", generatedAt = DateTimeOffset.UtcNow, generatorVersion = "AeroLink-3.0", report = Detail(report, await LinkViewsAsync(links, db, ct), revisions), sourceHash = report.CanonicalHash(), manifest = new { report.DisplayNumber, report.Version, revisionEvidenceCount = revisions.Count, linkCount = links.Count } });
     }
 
     private static async Task<IResult> ChangeAsync(Guid id, long? expectedVersion, HttpContext http, AeroLinkDbContext db, CancellationToken ct, string eventType, Action<ProblemReport, AuthenticatedUser, DateTimeOffset> action, Func<AuthenticatedUser, DateTimeOffset, ProblemReportLink>? link = null)
@@ -334,7 +335,73 @@ public static class ProblemReportEndpoints
         });
     }
 
-    private sealed record ProblemReportLinkView(string ArtifactType, Guid ArtifactId, string Relationship, string AddedBy, DateTimeOffset AddedAt);
+    private static async Task<IReadOnlyList<ProblemReportLinkView>> LinkViewsAsync(
+        IEnumerable<ProblemReportLink> links, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var result = new List<ProblemReportLinkView>();
+        foreach (var link in links)
+            result.Add(new(link.ArtifactType, link.ArtifactId,
+                await ResolveLinkIdentifierAsync(link.ArtifactType, link.ArtifactId, db, ct),
+                link.Relationship, link.AddedBy, link.AddedAt));
+        return result;
+    }
+
+    private static async Task<string?> ResolveLinkIdentifierAsync(
+        string artifactType, Guid artifactId, AeroLinkDbContext db, CancellationToken ct)
+    {
+        switch (artifactType.Trim().ToLowerInvariant())
+        {
+            case "requirement":
+                return await db.Requirements.AsNoTracking().Where(x => x.Id == artifactId)
+                    .Select(x => x.BaseNumber).SingleOrDefaultAsync(ct);
+            case "changerequest" or "scr" or "swcr":
+            {
+                var item = await db.SystemChangeRequests.AsNoTracking().Where(x => x.Id == artifactId)
+                    .Select(x => new { x.BaseNumber, x.Revision }).SingleOrDefaultAsync(ct);
+                return item is null ? null : $"{item.BaseNumber}.{item.Revision:D2}";
+            }
+            case "testexecution":
+            {
+                var item = await (from execution in db.TestExecutions.AsNoTracking().Where(x => x.Id == artifactId)
+                                  join revision in db.TestProcedureRevisions.AsNoTracking() on execution.ProcedureRevisionId equals revision.Id
+                                  join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                  select new { procedure.BaseNumber, revision.Revision }).SingleOrDefaultAsync(ct);
+                return item is null ? null : $"{item.BaseNumber}.{item.Revision:D2}";
+            }
+            case "softwarebuild" or "build":
+                return await db.SoftwareBuilds.AsNoTracking().Where(x => x.Id == artifactId)
+                    .Select(x => x.BuildNumber).SingleOrDefaultAsync(ct);
+            case "baseline":
+            {
+                var item = await db.CandidateBaselines.AsNoTracking().Where(x => x.Id == artifactId)
+                    .Select(x => new { x.BaseNumber, x.Revision }).SingleOrDefaultAsync(ct);
+                return item is null ? null : $"{item.BaseNumber}.{item.Revision:D2}";
+            }
+            case "document":
+            {
+                var item = await db.ControlledDocuments.AsNoTracking().Where(x => x.Id == artifactId)
+                    .Select(x => new { x.DocumentNumber, x.Revision }).SingleOrDefaultAsync(ct);
+                return item is null ? null : $"{item.DocumentNumber}.{item.Revision:D2}";
+            }
+            case "evidence":
+                return await db.EvidenceRecords.AsNoTracking().Where(x => x.Id == artifactId)
+                    .Select(x => x.OriginalFileName).SingleOrDefaultAsync(ct);
+            case "release":
+                var version = await db.Releases.AsNoTracking().Where(x => x.Id == artifactId)
+                    .Select(x => x.Version).SingleOrDefaultAsync(ct);
+                return version is null ? null : SoftwareBuildIdentifier.FromVersion(version);
+            case "problemreport" or "pr":
+            {
+                var item = await db.ProblemReports.AsNoTracking().Where(x => x.Id == artifactId)
+                    .Select(x => new { x.ReportNumber, x.Revision }).SingleOrDefaultAsync(ct);
+                return item is null ? null : $"{item.ReportNumber}.{item.Revision:D2}";
+            }
+            default:
+                return null;
+        }
+    }
+
+    private sealed record ProblemReportLinkView(string ArtifactType, Guid ArtifactId, string? Identifier, string Relationship, string AddedBy, DateTimeOffset AddedAt);
     private sealed record CreateProblemReportRequest(Guid ProjectId, Guid? ReleaseId, string Title, string Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? Origin, string? AffectedConfiguration);
     private sealed record CreateProblemReportFromExecutionRequest(Guid? ReleaseId, string? Title, string? Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? AffectedConfiguration);
     private sealed record InvestigationRequest(long? ExpectedVersion, string Analysis, string? RootCause, string? Effects, string? Containment);
