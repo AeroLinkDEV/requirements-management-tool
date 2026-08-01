@@ -38,9 +38,14 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
                 var part = archive.GetEntry("word/document.xml"); Assert.NotNull(part); using var reader = new StreamReader(part!.Open()); var xml = await reader.ReadToEndAsync();
                 Assert.Contains("Document Control", xml); Assert.Contains("Approval Register", xml); Assert.Contains("Development Assurance Reviewer", xml); Assert.Contains("Manifest SHA-256", xml);
             }
-            var historicalScr = await db.SystemChangeRequests.Where(x => x.ProjectId == summary.ProjectId && x.TargetReleaseId != summary.ActiveReleaseId).Select(x => x.Id).FirstAsync();
-            var scrOutput = await new ChangeRequestOutputGenerator(db).GenerateAsync(historicalScr, "docx", default); Assert.NotNull(scrOutput);
-            using (var archive = new ZipArchive(new MemoryStream(scrOutput!.Content), ZipArchiveMode.Read)) { using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()); var xml = await reader.ReadToEndAsync(); Assert.Contains("APPROVALS RECORDED FOR THIS PUBLICATION", xml); Assert.Contains("Change Request Definition", xml); Assert.Contains("Audit History", xml); }
+            var historical = await db.SystemChangeRequests.Where(x => x.ProjectId == summary.ProjectId)
+                .Select(x => new { x.Id, x.AuthorId }).FirstAsync();
+            const string historicalDisplayName = "Named Historical Author";
+            db.UserAccounts.Add(new AeroLink.Domain.Identity.UserAccount(historical.AuthorId, historicalDisplayName,
+                "historical.author@example.invalid", "not-used", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+            var scrOutput = await new ChangeRequestOutputGenerator(db).GenerateAsync(historical.Id, "docx", default); Assert.NotNull(scrOutput);
+            using (var archive = new ZipArchive(new MemoryStream(scrOutput!.Content), ZipArchiveMode.Read)) { using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()); var xml = await reader.ReadToEndAsync(); Assert.Contains("APPROVALS RECORDED FOR THIS PUBLICATION", xml); Assert.Contains("Change Request Definition", xml); Assert.Contains("Audit History", xml); Assert.Contains(historicalDisplayName, xml); Assert.DoesNotContain($">{historical.AuthorId}<", xml); }
             var procedureDocumentId = await db.ControlledDocuments.Where(x => x.BaselineId == summary.ReleasedBaselineId && x.Type == AeroLink.Domain.Traceability.ControlledDocumentType.SystemTestProcedures).Select(x => x.Id).SingleAsync();
             var procedureOutput = await generator.GenerateAsync(procedureDocumentId, "docx", default); Assert.NotNull(procedureOutput);
             string procedureXml;

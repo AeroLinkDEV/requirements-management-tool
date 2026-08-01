@@ -98,6 +98,7 @@ export default function SoftwareBuildsLanding({
             {[...softwareBuilds].sort((a, b) => a.sortOrder - b.sortOrder).map((build, index) => {
               const release = releaseByVersion.get(build.version);
               const enabled = build.isAccessible && Boolean(release);
+              const availabilityId = `${build.id}-availability`;
               return (
                 <li key={build.id}>
                   <article
@@ -122,9 +123,11 @@ export default function SoftwareBuildsLanding({
                       disabled={!enabled}
                       onClick={() => release && onOpenBuild(release)}
                       aria-label={`Open build ${build.version} (${officialBuildName(build.version)})`}
+                      aria-describedby={!enabled ? availabilityId : undefined}
                     >
                       <span aria-hidden="true">↗</span> Open build
                     </button>
+                    {!enabled && <small id={availabilityId}>This earlier build is shown for lineage only; its controlled workspace is not available.</small>}
                     {build.isReadOnly && enabled && <small>Informally Build {build.version} · read-only historical workspace</small>}
                     {build.isCurrent && <small>Informally Build {build.version} · active development workspace</small>}
                   </article>

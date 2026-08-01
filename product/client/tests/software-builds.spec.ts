@@ -1,5 +1,27 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, login, openNavigationGroup } from './auth'
+import { apiBase, apiLogin, login, openNavigationGroup, showcaseSeed } from './auth'
+
+test('Command Center renders the build-scoped software verification population', async ({ page, request }) => {
+  await apiLogin(request)
+  const showcase = await showcaseSeed(request)
+  const dashboardResponse = await request.get(
+    `${apiBase}/api/dashboard?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`,
+  )
+  expect(dashboardResponse.ok(), await dashboardResponse.text()).toBeTruthy()
+  const dashboard = await dashboardResponse.json()
+  const impactResponse = await request.get(`${apiBase}/api/releases/${showcase.activeReleaseId}/verification-impact`)
+  expect(impactResponse.ok(), await impactResponse.text()).toBeTruthy()
+  const currentImpacts = (await impactResponse.json()).filter((item: { state: string }) => item.state !== 'Superseded')
+  expect(currentImpacts.some((item: { subjectDisplayNumber: string }) => item.subjectDisplayNumber.startsWith('HLR-'))).toBe(true)
+
+  await login(page)
+  const rows = page.locator('.verificationTriageRows article')
+  for (const [index, summary] of [dashboard.verification.system, dashboard.verification.hlr, dashboard.verification.llr].entries()) {
+    await expect(rows.nth(index)).toContainText(`${summary.triagedChangeRequests} of ${summary.totalChangeRequests} change requests triaged`)
+    await expect(rows.nth(index).locator('strong')).toHaveText(String(summary.openDecisions))
+    await expect(rows.nth(index)).toContainText(`${summary.resolvedDecisions} resolved`)
+  }
+})
 
 test('FMS selection opens the ordered, accessible Software Builds lineage', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -20,6 +42,8 @@ test('FMS selection opens the ordered, accessible Software Builds lineage', asyn
 
   await expect(page.getByRole('button', { name: 'Open build 0.5' })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Open build 1.0' })).toBeDisabled()
+  await expect(cards.filter({ hasText: '0.5' })).toContainText('shown for lineage only')
+  await expect(cards.filter({ hasText: '1.0' })).toContainText('controlled workspace is not available')
   await expect(page.getByRole('button', { name: 'Open build 1.5' })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Open build 1.6' })).toBeEnabled()
 
