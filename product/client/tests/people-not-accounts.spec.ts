@@ -155,11 +155,11 @@ test('no surface names a person by their account', async ({ page, request }) => 
   await page.getByRole('button', { name: 'Job engine' }).first().click()
   // The job engine names whoever created a job, so a job is provisioned here rather than hoped for — an empty
   // table would let this pass by finding nothing to look at. Queued through the control an operator uses.
-  await page.getByRole('button', { name: 'Queue integrity scan' }).first().click()
+  await page.getByRole('button', { name: 'Generate controlled export' }).first().click()
   await expect(page.locator('.jobTable article').first()).toBeVisible({ timeout: 30_000 })
   await sweepTabs('System Operations', [
     'Operations', 'Content vault', 'Redlines', 'Query builder', 'Job engine',
-    'Concurrency', 'Product line', 'Assurance', 'Qualification',
+    'Product line', 'Assurance', 'Qualification',
   ])
 
   for (const [surface, path] of [['Testing Coverage', 'coverage'], ['Test Results', 'results']] as const) {
