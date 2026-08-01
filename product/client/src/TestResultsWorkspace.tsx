@@ -423,10 +423,10 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
               <input value={`${user.displayName} (${user.userName})`} readOnly aria-readonly="true" />
             </label>
             <label>Execution time
-              <input type="datetime-local" name="executedAt" defaultValue={localWallTimeNow()} required />
+              <input type="datetime-local" name="executedAt" aria-describedby="execution-time-help" defaultValue={localWallTimeNow()} required />
               {/* The field is a wall clock and the record is an instant. Saying which zone the wall clock is
                   in is the difference between a reader trusting the time and having to work it out. */}
-              <small>Local time, {Intl.DateTimeFormat().resolvedOptions().timeZone}. Stored as an exact instant.</small>
+              <small id="execution-time-help">Local time, {Intl.DateTimeFormat().resolvedOptions().timeZone}. Stored as an exact instant.</small>
             </label>
             <label>Configuration under test<input name="configuration" placeholder="Build, rig, data set" required /></label>
             <label>Determination<textarea name="determination" placeholder="What the run showed, and why it means what it means." required /></label>
