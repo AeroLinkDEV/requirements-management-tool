@@ -28,6 +28,8 @@ All three are safe to run again while AeroLink is already running. Note that Pos
 
 Run [`BACKUP_AEROLINK.bat`](BACKUP_AEROLINK.bat) manually or through Windows Task Scheduler for a complete local backup. It captures PostgreSQL, controlled evidence, and runtime configuration into an integrity-manifested archive under `product/.local/backups/`, with 30-day retention by default. Production IT must copy these archives to protected storage and periodically prove restore.
 
+Run [`SCHEDULE_AEROLINK_BACKUP.bat`](SCHEDULE_AEROLINK_BACKUP.bat) once to register that same verified backup as a current-user Windows task at 02:00 each day. It starts when next available after a missed trigger, refuses overlapping runs, works while the signed-in workstation is locked, and records results in `product/.local/logs/scheduled-backup.log`. The time and retention are configurable without changing the backup engine; see [Operations and recovery](product/docs/OPERATIONS.md#automatic-daily-backup).
+
 Operational shortcuts are also provided for [stopping AeroLink](STOP_AEROLINK.bat), [diagnostics](AEROLINK_DIAGNOSTICS.bat), [backup verification](VERIFY_AEROLINK_BACKUP.bat), and isolated [restore validation](RESTORE_AEROLINK.bat). The safety model and production recovery procedure are documented in [Operations and recovery](product/docs/OPERATIONS.md).
 
 ## First Product Slice

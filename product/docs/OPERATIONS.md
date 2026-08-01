@@ -141,7 +141,38 @@ Run `BACKUP_AEROLINK.bat`. The output under `product/.local/backups` contains a 
 
 Run `VERIFY_AEROLINK_BACKUP.bat <absolute-or-repository-backup-zip>`. Verification accepts only archives in `product/.local/backups`, checks the sidecar, rejects unsafe ZIP and manifest paths, and verifies every declared file's size and hash.
 
-For Windows Task Scheduler, create a daily task under a dedicated service identity: program `powershell.exe`; arguments `-NoProfile -ExecutionPolicy Bypass -File "<repository>\product\scripts\Backup-AeroLink.ps1" -RetentionDays 30`; start in `<repository>`. Configure it to run whether the user is logged on or not, retain task history, alert on nonzero exit, and copy archives to separately protected storage. A 24-hour backup target does not replace an organization-approved RPO/RTO.
+### Automatic daily backup
+
+For the current single-workstation installation, run `SCHEDULE_AEROLINK_BACKUP.bat` once. It registers the
+current Windows user to run the existing complete backup and verification flow at 02:00 local time each day.
+The task also runs while the workstation is locked. If the computer is off or the user is signed out at the
+scheduled time, **Start when available** runs it after that user next signs in. Overlapping runs are ignored.
+
+The default schedule retains archives for 30 days. Configure a different time or retention without editing the
+task by hand:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Configure-AeroLinkBackupSchedule.ps1 `
+  -Action Install -DailyAt 03:30 -RetentionDays 45
+```
+
+Inspect or remove the schedule with the same command:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Configure-AeroLinkBackupSchedule.ps1 -Action Status
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Configure-AeroLinkBackupSchedule.ps1 -Action Remove
+```
+
+`-Action Preview` validates and displays the exact executable, arguments, user, working directory, time and
+retention without changing Task Scheduler. Each scheduled run appends to
+`product/.local/logs/scheduled-backup.log`, and the task's last result remains visible through `-Action Status`.
+The scheduler deliberately invokes `Backup-AeroLink.ps1` and then `Verify-AeroLinkBackup.ps1`; it does not own a
+second backup implementation or create another database. A future sub-daily trigger can reuse the same runner.
+
+This current-user convenience task is suitable for the local workstation. An operational deployment should run
+the same script under a dedicated service identity whether anyone is signed in, retain task history, alert on
+nonzero exit, and copy archives to separately protected storage. A 24-hour backup target does not replace an
+organization-approved RPO/RTO.
 
 ## Isolated restore drill
 

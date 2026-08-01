@@ -122,9 +122,11 @@ HTTP 200 and `/health/ready` returned HTTP 200 with PostgreSQL connected.
   product decision; do not restore old navigation because historical documents mention it.
 - OIDC/SAML, SCIM, and organization directory provisioning are not current MVP work. Resume only when a real
   customer/provider contract defines protocols, claims, group mapping, logout, recovery, and break-glass needs.
-- TLS topology, protected off-device storage, external alert delivery, approved RPO/RTO/SLOs, and operational
-  scheduling belong to a selected deployment. The repository provides product-side health, evidence, backup,
-  verification, restore, and runbook foundations without pretending to provision customer infrastructure.
+- TLS topology, protected off-device storage, external alert delivery, approved RPO/RTO/SLOs, and service-identity
+  scheduling belong to a selected deployment. The local workstation now has a configurable current-user daily
+  backup task which invokes and verifies the existing complete backup flow; the repository otherwise provides
+  product-side health, evidence, backup, verification, restore, and runbook foundations without pretending to
+  provision customer infrastructure.
 - The published scale evidence remains 50,000 requirements and 150 simultaneous database clients on one
   workstation. It is not a claim of 150 rendered browser sessions or a production service-level guarantee.
 - Local demonstration identities and password are non-production.

@@ -186,6 +186,21 @@ jobs:
           npm run typecheck
           npm run build
 
+      - name: Validate the non-mutating backup schedule contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $preview = & ./product/scripts/Configure-AeroLinkBackupSchedule.ps1 -Action Preview -DailyAt 02:00 -RetentionDays 30
+          if ($preview.Schedule -ne 'Daily' -or $preview.DailyAt -ne '02:00' -or $preview.RetentionDays -ne 30) {
+            throw 'The default daily backup schedule contract changed unexpectedly.'
+          }
+          if (-not (Test-Path -LiteralPath $preview.Runner -PathType Leaf)) {
+            throw 'The scheduled backup runner does not resolve to a file.'
+          }
+          if ($preview.Arguments -notlike '*Invoke-AeroLinkScheduledBackup.ps1*' -or $preview.Arguments -notlike '*-RetentionDays 30*') {
+            throw 'The scheduled task no longer invokes the verified backup runner with retention.'
+          }
+
       # This job is a required gate, so it must never pass without having proved something. Every step above is
       # conditional, and a combination of conditions that skipped all of them still reported success — a green
       # tick that had run no test, no build and no type-check. The classifier now avoids selecting nothing, and
