@@ -19,7 +19,7 @@ public static class AdministrationEndpoints
         {
             if (!http.UserAccount().IsAdministrator) return Results.Forbid();
             var users = await db.UserAccounts.AsNoTracking().OrderBy(x => x.DisplayName).ToListAsync(ct); var memberships = await db.ProgramMemberships.AsNoTracking().ToListAsync(ct);
-            return Results.Ok(users.Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, state = x.State.ToString(), x.LastLoginAt, x.CreatedAt, memberships = memberships.Where(m => m.UserId == x.Id).Select(m => new { m.ProgramId, role = m.Role.ToString() }) }));
+            return Results.Ok(users.Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, state = x.State.ToString(), x.LastLoginAt, x.CreatedAt, isGlobalAdministrator = x.UserName == IdentityService.SystemAdministratorUserName, memberships = memberships.Where(m => m.UserId == x.Id).Select(m => new { m.ProgramId, role = m.Role.ToString() }) }));
         });
 
         app.MapPost("/api/admin/users", async (CreateUserRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
@@ -32,7 +32,8 @@ public static class AdministrationEndpoints
         app.MapPost("/api/admin/users/{id:guid}/memberships", async (Guid id, GrantRoleRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid(); if (!await db.UserAccounts.AnyAsync(x => x.Id == id, ct) || !await db.Programs.AnyAsync(x => x.Id == request.ProgramId, ct)) return Results.NotFound();
-            if (!await db.ProgramMemberships.AnyAsync(x => x.UserId == id && x.ProgramId == request.ProgramId && x.Role == request.Role, ct)) db.ProgramMemberships.Add(new(id, request.ProgramId, request.Role, actor.UserName, DateTimeOffset.UtcNow));
+            if (await db.ProgramMemberships.AnyAsync(x => x.UserId == id && x.ProgramId == request.ProgramId && x.Role == request.Role, ct)) return Results.Conflict(new { error = "That Program role is already assigned." });
+            db.ProgramMemberships.Add(new(id, request.ProgramId, request.Role, actor.UserName, DateTimeOffset.UtcNow));
             db.SecurityAuditEvents.Add(new("RoleGranted", actor.UserName, id.ToString(), "Success", $"Granted {request.Role} for program {request.ProgramId}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct); return Results.NoContent();
         });
 
@@ -77,6 +78,38 @@ public static class AdministrationEndpoints
             if(!await identity.HasRoleAsync(request.DelegatorUserId,request.ProgramId,request.Role,DateTimeOffset.UtcNow,ct))return Results.Forbid();
             try { var delegation = new RoleDelegation(request.ProgramId, request.DelegatorUserId, request.DelegateUserId, request.Role, request.StartsAt, request.EndsAt, request.Reason, actor.UserName, DateTimeOffset.UtcNow); db.RoleDelegations.Add(delegation); db.SecurityAuditEvents.Add(new("DelegationCreated", actor.UserName, request.DelegateUserId.ToString(), "Success", $"Delegated {request.Role} through {request.EndsAt:u}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct); return Results.Created($"/api/delegations/{delegation.Id}", new { delegation.Id }); }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapGet("/api/delegations", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var actor = http.UserAccount();
+            var now = DateTimeOffset.UtcNow;
+            var delegations = await db.RoleDelegations.AsNoTracking()
+                .Where(x => actor.IsAdministrator || x.DelegatorUserId == actor.Id || x.DelegateUserId == actor.Id)
+                .ToListAsync(ct);
+            var programIds = delegations.Select(x => x.ProgramId).Distinct().ToList();
+            var userIds = delegations.SelectMany(x => new[] { x.DelegatorUserId, x.DelegateUserId }).Distinct().ToList();
+            var programs = await db.Programs.AsNoTracking().Where(x => programIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+            var users = await db.UserAccounts.AsNoTracking().Where(x => userIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.DisplayName, ct);
+            return Results.Ok(delegations.OrderByDescending(x => x.CreatedAt).Select(x => new
+            {
+                x.Id,
+                x.ProgramId,
+                program = programs.GetValueOrDefault(x.ProgramId, "Unknown Program"),
+                x.DelegatorUserId,
+                delegator = users.GetValueOrDefault(x.DelegatorUserId, "Unknown user"),
+                x.DelegateUserId,
+                delegateName = users.GetValueOrDefault(x.DelegateUserId, "Unknown user"),
+                role = x.Role.ToString(),
+                x.StartsAt,
+                x.EndsAt,
+                x.Reason,
+                actor = x.CreatedBy,
+                x.CreatedAt,
+                x.RevokedAt,
+                status = x.RevokedAt is not null ? "Revoked" : x.EndsAt <= now ? "Expired" : x.StartsAt > now ? "Future" : "Active",
+                canRevoke = x.RevokedAt is null && x.EndsAt > now && (actor.IsAdministrator || actor.Id == x.DelegatorUserId)
+            }));
         });
 
         app.MapDelete("/api/delegations/{id:guid}", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
