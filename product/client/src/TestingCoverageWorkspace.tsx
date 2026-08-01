@@ -641,12 +641,12 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                 here rather than linked afterwards, because a procedure with no exact link never counts as
                 coverage and would sit in the library looking like work that had been done. */}
             <label>Requirements it verifies
-              <select name="requirement" multiple size={6} required>
+              <select name="requirement" aria-describedby="procedure-requirements-help" multiple size={6} required>
                 {requirements.map(item => (
                   <option key={item.revisionId} value={item.revisionId}>{item.displayNumber} · {item.statement.slice(0, 70)}</option>
                 ))}
               </select>
-              <small>Choose one or more. Hold Ctrl to pick several.</small>
+              <small id="procedure-requirements-help">Choose one or more. Hold Ctrl to pick several.</small>
             </label>
             <label>Independent approver</label>
             <PersonPicker api={api} projectId={projectId} value={procedureApprover.userId} name={procedureApprover.name}
@@ -756,13 +756,13 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             </label>
             {outcome === 'ProcedureCoverageConfirmed' && (
               <label>Covering procedure
-                <select name="procedureId" required>
+                <select name="procedureId" aria-label="Covering procedure" aria-describedby="covering-procedure-help" required>
                   <option value="">Choose an approved procedure…</option>
                   {procedures.filter(x => x.state === 'Approved').map(x => (
                     <option key={x.id} value={x.id}>{x.displayNumber} · {x.title.slice(0, 60)}</option>
                   ))}
                 </select>
-                <small>Only approved procedures in this Project. Search above to bring more into this list.</small>
+                <small id="covering-procedure-help">Only approved procedures in this Project. Search above to bring more into this list.</small>
               </label>
             )}
             {outcome === 'ProcedureRetargeted' && (

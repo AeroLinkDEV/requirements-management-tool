@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { apiLogin, layoutSettled, login, openNavigationGroup, selectProgram, surfacePainted } from './auth'
+import { apiLogin, layoutSettled, login, selectProgram, surfacePainted } from './auth'
 
 /**
  * Every control on a controlled-authoring form is programmatically what it looks like.
@@ -47,6 +47,7 @@ type ControlReport = {
  */
 const auditForm = ({ minimum, maximum }: { minimum: number; maximum: number }): ControlReport => {
   const visible = (element: Element) => {
+    if (element.getAttribute('aria-hidden') === 'true' || element.getAttribute('tabindex') === '-1') return false
     const box = element.getBoundingClientRect()
     if (box.width === 0 || box.height === 0) return false
     const style = getComputedStyle(element)
@@ -111,6 +112,11 @@ const auditForm = ({ minimum, maximum }: { minimum: number; maximum: number }): 
     const marked = control.hasAttribute('required') || control.getAttribute('aria-required') === 'true'
     const looksRequired = (control.closest('label')?.textContent ?? '').includes('*')
     if (looksRequired && !marked) requiredWithoutSemantics.push(describe(control))
+
+    const hint = control.closest('label')?.querySelector(':scope > small, :scope > .hint, :scope > p')
+    if (hint && (!hint.id || !(control.getAttribute('aria-describedby') ?? '').split(/\s+/).includes(hint.id))) {
+      verbose.push(`${describe(control)} includes help text in its name instead of an accessible description`)
+    }
   }
 
   // Radios sharing a name are one question, and a question needs a group. Checkbox sets are left alone: a
@@ -214,6 +220,8 @@ test('every controlled authoring form is programmatically what it looks like', a
     for (const label of ['Title', 'Problem', 'Analysis', 'Solution']) {
       await labelActivatesControl(page, label, where, failures)
     }
+    await page.getByRole('button', { name: /^\+ Introduce/ }).click()
+    await inspect(page, `${where} with a dynamic requirement proposal`, failures)
   }
 
   expect(failures, `Form semantics defects:\n  ${failures.join('\n  ')}`).toEqual([])

@@ -432,8 +432,8 @@ export default function ScrEditor({
           <div className="fields three identityFields">
             <label>
               {abbreviation} number
-              <input value={context?.changeRequestNumber || "Calculating next number…"} readOnly />
-              <small>Previewed here; assigned atomically by the server on save.</small>
+              <input aria-describedby="change-request-number-help" value={context?.changeRequestNumber || "Calculating next number…"} readOnly />
+              <small id="change-request-number-help">Previewed here; assigned atomically by the server on save.</small>
             </label>
             <label>
               Target release
@@ -442,10 +442,11 @@ export default function ScrEditor({
             <label>
               Author
               <input
+                aria-describedby="change-request-author-help"
                 value={`${context?.author.displayName || user.displayName} (${context?.author.userName || user.userName})`}
                 readOnly
               />
-              <small>Derived from the authenticated session.</small>
+              <small id="change-request-author-help">Derived from the authenticated session.</small>
             </label>
             <label className="wide">
               Title

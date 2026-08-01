@@ -323,11 +323,13 @@ export default function ControlledRequirementEditor({
         <label>
           Identifier
           <input
+            aria-label="Identifier"
+            aria-describedby={`proposal-${index + 1}-identifier-help`}
             value={item.kind === "Introduce" ? "Provisional — assigned at check-in" : item.baseNumber || "Awaiting controlled selection"}
             readOnly
             aria-readonly="true"
           />
-          <small>{item.kind === "Introduce"
+          <small id={`proposal-${index + 1}-identifier-help`}>{item.kind === "Introduce"
             ? "No controlled number has been issued. The server assigns the authoritative immutable identifier at check-in."
             : "Existing controlled identifier; immutable in this proposal."}</small>
         </label>
@@ -349,6 +351,7 @@ export default function ControlledRequirementEditor({
             Section
             <select
               aria-label={`Section for proposal ${index + 1}`}
+              aria-describedby={`proposal-${index + 1}-section-help`}
               value={item.targetSectionId ?? ""}
               onChange={(event) => onChange("targetSectionId", event.target.value)}
             >
@@ -373,7 +376,7 @@ export default function ControlledRequirementEditor({
                 </option>
               ))}
             </select>
-            <small>
+            <small id={`proposal-${index + 1}-section-help`}>
               {item.kind === "Modify"
                 ? "Changing this moves the requirement when the baseline is materialized."
                 : "Applied when the baseline is materialized and the requirement first exists."}
@@ -400,6 +403,7 @@ export default function ControlledRequirementEditor({
                   the select answer to a search for the Identifier field as well as this one. */}
               <select
                 aria-label="Change type"
+                aria-describedby={`proposal-${index + 1}-change-type-help`}
                 value={item.kind}
                 onChange={(event) => onKindChange(event.target.value as RequirementKind)}
               >
@@ -407,7 +411,7 @@ export default function ControlledRequirementEditor({
                   <option value={option.value} key={option.value}>{option.label}</option>
                 ))}
               </select>
-              <small>Changing this resets the controlled identity selection above.</small>
+              <small id={`proposal-${index + 1}-change-type-help`}>Changing this resets the controlled identity selection above.</small>
             </>
           ) : (
             <input value={item.kind} readOnly aria-readonly="true" />

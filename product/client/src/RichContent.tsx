@@ -191,6 +191,7 @@ export function RichContentEditor({ api, projectId, value, label, placeholder, d
 
             {block.type === "paragraph" && (
               <textarea
+                aria-label={`${label} paragraph ${index + 1}`}
                 value={block.text}
                 disabled={disabled}
                 placeholder="State the requirement, the analysis, or the context."
