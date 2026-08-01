@@ -62,7 +62,7 @@ are recorded in [SCOPE_AND_BOUNDARIES.md](SCOPE_AND_BOUNDARIES.md).
 | `design/mockups`, `docs/mockups` | North-star visual concepts. Reference material, not specifications. |
 | Root `*.md` | Authoritative product definition. See the index in [README.md](README.md). |
 | Root `*.docx` | The original supplied briefs, retained unmodified for provenance. |
-| Root `*.bat` | Windows operator entry points for start, stop, backup, restore, diagnostics. |
+| Root `*.bat` | Windows operator entry points for start, stop, backup, daily backup scheduling, restore, diagnostics. |
 
 A `showcase/` directory previously held a Phase 0.5 static-data prototype. It was retired on
 2026-07-24 — see DEC-046. The product application is now the single demonstrable artifact.
@@ -90,7 +90,8 @@ Around that core: enterprise requirements workspace, configurable artifact schem
 structured queries, governed bulk operations, visual redlines, CSV/XLSX onboarding that lands in a
 Draft SCR rather than bypassing approval, ReqIF 1.2 round trip, a versioned REST API with scoped
 service identities, webhooks with HMAC signing and dead-letter replay, OSLC RM, product-line libraries
-and variants, backup with integrity manifests, and isolated restore drills.
+and variants, backup with integrity manifests, a current-user automatic daily backup schedule, and isolated
+restore drills.
 
 Delivered since, and not to be omitted when describing the product: **email notification of required
 approvals** through an outbox over the existing in-app notification record; **rich authored content** —

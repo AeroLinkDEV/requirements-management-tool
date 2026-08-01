@@ -77,7 +77,9 @@ As of 2026-07-18, Wave 1 has integrated foundations for EA-001 through EA-004, C
 The connected-foundation and ReqIF round-trip increments establish project-scoped machine identities,
 `/api/v1` requirement reads, idempotent event ingestion, per-credential rate limiting, lifecycle-wide
 transactional event capture, durable HMAC-signed webhook delivery, retry/backoff, dead-letter replay, and
-operator-facing Integration and ReqIF Exchange Centers. EXCH-003 is implemented for the documented AeroLink
+operator-facing Integration and ReqIF Exchange Centers. OPS-002 now includes a configurable current-user daily
+backup task that invokes and verifies the existing complete backup archive without creating another database.
+EXCH-003 is implemented for the documented AeroLink
 governed profile, including stable identities, content, hierarchy, relations, schema attributes/tags,
 immutable source retention, attachment binaries, preview/reconciliation, and Draft-only controlled commit.
 Vendor-specific mappings and customer-specific connector contracts remain deployment/integration work.
