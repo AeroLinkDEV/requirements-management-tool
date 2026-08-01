@@ -2,11 +2,11 @@ import { expect, test } from "@playwright/test";
 import { apiBase, apiLogin, login, selectProgram } from "./auth";
 
 /**
- * The verification workspace rendered every procedure it was given. The software side holds 440 of them, so
+ * The verification workspace rendered every procedure it was given. The software HLR side holds 160 of them, so
  * finding one meant scrolling past the rest, and the client received far more than it could show.
  *
- * Software is driven deliberately rather than System: the system side has 75 procedures, which is unpleasant
- * but survivable, and a check that only ever saw 75 would have reported the workspace healthy.
+ * Software HLR is driven deliberately rather than the smaller System inventory, and it must remain isolated
+ * from the LLR procedures that live beside it.
  */
 test("the procedure workspace pages, filters and deep-links instead of rendering everything", async ({ page, request }) => {
   test.setTimeout(240_000);
@@ -19,8 +19,8 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   const fms = workspaces.find((x: { program: { name: string } }) => x.program.name === "Flight Management System Live Program");
   const projectId = fms.projects[0].project.id;
   const all = await (await page.request.get(
-    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=Software&pageSize=1`)).json();
-  expect(all.totalCount, "this only means something at showcase volume").toBeGreaterThanOrEqual(400);
+    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=HighLevelSoftware&pageSize=1`)).json();
+  expect(all.totalCount, "this only means something at showcase volume").toBeGreaterThanOrEqual(150);
 
   // Reached through the command palette, which is how the software workspace is addressable.
   await page.getByRole("button", { name: /Search & navigate/ }).click();
@@ -34,19 +34,19 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   await expect(rows.first()).toBeVisible({ timeout: 30_000 });
   const rendered = await rows.count();
   expect(rendered, `${rendered} of ${all.totalCount} procedures rendered at once`).toBeLessThanOrEqual(25);
-  await expect(page.getByText(new RegExp(` controlled software procedures`))).toBeVisible();
+  await expect(page.getByText(`${all.totalCount} controlled software hlr procedures.`, { exact: false })).toBeVisible();
 
   // Filtering narrows the set and the count, and is reflected in the address.
   await page.getByLabel("Procedure state").selectOption("Approved");
   await expect(page).toHaveURL(/procedureState=Approved/, { timeout: 30_000 });
   const approvedTotal = (await (await page.request.get(
-    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=Software&state=Approved&pageSize=1`)).json()).totalCount;
-  await expect(page.getByText(new RegExp(` controlled software procedures`))).toBeVisible({ timeout: 30_000 });
+    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=HighLevelSoftware&state=Approved&pageSize=1`)).json()).totalCount;
+  await expect(page.getByText(`${approvedTotal} controlled software hlr procedures.`, { exact: false })).toBeVisible({ timeout: 30_000 });
 
   // A filtered worklist survives being reloaded, which is what makes it worth sharing.
   await page.reload({ waitUntil: "load" });
   await expect(page.getByLabel("Procedure state")).toHaveValue("Approved", { timeout: 30_000 });
-  await expect(page.getByText(new RegExp(` controlled software procedures`))).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(`${approvedTotal} controlled software hlr procedures.`, { exact: false })).toBeVisible({ timeout: 30_000 });
 
   // Paging is reachable, moves the list, and is in the address.
   const firstNumber = await rows.first().locator("b").first().textContent();
