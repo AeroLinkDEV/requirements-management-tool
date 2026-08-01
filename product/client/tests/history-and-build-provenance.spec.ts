@@ -29,6 +29,14 @@ test('searches scoped change history while dormant build management stays unreac
   await expect(page.getByRole('heading', { name: 'Software Change Requests' })).toBeVisible()
   await page.getByLabel('Search change requests').fill('round robin')
   await expect(page.getByText(scr.displayNumber)).toBeVisible()
+  await page.getByLabel('Search change requests').fill('ZZZ-NO-MATCH')
+  await expect(page.locator('.historyEmpty')).toContainText('No software change requests match “ZZZ-NO-MATCH” for Build 3.3.')
+  await page.getByLabel('Lifecycle state filter').selectOption('Draft')
+  await expect(page.locator('.historyEmpty')).toContainText('No software change requests match “ZZZ-NO-MATCH” within the draft filter for Build 3.3.')
+  await page.getByRole('button', { name: 'Clear search' }).click()
+  await expect(page.locator('.historyEmpty')).toContainText('No draft software change requests match Build 3.3.')
+  await page.getByRole('button', { name: 'Clear lifecycle filter', exact: true }).click()
+  await expect(page.getByText(scr.displayNumber)).toBeVisible()
   await expect(page.locator('.historyTabs')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Record Software Build' })).toHaveCount(0)
 
@@ -48,4 +56,21 @@ test('searches scoped change history while dormant build management stays unreac
     await page.goto(`${root}/${retired}`)
     await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
   }
+})
+
+test('an unfiltered empty build still reports that no change requests are recorded', async ({ page, request }) => {
+  await apiLogin(request)
+  const suffix=Date.now().toString().slice(-7),programName=`Empty History ${suffix}`
+  const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, { data: {
+    programName, programCode: `EH${suffix}`, projectName: 'Empty FMS Software', softwareProduct: 'Flight Management Software', initialRelease: '4.1', initialReleaseIsReleased: false,
+  } })
+  expect(workspaceResponse.ok()).toBeTruthy()
+
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, programName)
+  await openNavigationGroup(page,'SOFTWARE ENGINEERING')
+  await page.getByRole('link', { name: 'Software Change Requests' }).click()
+
+  await expect(page.locator('.historyEmpty')).toHaveText('No software change requests are recorded for Build 4.1.')
+  await expect(page.getByRole('button', { name: 'Clear search' })).toHaveCount(0)
 })
