@@ -6,16 +6,16 @@ so the work can be picked up without re-deriving the reasoning.
 
 Items are numbered as they were in the analysis, so the numbering is not sequential here.
 
-> **Current-surface checkpoint — 2026-07-29.** PRs #166–#168 added explicit Project and Software Build
-> selection and simplified the active workspace around System, Software and Verification. Problem Reports,
-> Product Versions and Candidate Baselines are intentionally dormant in the UI; their retained implementation
-> is not a roadmap commitment to restore them. The broader Verification redesign remains a future product-owner
-> conversation. See [CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md) and
-> DEC-070 through DEC-072 before treating any older item below as current UI direction.
+> **Current-surface checkpoint — 2026-08-01.** Verification is now Testing Coverage and Test Results for each
+> System/HLR/LLR discipline; controlled Test Change Requests, downstream assessments, identity lifecycle, and
+> prospective upward allocation are delivered. Non-authoritative Concurrency and count-only IntegrityScan
+> simulations are retired. Problem Reports, Product Versions, and Candidate Baselines remain dormant product
+> surfaces. See [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) before treating
+> any older item below as current UI direction or active backlog.
 
 ## Accepted, in build order
 
-**Status as of 2026-07-29: items 1, 2, 3, 5, 8 and 9 are built.** The designs below are retained as the
+**Status as of 2026-08-01: items 1, 2, 3, 5, 8 and 9 are built.** The designs below are retained as the
 record of what was decided and why, not as a queue. Item 10 is measured with its claim deliberately
 unchanged, and the path beyond it is costed and deliberately not started.
 

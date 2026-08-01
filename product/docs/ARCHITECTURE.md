@@ -18,7 +18,13 @@ These are implementation decisions, not changes to the authoritative product beh
 
 Lifecycle rules live in domain objects rather than controllers or UI code. The API requests an operation; the aggregate validates state, actor authority, revision behavior, and ordered review rules; persistence records the resulting state and audit events atomically.
 
-The first aggregate is `SystemChangeRequest`. Stable artifact identity (`SCR-00001`) is distinct from revision display (`SCR-00001.04`). Requirements referenced by an SCR retain their own established identity model.
+`SystemChangeRequest` is the shared System/Software change aggregate. Stable artifact identity (`SCR-00001` or
+`SWCR-00001`) is distinct from revision display (`SCR-00001.04`). Requirements referenced by a change request
+retain stable identities and immutable revision identities.
+
+Downstream engineering work and upward allocation are separate controls. Approval raises build-scoped consuming-
+discipline assessments; prospective HLR/LLR changes carry exact proposed parent revision IDs in their review
+snapshot. Baseline materialization alone creates the resulting immutable `AllocatedFrom` trace links.
 
 Software-build identity is canonical: a release version such as `1.6` is represented by `SW-01.60`. The
 historical `CandidateBaseline` and executable `SoftwareBuild` persistence records are implementation facets of
@@ -52,4 +58,8 @@ Integration events and webhook deliveries are durable, separate records. Event c
 
 The Integration Command Center is the human control plane over these records. It shows scoped identities, endpoints, event activity, delivery health, replay actions, existing interchange history, and the ReqIF evolution path without creating an alternate approval path for requirements.
 
-The next control-depth increment should complete ReqIF 1.2 mapping and lossless round-trip, emit integration events from the authoritative lifecycle transactions, add filtering and conditional writes to the public API, and then replace the remaining route-string authorization boundary with explicit resource policies.
+The connected foundation now includes the governed ReqIF profile, lifecycle transaction events, filtering and
+conditional public reads/writes where documented, and monitored human control planes. Further connector depth
+must start from a selected customer/vendor contract. Broad authorization or module rewrites are not standing
+architecture work without a reproduced security/product defect; the current Program/resource enforcement and
+server-authoritative actor boundary remain mandatory.

@@ -13,23 +13,29 @@ AeroLink decisions must be attributable to authenticated people, not browser-sup
 - Passwords are stored only as salted PBKDF2-SHA-256 derivations with 310,000 iterations. Plaintext passwords are never persisted.
 - Eight consecutive failures lock an account. Successful authentication resets the failure counter.
 - The browser receives a random opaque session token in an HTTP-only cookie. Only its SHA-256 digest is stored. Sessions expire after 12 hours and can be explicitly revoked.
+- Account Security identifies the current session, lists retained session history, and permits a user to revoke
+  other active sessions without revoking the session performing the action.
 - Material API routes require an authenticated session. Actor names supplied by clients are ignored; the server derives the actor from the session.
 
 ## Program authority
 
 Authority is scoped to a Program through additive role assignments:
 
-| Role | Intended authority |
+| Role family | Current roles and intended authority |
 |---|---|
-| Engineer | Author and revise controlled drafts. |
-| Reviewer | Review assigned lifecycle artifacts and request changes. |
-| Approver | Apply an electronic approval when assigned in the active ordered stage. |
-| Configuration Manager | Assemble, freeze, materialize, and release controlled configurations. |
-| Test Engineer | Author procedures, record determinations, and associate evidence. |
-| Program Manager | Govern release readiness and program decisions. |
-| Administrator | Manage local identities and Program authority. Administration does not silently replace an assigned approval identity. |
+| General control | Engineer, Reviewer, Approver, Configuration Manager |
+| Verification | Test Engineer, Test Lead |
+| Program leadership | Program Manager, Administrator |
+| Engineering jobs | System Engineer, Software Engineer, System Engineering Lead, Software Engineering Lead, Project Engineering Lead, Engineering Manager |
+| Independent stakeholders | Software Quality Analyst, Airworthiness |
 
-Role delegations are time-bounded, Program-scoped, attributable, and revocable. Delegation grants authority; it does not rewrite the original assignee or historic identity.
+A precise engineering job satisfies the general Engineer authority it implies; naming the real job must not
+remove ordinary authoring capability. Independent stakeholder roles do not implicitly gain engineering write
+authority. Global system administration is separate from a Program's Administrator role.
+
+Role delegations are time-bounded, Program-scoped, attributable, and revocable. Current, future, expired, and
+revoked records retain Program, delegator, delegate, role, interval, reason, granting/revoking actor, and state.
+Only an active interval grants authority. Delegation does not rewrite the original assignee or historic identity.
 
 ## Electronic approval
 
@@ -43,7 +49,12 @@ The foundation prevents identity impersonation and requires explicit assignment.
 
 ## My Work and management visibility
 
-My Work is a server-derived queue, not a manually maintained task list. It identifies active SCR approval stages, active release approvals, and owned drafts for the authenticated person. Administrators can inspect accounts, state, last access, and Program roles; create local accounts; grant authority; and disable accounts without deleting historic attribution. Security audit events retain successful and denied logins, logout, account administration, role grants, and delegation creation.
+My Work is a server-derived queue, not a manually maintained task list. It identifies active change-request,
+downstream-assessment, verification, procedure, Test Change Request, release, and owned-draft work for the
+authenticated person. Administrators can inspect accounts, state, last access, and current Program roles;
+create local accounts; grant or revoke one role; and disable accounts without deleting historic attribution.
+Duplicate grants fail as conflicts. Security audit events retain successful and denied logins, logout, account
+administration, role grant/revocation, session revocation, and delegation lifecycle actions.
 
 ## Untrusted input and response hardening
 

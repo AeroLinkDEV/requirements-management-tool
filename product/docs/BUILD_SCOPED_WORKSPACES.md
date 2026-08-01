@@ -36,6 +36,8 @@ The build boundary follows relationships that already exist:
 | Immutable software builds | `SoftwareBuild.ReleaseId` and `BaselineId` |
 | Release campaigns and approvals | `ReleaseCampaign.ReleaseId` and `BaselineId` |
 | Test change reviews and procedure-impact decisions | `TestChangeReview.ReleaseId` and `VerificationImpact.ReleaseId` |
+| Downstream change assessments | target build plus exact upstream/downstream requirement revisions |
+| Prospective upward allocations | target build plus exact child and proposed parent revisions |
 | Test executions | `TestExecution.ReleaseId`; an optional immutable `SoftwareBuildId` adds exact configuration provenance |
 | Problem reports | explicit `ProblemReportLink` to the owning `SoftwareRelease`; failure-origin reports derive it from their execution build |
 | Requirement history | revision plus source SCR and effective baseline; historical rows retain their origin |
@@ -79,6 +81,12 @@ Approval of a change request automatically creates one controlled Test Change Re
 discipline: System, Software HLR, or Software LLR. A mixed-level software request therefore creates two
 independent reviews. Verification engineers decide whether to create, link, modify, retire, or omit a test
 procedure; the review cannot be submitted until every item is decided, and an approver closes it.
+
+Approved requirement changes also create consuming-discipline assessments where an exact upstream change can
+affect downstream requirements. The consuming engineer owns the rationale and independent approval. When a
+software engineer proposes a new upward allocation, the product records the prospective exact child/parent
+relationship for independent approval and materializes the trace only after approval. Neither workflow mutates
+released Build 1.5 evidence or creates an unreviewed trace.
 
 Procedure alignment is always a release gate. Execution evidence is a release gate for the build's **test
 set** — the procedures somebody decided this build has to run (DEC-076). The older per-decision mark,

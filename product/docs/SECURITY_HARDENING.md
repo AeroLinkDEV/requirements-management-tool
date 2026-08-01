@@ -15,6 +15,13 @@ This note records the production-safety decisions introduced after the initial A
 - `/health/live` remains lightweight while `/health/ready` proves database connectivity.
 - Service API credentials are project-scoped, displayed once, SHA-256 hashed at rest, revocable, rate limited, and separated from browser sessions.
 - Webhook signing secrets are encrypted through ASP.NET Core Data Protection. Outbound delivery blocks insecure and private targets by default.
+- Current Program roles are explicit and individually revocable; duplicate grants fail closed.
+- Global system administration is distinct from Program Administrator authority.
+- Account Security identifies the current session and permits revocation of other active sessions.
+- Delegations retain Program, people, role, interval, reason, actor, active/expired/revoked state, and revocation
+  history; only an active interval grants authority.
+- Independent reviewer pickers and server checks exclude the acting engineer where separation is required.
+- The protected `main` branch requires the Product Quality Gate reporter and pull-request workflow.
 
 ## Deployment requirements
 
@@ -29,14 +36,13 @@ A production deployment must provide:
 
 Do not place production credentials or bootstrap secrets in checked-in configuration.
 
-## Follow-up hardening work
+## Remaining deployment hardening
 
-The following items should be delivered as separate, reviewable changes because they affect request semantics or broad authorization behavior:
+The repository deliberately does not invent a customer deployment. A selected deployment must define TLS and
+reverse-proxy policy, secrets/key-ring storage, external identity provider behavior, dependency/readiness scope,
+protected off-device backup storage, alert delivery, retention/RPO/RTO/SLOs, and independent security review.
 
-1. Replace the remaining route-string authorization middleware with explicit resource/program authorization policies or endpoint filters.
-2. Extend readiness beyond database connectivity to controlled file storage and required external dependencies.
-3. Use a versioned SQLite migration path if SQLite remains a supported persistent deployment option; otherwise retain it strictly as disposable test/demo storage.
-4. Add automated accessibility checks and a keyboard-only critical journey.
-5. Require the complete GitHub quality workflow as a protected-branch merge gate.
-
-These items are intentionally not represented as completed by this document.
+SQLite is a disposable isolated-test provider, not a supported persistent production topology. Accessibility,
+keyboard, production-build, Program isolation, PostgreSQL migration/bootstrap, and protected-branch gates are
+automated now. Future hardening starts from a concrete threat, deployment contract, or reproduced defect rather
+than a blanket route/module rewrite.

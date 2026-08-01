@@ -29,7 +29,8 @@ PRs may motivate or be affected by changes across the chain.
 
 **Artifact Revision**: A version-specific representation of an artifact. Revisions preserve what was proposed, reviewed, approved, or used at a particular time.
 
-The stable identity and revision identity must remain separate even if a display number combines them. For example, `SYSR000000001` may identify the requirement while `Revision 3` identifies its third controlled revision. The exact display-number convention remains an open question.
+The stable identity and revision identity remain separate even when the display number combines them. For
+example, `SYSR-000001` is the stable requirement and `SYSR-000001.03` is its exact third controlled revision.
 
 ## Program and Delivery Terms
 
@@ -43,23 +44,39 @@ The stable identity and revision identity must remain separate even if a display
 
 **Configuration / Variant**: A defined applicability context that distinguishes product forms or options. Advanced variant management is later scope, but the initial model must not prevent it.
 
-**Release**: A planned or delivered product/software version used to target changes and collect approved baseline contents. For example, approved SCRs selected against the FMS Software Version 3.2 baseline create the candidate contents for Version 3.3. An SCR may target a release and later be deferred through a controlled decision.
+**Release / Software Build**: One product concept representing a planned or delivered software version. Its
+official identifier derives from the release version (`1.6` becomes `SW-01.60`); “Build 1.6” is informal UI
+wording. A released build is immutable and read-only; an in-work successor collects controlled changes,
+requirements, verification, documents, and readiness evidence.
 
 **Baseline**: An immutable, named set of exact artifact and relationship revisions approved for a defined purpose. Candidate baselines may be assembled and reviewed; released baselines cannot be edited.
 
-**Candidate Baseline**: A proposed set of exact revisions assembled for review. Approval creates an immutable baseline; rejection or rework returns the candidate for controlled revision.
+**Candidate Baseline**: The implementation facet that assembles the proposed exact contents of an in-work
+software build. It is not a separate product-level destination in the current UI.
 
 ## Change Terms
 
 **System Change Request (SCR)**: A versioned, reviewable artifact that explains and proposes one or more system requirement introductions, modifications, or retirements. It includes problem, analysis, solution, target-release, affected-artifact, PR-reference, review, and approval information.
 
-**Software Change Request (SWCR)**: The software-level counterpart to an SCR. SWCR behavior is later scope and will be refined before software-level implementation.
+**Software Change Request (SWCR)**: The software-level counterpart to an SCR. It governs HLR and LLR
+introductions, modifications, and retirements for one target build, including exact upward allocation or a
+justified derived exception.
 
 **Requirement Change Item**: One proposed introduction, modification, or retirement contained in an SCR. It identifies the affected requirement when applicable, the proposed content or disposition, and the rationale needed to review the change.
 
 **Retirement**: The controlled result previously described as requirement deletion. A retired requirement is excluded from later effective baselines but remains permanently available in historical baselines, revisions, SCRs, links, and audits.
 
 **Deferral**: A controlled decision to move an SCR or approved change out of an intended release. Deferral changes planning and selection; it does not erase approval or history.
+
+**Downstream Change Assessment**: Build-scoped work raised when an approved upstream change reaches a consuming
+software discipline. System approval raises HLR assessment work; HLR approval raises LLR assessment work. The
+consuming engineer records a justified no-change decision or links one or more Draft SWCRs, then submits the
+assessment to a named independent approver. Superseded source work remains readable but cannot satisfy current
+readiness.
+
+**Prospective Upward Allocation**: The exact current parent requirement revisions selected for a proposed HLR
+or LLR before review. HLR parents are System revisions; LLR parents are HLR revisions from the same Project and
+target build. Selected IDs enter the review snapshot and materialize as immutable `AllocatedFrom` traces.
 
 ## Requirements and Documents
 
@@ -75,7 +92,8 @@ The stable identity and revision identity must remain separate even if a display
 
 **System Requirements Document (SYSRD)**: A generated controlled document containing the applicable approved system requirement revisions from a named baseline. Draft SYSRDs are clearly watermarked and are not approved lifecycle outputs.
 
-**Software Requirements Document (SWRD)**: A generated controlled document containing applicable approved HLR revisions from a named software baseline. This capability is later scope.
+**Software Requirements Document (SWRD)**: A generated controlled document containing applicable approved HLR
+or LLR revisions from one exact software build, with document control and source-change provenance.
 
 The abbreviation `SRD` is not used on its own because it is ambiguous.
 
@@ -133,7 +151,9 @@ The abbreviation `SRD` is not used on its own because it is ambiguous.
 
 **Cancelled Review Cycle**: A historical review cycle whose decisions no longer count toward approval. Cancellation is required when a completed approval stage used the wrong approver. The corrected workflow restarts from its first stage.
 
-**Electronic Approval Record**: Evidence of the approver identity, decision, time, reviewed revision, and applicable meaning. The authentication and signature policy remains to be defined.
+**Electronic Approval Record**: Immutable evidence of approver identity, decision, server time, reviewed exact
+revision/snapshot hash, signature meaning, Program, artifact identity, and source address, created only after
+session, authority, assignment, independence, and password confirmation succeed.
 
 **Generated Document**: A file produced from a named baseline, template revision, and generator version, with identifiable approval state and integrity hash.
 

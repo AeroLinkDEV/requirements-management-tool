@@ -501,6 +501,11 @@ Future entries use:
   group on exactly this question, and it pointed them at the wrong record. This project's own convention is
   that decisions carry stable identifiers; the worked example of a deferral had not followed it.
 
+> **2026-08-01 disposition:** PR #53 was closed unmerged and issue #34 was closed as not planned for the MVP.
+> Local identity administration has since delivered explicit role revocation, session inventory/revocation,
+> and delegation lifecycle controls. The external-directory resume trigger above remains unchanged; start a new
+> implementation from current `main` only after a real provider/customer contract exists.
+
 ### DEC-052 - The API Serves the Built Client
 
 - **Date:** 2026-07-26
@@ -1062,6 +1067,67 @@ Future entries use:
   and newly submitted test change requests require one. The server, not merely the button visibility, rejects
   approval by another user or by the author/submitting engineer.
 
+### DEC-080 - Verification Inventory Is Exact by Build and Discipline
+
+- **Date:** 2026-08-01
+- **Status:** Accepted
+- **Decision:** System, Software HLR, and Software LLR Testing Coverage, procedures, history, search, Test Change
+  Requests, and results resolve only against the selected build and discipline. Controlled procedure revision
+  numbers are valid deep-link/search identities and closing history restores the scoped inventory.
+- **Rationale:** Mixing project-latest or adjacent software-level data made a correct-looking page answer the
+  wrong configuration question.
+- **Consequences:** API projections, queries, routes, refresh behavior, tests, and reviewer authority preserve
+  Project/build/discipline/exact-revision scope end to end.
+
+### DEC-081 - Production Surfaces Show Authoritative Controls, Not Qualification Simulations
+
+- **Date:** 2026-08-01
+- **Status:** Accepted
+- **Decision:** The production Concurrency simulation and count-only IntegrityScan job are retired. Real
+  controlled checkout/conflict records are the concurrency workflow. The supported integrity operation
+  recomputes controlled attachment hashes and reports missing, altered, and unreadable content.
+- **Rationale:** A production control must change or verify authoritative state. A simulation beside the real
+  workflow invites false operational conclusions.
+- **Consequences:** Historical simulation/count snapshots remain labelled evidence, but no new production action
+  can create them. Unknown background job types fail rather than silently mapping to another operation.
+
+### DEC-082 - Roles, Sessions, and Delegations Have Explicit Lifecycles
+
+- **Date:** 2026-08-01
+- **Status:** Accepted
+- **Decision:** Program role grants are individually visible and revocable; global system administration is
+  distinct from Program Administrator authority; users can identify the current session and revoke other
+  sessions; delegations retain active, future, expired, and revoked history with full attribution.
+- **Rationale:** Disabling an account is not role administration, and an authority grant that disappears when it
+  stops authorizing cannot support audit or incident review.
+- **Consequences:** Duplicate grants conflict, revocation does not erase history, expired/revoked delegations do
+  not authorize, and every lifecycle mutation is audited.
+
+### DEC-083 - Software Proposals Carry Prospective Exact Upward Allocation
+
+- **Date:** 2026-08-01
+- **Status:** Accepted
+- **Decision:** An HLR proposal selects one or more current System revisions from the target build; an LLR
+  proposal selects current HLR revisions. The only alternative is explicit derived classification with a
+  meaningful rationale.
+- **Rationale:** Review must see what the proposed software requirement refines. Creating traces only after
+  approval left reviewers unable to judge completeness and allowed cross-build or obsolete parents.
+- **Consequences:** Exact proposed parent IDs are validated server-side, included in the immutable review hash,
+  preserved through controlled editing and CR revisioning, and materialized as revision-to-revision
+  `AllocatedFrom` links. Approved/superseded history remains immutable.
+
+### DEC-084 - Current State Comes from the Qualified Repository, Not a Dated Backlog
+
+- **Date:** 2026-08-01
+- **Status:** Accepted
+- **Decision:** `PROJECT_STATE.md`, the newest dated handoff, current GitHub state, and the qualified merge commit
+  are the current-state authorities. Older handoffs, reviews, acceptance notes, Word inputs, and update reports
+  are historical evidence.
+- **Rationale:** Dated issue inventories and next-step recommendations remained accurate for their day but
+  contradicted later merged work when read as live instructions.
+- **Consequences:** Historical records receive clear supersession notices rather than rewritten history. New
+  work begins from live reproduction and GitHub refresh. Root Word files remain unmodified source inputs.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
@@ -1074,12 +1140,18 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 - **ASM-006:** PR references may point to an external system until full PR management exists.
 - **ASM-007:** The initial platform records Pass, Fail, Blocked, Not Run, and Not Applicable using the meanings in [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md); detailed step/result transition rules still require validation.
 - **ASM-008:** Source Word files remain unmodified in the repository root during the initial consolidation.
-- **ASM-009:** GitHub will eventually become the shared remote source of truth, but no repository details are assumed.
+- **ASM-009:** Superseded by DEC-060 and DEC-084. GitHub repository
+  `seanmccarthyns/requirements-management-tool` is the shared remote source of truth.
 - **ASM-010:** Dashboard values are computed only from records the current user is authorized to know exist.
-- **ASM-011:** The first interactive showcase uses deterministic fictional data and simulated state changes rather than a production backend.
+- **ASM-011:** Fulfilled and superseded by DEC-046. Live demonstrations use the real application and persistent
+  `FMSLIVE` data; the static showcase is retired.
 - **ASM-012:** Confirmed: the second Version 3.3 change package is an SCR linked to four PRs.
 
-## Open Questions Required Before Phase 1 Technical Planning
+## Historical Open Questions Required Before Phase 1 Technical Planning
+
+The table below is retained as the Phase 0 questionnaire. Phase 1 has been delivered, and several questions
+were answered by later decisions and implementation. It is not an active GitHub backlog; unresolved future
+choices are created as focused issues only when their trigger and acceptance boundary exist.
 
 | ID | Question | Why It Matters | Decision Owner / Timing |
 | --- | --- | --- | --- |

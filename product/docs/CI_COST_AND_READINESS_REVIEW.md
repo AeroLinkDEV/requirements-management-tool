@@ -2,6 +2,10 @@
 
 Date: 2026-07-19
 
+> **Historical engineering decision record.** Measurements and job topology describe the July 2026
+> optimization increment. The repository workflows and required GitHub checks are the live authority; current
+> qualification evidence is summarized in [the current handoff](../../CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
+
 ## Purpose
 
 This record explains the July 2026 changes made after reviewing AeroLink's browser-test stability and GitHub Actions usage. It is intended to let a future Codex session or human reviewer understand what changed, why it changed, what tradeoffs were accepted, and what should be verified before merge.

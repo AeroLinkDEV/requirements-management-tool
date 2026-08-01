@@ -1,32 +1,51 @@
-# React + TypeScript + Vite
+# AeroLink web client
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+This directory contains the React/TypeScript client for AeroLink. It is not a standalone template project:
+product behavior, routes, authority, and persistence come from the ASP.NET Core API under `product/src`.
 
-Currently, two official plugins are available:
+For product orientation, read [PROJECT_STATE.md](../../PROJECT_STATE.md) and the
+[current handoff](../../CURRENT_PRODUCT_HANDOFF_2026-08-01.md). For application startup, deployment-shaped
+demonstration, PostgreSQL setup, and complete validation commands, read the
+[product README](../README.md).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Supported development loop
 
-## React Compiler
+From this directory:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```powershell
+npm.cmd install
+npm.cmd run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The normal development launcher at the repository root (`START_AEROLINK.bat`) starts the API, PostgreSQL, and
+this Vite server with the correct local ports. Use `START_AEROLINK_PRODUCTION.bat` when validating or showing
+the built single-origin client served by the API.
+
+## Validation
+
+```powershell
+npm.cmd run test:fast
+npm.cmd run test:focused -- tests\upward-allocation.spec.ts
+npm.cmd run test:e2e:sharded
+npm.cmd run test:production
+```
+
+- `test:fast` runs lint and TypeScript checks.
+- `test:focused` runs selected Playwright journeys against an isolated API and SQLite database.
+- `test:e2e:sharded` builds the API once and runs the complete browser matrix in three isolated shards.
+- `test:production` builds the client and exercises protected mutations and deep links against the API-served
+  production artifact.
+
+Do not point browser tests at the persistent local PostgreSQL demonstration database. Do not weaken a failing
+assertion to accept multiple states until the product behavior and request/response evidence establish that the
+variation is intentional.
+
+## Client boundaries
+
+- The client never decides authority; the API derives the actor and enforces Program/build/role rules.
+- Requirements Explorer is read-only. Controlled changes begin in SCR/SWCR workflows.
+- Build 1.5 is released/read-only; Build 1.6 is active development.
+- System, Software HLR, and Software LLR verification inventories are isolated.
+- The client has no external runtime dependency and must remain usable on restricted on-premises networks.
+- Production Concurrency and count-only integrity simulations are intentionally absent; real checkout/conflict
+  records and cryptographic attachment checkpoints are the authoritative workflows.

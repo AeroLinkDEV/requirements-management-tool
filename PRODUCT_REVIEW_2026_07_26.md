@@ -13,6 +13,8 @@ This file records the disposition of each. It is a working record, not a product
 > beside the declared disposition in the proposal card, read-only, exactly as this file argued it should.
 >
 > Retained as the record of what was found and what was decided. Nothing here is outstanding work.
+> For current behavior and qualification, use the
+> [2026-08-01 handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
 >
 > **Later decision:** DEC-071 supersedes DEC-059's author-owned disposition model. The computed trace remains
 > visible as read-only context, but consuming engineers—not the change author—now decide downstream impact.

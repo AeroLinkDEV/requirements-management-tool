@@ -7,7 +7,7 @@ capability inventory, not the status record** — for current status read
 [PROJECT_STATE.md](PROJECT_STATE.md) and
 [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md). For the current supported routes,
 dormant UI and aligned issue backlog, read
-[CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md). A capability listed here may be
+[CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md). A capability listed here may be
 implemented but deliberately not exposed; the catalog is not authority to reconnect dormant modules. The paragraph below is a
 2026-07-18 snapshot retained for history and is not maintained.
 
@@ -29,6 +29,7 @@ As of 2026-07-18, Wave 1 has integrated foundations for EA-001 through EA-004, C
 | PF-010 | Persistent discipline workspaces | Keep daily Systems, Software, System Test, and Software Test work continuously reachable | Must | 1 | PF-001-PF-003, PF-009 | Main navigation remains visible on every authenticated page and preserves Program/release context while applying discipline scope |
 | PF-011 | Server-generated artifact numbering | Prevent collisions and user-selected identities | Must | 1 | PF-005, PF-007 | SCR, SWCR, and requirement identifiers are assigned atomically by installation-wide per-prefix sequences and never reused |
 | PF-012 | Searchable people directory controls | Make large review and ownership lists usable | Must | 1 | PF-002-PF-004 | Typing any part of a name, username, title, or role returns permitted active people immediately |
+| PF-013 | Identity authority lifecycle | Govern current roles, sessions, and delegated authority without erasing history | Must | 1 | PF-002-PF-004, PF-007 | Administrators revoke individual Program roles, users identify/revoke sessions, and time-bounded delegations retain attributable active/expired/revoked states |
 
 ## Enterprise Authoring and Collaboration
 
@@ -67,12 +68,19 @@ As of 2026-07-18, Wave 1 has integrated foundations for EA-001 through EA-004, C
 | CFG-003 | Product variants and composite configurations | Resolve exact lifecycle data for each product/version combination | Should | Enterprise Wave 3 | CFG-001, CFG-002, TR-001 | A composite configuration selects exact components and every trace resolves to the correct endpoint revision |
 | OPS-001 | Federated identity and provisioning | Integrate with enterprise access governance | Must | Enterprise Wave 4 | PF-002-PF-004 | OIDC/SAML, SCIM, group mapping, service accounts, and break-glass administration preserve attribution and least privilege |
 
-## AeroLink 2.0 implementation checkpoint
-
-The connected-foundation and ReqIF round-trip increments now establish project-scoped machine identities, `/api/v1` requirement reads, idempotent event ingestion, per-credential rate limiting, lifecycle-wide transactional event capture, durable HMAC-signed webhook delivery, retry/backoff, dead-letter replay, and operator-facing Integration and ReqIF Exchange Centers. EXCH-003 is implemented for the documented AeroLink governed profile, including stable identities, content, hierarchy, relations, schema attributes/tags, immutable source retention, attachment binaries, preview/reconciliation, and Draft-only controlled commit. Remaining connected-program expansion is conditional requirement writes, OSLC RM, vendor-specific extension mappings, and monitored connector checkpoints.
 | OPS-002 | Backup, restore, observability, and retention | Make on-premises operation supportable and recoverable | Must | Enterprise Wave 4 | PF-007, PF-008 | Operators monitor health, export audits, enforce retention, back up, restore, verify integrity, and prove RPO/RTO through drills |
 | OPS-003 | Published scale and performance qualification | Replace scalability assumptions with repeatable evidence | Must | Enterprise Wave 4 | SRCH-001, EXCH-001, CFG-001 | Benchmarks prove agreed volumes, large jobs, deep trace queries, publications, and 150-user concurrency against service objectives |
 | OPS-004 | Single-origin delivery of the built client | Make what is demonstrated and what is deployed the same artifact | Must | Delivered 2026-07-26 | OPS-002, PF-002 | The API serves the built client on one origin with a document-appropriate content security policy and a fallback that lets a deep link reload; a launcher builds and starts it; browser journeys run against that artifact rather than against a development server. See DEC-052 |
+
+## AeroLink 2.0 implementation checkpoint
+
+The connected-foundation and ReqIF round-trip increments establish project-scoped machine identities,
+`/api/v1` requirement reads, idempotent event ingestion, per-credential rate limiting, lifecycle-wide
+transactional event capture, durable HMAC-signed webhook delivery, retry/backoff, dead-letter replay, and
+operator-facing Integration and ReqIF Exchange Centers. EXCH-003 is implemented for the documented AeroLink
+governed profile, including stable identities, content, hierarchy, relations, schema attributes/tags,
+immutable source retention, attachment binaries, preview/reconciliation, and Draft-only controlled commit.
+Vendor-specific mappings and customer-specific connector contracts remain deployment/integration work.
 
 ## Dashboards and Decision Support
 
@@ -135,13 +143,15 @@ The connected-foundation and ReqIF round-trip increments now establish project-s
 | ST-009 | Verification decisions with reopening | Let a wrong decision be revisited without losing what was decided | Must | 3 | ST-007 | Every impacted requirement carries an explicit decision; reopening returns it to the release gate, puts claimed coverage back to suspect, and keeps the prior decision in immutable history |
 | TR-005 | Interactive release lineage tree | Explain predecessor, branch, baseline, build, and release progression | Must | 2-4 | BL-001-BL-003 | Users navigate a clickable tree from released predecessors through in-work successors, candidate baselines, builds, and selected change packages |
 
-## Later Software and PR Capabilities
+## Software and PR Capabilities
 
 | ID | Capability | Rationale | Priority | Phase | Dependencies | Acceptance Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
-| SW-001 | HLR and LLR management | Extend controlled requirements down the software V | Must | 4 | Proven system-level model | HLRs/LLRs support identity, revisions, derived status, SCR-package review, baseline inclusion, and upward trace |
-| SW-002 | SWCR and SWRD lifecycle | Control software change and document generation | Must | 4 | SW-001, reusable SCR/baseline framework | Approved SWCRs produce exact software baselines and controlled SWRDs |
-| SW-003 | Software verification artifacts | Verify HLRs, LLRs, integration, and robustness behavior | Must | 4 | SW-001, reusable verification framework | Software requirements trace to reviewed procedures, executions, results, and evidence |
+| SW-001 | HLR and LLR management | Extend controlled requirements down the software V | Must | Delivered | Proven system-level model | HLRs/LLRs support identity, revisions, derived status, SWCR-package review, exact build inclusion, and upward trace |
+| SW-002 | SWCR and SWRD lifecycle | Control software change and document generation | Must | Delivered | SW-001, reusable SCR/baseline framework | Approved SWCRs produce exact software baselines and controlled HLR/LLR SWRDs |
+| SW-003 | Software verification artifacts | Verify HLRs, LLRs, integration, and robustness behavior | Must | Delivered | SW-001, reusable verification framework | HLR and LLR requirements have isolated controlled procedures, Test Change Requests, build test sets, executions, results, and evidence |
+| SW-004 | Consuming-discipline downstream assessments | Put downstream impact decisions with the engineers who consume an approved change | Must | Delivered | SCR-002, SW-001, WF-002 | System approval raises governed HLR assessment work and HLR approval raises LLR assessment work; exact Draft SWCR links or justified no-change decisions retain independent approval and supersession history |
+| SW-005 | Prospective exact upward allocation | Prevent software proposals from reaching review without an allocation or explicit derived exception | Must | Delivered | SW-001, TR-001, BL-001 | HLR proposals select current System revisions and LLR proposals select current HLR revisions from the target build; exact IDs enter the review snapshot and materialize as immutable `AllocatedFrom` traces |
 | PR-001 | Full PR lifecycle | Control investigation, disposition, resolution, and closure | Should | 5 | PF foundations, TR-001 | PR state, classification, effects, resolution, verification, and closure are attributable |
 | PR-002 | PR-driven impact analysis | Build the change story across artifacts and releases | Should | 5 | PR-001, TR-004 | Users navigate from a PR through affected changes, requirements, tests, results, and release |
 | INT-001 | Enterprise identity | Integrate with organizational authentication | Should | 5 | PF-002, deployment decisions | Authorized enterprise identities and groups can be mapped to product roles |

@@ -1,5 +1,9 @@
 # Current product and backlog handoff — 2026-07-29
 
+> **Historical handoff.** Superseded by
+> [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md). This file preserves the
+> 29 July checkpoint; its open-issue inventory and delivery priorities are not current.
+
 This is the restart-ready record for a future Codex or Claude session. It supplements
 [PROJECT_STATE.md](PROJECT_STATE.md), which remains the canonical description of the product, and the
 append-only decisions in [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md).

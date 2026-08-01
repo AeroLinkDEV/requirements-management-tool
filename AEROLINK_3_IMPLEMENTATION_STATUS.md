@@ -1,168 +1,85 @@
-# AeroLink 3.0 — Implementation Status
+# AeroLink 3.0 - implementation status
 
-**Status date:** 2026-07-29
-**Authority:** This record summarizes implementation evidence and limitations. The detailed workstream contract remains `AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md`.
+**Status date:** 2026-08-01
+**Qualified product commit before this documentation reconciliation:** `067294c`
 
-> This file sat at 2026-07-24 through fifteen merges while `PROJECT_STATE.md` named it the authority for
-> per-workstream status. A scorecard that is not updated with the work it scores is worse than no scorecard,
-> because it is believed. Update it in the change that moves a workstream, as
-> [PROJECT_STATE.md](PROJECT_STATE.md) already requires of itself.
+This is the current scorecard for the long-lived
+[AeroLink 3.0 completion contract](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md). The contract describes the
+full enterprise ambition; this file describes what the repository truthfully delivers now. Detailed restart
+context is in [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
 
 ## Status vocabulary
 
-- **Complete:** the workstream acceptance gate is implemented and evidenced.
-- **In progress:** production code exists, but one or more acceptance-gate capabilities remain.
-- **Foundation only:** shared domain or architectural primitives exist, but no end-to-end capability is claimed.
-- **Not started:** no material implementation evidence has been accepted.
-
-## What has merged since the last status date
-
-Two evenings of product review (26 and 27 July) and their follow-up merged through PR #98. **None of it moves a
-workstream boundary**, and the scorecard below is unchanged as a result — that is the honest reading, not an
-oversight. The work was defect repair, reachability and product decisions inside capabilities already claimed:
-change-request allocation separated from state with a deferral shelf (DEC-056), a released build closed to new
-change requests (DEC-055), revision from the state approved change requests actually rest in (DEC-054),
-author-chosen specification sections applied at materialization (DEC-057), documents offered where requirements
-are read, and computed trace impact shown beside the declared disposition (DEC-059).
-
-The pattern worth recording for the workstreams still open: four of the eleven findings on 27 July were **not
-missing features but unreachable ones** — a gate admitting a state nothing rested in, a domain method with no
-endpoint, a field that was read-only where it mattered, and a read-side filter no authoring path could aim. A
-workstream can be implemented and evidenced and still be unreachable, and this scorecard does not currently
-distinguish those. Acceptance evidence should name the path a user takes, not only the capability.
-
-The 28 July review backlog was then delivered through focused PRs #140–#165. PR #166 added the Projects
-selector, #167 made build selection an explicit route-owned workspace context, and #168 simplified the active
-showcase around System, Software and Verification. These increments improve correctness and reachability but do
-not complete an AeroLink 3.0 workstream. Current product scope, dormant modules and remaining issues are recorded
-in [CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).
+- **MVP delivered:** the product-owned acceptance boundary is implemented and qualified.
+- **Delivered foundation:** useful production code is implemented, but the complete enterprise contract remains
+  broader than the supported product surface.
+- **Deferred by decision:** intentionally outside the current MVP until a recorded trigger is met.
+- **Deployment-owned:** requires a selected customer topology, provider, credentials, or service objectives and
+  cannot be completed truthfully inside this repository alone.
+- **Historical/dormant:** retained implementation or evidence is not a supported current route.
 
 ## Overall position
 
-AeroLink has a substantial controlled-lifecycle product foundation and a green releasable `main`, but **AeroLink 3.0 is not complete**. Completion requires every workstream acceptance gate, safe migration proof, production operations evidence, workload qualification, and security closure.
+The AeroLink 3.0 parent program (#29) and every review follow-up are closed. The 1 August reconciliation found
+no remaining implementation-ready MVP defect in the open backlog. Applicable work was delivered through PRs
+#237-#240; satisfied items were closed with evidence; broad refactors and customer-specific deployment work
+were closed with explicit reopen conditions.
 
-No entry in this file claims certification, regulatory compliance, or tool qualification.
+Closing the program does **not** mean AeroLink claims certification, tool qualification, completed customer
+deployment, or every capability named in the enterprise ambition. It means the supported MVP is coherent,
+qualified, and has no known open GitHub backlog at this checkpoint.
 
 ## Workstream scorecard
 
-| Workstream | Status | Implemented evidence | Remaining acceptance boundary |
-| --- | --- | --- | --- |
-| 1. Universal controlled editing | In progress | Shared policy registry; complete SCR/SWCR checkout, renewable lease, autosave snapshots, recovery, check-in/discard, contention and forced unlock | Connect the shared resolver and editing contract to all nine controlled draft families; add complete two-user and lifecycle-transition coverage for each family |
-| 2. Full problem-report lifecycle | In progress; active UI dormant | Problem-report references, lifecycle links and corrective routing exist in retained implementation; #168 intentionally removes Problem Reports from supported navigation/search/routes | A future product decision must first restore or redesign the surface; only then complete first-class PR identity/revisions, investigation/disposition, closure approval/reopen, release blocker/waiver rules, publications, dashboards, API/events and a bidirectional acceptance journey |
-| 3. Product-line configuration and reuse | In progress | Configuration-aware baselines, exact build-scoped routes, released 1.5 read-only workspace, in-work 1.6 workspace, lineage and integration foundations exist | Complete streams, controlled change sets, retained three-way conflicts, reusable libraries, synchronization decisions, variants, composite configurations and configuration-correct outputs |
-| 4. Enterprise identity and account assurance | Delivered slice; remainder deferred | Local accounts, Program membership, sessions, MFA/recovery and security audit; trusted provider and Program-scoped external-group role-mapping domain contracts; durable provider/mapping persistence with an applied additive migration, administrator-only administration API, fail-closed audited role resolution, and PostgreSQL smoke coverage that exercises the migrated tables | **Deferred by decision (2026-07-24), not in progress:** OIDC/SAML login/logout; SCIM; break-glass; step-up; account recovery and password expiration; administrator session inventory; provider health; administration UI. See the Workstream 4 decision record in the completion contract |
-| 5. Resumable interchange and monitored integrations | In progress | ReqIF binary integrity/provenance, mapping versioning, OSLC consumer monitoring/replay and integration completion evidence; **a named Jira connector with field mapping and link-back**; **email delivery of approval notifications through a transactional outbox** | Confirm the complete acceptance gate across interrupted large import, durable checkpoints, cancellation/restart, idempotent replay, conditional writes, provider/consumer configuration-aware links, queues and dead letters. Email delivery has never been exercised against a real SMTP relay |
-| 6. Rich technical content and controlled publications | In progress | Controlled SYSRD/SWRD, change, test, traceability and release outputs; valid DOCX/PDF generation and document control; **rich authored content — tables, figures and symbols stored as structure, never markup — in requirements and change-request narrative, reproduced in DOCX and PDF**; **approved template revisions that decide what a generated document contains**, replacing a template body no generator opened | Controlled equations, exact redlines across every field, reproducibility proof and verified release-package manifests |
-| 7. Quality, evidence and portfolio intelligence | In progress | Build-scoped three-way System/Software/Verification Command Center, drill-down foundations, traceability/completeness measures and qualification datasets | The broader Verification redesign remains pending; objective/evidence expectation records, blockers/waivers, historical event-time metrics, review/verification trends, permission-safe cross-Program aggregation, metric contracts and controlled exports remain |
-| 8. Production operations and qualification | In progress | One-click local startup, diagnostics, integrity-manifested backup, isolated restore validation, PostgreSQL migration smoke and mixed-workload tools; **a production-build launcher serving the client from the API on one origin, gated by browser journeys against that artifact** (DEC-052); **both launchers waiting on a readiness check that opens a database connection** rather than on liveness; **an authenticated 150-session HTTP load harness** whose first run found the product refusing sign-in to 121 of 150 users | Structured telemetry, dependency checks, alerts/runbooks, retention holds, scheduled protected off-device backups, scheduled restore drills, measured RPO/RTO, safe upgrade workflow, and a published 150-user/50,000-requirement workload result. The workspace query still caps the page at ~380ms; the costed path is in `CAPABILITY_ROADMAP.md` and is deliberately not started |
+| Workstream | Current status | Product evidence and boundary |
+| --- | --- | --- |
+| 1. Universal controlled editing | **MVP delivered** | SCR/SWCR checkout, renewable leases, autosave snapshots, recovery, check-in/discard, read-only observers, optimistic versions, forced unlock audit, and retained conflict evidence. Production Concurrency simulation was removed; authoritative editing is exercised through real artifacts. |
+| 2. Problem-report lifecycle | **Historical/dormant foundation** | Problem/corrective relationships and retained lifecycle implementation support trace and corrective routing, but the broad Problem Reports navigation/search surface remains intentionally dormant. Restore only through a new product decision. |
+| 3. Product-line configuration and reuse | **Delivered foundation** | Canonical software builds, exact immutable baselines, released 1.5/read-only and active 1.6 workspaces, controlled libraries, propagation decisions, variants, configuration-correct outputs, deterministic publications, and release evidence. |
+| 4. Enterprise identity and account assurance | **MVP delivered; federation deferred** | Local accounts, MFA/recovery codes, Program roles, individual role revocation, distinct global/Program administration, current/other session controls, time-bounded delegation lifecycle, electronic signatures, security audit, provider/mapping foundations, and PostgreSQL migration coverage. OIDC/SAML and SCIM resume only with a real directory contract. |
+| 5. Resumable interchange and monitored integrations | **Delivered foundation** | Governed CSV/XLSX onboarding, ReqIF profile round trip, scoped service identities, versioned API, transactional events, HMAC webhooks, retry/dead-letter replay, Jira mapping/link-back, OSLC foundations, and inspectable notification outbox. A real SMTP relay and vendor/provider-specific contracts remain external qualification work. |
+| 6. Rich technical content and controlled publications | **MVP delivered** | Structured rich content, approved template revisions, deterministic SYSRD/SWRD/test/change outputs in DOCX/PDF, exact provenance, document control, redlines, publication jobs, manifests, and release evidence packages. |
+| 7. Quality, evidence and portfolio intelligence | **MVP delivered** | Build-scoped Command Center, System/HLR/LLR Testing Coverage and Test Results, controlled Test Change Requests, Build Test Sets, verification decision history/reopening, downstream assessments, exact upward allocations, release readiness, permission-safe drill-downs, and immutable evidence/retest history. |
+| 8. Production operations and qualification | **Product foundation delivered; deployment-owned remainder** | One-click development/production/shared launchers, readiness, diagnostics, cryptographic attachment checkpoints, manifested backup/verification, isolated restore, retention/hold evidence, upgrade evidence, PostgreSQL migration/bootstrap, production-build browser tests, 50,000-requirement qualification, and 150-client database workload. Protected off-device storage, external alert delivery, TLS/reverse proxy, scheduler provisioning, and approved RPO/RTO/SLOs require a selected deployment. |
 
-## Current accepted delivery focus
+## Current control model
 
-Workstream 4 is **no longer the active delivery focus**. Its delivered slice is described below; its
-remaining capabilities were deferred by explicit decision on 2026-07-24 and are recorded in the Workstream 4
-decision record in `AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md`. Issue #34 stays open as the tracking
-record for that deferred work and must not be closed as if the full gate were met.
+- Build 1.5 (`SW-01.50`) is released, immutable, and read-only.
+- Build 1.6 (`SW-01.60`) is the active controlled development workspace.
+- System, Software HLR, Software LLR, and each verification discipline use exact build scope.
+- System approval raises an HLR downstream assessment; HLR approval raises an LLR assessment.
+- HLR proposals allocate to current System revisions; LLR proposals allocate to current HLR revisions. An
+  explicit derived classification with rationale is the only alternative.
+- Approved changes raise controlled, discipline-specific Test Change Requests. Explicit decisions and approved
+  procedures populate the build's test set; immutable results and evidence determine readiness.
+- Independent review is server-enforced and selected approvers are named before submission where required.
 
-The merged increments establish:
+## Qualification evidence
 
-- explicit OIDC and SAML provider definitions;
-- canonical provider keys and canonicalized absolute issuer trust anchors;
-- Program-scoped external-group-to-role mappings;
-- provider-specific, fail-closed matching for malformed external identity input;
-- explicit enable/disable lifecycle;
-- durable persistence owned by the EF model, with database uniqueness for the provider key, the issuer
-  anchor and the provider/group/Program/role authority tuple;
-- an administrator-only administration API whose every mutation is saved together with its security
-  audit event, so an authority change cannot be recorded without evidence; and
-- domain, persistence, API and PostgreSQL smoke coverage that exercises the migrated tables.
+The final PR #240 Product Quality Gate passed:
 
-This does **not** claim identity federation or provisioning is operational. It precedes authentication
-handlers, logout propagation, SCIM endpoints, administration UI, service accounts, break-glass access,
-step-up enforcement and provider health monitoring.
+- complete backend build and tests;
+- client lint, type checking, and production build;
+- PostgreSQL first-install migration/bootstrap and identity administration paths;
+- production-build browser journeys against the API-served single-origin client;
+- both complete browser shards; and
+- the required enforcing reporter.
 
-### Correction — closure-integrity note
+Independent local qualification on the final content passed all three browser shards: 112 passed and one
+capture-only journey skipped. Exact merged-main qualification passed nine focused browser regressions, two
+requirement-materialization regressions, client lint, production build, and live PostgreSQL readiness.
 
-The first attempt at the persistence increment shipped a migration class that carried neither
-`[Migration]` nor `[DbContext]`, and defined its tables outside the EF model. Entity Framework discovers
-migrations by attribute, so `Database.Migrate()` skipped it silently on PostgreSQL and `EnsureCreated()`
-had no model to build from elsewhere: the tables existed only inside a hand-written test fixture, and
-every administration endpoint would have failed at runtime. The quality gate stayed green because no test
-or smoke step called those endpoints. The migration is now generated by `dotnet ef`, the entities are part
-of the model, and two guard tests fail the build if any migration is undiscoverable or if the model drifts
-from its snapshot. Treat "the gate was green" as insufficient evidence that a capability is reachable.
+## Boundaries that must remain explicit
 
-## Delivery sequence from this checkpoint
+- No certification, compliance, or tool-qualification claim.
+- No generic identity federation without a provider/customer contract.
+- No fake production concurrency or integrity simulations in the product.
+- No claim of 150 rendered browser users; the published evidence is 150 simultaneous database clients.
+- No claim that repository scripts provision customer backup storage, monitoring, TLS, or recovery objectives.
+- No reset of the persistent demonstration database merely to prove an increment.
 
-Workstream 4's remaining sequence is held, not scheduled. It resumes at the trigger recorded in the
-contract — the first commitment to deploy AeroLink for an organization authenticating against its own
-directory — and in the order given there. Issue #34 may close only when that sequence is either completed
-and evidenced, or formally withdrawn from the program.
+## Governance
 
-The reconciled product-review backlog is mostly delivered. Its still-open applicable issues are #100, #101,
-#102, #106, #110, #112, #113, #115 and #132. #131 and #133 were closed as superseded/not planned after
-DEC-071 and DEC-072; neither should be restored as a regression fix. This work repairs reachability,
-correctness and qualification inside existing workstreams; it does not by itself move a scorecard boundary or
-resume Workstream 4 federation.
-
-The first controlled-change correctness increment closed proposal metadata loss and lifecycle bypasses:
-schema-governed authored attributes, server-authoritative derived state and durable specification placement
-share one contract across browser, API, domain, check-in and materialization (DEC-062). DEC-071 later
-superseded only DEC-062's author impact-disposition requirement: consuming engineers now own downstream impact
-decisions, while the author's live trace remains informational.
-
-The second controlled-change correctness increment makes record context and approval attribution consistent
-(DEC-063): canonical typed SCR/SWCR URLs survive every supported entry path, and review rows retain the selected
-principal and authority through assignment, active work, audit and electronic signature.
-
-The third security-boundary increment removes caller-selectable attribution from authenticated mutation
-contracts (DEC-064). Browser writes derive the author, actor, owner, recorder and executor from the authenticated
-principal, legacy spoof fields remain harmless during compatibility, and credentialless diagnostics prove
-liveness/readiness without creating administrator sessions.
-
-The fourth controlled-change increment makes administrator recovery functional without transferring authorship
-(DEC-065). A Project-authorized administrator can complete every author-owned Draft/deferred action and create
-the controlled successor of an approved record; lifecycle, release and concurrency rules still apply. The
-original author remains immutable while audit events, attachments and check-in evidence name the administrator
-who actually acted, identically for System and Software changes.
-
-The first verification/readiness increment makes baseline materialization an explicit prerequisite (DEC-066).
-Procedure authoring begins only when exact immutable requirement revisions exist. Until then, the verification
-workspace explains the lifecycle ordering and the four downstream assurance gates are not evaluated; every
-release view names baseline materialization as the next governed action instead of presenting contradictory
-`0/0` failures.
-
-The second verification/readiness increment gives the requirements workspace a coverage-state filter and gives
-settled coverage one definition (DEC-067). The release readiness gate, the workspace filter and the requirement
-trace panel now read the same predicate; before this the gate applied three conditions while the trace panel
-counted confirmed tests from the suspect flag alone, so one coverage link could be described two ways on two
-screens. The showcase gains a single in-work suspect gap so the product can be shown discovering one, and
-deliberately no uncovered requirement — the reasons are recorded in DEC-068 rather than left as a silent
-shortfall against issue #137's acceptance criteria.
-
-**This does not move a workstream boundary.** Workstream 7 covers quality and portfolio intelligence and its
-remaining acceptance gate is untouched; this is correctness and reachability inside capabilities already
-claimed, in the same pattern as the increments above.
-
-## Repository and authority corrections
-
-The following facts supersede earlier planning assumptions that predated repository publication:
-
-- The shared repository exists at `seanmccarthyns/requirements-management-tool`.
-- Repository visibility is public, by DEC-060 of 2026-07-28. This line read "private" for as long as DEC-060
-  had existed, inside the section headed as the one that supersedes earlier planning assumptions.
-- `main` is the source-of-truth integration branch and must remain releasable.
-- GitHub issues and pull requests are the delivery-control mechanism for AeroLink 3.0 increments.
-- Markdown in Git remains authoritative for product definition and implementation limitations.
-
-Earlier assumptions or open questions suggesting that the GitHub repository had not yet been selected should be treated as historical planning context, not current uncertainty. A future append-only decision-log update should formally supersede those entries.
-
-## Rules for future implementation claims
-
-A workstream status may move to **Complete** only when:
-
-- its complete acceptance gate is executable and green;
-- persistence changes include safe migration and PostgreSQL smoke evidence;
-- user-visible behavior includes browser acceptance coverage;
-- authorization, audit, immutable-history and configuration contracts are preserved;
-- operational and security impacts are documented; and
-- the implementation limitation records are updated in the same delivery increment.
+Current issue/PR state must always be refreshed from GitHub; counts in dated records are historical. New work
+starts from a reproduced product need, not from an old roadmap sentence. Use focused branches and pull requests,
+wait for the required Product Quality Gate, merge, pull `main`, and requalify the exact merge commit.

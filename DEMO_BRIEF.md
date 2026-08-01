@@ -1,7 +1,7 @@
 # Demonstration Brief
 
-**Status: inputs captured 2026-07-25. The script itself is to be drafted, targeted for the following
-Monday.** This file exists so that work starts from decisions already made rather than re-deriving them.
+**Status: durable demonstration guidance, reconciled 2026-08-01.** The original occasion and audience notes
+are retained, but live product facts and preparation instructions below now reflect the current application.
 
 ## The occasion
 
@@ -64,14 +64,11 @@ These must be rehearsed verbatim, because precision is the whole argument with t
   organization-specific work that has not been done.
 - **How would we get off DOORS?** ReqIF 1.2 round-trip exists. Migration itself is real, unestimated work.
 - **Who maintains it?** An honest answer is owed here and has not yet been decided.
-- **Would people sign in with their corporate account, or yet another password?** Corporate account, by
-  design, though not yet by working code. What exists and is tested today: external identity provider
-  definitions with canonicalized issuer trust anchors, Program-scoped mappings from an external directory
-  group to an AeroLink role, fail-closed matching, and an administration API whose every authority change
-  is saved together with its audit evidence. The PostgreSQL smoke gate exercises those tables on every run.
-  What does not exist: the sign-in path itself — OpenID Connect discovery, the authorization-code exchange
-  with PKCE, token validation, and the start and callback endpoints. That work is designed and drafted in
-  pull request #53, and deliberately left as a draft.
+- **Would people sign in with their corporate account, or yet another password?** The current MVP uses local
+  on-premises accounts. Administrators can govern Program roles, revoke individual grants, distinguish global
+  from Program administration, inspect/revoke sessions, and create/revoke time-bounded delegations with full
+  retained history. Corporate-directory sign-in is deliberately not implemented: the protocol and claims
+  contract must come from a real customer identity provider rather than a generic demonstration.
 
   This is a good answer to give rather than one to dodge, because it is the shape of the whole product
   argument: the controlled, auditable half is built and evidenced, the half that needs a real deployment
@@ -87,15 +84,15 @@ These must be rehearsed verbatim, because precision is the whole argument with t
 
 ## Deliberately out of scope for this demonstration
 
-Identity federation (pull request #53) stays a draft and is not worked before the demonstration. Finishing
-it means the genuinely difficult security work — PKCE, token and signature validation, key rotation — none
-of which the room is deciding next week, and none of which can be shown without a live identity provider.
+Identity federation is not worked before the demonstration. Pull request #53 was closed unmerged during the
+1 August backlog reconciliation. Finishing federation means the genuinely difficult security work — PKCE,
+token and signature validation, key rotation — none of which can be specified or shown responsibly without a
+live identity provider and deployment contract.
 The deferral is recorded in **DEC-051**, and in full in the Workstream 4 decision record in
 `AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md`. Its trigger to resume is the first commitment to deploy
 AeroLink for an organization authenticating against its own directory. That commitment has not been made.
 
-Rebasing that branch can wait until it is genuinely picked up; rebasing an unscheduled draft only means
-doing it twice.
+If the trigger is met, create a new focused branch from current `main`; do not revive the historical draft.
 
 ## Preparation that cannot be skipped
 
@@ -105,7 +102,7 @@ at all. Both launchers and every gate ran the Vite development server, so the bu
 rendered in a browser on any platform.
 
 That is now closed. `START_AEROLINK_PRODUCTION.bat` builds the client and serves it from the API on one
-origin at `http://127.0.0.1:5080`, four browser journeys run against that artifact on every pull request
+origin at `http://127.0.0.1:5080`, production browser journeys run against that artifact on every pull request
 (DEC-052), and the path has been exercised on Windows against PostgreSQL with the FMSLIVE dataset rendering.
 
 **Still do the dry run on the presenting machine**, because that is a different machine. Two things it must
