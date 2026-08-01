@@ -445,6 +445,29 @@ type SecurityStatus = {
   recoveryCodesRemaining: number;
   activeSessions: number;
 };
+type AccountSession = {
+  id: string;
+  ipAddress: string;
+  userAgent: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+  current: boolean;
+};
+type RoleDelegationView = {
+  id: string;
+  program: string;
+  delegator: string;
+  delegateName: string;
+  role: string;
+  startsAt: string;
+  endsAt: string;
+  reason: string;
+  actor: string;
+  status: string;
+  canRevoke: boolean;
+};
 export function AccountSecurityDialog({
   api,
   onClose,
@@ -453,6 +476,8 @@ export function AccountSecurityDialog({
   onClose: () => void;
 }) {
   const [status, setStatus] = useState<SecurityStatus>(),
+    [sessions, setSessions] = useState<AccountSession[]>([]),
+    [delegations, setDelegations] = useState<RoleDelegationView[]>([]),
     [secret, setSecret] = useState(""),
     [uri, setUri] = useState(""),
     [recoveryCodes, setRecoveryCodes] = useState<string[]>([]),
@@ -461,10 +486,17 @@ export function AccountSecurityDialog({
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
-    const response = await fetch(`${api}/api/auth/security`);
-    if (!response.ok)
+    const [statusResponse, sessionsResponse, delegationsResponse] =
+      await Promise.all([
+        fetch(`${api}/api/auth/security`),
+        fetch(`${api}/api/auth/sessions`),
+        fetch(`${api}/api/delegations`),
+      ]);
+    if (!statusResponse.ok || !sessionsResponse.ok || !delegationsResponse.ok)
       throw new Error("Account security status is unavailable.");
-    setStatus(await response.json());
+    setStatus(await statusResponse.json());
+    setSessions(await sessionsResponse.json());
+    setDelegations(await delegationsResponse.json());
   }, [api]);
   useEffect(() => {
     load().catch((error) => setError(error.message));
@@ -538,6 +570,36 @@ export function AccountSecurityDialog({
       setBusy(false);
     }
   };
+  const revokeOtherSessions = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest(`${api}/api/auth/sessions/revoke-others`, {
+        method: "POST",
+      });
+      await load();
+    } catch (error) {
+      recordClientOperationFailure("identity.sessions.revoke", error);
+      setError(operationError(error, "Other sessions were not revoked."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revokeDelegation = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest(`${api}/api/delegations/${id}`, { method: "DELETE" });
+      await load();
+    } catch (error) {
+      recordClientOperationFailure("identity.delegation.revoke", error);
+      setError(operationError(error, "The delegation was not revoked."));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div
       className="identityModal securityDialog"
@@ -583,6 +645,47 @@ export function AccountSecurityDialog({
               <span>Active sessions</span>
               <b>{status.activeSessions}</b>
             </article>
+          </section>
+        )}
+        {status && (
+          <section className="securityEnrollment">
+            <h3>Sessions</h3>
+            <p>Review this account's session history and end every other active session.</p>
+            {sessions.map((session) => (
+              <article key={session.id}>
+                <b>{session.current ? "Current session" : session.revokedAt ? "Revoked session" : "Other session"}</b>
+                <span>{session.ipAddress} · {session.userAgent || "Unknown client"}</span>
+                <small>Last used {new Date(session.lastSeenAt).toLocaleString()}</small>
+              </article>
+            ))}
+            <button
+              className="securityPrimary"
+              disabled={busy || !sessions.some((x) => !x.current && !x.revokedAt && new Date(x.expiresAt) > new Date())}
+              onClick={revokeOtherSessions}
+            >
+              Revoke other active sessions
+            </button>
+          </section>
+        )}
+        {status && (
+          <section className="securityEnrollment">
+            <h3>Delegated authority</h3>
+            <p>Delegations you granted or received remain visible after expiry or revocation.</p>
+            {!delegations.length && <span>No delegation history.</span>}
+            {delegations.map((delegation) => (
+              <article key={delegation.id}>
+                <b>{delegation.program} · {programRoleLabel(delegation.role)} · {delegation.status}</b>
+                <span>{delegation.delegator} → {delegation.delegateName}</span>
+                <small>
+                  {new Date(delegation.startsAt).toLocaleString()} – {new Date(delegation.endsAt).toLocaleString()} · {delegation.reason} · created by {delegation.actor}
+                </small>
+                {delegation.canRevoke && (
+                  <button disabled={busy} onClick={() => revokeDelegation(delegation.id)}>
+                    Revoke delegation
+                  </button>
+                )}
+              </article>
+            ))}
           </section>
         )}
         {status && !status.mfaEnabled && !secret && (
@@ -865,6 +968,7 @@ type AdminUser = {
   email: string;
   state: string;
   lastLoginAt?: string;
+  isGlobalAdministrator: boolean;
   memberships: { programId: string; role: string }[];
 };
 export function AdministrationCenter({
@@ -887,7 +991,11 @@ export function AdministrationCenter({
       fetch(`${api}/api/admin/users`)
         .then(async (x) => {
           if (!x.ok) throw new Error("Administrator access required.");
-          setUsers(await x.json());
+          const loaded = (await x.json()) as AdminUser[];
+          setUsers(loaded);
+          setSelected((current) =>
+            current?.id ? loaded.find((user) => user.id === current.id) : current,
+          );
         })
         .catch((x) => setError(x.message)),
     [api],
@@ -925,10 +1033,26 @@ export function AdministrationCenter({
         body: JSON.stringify({ programId, role }),
       });
       await load();
-      setSelected(undefined);
     } catch (error) {
       recordClientOperationFailure("identity.role.grant", error);
       setError(operationError(error, "The role was not granted."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (role: string) => {
+    if (!selected || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest(
+        `${api}/api/admin/users/${selected.id}/memberships/${programId}/${role}`,
+        { method: "DELETE" },
+      );
+      await load();
+    } catch (error) {
+      recordClientOperationFailure("identity.role.revoke", error);
+      setError(operationError(error, "The role was not revoked."));
     } finally {
       setBusy(false);
     }
@@ -969,6 +1093,7 @@ export function AdministrationCenter({
               displayName: "",
               email: "",
               state: "New",
+              isGlobalAdministrator: false,
               memberships: [],
             })
           }
@@ -1038,6 +1163,7 @@ export function AdministrationCenter({
               />
               <div>
                 <b>{user.displayName}</b>
+                {user.isGlobalAdministrator && <small>Global system administrator</small>}
                 <small>
                   {user.userName} · {user.email}
                 </small>
@@ -1108,15 +1234,23 @@ export function AdministrationCenter({
                 <p className="eyebrow">PROGRAM AUTHORITY</p>
                 <h2>{selected.displayName}</h2>
                 <p>
-                  Grant an additional role for this program. Existing role
-                  history remains retained.
+                  Program roles apply only inside this Program. The global system administrator is a separate break-glass identity.
                 </p>
                 <div className="rolePicker">
-                  {grantableProgramRoles.map((x) => (
-                    <button disabled={busy} onClick={() => grant(x)} key={x}>
-                      {programRoleLabel(x)}
-                    </button>
-                  ))}
+                  {grantableProgramRoles.map((role) => {
+                    const held = selected.memberships.some(
+                      (membership) => membership.programId === programId && membership.role === role,
+                    );
+                    return held ? (
+                      <button disabled={busy} onClick={() => revoke(role)} key={role}>
+                        {programRoleLabel(role)} · Current · Revoke
+                      </button>
+                    ) : (
+                      <button disabled={busy} onClick={() => grant(role)} key={role}>
+                        Grant {programRoleLabel(role)}
+                      </button>
+                    );
+                  })}
                 </div>
               </>
             ) : (

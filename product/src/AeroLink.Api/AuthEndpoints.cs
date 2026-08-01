@@ -68,7 +68,7 @@ public static class AuthEndpoints
 
         app.MapGet("/api/auth/sessions", async (HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
         {
-            var actor=http.UserAccount();return Results.Ok(await db.UserSessions.AsNoTracking().Where(x=>x.UserId==actor.Id).OrderByDescending(x=>x.LastSeenAt).Select(x=>new{x.Id,x.IpAddress,x.UserAgent,x.CreatedAt,x.LastSeenAt,x.ExpiresAt,x.RevokedAt}).ToListAsync(ct));
+            var actor=http.UserAccount();var currentHash=IdentityService.TokenDigest(http.Request.Cookies[IdentityService.CookieName]);var sessions=await db.UserSessions.AsNoTracking().Where(x=>x.UserId==actor.Id).ToListAsync(ct);return Results.Ok(sessions.OrderByDescending(x=>x.LastSeenAt).Select(x=>new{x.Id,x.IpAddress,x.UserAgent,x.CreatedAt,x.LastSeenAt,x.ExpiresAt,x.RevokedAt,current=x.TokenHash==currentHash}));
         });
 
         app.MapPost("/api/auth/sessions/revoke-others", async (HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>

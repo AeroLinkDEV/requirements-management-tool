@@ -193,6 +193,79 @@ public sealed class SecurityBoundaryTests
         Assert.NotEqual(Guid.Empty, delegatorId);
     }
 
+    [Fact]
+    public async Task Role_session_and_delegation_lifecycle_exposes_current_state_without_erasing_history()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var administrator = factory.CreateClient();
+        await BootstrapAndLoginAdministratorAsync(administrator);
+        var now = DateTimeOffset.UtcNow;
+        Guid programId;
+        Guid delegatorId;
+        Guid delegateId;
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("Identity Lifecycle Program", "ILP");
+            var delegator = new UserAccount("identity.delegator", "Identity Delegator", "identity.delegator@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var delegateUser = new UserAccount("identity.delegate", "Identity Delegate", "identity.delegate@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(
+                program,
+                delegator,
+                delegateUser,
+                new ProgramMembership(delegator.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
+                new RoleDelegation(program.Id, delegator.Id, delegateUser.Id, ProgramRole.Engineer, now.AddHours(-2), now.AddHours(-1), "Expired coverage retained for history.", "test.setup", now.AddHours(-3)),
+                new RoleDelegation(program.Id, delegator.Id, delegateUser.Id, ProgramRole.Engineer, now.AddMinutes(-1), now.AddHours(1), "Active coverage available for revocation.", "test.setup", now));
+            await db.SaveChangesAsync();
+            programId = program.Id;
+            delegatorId = delegator.Id;
+            delegateId = delegateUser.Id;
+        }
+
+        using var granted = await administrator.PostAsJsonAsync($"/api/admin/users/{delegateId}/memberships", new { programId, role = "Engineer" });
+        Assert.Equal(HttpStatusCode.NoContent, granted.StatusCode);
+        using var duplicate = await administrator.PostAsJsonAsync($"/api/admin/users/{delegateId}/memberships", new { programId, role = "Engineer" });
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        using var lastRoleRemoved = await administrator.DeleteAsync($"/api/admin/users/{delegateId}/memberships/{programId}/Engineer");
+        Assert.Equal(HttpStatusCode.NoContent, lastRoleRemoved.StatusCode);
+
+        using var secondAdministratorSession = factory.CreateClient();
+        using var login = await secondAdministratorSession.PostAsJsonAsync("/api/auth/login", new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await AuthorizeMutationsAsync(secondAdministratorSession);
+        var sessions = await secondAdministratorSession.GetFromJsonAsync<JsonElement>("/api/auth/sessions");
+        Assert.Equal(2, sessions.EnumerateArray().Count(x => x.GetProperty("revokedAt").ValueKind == JsonValueKind.Null));
+        Assert.Single(sessions.EnumerateArray(), x => x.GetProperty("current").GetBoolean());
+        using var sessionsRevoked = await secondAdministratorSession.PostAsJsonAsync("/api/auth/sessions/revoke-others", new { });
+        Assert.Equal(HttpStatusCode.OK, sessionsRevoked.StatusCode);
+        Assert.Equal(1, (await sessionsRevoked.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("revoked").GetInt32());
+
+        using var delegatorClient = factory.CreateClient();
+        using var delegatorLogin = await delegatorClient.PostAsJsonAsync("/api/auth/login", new { userName = "identity.delegator", password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, delegatorLogin.StatusCode);
+        await AuthorizeMutationsAsync(delegatorClient);
+        var delegations = await delegatorClient.GetFromJsonAsync<JsonElement>("/api/delegations");
+        var delegationRows = delegations.EnumerateArray().ToList();
+        Assert.Contains(delegationRows, x => x.GetProperty("status").GetString() == "Expired" && !x.GetProperty("canRevoke").GetBoolean());
+        var active = Assert.Single(delegationRows, x => x.GetProperty("status").GetString() == "Active");
+        Assert.Equal("Identity Lifecycle Program", active.GetProperty("program").GetString());
+        Assert.Equal("Identity Delegator", active.GetProperty("delegator").GetString());
+        Assert.Equal("Identity Delegate", active.GetProperty("delegateName").GetString());
+        Assert.Equal("test.setup", active.GetProperty("actor").GetString());
+        Assert.True(active.GetProperty("canRevoke").GetBoolean());
+        using var revoked = await delegatorClient.DeleteAsync($"/api/delegations/{active.GetProperty("id").GetGuid()}");
+        Assert.Equal(HttpStatusCode.NoContent, revoked.StatusCode);
+        delegations = await delegatorClient.GetFromJsonAsync<JsonElement>("/api/delegations");
+        Assert.Contains(delegations.EnumerateArray(), x => x.GetProperty("status").GetString() == "Revoked");
+
+        using var verificationScope = factory.Services.CreateScope();
+        var audit = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>().SecurityAuditEvents.AsNoTracking();
+        Assert.Equal(1, await audit.CountAsync(x => x.EventType == "RoleGranted" && x.Target == delegateId.ToString()));
+        Assert.Equal(1, await audit.CountAsync(x => x.EventType == "RoleRevoked" && x.Target == delegateId.ToString()));
+        Assert.NotEqual(Guid.Empty, delegatorId);
+    }
+
     private static async Task<HttpResponseMessage> BootstrapAsync(HttpClient client, string secret, string password = AeroLinkApiFactory.AdministratorPassword)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/setup/bootstrap")
