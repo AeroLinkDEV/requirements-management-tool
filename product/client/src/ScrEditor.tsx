@@ -47,6 +47,7 @@ type SavedDraft = {
   analysisRich?: string;
   solutionRich?: string;
 };
+type ValidationError = { kind: "title" | "proposal"; message: string };
 
 const pendingImpact = JSON.stringify({
   trace: "Pending",
@@ -140,6 +141,7 @@ export default function ScrEditor({
   const [changes, setChanges] = useState<ControlledRequirementDraft[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [validationError, setValidationError] = useState<ValidationError>();
 
   // Held in this browser, because the change request does not exist on the server yet and reserving one
   // would consume an identifier for something nobody submitted.
@@ -238,11 +240,13 @@ export default function ScrEditor({
     ).length;
     return addToIdentifier(context?.requirementNumbers[prefix], count);
   };
-  const addProposal = (kind: RequirementKind, level: RequirementLevel) =>
+  const addProposal = (kind: RequirementKind, level: RequirementLevel) => {
+    if (validationError?.kind === "proposal") setValidationError(undefined);
     setChanges((items) => [
       ...items,
       createProposal(level, kind, kind === "Introduce" ? nextIdentifier(level) : ""),
     ]);
+  };
 
   /**
    * Changes what a proposal *does* to a requirement, after the card exists.
@@ -257,7 +261,8 @@ export default function ScrEditor({
    * Retiring keeps no statement: the wording that stands is the one already in the baseline, and a proposal
    * that both retires a requirement and restates it is two different intentions in one row.
    */
-  const changeKind = (index: number, kind: RequirementKind) =>
+  const changeKind = (index: number, kind: RequirementKind) => {
+    if (validationError?.kind === "proposal") setValidationError(undefined);
     setChanges((items) =>
       items.map((item, position) => {
         if (position !== index || item.kind === kind) return item;
@@ -271,11 +276,13 @@ export default function ScrEditor({
         };
       }),
     );
+  };
   const updateProposal = (
     index: number,
     key: keyof ControlledRequirementDraft,
     value: string | number | boolean,
-  ) =>
+  ) => {
+    if (validationError?.kind === "proposal") setValidationError(undefined);
     setChanges((items) =>
       items.map((item, position) => {
         if (position !== index) return item;
@@ -288,6 +295,7 @@ export default function ScrEditor({
         return next;
       }),
     );
+  };
 
   const caseComplete = [title, problem, analysis, solution].every((value) => value.trim());
   const proposalsComplete =
@@ -302,7 +310,7 @@ export default function ScrEditor({
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!title.trim()) {
-      setError("Title of change request must be filled out before save is available.");
+      setValidationError({ kind: "title", message: "Title of change request must be filled out before save is available." });
       return;
     }
     // An untouched proposal card is a blank form row, not a proposal, so it is not sent. A *partly* filled one
@@ -316,11 +324,13 @@ export default function ScrEditor({
       (item) => item.kind !== "Retire" && !item.statement.trim(),
     );
     if (missingStatement.length) {
-      setError(
-        `Add a statement to ${missingStatement.map((item) => item.baseNumber || "the new requirement").join(", ")}, or clear the card, before saving this Draft.`,
-      );
+      setValidationError({
+        kind: "proposal",
+        message: `Add a statement to ${missingStatement.map((item) => item.baseNumber || "the new requirement").join(", ")}, or clear the card, before saving this Draft.`,
+      });
       return;
     }
+    setValidationError(undefined);
     setSaving(true);
     setError("");
     try {
@@ -441,7 +451,10 @@ export default function ScrEditor({
               Title
               <input
                 value={title}
-                onChange={(event) => setTitle(event.target.value)}
+                onChange={(event) => {
+                  setTitle(event.target.value);
+                  if (validationError?.kind === "title") setValidationError(undefined);
+                }}
                 placeholder="A concise, decision-ready description"
               />
             </label>
@@ -495,7 +508,10 @@ export default function ScrEditor({
                 identityLocked={Boolean(change.baseNumber)}
                 onChange={(key, value) => updateProposal(index, key, value)}
                 onKindChange={(kind) => changeKind(index, kind)}
-                onRemove={() => setChanges((items) => items.filter((_, position) => position !== index))}
+                onRemove={() => {
+                  if (validationError?.kind === "proposal") setValidationError(undefined);
+                  setChanges((items) => items.filter((_, position) => position !== index));
+                }}
               />
             ))}
           </div>
@@ -511,6 +527,7 @@ export default function ScrEditor({
         </section>
 
         {error && <div className="formError" role="alert">{error}</div>}
+        {validationError && <div className="formError" role="alert">{validationError.message}</div>}
         <footer className="editorActions">
           <p>
             Saving creates an attributable server-side Draft. Review begins only after check-in and reviewer selection.
@@ -531,4 +548,3 @@ export default function ScrEditor({
     </main>
   );
 }
-
