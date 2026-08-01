@@ -33,6 +33,11 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
  useEffect(()=>{setStateIntent(initialStateIntent);setScrPage(1)},[initialStateIntent])
  const changeStateIntent=(intent?:HistoryStateIntent)=>{setStateIntent(intent);setScrPage(1);onStateIntentChange(intent)}
  const visibleScrs=scrs.filter(x=>matchesStateIntent(x.state,stateIntent))
+ const emptyState=query
+  ?<div className="historyEmpty">No {scope.toLowerCase()} change requests match “{query}”{stateIntent?` within the ${stateLabels[stateIntent].toLowerCase()} filter`:''} for Build {activeRelease?.version}. <button type="button" onClick={()=>{setQuery('');setScrPage(1)}}>Clear search</button></div>
+  :stateIntent
+   ?<div className="historyEmpty">No {stateLabels[stateIntent].toLowerCase()} {scope.toLowerCase()} change requests match Build {activeRelease?.version}. <button type="button" onClick={()=>changeStateIntent(undefined)}>Clear lifecycle filter</button></div>
+   :<div className="historyEmpty">No {scope.toLowerCase()} change requests are recorded for Build {activeRelease?.version}.</div>
  const [expanded,setExpanded]=useState<Record<string,Scr[]|'loading'>>({})
  const toggleRevisions=async(row:Scr)=>{
   if(expanded[row.baseNumber]){setExpanded(current=>{const next={...current};delete next[row.baseNumber];return next});return}
@@ -70,6 +75,6 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
     {behind==='loading'&&<div className="revisionHistory"><span>Loading earlier revisions…</span></div>}
     {Array.isArray(behind)&&<div className="revisionHistory">{behind.map(prior=><button className="historyRow allocation superseded" key={prior.id} onClick={()=>onOpenScr(prior.id)}><div><b>{prior.displayNumber}</b><p>{prior.title}</p><small>{prior.requirementCount} requirement changes · <span className="personMeta"><i>{identityInitials(prior.authorId)}</i>{identityLabel(prior.authorId)}</span></small></div><span className="allocationCell">{changeRequestAllocation(facts(prior))}</span><i className="historyState superseded" data-state="Superseded">{changeRequestState(facts(prior,true))}</i><time>{new Date(prior.updatedAt).toLocaleString()}</time></button>)}</div>}
    </div>
-  })}{!visibleScrs.length&&<div className="historyEmpty">No {stateIntent?stateLabels[stateIntent].toLowerCase()+' ':''}{scope.toLowerCase()} change requests are recorded for Build {activeRelease?.version}.</div>}{scrTotalPages>1&&<div className="historyPager"><button type="button" disabled={scrPage<=1} onClick={()=>setScrPage(page=>Math.max(1,page-1))}>← Previous</button><span>Page {scrPage} of {scrTotalPages} · {scrTotal} records</span><button type="button" disabled={scrPage>=scrTotalPages} onClick={()=>setScrPage(page=>Math.min(scrTotalPages,page+1))}>Next →</button></div>}</section>
+  })}{!visibleScrs.length&&emptyState}{scrTotalPages>1&&<div className="historyPager"><button type="button" disabled={scrPage<=1} onClick={()=>setScrPage(page=>Math.max(1,page-1))}>← Previous</button><span>Page {scrPage} of {scrTotalPages} · {scrTotal} records</span><button type="button" disabled={scrPage>=scrTotalPages} onClick={()=>setScrPage(page=>Math.min(scrTotalPages,page+1))}>Next →</button></div>}</section>
  </main>
 }
