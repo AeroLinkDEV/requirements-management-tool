@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import "./LifecycleExplorer.css";
 import "./ControlledDownloads.css";
 import DocumentActions from "./DocumentActions";
+import { documentTypeLabel } from "./presentation";
 
 type Baseline = { id: string; releaseId: string; releaseVersion: string; displayNumber: string; name: string; requirementsMaterializedAt?: string };
 type Document = { id: string; type: string; displayNumber: string; title: string; contentHash: string; artifactCount: number; release: string; baselineId: string; baseline: string; generatedAt: string };
@@ -262,15 +263,15 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
             projectId={projectId}
             release={{ id: activeReleaseId, version: activeVersion, isReleased: false }}
             targets={[
-              { type: "Sysrd", label: "System Requirements Document" },
-              { type: "SwrdHighLevel", label: "Software Requirements Document — High-Level" },
-              { type: "SwrdLowLevel", label: "Software Requirements Document — Low-Level" },
+              { type: "Sysrd", label: documentTypeLabel("Sysrd") },
+              { type: "SwrdHighLevel", label: documentTypeLabel("SwrdHighLevel") },
+              { type: "SwrdLowLevel", label: documentTypeLabel("SwrdLowLevel") },
             ]}
             heading={`Draft documents for ${activeVersion}`}
           />
         ) : <>
         <div className="documentActions"><select value={baselineId} onChange={(event) => setBaselineId(event.target.value)}>{baselines.map((item) => <option value={item.id} key={item.id}>{item.displayNumber} · {item.name}</option>)}</select><button onClick={generate}>Generate / refresh outputs</button></div>
-        <section className="documentGrid">{documents.map((item) => <article key={item.id}><div><span>{item.type.replace(/([A-Z])/g, " $1").trim()}</span><i>CONTROLLED</i></div><h2>{item.displayNumber}</h2><h3>{item.title}</h3><dl><div><dt>Release</dt><dd>{item.release}</dd></div><div><dt>Baseline</dt><dd>{item.baseline}</dd></div><div><dt>Artifacts</dt><dd>{item.artifactCount.toLocaleString()}</dd></div><div><dt>Generated</dt><dd>{new Date(item.generatedAt).toLocaleDateString()}</dd></div></dl><code>{item.contentHash}</code><div className="downloadLinks"><a href={`${api}/api/documents/${item.id}/download?format=docx`}>Download DOCX</a><a href={`${api}/api/documents/${item.id}/download?format=pdf`}>Download PDF</a></div></article>)}{!loading && !documents.length && <div className="traceEmpty"><b>No outputs for this baseline</b><p>Generate controlled documents only after the selected requirement baseline has been materialized.</p></div>}</section>
+        <section className="documentGrid">{documents.map((item) => <article key={item.id}><div><span>{documentTypeLabel(item.type)}</span><i>CONTROLLED</i></div><h2>{item.displayNumber}</h2><h3>{item.title}</h3><dl><div><dt>Release</dt><dd>{item.release}</dd></div><div><dt>Baseline</dt><dd>{item.baseline}</dd></div><div><dt>Artifacts</dt><dd>{item.artifactCount.toLocaleString()}</dd></div><div><dt>Generated</dt><dd>{new Date(item.generatedAt).toLocaleDateString()}</dd></div></dl><code>{item.contentHash}</code><div className="downloadLinks"><a href={`${api}/api/documents/${item.id}/download?format=docx`}>Download DOCX</a><a href={`${api}/api/documents/${item.id}/download?format=pdf`}>Download PDF</a></div></article>)}{!loading && !documents.length && <div className="traceEmpty"><b>No outputs for this baseline</b><p>Generate controlled documents only after the selected requirement baseline has been materialized.</p></div>}</section>
         </>}
       </>}
     </main>

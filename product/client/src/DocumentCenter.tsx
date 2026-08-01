@@ -1,6 +1,6 @@
 import DocumentActions from "./DocumentActions";
 import type { Discipline } from "./routing";
-import type { DocumentTarget } from "./presentation";
+import { documentTypeLabel, type DocumentTarget } from "./presentation";
 
 type Props = {
   api: string;
@@ -12,17 +12,17 @@ type Props = {
 
 const targets = (discipline: Discipline): DocumentTarget[] => {
   if (discipline === "system")
-    return [{ type: "Sysrd", label: "System Requirements Document" }];
+    return [{ type: "Sysrd", label: documentTypeLabel("Sysrd") }];
   if (discipline === "software")
     return [
-      { type: "SwrdHighLevel", label: "Software Requirements Document — HLR" },
-      { type: "SwrdLowLevel", label: "Software Requirements Document — LLR" },
+      { type: "SwrdHighLevel", label: documentTypeLabel("SwrdHighLevel") },
+      { type: "SwrdLowLevel", label: documentTypeLabel("SwrdLowLevel") },
     ];
   if (discipline === "systemTest")
-    return [{ type: "SystemTestProcedures", label: "System Test Procedure Document" }];
+    return [{ type: "SystemTestProcedures", label: documentTypeLabel("SystemTestProcedures") }];
   return [
-    { type: "HighLevelTestProcedures", label: "HLR Test Procedure Document" },
-    { type: "LowLevelTestProcedures", label: "LLR Test Procedure Document" },
+    { type: "HighLevelTestProcedures", label: documentTypeLabel("HighLevelTestProcedures") },
+    { type: "LowLevelTestProcedures", label: documentTypeLabel("LowLevelTestProcedures") },
   ];
 };
 

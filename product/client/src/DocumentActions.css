@@ -38,6 +38,20 @@
   font: 700 13px Manrope, sans-serif;
 }
 
+.documentOutput .draftStatus {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border: 1px solid #d9b66d;
+  border-radius: 999px;
+  background: #fff7e6;
+  color: #7a5716;
+  font: 800 10px Manrope, sans-serif;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
 .documentOutput small {
   color: #66768b;
   font-size: 12px;

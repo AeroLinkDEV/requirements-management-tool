@@ -6,6 +6,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Contracts;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -96,6 +97,16 @@ static class ProblemReportIntegrationMap
 
 static class ApiMap
 {
+    public static string ControlledDocumentTypeLabel(ControlledDocumentType type) => type switch
+    {
+        ControlledDocumentType.Sysrd => "System Requirements Document (SYSRD)",
+        ControlledDocumentType.SwrdHighLevel => "High-Level Software Requirements Document (HLRD)",
+        ControlledDocumentType.SwrdLowLevel => "Low-Level Software Requirements Document (LLRD)",
+        ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document (SYSTD)",
+        ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedure Document (HLRTD)",
+        _ => "LLR Test Procedure Document (LLRTD)"
+    };
+
     private static readonly Regex LegacyRequirementNumber = new(@"\b(SYSR|HLR|LLR)-0*([0-9]{1,6})(\.[0-9]{2})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     public static string CanonicalAuditDetail(string detail) => LegacyRequirementNumber.Replace(detail, match =>
         $"{match.Groups[1].Value.ToUpperInvariant()}-{int.Parse(match.Groups[2].Value):D6}{match.Groups[3].Value}");

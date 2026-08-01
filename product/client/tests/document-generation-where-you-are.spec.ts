@@ -21,7 +21,8 @@ test('the requirements explorer offers the document for the build being read', a
   // 1.6 is in work, so what is on offer is a draft, and it says so rather than saying "generate".
   const drafts = page.getByRole('region', { name: /Draft documents for 1\.6/ })
   await expect(drafts).toBeVisible()
-  await expect(drafts.getByText('System Requirements Document')).toBeVisible()
+  await expect(drafts.getByText('System Requirements Document (SYSRD)')).toBeVisible()
+  await expect(drafts.getByText('Draft', { exact: true })).toBeVisible()
   await expect(drafts.getByRole('link', { name: 'Draft DOCX' })).toHaveAttribute(
     'href', /\/api\/releases\/[0-9a-f-]+\/draft-document\?type=Sysrd&format=docx/)
   await expect(drafts.getByRole('link', { name: 'Draft PDF' })).toBeVisible()
