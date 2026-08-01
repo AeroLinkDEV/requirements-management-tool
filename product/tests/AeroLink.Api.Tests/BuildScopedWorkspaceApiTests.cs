@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -86,6 +87,35 @@ public sealed class BuildScopedWorkspaceApiTests
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", seeded.InWorkId.ToString());
         using var inWork = await client.PostAsJsonAsync("/api/scr-drafts", new { });
         Assert.NotEqual(HttpStatusCode.Conflict, inWork.StatusCode);
+    }
+
+    [Fact]
+    public async Task My_work_orders_drafts_within_their_priority_tier_by_earliest_due_date()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var seeded = await SeedAsync(factory);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.SystemChangeRequests.Add(new SystemChangeRequest("SCR-16002", 0, seeded.ProjectId,
+                seeded.InWorkId, "Earlier due Draft", "P", "A", "S", "build.user",
+                DateTimeOffset.UtcNow.AddDays(-30), ChangeRequestType.System));
+            await db.SaveChangesAsync();
+        }
+
+        await SignInAsync(client);
+        var body = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/my-work?projectId={seeded.ProjectId}&releaseId={seeded.InWorkId}");
+        var drafts = body.GetProperty("tasks").EnumerateArray()
+            .Where(task => task.GetProperty("type").GetString() == "Draft to complete").ToList();
+
+        Assert.Equal(2, drafts.Count);
+        Assert.Equal("Earlier due Draft", drafts[0].GetProperty("title").GetString());
+        Assert.True(drafts[0].GetProperty("dueAt").GetDateTimeOffset()
+            < drafts[1].GetProperty("dueAt").GetDateTimeOffset());
+        Assert.Equal(2, body.GetProperty("summary").GetProperty("drafts").GetInt32());
     }
 
     [Fact]
