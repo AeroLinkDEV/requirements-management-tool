@@ -144,11 +144,11 @@ public static class ChangeRequestEndpoints
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             var prefixes = type == ChangeRequestType.System ? new[] { "SYSR" } : new[] { "HLR", "LLR" };
             var numbers = new Dictionary<string, string>();
-            foreach (var prefix in prefixes) numbers[prefix] = await IdentifierAllocator.NextRequirementAsync(db, prefix, ct);
+            foreach (var prefix in prefixes) numbers[prefix] = await IdentifierAllocator.PreviewRequirementAsync(db, prefix, ct);
             return Results.Ok(new
             {
                 type = type.ToString(),
-                changeRequestNumber = await IdentifierAllocator.NextChangeRequestAsync(db, type, ct),
+                changeRequestNumber = await IdentifierAllocator.PreviewChangeRequestAsync(db, type, ct),
                 author = new { http.UserAccount().UserName, http.UserAccount().DisplayName },
                 requirementNumbers = numbers
             });
