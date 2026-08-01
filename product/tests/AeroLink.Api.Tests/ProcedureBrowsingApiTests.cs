@@ -153,6 +153,40 @@ public sealed class ProcedureBrowsingApiTests
     }
 
     [Fact]
+    public async Task Software_HLR_and_LLR_scopes_return_only_their_own_procedures()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var projectId = await SeedAsync(factory, 0);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var hlr = new TestProcedure(projectId, "HLRTP-000001", "Verify HLR", "test.author", now, TestProcedureLevel.HighLevel);
+            var llr = new TestProcedure(projectId, "LLRTP-000001", "Verify LLR", "test.author", now, TestProcedureLevel.LowLevel);
+            db.AddRange(hlr, llr,
+                new TestProcedureRevision(hlr.Id, 0, "HLR", "Ready", "Run", "Pass", TestProcedureState.Draft, "test.author", now),
+                new TestProcedureRevision(llr.Id, 0, "LLR", "Ready", "Run", "Pass", TestProcedureState.Draft, "test.author", now));
+            await db.SaveChangesAsync();
+        }
+        await SignInAsync(client);
+
+        Assert.Equal(["HLRTP-000001.00"], Numbers(await PageAsync(client, projectId, "&scope=HighLevelSoftware")));
+        Assert.Equal(["LLRTP-000001.00"], Numbers(await PageAsync(client, projectId, "&scope=LowLevelSoftware")));
+    }
+
+    [Fact]
+    public async Task Search_accepts_a_full_display_number_with_revision()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var projectId = await SeedAsync(factory, 1);
+        await SignInAsync(client);
+
+        Assert.Equal(["SYSTP-00000001.01"], Numbers(await PageAsync(client, projectId, "&search=SYSTP-00000001.01")));
+    }
+
+    [Fact]
     public async Task The_procedure_list_is_not_readable_without_access_to_the_project()
     {
         using var factory = new AeroLinkApiFactory();

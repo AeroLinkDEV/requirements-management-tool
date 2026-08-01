@@ -116,7 +116,7 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
         ("systems.reviewer", "Systems Engineer", "systems.reviewer@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
         ("assurance.reviewer", "Development Assurance Reviewer", "assurance@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
         ("lead.reviewer", "Maya Patel", "maya.patel@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver]),
-        ("software.lead", "Software Engineering Lead", "software.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver, ProgramRole.SoftwareEngineeringLead]),
+        ("software.lead", "Rina Shah", "software.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver, ProgramRole.SoftwareEngineeringLead]),
         ("systems.lead", "Systems Engineering Lead", "systems.lead@aerolink.local", [ProgramRole.Reviewer, ProgramRole.Approver, ProgramRole.SystemEngineeringLead]),
         ("engineering.manager", "Engineering Manager", "engineering.manager@aerolink.local", [ProgramRole.ProgramManager, ProgramRole.Approver, ProgramRole.EngineeringManager]),
         // Named, like the rest of the cast. "Engineering Manager" is what this person does, not who they are,

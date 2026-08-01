@@ -33,7 +33,7 @@ test('coverage opens on the work the build created, then the inventory behind it
   // And the browsable procedure library, which used to be a tab of its own and was the only way to find a
   // procedure by number.
   await expect(page.getByRole('heading', { name: 'Test procedures' })).toBeVisible()
-  await page.getByLabel('Find a procedure').fill('SYSTP-000001')
+  await page.getByLabel('Find a procedure').fill('SYSTP-000001.00')
   const row = page.locator('.procedureLibrary .coverageRow').filter({ hasText: 'SYSTP-000001' })
   await expect(row.first()).toBeVisible({ timeout: 30_000 })
 })
@@ -108,6 +108,9 @@ test('a procedure says who wrote it and what drove each revision', async ({ page
 
   await history.getByRole('button', { name: 'Close' }).click()
   await expect(history).toHaveCount(0)
+  await expect(page).not.toHaveURL(/procedure=/)
+  await expect(page.getByLabel('Find a procedure')).toHaveValue('')
+  await expect(page.locator('.procedureLibrary .coverageRow').first()).toBeVisible()
 })
 
 test('software HLR and LLR each have their own coverage page', async ({ page }) => {
@@ -120,6 +123,9 @@ test('software HLR and LLR each have their own coverage page', async ({ page }) 
   await page.getByRole('link', { name: 'Software HLR Testing Coverage' }).click()
   await expect(page).toHaveURL(/software-verification\/hlr\/coverage$/, { timeout: 30_000 })
   await expect(page.getByText('VERIFICATION / SOFTWARE HLR')).toBeVisible()
+  await expect(page.locator('.coverageSummary article').first().locator('b')).toHaveText('400', { timeout: 30_000 })
+  await expect(page.locator('.procedureLibrary .cardTitle')).toContainText('160 controlled software hlr procedures', { timeout: 30_000 })
+  await expect(page.locator('.procedureLibrary')).not.toContainText('LLRTP-')
   // The showcase raises one HLR package for this build. This page reported none for a while, and nothing had
   // failed: two loaders on the page shared one "only the newest reply may write the screen" counter, so the
   // procedure search cancelled the load that was fetching the packages. Asserting the package here is what
@@ -130,6 +136,9 @@ test('software HLR and LLR each have their own coverage page', async ({ page }) 
   await page.getByRole('link', { name: 'Software LLR Testing Coverage' }).click()
   await expect(page).toHaveURL(/software-verification\/llr\/coverage$/, { timeout: 30_000 })
   await expect(page.getByText('VERIFICATION / SOFTWARE LLR')).toBeVisible()
+  await expect(page.locator('.coverageSummary article').first().locator('b')).toHaveText('700', { timeout: 30_000 })
+  await expect(page.locator('.procedureLibrary .cardTitle')).toContainText('280 controlled software llr procedures', { timeout: 30_000 })
+  await expect(page.locator('.procedureLibrary')).not.toContainText('HLRTP-')
 })
 
 /**
@@ -246,6 +255,7 @@ test('the full requirement coverage table is one toggle away', async ({ page }) 
 
   const toggle = page.getByRole('button', { name: /Show all \d+ requirements/ })
   await expect(toggle).toBeVisible({ timeout: 30_000 })
+  await expect.poll(async () => Number(/Show all (\d+)/.exec((await toggle.textContent()) ?? '')?.[1] ?? 0), { timeout: 30_000 }).toBeGreaterThan(0)
   const listed = Number(/Show all (\d+)/.exec((await toggle.textContent()) ?? '')?.[1] ?? 0)
   await toggle.click()
   await expect(page.getByRole('button', { name: 'Show only what needs attention' })).toBeVisible()

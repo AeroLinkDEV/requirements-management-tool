@@ -107,6 +107,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [saved, setSaved] = useState('')
   const [creating, setCreating] = useState(false)
   const [approving, setApproving] = useState<Procedure>()
+  const [reviewDecision, setReviewDecision] = useState<{ request: TestChangeRequest; action: 'approve' | 'return' }>()
   const [submitting, setSubmitting] = useState<TestChangeRequest>()
   const [reviewApprover, setReviewApprover] = useState({ userId: '', name: '' })
   const [procedureApprover, setProcedureApprover] = useState({ userId: '', name: '' })
@@ -132,7 +133,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   // software HLR queue being empty while the API demonstrably returned a package for that build.
   const loadTicket = useRef(0)
   const procedureTicket = useRef(0)
-  const scope = discipline === 'System' ? 'System' : 'Software'
+  const scope = discipline
 
   const load = useCallback(async () => {
     const mine = ++loadTicket.current
@@ -167,7 +168,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     if (mine !== loadTicket.current) return
     if (rawCoverage) {
       // Coverage is computed for the whole configuration; this page speaks for one discipline.
-      const items = rawCoverage.items.filter(x => scope === 'System' ? x.displayNumber.startsWith('SYSR-') : !x.displayNumber.startsWith('SYSR-'))
+      const prefix = discipline === 'System' ? 'SYSR-' : discipline === 'HighLevelSoftware' ? 'HLR-' : 'LLR-'
+      const items = rawCoverage.items.filter(x => x.displayNumber.startsWith(prefix))
       setCoverage({
         items,
         total: items.length,
@@ -188,7 +190,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       recordClientOperationFailure('verification.coverage.load', new Error(`HTTP ${coverageResponse.status}`))
       setError('The requirement coverage for this build could not be read.')
     }
-  }, [api, projectId, releaseId, scope])
+  }, [api, projectId, releaseId, scope, discipline])
 
   useEffect(() => { void load() }, [load])
 
@@ -356,6 +358,16 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     setHistory(await response.json())
   }, [api, releaseId])
 
+  const closeHistory = () => {
+    setHistory(undefined)
+    const params = new URLSearchParams(location.search)
+    params.delete('procedureId')
+    params.delete('procedureRevisionId')
+    params.delete('procedure')
+    window.history.replaceState({}, '', `${location.pathname}${params.toString() ? `?${params}` : ''}`)
+    setQuery('')
+  }
+
   useEffect(() => {
     if (openingProcedureId) void openHistory(openingProcedureId, openingProcedureRevisionId || undefined)
   }, [openHistory, openingProcedureId, openingProcedureRevisionId])
@@ -414,14 +426,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               )}
               {request.capabilities.canApprove && (
                 <>
-                  <button type="button" disabled={busy} onClick={() => {
-                    const rationale = window.prompt(`Why is ${request.displayNumber} approved?`)
-                    if (rationale?.trim()) void advance(request, 'approve', rationale)
-                  }}>Approve</button>
-                  <button type="button" className="quiet" disabled={busy} onClick={() => {
-                    const rationale = window.prompt(`Why is ${request.displayNumber} going back?`)
-                    if (rationale?.trim()) void advance(request, 'return', rationale)
-                  }}>Return</button>
+                  <button type="button" disabled={busy} onClick={() => setReviewDecision({ request, action: 'approve' })}>Approve</button>
+                  <button type="button" className="quiet" disabled={busy} onClick={() => setReviewDecision({ request, action: 'return' })}>Return</button>
                 </>
               )}
             </div>
@@ -533,7 +539,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       <section className="coverageCard procedureLibrary">
         <div className="cardTitle">
           <h2>Test procedures</h2>
-          <p>{total} controlled {scope.toLowerCase()} procedure{total === 1 ? '' : 's'}. Open one to see who wrote it and what changed it.</p>
+          <p>{total} controlled {disciplineLabel(discipline).toLowerCase()} procedure{total === 1 ? '' : 's'}. Open one to see who wrote it and what changed it.</p>
           {!readOnly && (
             <button
               type="button"
@@ -644,7 +650,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             </label>
             <label>Independent approver</label>
             <PersonPicker api={api} projectId={projectId} value={procedureApprover.userId} name={procedureApprover.name}
-              index={9101} label="Independent procedure approver" onSelect={setProcedureApprover} />
+              index={9101} label="Independent procedure approver" excludeUserNames={[user.userName]} onSelect={setProcedureApprover} />
             <div className="decisionActions">
               <button type="submit" disabled={busy || !procedureApprover.userId}>Create procedure</button>
               <button type="button" className="quiet" disabled={busy} onClick={() => setCreating(false)}>Cancel</button>
@@ -663,7 +669,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <h2>Send {submitting.displayNumber} for approval</h2>
             <p>Select the person who will independently review this exact package of test-procedure decisions.</p>
             <PersonPicker api={api} projectId={projectId} value={reviewApprover.userId} name={reviewApprover.name}
-              index={9102} label="Independent test change request approver" onSelect={setReviewApprover} />
+              index={9102} label="Independent test change request approver" excludeUserNames={[submitting.assignedEngineerId??user.userName,user.userName]} onSelect={setReviewApprover} />
             <div className="decisionActions">
               <button type="submit" disabled={busy || !reviewApprover.userId}>Send for approval</button>
               <button type="button" className="quiet" onClick={() => setSubmitting(undefined)}>Cancel</button>
@@ -679,6 +685,30 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           onCancel={() => setApproving(undefined)}
           onSign={(password, meaning) => approveProcedure(approving, password, meaning)}
         />
+      )}
+
+      {reviewDecision && (
+        <div className="decisionModal" role="dialog" aria-label={`${reviewDecision.action === 'approve' ? 'Approve' : 'Return'} ${reviewDecision.request.displayNumber}`}>
+          <form onSubmit={event => {
+            event.preventDefault()
+            const rationale = String(new FormData(event.currentTarget).get('rationale') ?? '').trim()
+            if (!rationale) return
+            const selected = reviewDecision
+            setReviewDecision(undefined)
+            void advance(selected.request, selected.action, rationale)
+          }}>
+            <p className="eyebrow">INDEPENDENT REVIEW</p>
+            <h2>{reviewDecision.action === 'approve' ? 'Approve' : 'Return'} {reviewDecision.request.displayNumber}</h2>
+            <p>{reviewDecision.action === 'approve'
+              ? 'Record why this exact package of test-procedure decisions is acceptable.'
+              : 'State what the test engineer must update before this package can be approved.'}</p>
+            <label>Rationale<textarea name="rationale" required autoFocus /></label>
+            <div className="decisionActions">
+              <button type="button" className="quiet" disabled={busy} onClick={() => setReviewDecision(undefined)}>Cancel</button>
+              <button type="submit" disabled={busy}>{reviewDecision.action === 'approve' ? 'Approve package' : 'Return for changes'}</button>
+            </div>
+          </form>
+        </div>
       )}
 
       {reopening && (
@@ -779,7 +809,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                 </li>
               ))}
             </ol>
-            <button type="button" onClick={() => setHistory(undefined)}>Close</button>
+            <button type="button" onClick={closeHistory}>Close</button>
           </div>
         </div>
       )}

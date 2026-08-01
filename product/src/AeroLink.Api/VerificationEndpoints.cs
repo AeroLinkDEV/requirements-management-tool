@@ -229,7 +229,16 @@ public static class VerificationEndpoints
             }
             if(string.Equals(scope,"System",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.System);
             else if(string.Equals(scope,"Software",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.HighLevel||x.Level==TestProcedureLevel.LowLevel);
-            if (!string.IsNullOrWhiteSpace(search)) { var q = search.Trim().ToLower(); source = source.Where(x => x.BaseNumber.ToLower().Contains(q) || x.Title.ToLower().Contains(q)); }
+            else if(string.Equals(scope,"HighLevelSoftware",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.HighLevel);
+            else if(string.Equals(scope,"LowLevelSoftware",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.LowLevel);
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var q = search.Trim().ToLower();
+                // Deep links use the controlled display number, including its revision suffix, while the
+                // procedure owns only the base number. Let either form find the same controlled procedure.
+                var baseQuery = q.Length > 3 && q[^3] == '.' && int.TryParse(q[^2..], out _) ? q[..^3] : q;
+                source = source.Where(x => x.BaseNumber.ToLower().Contains(baseQuery) || x.Title.ToLower().Contains(q));
+            }
             if (!string.IsNullOrWhiteSpace(owner)) { var o = owner.Trim().ToLower(); source = source.Where(x => x.OwnerId.ToLower() == o); }
             // Lifecycle state belongs to the current revision, so the predicate names it rather than matching
             // any revision a procedure has ever had.

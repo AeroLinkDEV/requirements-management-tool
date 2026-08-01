@@ -24,7 +24,7 @@ const people: Record<string, DemoPerson> = {
   "program.manager": { name: "Olivia Chen", role: "Program Manager", portrait: oliviaChen },
   "release.manager": { name: "Daniel Reyes", role: "Release Manager", portrait: danielReyes },
   "cm.fms": { name: "Daniel Reyes", role: "Configuration Manager", portrait: danielReyes },
-  "software.lead": { name: "Daniel Reyes", role: "Software Lead", portrait: danielReyes },
+  "software.lead": { name: "Rina Shah", role: "Software Engineering Lead", portrait: "" },
   "software.author": { name: "Daniel Reyes", role: "Software Lead", portrait: danielReyes },
 };
 
