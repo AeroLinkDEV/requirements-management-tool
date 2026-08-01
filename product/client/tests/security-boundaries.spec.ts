@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
-import { apiBase, apiLogin, showcaseSeed } from './auth'
+import { apiBase, apiLogin, firstSectionId, showcaseSeed } from './auth'
 
 test('mutation authentication and Program-scoped discovery prevent direct-object access',async({request,playwright})=>{
  const anonymous=await playwright.request.newContext();const deniedSeed=await anonymous.post(`${apiBase}/api/showcase/seed`);expect(deniedSeed.status()).toBe(401)
@@ -32,8 +32,9 @@ test('mutation authentication and Program-scoped discovery prevent direct-object
 test('Program scope protects dashboards, signatures, impacts, directories, and baseline views',async({request,playwright})=>{
  await apiLogin(request)
  const showcase=await showcaseSeed(request)
- const draftsResponse=await request.get(`${apiBase}/api/scrs?projectId=${showcase.projectId}&state=Draft&page=1&pageSize=200`);expect(draftsResponse.ok(),await draftsResponse.text()).toBeTruthy();const drafts=await draftsResponse.json();expect(drafts.items.length).toBeGreaterThan(0);const signedArtifact=drafts.items.find((x:any)=>x.authorId==='systems.author'||x.authorId==='software.author');expect(signedArtifact).toBeTruthy()
- const author=await playwright.request.newContext();const authorLogin=await author.post(`${apiBase}/api/auth/login`,{data:{userName:signedArtifact.authorId,password:'AeroLink!2026'}});expect(authorLogin.ok(),await authorLogin.text()).toBeTruthy();const submitted=await author.post(`${apiBase}/api/scrs/${signedArtifact.id}/submit`,{data:{actorId:signedArtifact.authorId,expectedVersion:null,approvers:[{userId:'admin',name:'AeroLink Administrator'}],mode:'Sequential'}});expect(submitted.ok(),await submitted.text()).toBeTruthy();await author.dispose()
+ const author=await playwright.request.newContext();const authorLogin=await author.post(`${apiBase}/api/auth/login`,{data:{userName:'systems.author',password:'AeroLink!2026'}});expect(authorLogin.ok(),await authorLogin.text()).toBeTruthy()
+ const created=await author.post(`${apiBase}/api/scr-drafts`,{data:{projectId:showcase.projectId,targetReleaseId:showcase.activeReleaseId,type:'System',title:`Tenant isolation signature ${Date.now()}`,problem:'Signature visibility must remain Program scoped.',analysis:'A dedicated System fixture avoids dependence on seeded software proposals.',solution:'Approve one controlled System requirement change.',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:await firstSectionId(request,showcase.projectId),statement:'The FMS shall preserve Program isolation for approval signatures.',rationale:'Tenant isolation qualification.',verificationMethod:'Inspection'}]}});expect(created.ok(),await created.text()).toBeTruthy();const signedArtifact=await created.json()
+ const submitted=await author.post(`${apiBase}/api/scrs/${signedArtifact.id}/submit`,{data:{expectedVersion:signedArtifact.version,approvers:[{userId:'admin',name:'AeroLink Administrator'}],mode:'Sequential'}});expect(submitted.ok(),await submitted.text()).toBeTruthy();await author.dispose()
  const approved=await request.post(`${apiBase}/api/scrs/${signedArtifact.id}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved as a tenant-isolation signature probe.',expectedVersion:null}});expect(approved.ok(),await approved.text()).toBeTruthy()
  const campaignsResponse=await request.get(`${apiBase}/api/release-campaigns?projectId=${showcase.projectId}`);expect(campaignsResponse.ok(),await campaignsResponse.text()).toBeTruthy();const campaigns=await campaignsResponse.json();expect(campaigns.length).toBeGreaterThan(0)
  const campaignResponse=await request.get(`${apiBase}/api/release-campaigns/${campaigns[0].id}`);expect(campaignResponse.ok(),await campaignResponse.text()).toBeTruthy();const campaign=await campaignResponse.json();expect(campaign.impacts.length).toBeGreaterThan(0)

@@ -270,7 +270,8 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
                 revision = x.Revision, level = x.Level.ToString(), kind = x.Kind.ToString(),
                 statement = x.Statement, rationale = x.Rationale, verificationMethod = x.VerificationMethod,
                 richText = x.RichText, attributesJson = x.AttributesJson,
-                impactDispositionJson = x.ImpactDispositionJson, targetSectionId = x.TargetSectionId }) });
+                impactDispositionJson = x.ImpactDispositionJson, targetSectionId = x.TargetSectionId,
+                upstreamRevisionIds = ProposedParents(x.ProposedUpstreamRevisionIdsJson) }) });
 
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
         bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
@@ -342,7 +343,8 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
                 level != RequirementLevel.System && isDerived);
             normalized.Add(new(baseNumber, revision, level, kind, raw.Statement ?? "", raw.Rationale ?? "",
                 raw.VerificationMethod ?? "", raw.RichText ?? "", attributes,
-                raw.ImpactDispositionJson ?? "{}", raw.TargetSectionId));
+                raw.ImpactDispositionJson ?? "{}", raw.TargetSectionId,
+                JsonSerializer.Serialize(raw.UpstreamRevisionIds ?? ProposedParents(preserved?.ProposedUpstreamRevisionIdsJson))));
         }
         return normalized;
     }
@@ -362,7 +364,14 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     private sealed record SystemChangeRequestRequirementDraft(string? BaseNumber, int Revision,
         string? Level, string? Kind, string? Statement, string? Rationale, string? VerificationMethod,
         string? RichText, string? AttributesJson, string? ImpactDispositionJson, bool? IsDerived = null,
-        Guid? TargetSectionId = null);
+        Guid? TargetSectionId = null, List<Guid>? UpstreamRevisionIds = null);
+
+    private static IReadOnlyList<Guid> ProposedParents(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try { return JsonSerializer.Deserialize<List<Guid>>(json) ?? []; }
+        catch (JsonException) { return []; }
+    }
 }
 
 public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
@@ -393,7 +402,8 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
         JsonSerializer.Serialize(new { item.Id, item.BaseNumber, item.Revision,
             level = item.Level.ToString(), kind = item.Kind.ToString(), item.Statement, item.Rationale,
             item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
-            targetSectionId = item.TargetSectionId, parentVersion });
+            targetSectionId = item.TargetSectionId,
+            upstreamRevisionIds = ProposedParents(item.ProposedUpstreamRevisionIdsJson), parentVersion });
 
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
         bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
@@ -423,10 +433,11 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
             ? new RequirementChangeDraft(current.BaseNumber, current.Revision, current.Level, current.Kind,
                 draft.Statement ?? "", draft.Rationale ?? "", draft.VerificationMethod ?? "",
                 draft.RichText ?? "", attributes, draft.ImpactDispositionJson ?? "{}",
-                draft.TargetSectionId ?? current.TargetSectionId)
+                draft.TargetSectionId ?? current.TargetSectionId,
+                JsonSerializer.Serialize(draft.UpstreamRevisionIds ?? ProposedParents(current.ProposedUpstreamRevisionIdsJson)))
             : new RequirementChangeDraft(item.BaseNumber, item.Revision, item.Level, item.Kind, item.Statement,
                 item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson,
-                item.ImpactDispositionJson, item.TargetSectionId)).ToList();
+                item.ImpactDispositionJson, item.TargetSectionId, item.ProposedUpstreamRevisionIdsJson)).ToList();
         parent.UpdateDraft(actor, parent.Title, parent.Problem, parent.Analysis, parent.Solution, changes, now,
             parent.ProblemRich, parent.AnalysisRich, parent.SolutionRich);
     }
@@ -444,7 +455,14 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
     private sealed record ProposalDraft(string? BaseNumber, int Revision, string? Level, string? Kind,
         string? Statement, string? Rationale, string? VerificationMethod, string? RichText,
         string? AttributesJson, string? ImpactDispositionJson, Guid? TargetSectionId = null,
-        bool? IsDerived = null);
+        bool? IsDerived = null, List<Guid>? UpstreamRevisionIds = null);
+
+    private static IReadOnlyList<Guid> ProposedParents(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try { return JsonSerializer.Deserialize<List<Guid>>(json) ?? []; }
+        catch (JsonException) { return []; }
+    }
 }
 
 public sealed class SpecificationStructureControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter

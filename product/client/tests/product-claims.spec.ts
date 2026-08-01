@@ -116,12 +116,10 @@ test('the assurance surface states the boundary rather than leaving it to be inf
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
 
-  const links = page.locator('nav[aria-label="Primary navigation"] a[href]')
-  await expect(links.first()).toBeAttached({ timeout: 30_000 })
-  const enterprise = (
-    await links.evaluateAll(nodes => nodes.map(node => (node as HTMLAnchorElement).getAttribute('href') ?? ''))
-  ).find(href => href.includes('/enterprise-control'))
-  expect(enterprise, 'Enterprise Control should be reachable from the navigation').toBeTruthy()
+  const enterpriseLink = page.locator('nav[aria-label="Primary navigation"] a[href*="/enterprise-control"]')
+  await expect(enterpriseLink, 'Enterprise Control should be reachable from the navigation').toBeAttached({ timeout: 30_000 })
+  const enterprise = await enterpriseLink.getAttribute('href')
+  expect(enterprise).toBeTruthy()
 
   await page.goto(enterprise!, { waitUntil: 'load' })
   await page.getByRole('button', { name: 'Assurance', exact: true }).click()

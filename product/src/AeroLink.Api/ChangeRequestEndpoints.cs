@@ -190,6 +190,37 @@ public static class ChangeRequestEndpoints
                 currentSectionId = sectionByArtifact.TryGetValue(x.Id, out var sectionId) ? sectionId : (Guid?)null }));
         });
 
+        app.MapGet("/api/authoring/upstream-requirements", async (Guid projectId, Guid releaseId,
+            RequirementLevel childLevel, string? search, string? selected, int? limit, HttpContext http, AeroLinkDbContext db,
+            CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var parentLevel = childLevel switch
+            {
+                RequirementLevel.HighLevel => RequirementLevel.System,
+                RequirementLevel.LowLevel => RequirementLevel.HighLevel,
+                _ => (RequirementLevel?)null
+            };
+            if (parentLevel is null)
+                return Results.BadRequest(new { error = "Only HLR and LLR proposals have an upward allocation." });
+            var baselineId = await BuildScope.EffectiveBaselineAsync(db, projectId, releaseId, ct);
+            if (baselineId is null) return Results.Ok(Array.Empty<object>());
+            var source = from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
+                         join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == parentLevel) on member.ArtifactId equals artifact.Id
+                         join revision in db.RequirementRevisions.AsNoTracking().Where(x => x.State == RequirementRevisionState.Active) on member.RevisionId equals revision.Id
+                         select new { revisionId = revision.Id, artifact.BaseNumber, revision.Revision, revision.Statement };
+            var selectedIds = (selected ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => Guid.TryParse(x, out var id) ? id : Guid.Empty).Where(x => x != Guid.Empty).ToList();
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim().ToLowerInvariant();
+                source = source.Where(x => selectedIds.Contains(x.revisionId) || x.BaseNumber.ToLower().Contains(term) || x.Statement.ToLower().Contains(term));
+            }
+            else if (selectedIds.Count > 0) source = source.Where(x => selectedIds.Contains(x.revisionId));
+            var rows = await source.OrderBy(x => x.BaseNumber).Take(Math.Clamp(Math.Max(limit ?? 12, selectedIds.Count), 1, 50)).ToListAsync(ct);
+            return Results.Ok(rows.Select(x => new { x.revisionId, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", level = parentLevel.ToString(), x.Statement }));
+        });
+
         // What the traceability graph says a proposed change touches.
         //
         // A change request already asks its author to close five impact decisions — trace, verification,
@@ -406,6 +437,10 @@ public static class ChangeRequestEndpoints
                         return Results.BadRequest(new { error = "A Software SWCR can contain only HLR and LLR changes." });
                     if (change.IsDerived && string.IsNullOrWhiteSpace(change.Rationale))
                         return Results.BadRequest(new { error = "Every derived software requirement requires an explicit engineering rationale." });
+                    var upstreamError = await UpstreamAllocationRefusalAsync(db, request.ProjectId,
+                        request.TargetReleaseId, change.Level, change.IsDerived,
+                        change.UpstreamRevisionIds ?? [], false, ct);
+                    if (upstreamError is not null) return Results.BadRequest(new { error = upstreamError });
                     string requirementNumber; int revision;
                     if (change.Kind == RequirementChangeKind.Introduce)
                     {
@@ -433,7 +468,7 @@ public static class ChangeRequestEndpoints
                     if (sectionError is not null) return Results.BadRequest(new { error = sectionError });
                     scr.AddRequirementChange(actor, requirementNumber, revision, change.Level, change.Kind,
                         change.Statement, change.Rationale, change.VerificationMethod, now, change.RichText, attributes, change.ImpactDispositionJson,
-                        change.TargetSectionId);
+                        change.TargetSectionId, proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(change.UpstreamRevisionIds ?? []));
                 }
                 await repository.AddAsync(scr, ct);
                 await repository.SaveAsync(ct);
@@ -475,6 +510,10 @@ public static class ChangeRequestEndpoints
                     var sectionError = await TargetSectionRefusalAsync(db, scr.ProjectId, change.Level,
                         change.TargetSectionId, ct, change.Kind);
                     if (sectionError is not null) return Results.BadRequest(new { error = sectionError });
+                    var upstreamError = await UpstreamAllocationRefusalAsync(db, scr.ProjectId,
+                        scr.TargetReleaseId, change.Level, RequirementAuthoringJson.IsDerived(change.AttributesJson),
+                        ProposedUpstreamRevisionIds(change.ProposedUpstreamRevisionIdsJson), true, ct);
+                    if (upstreamError is not null) return Results.BadRequest(new { error = upstreamError });
                 }
                 var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
                 if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every approver must be an active AeroLink user." });
@@ -648,6 +687,37 @@ public static class ChangeRequestEndpoints
                             select node.Id).AnyAsync(ct);
         return exists ? null :
             $"The selected {level} specification section is no longer available. Reopen the Draft and choose another section.";
+    }
+
+    private static IReadOnlyList<Guid> ProposedUpstreamRevisionIds(string json)
+    {
+        try { return JsonSerializer.Deserialize<List<Guid>>(json) ?? []; }
+        catch (JsonException) { return []; }
+    }
+
+    private static async Task<string?> UpstreamAllocationRefusalAsync(AeroLinkDbContext db, Guid projectId,
+        Guid releaseId, RequirementLevel childLevel, bool derived, IReadOnlyCollection<Guid> selected,
+        bool requireComplete, CancellationToken ct)
+    {
+        if (childLevel == RequirementLevel.System)
+            return selected.Count == 0 ? null : "System requirements cannot carry a software upward allocation.";
+        if (derived)
+            return selected.Count == 0 ? null : "A derived requirement uses its documented rationale instead of an upstream allocation.";
+        if (selected.Count == 0)
+            return requireComplete ? $"Allocate the proposed {(childLevel == RequirementLevel.HighLevel ? "HLR" : "LLR")} to at least one current upstream requirement before review." : null;
+        if (selected.Any(x => x == Guid.Empty) || selected.Distinct().Count() != selected.Count)
+            return "Every proposed upstream allocation must name a distinct controlled revision.";
+        if (!await db.Releases.AsNoTracking().AnyAsync(x => x.Id == releaseId && x.ProjectId == projectId, ct))
+            return "The selected build does not belong to this Project.";
+        var baselineId = await BuildScope.EffectiveBaselineAsync(db, projectId, releaseId, ct);
+        if (baselineId is null) return "The selected build has no controlled baseline for upward allocation.";
+        var expectedLevel = childLevel == RequirementLevel.HighLevel ? RequirementLevel.System : RequirementLevel.HighLevel;
+        var valid = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId && selected.Contains(x.RevisionId))
+                           join revision in db.RequirementRevisions.AsNoTracking().Where(x => x.State == RequirementRevisionState.Active) on member.RevisionId equals revision.Id
+                           join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == expectedLevel) on member.ArtifactId equals artifact.Id
+                           select revision.Id).Distinct().ToListAsync(ct);
+        return valid.Count == selected.Count ? null :
+            $"Every proposed upstream allocation must be a current {expectedLevel} revision from this Project and build.";
     }
 
     private static HashSet<string> AttributeKeys(string attributesJson)

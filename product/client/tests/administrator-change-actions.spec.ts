@@ -40,6 +40,7 @@ test('administrator actions work identically for another authors System and Soft
           rationale: 'Controlled recovery must remain attributable.',
           verificationMethod: 'Inspection',
           impactDispositionJson: completeImpacts,
+          isDerived: discipline.type === 'Software',
         }],
       } })
       expect(response.ok(), await response.text()).toBeTruthy()

@@ -214,7 +214,9 @@ public sealed class AdministratorChangeRequestApiTests
                 "Problem", "Analysis", "Solution", "change.author", now, type);
             item.AddRequirementChange("change.author", requirementNumber, 0, level,
                 RequirementChangeKind.Introduce, "The product shall preserve governed state.",
-                "Controlled rationale.", "Test", now, targetSectionId: section.Id);
+                "Controlled rationale.", "Test", now,
+                attributesJson: type == ChangeRequestType.Software ? "{\"derived\":true}" : "{}",
+                targetSectionId: section.Id);
             return item;
         }
     }
