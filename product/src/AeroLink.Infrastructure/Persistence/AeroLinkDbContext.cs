@@ -241,6 +241,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.RichText).HasMaxLength(200000);
             b.Property(x => x.AttributesJson).IsRequired();
             b.Property(x => x.ImpactDispositionJson).IsRequired();
+            b.Property(x => x.ProposedUpstreamRevisionIdsJson).IsRequired();
             b.Ignore(x => x.DisplayNumber);
             b.HasIndex(x => new { x.ScrId, x.BaseNumber, x.Revision }).IsUnique();
             b.HasIndex(x => x.BaseNumber);

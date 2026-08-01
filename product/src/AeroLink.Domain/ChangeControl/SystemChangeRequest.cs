@@ -77,17 +77,20 @@ public sealed class SystemChangeRequest
         RequirementLevel level, RequirementChangeKind kind, string statement, string rationale,
         string verificationMethod, DateTimeOffset now, string richText = "", string attributesJson = "{}",
         string impactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
-        Guid? targetSectionId = null, bool administratorAuthority = false)
+        Guid? targetSectionId = null, bool administratorAuthority = false,
+        string proposedUpstreamRevisionIdsJson = "[]")
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
         if (string.IsNullOrWhiteSpace(statement) && kind != RequirementChangeKind.Retire)
             throw new DomainException("A requirement statement is required.");
         var change = new RequirementChange(Id, baseNumber, revision, level, kind, statement, rationale, verificationMethod,
-            richText, attributesJson, impactDispositionJson, targetSectionId);
+            richText, attributesJson, impactDispositionJson, targetSectionId, proposedUpstreamRevisionIdsJson);
         _requirementChanges.Add(change);
         UpdatedAt = now;
-        Audit("RequirementChangeAdded", actorId, $"Added {change.Kind} {change.DisplayNumber}.", now);
+        Audit("RequirementChangeAdded", actorId,
+            $"Added {change.Kind} {change.DisplayNumber}" +
+            (RequirementAuthoringJson.IsDerived(change.AttributesJson) ? " as a derived requirement with a documented rationale." : "."), now);
         return change;
     }
 
@@ -108,10 +111,12 @@ public sealed class SystemChangeRequest
                 throw new DomainException("A requirement statement is required unless the requirement is being retired.");
             _requirementChanges.Add(new RequirementChange(Id, item.BaseNumber, item.Revision, item.Level, item.Kind,
                 item.Statement, item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
-                item.TargetSectionId));
+                item.TargetSectionId, item.ProposedUpstreamRevisionIdsJson));
         }
         UpdatedAt = now;
-        Audit("ScrDraftUpdated", actorId, $"Updated {DisplayNumber} Draft with {changes.Count} proposed requirement changes.", now);
+        var derivedCount = _requirementChanges.Count(x => RequirementAuthoringJson.IsDerived(x.AttributesJson));
+        Audit("ScrDraftUpdated", actorId,
+            $"Updated {DisplayNumber} Draft with {changes.Count} proposed requirement changes and {derivedCount} documented derived exception(s).", now);
     }
 
     public ReviewCycle SubmitForReview(string actorId, IReadOnlyList<ApproverSelection> approvers,
@@ -246,7 +251,7 @@ public sealed class SystemChangeRequest
         foreach (var item in _requirementChanges)
             next.AddRequirementChange(actorId, item.BaseNumber, item.Revision, item.Level, item.Kind,
                 item.Statement, item.Rationale, item.VerificationMethod, now, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
-                item.TargetSectionId, administratorAuthority);
+                item.TargetSectionId, administratorAuthority, item.ProposedUpstreamRevisionIdsJson);
         return next;
     }
 
@@ -383,7 +388,7 @@ public sealed class SystemChangeRequest
         var content = string.Join("|", DisplayNumber, Title, Problem, Analysis, Solution,
             ProblemRich, AnalysisRich, SolutionRich,
             string.Join(";", _requirementChanges.OrderBy(x => x.DisplayNumber).Select(x =>
-                $"{x.DisplayNumber}:{x.Level}:{x.Kind}:{x.Statement}:{x.Rationale}:{x.VerificationMethod}:{x.RichText}:{x.AttributesJson}:{x.ImpactDispositionJson}")));
+                $"{x.DisplayNumber}:{x.Level}:{x.Kind}:{x.Statement}:{x.Rationale}:{x.VerificationMethod}:{x.RichText}:{x.AttributesJson}:{x.ImpactDispositionJson}:{x.ProposedUpstreamRevisionIdsJson}")));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
     }
 

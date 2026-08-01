@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -74,6 +76,24 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         // Requirement revisions exist for the first time here, so this is the earliest point at which
         // verification work can bind to them, coverage can carry forward, and a stranded procedure is visible.
         await verificationImpact.ApplyMaterializationAsync(baseline.ProjectId, baseline.ReleaseId, materialized, now, ct);
+
+        var revisionByChange = materialized.ToDictionary(x => x.RequirementChangeId, x => x.RevisionId);
+        var proposed = scrs.SelectMany(x => x.RequirementChanges.Select(change => new { Scr = x, Change = change }))
+            .SelectMany(x => ProposedParents(x.Change).Select(parent => new { x.Scr, x.Change, Parent = parent }))
+            .ToList();
+        var existingTraceKeys = (await db.RequirementTraces.AsNoTracking()
+                .Where(x => x.ProjectId == baseline.ProjectId)
+                .Select(x => new { x.SourceRevisionId, x.TargetRevisionId, x.Type }).ToListAsync(ct))
+            .Select(x => (x.SourceRevisionId, x.TargetRevisionId, x.Type)).ToHashSet();
+        foreach (var allocation in proposed)
+        {
+            if (!revisionByChange.TryGetValue(allocation.Change.Id, out var source)) continue;
+            var key = (source, allocation.Parent, RequirementTraceType.AllocatedFrom);
+            if (!existingTraceKeys.Add(key)) continue;
+            db.RequirementTraces.Add(new RequirementTraceLink(baseline.ProjectId, source, allocation.Parent,
+                RequirementTraceType.AllocatedFrom,
+                $"Prospective upward allocation approved in {allocation.Scr.DisplayNumber}: {allocation.Change.Rationale}", now));
+        }
 
         await PlaceInChosenSectionsAsync(baseline.ProjectId, scrs, artifactByBase, actorId, now, ct);
 
@@ -161,6 +181,12 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
     private static RequirementRevision CreateRevision(RequirementArtifact artifact, RequirementChange change, Guid scrId,
         Guid baselineId, DateTimeOffset now, RequirementRevisionState state) =>
         new(artifact.Id, change.Revision, change.Statement, change.Rationale, change.VerificationMethod, state, scrId, baselineId, now);
+
+    private static IReadOnlyList<Guid> ProposedParents(RequirementChange change)
+    {
+        try { return JsonSerializer.Deserialize<List<Guid>>(change.ProposedUpstreamRevisionIdsJson) ?? []; }
+        catch (JsonException) { return []; }
+    }
 
     private void AddProfile(RequirementRevision revision,RequirementChange change,IReadOnlyDictionary<string,ArtifactSchemaDefinition> schemas,string actor,DateTimeOffset now)
     {

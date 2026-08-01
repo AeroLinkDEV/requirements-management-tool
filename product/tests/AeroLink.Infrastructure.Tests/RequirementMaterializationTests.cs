@@ -3,7 +3,9 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Domain.Traceability;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -37,6 +39,59 @@ public sealed class RequirementMaterializationTests
             Assert.Single(await db.BaselineRequirements.Where(x => x.BaselineId == first.Id).ToListAsync());
             var secondMember = await db.BaselineRequirements.SingleAsync(x => x.BaselineId == second.Id); Assert.Equal(history[1].Id, secondMember.RevisionId);
             Assert.Empty(await db.BaselineRequirements.Where(x => x.BaselineId == third.Id).ToListAsync());
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Proposed_one_and_many_parent_allocations_materialize_as_exact_links_across_supersession()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-upstream-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync(); var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("FMS", "FMST"); var project = new ProjectRecord(program.Id, "Software", "FMS Software"); var release = new SoftwareRelease(project.Id, "1.6", false);
+            db.AddRange(program, project, release); await db.SaveChangesAsync();
+
+            var system = new SystemChangeRequest("SCR-00001", 0, project.Id, release.Id, "System parents", "P", "A", "S", "author", now);
+            system.AddRequirementChange("author", "SYSR-000001", 0, RequirementLevel.System, RequirementChangeKind.Introduce, "The system shall navigate.", "Parent one.", "Test", now);
+            system.AddRequirementChange("author", "SYSR-000002", 0, RequirementLevel.System, RequirementChangeKind.Introduce, "The system shall monitor position.", "Parent two.", "Test", now);
+            system.SubmitForReview("author", [new("reviewer", "Reviewer")], now); system.ApproveActiveStage("reviewer", now);
+            var first = FrozenBaseline("SYSBL-000001", project.Id, release.Id, null, system, now); db.AddRange(system, first); await db.SaveChangesAsync();
+            await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(first.Id, "cm", now, default);
+            var parents = await (from artifact in db.Requirements.Where(x => x.Level == RequirementLevel.System)
+                                 join revision in db.RequirementRevisions on artifact.Id equals revision.ArtifactId
+                                 orderby artifact.BaseNumber select revision.Id).ToListAsync();
+
+            var software = new SystemChangeRequest("SWCR-00001", 0, project.Id, release.Id, "Software allocations", "P", "A", "S", "author", now, ChangeRequestType.Software);
+            software.AddRequirementChange("author", "HLR-000001", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "The software shall navigate.", "One-to-one allocation.", "Test", now,
+                proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(new[] { parents[0] }));
+            software.AddRequirementChange("author", "HLR-000002", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "The software shall monitor navigation integrity.", "Many-to-one allocation.", "Test", now,
+                proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(parents));
+            software.SubmitForReview("author", [new("reviewer", "Reviewer")], now); software.ApproveActiveStage("reviewer", now);
+            var second = FrozenBaseline("SYSBL-000002", project.Id, release.Id, first.Id, software, now); db.AddRange(software, second); await db.SaveChangesAsync();
+            await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(second.Id, "cm", now, default);
+
+            var links = await db.RequirementTraces.AsNoTracking().Where(x => x.Type == RequirementTraceType.AllocatedFrom).ToListAsync();
+            Assert.Equal(3, links.Count);
+            Assert.Equal(parents.Order(), links.Select(x => x.TargetRevisionId).Distinct().Order());
+            var firstHlrRevision = await (from artifact in db.Requirements.Where(x => x.BaseNumber == "HLR-000001")
+                                          join revision in db.RequirementRevisions on artifact.Id equals revision.ArtifactId
+                                          select revision).SingleAsync();
+            Assert.Contains(links, x => x.SourceRevisionId == firstHlrRevision.Id && x.TargetRevisionId == parents[0]);
+
+            var revise = new SystemChangeRequest("SWCR-00002", 0, project.Id, release.Id, "Supersede allocated HLR", "P", "A", "S", "author", now, ChangeRequestType.Software);
+            revise.AddRequirementChange("author", "HLR-000001", 1, RequirementLevel.HighLevel, RequirementChangeKind.Modify, "The software shall navigate with integrity monitoring.", "Reassessed allocation.", "Test", now,
+                proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(new[] { parents[0] }));
+            revise.SubmitForReview("author", [new("reviewer", "Reviewer")], now); revise.ApproveActiveStage("reviewer", now);
+            var third = FrozenBaseline("SYSBL-000003", project.Id, release.Id, second.Id, revise, now); db.AddRange(revise, third); await db.SaveChangesAsync();
+            await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(third.Id, "cm", now, default);
+
+            var hlrHistory = await db.RequirementRevisions.Where(x => x.ArtifactId == firstHlrRevision.ArtifactId).OrderBy(x => x.Revision).ToListAsync();
+            Assert.Equal(new[] { 0, 1 }, hlrHistory.Select(x => x.Revision));
+            Assert.Contains(await db.RequirementTraces.AsNoTracking().ToListAsync(), x => x.SourceRevisionId == hlrHistory[0].Id && x.TargetRevisionId == parents[0]);
+            Assert.Contains(await db.RequirementTraces.AsNoTracking().ToListAsync(), x => x.SourceRevisionId == hlrHistory[1].Id && x.TargetRevisionId == parents[0]);
         }
         finally { File.Delete(path); }
     }

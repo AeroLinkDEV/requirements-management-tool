@@ -68,6 +68,8 @@ test('Software Draft keeps downstream impact with consuming engineers before an 
   await page.getByLabel('Requirement statement').fill('The software shall require explicit review readiness decisions.')
   // A new requirement must be given a place in the document before it can be sent for review.
   await page.getByLabel('Section for proposal 1').selectOption({ index: 1 })
+  await page.locator('.derivedControl button').click()
+  await page.getByLabel('Rationale').fill('Architecture-derived behavior for this isolated software workspace.')
   await page.getByRole('textbox',{name:'Author',exact:true}).fill('software.author')
   await page.getByRole('button',{name:'Save SWCR Draft'}).click()
 

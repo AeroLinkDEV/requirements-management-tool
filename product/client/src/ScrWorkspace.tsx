@@ -33,6 +33,7 @@ type Requirement = {
   attributesJson: string;
   impactDispositionJson: string;
   targetSectionId?: string;
+  upstreamRevisionIds?: string[];
 };
 /// What this change does to the requirement, as a noun.
 ///
@@ -226,6 +227,7 @@ const createRequirement = (
   isDerived: false,
   // Empty means unchanged, as in the new change request editor.
   targetSectionId: "",
+  upstreamRevisionIds: [],
 });
 const normalizeRequirement = (
   item: Partial<DraftRequirement>,
@@ -261,6 +263,7 @@ const mapRequirements = (items: Requirement[]) =>
         attributesJson: item.attributesJson,
         impactDispositionJson: item.impactDispositionJson,
         targetSectionId: item.targetSectionId ?? "",
+        upstreamRevisionIds: item.upstreamRevisionIds ?? [],
       },
       item.level,
     ),
@@ -270,7 +273,10 @@ const proposalComplete = (item: DraftRequirement) =>
     item.baseNumber &&
       (item.kind === "Retire" || item.statement.trim()) &&
       (!(item.isDerived ?? parseObject(item.attributesJson).derived === true) ||
-        item.rationale.trim()),
+        item.rationale.trim()) &&
+      (item.level === "System" ||
+        (item.isDerived ?? parseObject(item.attributesJson).derived === true) ||
+        Boolean(item.upstreamRevisionIds?.length)),
   );
 
 /**
@@ -736,7 +742,7 @@ export default function ScrWorkspace({
   const updateRequirement = (
     index: number,
     key: keyof DraftRequirement,
-    value: string | number | boolean,
+    value: string | number | boolean | string[],
   ) =>
     setRequirements((items) =>
       items.map((item, position) => {
@@ -997,6 +1003,7 @@ export default function ScrWorkspace({
               <ControlledRequirementEditor
                 api={api}
                 projectId={scr.projectId}
+                releaseId={scr.targetReleaseId}
                 scope={scr.type}
                 item={item}
                 index={index}
@@ -1167,6 +1174,13 @@ export default function ScrWorkspace({
                   <article className="requirementView" key={item.id}>
                     <div><b>{item.displayNumber}</b><span>{changeKindLabel(item.kind)}</span></div>
                     <p>{item.kind === "Retire" && !item.statement ? "Requirement will be retired." : item.statement}</p>
+                    {item.level !== "System" && (
+                      <p>
+                        {parseObject(item.attributesJson).derived === true
+                          ? `Derived exception — ${item.rationale}`
+                          : `${item.upstreamRevisionIds?.length ?? 0} exact upstream revision${item.upstreamRevisionIds?.length === 1 ? "" : "s"} allocated`}
+                      </p>
+                    )}
                     <footer><small>{item.verificationMethod} · {item.rationale || "No rationale recorded"}</small><em>Downstream impact assessed after approval</em></footer>
                   </article>
                 );

@@ -24,6 +24,7 @@ export type ControlledRequirementDraft = {
    * requirement where it is, and let the existing placement rule decide for a new one.
    */
   targetSectionId?: string;
+  upstreamRevisionIds?: string[];
 };
 
 type TracedImpact = {
@@ -60,17 +61,24 @@ type ExistingRequirement = {
   verificationMethod: string;
   state: string;
 };
+type UpstreamRequirement = {
+  revisionId: string;
+  displayNumber: string;
+  level: RequirementLevel;
+  statement: string;
+};
 
 type Props = {
   api: string;
   projectId: string;
+  releaseId: string;
   scope: "System" | "Software";
   item: ControlledRequirementDraft;
   index: number;
   identityLocked: boolean;
   onChange: (
     key: keyof ControlledRequirementDraft,
-    value: string | number | boolean,
+    value: string | number | boolean | string[],
   ) => void;
   /**
    * Changes what this proposal does to a requirement. Separate from `onChange` because the kind decides what
@@ -105,6 +113,7 @@ const levelLabel = (level: RequirementLevel) =>
 export default function ControlledRequirementEditor({
   api,
   projectId,
+  releaseId,
   scope,
   item,
   index,
@@ -118,6 +127,9 @@ export default function ControlledRequirementEditor({
   const [results, setResults] = useState<ExistingRequirement[]>([]);
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupError, setLookupError] = useState("");
+  const [upstreamQuery, setUpstreamQuery] = useState("");
+  const [upstreamResults, setUpstreamResults] = useState<UpstreamRequirement[]>([]);
+  const [knownUpstreams, setKnownUpstreams] = useState<Record<string, UpstreamRequirement>>({});
 
   const setAttribute = (key: string, value: unknown) =>
     onChange("attributesJson", JSON.stringify({ ...attributes, [key]: value }));
@@ -254,6 +266,33 @@ export default function ControlledRequirementEditor({
   }, [api, projectId, item.kind, item.baseNumber]);
 
   const derived = item.isDerived ?? attributes.derived === true;
+  const selectedUpstreams = useMemo(
+    () => item.upstreamRevisionIds ?? [],
+    [item.upstreamRevisionIds],
+  );
+  useEffect(() => {
+    if (scope !== "Software" || derived) {
+      setUpstreamResults([]);
+      return;
+    }
+    const term = upstreamQuery.trim();
+    if (term.length < 2 && selectedUpstreams.length === 0) {
+      setUpstreamResults([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      fetch(`${api}/api/authoring/upstream-requirements?projectId=${projectId}&releaseId=${releaseId}&childLevel=${item.level}&search=${encodeURIComponent(term)}&selected=${encodeURIComponent(selectedUpstreams.join(","))}&limit=12`)
+        .then((response) => response.ok ? response.json() as Promise<UpstreamRequirement[]> : [])
+        .then((rows) => {
+          if (cancelled) return;
+          setUpstreamResults(term.length >= 2 ? rows : []);
+          setKnownUpstreams((current) => ({ ...current, ...Object.fromEntries(rows.map((row) => [row.revisionId, row])) }));
+        })
+        .catch(() => { if (!cancelled) setUpstreamResults([]); });
+    }, 180);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [api, derived, item.level, projectId, releaseId, scope, selectedUpstreams, upstreamQuery]);
   const displayNumber = item.kind === "Introduce"
     ? `New ${levelLabel(item.level)} requirement`
     : item.baseNumber
@@ -536,8 +575,10 @@ export default function ControlledRequirementEditor({
                       aria-pressed={derived}
                       className={derived ? "active" : ""}
                       onClick={() => {
-                        onChange("isDerived", !derived);
-                        setAttribute("derived", !derived);
+                        const nextDerived = !derived;
+                        onChange("isDerived", nextDerived);
+                        setAttribute("derived", nextDerived);
+                        if (nextDerived) onChange("upstreamRevisionIds", []);
                       }}
                     >
                       <i>{derived ? "✓" : "○"}</i>
@@ -549,6 +590,50 @@ export default function ControlledRequirementEditor({
                   </label>
                 )}
               </div>
+              {scope === "Software" && !derived && (
+                <section className="proposalLookup" aria-label={`Upstream allocation for proposal ${index + 1}`}>
+                  <div>
+                    <b>Prospective upward allocation</b>
+                    <span>
+                      {item.level === "HighLevel" ? "Select one or more current System requirement revisions." : "Select one or more current HLR revisions."}
+                    </span>
+                  </div>
+                  {!!selectedUpstreams.length && (
+                    <div className="roleCloud">
+                      {selectedUpstreams.map((revisionId) => (
+                        <button type="button" key={revisionId} onClick={() => onChange("upstreamRevisionIds", selectedUpstreams.filter((id) => id !== revisionId))}>
+                          {knownUpstreams[revisionId]?.displayNumber ?? `Controlled revision ${revisionId.slice(0, 8)}`} · Remove
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <label>
+                    Find upstream requirement
+                    <input
+                      aria-label={`Find upstream requirement ${index + 1}`}
+                      value={upstreamQuery}
+                      onChange={(event) => setUpstreamQuery(event.target.value)}
+                      placeholder="Search identifier or requirement wording"
+                    />
+                  </label>
+                  {!!upstreamResults.length && (
+                    <div className="proposalLookupResults">
+                      {upstreamResults.map((result) => (
+                        <button
+                          type="button"
+                          key={result.revisionId}
+                          disabled={selectedUpstreams.includes(result.revisionId)}
+                          onClick={() => onChange("upstreamRevisionIds", [...selectedUpstreams, result.revisionId])}
+                        >
+                          <span><b>{result.displayNumber}</b><small>{levelLabel(result.level)}</small></span>
+                          <p>{result.statement}</p>
+                          <em>{selectedUpstreams.includes(result.revisionId) ? "Allocated" : "Allocate ↑"}</em>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
             </div>
           </details>
         </section>

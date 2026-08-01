@@ -9,7 +9,8 @@ public sealed record RequirementChangeDraft(string BaseNumber, int Revision, Req
     RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod,
     string RichText = "", string AttributesJson = "{}",
     string ImpactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
-    Guid? TargetSectionId = null);
+    Guid? TargetSectionId = null,
+    string ProposedUpstreamRevisionIdsJson = "[]");
 
 public sealed class RequirementChange
 {
@@ -19,7 +20,7 @@ public sealed class RequirementChange
         RequirementChangeKind kind, string statement, string rationale, string verificationMethod,
         string richText = "", string attributesJson = "{}",
         string impactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
-        Guid? targetSectionId = null)
+        Guid? targetSectionId = null, string proposedUpstreamRevisionIdsJson = "[]")
     {
         Id = Guid.NewGuid();
         ScrId = scrId;
@@ -39,6 +40,9 @@ public sealed class RequirementChange
         AttributesJson = string.IsNullOrWhiteSpace(attributesJson) ? "{}" : attributesJson;
         ImpactDispositionJson = string.IsNullOrWhiteSpace(impactDispositionJson) ? "{}" : impactDispositionJson;
         TargetSectionId = targetSectionId;
+        ProposedUpstreamRevisionIdsJson = string.IsNullOrWhiteSpace(proposedUpstreamRevisionIdsJson)
+            ? "[]"
+            : proposedUpstreamRevisionIdsJson;
     }
 
     public Guid Id { get; private set; }
@@ -54,6 +58,7 @@ public sealed class RequirementChange
     public string RichText { get; private set; } = string.Empty;
     public string AttributesJson { get; private set; } = "{}";
     public string ImpactDispositionJson { get; private set; } = "{}";
+    public string ProposedUpstreamRevisionIdsJson { get; private set; } = "[]";
 
     /// <summary>
     /// Which section of the specification this requirement belongs in, as the author chose it.

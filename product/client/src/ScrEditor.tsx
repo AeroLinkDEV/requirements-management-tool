@@ -90,6 +90,7 @@ const createProposal = (
   // Empty means unchanged: leave a modified requirement where it is, and let the existing placement rule decide
   // where a newly introduced one goes.
   targetSectionId: "",
+  upstreamRevisionIds: [],
 });
 const normalizeProposal = (
   value: Partial<ControlledRequirementDraft>,
@@ -280,7 +281,7 @@ export default function ScrEditor({
   const updateProposal = (
     index: number,
     key: keyof ControlledRequirementDraft,
-    value: string | number | boolean,
+    value: string | number | boolean | string[],
   ) => {
     if (validationError?.kind === "proposal") setValidationError(undefined);
     setChanges((items) =>
@@ -305,7 +306,10 @@ export default function ScrEditor({
         item.baseNumber &&
         (item.kind === "Retire" || item.statement.trim()) &&
         (!(item.isDerived ?? parseObject(item.attributesJson).derived === true) ||
-          item.rationale.trim()),
+          item.rationale.trim()) &&
+        (item.level === "System" ||
+          (item.isDerived ?? parseObject(item.attributesJson).derived === true) ||
+          Boolean(item.upstreamRevisionIds?.length)),
     );
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -502,6 +506,7 @@ export default function ScrEditor({
               <ControlledRequirementEditor
                 api={api}
                 projectId={projectId}
+                releaseId={releaseId}
                 scope={scope}
                 item={change}
                 index={index}
