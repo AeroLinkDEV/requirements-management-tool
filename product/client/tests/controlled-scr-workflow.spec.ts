@@ -74,8 +74,10 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByRole('button', { name: 'Configure & Submit Review' }).click()
   await expect(page.getByText('No reviewers selected')).toBeVisible()
   await page.getByRole('button', { name: '+ Add approver' }).click()
+  await expect(page.getByText('0 reviewers selected')).toBeVisible()
   await page.getByLabel('Approver 1 search').fill('AeroLink Administrator')
   await page.getByRole('button', { name: /AeroLink Administrator.*Administrator/ }).click()
+  await expect(page.getByText('1 reviewer selected')).toBeVisible()
   await page.getByRole('button', { name: 'Submit for Review' }).click()
   // The lifecycle state is spelled for a reader; the raw enum stays available to tooling as data-state.
   await expect(page.getByText('In review', { exact: true }).first()).toBeVisible()

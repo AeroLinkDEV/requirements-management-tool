@@ -881,6 +881,7 @@ export default function ScrWorkspace({
   const proposalsComplete = requirements.length > 0 && requirements.every(proposalComplete);
   const reviewReady = caseComplete && proposalsComplete && requirements.length > 0;
   const uniqueApprovers = new Set(approvers.map((item) => item.userId).filter(Boolean));
+  const selectedApproverCount = uniqueApprovers.size;
   const reviewerSetupValid =
     approvers.length > 0 &&
     approvers.every((item) => item.userId) &&
@@ -1078,7 +1079,7 @@ export default function ScrWorkspace({
             <p>Submission freezes the exact content hash. Each activated reviewer receives a My Work deep link and must re-authenticate to sign.</p>
           </div>
           <div className="workspaceActions reviewerActions">
-            <div><b>{approvers.length} reviewer{approvers.length === 1 ? "" : "s"} selected</b><span>{reviewMode} authority path</span></div>
+            <div><b>{selectedApproverCount} reviewer{selectedApproverCount === 1 ? "" : "s"} selected</b><span>{reviewMode} authority path</span></div>
             <button type="button" className="outline" onClick={() => setMode("view")}>Cancel</button>
             <button type="button" disabled={busy || !reviewerSetupValid || !reviewReady} onClick={() => void call("submit", { expectedVersion: scr.version, approvers, mode: reviewMode })}>
               {busy ? "Submitting…" : "Submit for Review"}
