@@ -156,6 +156,7 @@ public sealed class DraftDocumentApiTests(ShowcaseApiFixture showcase)
         Assert.Contains("AeroLinkWatermark", header);
         Assert.Contains("string=\"DRAFT\"", header);
         Assert.Contains("<w:headerReference", document);
+        Assert.Contains("<w:pStyle w:val=\"Heading1\"/><w:pageBreakBefore/>", document);
         Assert.Contains("HLRD-000016", document);
         Assert.Contains("High-Level Software Requirements Document (HLRD)", document);
         Assert.DoesNotContain("SWRD-HLR", document);
