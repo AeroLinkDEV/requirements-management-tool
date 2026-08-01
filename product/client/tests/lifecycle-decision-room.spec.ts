@@ -34,6 +34,9 @@ test("Lifecycle Decision Room connects readiness, impact, evidence, people, and 
   await expect(page.getByRole("heading", { name: "Release Evidence & Decision" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Evidence checklist" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Approval path" })).toBeVisible();
+  const releaseNarrative = page.locator(".releaseNarrative");
+  await expect(releaseNarrative.getByText("—", { exact: true })).toHaveCount(4);
+  await expect(releaseNarrative.getByText("Counts become exact when the candidate baseline is materialized.")).toBeVisible();
   await expect(page.getByRole("img", { name: /Ethan Brooks, Verification Lead/ })).toBeVisible();
   await expect(page.getByRole("img", { name: /Olivia Chen, Program Manager/ })).toBeVisible();
   await expect(page.getByRole("img", { name: /Daniel Reyes, Release Manager/ })).toBeVisible();
