@@ -1,7 +1,7 @@
 # Aerospace Development Assurance Platform
 
 > **New here — human or model? Read [PROJECT_STATE.md](PROJECT_STATE.md) first, then the
-> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-07-31.md).** They record what
+> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).** They record what
 > exists today, what is deliberately excluded, where delivery stands, and the known limitations. The
 > documents indexed below are durable definitions and historical records; `PROJECT_STATE.md` describes
 > the present.
@@ -58,8 +58,9 @@ demonstrations use the `FMSLIVE` dataset described in
 | Document | Purpose |
 | --- | --- |
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
-| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-07-31.md) | Restart-ready account of the verification rebuild (PRs #191–#208), where things stand, and lessons worth not relearning |
-| [Previous product handoff](CURRENT_PRODUCT_HANDOFF_2026-07-29.md) | PRs #140–#168, build-scoped navigation, dormant UI, aligned issues — accurate except for verification |
+| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) | **Current restart point.** Build-scoped verification, assessments, identity lifecycle, upward allocation, backlog reconciliation, validation, and safe continuation |
+| [31 July handoff](CURRENT_PRODUCT_HANDOFF_2026-07-31.md) | Historical delivery record for the verification rebuild and downstream-assessment increment |
+| [29 July handoff](CURRENT_PRODUCT_HANDOFF_2026-07-29.md) | Historical delivery record for build-scoped navigation and the product-surface simplification |
 | [Project vision](PROJECT_VISION.md) | Problem, audience, value, ambition, and success definition |
 | [Scope and boundaries](SCOPE_AND_BOUNDARIES.md) | Current, future, and excluded capabilities |
 | [Domain model and glossary](DOMAIN_MODEL_AND_GLOSSARY.md) | Shared vocabulary and lifecycle concepts |
@@ -75,7 +76,7 @@ demonstrations use the `FMSLIVE` dataset described in
 | [System-level workflow](SYSTEM_LEVEL_WORKFLOW.md) | Decision-complete first-slice behavior and paper scenarios |
 | [Feature catalog](FEATURE_CATALOG.md) | Stable, phased capability inventory |
 | [Release roadmap](RELEASE_ROADMAP.md) | Incremental delivery strategy and exit criteria |
-| [Massive enterprise update report](MASSIVE_ENTERPRISE_UPDATE_REPORT.md) | Implemented scope, validation evidence, limitations, and next update |
+| [Massive enterprise update report](MASSIVE_ENTERPRISE_UPDATE_REPORT.md) | Historical acceptance report for its completed enterprise increment; current state is in Project State |
 | [Showcase and usability refresh](SHOWCASE_USABILITY_REFRESH_REPORT.md) | Readable design system, simplified shell, progressive disclosure, critical-surface redesign, and visual validation evidence |
 | [Operations and recovery](product/docs/OPERATIONS.md) | Startup, stop, diagnostics, backup verification, isolated restore, and production recovery |
 | [Quality attributes](QUALITY_ATTRIBUTES.md) | Security, integrity, operations, and production targets |
@@ -93,6 +94,8 @@ demonstrations use the `FMSLIVE` dataset described in
 - Requirements use normative language deliberately: **must** is mandatory, **should** is preferred, and **may** is optional.
 - Standards references inform terminology and expected rigor but do not constitute a compliance or certification claim.
 - Source Word documents remain unmodified in the repository root for provenance during this initial consolidation.
+- Dated handoffs, reviews, acceptance notes, mockup notes, and update reports preserve history; they are not
+  current backlog authorities unless the current handoff explicitly says otherwise.
 
 ## Documentation baseline gate — met
 

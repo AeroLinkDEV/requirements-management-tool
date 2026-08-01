@@ -1,5 +1,10 @@
 # FMS 1.6 Release Campaign
 
+> **Implemented lifecycle contract; hidden planning surface.** Reconciled 2026-08-01. The model and gates
+> remain implemented, but the detailed campaign/baseline workbench is not a current navigation destination
+> (DEC-072). Seed-state counts are initial conditions only; live engineering work persists independently.
+> See [the current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
+
 ## Repeatable user-controlled release progression
 
 The seeded 1.5 baseline is the immutable starting product configuration. Version 1.6 is an editable target workspace, not a preordained release. Users must approve the intended SCR/SWCR revisions, select those exact revisions into a candidate inheriting the materialized 1.5 baseline, freeze and materialize it, close release evidence and impact gates, collect unanimous electronic release approval, and explicitly issue the release.
@@ -75,9 +80,9 @@ Each row requires Pass, Fail, or Blocked, execution time, executor, configuratio
 
 Uploaded evidence is stored outside the database payload with file metadata and a SHA-256 checksum persisted in the database. Evidence is linked to an exact immutable test execution, and both records must belong to the same project. File names are sanitized, storage paths are controlled by the server, and file size is bounded.
 
-## Seeded Demonstration State
+## Initial Seeded Demonstration State
 
-The FMS 1.6 campaign starts in Verification with an intentionally mixed impact backlog. Eight impacts are already addressed and twenty-four remain pending. This creates an honest manager-facing readiness story and leaves meaningful work for the interactive demonstration rather than presenting a pre-completed release.
+The initial FMS 1.6 campaign starts in Verification with an intentionally mixed impact backlog. Eight impacts are already addressed and twenty-four remain pending. This creates an honest manager-facing readiness story without implying that those counts remain fixed after persistent live testing.
 
 ## Release Integrity Rule
 

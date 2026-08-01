@@ -1,5 +1,10 @@
 # Current product and backlog handoff — 2026-07-31
 
+> **Historical handoff.** Superseded by
+> [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md). This file preserves the
+> 31 July delivery checkpoint; its branch names, issue counts, test totals, and next-work recommendations are
+> not current.
+
 This supersedes [CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md), which
 remains accurate for everything it describes except verification. [PROJECT_STATE.md](PROJECT_STATE.md) is
 still the canonical description of the product, and decisions are appended to

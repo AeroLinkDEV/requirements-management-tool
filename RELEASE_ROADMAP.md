@@ -12,8 +12,8 @@ This roadmap is capability-driven, not calendar-driven. Each phase ends with evi
 | 2 — SCRs, review, baselines, and SYSRD | Complete |
 | 3 — System verification and traceability | Complete |
 | 4 — Software-level lifecycle | Delivered: HLRs, LLRs, SWCRs, SWRDs, and software verification are implemented |
-| 5 — PR management and integrations | Partially delivered; problem-report lifecycle is in progress |
-| Enterprise maturity program | In progress as AeroLink 3.0 — see the workstream scorecard |
+| 5 — PR management and integrations | Integration foundation delivered; broad Problem Report surface intentionally dormant |
+| Enterprise maturity program | MVP program closed 2026-08-01; provider/deployment-specific boundaries remain conditional |
 
 The phase goals and exit evidence below are retained as the definition of what each phase had to
 prove. Live status is in [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md)
@@ -131,7 +131,11 @@ Before implementation, refine derived-requirement workflows, allocation/refineme
 
 The current application now includes a complete first vertical increment for durable routing and SCR/SWCR exclusive editing: context-preserving artifact URLs, browser navigation, breadcrumbs, quick navigation, bounded Program-aware search, renewable checkout, server autosave snapshots, read-only observers, check-in/discard, forced unlock auditing, and review/checkout incompatibility enforcement. The same increment adds authentication rate limiting, broad Program-scope request enforcement, isolated browser-test topology, verified backup integrity, isolated PostgreSQL restore tooling, diagnostics, and controlled stop/start operations.
 
-The next increment should extend the proven edit-session contract to requirement proposals, specification structures, test procedures, trace links, and release-planning drafts; complete email outbox delivery; broaden universal search facets and pagination; and add browser journeys for the remaining controlled document, verification/retest, and release-approval paths.
+That recommendation is historical. Subsequent increments delivered universal controlled-editing foundations,
+email outbox delivery, broad search/filtering, verification/retest/release journeys, build-scoped verification,
+controlled Test Change Requests, downstream assessments, identity lifecycle administration, and exact software
+upward allocation. Current continuation starts from a reproduced need and the
+[current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md), not this old next-increment sentence.
 
 ### 2026-07-18 Requirements Explorer boundary delivered
 
@@ -154,7 +158,9 @@ configuration work. The current program and its per-workstream status are in
 
 **Goal:** Add the full PR lifecycle, PR-driven impact analysis, broader configuration/release functions, enterprise identity, and selected external references or integrations.
 
-PR scope will include classification, effects, investigation, resolution, verification, closure, alternative dispositions, and links across requirements, tests, changes, builds, and releases.
+Retained Problem Report relationships support corrective routing, but the broad first-class Problem Reports
+surface remains dormant by decision. A future PR increment requires a fresh product decision and validated
+classification/lifecycle contract; retained code or this roadmap sentence is not authority to restore it.
 
 ## Post-MVP Identity and Account Hardening Backlog
 
@@ -170,6 +176,8 @@ reason, the trigger to resume, and the order to resume in.
       product does not yet have;
 - [x] multi-factor authentication and recovery codes — **delivered**, with encrypted secrets and
       downgrade protection. Step-up authentication for privileged actions is **deferred**; and
+- [x] current role, session, and delegation administration — **delivered**; individual Program role revocation,
+      current/other-session controls, and retained active/expired/revoked delegation history are qualified;
 - [ ] enterprise identity federation and provisioning through OIDC/SAML and SCIM with a break-glass
       administrator path — **deferred**. The trusted group-to-Program-role mapping that federation will
       consume is delivered, persisted and audited.

@@ -7,7 +7,7 @@ This document turns the AeroLink concept mockups into guiding product direction.
 > Requirement totals, Release Attention and Change Request Flow are not current dashboard requirements.
 > Problem Reports, Product Versions and Candidate Baselines are dormant UI. Treat the mockups below as
 > inspiration, not instructions to restore those elements. See
-> [CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).
+> [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
 
 ## Experience Vision
 

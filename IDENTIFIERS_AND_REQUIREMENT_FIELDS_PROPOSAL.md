@@ -2,6 +2,11 @@
 
 This document records the accepted requirement identifier/revision display and proposes the remaining mandatory-field policy.
 
+> **Status, 2026-08-01:** the controlled identifier and appended revision display are implemented product
+> contracts. The field-policy sections remain design rationale/proposals, not an active GitHub backlog or a
+> claim that every listed field is enforced. Current terminology is in
+> [Domain Model and Glossary](DOMAIN_MODEL_AND_GLOSSARY.md).
+
 ## Identifier Proposal
 
 ### Principle

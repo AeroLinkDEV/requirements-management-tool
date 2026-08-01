@@ -11,7 +11,7 @@ AeroLink 3.0 completes the remaining enterprise lifecycle capabilities without i
 > Project/Build selection and intentionally make Problem Reports, Product Versions and Candidate Baselines
 > dormant in the current UI. Workstream acceptance boundaries remain recorded here, but restoring a dormant
 > surface requires a new product decision. See
-> [CURRENT_PRODUCT_HANDOFF_2026-07-29.md](CURRENT_PRODUCT_HANDOFF_2026-07-29.md).
+> [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
 
 ## Non-negotiable delivery rules
 

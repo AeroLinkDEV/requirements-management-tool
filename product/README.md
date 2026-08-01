@@ -6,7 +6,7 @@ comes from the actual API and persistence layer. The former `showcase/` prototyp
 [DESIGN_VISION_AND_DASHBOARDS.md](../DESIGN_VISION_AND_DASHBOARDS.md).
 
 For project-wide orientation, start at [PROJECT_STATE.md](../PROJECT_STATE.md), then read the
-[current product handoff](../CURRENT_PRODUCT_HANDOFF_2026-07-29.md).
+[current product handoff](../CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
 
 ## Current vertical slice
 
@@ -21,6 +21,15 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 
 - optional deterministic FMS live program with released `SW-01.50` and active `SW-01.60`
 - 150 system requirements, 400 HLRs, 700 LLRs, 105 historical SCR/SWCR records, 1,100 typed traces, 515 procedures, 520 executions, and generated requirements/test-procedure documents
+- exact System/HLR/LLR procedure and coverage isolation, including controlled procedure-number deep links,
+  refresh-safe history, and truthful Covered/Suspect/Uncovered states
+- governed downstream assessments from approved System changes to HLR work and from approved HLR changes to
+  LLR work, with named independent approval, no-change rationale, SWCR linking, and supersession behavior
+- prospective build-scoped upward allocation: HLR proposals select current System revisions, LLR proposals
+  select current HLR revisions, and justified derived requirements are the explicit exception
+- controlled Test Change Requests with assignment, explicit verification decisions, independent approval,
+  build test sets, immutable result/evidence history, and named retests
+- current role, session, and delegation administration with individual revocation and retained history
 
 - clean Program, software Project, and initial Release onboarding; optional FMS demonstration data
 - SCR creation with proposed system or high-level software requirement changes
@@ -72,7 +81,9 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 - versioned controlled attachment vault with exact-revision association, protected storage, SHA-256 integrity verification, provenance, retrieval, supersession, and immutable history
 - comprehensive visual redlines spanning statement, rationale, rich content, Program attributes, verification method, and exact-revision attachment changes
 - visual structured-query builder with personal/shared permission-aware worklists and stable URLs that reopen the saved view
-- durable background export/integrity jobs with idempotency, progress, attempts, retry/cancel state, attributable outcomes, and downloadable controlled CSV output
+- durable repository-export jobs with idempotency, progress, attempts, retry/cancel state, attributable outcomes,
+  and downloadable controlled CSV output; attachment integrity is a separate cryptographic checkpoint that
+  recomputes content hashes rather than a count-only background simulation
 - multi-session edit detection with optimistic versions, retained base/local/remote content, explicit three-way resolution, and no silent overwrite
 - operator-facing Enterprise Control dashboard with repository, file-storage, job, editor, conflict, performance, and integrity-checkpoint signals
 - isolated PostgreSQL qualification workspace generator with 50,000 mixed-level Requirement/Revision records, measured enterprise workspace benchmarks, and a 150-client mixed-load gate
@@ -121,7 +132,10 @@ The default showcase contains only `Flight Management System Live Program`, with
 
 For a production database, demo identities remain disabled. Configure the one-time, zero-user administrator bootstrap through the protected `Identity__BootstrapSecret` service environment setting, then remove it immediately after creating the first `admin` account. The complete procedure is in [Operations and recovery](docs/OPERATIONS.md#production-first-install-administrator); no bootstrap secret belongs in this repository.
 
-Local demonstration identities include `admin`, `systems.author`, `software.author`, `systems.reviewer`, and `release.manager`; their local-only password is `AeroLink!2026`. These credentials are intentionally non-production and must be replaced before any operational deployment. See [Operations and recovery](docs/OPERATIONS.md).
+Local demonstration identities include `admin`, `systems.author`, `software.author`, `systems.reviewer`,
+`software.lead`, `test.engineer`, `assurance.reviewer`, and `release.manager`; their local-only password is
+`AeroLink!2026`. These credentials are intentionally non-production and must be replaced before any
+operational deployment. See [Operations and recovery](docs/OPERATIONS.md).
 
 ## Verify
 

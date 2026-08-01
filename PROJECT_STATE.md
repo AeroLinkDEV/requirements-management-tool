@@ -1,6 +1,6 @@
 # Project State — Start Here
 
-**Last updated: 2026-07-31.**
+**Last updated: 2026-08-01.**
 
 This is the orientation record for anyone — human or model — picking up AeroLink. It answers *what
 exists, what is true today, what is deliberately not being built, and where to start*. Every other
@@ -124,7 +124,16 @@ carry, generated from the released baseline plus every approved change and stamp
 stored, because a controlled record of content that is still moving is a record of nothing.
 
 Identity: local accounts, Program-scoped roles, sessions, MFA with recovery codes, mandatory
-temporary-password rotation, scoped service accounts, and security audit.
+temporary-password rotation, scoped service accounts, and security audit. Administrators can see and revoke
+individual current role grants, distinguish global system administration from Program Administrator authority,
+identify the current session, revoke other sessions, and govern time-bounded delegations without deleting
+expired or revoked history.
+
+Software change control now governs both directions of allocation. Approval raises a downstream assessment
+owned by the consuming discipline: System to HLR, then HLR to LLR. Before approval, an HLR proposal selects
+current System revisions from the target build and an LLR selects current HLR revisions, or the author records
+an explicit derived exception with rationale. Exact selected revision IDs are reviewed, retained through
+checkout and change-request revisioning, and materialized as immutable `AllocatedFrom` traces.
 
 Verification impact: approving a change request raises an item for every requirement it introduces or
 modifies, and for any procedure a retirement leaves covering nothing. A Test Lead distributes items;
@@ -204,7 +213,7 @@ records with their own numbers and revisions, which may cover more than one requ
 may also be raised by hand when a set of changes is best tested together.
 
 The restart-ready description, routes, issue state and validation evidence are in
-[CURRENT_PRODUCT_HANDOFF_2026-07-31.md](CURRENT_PRODUCT_HANDOFF_2026-07-31.md).
+[CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
 
 ## The demonstration dataset
 
@@ -222,22 +231,15 @@ The tool never auto-creates or auto-approves a successor release. Details in
 
 ## Where delivery stands
 
-Work is tracked as **AeroLink 3.0** ([issue #29](https://github.com/seanmccarthyns/requirements-management-tool/issues/29)),
-whose contract is [AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md).
-Per-workstream status is in [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md);
-that scorecard is the authority, and this section is a summary of it.
+The AeroLink 3.0 implementation program and its review follow-ups have been reconciled. GitHub issue #29 and
+every child/follow-up are closed; there were zero open issues and zero open pull requests at the qualified
+`067294c` checkpoint. Applicable work landed through focused, gated pull requests. Residual identity federation
+and deployment operations were closed with explicit resume conditions because they require a real provider or
+hosting contract, not generic product simulation.
 
-No workstream is Complete. Workstream 4 (enterprise identity) has a delivered slice with its remainder
-**formally deferred** — federation, SCIM, break-glass, step-up, account recovery, provider health and
-the identity administration UI are not in progress and not scheduled. The reason, the trigger to
-resume and the order to resume in are recorded in the contract's Workstream 4 decision record. Do not
-treat that deferral as a backlog to pick up without the trigger being met.
-
-The 28 July review backlog has largely been delivered. The still-open applicable issues from that batch are
-**#100, #101, #102, #106, #110, #112, #113, #115 and #132**. Issues **#29** (program parent), **#34**
-(identity — deferred remainder), and **#38** (production operations and qualification) remain the longer-lived
-program records. #131 and #133 are closed as superseded/not planned after the 29 July product decisions; future
-agents must not restore Problem Report search or author-owned impact dispositions as regression fixes.
+Per-workstream status is in [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md). Its
+vocabulary distinguishes **MVP delivered**, **deferred by decision**, and **deployment-owned** from an
+unqualified claim that every enterprise deployment capability is complete.
 
 **[PRODUCT_REVIEW_2026_07_26.md](PRODUCT_REVIEW_2026_07_26.md)** holds the findings from the first evening of
 using the product as an engineer would. **Every item in it is now closed** — the six defects, and all nine that
@@ -494,9 +496,12 @@ reason the document set can be trusted.
   and lost to `.controlledEditor input { width: 100% }` — (0,1,0) against (0,1,1) — so the input rendered at
   1160px and pushed the page 106px off screen. The cascade lesson above is about load order; this is the same
   failure through the other mechanism, and the same fix applies. When a rule matters, make it win on purpose.
-# Current implementation checkpoint â€” 2026-07-31
+# Current implementation checkpoint — 2026-08-01
 
-The current increment introduces controlled downstream change assessments between approved upstream change
-requests and consuming software engineering. See DEC-078/DEC-079, GitHub #209/#210, and
-`CURRENT_PRODUCT_HANDOFF_2026-07-31.md`. Its server, migration, review authority, showcase reconciliation,
-browser workflow, and production bundle have been qualified on `codex/downstream-change-assessments`.
+`main` at `067294c` contains the complete build-scoped verification, downstream-assessment, identity-lifecycle,
+and prospective upward-allocation increments. Non-authoritative Concurrency and count-only IntegrityScan
+simulations are retired. The GitHub Product Quality Gate passed backend, client, PostgreSQL migration/bootstrap,
+production-build browser tests, both browser shards, and the enforcing reporter. Independent local qualification
+passed all three browser shards (112 passed, one intentionally skipped), and the persistent PostgreSQL
+application restarted healthy without replacing its engineering records. See
+[CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).

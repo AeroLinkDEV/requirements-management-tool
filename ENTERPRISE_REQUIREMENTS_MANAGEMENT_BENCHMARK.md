@@ -4,6 +4,11 @@
 **Status:** Product-direction baseline  
 **Purpose:** Define the enterprise capabilities AeroLink must provide to be credible beside established requirements-management platforms without copying their unnecessary complexity.
 
+> **Historical market benchmark.** This comparison and its gap analysis are a 2026-07-12 planning input,
+> not the current implementation scorecard. Several listed gaps were delivered in later increments. Use
+> [AeroLink 3 Implementation Status](AEROLINK_3_IMPLEMENTATION_STATUS.md) and the
+> [current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) for present claims and deliberate boundaries.
+
 ## Executive finding
 
 AeroLink's strongest current capabilities are controlled change packages, attributable ordered approval, exact immutable baselines, release-readiness gates, version-aware lifecycle evidence, professional controlled publications, and a realistic large FMS dataset. Those foundations compare favorably with the governance story of mature tools.

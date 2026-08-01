@@ -1,5 +1,11 @@
 # FMS Live Showcase Dataset
 
+> **Dataset contract, reconciled 2026-08-01.** Exact released Build 1.5 counts remain deterministic. Build
+> 1.6 values below describe the initial idempotent seed; the persistent demonstration database now also
+> contains legitimate engineering records created through live workflows. Present-tense seed descriptions
+> below should be read as initial conditions. See
+> [the current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) for the active product checkpoint.
+
 ## Purpose
 
 The FMS live showcase is a deterministic, production-shaped program used for demonstrations, continuing development, regression testing, and performance validation. It uses the same domain and persistence rules as user-created programs and is not a disconnected mock-data layer.
@@ -54,14 +60,14 @@ The baseline records a SYSRD, HLR SWRD, LLR SWRD, System Test Procedures, HLR Te
 
 ## Active FMS 1.6 development
 
-FMS 1.6 begins from the FMS 1.5 predecessor baseline and contains eight controlled change requests:
+At initial seed, FMS 1.6 begins from the FMS 1.5 predecessor baseline and contains eight controlled change requests:
 
 - 2 Approved and selected in the working candidate baseline
 - 2 In Review
 - 3 Draft
 - 1 Deferred
 
-The active changes include a new system-level oceanic round-robin function and representative HLR and LLR modifications. The FMS 1.6 candidate remains editable and is not released.
+The seeded changes include a new system-level oceanic round-robin function and representative HLR and LLR modifications. Subsequent realistic testing may add approved, returned, deferred, or draft records; these are persistent product data, not seed drift. The FMS 1.6 workspace remains editable and is not released.
 
 ## Terminology
 
