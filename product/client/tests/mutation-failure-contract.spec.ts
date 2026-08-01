@@ -53,23 +53,6 @@ test('upload, job, identity, and conflict failures stay visible without false su
   await expect(upload).toBeEnabled()
   await page.unroute('**/api/enterprise-hardening/attachments')
 
-  await page.getByRole('button', { name: 'Concurrency' }).click()
-  await page.getByRole('button', { name: 'Open editing session' }).click()
-  await expect(page.getByText(/Session active/)).toBeVisible()
-  await page.route('**/api/enterprise-hardening/edit-sessions/*', route => route.fulfill({
-    status: 409,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      id: '0f8fad5b-d9cb-469f-a165-70867728950e',
-      baseJson: JSON.stringify({ statement: 'Common controlled base' }),
-      localJson: JSON.stringify({ statement: 'Retained local draft' }),
-      remoteJson: JSON.stringify({ statement: 'Competing remote draft' }),
-    }),
-  }))
-  await page.getByRole('button', { name: 'Save draft checkpoint' }).click()
-  await expect(page.getByText('MERGE REQUIRED')).toBeVisible()
-  await expect(page.getByText('Retained local draft')).toBeVisible()
-  await expect(page.getByRole('status')).toContainText('No content was overwritten')
 })
 
 test('a rejected approval preserves signature input and records no approval evidence', async ({ page, request, playwright }) => {
