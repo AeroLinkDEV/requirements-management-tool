@@ -8,10 +8,12 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
 ## Repository checkpoint
 
 - Repository: `seanmccarthyns/requirements-management-tool`
-- Product code checkpoint: `c52af21` on `main` - *Align primary navigation around engineering and verification (#267)*
+- Feature checkpoint before the final live sweep: `c52af21` on `main` - *Align primary navigation around
+  engineering and verification (#267)*
+- Documentation checkpoint: `5121b1e` on `main` - *Align documentation to August 2 product checkpoint (#268)*
 - GitHub backlog at handoff: **zero open issues**
-- Issues closed in this delivery: #258, #259, #260, #261 and #262
-- Pull requests merged: #263, #264, #265, #266 and #267
+- Issues closed in this delivery: #258, #259, #260, #261, #262 and the live-sweep defect #269
+- Pull requests merged: #263, #264, #265, #266, #267, #268 and #270
 - Delivery rule remains: focused `codex/*` branch, pull request, required Product Quality Gate, squash merge,
   exact-merge requalification; never push implementation directly to `main`
 - The persistent PostgreSQL demonstration database remains the one real-life database. Its engineering records
@@ -66,6 +68,15 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
 - The redundant generic Verification sidebar entry is gone; `/system-verification` and
   `/software-verification` remain backward-compatible chooser routes.
 - Assurance reviewer role names and legitimate production-assurance language were not renamed.
+
+### Live-sweep punctuation remediation
+
+- The persistent Build 1.6 Problem Reports center exposed malformed separator, arrow and ellipsis literals in
+  controlled-reference cards and related loading/action text.
+- The observation was reproduced on PR-00002.00, recorded as durable engineering artifact PR-00003.00, and
+  corrected through GitHub issue #269 / PR #270 with a focused PR-to-SCR regression.
+- The persistent relationship card was refreshed after the fix and rendered `Software Build (SW) · SW-01.60`
+  and `Open →` correctly; PR-00003.00 remains open as realistic unfinished Build 1.6 work.
 
 ## Problem Reports and mandatory verification
 
