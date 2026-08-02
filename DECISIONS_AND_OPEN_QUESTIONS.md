@@ -942,6 +942,8 @@ Future entries use:
 
 - **Date:** 2026-07-29
 - **Status:** Accepted
+- **Supersession:** DEC-085 reactivates Problem Reports only. Product Versions, Candidate Baselines, and the
+  Change Request Software Builds view remain hidden.
 - **Decision:** Keep System and Software as distinct areas, with Verification as the third Command Center
   concern. Hide Problem Reports, Product Versions, Candidate Baselines, and the Change Request page's Software
   Builds view from navigation, search and direct UI routing for now. Preserve their domain/API/client
@@ -1128,6 +1130,23 @@ Future entries use:
 - **Consequences:** Historical records receive clear supersession notices rather than rewritten history. New
   work begins from live reproduction and GitHub refresh. Root Word files remain unmodified source inputs.
 
+### DEC-085 - Problem Reports Drive Controlled Change and Changed Requirements Drive Mandatory Tests
+
+- **Date:** 2026-08-01
+- **Status:** Accepted
+- **Decision:** Reactivate the build-scoped Problem Reports center. A PR may drive an SCR, SWCR, or System/HLR/LLR
+  TCR. Requirement changes do not create PRs. Final engineering-change approval is automatically presented as
+  an approved corrective action on every linked PR. Containment and preventive-action authoring are outside
+  this increment. Every approved procedure covering a requirement introduced or modified in a build is
+  mandatory pre-release scope and cannot be removed from that build's test set.
+- **Rationale:** The causal thread begins with an observed problem and proceeds through approved correction and
+  verification. Reversing it would manufacture problem records for ordinary planned change. Similarly, an
+  impacted test that can be unchecked cannot protect release readiness.
+- **Consequences:** PR selection is build scoped and validated server-side; automatically raised TCRs inherit
+  their source CR's PR links; final approval adds attributable corrective-action evidence; exact procedure
+  revisions require a passing build execution with evidence before release. Released builds remain read-only.
+  Broader PR classification, lifecycle, and closure policy will be added only as product decisions settle.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
@@ -1137,7 +1156,8 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 - **ASM-003:** The first slice supports multiple programs even if initial validation uses one reference program.
 - **ASM-004:** Requirements may include controlled images/figures as part of revisioned content.
 - **ASM-005:** Exact review roles and independence rules vary by organization/program; the SCR author selects the ordered approval sequence and unanimous sequential approval is fixed initial behavior.
-- **ASM-006:** PR references may point to an external system until full PR management exists.
+- **ASM-006:** Superseded by DEC-085. PRs are controlled first-class records in the product; external issue
+  references may be added later without replacing them.
 - **ASM-007:** The initial platform records Pass, Fail, Blocked, Not Run, and Not Applicable using the meanings in [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md); detailed step/result transition rules still require validation.
 - **ASM-008:** Source Word files remain unmodified in the repository root during the initial consolidation.
 - **ASM-009:** Superseded by DEC-060 and DEC-084. GitHub repository

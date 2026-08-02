@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -82,16 +83,15 @@ public sealed class BuildTestSetSeedingTests
     }
 
     [Fact]
-    public async Task A_decision_that_never_asked_for_evidence_carries_nothing_forward()
+    public async Task A_changed_requirement_decision_is_mandatory_even_when_the_client_asks_for_false()
     {
         var fixture = await DatabaseAsync(flagPreReleaseEvidence: false);
         await using var db = fixture.Db;
 
         var sets = await new BuildTestSetService(db).EnsureForReleaseAsync(fixture.ProjectId, fixture.ReleaseId);
 
-        // The checkbox meant "this one specifically". Carrying every confirmed procedure forward would turn a
-        // deliberately narrow list into the whole suite and change what the release is measured against.
-        Assert.All(sets, x => Assert.Empty(x.Entries));
+        Assert.Single(sets.Single(x => x.Discipline == TestChangeReviewDiscipline.System).Entries);
+        Assert.All(sets.Where(x => x.Discipline != TestChangeReviewDiscipline.System), x => Assert.Empty(x.Entries));
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public sealed class BuildTestSetSeedingTests
     }
 
     [Fact]
-    public async Task A_procedure_a_lead_removed_stays_removed()
+    public async Task A_procedure_required_by_a_changed_requirement_cannot_be_removed()
     {
         var fixture = await DatabaseAsync(flagPreReleaseEvidence: true);
         await using var db = fixture.Db;
@@ -119,10 +119,9 @@ public sealed class BuildTestSetSeedingTests
         var sets = await service.EnsureForReleaseAsync(fixture.ProjectId, fixture.ReleaseId);
 
         var system = sets.Single(x => x.Discipline == TestChangeReviewDiscipline.System);
-        system.Exclude(fixture.ProcedureRevisionId, DateTimeOffset.UtcNow);
-        await db.SaveChangesAsync();
-
-        var again = await service.EnsureForReleaseAsync(fixture.ProjectId, fixture.ReleaseId);
-        Assert.Empty(again.Single(x => x.Discipline == TestChangeReviewDiscipline.System).Entries);
+        var error = Assert.Throws<DomainException>(() =>
+            system.Exclude(fixture.ProcedureRevisionId, DateTimeOffset.UtcNow));
+        Assert.Contains("mandatory before release", error.Message);
+        Assert.Single(system.Entries);
     }
 }

@@ -13,7 +13,9 @@ public sealed record ResolveVerificationImpactRequest(VerificationImpactOutcome 
     Guid? RetargetedRequirementRevisionId = null);
 public sealed record ReopenVerificationImpactRequest(string Rationale);
 public sealed record IncludeChangeRequestRequest(Guid ChangeRequestId);
-public sealed record CreateTestChangeRequestRequest(TestChangeReviewDiscipline Discipline, Guid[] ChangeRequestIds);
+public sealed record CreateTestChangeRequestRequest(TestChangeReviewDiscipline Discipline, Guid[] ChangeRequestIds,
+    Guid[]? ProblemReportIds = null);
+public sealed record LinkProblemReportsRequest(Guid[] ProblemReportIds);
 public sealed record SubmitTestChangeReviewRequest(string ApproverId);
 public sealed record ApproveTestChangeReviewRequest(string Rationale);
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
@@ -56,6 +58,12 @@ public static class VerificationImpactEndpoints
             var reviewIds = reviews.Select(x => x.Id).ToList();
             var items = await db.VerificationImpactItems.AsNoTracking()
                 .Where(x => reviewIds.Contains(x.TestChangeReviewId)).ToListAsync(ct);
+            var reportLinks = await db.ProblemReportLinks.AsNoTracking()
+                .Where(x => x.ArtifactType == "TestChangeRequest" && reviewIds.Contains(x.ArtifactId))
+                .ToListAsync(ct);
+            var reportIds = reportLinks.Select(x => x.ProblemReportId).Distinct().ToList();
+            var reportDirectory = await db.ProblemReports.AsNoTracking().Where(x => reportIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => new { x.Id, x.DisplayNumber, x.Title, state = x.State.ToString() }, ct);
             return Results.Ok(reviews.Select(review => new
             {
                 review.Id,
@@ -83,6 +91,9 @@ public static class VerificationImpactEndpoints
                 totalItems = items.Count(x => x.TestChangeReviewId == review.Id),
                 resolvedItems = items.Count(x => x.TestChangeReviewId == review.Id && x.State == VerificationImpactState.Resolved),
                 preReleaseEvidenceItems = items.Count(x => x.TestChangeReviewId == review.Id && x.PreReleaseEvidenceRequired)
+                ,problemReports = reportLinks.Where(x => x.ArtifactId == review.Id)
+                    .Select(x => reportDirectory.GetValueOrDefault(x.ProblemReportId)).Where(x => x is not null)
+                    .DistinctBy(x => x!.Id)
                 ,capabilities = new
                 {
                     canAssign = canTest && review.State == TestChangeReviewState.Open && review.AssignedEngineerId == null,
@@ -96,6 +107,25 @@ public static class VerificationImpactEndpoints
                         && string.Equals(review.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase)
                 }
             }));
+        });
+
+        app.MapPost("/api/test-change-reviews/{id:guid}/problem-reports", async (Guid id,
+            LinkProblemReportsRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            ProblemReportLinkService problemReports, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build test change requests are read-only." });
+            if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct,
+                    ProgramRole.TestEngineer, ProgramRole.TestLead)) return Results.Forbid();
+            var error = await problemReports.ValidateSelectionAsync(review.ProjectId, review.ReleaseId,
+                request.ProblemReportIds, ct);
+            if (error is not null) return Results.BadRequest(new { error });
+            await problemReports.LinkTestChangeRequestAsync(review.Id, request.ProblemReportIds,
+                http.UserAccount().UserName, DateTimeOffset.UtcNow, ct);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { review.Id, linkedProblemReports = request.ProblemReportIds.Distinct() });
         });
 
         app.MapPost("/api/test-change-reviews/{id:guid}/assign", async (Guid id, AssignVerificationImpactRequest request,
@@ -245,7 +275,7 @@ public static class VerificationImpactEndpoints
         /// nothing to decide and would sit in the queue looking like work.
         app.MapPost("/api/releases/{releaseId:guid}/test-change-requests", async (Guid releaseId,
             CreateTestChangeRequestRequest request, HttpContext http, AeroLinkDbContext db,
-            IdentityService identity, CancellationToken ct) =>
+            IdentityService identity, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
@@ -265,6 +295,9 @@ public static class VerificationImpactEndpoints
                     error = "A test change request can only answer for change requests allocated to this build.",
                     code = "change_request_not_selectable"
                 });
+            var problemReportError = await problemReports.ValidateSelectionAsync(release.ProjectId, releaseId,
+                request.ProblemReportIds, ct);
+            if (problemReportError is not null) return Results.BadRequest(new { error = problemReportError });
 
             // Already covered, by the package it was raised from or by one it was folded into. The check names
             // the holder, so an engineer is told where the work went rather than told to try again.
@@ -295,6 +328,7 @@ public static class VerificationImpactEndpoints
                 foreach (var extra in changes.Skip(1))
                     review.IncludeChangeRequest(actor, extra.Id, extra.DisplayNumber, now);
                 db.TestChangeReviews.Add(review);
+                await problemReports.LinkTestChangeRequestAsync(review.Id, request.ProblemReportIds, actor, now, ct);
                 await db.SaveChangesAsync(ct);
                 return Results.Created($"/api/test-change-reviews/{review.Id}", new
                 {

@@ -92,9 +92,16 @@ public static class BuildTestSetEndpoints
             if (set is null) return Results.NotFound(new { error = "That discipline has no test set on this build." });
             // A procedure that is not in the set is already in the state the caller asked for. Two people
             // tidying the same set should not produce an error for whichever of them is slower.
-            set.Exclude(procedureRevisionId, DateTimeOffset.UtcNow);
-            await db.SaveChangesAsync(ct);
-            return Results.Ok((await DescribeAsync([set], releaseId, db, ct)).Single());
+            try
+            {
+                set.Exclude(procedureRevisionId, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok((await DescribeAsync([set], releaseId, db, ct)).Single());
+            }
+            catch (DomainException ex)
+            {
+                return Results.Conflict(new { error = ex.Message, code = "mandatory_changed_requirement_test" });
+            }
         });
 
         return app;

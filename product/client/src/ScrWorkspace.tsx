@@ -138,6 +138,12 @@ type ScrDetail = {
   reviewCycles: Cycle[];
   audit: Audit[];
 };
+type ProblemReportSummary = {
+  id: string;
+  displayNumber: string;
+  title: string;
+  state: string;
+};
 type DraftRequirement = ControlledRequirementDraft;
 type Approver = { userId: string; name: string };
 type EditLock = {
@@ -345,6 +351,7 @@ export default function ScrWorkspace({
   releases,
 }: Props) {
   const [scr, setScr] = useState<ScrDetail>();
+  const [drivingProblemReports, setDrivingProblemReports] = useState<ProblemReportSummary[]>([]);
   const [context, setContext] = useState<AuthoringContext>();
   const [mode, setMode] = useState<"view" | "edit" | "approvers">("view");
   const [reviewMode, setReviewMode] = useState<"Sequential" | "Parallel">("Sequential");
@@ -389,6 +396,15 @@ export default function ScrWorkspace({
       const detail = (await response.json()) as ScrDetail;
       onDisciplineResolved(detail.type === "Software" ? "software" : "system");
       setScr(detail);
+      try {
+        const reportsResponse = await fetch(`${api}/api/problem-reports/linked/ChangeRequest/${detail.id}`);
+        setDrivingProblemReports(reportsResponse.ok
+          ? (await reportsResponse.json()) as ProblemReportSummary[]
+          : []);
+      } catch {
+        // The controlled change remains usable if this supplementary trace view cannot be loaded.
+        setDrivingProblemReports([]);
+      }
       if (mode !== "edit") {
         setDraft({
           title: detail.title,
@@ -1149,6 +1165,19 @@ export default function ScrWorkspace({
                 ))}
               </div>
             </section>
+
+            {drivingProblemReports.length > 0 && (
+              <section className="workspaceCard">
+                <div className="workspaceTitle"><div><h2>Driving Problem Reports</h2><p>The problem records that authorized this engineering response</p></div></div>
+                {drivingProblemReports.map((report) => (
+                  <article className="requirementView" key={report.id}>
+                    <div><b>{report.displayNumber}</b><span>{stateLabel(report.state)}</span></div>
+                    <p>{report.title}</p>
+                    <footer><small>Linked as a proposed corrective action</small><em>Controlled PR trace</em></footer>
+                  </article>
+                ))}
+              </section>
+            )}
 
             <ScrJiraLink api={api} scrId={scr.id} displayNumber={scr.displayNumber} />
 

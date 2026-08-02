@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Releases;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -9,6 +11,41 @@ namespace AeroLink.Api.Tests;
 
 public sealed class ProblemReportApiTests
 {
+    [Theory]
+    [InlineData(ChangeRequestType.System)]
+    [InlineData(ChangeRequestType.Software)]
+    public async Task A_problem_report_can_drive_each_engineering_change_request_type(ChangeRequestType type)
+    {
+        using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
+        Guid projectId, releaseId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("PR change Program", $"PC{Guid.NewGuid():N}"[..12]);
+            var project = new ProjectRecord(program.Id, "Flight Management Product", "Flight Management System");
+            var release = new SoftwareRelease(project.Id, "1.6", false);
+            db.AddRange(program, project, release); await db.SaveChangesAsync();
+            projectId = project.Id; releaseId = release.Id;
+        }
+        using var createdReport = await client.PostAsJsonAsync("/api/problem-reports", new
+        {
+            projectId, releaseId, title = "Position source disagreement", problem = "Sources disagree during approach."
+        });
+        Assert.Equal(HttpStatusCode.Created, createdReport.StatusCode);
+        var reportId = (await createdReport.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        using var createdChange = await client.PostAsJsonAsync("/api/scrs", new
+        {
+            projectId, targetReleaseId = releaseId, type = type.ToString(), title = "Correct source selection",
+            problem = "P", analysis = "A", solution = "S", problemReportIds = new[] { reportId }
+        });
+        var text = await createdChange.Content.ReadAsStringAsync();
+        Assert.True(createdChange.StatusCode == HttpStatusCode.Created, text);
+        var changeId = JsonDocument.Parse(text).RootElement.GetProperty("id").GetGuid();
+        var linked = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/linked/ChangeRequest/{changeId}");
+        Assert.Equal(reportId, Assert.Single(linked.EnumerateArray()).GetProperty("id").GetGuid());
+    }
+
     [Fact]
     public async Task Problem_report_is_server_numbered_and_cannot_be_closed_by_its_owner()
     {

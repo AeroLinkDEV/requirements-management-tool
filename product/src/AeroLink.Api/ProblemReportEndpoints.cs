@@ -135,7 +135,7 @@ public static class ProblemReportEndpoints
         return Results.Ok(Detail(report, await LinkViewsAsync(links, db, ct), revisions));
     }
 
-    private static async Task<IResult> InvestigateAsync(Guid id, InvestigationRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "InvestigationRecorded", (report, actor, now) => report.BeginInvestigation(actor.UserName, request.Analysis, request.RootCause ?? "", request.Effects ?? "", request.Containment ?? "", now));
+    private static async Task<IResult> InvestigateAsync(Guid id, InvestigationRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "InvestigationRecorded", (report, actor, now) => report.BeginInvestigation(actor.UserName, request.Analysis, request.RootCause ?? "", request.Effects ?? "", "", now));
     private static async Task<IResult> ProposeResolutionAsync(Guid id, ResolutionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ResolutionProposed", (report, actor, now) => report.ProposeResolution(actor.UserName, request.CorrectiveAction, now));
 
     private static async Task<IResult> VerifyAsync(Guid id, VerificationRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
@@ -217,6 +217,7 @@ public static class ProblemReportEndpoints
     {
         "requirement" => await db.Requirements.AnyAsync(x => x.Id == artifactId && x.ProjectId == projectId, ct),
         "changerequest" or "scr" or "swcr" => await db.SystemChangeRequests.AnyAsync(x => x.Id == artifactId && x.ProjectId == projectId, ct),
+        "testchangerequest" or "tcr" => await db.TestChangeReviews.AnyAsync(x => x.Id == artifactId && x.ProjectId == projectId, ct),
         "testexecution" => await db.TestExecutions.AnyAsync(x => x.Id == artifactId && x.ProjectId == projectId, ct),
         "softwarebuild" or "build" => await db.SoftwareBuilds.AnyAsync(x => x.Id == artifactId && x.ProjectId == projectId, ct),
         "baseline" => await db.CandidateBaselines.AnyAsync(x => x.Id == artifactId && x.ProjectId == projectId, ct),
@@ -230,6 +231,7 @@ public static class ProblemReportEndpoints
     private static string CanonicalLinkType(string artifactType) => artifactType.Trim().ToLowerInvariant() switch
     {
         "changerequest" or "change-request" or "scr" or "swcr" => "ChangeRequest",
+        "testchangerequest" or "test-change-request" or "tcr" => "TestChangeRequest",
         "testexecution" or "test-execution" => "TestExecution",
         "softwarebuild" or "software-build" or "build" => "SoftwareBuild",
         "problemreport" or "problem-report" or "pr" => "ProblemReport",
@@ -242,7 +244,15 @@ public static class ProblemReportEndpoints
     };
 
     private static object Summary(ProblemReport x) => new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = x.State.ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Classification, x.ReportedBy, x.IsReleaseBlocker, waived = !string.IsNullOrWhiteSpace(x.WaiverRationale), x.UpdatedAt, x.Version };
-    private static object Detail(ProblemReport x, IEnumerable<ProblemReportLinkView> links, IEnumerable<ProblemReportRevision> revisions) => new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.Analysis, x.ReportedBy, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.Containment, x.CorrectiveAction, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.WaiverRationale, x.WaivedBy, x.WaivedAt, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), links, revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotHash, x.OccurredAt }) };
+    private static object Detail(ProblemReport x, IEnumerable<ProblemReportLinkView> links, IEnumerable<ProblemReportRevision> revisions)
+    {
+        var materializedLinks = links.ToList();
+        var approvedChanges = materializedLinks.Where(link => link.Relationship == "ApprovedCorrectiveAction")
+            .Select(link => link.Identifier).Where(identifier => !string.IsNullOrWhiteSpace(identifier)).ToList();
+        var correctiveAction = string.Join("; ", new[] { x.CorrectiveAction }.Concat(approvedChanges)
+            .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct());
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.Analysis, x.ReportedBy, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, correctiveAction, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.WaiverRationale, x.WaivedBy, x.WaivedAt, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), links = materializedLinks, revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotHash, x.OccurredAt }) };
+    }
 
     /// <summary>
     /// Where "record a passing successor execution" should actually take the reader.
@@ -357,6 +367,12 @@ public static class ProblemReportEndpoints
             case "changerequest" or "scr" or "swcr":
             {
                 var item = await db.SystemChangeRequests.AsNoTracking().Where(x => x.Id == artifactId)
+                    .Select(x => new { x.BaseNumber, x.Revision }).SingleOrDefaultAsync(ct);
+                return item is null ? null : $"{item.BaseNumber}.{item.Revision:D2}";
+            }
+            case "testchangerequest" or "tcr":
+            {
+                var item = await db.TestChangeReviews.AsNoTracking().Where(x => x.Id == artifactId)
                     .Select(x => new { x.BaseNumber, x.Revision }).SingleOrDefaultAsync(ct);
                 return item is null ? null : $"{item.BaseNumber}.{item.Revision:D2}";
             }

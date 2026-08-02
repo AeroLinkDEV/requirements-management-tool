@@ -110,6 +110,10 @@ Capabilities:
 - reopen while retaining prior closure history;
 - PR-driven impact analysis and suspect-link propagation;
 - release blocker/waiver policy;
+
+Current product boundary (DEC-085): the build-scoped center and PR-to-CR/TCR corrective thread are active.
+Containment and preventive-action authoring remain outside the current increment; this broader capability list
+is retained as enterprise ambition, not a statement that every field is currently exposed.
 - dashboards, saved views, notifications, comments, assignments, and escalations;
 - controlled PR publications and audit export; and
 - search, API, event, and ReqIF/reference integration where applicable.

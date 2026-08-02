@@ -88,6 +88,47 @@ public sealed class VerificationImpactMaterializationTests
     }
 
     [Fact]
+    public async Task Selected_coverage_for_an_introduced_requirement_becomes_mandatory_test_scope()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            await using var db = new AeroLinkDbContext(seed.Options);
+            var scr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+                "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
+            var baseline = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, scr, now);
+            var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", now);
+            var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
+                "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
+                TestProcedureState.Approved, "test.engineer", now);
+            db.AddRange(scr, baseline, procedure, procedureRevision);
+            await new VerificationImpactService(db).RaiseForApprovedChangeRequestAsync(scr, now, default);
+            await db.SaveChangesAsync();
+
+            var item = await db.VerificationImpactItems.SingleAsync();
+            item.AssignToEngineer("test.lead", "test.engineer", now);
+            item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
+                "This approved procedure verifies the introduced requirement.", now,
+                procedure.Id, procedureRevision.Id);
+            await db.SaveChangesAsync();
+
+            await MaterializeAsync(db, baseline.Id, now);
+
+            var revision = await db.RequirementRevisions.AsNoTracking().SingleAsync();
+            Assert.Equal(procedureRevision.Id, (await db.TestCoverage.AsNoTracking()
+                .SingleAsync(x => x.RequirementRevisionId == revision.Id)).ProcedureRevisionId);
+            var mandatorySet = await db.BuildTestSets.Include(x => x.Entries)
+                .SingleAsync(x => x.ReleaseId == seed.ReleaseId
+                    && x.Discipline == TestChangeReviewDiscipline.HighLevelSoftware);
+            var mandatory = Assert.Single(mandatorySet.Entries);
+            Assert.Equal(procedureRevision.Id, mandatory.ProcedureRevisionId);
+            Assert.Equal(TestSelectionReason.ChangedRequirement, mandatory.Reason);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
     public async Task Coverage_on_a_modified_requirement_carries_forward_marked_suspect()
     {
         var seed = await SeedAsync();
@@ -127,6 +168,12 @@ public sealed class VerificationImpactMaterializationTests
             Assert.Equal(procedureRevision.Id, carried.ProcedureRevisionId);
             Assert.True(carried.IsSuspect);
             Assert.Contains("SWR-00002375", carried.SuspectReason);
+            var mandatorySet = await db.BuildTestSets.Include(x => x.Entries)
+                .SingleAsync(x => x.ReleaseId == seed.ReleaseId
+                    && x.Discipline == TestChangeReviewDiscipline.HighLevelSoftware);
+            var mandatory = Assert.Single(mandatorySet.Entries);
+            Assert.Equal(procedureRevision.Id, mandatory.ProcedureRevisionId);
+            Assert.Equal(TestSelectionReason.ChangedRequirement, mandatory.Reason);
 
             // The original link is untouched: history stays exactly as it was approved.
             var original = await db.TestCoverage.AsNoTracking().SingleAsync(x => x.RequirementRevisionId == firstRevision.Id);
@@ -173,6 +220,7 @@ public sealed class VerificationImpactMaterializationTests
             item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
                 "The existing procedure still exercises the two-second bound.", now,
                 procedure.Id, procedureRevision.Id);
+            Assert.True(item.PreReleaseEvidenceRequired);
             await db.SaveChangesAsync();
 
             await MaterializeAsync(db, second.Id, now);

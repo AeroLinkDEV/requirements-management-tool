@@ -111,7 +111,7 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (tail[0] === "software-verification" && tail[1] === "llr" && tail[2] === "results" && tail[3]) return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "LowLevel", artifactId: decoded(tail[3]) };
   if (path === "system-verification") return { ...base, view: "verification", discipline: "systemTest" };
   if (path === "software-verification") return { ...base, view: "verification", discipline: "softwareTest" };
-  if (path === "problem-reports") return { ...base, view: "notFound", discipline: "system" };
+  if (path === "problem-reports") return { ...base, view: "problemReports", discipline: "system" };
   if (path === "traceability") return { ...base, view: "lifecycle", discipline: "system" };
   // The focused artifact is part of the address, not just component state. Without it the route rewrote
   // itself to a bare /traceability, the app re-read that URL, and the requirement the reader arrived from

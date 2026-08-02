@@ -218,7 +218,12 @@ public sealed class VerificationImpactItem
         RetargetedRequirementRevisionId = retargetedRequirementRevisionId;
         Outcome = outcome;
         ProcedureChangeAction = action;
-        PreReleaseEvidenceRequired = preReleaseEvidenceRequired;
+        // A procedure that covers a requirement introduced or modified by this build is not optional
+        // regression scope. The caller may still require evidence for other decisions, but cannot turn it
+        // off for changed-requirement coverage.
+        PreReleaseEvidenceRequired = preReleaseEvidenceRequired
+            || (Trigger is VerificationImpactTrigger.RequirementIntroduced or VerificationImpactTrigger.RequirementModified
+                && outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed);
         ResolutionRationale = Required(rationale, "resolution rationale");
         ResolvedBy = Required(actorId, "resolving verification engineer");
         ResolvedAt = now;

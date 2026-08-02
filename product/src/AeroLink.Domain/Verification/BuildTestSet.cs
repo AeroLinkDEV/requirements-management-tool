@@ -79,7 +79,14 @@ public sealed class BuildTestSet
         if (procedureRevisionId == Guid.Empty) throw new DomainException("A test set entry requires its procedure revision.");
         if (!Enum.IsDefined(reason)) throw new DomainException("A test set entry requires a known selection reason.");
         var actor = Required(actorId, "selecting engineer");
-        if (_entries.Any(x => x.ProcedureRevisionId == procedureRevisionId)) return false;
+        var existing = _entries.SingleOrDefault(x => x.ProcedureRevisionId == procedureRevisionId);
+        if (existing is not null)
+        {
+            // A discretionary selection can later become required because this build changed a requirement it
+            // covers. Mandatory scope wins; otherwise a lead could remove it using its older "Chosen" reason.
+            if (reason == TestSelectionReason.ChangedRequirement && existing.MakeMandatory(note)) Touch(now);
+            return false;
+        }
         _entries.Add(new BuildTestSetEntry(Id, procedureRevisionId, reason, note?.Trim() ?? "", actor, now));
         Touch(now);
         return true;
@@ -96,6 +103,8 @@ public sealed class BuildTestSet
     {
         var entry = _entries.SingleOrDefault(x => x.ProcedureRevisionId == procedureRevisionId);
         if (entry is null) return false;
+        if (entry.Reason == TestSelectionReason.ChangedRequirement)
+            throw new DomainException("A procedure covering a requirement changed by this build is mandatory before release.");
         _entries.Remove(entry);
         Touch(now);
         return true;
@@ -136,4 +145,12 @@ public sealed class BuildTestSetEntry
     public string Note { get; private set; } = "";
     public string AddedBy { get; private set; } = "";
     public DateTimeOffset AddedAt { get; private set; }
+
+    internal bool MakeMandatory(string note)
+    {
+        if (Reason == TestSelectionReason.ChangedRequirement) return false;
+        Reason = TestSelectionReason.ChangedRequirement;
+        Note = note?.Trim() ?? "";
+        return true;
+    }
 }

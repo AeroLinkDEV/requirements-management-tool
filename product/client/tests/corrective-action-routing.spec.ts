@@ -86,6 +86,7 @@ test("a corrective action opens the discipline, report and procedure it belongs 
   const fms = workspaces.find((x: { program: { name: string } }) => x.program.name === "Flight Management System Live Program");
   const projectId = fms.projects[0].project.id;
   const releaseId = fms.projects[0].releases.find((x: { isReleased: boolean }) => !x.isReleased).id;
+  const historicalReleaseId = fms.projects[0].releases.find((x: { isReleased: boolean }) => x.isReleased).id;
 
   const system = await raiseReport(page, projectId, releaseId, "System");
   const software = await raiseReport(page, projectId, releaseId, "Software");
@@ -99,9 +100,15 @@ test("a corrective action opens the discipline, report and procedure it belongs 
     }))
   }
   await page.goto(new URL(root + "/problem-reports", page.url()).toString(), { waitUntil: "load" })
-  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible()
-  await expect(page.getByText(system.report.displayNumber)).toHaveCount(0)
-  await expect(page.getByText(software.report.displayNumber)).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Problem Reports" })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole("button", { name: new RegExp(system.report.displayNumber.replace('.', '\\.')) })).toBeVisible()
+  await expect(page.getByRole("button", { name: new RegExp(software.report.displayNumber.replace('.', '\\.')) })).toBeVisible()
+  await page.reload({ waitUntil: "load" })
+  await expect(page.getByRole("heading", { name: "Problem Reports" })).toBeVisible()
+  const historicalRoot = root.replace(/\/releases\/[^/]+$/, `/releases/${historicalReleaseId}`)
+  await page.goto(new URL(historicalRoot + "/problem-reports", page.url()).toString(), { waitUntil: "load" })
+  await expect(page.getByText("Released build · read-only")).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole("button", { name: "+ Record problem" })).toHaveCount(0)
 });
 
 /**

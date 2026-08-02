@@ -178,6 +178,23 @@ public sealed class BuildTestSetApiTests
         Assert.True(again.IsSuccessStatusCode, await again.Content.ReadAsStringAsync());
     }
 
+    [Fact]
+    public async Task A_changed_requirement_procedure_cannot_be_taken_out_of_release_scope()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "plan.lead");
+        using var added = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-sets/System/procedures",
+            new { procedureRevisionIds = new[] { fixture.ApprovedRevisionId }, reason = "ChangedRequirement", note = "SYSR-000151 changed." });
+        Assert.True(added.IsSuccessStatusCode, await added.Content.ReadAsStringAsync());
+
+        using var removed = await client.DeleteAsync(
+            $"/api/releases/{fixture.ReleaseId}/test-sets/System/procedures/{fixture.ApprovedRevisionId}");
+        Assert.Equal(HttpStatusCode.Conflict, removed.StatusCode);
+        Assert.Contains("mandatory_changed_requirement_test", await removed.Content.ReadAsStringAsync());
+    }
+
     /// <summary>
     /// Scope and execution are different jobs even when one person does both: a test engineer records
     /// determinations against the set rather than deciding what is in it.
