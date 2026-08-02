@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { changeRequestAllocation, changeRequestState, stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import { SignatureDialog } from "./IdentityCenter";
@@ -287,6 +287,25 @@ const proposalComplete = (item: DraftRequirement) =>
         Boolean(item.upstreamRevisionIds?.length)),
   );
 
+// Check-in returns a controlled Draft to the shared record; it is not review submission. It therefore accepts
+// unfinished case analysis, impact decisions, and upward allocation, while still refusing a half-created
+// proposal that the aggregate itself cannot represent.
+const proposalCanCheckIn = (item: DraftRequirement) => {
+  const derived = item.isDerived ?? parseObject(item.attributesJson).derived === true;
+  return Boolean(
+    (item.kind === "Introduce" || item.baseNumber) &&
+      (item.kind === "Retire" || item.statement.trim()) &&
+      (!derived || item.rationale.trim()),
+  );
+};
+
+const workingCopyJson = (draft: ScrDraft, problemReportIds: string[], requirements: DraftRequirement[]) =>
+  JSON.stringify({
+    ...draft,
+    problemReportIds: [...problemReportIds].sort(),
+    requirementChanges: requirements,
+  });
+
 /**
  * The sentence to show for an audit event.
  *
@@ -364,7 +383,7 @@ export default function ScrWorkspace({
   const [signing, setSigning] = useState(false);
   const [lock, setLock] = useState<EditLock>();
   const [lockStatus, setLockStatus] = useState<LockStatus>();
-  const [autosaveStatus, setAutosaveStatus] = useState<"Saved" | "Saving" | "Error" | "Conflict">("Saved");
+  const [autosaveStatus, setAutosaveStatus] = useState<"Saved" | "Unsaved" | "Saving" | "Error" | "Conflict">("Saved");
   // Pressing a button that saves should say so. Without this the only signal that a check-in worked was the
   // form changing mode, which is easy to miss and indistinguishable from nothing having happened.
   const [saved, setSaved] = useState("");
@@ -378,7 +397,14 @@ export default function ScrWorkspace({
   const lockRef = useRef<EditLock | undefined>(undefined);
   const draftRef = useRef("");
   const lastSavedRef = useRef("");
+  const checkoutSnapshotRef = useRef("");
+  const resumedWorkingCopyRef = useRef(false);
   const savingRef = useRef(false);
+
+  const serializedWorkingCopy = useMemo(
+    () => workingCopyJson(draft, problemReportIds, requirements),
+    [draft, problemReportIds, requirements],
+  );
 
   const loadStatus = useCallback(async () => {
     const response = await fetch(`${api}/api/controlled-editing/status?artifactType=SCR&artifactId=${scrId}`);
@@ -458,8 +484,10 @@ export default function ScrWorkspace({
   }, [lock]);
 
   useEffect(() => {
-    draftRef.current = JSON.stringify({ ...draft, problemReportIds, requirementChanges: requirements });
-  }, [draft, problemReportIds, requirements]);
+    draftRef.current = serializedWorkingCopy;
+    if (mode === "edit" && serializedWorkingCopy !== lastSavedRef.current && autosaveStatus !== "Saving" && autosaveStatus !== "Conflict")
+      setAutosaveStatus("Unsaved");
+  }, [autosaveStatus, mode, serializedWorkingCopy]);
 
 
   /**
@@ -507,8 +535,7 @@ export default function ScrWorkspace({
         requirementChanges?: Partial<DraftRequirement>[];
       };
       const fallbackLevel: RequirementLevel = scr?.type === "Software" ? "HighLevel" : "System";
-      setLock(value);
-      setDraft({
+      const recoveredDraft = {
         title: recovered.title,
         problem: recovered.problem,
         analysis: recovered.analysis,
@@ -518,13 +545,19 @@ export default function ScrWorkspace({
         problemRich: recovered.problemRich || fromPlainText(recovered.problem),
         analysisRich: recovered.analysisRich || fromPlainText(recovered.analysis),
         solutionRich: recovered.solutionRich || fromPlainText(recovered.solution),
-      });
-      if (recovered.requirementChanges)
-        setRequirements(
-          recovered.requirementChanges.map((item) => normalizeRequirement(item, fallbackLevel)),
-        );
-      setProblemReportIds(recovered.problemReportIds ?? drivingProblemReports.map((report) => report.id));
-      lastSavedRef.current = value.draftJson;
+      };
+      const recoveredRequirements = (recovered.requirementChanges ?? [])
+        .map((item) => normalizeRequirement(item, fallbackLevel));
+      const recoveredReports = recovered.problemReportIds ?? drivingProblemReports.map((report) => report.id);
+      const normalizedWorkingCopy = workingCopyJson(recoveredDraft, recoveredReports, recoveredRequirements);
+      setLock(value);
+      setDraft(recoveredDraft);
+      setRequirements(recoveredRequirements);
+      setProblemReportIds(recoveredReports);
+      draftRef.current = normalizedWorkingCopy;
+      lastSavedRef.current = normalizedWorkingCopy;
+      checkoutSnapshotRef.current = normalizedWorkingCopy;
+      resumedWorkingCopyRef.current = value.resumed;
       setAutosaveStatus("Saved");
       setMode("edit");
       await loadStatus();
@@ -589,7 +622,7 @@ export default function ScrWorkspace({
   // wasting a write, or leaves the last seconds of typing unprotected; a pause after the last keystroke is
   // what a person means by "saved as I go". The ten-second ceiling covers writing a long paragraph without
   // pausing, which is the case somebody actually loses work in.
-  useDebouncedSave(draftRef.current, async () => { await autosave(); }, {
+  useDebouncedSave(serializedWorkingCopy, async () => { await autosave(); }, {
     delaySeconds: 1,
     maximumSeconds: 10,
     enabled: mode === "edit",
@@ -646,6 +679,8 @@ export default function ScrWorkspace({
       }
     }
     setLock(undefined);
+    resumedWorkingCopyRef.current = false;
+    checkoutSnapshotRef.current = "";
     setMode("view");
     await load();
   };
@@ -815,14 +850,18 @@ export default function ScrWorkspace({
       }),
     );
 
+  const saveWorkingCopy = async () => {
+    setError("");
+    setSaved("");
+    const current = await autosave();
+    if (current) setSaved("Working copy saved. Checkout remains active.");
+  };
+
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!scr || !lockRef.current) return;
-    const caseComplete = [draft.title, draft.problem, draft.analysis, draft.solution].every((value) =>
-      value.trim(),
-    );
-    if (!caseComplete || !requirements.length || !requirements.every(proposalComplete)) {
-      setError("Complete the change case and every requirement proposal before checking in.");
+    if (!draft.title.trim() || !requirements.every(proposalCanCheckIn)) {
+      setError("Add a title and finish or remove each started requirement proposal before checking in this Draft.");
       return;
     }
     await withBusy(async () => {
@@ -854,6 +893,8 @@ export default function ScrWorkspace({
         return;
       }
       setLock(undefined);
+      resumedWorkingCopyRef.current = false;
+      checkoutSnapshotRef.current = "";
       setMode("view");
       await load();
       await onChanged();
@@ -909,6 +950,11 @@ export default function ScrWorkspace({
   );
   const proposalsComplete = requirements.length > 0 && requirements.every(proposalComplete);
   const reviewReady = caseComplete && proposalsComplete && requirements.length > 0;
+  const hasUnsavedChanges = mode === "edit" && serializedWorkingCopy !== lastSavedRef.current;
+  const hasCheckoutChanges = mode === "edit" && (
+    resumedWorkingCopyRef.current || serializedWorkingCopy !== checkoutSnapshotRef.current
+  );
+  const draftCanCheckIn = Boolean(draft.title.trim()) && requirements.every(proposalCanCheckIn);
   const uniqueApprovers = new Set(approvers.map((item) => item.userId).filter(Boolean));
   const selectedApproverCount = uniqueApprovers.size;
   const reviewerSetupValid =
@@ -983,13 +1029,13 @@ export default function ScrWorkspace({
                 <input name="title" value={draft.title} onChange={(event) => setDraft((value) => ({ ...value, title: event.target.value }))} required />
               </label>
               <RichCaseField api={api} projectId={scr.projectId} label="Problem" value={draft.problemRich}
-                placeholder="What need, defect, or risk exists?"
+                placeholder="What need, defect, or risk exists?" required={false}
                 onChange={(value) => setDraft((current) => ({ ...current, problemRich: value, problem: toPlainText(value) }))} />
               <RichCaseField api={api} projectId={scr.projectId} label="Analysis" value={draft.analysisRich}
-                placeholder="What is affected and what alternatives were considered?"
+                placeholder="What is affected and what alternatives were considered?" required={false}
                 onChange={(value) => setDraft((current) => ({ ...current, analysisRich: value, analysis: toPlainText(value) }))} />
               <RichCaseField api={api} projectId={scr.projectId} label="Solution" value={draft.solutionRich}
-                placeholder="What controlled outcome is proposed?"
+                placeholder="What controlled outcome is proposed?" required={false}
                 onChange={(value) => setDraft((current) => ({ ...current, solutionRich: value, solution: toPlainText(value) }))} />
             </div>
             <ProblemReportPicker api={api} projectId={scr.projectId} releaseId={scr.targetReleaseId}
@@ -1020,8 +1066,10 @@ export default function ScrWorkspace({
                 <>
                   <button type="button" disabled={!context} onClick={() => addProposal("Introduce", "HighLevel")}>+ Introduce HLR</button>
                   <button type="button" disabled={!context} onClick={() => addProposal("Introduce", "LowLevel")}>+ Introduce LLR</button>
-                  <button type="button" onClick={() => addProposal("Modify", "HighLevel")}>Modify existing</button>
-                  <button type="button" onClick={() => addProposal("Retire", "HighLevel")}>Retire existing</button>
+                  <button type="button" onClick={() => addProposal("Modify", "HighLevel")}>Modify existing HLR</button>
+                  <button type="button" onClick={() => addProposal("Retire", "HighLevel")}>Retire existing HLR</button>
+                  <button type="button" onClick={() => addProposal("Modify", "LowLevel")}>Modify existing LLR</button>
+                  <button type="button" onClick={() => addProposal("Retire", "LowLevel")}>Retire existing LLR</button>
                 </>
               )}
             </div>
@@ -1050,12 +1098,13 @@ export default function ScrWorkspace({
 
           <div className="workspaceActions stickyWorkspaceActions">
             <div>
-              <b>{reviewReady ? "Ready to check in" : "Draft can be checked in before review readiness"}</b>
-              <span>Server recovery: {autosaveStatus.toLowerCase()}</span>
+              <b>{reviewReady ? "Ready for review after check-in" : "Draft can be checked in before review readiness"}</b>
+              <span>{hasUnsavedChanges ? "Working copy has unsaved changes" : `Working copy: ${autosaveStatus.toLowerCase()}`}</span>
             </div>
             <button type="button" className="outline" onClick={discard}>Discard checkout</button>
-            <button type="button" className="outline" onClick={() => void autosave()} disabled={autosaveStatus === "Saving"}>Save recovery snapshot</button>
-            <button disabled={busy || autosaveStatus === "Conflict" || !caseComplete || !proposalsComplete}>
+            <button type="button" className="outline" onClick={() => void saveWorkingCopy()}
+              disabled={busy || autosaveStatus === "Saving" || autosaveStatus === "Conflict" || !hasUnsavedChanges}>Save</button>
+            <button disabled={busy || autosaveStatus === "Conflict" || !hasCheckoutChanges || !draftCanCheckIn}>
               {busy ? "Checking in…" : "Save & check in"}
             </button>
           </div>
