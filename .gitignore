@@ -6,6 +6,7 @@ Thumbs.db
 
 # Local scratch and generated review output
 .tmp/
+.codex-temp/
 artifacts/
 out/
 rendered/
