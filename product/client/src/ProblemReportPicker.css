@@ -3,5 +3,5 @@
 .problemReportPicker>small,.problemReportPicker>span{display:block;margin:0 0 10px;color:var(--ink-500);font-size:12px}
 .problemReportPicker label{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:9px;margin:0;padding:9px 4px;border-top:1px solid var(--line);font-weight:400;cursor:pointer}
 .problemReportPicker label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-600)}
-.problemReportPicker label i{font-size:11px;font-style:normal;color:var(--ink-500)}
-.problemReportPicker input{width:auto!important;margin:0}
+.problemReportPicker label i{font-size:12px;font-style:normal;color:var(--ink-500)}
+.problemReportPicker input{width:24px!important;height:24px;margin:0}
