@@ -59,7 +59,8 @@ export async function openNavigationGroup(page:Page,name:string){
   const currentName:{[key:string]:string}={
     'SYSTEMS ENGINEERING':'ENGINEERING',
     'SOFTWARE ENGINEERING':'ENGINEERING',
-    'VERIFICATION':'ASSURANCE',
+    'VERIFICATION':'VERIFICATION',
+    'ASSURANCE':'VERIFICATION',
     'RELEASE & CONFIGURATION':'RELEASE',
   }
   const group=page.locator('.navGroup').filter({has:page.locator('summary').filter({hasText:currentName[name]??name})})

@@ -26,7 +26,7 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await page.getByLabel("Search requirements").fill("LLR-000700");
   await expect(page.getByText(/LLR-000700/).first()).toBeVisible();
   await page.getByRole("link", { name: /Command Center/ }).first().click();
-  await openNavigationGroup(page,"VERIFICATION");
+  await openNavigationGroup(page,"SYSTEMS ENGINEERING");
   await page.getByRole("link", { name: "Digital Thread" }).click();
   await expect(
     page.getByRole("heading", { name: "Digital Thread" }),

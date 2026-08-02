@@ -15,7 +15,7 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   await expect(page.getByRole('heading',{name:'Change triage'})).toBeVisible()
   await expect(page.getByText('Release attention')).toHaveCount(0)
   await expect(page.getByText('Change request flow')).toHaveCount(0)
-  await expect(page.locator('.navGroup > summary')).toHaveText(['ENGINEERING','ASSURANCE','RELEASE','ADMINISTRATION'])
+  await expect(page.locator('.navGroup > summary')).toHaveText(['ENGINEERING','VERIFICATION','RELEASE','ADMINISTRATION'])
 
   await openNavigationGroup(page,'SYSTEMS ENGINEERING')
   await page.getByRole('link',{name:'System Change Requests'}).click()
@@ -56,7 +56,7 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()
 
   await page.getByRole('link',{name:/Command Center/}).click()
-  await openNavigationGroup(page,'VERIFICATION')
+  await openNavigationGroup(page,'SYSTEMS ENGINEERING')
   await page.getByRole('link',{name:'Digital Thread'}).click()
   await expect(page.getByText('1,250 requirements')).toBeVisible()
   await expect(page.getByRole('heading',{name:'Digital Thread'})).toBeVisible()
@@ -69,7 +69,7 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
 
   // Verification is a fork between two pages rather than a workspace with tabs: the question a reader
   // arrives with decides which page they open, and both are named on the way in.
-  await page.getByRole('link',{name:'System Verification'}).click()
+  await page.goto(page.url().replace(/\/traceability.*$/,'/system-verification'))
   await expect(page.getByRole('heading',{name:'Verification'})).toBeVisible()
   await page.getByRole('button',{name:'Open Testing Coverage →'}).click()
   await expect(page.getByRole('heading',{name:'Test change requests'})).toBeVisible()

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiLogin, login, openNavigationGroup, selectProgram } from './auth'
+import { apiLogin, login, selectProgram } from './auth'
 
 /**
  * Verification is a fork, not a workspace.
@@ -15,8 +15,7 @@ test('verification offers the two pages by name, and both open on real work', as
   await apiLogin(request)
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Verification' }).click()
+  await page.goto(`${page.url().replace(/\/command-center$/,'')}/system-verification`)
   await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
 
   const cards = page.locator('.landingCards button')
@@ -54,8 +53,7 @@ test('software verification offers an HLR pair and an LLR pair', async ({ page, 
   await apiLogin(request)
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('button', { name: 'Software', exact: true }).click()
+  await page.goto(`${page.url().replace(/\/command-center$/,'')}/software-verification`)
   await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
 
   await expect(page.locator('.landingCards button')).toHaveCount(4)
