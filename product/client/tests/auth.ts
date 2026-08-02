@@ -80,8 +80,8 @@ export async function openNewSystemChangeRequest(page:Page){
 export async function openNewSoftwareChangeRequest(page:Page,level:'HLR'|'LLR'='HLR'){
   await openNavigationGroup(page,'SOFTWARE ENGINEERING')
   await page.getByRole('link',{name:'Software Change Requests'}).click()
-  await page.getByRole('button',{name:'+ New Software Change Request'}).click()
-  await page.getByRole('button',{name:new RegExp(`^${level} change request`)}).click()
+  if(level==='LLR')await page.getByRole('button',{name:/^LLR Low-level requirements$/}).click()
+  await page.getByRole('button',{name:`+ New ${level} Change Request`}).click()
 }
 
 /**

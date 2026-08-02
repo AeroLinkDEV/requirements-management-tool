@@ -15,8 +15,8 @@ type Assessment = {
 type Draft = {id:string;displayNumber:string;title:string;requirementCount:number}
 type RationaleDecision = {assessmentId:string;sourceNumber:string;kind:'no-change'|'return'}
 
-export default function DownstreamAssessmentQueue({api,projectId,releaseId,user,onOpenScr}:{
-  api:string;projectId:string;releaseId:string;user:AuthUser;onOpenScr:(id:string)=>void
+export default function DownstreamAssessmentQueue({api,projectId,releaseId,targetLevel,user,onOpenScr}:{
+  api:string;projectId:string;releaseId:string;targetLevel:'HighLevel'|'LowLevel';user:AuthUser;onOpenScr:(id:string)=>void
 }) {
   const [rows,setRows]=useState<Assessment[]>([]),[drafts,setDrafts]=useState<Draft[]>([])
   const [busy,setBusy]=useState(''),[error,setError]=useState(''),[revision,setRevision]=useState(0)
@@ -24,12 +24,12 @@ export default function DownstreamAssessmentQueue({api,projectId,releaseId,user,
   const [decision,setDecision]=useState<RationaleDecision>(),[rationale,setRationale]=useState('')
   const load=useCallback(async()=>{
     const [assessments,requests]=await Promise.all([
-      fetch(`${api}/api/downstream-assessments?projectId=${projectId}&releaseId=${releaseId}`),
-      fetch(`${api}/api/history/scrs?projectId=${projectId}&releaseId=${releaseId}&type=Software&state=Draft&page=1&pageSize=100`),
+      fetch(`${api}/api/downstream-assessments?projectId=${projectId}&releaseId=${releaseId}&targetLevel=${targetLevel}`),
+      fetch(`${api}/api/history/scrs?projectId=${projectId}&releaseId=${releaseId}&type=Software&level=${targetLevel}&state=Draft&page=1&pageSize=100`),
     ])
     if(assessments.ok)setRows(await assessments.json())
     if(requests.ok)setDrafts((await requests.json()).items)
-  },[api,projectId,releaseId])
+  },[api,projectId,releaseId,targetLevel])
   useEffect(()=>{void load()},[load,revision])
   const act=async(id:string,path:string,body:object={})=>{
     setBusy(id);setError('')
