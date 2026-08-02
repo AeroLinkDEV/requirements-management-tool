@@ -9,6 +9,7 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -133,6 +134,66 @@ public sealed class AuthoringTracedImpactTests
         var rows = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
 
         Assert.Contains(rows.EnumerateArray(), x => x.GetProperty("baseNumber").GetString() == parentNumber);
+    }
+
+    [Fact]
+    public async Task Modification_picker_hydrates_the_current_exact_upward_allocation()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var (projectId, parentNumber, childNumber, _) = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        using var response = await client.GetAsync(
+            $"/api/authoring/requirements?projectId={projectId}&scope=Software&search={childNumber}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var rows = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        var child = Assert.Single(rows.EnumerateArray(), x => x.GetProperty("baseNumber").GetString() == childNumber);
+        var parentRevisionId = Assert.Single(child.GetProperty("currentUpstreamRevisionIds").EnumerateArray()).GetGuid();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var parentId = db.Requirements.Single(x => x.ProjectId == projectId && x.BaseNumber == parentNumber).Id;
+        Assert.Equal(db.RequirementRevisions.Single(x => x.ArtifactId == parentId).Id, parentRevisionId);
+    }
+
+    [Fact]
+    public async Task Upstream_picker_hydrates_an_exact_selected_parent_from_an_older_revision()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var (projectId, parentNumber, childNumber, _) = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        Guid releaseId, parentRevisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var baseline = db.CandidateBaselines.Single(x => x.ProjectId == projectId);
+            releaseId = db.Releases.Single(x => x.ProjectId == projectId).Id;
+            var parent = db.Requirements.Single(x => x.ProjectId == projectId && x.BaseNumber == parentNumber);
+            var parentRevision = db.RequirementRevisions.Single(x => x.ArtifactId == parent.Id);
+            parentRevisionId = parentRevision.Id;
+            db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, parent.Id, parentRevision.Id));
+            await db.SaveChangesAsync();
+            await db.CandidateBaselines.Where(x => x.Id == baseline.Id)
+                .ExecuteUpdateAsync(update => update.SetProperty(x => x.RequirementsMaterializedAt, DateTimeOffset.UtcNow));
+            await db.RequirementRevisions.Where(x => x.Id == parentRevision.Id)
+                .ExecuteUpdateAsync(update => update.SetProperty(x => x.State, RequirementRevisionState.Superseded));
+        }
+
+        var requirements = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/authoring/requirements?projectId={projectId}&scope=Software&search={childNumber}");
+        var child = Assert.Single(requirements.EnumerateArray(), x => x.GetProperty("baseNumber").GetString() == childNumber);
+        Assert.Equal(parentRevisionId, Assert.Single(child.GetProperty("currentUpstreamRevisionIds").EnumerateArray()).GetGuid());
+
+        using var response = await client.GetAsync(
+            $"/api/authoring/upstream-requirements?projectId={projectId}&releaseId={releaseId}&childLevel=HighLevel&selected={parentRevisionId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var rows = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        var selected = Assert.Single(rows.EnumerateArray());
+        Assert.Equal(parentRevisionId, selected.GetProperty("revisionId").GetGuid());
+        Assert.Equal($"{parentNumber}.00", selected.GetProperty("displayNumber").GetString());
     }
 
     [Fact]

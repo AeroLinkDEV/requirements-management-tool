@@ -48,6 +48,8 @@ test('problem reports are active while retired product-version and baseline page
   const root = '/programs/program-a/projects/project-a/releases/release-a'
   expect(parseRoute(`${root}/problem-reports`)).toMatchObject({ view: 'problemReports', discipline: 'system' })
   expect(routePath(context, 'problemReports')).toBe(`${root}/problem-reports`)
+  expect(parseRoute(`${root}/problem-reports/report-a`)).toMatchObject({ view: 'problemReports', artifactId: 'report-a' })
+  expect(routePath(context, 'problemReports', 'system', 'report-a')).toBe(`${root}/problem-reports/report-a`)
   for (const path of ['release-planning', 'baselines'])
     expect(parseRoute(`${root}/${path}`)).toMatchObject({ view: 'notFound' })
   for (const kind of ['problem-report', 'baseline', 'build'])

@@ -496,6 +496,8 @@ function App() {
         onBack={() => navigate("history", discipline)}
         onChanged={loadData}
         onOpenScr={(id) => navigate("scr", discipline, id)}
+        onOpenRequirement={(id,level)=>navigate("requirements",level==="System"?"system":"software",id)}
+        onOpenProblemReport={(id)=>navigate("problemReports","system",id)}
         onDisciplineResolved={(resolved) => {
           if (resolved !== discipline) setDiscipline(resolved);
           if (context) history.replaceState({}, "", routePath(context, "scr", resolved, selectedScrId));
@@ -623,8 +625,11 @@ function App() {
         releaseId={release?.id ?? ""}
         readOnly={release?.isReleased ?? false}
         user={user}
+        initialReportId={selectedArtifactId||undefined}
+        onSelected={(id)=>navigate("problemReports","system",id,undefined,true)}
         onBack={() => navigate("dashboard")}
         onOpenVerification={(target) => navigate("testResults", target?.discipline === "software" ? "softwareTest" : "systemTest", target?.problemReportId, target?.discipline === "software" ? "HighLevel" : undefined)}
+        onOpenArtifact={(kind,id,identifier)=>{if(kind==="change-request")navigate("scr",identifier?.startsWith("SWCR-")?"software":"system",id);else if(kind==="problem-report")navigate("problemReports","system",id);else if(kind==="requirement")navigate("requirements",identifier?.startsWith("SYSR-")?"system":"software",id);else navigate("artifact","system",id,kind)}}
       />
     );
   if (view === "lifecycle" && project)
