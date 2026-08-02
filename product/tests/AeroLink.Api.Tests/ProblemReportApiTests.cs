@@ -32,7 +32,8 @@ public sealed class ProblemReportApiTests
             projectId, releaseId, title = "Position source disagreement", problem = "Sources disagree during approach."
         });
         Assert.Equal(HttpStatusCode.Created, createdReport.StatusCode);
-        var reportId = (await createdReport.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var reportBody = await createdReport.Content.ReadFromJsonAsync<JsonElement>();
+        var reportId = reportBody.GetProperty("id").GetGuid();
 
         using var createdChange = await client.PostAsJsonAsync("/api/scrs", new
         {
@@ -44,6 +45,17 @@ public sealed class ProblemReportApiTests
         var changeId = JsonDocument.Parse(text).RootElement.GetProperty("id").GetGuid();
         var linked = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/linked/ChangeRequest/{changeId}");
         Assert.Equal(reportId, Assert.Single(linked.EnumerateArray()).GetProperty("id").GetGuid());
+
+        var changeNumber = JsonDocument.Parse(text).RootElement.GetProperty("displayNumber").GetString();
+        var reportNumber = reportBody.GetProperty("displayNumber").GetString();
+        var changeSearch = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/search?projectId={projectId}&releaseId={releaseId}&query={changeNumber}");
+        var reportSearch = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/search?projectId={projectId}&releaseId={releaseId}&query={reportNumber}");
+        Assert.Equal(changeNumber, Assert.Single(changeSearch.GetProperty("items").EnumerateArray(), x =>
+            x.GetProperty("id").GetGuid() == changeId).GetProperty("identifier").GetString());
+        Assert.Equal(reportNumber, Assert.Single(reportSearch.GetProperty("items").EnumerateArray(), x =>
+            x.GetProperty("id").GetGuid() == reportId).GetProperty("identifier").GetString());
     }
 
     [Fact]

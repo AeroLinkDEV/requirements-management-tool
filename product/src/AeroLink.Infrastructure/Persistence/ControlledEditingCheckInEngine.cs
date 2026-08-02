@@ -252,20 +252,26 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     {
         var item = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
             .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
-        return item is null ? null : new(item.ProjectId, item.State.ToString(), item, item.Version,
+        if (item is null) return null;
+        var reportIds = await db.ProblemReportLinks.AsNoTracking().Where(link => link.ArtifactType == "ChangeRequest"
+            && link.ArtifactId == item.Id && link.Relationship == "ProposedCorrectiveAction")
+            .Select(link => link.ProblemReportId).OrderBy(id => id).ToListAsync(ct);
+        return new(item.ProjectId, item.State.ToString(), new State(item, reportIds), item.Version,
             item.Revision.ToString(), item.Id);
     }
 
     public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null)
     {
-        var item = (SystemChangeRequest)artifact.Aggregate;
-        return Snapshot(item, versionOverride);
+        var state = (State)artifact.Aggregate;
+        return Snapshot(state.Request, state.ProblemReportIds, versionOverride);
     }
 
-    public static string Snapshot(SystemChangeRequest item, long? versionOverride = null) =>
+    public static string Snapshot(SystemChangeRequest item, IReadOnlyList<Guid>? problemReportIds = null,
+        long? versionOverride = null) =>
         JsonSerializer.Serialize(new { scrVersion = versionOverride ?? item.Version, title = item.Title,
             problem = item.Problem, analysis = item.Analysis, solution = item.Solution,
             problemRich = item.ProblemRich, analysisRich = item.AnalysisRich, solutionRich = item.SolutionRich,
+            problemReportIds = problemReportIds?.OrderBy(id => id),
             requirementChanges = item.RequirementChanges.Select(x => new { baseNumber = x.BaseNumber,
                 revision = x.Revision, level = x.Level.ToString(), kind = x.Kind.ToString(),
                 statement = x.Statement, rationale = x.Rationale, verificationMethod = x.VerificationMethod,
@@ -276,7 +282,8 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
         bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
-        var item = (SystemChangeRequest)artifact.Aggregate;
+        var state = (State)artifact.Aggregate;
+        var item = state.Request;
         var draft = JsonSerializer.Deserialize<SystemChangeRequestDraft>(draftJson, DraftOptions)
             ?? throw new JsonException("The latest autosaved SCR draft is empty.");
         if (draft.RequirementChanges is null)
@@ -285,6 +292,12 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
         item.UpdateDraft(actor, draft.Title ?? "", draft.Problem ?? "", draft.Analysis ?? "",
             draft.Solution ?? "", changes, now, draft.ProblemRich, draft.AnalysisRich, draft.SolutionRich,
             administratorAuthority);
+        var selectedReports = (draft.ProblemReportIds ?? state.ProblemReportIds)
+            .Distinct().OrderBy(id => id).ToList();
+        await new ProblemReportLinkService(db).ReplaceDraftChangeRequestLinksAsync(item, selectedReports,
+            actor, now, ct);
+        state.ProblemReportIds.Clear();
+        state.ProblemReportIds.AddRange(selectedReports);
     }
 
     private async Task<IReadOnlyList<RequirementChangeDraft>> NormalizeAsync(SystemChangeRequest scr,
@@ -360,7 +373,9 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
 
     private sealed record SystemChangeRequestDraft(string? Title, string? Problem, string? Analysis,
         string? Solution, List<SystemChangeRequestRequirementDraft>? RequirementChanges,
-        string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null);
+        string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null,
+        List<Guid>? ProblemReportIds = null);
+    private sealed record State(SystemChangeRequest Request, List<Guid> ProblemReportIds);
     private sealed record SystemChangeRequestRequirementDraft(string? BaseNumber, int Revision,
         string? Level, string? Kind, string? Statement, string? Rationale, string? VerificationMethod,
         string? RichText, string? AttributesJson, string? ImpactDispositionJson, bool? IsDerived = null,

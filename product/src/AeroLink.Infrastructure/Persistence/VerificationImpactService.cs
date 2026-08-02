@@ -39,7 +39,8 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
     /// change request: existing items for the same requirement change are left alone, so a retried approval
     /// never duplicates work.
     /// </summary>
-    public async Task<int> RaiseForApprovedChangeRequestAsync(SystemChangeRequest request, DateTimeOffset now, CancellationToken ct)
+    public async Task<int> RaiseForApprovedChangeRequestAsync(SystemChangeRequest request, DateTimeOffset now,
+        CancellationToken ct, string? actionActor = null)
     {
         // Selecting an approved change into a candidate baseline moves it to SelectedForBaseline, so both
         // states mean "approved". Testing only for Approved would make a retried raise silently do nothing
@@ -77,7 +78,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
                     await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct));
                 db.TestChangeReviews.Add(review);
                 await (problemReports ?? new ProblemReportLinkService(db)).PropagateToTestChangeRequestAsync(
-                    request.Id, review.Id, request.AuthorId, now, ct);
+                    request.Id, review.Id, actionActor ?? request.AuthorId, now, ct);
                 reviews.Add(discipline, review);
                 foreach (var historical in priorReviews.Where(x => x.Discipline == discipline))
                 {

@@ -22,7 +22,8 @@ namespace AeroLink.Api.Tests;
 public sealed class ManualTestChangeRequestApiTests
 {
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid FirstChangeId, Guid SecondChangeId,
-        Guid AutoRaisedChangeId, Guid OtherBuildChangeId, Guid ProblemReportId, Guid OtherBuildProblemReportId);
+        Guid AutoRaisedChangeId, Guid AutoTcrId, Guid OtherBuildChangeId, Guid ProblemReportId,
+        Guid OtherBuildProblemReportId);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -76,8 +77,10 @@ public sealed class ManualTestChangeRequestApiTests
         var tracked = await db.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == autoRaised.Id);
         await impact.RaiseForApprovedChangeRequestAsync(tracked, now, default);
         await db.SaveChangesAsync();
+        var autoTcrId = await db.TestChangeReviews.Where(x => x.ChangeRequestId == autoRaised.Id)
+            .Select(x => x.Id).SingleAsync();
 
-        return new(project.Id, release.Id, first.Id, second.Id, autoRaised.Id, elsewhere.Id,
+        return new(project.Id, release.Id, first.Id, second.Id, autoRaised.Id, autoTcrId, elsewhere.Id,
             report.Id, otherReport.Id);
     }
 
@@ -173,6 +176,34 @@ public sealed class ManualTestChangeRequestApiTests
                 problemReportIds = new[] { fixture.OtherBuildProblemReportId } });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("target build", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Problem_report_links_are_editable_only_while_the_test_change_request_is_open()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var open = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.AutoTcrId}/problem-reports",
+            new { problemReportIds = new[] { fixture.ProblemReportId } });
+        Assert.Equal(HttpStatusCode.OK, open.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var review = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.AutoTcrId);
+            review.Submit("manual.engineer", "independent.reviewer", true, DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        using var inReview = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.AutoTcrId}/problem-reports",
+            new { problemReportIds = new[] { fixture.ProblemReportId } });
+        Assert.Equal(HttpStatusCode.Conflict, inReview.StatusCode);
+        Assert.Contains("only while", await inReview.Content.ReadAsStringAsync());
     }
 
     [Fact]

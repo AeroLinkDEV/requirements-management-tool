@@ -429,7 +429,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               <button type="button" className="quiet" onClick={() => setOpened(current => current === request.id ? '' : request.id)}>
                 {opened === request.id ? 'Hide decisions' : 'Decisions'}
               </button>
-              {canTest && <button type="button" className="quiet" disabled={busy} onClick={() => {
+              {canTest && request.state === 'Open' && <button type="button" className="quiet" disabled={busy} onClick={() => {
                 setProblemReportIds((request.problemReports ?? []).map(report => report.id))
                 setLinkingProblemReports(request)
               }}>Link PRs{request.problemReports?.length ? ` · ${request.problemReports.length}` : ''}</button>}

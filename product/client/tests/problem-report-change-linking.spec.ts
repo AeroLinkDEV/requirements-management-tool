@@ -34,6 +34,23 @@ test('a PR drives an SCR and can be added to a System TCR through the active cen
   expect(linkedToChange.ok(), await linkedToChange.text()).toBeTruthy()
   expect((await linkedToChange.json()).map((item: { id: string }) => item.id)).toContain(report.id)
 
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  const checkedOutReport = page.getByRole('checkbox', { name: new RegExp(report.displayNumber.replace('.', '\\.')) })
+  await expect(checkedOutReport).toBeVisible()
+  await expect(checkedOutReport).toBeChecked()
+  await page.getByRole('button', { name: 'Discard checkout' }).click()
+  await expect(page.getByRole('button', { name: 'Check out & edit' })).toBeVisible()
+
+  const change = await (await page.request.get(`${apiBase}/api/scrs/${changeRequestId}`)).json()
+  for (const controlledNumber of [change.displayNumber, report.displayNumber]) {
+    await page.getByRole('button', { name: /Search & navigate/ }).click()
+    const palette = page.getByRole('dialog', { name: 'Quick navigation' })
+    const search = palette.getByLabel('Search AeroLink')
+    await search.fill(controlledNumber)
+    await expect(palette.getByRole('link').filter({ hasText: controlledNumber })).toBeVisible()
+    await search.press('Escape')
+  }
+
   await page.goto(new URL(`${root}/system-verification/coverage`, page.url()).toString(), { waitUntil: 'load' })
   await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
   const linkButton = page.getByRole('button', { name: /^Link PRs/ }).first()

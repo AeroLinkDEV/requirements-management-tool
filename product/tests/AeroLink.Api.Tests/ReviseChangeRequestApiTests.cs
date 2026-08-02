@@ -5,7 +5,9 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -55,6 +57,13 @@ public sealed class ReviseChangeRequestApiTests
         Assert.Equal(ScrState.Approved, scr.State);
         if (allocate) scr.MarkSelectedForBaseline("revise.author", now);
         db.SystemChangeRequests.Add(scr);
+        var report = new ProblemReport(project.Id, "PR-00001", "Oceanic sequence anomaly",
+            "The sequence skipped a waypoint.", "", "revise.author", now);
+        db.ProblemReports.Add(report);
+        db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, "Release", release.Id,
+            "BuildScope", "revise.author", now));
+        db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, "ChangeRequest", scr.Id,
+            "ProposedCorrectiveAction", "revise.author", now));
 
         // Released last, so the change request reaches its state through the ordinary transitions first. A
         // release that shipped before its change requests were approved is not a state this product can be in.
@@ -92,6 +101,10 @@ public sealed class ReviseChangeRequestApiTests
         Assert.Equal("Draft", next.State);
         // The content comes forward, which is the whole point of revising rather than starting again.
         Assert.Single(next.RequirementChanges);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.True(await db.ProblemReportLinks.AnyAsync(x => x.ArtifactType == "ChangeRequest"
+            && x.ArtifactId == next.Id && x.Relationship == "ProposedCorrectiveAction"));
     }
 
     /// <summary>
@@ -114,6 +127,6 @@ public sealed class ReviseChangeRequestApiTests
         Assert.Contains("released build", body);
     }
 
-    private sealed record ScrShape(string DisplayNumber, string State, ScrChangeShape[] RequirementChanges);
+    private sealed record ScrShape(Guid Id, string DisplayNumber, string State, ScrChangeShape[] RequirementChanges);
     private sealed record ScrChangeShape(string DisplayNumber);
 }
