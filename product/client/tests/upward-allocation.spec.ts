@@ -87,13 +87,22 @@ test('an engineer can search, select, and explicitly replace an upward allocatio
   await expect(page.locator('.controlledEditor .roleCloud button').filter({ hasText: 'Remove' })).toHaveCount(0)
 })
 
-test('modifying an HLR hydrates its exact parent and preserves an engineer replacement as a navigable reference',async({page})=>{
+test('modifying an HLR hydrates its exact parent and preserves an engineer replacement as a navigable reference',async({page,request})=>{
+  test.setTimeout(90_000)
+  await apiLogin(request)
+  const showcase=await showcaseSeed(request)
+  const requirements=await (await request.get(`${apiBase}/api/authoring/requirements?projectId=${showcase.projectId}&scope=Software&search=HLR-&limit=50`)).json()
+  const existing=requirements.find((item:{currentUpstreamRevisionIds?:string[]})=>item.currentUpstreamRevisionIds?.length)
+  expect(existing,'A current HLR with an exact upward allocation').toBeTruthy()
+  const parents=await (await request.get(`${apiBase}/api/authoring/upstream-requirements?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}&childLevel=HighLevel&search=SYSR-&limit=50`)).json()
+  const replacement=parents.find((item:{revisionId:string})=>!existing.currentUpstreamRevisionIds.includes(item.revisionId))
+  expect(replacement,'A permitted replacement System requirement').toBeTruthy()
   await login(page)
   await openNewSoftwareChangeRequest(page,'HLR')
   await page.getByRole('button',{name:'Modify existing HLR'}).click()
   const requirementSearch=page.getByLabel('Find controlled requirement 1')
-  await requirementSearch.fill('HLR-000001')
-  await page.locator('.proposalLookupResults button').filter({hasText:'HLR-000001.00'}).first().click()
+  await requirementSearch.fill(existing.baseNumber)
+  await page.locator('.proposalLookupResults button').filter({hasText:existing.displayNumber}).first().click()
 
   const existingParent=page.locator('.controlledEditor .roleCloud button').filter({hasText:/SYSR-\d{6}\.\d{2}/}).first()
   await expect(existingParent).toBeVisible()
@@ -101,13 +110,13 @@ test('modifying an HLR hydrates its exact parent and preserves an engineer repla
   await expect(page.locator('.controlledEditor .roleCloud button').filter({hasText:/SYSR-\d{6}\.\d{2}/})).toHaveCount(0)
 
   const upstreamSearch=page.getByLabel('Find upstream requirement 1')
-  await upstreamSearch.fill('SYSR-000002')
-  await page.locator('.proposalLookupResults button').filter({hasText:'SYSR-000002.00'}).last().click()
-  await expect(page.locator('.controlledEditor .roleCloud button').filter({hasText:'SYSR-000002.00'})).toBeVisible()
+  await upstreamSearch.fill(replacement.displayNumber.replace(/\.\d{2}$/,''))
+  await page.locator('.proposalLookupResults button').filter({hasText:replacement.displayNumber}).last().click()
+  await expect(page.locator('.controlledEditor .roleCloud button').filter({hasText:replacement.displayNumber})).toBeVisible()
   await page.getByLabel('Title').fill('Replace HLR upward allocation')
   await page.getByRole('button',{name:'Save SWCR Draft'}).click()
 
-  const controlledParent=page.locator('.artifactReferenceCloud button').filter({hasText:'SYSR-000002.00'})
+  const controlledParent=page.locator('.artifactReferenceCloud button').filter({hasText:replacement.displayNumber})
   await expect(controlledParent).toBeVisible()
   await controlledParent.click()
   await expect(page).toHaveURL(/\/requirements\/[0-9a-f-]+\?discipline=system$/i)
