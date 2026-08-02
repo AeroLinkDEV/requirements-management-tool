@@ -379,7 +379,7 @@ function ExactUpstreamReferences({api,projectId,releaseId,childLevel,revisionIds
     return()=>{active=false}
   },[api,childLevel,projectId,releaseId,revisionKey])
   if(!revisionKey)return <span>No exact upstream revisions allocated</span>
-  if(!loaded)return <span>Loading exact upstream revisionsâ€¦</span>
+  if(!loaded)return <span>Loading exact upstream revisions…</span>
   return <span className="artifactReferenceCloud">{references.map(reference=><button type="button" key={reference.revisionId} onClick={()=>onOpen(reference.artifactId,reference.level)}>{reference.displayNumber}</button>)}{references.length<revisionIds.length&&<i>Unavailable controlled revision</i>}</span>
 }
 
@@ -1256,7 +1256,7 @@ export default function ScrWorkspace({
                   <button type="button" className="requirementView artifactReferenceCard" key={report.id} onClick={()=>onOpenProblemReport(report.id)}>
                     <div><b>{report.displayNumber}</b><span>{stateLabel(report.state)}</span></div>
                     <p>{report.title}</p>
-                    <footer><small>Linked as a proposed corrective action</small><em>Open controlled PR â†’</em></footer>
+                    <footer><small>Linked as a proposed corrective action</small><em>Open controlled PR →</em></footer>
                   </button>
                 ))}
               </section>

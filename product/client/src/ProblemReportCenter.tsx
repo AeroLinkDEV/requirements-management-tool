@@ -16,8 +16,8 @@ const call=async(api:string,path:string,method="GET",body?:unknown)=>{const resp
 const destinationKind=(type:string)=>({ChangeRequest:'change-request',SystemChangeRequest:'change-request',SoftwareChangeRequest:'change-request',ProblemReport:'problem-report',Requirement:'requirement',TestExecution:'test-execution',TestProcedure:'test-procedure',Evidence:'evidence',Document:'document',Release:'release'} as Record<string,string>)[type]
 function ConnectedArtifact({link,onOpen}:{link:NonNullable<Report['links']>[number];onOpen:(kind:string,id:string,identifier?:string)=>void}){
  const kind=destinationKind(link.artifactType)
- const content=<><i>{artifactAcronym(link.identifier,link.artifactType)}</i><div><b>{link.relationship.replace(/([A-Z])/g," $1")}</b><span>{artifactTypeLabel(link.artifactType,link.identifier)}{link.identifier&&` Â· ${link.identifier}`}</span></div><small><PersonName userName={link.addedBy}/></small></>
- return kind?<button type="button" className="artifactReferenceCard" onClick={()=>onOpen(kind,link.artifactId,link.identifier)}>{content}<em>Open â†’</em></button>:<article className="artifactUnavailable">{content}<em>Unavailable in this workspace</em></article>
+ const content=<><i>{artifactAcronym(link.identifier,link.artifactType)}</i><div><b>{link.relationship.replace(/([A-Z])/g," $1")}</b><span>{artifactTypeLabel(link.artifactType,link.identifier)}{link.identifier&&` · ${link.identifier}`}</span></div><small><PersonName userName={link.addedBy}/></small></>
+ return kind?<button type="button" className="artifactReferenceCard" onClick={()=>onOpen(kind,link.artifactId,link.identifier)}>{content}<em>Open →</em></button>:<article className="artifactUnavailable">{content}<em>Unavailable in this workspace</em></article>
 }
 
 export default function ProblemReportCenter({api,projectId,releaseId,readOnly,user,initialReportId,onSelected,onBack,onOpenVerification,onOpenArtifact}:Props){

@@ -55,7 +55,7 @@ export default function ProblemReportPicker({ api, projectId, releaseId, selecte
     <legend>{legend}</legend>
     <label className="problemReportSearch"><span>Find controlled PR</span><input type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search PR number, title, problem, or root cause"/></label>
     {error && <span role="alert">{error}</span>}
-    {busy&&<span role="status">Searching problem reportsâ€¦</span>}
+    {busy&&<span role="status">Searching problem reports…</span>}
     {!busy&&!error&&!visible.length && <span>{query.trim()?'No problem reports match this search.':'No PRs are recorded for this build.'}</span>}
     {visible.map(report => <label key={report.id}>
       <input type="checkbox" checked={selected.includes(report.id)} disabled={locked.includes(report.id)} onChange={() => toggle(report.id)} />
