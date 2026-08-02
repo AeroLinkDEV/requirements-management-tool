@@ -135,7 +135,7 @@ That recommendation is historical. Subsequent increments delivered universal con
 email outbox delivery, broad search/filtering, verification/retest/release journeys, build-scoped verification,
 controlled Test Change Requests, downstream assessments, identity lifecycle administration, and exact software
 upward allocation. Current continuation starts from a reproduced need and the
-[current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md), not this old next-increment sentence.
+[current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md), not this old next-increment sentence.
 
 ### 2026-07-18 Requirements Explorer boundary delivered
 

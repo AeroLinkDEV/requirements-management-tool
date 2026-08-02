@@ -6,16 +6,16 @@ comes from the actual API and persistence layer. The former `showcase/` prototyp
 [DESIGN_VISION_AND_DASHBOARDS.md](../DESIGN_VISION_AND_DASHBOARDS.md).
 
 For project-wide orientation, start at [PROJECT_STATE.md](../PROJECT_STATE.md), then read the
-[current product handoff](../CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
+[current product handoff](../CURRENT_PRODUCT_HANDOFF_2026-08-02.md).
 
 ## Current vertical slice
 
 The current entry path is login → Projects → FMS Product Development → Software Builds → one explicit
 build-scoped workspace. `SW-01.50` (informally Build 1.5) is released/read-only; `SW-01.60` (informally Build
 1.6) is in work. A baseline and software build are one product concept. System and Software remain
-separate, while Command Center summarizes System, Software and Verification. Problem Reports, Product Versions,
-Candidate Baselines and the old Change Request Software Builds view are deliberately dormant in the UI even
-though underlying lifecycle implementation remains.
+separate, while Command Center summarizes System, Software and Verification. Problem Reports is an active,
+standalone build-scoped workspace; Product Versions, Candidate Baselines and the old Change Request Software
+Builds view remain deliberately dormant even though underlying lifecycle implementation remains.
 
 The 2026-07-13 enterprise control increment adds durable URL routing and context restoration, a keyboard command palette, Program-aware universal artifact search, authoritative artifact detail links, SCR/SWCR exclusive checkout, renewable leases, server autosave snapshots, read-only observers, check-in/discard, forced-unlock auditing, authentication throttling, Program-scope enforcement, isolated browser-test infrastructure, and verified backup/restore operations.
 
@@ -24,7 +24,10 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 - exact System/HLR/LLR procedure and coverage isolation, including controlled procedure-number deep links,
   refresh-safe history, and truthful Covered/Suspect/Uncovered states
 - governed downstream assessments from approved System changes to HLR work and from approved HLR changes to
-  LLR work, with named independent approval, no-change rationale, SWCR linking, and supersession behavior
+  LLR work, with engineering-language state, source-case/downward-trace context, named independent approval,
+  no-change rationale, automatic/retryable correct-level Draft SWCR linking, and supersession behavior
+- searchable, durable Problem Report relationships from every SCR/SWCR/TCR type through corrective actions and
+  applicable test evidence, without turning requirement changes into automatic PRs
 - prospective build-scoped upward allocation: HLR proposals select current System revisions, LLR proposals
   select current HLR revisions, and justified derived requirements are the explicit exception
 - controlled Test Change Requests with assignment, explicit verification decisions, independent approval,

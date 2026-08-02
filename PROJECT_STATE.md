@@ -1,6 +1,6 @@
 # Project State — Start Here
 
-**Last updated: 2026-08-01.**
+**Last updated: 2026-08-02.**
 
 This is the orientation record for anyone — human or model — picking up AeroLink. It answers *what
 exists, what is true today, what is deliberately not being built, and where to start*. Every other
@@ -136,6 +136,20 @@ current System revisions from the target build and an LLR selects current HLR re
 an explicit derived exception with rationale. Exact selected revision IDs are reviewed, retained through
 checkout and change-request revisioning, and materialized as immutable `AllocatedFrom` traces.
 
+Draft authoring separates two deliberate actions. **Save Draft** persists incomplete work without issuing
+empty records or pretending it is review-ready; **Save and check in** applies the controlled working copy and
+closes its edit session. HLR and LLR histories, requirement pickers, and procedure inventories stay isolated,
+while exact controlled references remain searchable and navigable. A modified software requirement hydrates
+its existing exact upstream revisions, including historical revisions no longer active in the current baseline,
+without widening the current-build candidate search.
+
+Downstream assessments now read as engineering decisions rather than storage states: pending, in progress, in
+review, complete with no impact, complete with controlled impact, change required with SWCR pending, or
+superseded, always labelled HLR or LLR. A deep-linked assessment drawer shows the source SCR and its complete
+change case, changed requirements, and the current downward trace. An engineer may record no impact, link a
+level-compatible Draft SWCR, or create the correct HLR/LLR Draft directly; the new Draft is linked automatically,
+and a failed link remains visible and retryable without losing the saved Draft.
+
 Verification impact: approving a change request raises an item for every requirement it introduces or
 modifies, and for any procedure a retirement leaves covering nothing. A Test Lead distributes items;
 a Test Engineer resolves each one either by naming an approved procedure or by recording that no test is
@@ -187,8 +201,11 @@ Software and Verification work. System change creation is direct; Software creat
 Change history, requirements, search and verification are scoped to the active build, and historical evidence
 is labelled with its originating build without changing workspace context.
 
-Problem Reports are active and build scoped under DEC-085. They link forward to SCRs, SWCRs, and every TCR
-discipline; approved engineering changes are shown as corrective actions. Product Versions, Candidate
+Problem Reports are active and build scoped under DEC-085. Their center is searchable by controlled number and
+content, supports durable detail links, and links forward to SCRs, SWCRs, every TCR discipline, requirements,
+procedures, executions/evidence, documents, and releases where those records exist. Every change-request type
+can select one or more driving PRs; approved engineering changes are projected back as corrective actions, and
+verification results are projected as test evidence. Product Versions, Candidate
 Baselines, and the old Change Request Software Builds view remain dormant under DEC-072. Lifecycle Decision
 Room remains visible.
 
@@ -207,6 +224,12 @@ System has one pair; software has two, HLR and LLR, because that work is planned
 separately. `/system-verification` and `/software-verification` are now a chooser between the pages rather
 than a workspace of their own.
 
+Primary navigation mirrors that work: **Engineering** owns change requests, requirements, engineering
+documents, and Digital Thread; **Verification** owns the direct coverage, results, and verification-document
+destinations; **Problem Reports** is a standalone destination. The older verification chooser URLs remain
+valid deep links, but no redundant generic Verification entry occupies the sidebar. Legitimate assurance role
+names and production-assurance terminology are unchanged.
+
 A build's test work is scoped by a **Build Test Set** — one per build per discipline, a working list rather
 than a controlled artefact, recording who put each procedure in it and why (changed requirement, coverage
 area, corrective action, or simply chosen). The release gates measure that set. The older
@@ -218,7 +241,7 @@ records with their own numbers and revisions, which may cover more than one requ
 may also be raised by hand when a set of changes is best tested together.
 
 The restart-ready description, routes, issue state and validation evidence are in
-[CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
+[CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md).
 
 ## The demonstration dataset
 
@@ -238,8 +261,9 @@ The tool never auto-creates or auto-approves a successor release. Details in
 ## Where delivery stands
 
 The AeroLink 3.0 implementation program and its review follow-ups have been reconciled. GitHub issue #29 and
-every child/follow-up are closed; the later issue #252 Problem Reports increment followed the same focused,
-gated pull-request path. Residual identity federation
+every child/follow-up are closed. The later Problem Reports increment and the 2 August engineering-observation
+set (#258-#262) followed the same focused, gated pull-request path; all are closed and GitHub has no open issue
+at this checkpoint. Residual identity federation
 and deployment operations were closed with explicit resume conditions because they require a real provider or
 hosting contract, not generic product simulation.
 
@@ -502,11 +526,13 @@ reason the document set can be trusted.
   and lost to `.controlledEditor input { width: 100% }` — (0,1,0) against (0,1,1) — so the input rendered at
   1160px and pushed the page 106px off screen. The cascade lesson above is about load order; this is the same
   failure through the other mechanism, and the same fix applies. When a rule matters, make it win on purpose.
-# Current implementation checkpoint — 2026-08-01
+# Current implementation checkpoint — 2026-08-02
 
-Current `main` includes build-scoped verification, downstream assessment, identity lifecycle, prospective
-upward allocation, active Problem Reports traceability, and mandatory changed-requirement testing.
+Current `main` includes trustworthy Draft SWCR persistence, HLR/LLR-scoped histories and assessments,
+searchable controlled references, actionable downstream assessment decisions with automatic Draft linking,
+active Problem Reports traceability, mandatory changed-requirement testing, and the Engineering / Verification /
+Problem Reports navigation model.
 Non-authoritative Concurrency and count-only IntegrityScan simulations are retired. Each focused delivery is
 qualified through the GitHub Product Quality Gate and exact-merge local checks; the persistent PostgreSQL
 application is restarted healthy without replacing its engineering records. See
-[CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
+[CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md).

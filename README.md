@@ -1,7 +1,7 @@
 # Aerospace Development Assurance Platform
 
 > **New here — human or model? Read [PROJECT_STATE.md](PROJECT_STATE.md) first, then the
-> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).** They record what
+> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md).** They record what
 > exists today, what is deliberately excluded, where delivery stands, and the known limitations. The
 > documents indexed below are durable definitions and historical records; `PROJECT_STATE.md` describes
 > the present.
@@ -60,7 +60,8 @@ demonstrations use the `FMSLIVE` dataset described in
 | Document | Purpose |
 | --- | --- |
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
-| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) | **Current restart point.** Build-scoped verification, assessments, identity lifecycle, upward allocation, backlog reconciliation, validation, and safe continuation |
+| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) | **Current restart point.** Draft SWCR controls, HLR/LLR scope, searchable references, actionable assessments, Problem Reports integration, navigation, validation, and safe continuation |
+| [1 August handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) | Historical delivery record for build-scoped verification roles and live engineering workflow qualification |
 | [31 July handoff](CURRENT_PRODUCT_HANDOFF_2026-07-31.md) | Historical delivery record for the verification rebuild and downstream-assessment increment |
 | [29 July handoff](CURRENT_PRODUCT_HANDOFF_2026-07-29.md) | Historical delivery record for build-scoped navigation and the product-surface simplification |
 | [Project vision](PROJECT_VISION.md) | Problem, audience, value, ambition, and success definition |

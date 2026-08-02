@@ -1147,6 +1147,21 @@ Future entries use:
   revisions require a passing build execution with evidence before release. Released builds remain read-only.
   Broader PR classification, lifecycle, and closure policy will be added only as product decisions settle.
 
+### DEC-086 - Primary Navigation Follows Engineering Work and Verification Evidence
+
+- **Date:** 2026-08-02
+- **Status:** Accepted
+- **Decision:** The primary sidebar groups requirement change, controlled documents, and the Digital Thread
+  under **Engineering**. Coverage, results, and verification documents sit under **Verification**. Problem
+  Reports remain a standalone operational center. Existing discipline chooser routes remain compatible entry
+  points even though they are not duplicate sidebar destinations.
+- **Rationale:** Engineers follow a change and its trace consequences, while verification users work from
+  coverage and evidence. A standalone PR center preserves the problem-to-correction thread without treating it
+  as either a requirement level or a verification subtype.
+- **Consequences:** Navigation labels describe user work rather than internal modules. Direct links and browser
+  refreshes remain supported, and historical URLs continue to resolve while the visible information
+  architecture stays compact.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

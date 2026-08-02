@@ -91,6 +91,9 @@ The following are not part of Phase 0 or the first product slice:
 - **Approval and baselines:** Approval of an artifact revision does not automatically place it in a release baseline. Baseline inclusion is a distinct controlled decision.
 - **Testing:** A test procedure is a reusable controlled definition. A test execution is a historical occurrence using a specific procedure revision and configuration.
 - **Standards:** Standards inform product language and rigor. Program-specific processes remain authoritative for actual certification use.
-- **PRs:** PRs are strategically important but the complete PR workflow is later scope. The initial model may retain external PR identifiers and links so the future relationship is not blocked.
+- **PRs:** The product now provides a build-scoped Problem Reports center and controlled PR links from SCRs,
+  SWCRs, and System/HLR/LLR TCRs. Approved engineering changes appear as corrective actions and linked test
+  results provide verification evidence. Broader classification, lifecycle, closure policy, and external issue
+  integration remain later scope.
 
 Scope changes must be recorded in [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md) and reflected in [FEATURE_CATALOG.md](FEATURE_CATALOG.md).

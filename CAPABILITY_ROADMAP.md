@@ -10,7 +10,7 @@ Items are numbered as they were in the analysis, so the numbering is not sequent
 > System/HLR/LLR discipline; controlled Test Change Requests, downstream assessments, identity lifecycle, and
 > prospective upward allocation are delivered. Non-authoritative Concurrency and count-only IntegrityScan
 > simulations are retired. Problem Reports are now active and build scoped under DEC-085; Product Versions and
-> Candidate Baselines remain dormant product surfaces. See [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) before treating
+> Candidate Baselines remain dormant product surfaces. See [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) before treating
 > any older item below as current UI direction or active backlog.
 
 ## Accepted, in build order

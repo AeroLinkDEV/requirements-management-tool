@@ -60,7 +60,8 @@ software build. It is not a separate product-level destination in the current UI
 
 **Software Change Request (SWCR)**: The software-level counterpart to an SCR. It governs HLR and LLR
 introductions, modifications, and retirements for one target build, including exact upward allocation or a
-justified derived exception.
+justified derived exception. HLR and LLR work is scoped independently. Saving a Draft persists incomplete
+work; checking in applies the controlled working copy and closes its edit session.
 
 **Requirement Change Item**: One proposed introduction, modification, or retirement contained in an SCR. It identifies the affected requirement when applicable, the proposed content or disposition, and the rationale needed to review the change.
 
@@ -72,7 +73,9 @@ justified derived exception.
 software discipline. System approval raises HLR assessment work; HLR approval raises LLR assessment work. The
 consuming engineer records a justified no-change decision or links one or more Draft SWCRs, then submits the
 assessment to a named independent approver. Superseded source work remains readable but cannot satisfy current
-readiness.
+readiness. `ChangeRequired` is an explicit intermediate outcome: it records that work is needed but cannot be
+submitted until a level-compatible SWCR is linked. The assessment detail retains a deep link to the source SCR,
+its Problem/Analysis/Solution case, changed requirements, current downward trace, and the linked SWCRs.
 
 **Prospective Upward Allocation**: The exact current parent requirement revisions selected for a proposed HLR
 or LLR before review. HLR parents are System revisions; LLR parents are HLR revisions from the same Project and
@@ -167,7 +170,12 @@ session, authority, assignment, independence, and password confirmation succeed.
 
 **Suspect Link**: A link whose continuing validity requires reassessment because a linked artifact changed or another defined trigger occurred. Suspect does not automatically mean invalid.
 
-**Problem Report (PR)**: A controlled record of an identified product, lifecycle-data, or process problem and its investigation, disposition, resolution, verification, and relationships. Full PR management is later scope; the first slice may retain external PR references.
+**Problem Report (PR)**: A build-scoped controlled record of an identified product, lifecycle-data, or process
+problem. The delivered foundation retains its controlled number, raised date, title, description, additional
+information, target build, status and relationships. PRs drive change; requirements do not automatically create
+PRs. Any SCR, SWCR or TCR may cite one or more driving PRs. Approved changes appear on the PR as corrective
+actions, and applicable executions/results appear as test evidence. Additional classification and closure-policy
+depth remains incremental product work rather than implied behavior.
 
 **Impact Analysis**: Identification and review of artifacts, links, tests, results, documents, and releases potentially affected by a proposed change or PR.
 
