@@ -4,6 +4,7 @@ using AeroLink.Domain.Contracts;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Data;
@@ -181,7 +182,7 @@ public static class ChangeRequestEndpoints
                               join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId
                               where revision.Revision == db.RequirementRevisions.Where(x => x.ArtifactId == artifact.Id).Max(x => x.Revision)
                               orderby artifact.BaseNumber
-                              select new { artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(), revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, state = revision.State.ToString() })
+                              select new { artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(), revisionId = revision.Id, revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, state = revision.State.ToString() })
                 .Take(Math.Clamp(limit ?? 12, 1, 50)).ToListAsync(ct);
             // The section each requirement is currently in, so a modification can offer to keep it. Without this
             // the author is asked to choose a section for a requirement that already has one, which invites
@@ -194,8 +195,16 @@ public static class ChangeRequestEndpoints
                 .ToListAsync(ct);
             var sectionByArtifact = placements.GroupBy(x => x.ArtifactId)
                 .ToDictionary(x => x.Key, x => x.First().SectionId);
+            var currentRevisionIds = rows.Select(x => x.revisionId).ToList();
+            var currentAllocations = await db.RequirementTraces.AsNoTracking()
+                .Where(x => currentRevisionIds.Contains(x.SourceRevisionId)
+                    && (x.Type == RequirementTraceType.AllocatedFrom || x.Type == RequirementTraceType.DerivedFrom))
+                .Select(x => new { x.SourceRevisionId, x.TargetRevisionId }).ToListAsync(ct);
+            var upstreamByRevision = currentAllocations.GroupBy(x => x.SourceRevisionId)
+                .ToDictionary(group => group.Key, group => group.Select(x => x.TargetRevisionId).Distinct().ToArray());
             return Results.Ok(rows.Select(x => new { x.Id, x.BaseNumber, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.level, x.Revision, nextRevision = x.Revision + 1, x.Statement, x.Rationale, x.VerificationMethod, x.state,
-                currentSectionId = sectionByArtifact.TryGetValue(x.Id, out var sectionId) ? sectionId : (Guid?)null }));
+                currentSectionId = sectionByArtifact.TryGetValue(x.Id, out var sectionId) ? sectionId : (Guid?)null,
+                currentUpstreamRevisionIds = upstreamByRevision.TryGetValue(x.revisionId, out var parents) ? parents : [] }));
         });
 
         app.MapGet("/api/authoring/upstream-requirements", async (Guid projectId, Guid releaseId,
@@ -216,7 +225,7 @@ public static class ChangeRequestEndpoints
             var source = from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
                          join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == parentLevel) on member.ArtifactId equals artifact.Id
                          join revision in db.RequirementRevisions.AsNoTracking().Where(x => x.State == RequirementRevisionState.Active) on member.RevisionId equals revision.Id
-                         select new { revisionId = revision.Id, artifact.BaseNumber, revision.Revision, revision.Statement };
+                         select new { revisionId = revision.Id, artifactId = artifact.Id, artifact.BaseNumber, revision.Revision, revision.Statement };
             var selectedIds = (selected ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => Guid.TryParse(x, out var id) ? id : Guid.Empty).Where(x => x != Guid.Empty).ToList();
             if (!string.IsNullOrWhiteSpace(search))
@@ -226,7 +235,7 @@ public static class ChangeRequestEndpoints
             }
             else if (selectedIds.Count > 0) source = source.Where(x => selectedIds.Contains(x.revisionId));
             var rows = await source.OrderBy(x => x.BaseNumber).Take(Math.Clamp(Math.Max(limit ?? 12, selectedIds.Count), 1, 50)).ToListAsync(ct);
-            return Results.Ok(rows.Select(x => new { x.revisionId, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", level = parentLevel.ToString(), x.Statement }));
+            return Results.Ok(rows.Select(x => new { x.revisionId, x.artifactId, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", level = parentLevel.ToString(), x.Statement }));
         });
 
         // What the traceability graph says a proposed change touches.

@@ -86,3 +86,30 @@ test('an engineer can search, select, and explicitly replace an upward allocatio
   await expect(search).toHaveCount(0)
   await expect(page.locator('.controlledEditor .roleCloud button').filter({ hasText: 'Remove' })).toHaveCount(0)
 })
+
+test('modifying an HLR hydrates its exact parent and preserves an engineer replacement as a navigable reference',async({page})=>{
+  await login(page)
+  await openNewSoftwareChangeRequest(page,'HLR')
+  await page.getByRole('button',{name:'Modify existing HLR'}).click()
+  const requirementSearch=page.getByLabel('Find controlled requirement 1')
+  await requirementSearch.fill('HLR-000001')
+  await page.locator('.proposalLookupResults button').filter({hasText:'HLR-000001.00'}).first().click()
+
+  const existingParent=page.locator('.controlledEditor .roleCloud button').filter({hasText:/SYSR-\d{6}\.\d{2}/}).first()
+  await expect(existingParent).toBeVisible()
+  await existingParent.click()
+  await expect(page.locator('.controlledEditor .roleCloud button').filter({hasText:/SYSR-\d{6}\.\d{2}/})).toHaveCount(0)
+
+  const upstreamSearch=page.getByLabel('Find upstream requirement 1')
+  await upstreamSearch.fill('SYSR-000002')
+  await page.locator('.proposalLookupResults button').filter({hasText:'SYSR-000002.00'}).last().click()
+  await expect(page.locator('.controlledEditor .roleCloud button').filter({hasText:'SYSR-000002.00'})).toBeVisible()
+  await page.getByLabel('Title').fill('Replace HLR upward allocation')
+  await page.getByRole('button',{name:'Save SWCR Draft'}).click()
+
+  const controlledParent=page.locator('.artifactReferenceCloud button').filter({hasText:'SYSR-000002.00'})
+  await expect(controlledParent).toBeVisible()
+  await controlledParent.click()
+  await expect(page).toHaveURL(/\/requirements\/[0-9a-f-]+\?discipline=system$/i)
+  await expect(page.getByRole('heading',{name:'System Requirements Explorer'})).toBeVisible()
+})

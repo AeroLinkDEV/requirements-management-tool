@@ -56,6 +56,7 @@ type ExistingRequirement = {
   nextRevision: number;
   /** The section it is in today, so a modification can offer to keep it rather than silently move it. */
   currentSectionId?: string | null;
+  currentUpstreamRevisionIds?: string[];
   statement: string;
   rationale: string;
   verificationMethod: string;
@@ -63,6 +64,7 @@ type ExistingRequirement = {
 };
 type UpstreamRequirement = {
   revisionId: string;
+  artifactId: string;
   displayNumber: string;
   level: RequirementLevel;
   statement: string;
@@ -218,6 +220,7 @@ export default function ControlledRequirementEditor({
     onChange("richText", item.kind === "Retire" ? emptyRichContent : fromPlainText(selected.statement));
     // Its existing section comes with it, so choosing a requirement to modify does not quietly relocate it.
     onChange("targetSectionId", selected.currentSectionId ?? "");
+    onChange("upstreamRevisionIds", item.kind === "Modify" ? selected.currentUpstreamRevisionIds ?? [] : []);
     setQuery(selected.displayNumber);
     setResults([]);
   };

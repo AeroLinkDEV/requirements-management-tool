@@ -136,6 +136,27 @@ public sealed class AuthoringTracedImpactTests
     }
 
     [Fact]
+    public async Task Modification_picker_hydrates_the_current_exact_upward_allocation()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var (projectId, parentNumber, childNumber, _) = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        using var response = await client.GetAsync(
+            $"/api/authoring/requirements?projectId={projectId}&scope=Software&search={childNumber}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var rows = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        var child = Assert.Single(rows.EnumerateArray(), x => x.GetProperty("baseNumber").GetString() == childNumber);
+        var parentRevisionId = Assert.Single(child.GetProperty("currentUpstreamRevisionIds").EnumerateArray()).GetGuid();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var parentId = db.Requirements.Single(x => x.ProjectId == projectId && x.BaseNumber == parentNumber).Id;
+        Assert.Equal(db.RequirementRevisions.Single(x => x.ArtifactId == parentId).Id, parentRevisionId);
+    }
+
+    [Fact]
     public async Task A_suspect_link_is_reported_separately_from_the_approved_procedure_lifecycle()
     {
         using var factory = new AeroLinkApiFactory();

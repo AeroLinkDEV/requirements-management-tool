@@ -185,6 +185,8 @@ type Props = {
   onBack: () => void;
   onChanged: () => Promise<void>;
   onOpenScr: (id: string) => void;
+  onOpenRequirement: (id: string, level: RequirementLevel) => void;
+  onOpenProblemReport: (id: string) => void;
   onDisciplineResolved: (discipline: "system" | "software") => void;
   /**
    * The project's builds, so this record's own target can be resolved once it loads. Without them the rail
@@ -361,6 +363,26 @@ function AuditEvidence({ event }: { event: Audit }) {
   );
 }
 
+function ExactUpstreamReferences({api,projectId,releaseId,childLevel,revisionIds,onOpen}:{api:string;projectId:string;releaseId:string;childLevel:RequirementLevel;revisionIds:string[];onOpen:(id:string,level:RequirementLevel)=>void}) {
+  const [references,setReferences]=useState<{revisionId:string;artifactId:string;displayNumber:string;level:RequirementLevel}[]>([])
+  const [loaded,setLoaded]=useState(false)
+  const revisionKey=revisionIds.join(',')
+  useEffect(()=>{
+    let active=true
+    if(!revisionKey){setReferences([]);setLoaded(true);return()=>{active=false}}
+    setLoaded(false)
+    fetch(`${api}/api/authoring/upstream-requirements?projectId=${projectId}&releaseId=${releaseId}&childLevel=${childLevel}&selected=${encodeURIComponent(revisionKey)}&limit=50`)
+      .then(response=>response.ok?response.json():[])
+      .then(rows=>{if(active)setReferences(rows)})
+      .catch(()=>{if(active)setReferences([])})
+      .finally(()=>{if(active)setLoaded(true)})
+    return()=>{active=false}
+  },[api,childLevel,projectId,releaseId,revisionKey])
+  if(!revisionKey)return <span>No exact upstream revisions allocated</span>
+  if(!loaded)return <span>Loading exact upstream revisionsâ€¦</span>
+  return <span className="artifactReferenceCloud">{references.map(reference=><button type="button" key={reference.revisionId} onClick={()=>onOpen(reference.artifactId,reference.level)}>{reference.displayNumber}</button>)}{references.length<revisionIds.length&&<i>Unavailable controlled revision</i>}</span>
+}
+
 export default function ScrWorkspace({
   api,
   scrId,
@@ -368,6 +390,8 @@ export default function ScrWorkspace({
   onBack,
   onChanged,
   onOpenScr,
+  onOpenRequirement,
+  onOpenProblemReport,
   onDisciplineResolved,
   releases,
 }: Props) {
@@ -1229,11 +1253,11 @@ export default function ScrWorkspace({
               <section className="workspaceCard">
                 <div className="workspaceTitle"><div><h2>Driving Problem Reports</h2><p>The problem records that authorized this engineering response</p></div></div>
                 {drivingProblemReports.map((report) => (
-                  <article className="requirementView" key={report.id}>
+                  <button type="button" className="requirementView artifactReferenceCard" key={report.id} onClick={()=>onOpenProblemReport(report.id)}>
                     <div><b>{report.displayNumber}</b><span>{stateLabel(report.state)}</span></div>
                     <p>{report.title}</p>
-                    <footer><small>Linked as a proposed corrective action</small><em>Controlled PR trace</em></footer>
-                  </article>
+                    <footer><small>Linked as a proposed corrective action</small><em>Open controlled PR â†’</em></footer>
+                  </button>
                 ))}
               </section>
             )}
@@ -1263,11 +1287,11 @@ export default function ScrWorkspace({
                     <div><b>{item.displayNumber}</b><span>{changeKindLabel(item.kind)}</span></div>
                     <p>{item.kind === "Retire" && !item.statement ? "Requirement will be retired." : item.statement}</p>
                     {item.level !== "System" && (
-                      <p>
+                      <div className="upstreamReferences">
                         {parseObject(item.attributesJson).derived === true
                           ? `Derived exception — ${item.rationale}`
-                          : `${item.upstreamRevisionIds?.length ?? 0} exact upstream revision${item.upstreamRevisionIds?.length === 1 ? "" : "s"} allocated`}
-                      </p>
+                          : <ExactUpstreamReferences api={api} projectId={scr.projectId} releaseId={scr.targetReleaseId} childLevel={item.level} revisionIds={item.upstreamRevisionIds??[]} onOpen={onOpenRequirement}/>}
+                      </div>
                     )}
                     <footer><small>{item.verificationMethod} · {item.rationale || "No rationale recorded"}</small><em>Downstream impact assessed after approval</em></footer>
                   </article>
