@@ -117,6 +117,8 @@ public static class VerificationImpactEndpoints
             if (review is null) return Results.NotFound();
             if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
                 return Results.Conflict(new { error = "Released software-build test change requests are read-only." });
+            if (review.State != TestChangeReviewState.Open)
+                return Results.Conflict(new { error = "Problem Report links can be changed only while the test change request is Open." });
             if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct,
                     ProgramRole.TestEngineer, ProgramRole.TestLead)) return Results.Forbid();
             var error = await problemReports.ValidateSelectionAsync(review.ProjectId, review.ReleaseId,

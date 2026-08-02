@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Requirements;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,6 +31,28 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
     public Task LinkChangeRequestAsync(Guid changeRequestId, IEnumerable<Guid>? problemReportIds,
         string actor, DateTimeOffset now, CancellationToken ct)
         => AddLinksAsync("ChangeRequest", changeRequestId, "ProposedCorrectiveAction", problemReportIds, actor, now, ct);
+
+    public async Task ReplaceDraftChangeRequestLinksAsync(SystemChangeRequest request,
+        IEnumerable<Guid>? problemReportIds, string actor, DateTimeOffset now, CancellationToken ct)
+    {
+        if (request.State != ScrState.Draft)
+            throw new DomainException("Problem Report links can be changed only while the change request is a Draft.");
+        var selected = Selected(problemReportIds);
+        var validation = await ValidateSelectionAsync(request.ProjectId, request.TargetReleaseId, selected, ct);
+        if (validation is not null) throw new DomainException(validation);
+
+        var existing = await db.ProblemReportLinks.Where(link => link.ArtifactType == "ChangeRequest"
+            && link.ArtifactId == request.Id && link.Relationship == "ProposedCorrectiveAction").ToListAsync(ct);
+        var existingIds = existing.Select(link => link.ProblemReportId).ToHashSet();
+        var selectedIds = selected.ToHashSet();
+        if (existingIds.SetEquals(selectedIds)) return;
+
+        db.ProblemReportLinks.RemoveRange(existing.Where(link => !selectedIds.Contains(link.ProblemReportId)));
+        await AddLinksAsync("ChangeRequest", request.Id, "ProposedCorrectiveAction",
+            selectedIds.Except(existingIds), actor, now, ct);
+        db.AuditEvents.Add(new AuditEvent(request.Id, "ProblemReportLinksUpdated", actor,
+            $"Updated the driving Problem Report set to {selectedIds.Count} record(s).", now));
+    }
 
     public Task LinkTestChangeRequestAsync(Guid testChangeRequestId, IEnumerable<Guid>? problemReportIds,
         string actor, DateTimeOffset now, CancellationToken ct)

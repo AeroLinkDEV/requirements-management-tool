@@ -33,10 +33,12 @@ public sealed class ProblemReportLinkServiceTests
             scr.AddRequirementChange("software.engineer", "LLR-000001", 1, RequirementLevel.LowLevel,
                 RequirementChangeKind.Modify, "The software shall reject a stale position source.",
                 "Correct the reported disagreement.", "Test", now);
-            var tcr = new TestChangeReview(project.Id, release.Id, scr.Id,
-                TestChangeReviewDiscipline.LowLevelSoftware, scr.DisplayNumber, now, "LLRTCR-000001");
-            db.AddRange(program, project, release, otherRelease, report, scr, tcr);
+            var replacement = new ProblemReport(project.Id, "PR-00002", "Replacement trace",
+                "The original selection was incorrect.", "", "quality.engineer", now);
+            db.AddRange(program, project, release, otherRelease, report, replacement, scr);
             db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, "Release", release.Id,
+                "BuildScope", "quality.engineer", now));
+            db.ProblemReportLinks.Add(new ProblemReportLink(replacement.Id, "Release", release.Id,
                 "BuildScope", "quality.engineer", now));
             await db.SaveChangesAsync();
 
@@ -45,12 +47,19 @@ public sealed class ProblemReportLinkServiceTests
             Assert.NotNull(await service.ValidateSelectionAsync(project.Id, otherRelease.Id, [report.Id], default));
             await service.LinkChangeRequestAsync(scr.Id, [report.Id], "software.engineer", now, default);
             await db.SaveChangesAsync();
-            await service.PropagateToTestChangeRequestAsync(scr.Id, tcr.Id, "test.engineer", now, default);
+            await service.ReplaceDraftChangeRequestLinksAsync(scr, [replacement.Id], "software.engineer", now, default);
+            await db.SaveChangesAsync();
+            Assert.DoesNotContain(await db.ProblemReportLinks.ToListAsync(), x => x.ArtifactType == "ChangeRequest"
+                && x.ArtifactId == scr.Id && x.ProblemReportId == report.Id);
+            await service.ReplaceDraftChangeRequestLinksAsync(scr, [report.Id], "software.engineer", now, default);
             scr.SubmitForReview("software.engineer", [new("reviewer", "Reviewer")], now);
             await db.SaveChangesAsync();
             scr.ApproveActiveStage("reviewer", now);
+            await new VerificationImpactService(db, service).RaiseForApprovedChangeRequestAsync(
+                scr, now, default, "reviewer");
             await service.RecordApprovedCorrectiveActionsAsync(scr, "reviewer", now, default);
             await db.SaveChangesAsync();
+            var tcr = await db.TestChangeReviews.SingleAsync();
 
             var links = await db.ProblemReportLinks.AsNoTracking()
                 .Where(x => x.ProblemReportId == report.Id).ToListAsync();
@@ -59,7 +68,8 @@ public sealed class ProblemReportLinkServiceTests
             Assert.Contains(links, x => x.ArtifactType == "ChangeRequest"
                 && x.ArtifactId == scr.Id && x.Relationship == "ApprovedCorrectiveAction");
             Assert.Contains(links, x => x.ArtifactType == "TestChangeRequest"
-                && x.ArtifactId == tcr.Id && x.Relationship == "VerificationForProblem");
+                && x.ArtifactId == tcr.Id && x.Relationship == "VerificationForProblem"
+                && x.AddedBy == "reviewer");
         }
         finally
         {

@@ -61,6 +61,54 @@ public sealed class ControlledEditingCheckInEngineTests
     }
 
     [Fact]
+    public async Task Draft_check_in_atomically_adds_a_build_scoped_driving_problem_report()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var releaseId = await scenario.Db.Releases.Select(x => x.Id).SingleAsync();
+        var report = new ProblemReport(scenario.Project.Id, "PR-00001", "Position disagreement",
+            "Sources disagree during approach.", "", scenario.Actor.UserName, scenario.Now);
+        scenario.Db.ProblemReports.Add(report);
+        scenario.Db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, "Release", releaseId,
+            "BuildScope", scenario.Actor.UserName, scenario.Now));
+        await scenario.Db.SaveChangesAsync();
+        await scenario.AutosaveAsync(Scenario.Draft("PR-driven correction", "Latest problem", [report.Id]));
+
+        var result = await scenario.Engine.CheckInAsync(scenario.Session.Id, scenario.Session.Version,
+            scenario.Actor, scenario.Now.AddMinutes(1), default);
+
+        Assert.True(result.Success, result.Error);
+        scenario.Db.ChangeTracker.Clear();
+        var link = await scenario.Db.ProblemReportLinks.SingleAsync(x => x.ArtifactType == "ChangeRequest"
+            && x.ArtifactId == scenario.Scr.Id && x.Relationship == "ProposedCorrectiveAction");
+        Assert.Equal(report.Id, link.ProblemReportId);
+        Assert.Contains(await scenario.Db.AuditEvents.ToListAsync(), x =>
+            x.AggregateId == scenario.Scr.Id && x.EventType == "ProblemReportLinksUpdated");
+    }
+
+    [Fact]
+    public async Task Draft_check_in_rejects_a_problem_report_from_another_build_without_partial_changes()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var otherRelease = new SoftwareRelease(scenario.Project.Id, "2.0", false);
+        var report = new ProblemReport(scenario.Project.Id, "PR-00001", "Future-build problem",
+            "This report belongs to another build.", "", scenario.Actor.UserName, scenario.Now);
+        scenario.Db.AddRange(otherRelease, report);
+        scenario.Db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, "Release", otherRelease.Id,
+            "BuildScope", scenario.Actor.UserName, scenario.Now));
+        await scenario.Db.SaveChangesAsync();
+        await scenario.AutosaveAsync(Scenario.Draft("Should roll back", "Changed problem", [report.Id]));
+
+        var result = await scenario.Engine.CheckInAsync(scenario.Session.Id, scenario.Session.Version,
+            scenario.Actor, scenario.Now.AddMinutes(1), default);
+
+        Assert.Equal(ControlledCheckInStatus.InvalidDraft, result.Status);
+        Assert.Contains("target build", result.Error);
+        scenario.Db.ChangeTracker.Clear();
+        Assert.Equal("Original title", (await scenario.Db.SystemChangeRequests.SingleAsync()).Title);
+        Assert.Empty(await scenario.Db.ProblemReportLinks.Where(x => x.ArtifactType == "ChangeRequest").ToListAsync());
+    }
+
+    [Fact]
     public async Task Expected_session_version_mismatch_retains_active_session_and_does_not_mutate_artifact()
     {
         await using var scenario = await Scenario.CreateAsync();
@@ -483,9 +531,10 @@ public sealed class ControlledEditingCheckInEngineTests
             Assert.NotNull(session.LockKey);
         }
 
-        public static string Draft(string title, string problem) => JsonSerializer.Serialize(new
+        public static string Draft(string title, string problem, Guid[]? problemReportIds = null) => JsonSerializer.Serialize(new
         {
             title, problem, analysis = "Latest analysis", solution = "Latest solution",
+            problemReportIds,
             requirementChanges = Array.Empty<object>()
         });
 

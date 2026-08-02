@@ -321,8 +321,13 @@ public static class ControlledEditingEndpoints
             {
                 var item = await db.SystemChangeRequests.AsNoTracking().Include(x => x.RequirementChanges)
                     .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
-                return item is null ? null : new(item.ProjectId, item.State.ToString(), null,
-                    SystemChangeRequestControlledEditingAdapter.Snapshot(item),
+                if (item is null) return null;
+                var reportIds = await db.ProblemReportLinks.AsNoTracking().Where(link =>
+                        link.ArtifactType == "ChangeRequest" && link.ArtifactId == item.Id
+                        && link.Relationship == "ProposedCorrectiveAction")
+                    .Select(link => link.ProblemReportId).OrderBy(id => id).ToListAsync(ct);
+                return new(item.ProjectId, item.State.ToString(), null,
+                    SystemChangeRequestControlledEditingAdapter.Snapshot(item, reportIds),
                     "ChangeRequest", item.Id, item.AuthorId);
             }
             case ControlledArtifactFamily.RequirementProposal:

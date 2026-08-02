@@ -119,8 +119,16 @@ public static class ChangeRequestEndpoints
                 // the aggregate, which owns the rule about what that fact forbids.
                 var released = await db.Releases.AsNoTracking()
                     .Where(x => x.Id == approved.TargetReleaseId).Select(x => x.IsReleased).SingleOrDefaultAsync(ct);
-                var next = approved.StartNextRevision(actor.UserName, DateTimeOffset.UtcNow, released, actor.IsAdministrator);
-                await repository.AddAsync(next, ct); await repository.SaveAsync(ct);
+                var now = DateTimeOffset.UtcNow;
+                var next = approved.StartNextRevision(actor.UserName, now, released, actor.IsAdministrator);
+                var reportIds = await db.ProblemReportLinks.AsNoTracking().Where(link =>
+                        link.ArtifactType == "ChangeRequest" && link.ArtifactId == approved.Id
+                        && link.Relationship == "ProposedCorrectiveAction")
+                    .Select(link => link.ProblemReportId).ToListAsync(ct);
+                await repository.AddAsync(next, ct);
+                await new ProblemReportLinkService(db).LinkChangeRequestAsync(next.Id, reportIds,
+                    actor.UserName, now, ct);
+                await repository.SaveAsync(ct);
                 return Results.Created($"/api/scrs/{next.Id}", ApiMap.ScrDetail(next));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -593,7 +601,7 @@ public static class ChangeRequestEndpoints
             try { var now = DateTimeOffset.UtcNow; var snapshotHash = scr.ActiveReviewCycle?.SnapshotHash ?? ""; var activeBefore=scr.ActiveReviewCycle!.Steps.Where(x=>x.State==ApprovalStepState.Active).Select(x=>x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase); scr.ApproveActiveStage(actor.UserName, now); var activated=scr.ActiveReviewCycle?.Steps.Where(x=>x.State==ApprovalStepState.Active&&!activeBefore.Contains(x.ApproverId)).ToList()??[];foreach(var step in activated)db.UserNotifications.Add(new(scr.ProjectId,step.ApproverId,"ReviewActivated",$"Review {scr.DisplayNumber}",$"The prior stage is complete. You are now authorized to review {scr.DisplayNumber}: {scr.Title}",$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now)); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "SCR", scr.Id, scr.DisplayNumber, "Approve", request.Meaning, snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
                 // Approval is what settles the engineering decision, so verification work is raised here rather than
                 // waiting for baseline inclusion. Saved in the same unit of work as the approval itself.
-                await verificationImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct);
+                await verificationImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct, actor.UserName);
                 await downstreamImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct);
                 await problemReports.RecordApprovedCorrectiveActionsAsync(scr, actor.UserName, now, ct);
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }

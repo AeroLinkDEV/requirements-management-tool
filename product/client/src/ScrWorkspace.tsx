@@ -18,6 +18,7 @@ import { personLabel } from "./PeopleRegistry";
 import { RichCaseField, RichContentView } from "./RichContent";
 import { useDebouncedSave } from "./autosave";
 import { emptyRichContent, fromPlainText, toPlainText } from "./richContentModel";
+import ProblemReportPicker from "./ProblemReportPicker";
 import "./ScrWorkspace.css";
 import "./ReviewMode.css";
 
@@ -169,6 +170,7 @@ type LockStatus = {
 type ScrDraft = {
   title: string; problem: string; analysis: string; solution: string;
   problemRich: string; analysisRich: string; solutionRich: string;
+  problemReportIds?: string[];
 };
 type AuthoringContext = {
   type: "System" | "Software";
@@ -371,6 +373,7 @@ export default function ScrWorkspace({
     problemRich: emptyRichContent, analysisRich: emptyRichContent, solutionRich: emptyRichContent,
   });
   const [requirements, setRequirements] = useState<DraftRequirement[]>([]);
+  const [problemReportIds, setProblemReportIds] = useState<string[]>([]);
   const [approvers, setApprovers] = useState<Approver[]>([]);
   const lockRef = useRef<EditLock | undefined>(undefined);
   const draftRef = useRef("");
@@ -396,11 +399,13 @@ export default function ScrWorkspace({
       const detail = (await response.json()) as ScrDetail;
       onDisciplineResolved(detail.type === "Software" ? "software" : "system");
       setScr(detail);
+      let reports: ProblemReportSummary[] = [];
       try {
         const reportsResponse = await fetch(`${api}/api/problem-reports/linked/ChangeRequest/${detail.id}`);
-        setDrivingProblemReports(reportsResponse.ok
+        reports = reportsResponse.ok
           ? (await reportsResponse.json()) as ProblemReportSummary[]
-          : []);
+          : [];
+        setDrivingProblemReports(reports);
       } catch {
         // The controlled change remains usable if this supplementary trace view cannot be loaded.
         setDrivingProblemReports([]);
@@ -416,6 +421,7 @@ export default function ScrWorkspace({
           solutionRich: detail.solutionRich || fromPlainText(detail.solution),
         });
         setRequirements(mapRequirements(detail.requirementChanges));
+        setProblemReportIds(reports.map((report) => report.id));
       }
       }
     } catch {
@@ -452,8 +458,8 @@ export default function ScrWorkspace({
   }, [lock]);
 
   useEffect(() => {
-    draftRef.current = JSON.stringify({ ...draft, requirementChanges: requirements });
-  }, [draft, requirements]);
+    draftRef.current = JSON.stringify({ ...draft, problemReportIds, requirementChanges: requirements });
+  }, [draft, problemReportIds, requirements]);
 
 
   /**
@@ -517,6 +523,7 @@ export default function ScrWorkspace({
         setRequirements(
           recovered.requirementChanges.map((item) => normalizeRequirement(item, fallbackLevel)),
         );
+      setProblemReportIds(recovered.problemReportIds ?? drivingProblemReports.map((report) => report.id));
       lastSavedRef.current = value.draftJson;
       setAutosaveStatus("Saved");
       setMode("edit");
@@ -985,6 +992,9 @@ export default function ScrWorkspace({
                 placeholder="What controlled outcome is proposed?"
                 onChange={(value) => setDraft((current) => ({ ...current, solutionRich: value, solution: toPlainText(value) }))} />
             </div>
+            <ProblemReportPicker api={api} projectId={scr.projectId} releaseId={scr.targetReleaseId}
+              selected={problemReportIds} onChange={setProblemReportIds}
+              legend={`PRs driving this ${scr.type === "Software" ? "SWCR" : "SCR"} (optional)`} />
           </section>
 
           <section className="workspaceCard authoringCard" id="checked-requirements">
