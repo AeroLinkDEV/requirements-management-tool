@@ -523,10 +523,15 @@ function App() {
         releases={release ? [release] : []}
         activeReleaseId={release?.id??""}
         scope={discipline === "software" ? "Software" : "System"}
+        initialSoftwareLevel={selectedArtifactKind === "LowLevel" ? "LowLevel" : "HighLevel"}
         initialStateIntent={historyStateIntent}
+        onSoftwareLevelChange={(level)=>{
+          setSelectedArtifactKind(level);
+          if(context)history.pushState({},"",routePath(context,"history","software",undefined,level,historyStateIntent,historyTypeIntent));
+        }}
         onStateIntentChange={(stateIntent)=>{
           setHistoryStateIntent(stateIntent);
-          if(context)history.replaceState({},"",routePath(context,"history",discipline,undefined,undefined,stateIntent,historyTypeIntent));
+          if(context)history.replaceState({},"",routePath(context,"history",discipline,undefined,selectedArtifactKind,stateIntent,historyTypeIntent));
         }}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}

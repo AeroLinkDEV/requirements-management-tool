@@ -30,12 +30,13 @@ public static class BaselineEndpoints
         // each change request's newest revision. A programme's history is a list of change requests and not of
         // revisions — .00 superseded by .01 is one piece of work read twice, and showing both puts the stale copy
         // in the reader's way. Nothing is hidden: every collapsed row carries its revision count and expands.
-        app.MapGet("/api/history/scrs", async (Guid projectId, string? search, Guid? releaseId, Guid? baselineId, Guid? buildId, ChangeRequestType? type, string? state,
+        app.MapGet("/api/history/scrs", async (Guid projectId, string? search, Guid? releaseId, Guid? baselineId, Guid? buildId, ChangeRequestType? type, RequirementLevel? level, string? state,
             string? baseNumber, int page, int pageSize, AeroLinkDbContext db, CancellationToken ct) =>
         {
             page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
             var source = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId);
             if (type is not null) source = source.Where(x => x.Type == type);
+            if (level is not null) source = source.Where(x => x.RequirementChanges.Any(change => change.Level == level));
             if (!string.IsNullOrWhiteSpace(state))
             {
                 if (state.Equals("ApprovedOrSelected", StringComparison.OrdinalIgnoreCase))
@@ -62,6 +63,8 @@ public static class BaselineEndpoints
                 .Skip((page - 1) * pageSize).Take(pageSize).Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision,
                     x.BaseNumber, x.Revision, x.Title, state = x.State.ToString(), deferredFromState = x.DeferredFromState == null ? null : x.DeferredFromState.ToString(),
                     x.AuthorId, x.TargetReleaseId, requirementCount = x.RequirementChanges.Count, x.CreatedAt, x.UpdatedAt,
+                    hasHighLevelChanges = x.RequirementChanges.Any(change => change.Level == RequirementLevel.HighLevel),
+                    hasLowLevelChanges = x.RequirementChanges.Any(change => change.Level == RequirementLevel.LowLevel),
                     revisionCount = db.SystemChangeRequests.Count(other => other.ProjectId == projectId && other.BaseNumber == x.BaseNumber) }).ToListAsync(ct);
             return Results.Ok(new { page, pageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)pageSize), items });
         });
