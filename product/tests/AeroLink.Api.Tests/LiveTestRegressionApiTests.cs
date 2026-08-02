@@ -96,7 +96,7 @@ public sealed class LiveTestRegressionApiTests
     public async Task Downstream_queue_projects_claim_capability_for_the_current_user()
     {
         using var factory = new AeroLinkApiFactory();
-        Guid projectId, releaseId;
+        Guid projectId, releaseId, assessmentId;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -114,7 +114,7 @@ public sealed class LiveTestRegressionApiTests
                 new ProgramMembership(reviewer.Id, program.Id, ProgramRole.Approver, "setup", now),
                 new ProgramMembership(engineer.Id, program.Id, ProgramRole.Engineer, "setup", now));
             await db.SaveChangesAsync();
-            projectId = project.Id; releaseId = release.Id;
+            projectId = project.Id; releaseId = release.Id; assessmentId = assessment.Id;
         }
 
         using (var reviewer = factory.CreateClient())
@@ -130,6 +130,33 @@ public sealed class LiveTestRegressionApiTests
             var rows = await engineer.GetFromJsonAsync<JsonElement>(
                 $"/api/downstream-assessments?projectId={projectId}&releaseId={releaseId}");
             Assert.True(rows[0].GetProperty("capabilities").GetProperty("canAssign").GetBoolean());
+            Assert.Equal("Problem", rows[0].GetProperty("sourceProblem").GetString());
+            await SecurityBoundaryTests.AuthorizeMutationsAsync(engineer);
+            Assert.Equal(HttpStatusCode.OK, (await engineer.PostAsJsonAsync(
+                $"/api/downstream-assessments/{assessmentId}/assign", new { engineerId = "software.engineer" })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await engineer.PostAsync(
+                $"/api/downstream-assessments/{assessmentId}/change-required", null)).StatusCode);
+            rows = await engineer.GetFromJsonAsync<JsonElement>(
+                $"/api/downstream-assessments?projectId={projectId}&releaseId={releaseId}");
+            Assert.Equal("ChangeRequired", rows[0].GetProperty("outcome").GetString());
+            Assert.False(rows[0].GetProperty("capabilities").GetProperty("canSubmit").GetBoolean());
+        }
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            await db.Releases.Where(x => x.Id == releaseId)
+                .ExecuteUpdateAsync(update => update.SetProperty(x => x.IsReleased, true));
+        }
+        using (var historicalReader = factory.CreateClient())
+        {
+            await LoginAsync(historicalReader, "software.engineer");
+            var rows = await historicalReader.GetFromJsonAsync<JsonElement>(
+                $"/api/downstream-assessments?projectId={projectId}&releaseId={releaseId}");
+            Assert.False(rows[0].GetProperty("capabilities").GetProperty("canEdit").GetBoolean());
+            await SecurityBoundaryTests.AuthorizeMutationsAsync(historicalReader);
+            using var mutation = await historicalReader.PostAsync(
+                $"/api/downstream-assessments/{assessmentId}/change-required", null);
+            Assert.Equal(HttpStatusCode.Conflict, mutation.StatusCode);
         }
     }
 

@@ -241,6 +241,7 @@ function App() {
     [density,setDensity]=useState<WorkspaceDensity>(()=>(localStorage.getItem('aerolink-density')==='compact'?'compact':'comfortable')),
     [motion,setMotion]=useState<MotionPreference>(()=>(localStorage.getItem('aerolink-motion')==='reduced'?'reduced':'full')),
     [toast,setToast]=useState(''),
+    [pendingAssessmentLink,setPendingAssessmentLink]=useState<{assessmentId:string;targetLevel:'HighLevel'|'LowLevel';sourceNumber:string;changeRequestId?:string}>(),
     [dashboardLoading,setDashboardLoading]=useState(true),
     [historyStateIntent,setHistoryStateIntent]=useState<HistoryStateIntent|undefined>(initialRoute.historyStateIntent),
     [historyTypeIntent,setHistoryTypeIntent]=useState<HistoryTypeIntent|undefined>(initialRoute.historyTypeIntent),
@@ -404,6 +405,11 @@ function App() {
     );
   const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
   const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");if(context){const path=routePath(context,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+  const linkPendingAssessment=async(changeRequestId:string)=>{
+    if(!pendingAssessmentLink)return true
+    try{await apiRequest(`${API}/api/downstream-assessments/${pendingAssessmentLink.assessmentId}/change-requests`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({changeRequestId})});setPendingAssessmentLink(undefined);return true}
+    catch{return false}
+  }
   const openVerificationProcedure=(procedure?:{procedureId:string;revisionId?:string;displayNumber?:string;level?:string})=>{
     const area:Discipline=procedure?.level==="System"?"systemTest":"softwareTest";
     setView("testingCoverage");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(procedure?.level??"");
@@ -482,14 +488,16 @@ function App() {
           await loadData();
           // Said out loud, because landing on a new page is not the same as being told the save worked —
           // it was asked for twice. The toast outlives this navigation because it is held up here.
-          setToast(`${displayNumber} saved as a Draft.`);
+          const linked=await linkPendingAssessment(scrId)
+          if(linked)setToast(pendingAssessmentLink?`${displayNumber} saved and linked to the ${pendingAssessmentLink.sourceNumber} downstream assessment.`:`${displayNumber} saved as a Draft.`)
+          else{setPendingAssessmentLink(current=>current?{...current,changeRequestId:scrId}:current);setToast(`${displayNumber} saved, but its downstream assessment link needs attention.`)}
           navigate("scr",view === "createSoftwareChange" ? "software" : "system",scrId);
         }}
       />
     );
   if (view === "scr" && selectedScrId)
     return inShell(
-      <ScrWorkspace
+      <>{pendingAssessmentLink?.changeRequestId===selectedScrId&&<section className="assessmentLinkRecovery" role="alert"><div><b>Downstream assessment link needs attention</b><span>This Draft is saved. Retry its link to the {pendingAssessmentLink.sourceNumber} assessment.</span></div><button type="button" onClick={async()=>{if(await linkPendingAssessment(selectedScrId))setToast(`Draft linked to the ${pendingAssessmentLink.sourceNumber} downstream assessment.`);else setToast('The downstream assessment link still could not be recorded.')}}>Retry assessment link</button></section>}<ScrWorkspace
         api={API}
         scrId={selectedScrId}
         user={user}
@@ -503,7 +511,7 @@ function App() {
           if (context) history.replaceState({}, "", routePath(context, "scr", resolved, selectedScrId));
         }}
         releases={release ? [release] : []}
-      />
+      /></>
     );
   if (view === "baselines" && project && release)
     return inShell(
@@ -526,19 +534,23 @@ function App() {
         activeReleaseId={release?.id??""}
         scope={discipline === "software" ? "Software" : "System"}
         initialSoftwareLevel={selectedArtifactKind === "LowLevel" ? "LowLevel" : "HighLevel"}
+        initialAssessmentId={selectedArtifactId||undefined}
         initialStateIntent={historyStateIntent}
         onSoftwareLevelChange={(level)=>{
+          setSelectedArtifactId("");
           setSelectedArtifactKind(level);
           if(context)history.pushState({},"",routePath(context,"history","software",undefined,level,historyStateIntent,historyTypeIntent));
         }}
+        onAssessmentSelected={(id)=>{setSelectedArtifactId(id??"");if(context)history.pushState({},"",routePath(context,"history","software",id,selectedArtifactKind,historyStateIntent,historyTypeIntent))}}
         onStateIntentChange={(stateIntent)=>{
           setHistoryStateIntent(stateIntent);
           if(context)history.replaceState({},"",routePath(context,"history",discipline,undefined,selectedArtifactKind,stateIntent,historyTypeIntent));
         }}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}
+        onOpenRequirement={(id,level)=>navigate("requirements",level==="System"?"system":"software",id)}
         onCreateSystem={() => navigate("createSystemScr","system")}
-        onCreateSoftware={(level) => navigate("createSoftwareChange","software",undefined,level)}
+        onCreateSoftware={(level,assessmentId,sourceNumber) => {if(assessmentId&&sourceNumber)setPendingAssessmentLink({assessmentId,targetLevel:level,sourceNumber});navigate("createSoftwareChange","software",undefined,level)}}
         user={user}
       />
     );

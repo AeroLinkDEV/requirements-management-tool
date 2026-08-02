@@ -42,6 +42,10 @@ test('software change history routes preserve the selected HLR or LLR level', ()
   expect(llr).toContain('/software/change-requests?level=LLR')
   expect(parseRoute(hlr)).toMatchObject({ view: 'history', artifactKind: 'HighLevel' })
   expect(parseRoute(llr)).toMatchObject({ view: 'history', artifactKind: 'LowLevel' })
+  const assessment=routePath(context,'history','software','assessment-a','HighLevel')
+  expect(assessment).toContain('level=HLR')
+  expect(assessment).toContain('assessment=assessment-a')
+  expect(parseRoute(assessment)).toMatchObject({view:'history',artifactKind:'HighLevel',artifactId:'assessment-a'})
 })
 
 test('problem reports are active while retired product-version and baseline pages reject direct navigation', () => {

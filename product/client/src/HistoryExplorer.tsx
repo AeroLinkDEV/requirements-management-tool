@@ -14,16 +14,17 @@ type Scr={id:string;baseNumber:string;revision:number;displayNumber:string;title
 type Props={
  api:string;projectId:string;releases:Release[];activeReleaseId:string;scope:Scope;
  initialSoftwareLevel:SoftwareLevel;onSoftwareLevelChange:(level:SoftwareLevel)=>void;
+ initialAssessmentId?:string;onAssessmentSelected:(id?:string)=>void;
  initialStateIntent?:HistoryStateIntent;onStateIntentChange:(intent?:HistoryStateIntent)=>void;
- onBack:()=>void;onOpenScr:(id:string)=>void;onCreateSystem:()=>void;
- onCreateSoftware:(level:'HighLevel'|'LowLevel')=>void
+ onBack:()=>void;onOpenScr:(id:string)=>void;onOpenRequirement:(id:string,level:string)=>void;onCreateSystem:()=>void;
+ onCreateSoftware:(level:'HighLevel'|'LowLevel',assessmentId?:string,sourceNumber?:string)=>void
  user:AuthUser
 }
 
 const stateLabels:Record<HistoryStateIntent,string>={Draft:'Draft',InReview:'In review',Approved:'Approved',SelectedForBaseline:'Allocated to a build',Deferred:'Deferred',ApprovedOrSelected:'Approved or allocated'}
 const matchesStateIntent=(state:string,intent?:HistoryStateIntent)=>!intent||(intent==='ApprovedOrSelected'?(state==='Approved'||state==='SelectedForBaseline'):state===intent)
 
-export default function HistoryExplorer({api,projectId,releases,activeReleaseId,scope,initialSoftwareLevel,onSoftwareLevelChange,initialStateIntent,onStateIntentChange,onBack,onOpenScr,onCreateSystem,onCreateSoftware,user}:Props){
+export default function HistoryExplorer({api,projectId,releases,activeReleaseId,scope,initialSoftwareLevel,onSoftwareLevelChange,initialAssessmentId,onAssessmentSelected,initialStateIntent,onStateIntentChange,onBack,onOpenScr,onOpenRequirement,onCreateSystem,onCreateSoftware,user}:Props){
  const [query,setQuery]=useState(''),[softwareLevel,setSoftwareLevel]=useState<SoftwareLevel>(initialSoftwareLevel),[stateIntent,setStateIntent]=useState<HistoryStateIntent|undefined>(initialStateIntent),[scrPage,setScrPage]=useState(1),[scrTotal,setScrTotal]=useState(0),[scrTotalPages,setScrTotalPages]=useState(1),[scrs,setScrs]=useState<Scr[]>([]),[error,setError]=useState('')
  const activeRelease=releases.find(x=>x.id===activeReleaseId)
  const load=useCallback(async()=>{const params=new URLSearchParams({projectId,page:String(scrPage),pageSize:'50',releaseId:activeReleaseId,type:scope});if(scope==='Software')params.set('level',softwareLevel);if(stateIntent)params.set('state',stateIntent);if(query)params.set('search',query)
@@ -52,7 +53,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
   setExpanded(current=>({...current,[row.baseNumber]:body.items.filter(x=>x.revision<row.revision).sort((a,b)=>b.revision-a.revision)}))
  }
  const facts=(x:Scr,superseded=false)=>({state:x.state,deferredFromState:x.deferredFromState,targetRelease:releases.find(r=>r.id===x.targetReleaseId),superseded})
- const changeSoftwareLevel=(level:SoftwareLevel)=>{setSoftwareLevel(level);setScrPage(1);onSoftwareLevelChange(level)}
+ const changeSoftwareLevel=(level:SoftwareLevel)=>{setSoftwareLevel(level);setScrPage(1);onAssessmentSelected(undefined);onSoftwareLevelChange(level)}
  return <main className="historyPage">
   <header className="historyHeader">
    <div><button className="back" onClick={onBack}>← Command Center</button><p className="eyebrow">{scope.toUpperCase()} CHANGE CONTROL / BUILD {activeRelease?.version}</p><h1>{scope} Change Requests</h1><p>{activeRelease?.isReleased?`Released ${scope.toLowerCase()} change history owned by Build ${activeRelease.version}.`:`Active and deferred ${scope.toLowerCase()} change requests owned by Build ${activeRelease?.version}.`}</p></div>
@@ -62,7 +63,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
   </header>
   {scope==='Software'&&<nav className="softwareLevelTabs" aria-label="Software requirement level"><button type="button" aria-current={softwareLevel==='HighLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('HighLevel')}><b>HLR</b><span>High-level requirements</span></button><button type="button" aria-current={softwareLevel==='LowLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('LowLevel')}><b>LLR</b><span>Low-level requirements</span></button></nav>}
   {error&&<div className="workspaceError">{error}</div>}
-  {scope==='Software'&&<DownstreamAssessmentQueue api={api} projectId={projectId} releaseId={activeReleaseId} targetLevel={softwareLevel} user={user} onOpenScr={onOpenScr}/>}
+  {scope==='Software'&&<DownstreamAssessmentQueue api={api} projectId={projectId} releaseId={activeReleaseId} targetLevel={softwareLevel} user={user} onOpenScr={onOpenScr} onOpenRequirement={onOpenRequirement} onCreateScr={onCreateSoftware} initialAssessmentId={initialAssessmentId} onAssessmentSelected={onAssessmentSelected}/>}
   <section className="historyTools"><div className="historyContext"><b>Build {activeRelease?.version}</b><span>{scope==='Software'?(softwareLevel==='HighLevel'?'HLR':'LLR'):'System'} area · {scrTotal} records</span></div><div className="historyFilters"><input aria-label="Search change requests" value={query} onChange={e=>{setQuery(e.target.value);setScrPage(1)}} placeholder="Search number, title, statement, rationale…"/><select aria-label="Lifecycle state filter" value={stateIntent??''} onChange={e=>changeStateIntent(e.target.value?e.target.value as HistoryStateIntent:undefined)}><option value="">All lifecycle states</option><option value="Draft">Draft</option><option value="InReview">In review</option><option value="Approved">Approved</option><option value="SelectedForBaseline">Allocated to a build</option><option value="Deferred">Deferred</option><option value="ApprovedOrSelected">Approved or allocated</option></select></div></section>
   {stateIntent&&<div className="historyActiveFilter" role="status"><div><span>ACTIVE FILTER</span><b>{stateLabels[stateIntent]}</b><small>{scrTotal} matching {scope.toLowerCase()} record{scrTotal===1?'':'s'} in Build {activeRelease?.version}</small></div><button type="button" onClick={()=>changeStateIntent(undefined)} aria-label={`Clear ${stateLabels[stateIntent]} lifecycle filter`}>Clear filter ×</button></div>}
   <section className="historyTable"><div className="tableHead allocation"><span>Change request revision</span><span>Build allocation</span><span>State</span><span>Last activity</span></div>{visibleScrs.map(x=>{
