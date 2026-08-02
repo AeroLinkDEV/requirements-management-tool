@@ -149,6 +149,11 @@ const auditForm = ({ minimum, maximum }: { minimum: number; maximum: number }): 
 /** Every rule this file enforces, reported together so one run names every offending form. */
 async function inspect(page: Page, where: string, failures: string[]) {
   await surfacePainted(page)
+  // The page shell and headings paint before the authoring form's asynchronous data has loaded. Waiting for
+  // the first reachable field makes the guard below observe the form itself instead of racing that second
+  // render on slower CI workers.
+  await page.locator('main input:not([type=hidden]), main select, main textarea').first()
+    .waitFor({ state: 'visible', timeout: 30_000 })
   await layoutSettled(page)
   const report = await page.evaluate(auditForm, { minimum: NAME_MINIMUM, maximum: NAME_MAXIMUM })
 
