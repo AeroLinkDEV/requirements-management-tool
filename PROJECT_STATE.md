@@ -187,10 +187,14 @@ Software and Verification work. System change creation is direct; Software creat
 Change history, requirements, search and verification are scoped to the active build, and historical evidence
 is labelled with its originating build without changing workspace context.
 
-The active navigation deliberately hides Problem Reports, Product Versions, Candidate Baselines and the old
-Change Request Software Builds view (DEC-072). Their implementation remains dormant for potential future reuse;
-it is neither a supported route nor dead code to reconnect or delete without a new decision. Lifecycle Decision
+Problem Reports are active and build scoped under DEC-085. They link forward to SCRs, SWCRs, and every TCR
+discipline; approved engineering changes are shown as corrective actions. Product Versions, Candidate
+Baselines, and the old Change Request Software Builds view remain dormant under DEC-072. Lifecycle Decision
 Room remains visible.
+
+Procedures covering requirements introduced or modified by the active build are automatically included as
+mandatory changed-requirement tests. They cannot be removed from the build test set, and the exact-revision
+result/evidence gates prevent release until they pass with evidence.
 
 Verification is two pages per discipline rather than one workspace with four tabs (DEC-077). **Testing
 Coverage** answers "what are this build's requirements tested by, and what test work has nobody picked up" —
@@ -225,7 +229,8 @@ default in production configuration.
 Released **FMS 1.5** baseline: 150 system requirements, 400 HLRs, 700 LLRs, 1,250 effective revisions,
 30 SCRs, 75 SWCRs, 1,100 typed traces, 515 procedures, 520 executions including retained retests, 6
 controlled documents, 1 released build. **FMS 1.6** is derived from it and deliberately in work, with
-eight change requests spread across approved, in-review, draft and deferred.
+persistent controlled work spread across approved, in-review, draft and deferred states. Its counts evolve as
+realistic engineering qualification adds records; they are not a fixed seed-data contract.
 
 The tool never auto-creates or auto-approves a successor release. Details in
 [FMS_LIVE_SHOWCASE_DATASET.md](FMS_LIVE_SHOWCASE_DATASET.md).
@@ -233,8 +238,8 @@ The tool never auto-creates or auto-approves a successor release. Details in
 ## Where delivery stands
 
 The AeroLink 3.0 implementation program and its review follow-ups have been reconciled. GitHub issue #29 and
-every child/follow-up are closed; there were zero open issues and zero open pull requests at the qualified
-`067294c` checkpoint. Applicable work landed through focused, gated pull requests. Residual identity federation
+every child/follow-up are closed; the later issue #252 Problem Reports increment followed the same focused,
+gated pull-request path. Residual identity federation
 and deployment operations were closed with explicit resume conditions because they require a real provider or
 hosting contract, not generic product simulation.
 
@@ -499,10 +504,9 @@ reason the document set can be trusted.
   failure through the other mechanism, and the same fix applies. When a rule matters, make it win on purpose.
 # Current implementation checkpoint — 2026-08-01
 
-`main` at `067294c` contains the complete build-scoped verification, downstream-assessment, identity-lifecycle,
-and prospective upward-allocation increments. Non-authoritative Concurrency and count-only IntegrityScan
-simulations are retired. The GitHub Product Quality Gate passed backend, client, PostgreSQL migration/bootstrap,
-production-build browser tests, both browser shards, and the enforcing reporter. Independent local qualification
-passed all three browser shards (112 passed, one intentionally skipped), and the persistent PostgreSQL
-application restarted healthy without replacing its engineering records. See
+Current `main` includes build-scoped verification, downstream assessment, identity lifecycle, prospective
+upward allocation, active Problem Reports traceability, and mandatory changed-requirement testing.
+Non-authoritative Concurrency and count-only IntegrityScan simulations are retired. Each focused delivery is
+qualified through the GitHub Product Quality Gate and exact-merge local checks; the persistent PostgreSQL
+application is restarted healthy without replacing its engineering records. See
 [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).

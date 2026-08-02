@@ -9,8 +9,8 @@ description, [FEATURE_CATALOG.md](FEATURE_CATALOG.md) is the stable capability i
 
 - Repository: `seanmccarthyns/requirements-management-tool`
 - Branch: `main`
-- Qualified product commit before this documentation reconciliation: `067294c`
-- GitHub backlog: zero open issues and zero open pull requests after the 1 August reconciliation
+- Qualified product checkpoint: current `main` after the focused delivery that closes issue #252
+- GitHub backlog at handoff: no implementation issue remains open after the #252 delivery
 - Delivery rule: focused `codex/*` branch, pull request, required Product Quality Gate, squash merge, then
   requalify the exact merge commit; never push implementation work directly to `main`
 - Local persistent PostgreSQL demonstration data is valuable engineering evidence. Startups and migrations are
@@ -38,6 +38,10 @@ Approved change
           -> approved procedure revisions in the build test set
               -> immutable executions, results, evidence, and retest history
 ```
+
+Problem Reports now provide the causal front door for that chain. A build-scoped PR may drive any SCR, SWCR,
+or TCR; an approved CR becomes corrective-action evidence on the PR. Requirement changes never create PRs.
+Procedures linked to a requirement introduced or modified by the build become mandatory pre-release test scope.
 
 Software requirement proposals also govern the opposite direction before approval:
 
@@ -118,8 +122,13 @@ HTTP 200 and `/health/ready` returned HTTP 200 with PostgreSQL connected.
 ## Intentional boundaries
 
 - AeroLink makes no certification or tool-qualification claim.
-- Problem Report implementation is retained but its broad product surface remains dormant pending a deliberate
-  product decision; do not restore old navigation because historical documents mention it.
+- Problem Reports are active for each build. A PR can drive SCR/SWCR/TCR work; final CR approval is projected
+  as an approved corrective action, and TCRs inherit the source CR's PR links. Released-build records are
+  readable but immutable. Containment and preventive-action authoring remain intentionally outside the current
+  product increment (DEC-085).
+- Every approved procedure linked to an introduced or modified requirement is mandatory pre-release scope.
+  Carried-forward coverage is added automatically, changed-requirement entries cannot be removed, and release
+  remains blocked until the exact procedure revision passes with evidence.
 - OIDC/SAML, SCIM, and organization directory provisioning are not current MVP work. Resume only when a real
   customer/provider contract defines protocols, claims, group mapping, logout, recovery, and break-glass needs.
 - TLS topology, protected off-device storage, external alert delivery, approved RPO/RTO/SLOs, and service-identity

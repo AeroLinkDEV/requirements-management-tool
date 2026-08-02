@@ -387,26 +387,31 @@ public static class ChangeRequestEndpoints
 
         // Historical discovery endpoints deliberately include every revision and lifecycle state.
 
-        app.MapPost("/api/scrs", async (CreateScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/scrs", async (CreateScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
             var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
             if (closed is not null) return Results.BadRequest(new { error = closed, code = "release_is_closed" });
             if (string.IsNullOrWhiteSpace(request.Title))
                 return Results.BadRequest(new { error = "Title of change request must be filled out before save is available." });
+            var problemReportError = await problemReports.ValidateSelectionAsync(request.ProjectId,
+                request.TargetReleaseId, request.ProblemReportIds, ct);
+            if (problemReportError is not null) return Results.BadRequest(new { error = problemReportError });
             try
             {
                 var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, ct);
                 var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
                     request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, DateTimeOffset.UtcNow, request.Type,
                     request.ProblemRich, request.AnalysisRich, request.SolutionRich);
+                await problemReports.LinkChangeRequestAsync(scr.Id, request.ProblemReportIds,
+                    http.UserAccount().UserName, DateTimeOffset.UtcNow, ct);
                 await repository.AddAsync(scr, ct); await repository.SaveAsync(ct);
                 return Results.Created($"/api/scrs/{scr.Id}", ApiMap.ScrDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, EnterpriseRequirementsService enterpriseRequirements, CancellationToken ct) =>
+        app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, EnterpriseRequirementsService enterpriseRequirements, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
             var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
@@ -415,6 +420,9 @@ public static class ChangeRequestEndpoints
             // form is not a controlled record and must not consume the next SCR/SWCR number.
             if (string.IsNullOrWhiteSpace(request.Title))
                 return Results.BadRequest(new { error = "Title of change request must be filled out before save is available." });
+            var problemReportError = await problemReports.ValidateSelectionAsync(request.ProjectId,
+                request.TargetReleaseId, request.ProblemReportIds, ct);
+            if (problemReportError is not null) return Results.BadRequest(new { error = problemReportError });
             await enterpriseRequirements.SynchronizeProjectAsync(request.ProjectId, http.UserAccount().UserName, ct);
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
             try
@@ -471,6 +479,7 @@ public static class ChangeRequestEndpoints
                         change.TargetSectionId, proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(change.UpstreamRevisionIds ?? []));
                 }
                 await repository.AddAsync(scr, ct);
+                await problemReports.LinkChangeRequestAsync(scr.Id, request.ProblemReportIds, actor, now, ct);
                 await repository.SaveAsync(ct);
                 await transaction.CommitAsync(ct);
                 return Results.Created($"/api/scrs/{scr.Id}", ApiMap.ScrDetail(scr));
@@ -574,7 +583,7 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, DownstreamImpactService downstreamImpact, CancellationToken ct) =>
+        app.MapPost("/api/scrs/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, DownstreamImpactService downstreamImpact, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
@@ -586,6 +595,7 @@ public static class ChangeRequestEndpoints
                 // waiting for baseline inclusion. Saved in the same unit of work as the approval itself.
                 await verificationImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct);
                 await downstreamImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct);
+                await problemReports.RecordApprovedCorrectiveActionsAsync(scr, actor.UserName, now, ct);
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });

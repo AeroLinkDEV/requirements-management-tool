@@ -13,6 +13,7 @@ import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useLocalDraft } from "./autosave";
 import { fromPlainText, toPlainText } from "./richContentModel";
 import { apiRequest, operationError, recordClientOperationFailure } from "./apiClient";
+import ProblemReportPicker from "./ProblemReportPicker";
 import "./ScrEditor.css";
 import "./ScrEditorEnhancements.css";
 
@@ -46,6 +47,7 @@ type SavedDraft = {
   problemRich?: string;
   analysisRich?: string;
   solutionRich?: string;
+  problemReportIds?: string[];
 };
 type ValidationError = { kind: "title" | "proposal"; message: string };
 
@@ -140,6 +142,7 @@ export default function ScrEditor({
   // said, and because it arrived with an identifier already allocated it counted as identity-locked — so it
   // could not be turned into a Modify or a Retire either. The author chooses the first change.
   const [changes, setChanges] = useState<ControlledRequirementDraft[]>([]);
+  const [problemReportIds, setProblemReportIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [validationError, setValidationError] = useState<ValidationError>();
@@ -148,7 +151,7 @@ export default function ScrEditor({
   // would consume an identifier for something nobody submitted.
   const draft = useLocalDraft<SavedDraft>(
     storageKey,
-    { title, problem, analysis, solution, changes, problemRich, analysisRich, solutionRich },
+    { title, problem, analysis, solution, changes, problemRich, analysisRich, solutionRich, problemReportIds },
     { isEmpty: (value) => !value.title.trim() && !value.problem.trim() && !value.analysis.trim() && !value.solution.trim() },
   );
 
@@ -161,6 +164,7 @@ export default function ScrEditor({
     setAnalysisRich(saved.analysisRich || fromPlainText(saved.analysis || ""));
     setSolutionRich(saved.solutionRich || fromPlainText(saved.solution || ""));
     if (saved.changes?.length) setChanges(saved.changes.map((item) => normalizeProposal(item, defaultLevel)));
+    setProblemReportIds(saved.problemReportIds ?? []);
   };
 
   useEffect(() => {
@@ -351,6 +355,7 @@ export default function ScrEditor({
           problemRich,
           analysisRich,
           solutionRich,
+          problemReportIds,
           type: scope,
           // An unset section is sent as null, not as "". A Guid? will not bind an empty string, and the failure
           // would be a 400 on the whole change request because one optional field was left alone.
@@ -472,6 +477,9 @@ export default function ScrEditor({
             <RichCaseField api={api} projectId={projectId} label="Solution" value={solutionRich} onChange={setSolutionRich}
               placeholder="What controlled outcome is proposed?" required={false} />
           </div>
+          <ProblemReportPicker api={api} projectId={projectId} releaseId={releaseId}
+            selected={problemReportIds} onChange={setProblemReportIds}
+            legend={`PRs driving this ${abbreviation} (optional)`} />
         </section>
 
         <section className="editorCard authoringStage" id="requirement-changes">

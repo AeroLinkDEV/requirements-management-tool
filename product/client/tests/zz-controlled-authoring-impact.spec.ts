@@ -35,7 +35,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
     .click();
   await expect(page.getByText("Started from Requirements Explorer")).toBeVisible();
   await expect(page.locator('input[value*="SYSR-000150"]').first()).toBeVisible();
-  await page.getByLabel("Problem").fill("The selected controlled behavior requires an attributable update.");
+  await page.getByLabel("Problem", { exact: true }).fill("The selected controlled behavior requires an attributable update.");
   await page.getByRole("textbox", { name: "Analysis", exact: true }).fill("The requirement, trace, verification, and document impacts will be dispositioned in this change.");
   await page.getByLabel("Solution").fill("Create the proposed successor revision without altering the authoritative requirement directly.");
   await page.getByRole("button", { name: "Save SCR Draft" }).click();

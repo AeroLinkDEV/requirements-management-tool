@@ -62,7 +62,7 @@ test('Software Draft keeps downstream impact with consuming engineers before an 
   await expect(page.getByRole('textbox',{name:'Level',exact:true})).toHaveValue('Software HLR')
   await expect(page.getByText('SWR-000001')).toHaveCount(0)
   await page.getByLabel('Title').fill('Control software authoring readiness')
-  await page.getByLabel('Problem').fill('The authoring handoff needs explicit readiness gates.')
+  await page.getByLabel('Problem', { exact: true }).fill('The authoring handoff needs explicit readiness gates.')
   await page.getByLabel('Analysis',{exact:true}).fill('Identity, content, impacts, and review authority must remain attributable.')
   await page.getByLabel('Solution').fill('Use one staged controlled proposal experience.')
   await page.getByLabel('Requirement statement').fill('The software shall require explicit review readiness decisions.')

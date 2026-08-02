@@ -12,7 +12,7 @@ This roadmap is capability-driven, not calendar-driven. Each phase ends with evi
 | 2 — SCRs, review, baselines, and SYSRD | Complete |
 | 3 — System verification and traceability | Complete |
 | 4 — Software-level lifecycle | Delivered: HLRs, LLRs, SWCRs, SWRDs, and software verification are implemented |
-| 5 — PR management and integrations | Integration foundation delivered; broad Problem Report surface intentionally dormant |
+| 5 — PR management and integrations | First active increment delivered: build-scoped PR center plus SCR/SWCR/TCR and corrective-action links; broader lifecycle policy remains incremental |
 | Enterprise maturity program | MVP program closed 2026-08-01; provider/deployment-specific boundaries remain conditional |
 
 The phase goals and exit evidence below are retained as the definition of what each phase had to

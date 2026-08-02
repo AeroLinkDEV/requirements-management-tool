@@ -74,6 +74,35 @@ public sealed class BuildTestSetTests
     }
 
     [Fact]
+    public void A_changed_requirement_procedure_is_mandatory()
+    {
+        var set = Set();
+        var procedure = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        set.Include("test.lead", procedure, TestSelectionReason.ChangedRequirement, "SYSR-000151 changed.", now);
+
+        var error = Assert.Throws<DomainException>(() => set.Exclude(procedure, now));
+        Assert.Contains("mandatory before release", error.Message);
+        Assert.Single(set.Entries);
+    }
+
+    [Fact]
+    public void A_discretionary_selection_is_promoted_when_a_changed_requirement_makes_it_mandatory()
+    {
+        var set = Set();
+        var procedure = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        set.Include("test.lead", procedure, TestSelectionReason.Chosen, "Area sweep.", now);
+
+        Assert.False(set.Include("verification", procedure, TestSelectionReason.ChangedRequirement,
+            "SYSR-000151 changed.", now));
+        var entry = Assert.Single(set.Entries);
+        Assert.Equal(TestSelectionReason.ChangedRequirement, entry.Reason);
+        Assert.Contains("SYSR-000151", entry.Note);
+        Assert.Throws<DomainException>(() => set.Exclude(procedure, now));
+    }
+
+    [Fact]
     public void Every_selection_says_who_made_it()
     {
         var set = Set();

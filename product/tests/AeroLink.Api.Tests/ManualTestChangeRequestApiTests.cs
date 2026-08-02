@@ -22,7 +22,7 @@ namespace AeroLink.Api.Tests;
 public sealed class ManualTestChangeRequestApiTests
 {
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid FirstChangeId, Guid SecondChangeId,
-        Guid AutoRaisedChangeId, Guid OtherBuildChangeId);
+        Guid AutoRaisedChangeId, Guid OtherBuildChangeId, Guid ProblemReportId, Guid OtherBuildProblemReportId);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -51,7 +51,13 @@ public sealed class ManualTestChangeRequestApiTests
         var second = Approved("SCR-00911", "SYSR-00000912", release.Id);
         var autoRaised = Approved("SCR-00912", "SYSR-00000913", release.Id);
         var elsewhere = Approved("SCR-00913", "SYSR-00000914", otherBuild.Id);
-        db.AddRange(first, second, autoRaised, elsewhere);
+        var report = new ProblemReport(project.Id, "PR-00910", "Route sequencing disagreement",
+            "The observed route differs from the approved plan.", "", "quality", now);
+        var otherReport = new ProblemReport(project.Id, "PR-00911", "Future-build problem",
+            "This problem belongs to another build.", "", "quality", now);
+        db.AddRange(first, second, autoRaised, elsewhere, report, otherReport,
+            new ProblemReportLink(report.Id, "Release", release.Id, "BuildScope", "quality", now),
+            new ProblemReportLink(otherReport.Id, "Release", otherBuild.Id, "BuildScope", "quality", now));
 
         foreach (var (user, role) in new[]
                  {
@@ -71,7 +77,8 @@ public sealed class ManualTestChangeRequestApiTests
         await impact.RaiseForApprovedChangeRequestAsync(tracked, now, default);
         await db.SaveChangesAsync();
 
-        return new(project.Id, release.Id, first.Id, second.Id, autoRaised.Id, elsewhere.Id);
+        return new(project.Id, release.Id, first.Id, second.Id, autoRaised.Id, elsewhere.Id,
+            report.Id, otherReport.Id);
     }
 
     private static async Task LoginAsync(HttpClient client, string user)
@@ -91,7 +98,8 @@ public sealed class ManualTestChangeRequestApiTests
         await LoginAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
-            new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId, fixture.SecondChangeId } });
+            new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId, fixture.SecondChangeId },
+                problemReportIds = new[] { fixture.ProblemReportId } });
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
 
@@ -99,6 +107,9 @@ public sealed class ManualTestChangeRequestApiTests
         // Numbered like any other controlled package, not marked out as hand-made.
         Assert.Matches(@"^SYSTCR-\d{6}\.\d{2}$", created.GetProperty("displayNumber").GetString()!);
         Assert.Equal(2, created.GetProperty("covered").EnumerateArray().Count());
+        var list = await client.GetFromJsonAsync<JsonElement>($"/api/releases/{fixture.ReleaseId}/test-change-reviews");
+        var package = Assert.Single(list.EnumerateArray(), x => x.GetProperty("id").GetGuid() == created.GetProperty("id").GetGuid());
+        Assert.Equal("PR-00910.00", Assert.Single(package.GetProperty("problemReports").EnumerateArray()).GetProperty("displayNumber").GetString());
     }
 
     [Fact]
@@ -147,6 +158,21 @@ public sealed class ManualTestChangeRequestApiTests
             new { discipline = "System", changeRequestIds = new[] { fixture.OtherBuildChangeId } });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("change_request_not_selectable", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_problem_report_allocated_to_another_build_cannot_be_linked()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId },
+                problemReportIds = new[] { fixture.OtherBuildProblemReportId } });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("target build", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]

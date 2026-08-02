@@ -210,7 +210,7 @@ test('the first protected production mutation after deep-linked sign-in creates 
 
   await page.getByRole('button', { name: '+ Introduce System requirement' }).click()
   await page.getByLabel('Title').fill(title)
-  await page.getByLabel('Problem').fill('The compiled production client must perform protected writes.')
+  await page.getByLabel('Problem', { exact: true }).fill('The compiled production client must perform protected writes.')
   await page.getByRole('textbox', { name: 'Analysis', exact: true }).fill('A durable server query must prove the write rather than trusting the success ceremony.')
   await page.getByLabel('Solution').fill('Resolve relative API URLs and bind CSRF state to the signed-in session.')
   await page.getByLabel('Requirement statement').fill('The production client shall preserve authenticated mutation capability.')

@@ -35,9 +35,11 @@ test('software authoring routes preserve the selected HLR or LLR level', () => {
   expect(parseRoute(llr)).toMatchObject({ view: 'createSoftwareChange', artifactKind: 'LowLevel' })
 })
 
-test('retired problem-report, product-version, and baseline pages reject direct navigation', () => {
+test('problem reports are active while retired product-version and baseline pages reject direct navigation', () => {
   const root = '/programs/program-a/projects/project-a/releases/release-a'
-  for (const path of ['problem-reports', 'release-planning', 'baselines'])
+  expect(parseRoute(`${root}/problem-reports`)).toMatchObject({ view: 'problemReports', discipline: 'system' })
+  expect(routePath(context, 'problemReports')).toBe(`${root}/problem-reports`)
+  for (const path of ['release-planning', 'baselines'])
     expect(parseRoute(`${root}/${path}`)).toMatchObject({ view: 'notFound' })
   for (const kind of ['problem-report', 'baseline', 'build'])
     expect(parseRoute(`${root}/artifacts/${kind}/record-a`)).toMatchObject({ view: 'notFound' })

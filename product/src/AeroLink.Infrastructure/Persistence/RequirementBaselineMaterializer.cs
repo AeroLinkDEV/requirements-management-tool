@@ -75,7 +75,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
 
         // Requirement revisions exist for the first time here, so this is the earliest point at which
         // verification work can bind to them, coverage can carry forward, and a stranded procedure is visible.
-        await verificationImpact.ApplyMaterializationAsync(baseline.ProjectId, baseline.ReleaseId, materialized, now, ct);
+        await verificationImpact.ApplyMaterializationAsync(baseline.ProjectId, baseline.ReleaseId, materialized, actorId, now, ct);
 
         var revisionByChange = materialized.ToDictionary(x => x.RequirementChangeId, x => x.RevisionId);
         var proposed = scrs.SelectMany(x => x.RequirementChanges.Select(change => new { Scr = x, Change = change }))

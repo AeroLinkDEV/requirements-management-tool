@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { PersonName } from './People'
 import { SignatureDialog } from './IdentityCenter'
 import PersonPicker from './PersonPicker'
+import ProblemReportPicker, { type ProblemReportOption } from './ProblemReportPicker'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
@@ -28,6 +29,7 @@ type TestChangeRequest = {
   totalItems: number
   resolvedItems: number
   coveredChangeRequests: ChangeRequestCover[]
+  problemReports?: ProblemReportOption[]
   capabilities: { canAssign: boolean; canDecide: boolean; canSubmit: boolean; canApprove: boolean; canReturn: boolean }
 }
 type Procedure = { id: string; revisionId: string; displayNumber: string; title: string; state: string; requirementCount: number; ownerId: string; selectedApproverId?: string }
@@ -108,6 +110,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [creating, setCreating] = useState(false)
   const [approving, setApproving] = useState<Procedure>()
   const [reviewDecision, setReviewDecision] = useState<{ request: TestChangeRequest; action: 'approve' | 'return' }>()
+  const [linkingProblemReports, setLinkingProblemReports] = useState<TestChangeRequest>()
+  const [problemReportIds, setProblemReportIds] = useState<string[]>([])
   const [submitting, setSubmitting] = useState<TestChangeRequest>()
   const [reviewApprover, setReviewApprover] = useState({ userId: '', name: '' })
   const [procedureApprover, setProcedureApprover] = useState({ userId: '', name: '' })
@@ -313,6 +317,15 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     if (action === 'submit') { setSubmitting(undefined); setReviewApprover({ userId: '', name: '' }) }
   }, 'The package could not be moved on.')
 
+  const linkReports = (request: TestChangeRequest) => act(async () => {
+    await apiRequest(`${api}/api/test-change-reviews/${request.id}/problem-reports`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ problemReportIds }),
+    })
+    setLinkingProblemReports(undefined)
+    setSaved(`PR links updated for ${request.displayNumber}.`)
+  }, 'The PR links could not be updated.')
+
   const createProcedure = (form: FormData) => act(async () => {
     const requirementRevisionIds = form.getAll('requirement').map(String).filter(Boolean)
     if (!requirementRevisionIds.length) { setError('A procedure has to say which requirements it verifies.'); return }
@@ -416,6 +429,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               <button type="button" className="quiet" onClick={() => setOpened(current => current === request.id ? '' : request.id)}>
                 {opened === request.id ? 'Hide decisions' : 'Decisions'}
               </button>
+              {canTest && <button type="button" className="quiet" disabled={busy} onClick={() => {
+                setProblemReportIds((request.problemReports ?? []).map(report => report.id))
+                setLinkingProblemReports(request)
+              }}>Link PRs{request.problemReports?.length ? ` · ${request.problemReports.length}` : ''}</button>}
               {request.capabilities.canAssign && (
                 <button type="button" className="quiet" disabled={busy} onClick={() => void takeOn(request)}>Take it on</button>
               )}
@@ -654,6 +671,22 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <div className="decisionActions">
               <button type="submit" disabled={busy || !procedureApprover.userId}>Create procedure</button>
               <button type="button" className="quiet" disabled={busy} onClick={() => setCreating(false)}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {linkingProblemReports && (
+        <div className="decisionModal" role="dialog" aria-label={`Link PRs to ${linkingProblemReports.displayNumber}`}>
+          <form onSubmit={event => { event.preventDefault(); void linkReports(linkingProblemReports) }}>
+            <p className="eyebrow">CONTROLLED TRACEABILITY</p>
+            <h2>Link PRs to {linkingProblemReports.displayNumber}</h2>
+            <ProblemReportPicker api={api} projectId={projectId} releaseId={releaseId}
+              selected={problemReportIds} locked={(linkingProblemReports.problemReports ?? []).map(report => report.id)}
+              onChange={setProblemReportIds} legend="PRs verified by this TCR" />
+            <div className="decisionActions">
+              <button type="submit" disabled={busy}>Save links</button>
+              <button type="button" className="quiet" disabled={busy} onClick={() => setLinkingProblemReports(undefined)}>Cancel</button>
             </div>
           </form>
         </div>

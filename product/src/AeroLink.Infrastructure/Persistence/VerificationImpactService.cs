@@ -32,7 +32,7 @@ public sealed record ApprovedProcedureSelection(Guid ProcedureId, Guid RevisionI
 /// as soon as the engineering decision is settled, rather than discovering the work when the release is
 /// already being assembled.
 /// </summary>
-public sealed class VerificationImpactService(AeroLinkDbContext db)
+public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemReportLinkService? problemReports = null)
 {
     /// <summary>
     /// Raises the items owed by a newly approved change request. Safe to call more than once for the same
@@ -76,6 +76,8 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
                     discipline, request.DisplayNumber, now,
                     await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct));
                 db.TestChangeReviews.Add(review);
+                await (problemReports ?? new ProblemReportLinkService(db)).PropagateToTestChangeRequestAsync(
+                    request.Id, review.Id, request.AuthorId, now, ct);
                 reviews.Add(discipline, review);
                 foreach (var historical in priorReviews.Where(x => x.Discipline == discipline))
                 {
@@ -127,7 +129,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
     /// Runs inside the materialisation transaction and does not save; the caller owns the unit of work.
     /// </summary>
     public async Task<MaterializationImpactResult> ApplyMaterializationAsync(Guid projectId, Guid releaseId,
-        IReadOnlyList<MaterializedRequirementChange> changes, DateTimeOffset now, CancellationToken ct)
+        IReadOnlyList<MaterializedRequirementChange> changes, string actorId, DateTimeOffset now, CancellationToken ct)
     {
         if (changes.Count == 0) return new MaterializationImpactResult(0, 0, 0, 0);
 
@@ -150,8 +152,56 @@ public sealed class VerificationImpactService(AeroLinkDbContext db)
 
         var carried = await CarryCoverageForwardAsync(changes, now, ct);
         var confirmed = await ConfirmDecidedCoverageAsync(changes, itemByChange, carried, now, ct);
+        var changedRevisionIds = changes.Select(change => change.RevisionId).ToHashSet();
+        var changedCoverage = db.TestCoverage.Local
+            .Where(link => changedRevisionIds.Contains(link.RequirementRevisionId))
+            .DistinctBy(link => link.ProcedureRevisionId)
+            .ToList();
+        await IncludeChangedCoverageInTestSetsAsync(projectId, releaseId, changes, changedCoverage,
+            actorId, now, ct);
         var orphaned = await RaiseOrphanedProceduresAsync(projectId, releaseId, changes, carried, now, ct);
         return new MaterializationImpactResult(bound, carried.Count, confirmed, orphaned);
+    }
+
+    /// <summary>
+    /// Every procedure already linked to wording this build modified is mandatory regression scope. Coverage
+    /// is carried forward as suspect until engineering confirms it; the run obligation is immediate and is
+    /// measured by the existing exact-revision result/evidence release gates.
+    /// </summary>
+    private async Task IncludeChangedCoverageInTestSetsAsync(Guid projectId, Guid releaseId,
+        IReadOnlyList<MaterializedRequirementChange> changes, IReadOnlyList<TestRequirementCoverage> coverage,
+        string actorId, DateTimeOffset now, CancellationToken ct)
+    {
+        if (coverage.Count == 0) return;
+        var revisionIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
+        var levels = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                            join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                            where revisionIds.Contains(revision.Id)
+                            select new { revision.Id, procedure.Level }).ToListAsync(ct);
+        var sets = await db.BuildTestSets.Include(x => x.Entries).Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
+        foreach (var discipline in new[] { TestChangeReviewDiscipline.System,
+                     TestChangeReviewDiscipline.HighLevelSoftware, TestChangeReviewDiscipline.LowLevelSoftware })
+        {
+            if (sets.Any(x => x.Discipline == discipline)) continue;
+            var pending = db.BuildTestSets.Local.FirstOrDefault(x => x.ReleaseId == releaseId && x.Discipline == discipline);
+            var set = pending ?? new BuildTestSet(projectId, releaseId, discipline, now);
+            if (pending is null) db.BuildTestSets.Add(set);
+            sets.Add(set);
+        }
+        var changedByRevision = coverage.GroupBy(x => x.ProcedureRevisionId).ToDictionary(x => x.Key,
+            x => changes.First(change => x.Any(link => link.RequirementRevisionId == change.RevisionId)).DisplayNumber);
+        foreach (var row in levels)
+        {
+            var discipline = row.Level switch
+            {
+                TestProcedureLevel.System => TestChangeReviewDiscipline.System,
+                TestProcedureLevel.HighLevel => TestChangeReviewDiscipline.HighLevelSoftware,
+                _ => TestChangeReviewDiscipline.LowLevelSoftware
+            };
+            sets.Single(x => x.Discipline == discipline).Include(actorId, row.Id,
+                TestSelectionReason.ChangedRequirement,
+                $"Mandatory before release because {changedByRevision[row.Id]} changed.", now);
+        }
     }
 
     /// <summary>

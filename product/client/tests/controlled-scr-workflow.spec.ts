@@ -53,7 +53,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByLabel('Change type')).toBeEditable()
   await expect(page.getByText('SWR-000001')).toHaveCount(0)
   await page.getByLabel('Title').fill('Introduce controlled browser workflow')
-  await page.getByLabel('Problem').fill('The workflow is not yet controlled end to end.')
+  await page.getByLabel('Problem', { exact: true }).fill('The workflow is not yet controlled end to end.')
   await page.getByLabel('Analysis', { exact: true }).fill('SCR content, reviewers, and history must remain attributable.')
   await page.getByLabel('Solution').fill('Add an ordered and auditable approval workflow.')
   await page.getByLabel('Requirement statement').fill('The software shall enforce ordered SCR approval.')

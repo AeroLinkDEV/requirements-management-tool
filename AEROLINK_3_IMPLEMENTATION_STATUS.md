@@ -1,7 +1,7 @@
 # AeroLink 3.0 - implementation status
 
 **Status date:** 2026-08-01
-**Qualified product commit before this documentation reconciliation:** `067294c`
+**Qualified product checkpoint:** current `main` after the issue #252 Problem Reports increment
 
 This is the current scorecard for the long-lived
 [AeroLink 3.0 completion contract](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md). The contract describes the
@@ -20,21 +20,21 @@ context is in [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_20
 
 ## Overall position
 
-The AeroLink 3.0 parent program (#29) and every review follow-up are closed. The 1 August reconciliation found
-no remaining implementation-ready MVP defect in the open backlog. Applicable work was delivered through PRs
-#237-#240; satisfied items were closed with evidence; broad refactors and customer-specific deployment work
-were closed with explicit reopen conditions.
+The AeroLink 3.0 parent program (#29) and every review follow-up are closed. The 1 August reconciliation
+delivered applicable work through PRs #237-#240; the later #252 increment activated the minimum Problem Reports
+chain and mandatory changed-requirement testing. Broad refactors and customer-specific deployment work remain
+closed with explicit reopen conditions.
 
 Closing the program does **not** mean AeroLink claims certification, tool qualification, completed customer
 deployment, or every capability named in the enterprise ambition. It means the supported MVP is coherent,
-qualified, and has no known open GitHub backlog at this checkpoint.
+qualified, with no known implementation-ready GitHub backlog at this checkpoint.
 
 ## Workstream scorecard
 
 | Workstream | Current status | Product evidence and boundary |
 | --- | --- | --- |
 | 1. Universal controlled editing | **MVP delivered** | SCR/SWCR checkout, renewable leases, autosave snapshots, recovery, check-in/discard, read-only observers, optimistic versions, forced unlock audit, and retained conflict evidence. Production Concurrency simulation was removed; authoritative editing is exercised through real artifacts. |
-| 2. Problem-report lifecycle | **Historical/dormant foundation** | Problem/corrective relationships and retained lifecycle implementation support trace and corrective routing, but the broad Problem Reports navigation/search surface remains intentionally dormant. Restore only through a new product decision. |
+| 2. Problem-report lifecycle | **MVP increment active** | Build-scoped Problem Reports are navigable and searchable. PRs drive SCR/SWCR/TCR work, approved CRs become corrective-action evidence, TCRs inherit PR links, and released builds are read-only. Broader classification and closure policy remains incremental under DEC-085. |
 | 3. Product-line configuration and reuse | **Delivered foundation** | Canonical software builds, exact immutable baselines, released 1.5/read-only and active 1.6 workspaces, controlled libraries, propagation decisions, variants, configuration-correct outputs, deterministic publications, and release evidence. |
 | 4. Enterprise identity and account assurance | **MVP delivered; federation deferred** | Local accounts, MFA/recovery codes, Program roles, individual role revocation, distinct global/Program administration, current/other session controls, time-bounded delegation lifecycle, electronic signatures, security audit, provider/mapping foundations, and PostgreSQL migration coverage. OIDC/SAML and SCIM resume only with a real directory contract. |
 | 5. Resumable interchange and monitored integrations | **Delivered foundation** | Governed CSV/XLSX onboarding, ReqIF profile round trip, scoped service identities, versioned API, transactional events, HMAC webhooks, retry/dead-letter replay, Jira mapping/link-back, OSLC foundations, and inspectable notification outbox. A real SMTP relay and vendor/provider-specific contracts remain external qualification work. |
@@ -48,6 +48,9 @@ qualified, and has no known open GitHub backlog at this checkpoint.
 - Build 1.6 (`SW-01.60`) is the active controlled development workspace.
 - System, Software HLR, Software LLR, and each verification discipline use exact build scope.
 - System approval raises an HLR downstream assessment; HLR approval raises an LLR assessment.
+- PRs may drive every change-request type; requirement changes never manufacture a PR.
+- Every procedure covering an introduced or modified requirement is mandatory pre-release scope and cannot be
+  removed from that build's test set.
 - HLR proposals allocate to current System revisions; LLR proposals allocate to current HLR revisions. An
   explicit derived classification with rationale is the only alternative.
 - Approved changes raise controlled, discipline-specific Test Change Requests. Explicit decisions and approved

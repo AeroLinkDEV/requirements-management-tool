@@ -31,7 +31,7 @@ const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:st
 
 const commandEntries:PaletteEntry[]=commandDefinitions.map(item=>({...item,key:`page-${item.view}-${item.discipline}-${item.artifactKind??''}`,category:'page'}))
 const recentKey='aerolink-recent-destinations'
-const hiddenViews=new Set<View>(['planning','baselines','problemReports'])
+const hiddenViews=new Set<View>(['planning','baselines'])
 const hiddenArtifactKinds=new Set(['baseline','build','problem-report'])
 const readRecent=():PaletteEntry[]=>{try{return (JSON.parse(localStorage.getItem(recentKey)??'[]') as PaletteEntry[]).filter(item=>!hiddenViews.has(item.view)&&!hiddenArtifactKinds.has(item.artifactKind??'')).slice(0,5)}catch{return[]}}
 
