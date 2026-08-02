@@ -6,7 +6,7 @@
 This is the current scorecard for the long-lived
 [AeroLink 3.0 completion contract](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md). The contract describes the
 full enterprise ambition; this file describes what the repository truthfully delivers now. Detailed restart
-context is in [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
+context is in [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md).
 
 ## Status vocabulary
 

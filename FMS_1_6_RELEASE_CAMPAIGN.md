@@ -3,7 +3,7 @@
 > **Implemented lifecycle contract; hidden planning surface.** Reconciled 2026-08-01. The model and gates
 > remain implemented, but the detailed campaign/baseline workbench is not a current navigation destination
 > (DEC-072). Seed-state counts are initial conditions only; live engineering work persists independently.
-> See [the current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
+> See [the current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md).
 
 ## Repeatable user-controlled release progression
 

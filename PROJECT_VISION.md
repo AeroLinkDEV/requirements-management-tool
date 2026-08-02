@@ -44,7 +44,8 @@ The platform will provide:
 - reliable identification of missing, invalid, suspect, failed, or incomplete trace chains;
 - controlled SYSRD, test, result, baseline, and traceability outputs;
 - permanent, attributable history; and
-- a foundation that can later extend from system-level data to HLRs, LLRs, software tests, PRs, releases, and selected integrations.
+- a shared model now spanning System, HLR, LLR, verification, Problem Reports, controlled documents and releases,
+  with selected external integrations remaining incremental.
 
 ## Standards Posture
 

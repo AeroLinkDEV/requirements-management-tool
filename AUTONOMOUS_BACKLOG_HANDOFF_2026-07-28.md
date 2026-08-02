@@ -1,12 +1,12 @@
 # Autonomous backlog handoff — 2026-07-28
 
 > **Historical backlog inventory.** All issues listed here have since been reconciled. Use
-> [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) and refresh GitHub directly;
+> [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) and refresh GitHub directly;
 > do not treat this file as an active queue.
 
 > **Historical checkpoint; do not restart from its issue list.** Work continued through PR #168 on
 > 2026-07-29, and several product decisions changed the active surface. Use
-> [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) for current routes,
+> [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) for current routes,
 > issue state, deliberate dormant code and restart instructions.
 
 ## Why work stopped

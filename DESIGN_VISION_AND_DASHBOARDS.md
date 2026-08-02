@@ -8,7 +8,7 @@ This document turns the AeroLink concept mockups into guiding product direction.
 > Problem Reports are active through their dedicated build-scoped center; Product Versions and Candidate
 > Baselines remain dormant UI. Treat the mockups below as inspiration, not instructions to restore retired
 > dashboard elements. See
-> [CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md).
+> [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md).
 
 ## Experience Vision
 

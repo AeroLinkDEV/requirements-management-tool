@@ -7,7 +7,7 @@ capability inventory, not the status record** — for current status read
 [PROJECT_STATE.md](PROJECT_STATE.md) and
 [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md). For the current supported routes,
 dormant UI and aligned issue backlog, read
-[CURRENT_PRODUCT_HANDOFF_2026-08-01.md](CURRENT_PRODUCT_HANDOFF_2026-08-01.md). A capability listed here may be
+[CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md). A capability listed here may be
 implemented but deliberately not exposed; the catalog is not authority to reconnect dormant modules. The paragraph below is a
 2026-07-18 snapshot retained for history and is not maintained.
 
@@ -149,13 +149,13 @@ Vendor-specific mappings and customer-specific connector contracts remain deploy
 
 | ID | Capability | Rationale | Priority | Phase | Dependencies | Acceptance Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
-| SW-001 | HLR and LLR management | Extend controlled requirements down the software V | Must | Delivered | Proven system-level model | HLRs/LLRs support identity, revisions, derived status, SWCR-package review, exact build inclusion, and upward trace |
+| SW-001 | HLR and LLR management | Extend controlled requirements down the software V | Must | Delivered | Proven system-level model | HLRs/LLRs support identity, revisions, derived status, independently scoped history and editing, SWCR-package review, exact build inclusion, and navigable upward trace |
 | SW-002 | SWCR and SWRD lifecycle | Control software change and document generation | Must | Delivered | SW-001, reusable SCR/baseline framework | Approved SWCRs produce exact software baselines and controlled HLR/LLR SWRDs |
 | SW-003 | Software verification artifacts | Verify HLRs, LLRs, integration, and robustness behavior | Must | Delivered | SW-001, reusable verification framework | HLR and LLR requirements have isolated controlled procedures, Test Change Requests, build test sets, executions, results, and evidence |
-| SW-004 | Consuming-discipline downstream assessments | Put downstream impact decisions with the engineers who consume an approved change | Must | Delivered | SCR-002, SW-001, WF-002 | System approval raises governed HLR assessment work and HLR approval raises LLR assessment work; exact Draft SWCR links or justified no-change decisions retain independent approval and supersession history |
+| SW-004 | Consuming-discipline downstream assessments | Put downstream impact decisions with the engineers who consume an approved change | Must | Delivered | SCR-002, SW-001, WF-002 | System approval raises governed HLR work and HLR approval raises LLR work; explicit engineering statuses, source-case/downward-trace context, justified no-change, level-correct Draft creation and automatic/retryable SWCR linkage retain independent approval, read-only history, and supersession |
 | SW-005 | Prospective exact upward allocation | Prevent software proposals from reaching review without an allocation or explicit derived exception | Must | Delivered | SW-001, TR-001, BL-001 | HLR proposals select current System revisions and LLR proposals select current HLR revisions from the target build; exact IDs enter the review snapshot and materialize as immutable `AllocatedFrom` traces |
-| PR-001 | Full PR lifecycle | Control investigation, disposition, resolution, and closure | Should | 5 | PF foundations, TR-001 | PR state, classification, effects, resolution, verification, and closure are attributable |
-| PR-002 | PR-driven impact analysis | Build the change story across artifacts and releases | Should | 5 | PR-001, TR-004 | Users navigate from a PR through affected changes, requirements, tests, results, and release |
+| PR-001 | Problem Report lifecycle foundation | Control investigation, implementation, verification, and closure without inventing unused process fields | Should | Foundation delivered; expansion planned | PF foundations, TR-001 | Build-scoped PRs retain controlled number, title, raised date, description, additional information, target build, status, ownership and history; released builds are read-only |
+| PR-002 | PR-driven corrective-action and evidence chain | Build the change story across artifacts and releases | Should | Delivered | PR-001, TR-004, SCR-001, ST-007 | Any SCR, SWCR, or TCR can select driving PRs; approved changes project as corrective actions, applicable test results project as test evidence, and connected controlled records are searchable, deep-linked, and refresh-safe |
 | INT-001 | Enterprise identity | Integrate with organizational authentication | Should | 5 | PF-002, deployment decisions | Authorized enterprise identities and groups can be mapped to product roles |
 | INT-002 | Git/build/reference integrations | Link controlled lifecycle data to external implementation evidence | Could | 5 | SW-001, integration policy | Users follow immutable external references without the platform becoming a source-code host |
 | AI-001 | Human-controlled local AI suggestions | Assist drafting and analysis without authority | Could | Future | Mature domain model and governance | Suggestions are labeled, provenance-recorded, draft-only, and explicitly accepted by a human |

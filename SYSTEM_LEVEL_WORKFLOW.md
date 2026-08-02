@@ -77,6 +77,8 @@ Selected -> Deferred (with controlled reason)
 - Approval requires every author-selected approver to approve the same submitted revision and review-cycle snapshot. Approval decisions from an earlier review cycle do not carry into a resubmission after requested changes, even when the SCR revision number remains unchanged.
 - Rejection preserves the SCR and review history. A materially revised proposal proceeds as a new SCR revision or a replacement SCR according to policy.
 - Approval makes the proposed changes eligible for baseline selection; it does not itself change the effective baseline.
+- When an approved SCR is linked to one or more PRs, the approved change is presented as an attributable
+  corrective action on those PRs; ordinary requirement changes never create a PR automatically.
 - Deferral records who deferred the SCR, when, why, and any new target release.
 
 ## 4. Requirement Change Behavior
@@ -156,6 +158,10 @@ Completed executions are immutable. A clerical correction uses a controlled amen
 A failed execution may link to one or more PRs or external PR references. A later retest links to the earlier execution, relevant correction/change, and its own evidence. Reporting may show the latest valid status but must preserve the full sequence.
 
 A PR may also be raised when review identifies that an applicable requirement is not fully covered by verification. That PR can drive creation or revision of test procedures and remains linked through the resulting execution and coverage closure.
+
+Any approved procedure that covers a requirement introduced or modified in a build is mandatory pre-release
+scope for that build. It cannot be removed from the build test set, and release readiness requires an accepted
+passing execution with evidence for the exact procedure revision.
 
 ## 8. Traceability and Completeness
 
