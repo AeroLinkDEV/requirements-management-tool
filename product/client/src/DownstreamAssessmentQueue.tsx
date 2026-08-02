@@ -1,85 +1,56 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AuthUser } from './IdentityCenter'
 import PersonPicker from './PersonPicker'
 import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
 import './DownstreamAssessmentQueue.css'
 
-type Assessment = {
-  id:string; sourceChangeRequestNumber:string; sourceTitle:string; targetLevel:'HighLevel'|'LowLevel'
-  state:'Open'|'InReview'|'Approved'|'Superseded'; outcome:'Pending'|'NoChangeRequired'|'ChangeRequestsLinked'
-  assignedEngineerId?:string; selectedApproverId?:string; rationale:string; supersededReason:string
-  linkedChangeRequests:{changeRequestId:string;changeRequestNumber:string}[]
-  capabilities:{canAssign:boolean;canEdit:boolean;canSubmit:boolean;canApprove:boolean;canReturn:boolean}
-}
-type Draft = {id:string;displayNumber:string;title:string;requirementCount:number}
-type RationaleDecision = {assessmentId:string;sourceNumber:string;kind:'no-change'|'return'}
+type Level='HighLevel'|'LowLevel'
+type SourceChange={id:string;displayNumber:string;level:string;kind:string;statement:string}
+type Assessment={id:string;sourceChangeRequestId:string;sourceChangeRequestNumber:string;sourceTitle:string;sourceProblem:string;sourceAnalysis:string;sourceSolution:string;sourceChanges:SourceChange[];targetLevel:Level;state:'Open'|'InReview'|'Approved'|'Superseded';outcome:'Pending'|'ChangeRequired'|'NoChangeRequired'|'ChangeRequestsLinked';assignedEngineerId?:string;selectedApproverId?:string;rationale:string;supersededReason:string;linkedChangeRequests:{changeRequestId:string;changeRequestNumber:string}[];capabilities:{canAssign:boolean;canEdit:boolean;canSubmit:boolean;canApprove:boolean;canReturn:boolean}}
+type Draft={id:string;displayNumber:string;title:string;requirementCount:number}
+type RationaleDecision={assessmentId:string;sourceNumber:string;kind:'no-change'|'return'}
+type Impact={baseNumber:string;known:boolean;derivedRequirements:{id:string;displayNumber:string;level:string;statement:string;linkType:string}[]}
 
-export default function DownstreamAssessmentQueue({api,projectId,releaseId,targetLevel,user,onOpenScr}:{
-  api:string;projectId:string;releaseId:string;targetLevel:'HighLevel'|'LowLevel';user:AuthUser;onOpenScr:(id:string)=>void
-}) {
+const levelName=(level:Level)=>level==='HighLevel'?'HLR':'LLR'
+const engineeringStatus=(row:Assessment)=>{
+  const level=levelName(row.targetLevel)
+  if(row.state==='Superseded')return `${level} assessment superseded`
+  if(row.state==='InReview')return `${level} assessment in review`
+  if(row.state==='Approved'&&row.outcome==='NoChangeRequired')return `${level} assessment complete — no impact`
+  if(row.state==='Approved')return `${level} assessment complete — impact controlled`
+  if(!row.assignedEngineerId)return `${level} impact pending`
+  if(row.outcome==='Pending')return `${level} assessment in progress`
+  if(row.outcome==='ChangeRequired')return `${level} change required — SWCR pending`
+  if(row.outcome==='ChangeRequestsLinked')return `${level} impact controlled — ready for review`
+  return `${level} no impact — ready for review`
+}
+
+export default function DownstreamAssessmentQueue({api,projectId,releaseId,targetLevel,user,onOpenScr,onOpenRequirement,onCreateScr,initialAssessmentId,onAssessmentSelected}:{api:string;projectId:string;releaseId:string;targetLevel:Level;user:AuthUser;onOpenScr:(id:string)=>void;onOpenRequirement:(id:string,level:string)=>void;onCreateScr:(level:Level,assessmentId:string,sourceNumber:string)=>void;initialAssessmentId?:string;onAssessmentSelected:(id?:string)=>void}){
   const [rows,setRows]=useState<Assessment[]>([]),[drafts,setDrafts]=useState<Draft[]>([])
   const [busy,setBusy]=useState(''),[error,setError]=useState(''),[revision,setRevision]=useState(0)
   const [approvers,setApprovers]=useState<Record<string,{userId:string;name:string}>>({})
   const [decision,setDecision]=useState<RationaleDecision>(),[rationale,setRationale]=useState('')
-  const load=useCallback(async()=>{
-    const [assessments,requests]=await Promise.all([
-      fetch(`${api}/api/downstream-assessments?projectId=${projectId}&releaseId=${releaseId}&targetLevel=${targetLevel}`),
-      fetch(`${api}/api/history/scrs?projectId=${projectId}&releaseId=${releaseId}&type=Software&level=${targetLevel}&state=Draft&page=1&pageSize=100`),
-    ])
-    if(assessments.ok)setRows(await assessments.json())
-    if(requests.ok)setDrafts((await requests.json()).items)
-  },[api,projectId,releaseId,targetLevel])
+  const [selectedId,setSelectedId]=useState(initialAssessmentId??''),[impacts,setImpacts]=useState<Impact[]>([]),[impactBusy,setImpactBusy]=useState(false)
+  const load=useCallback(async()=>{const [assessments,requests]=await Promise.all([fetch(`${api}/api/downstream-assessments?projectId=${projectId}&releaseId=${releaseId}&targetLevel=${targetLevel}`),fetch(`${api}/api/history/scrs?projectId=${projectId}&releaseId=${releaseId}&type=Software&level=${targetLevel}&state=Draft&page=1&pageSize=100`)]);if(assessments.ok)setRows(await assessments.json());if(requests.ok)setDrafts((await requests.json()).items)},[api,projectId,releaseId,targetLevel])
   useEffect(()=>{void load()},[load,revision])
-  const act=async(id:string,path:string,body:object={})=>{
-    setBusy(id);setError('')
-    try{await apiRequest(`${api}/api/downstream-assessments/${id}/${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});setRevision(x=>x+1);return true}
-    catch(problem){setError(operationError(problem,'The downstream assessment could not be updated.'));return false}
-    finally{setBusy('')}
-  }
-  const openDecision=(row:Assessment,kind:RationaleDecision['kind'])=>{setError('');setRationale('');setDecision({assessmentId:row.id,sourceNumber:row.sourceChangeRequestNumber,kind})}
-  const closeDecision=()=>{if(busy)return;setDecision(undefined);setRationale('');setError('')}
-  const confirmDecision=async()=>{
-    if(!decision||!rationale.trim())return
-    if(await act(decision.assessmentId,decision.kind,{rationale:rationale.trim()})){setDecision(undefined);setRationale('')}
-  }
+  useEffect(()=>{setSelectedId(initialAssessmentId??'')},[initialAssessmentId])
+  const selected=useMemo(()=>rows.find(row=>row.id===selectedId),[rows,selectedId])
+  useEffect(()=>{if(!selected){setImpacts([]);return}let active=true;setImpactBusy(true);Promise.all(selected.sourceChanges.map(change=>fetch(`${api}/api/authoring/impact?projectId=${projectId}&baseNumber=${encodeURIComponent(change.displayNumber.replace(/\.\d{2}$/,''))}`).then(response=>response.ok?response.json():undefined))).then(values=>{if(active)setImpacts(values.filter(Boolean) as Impact[])}).catch(()=>{if(active)setImpacts([])}).finally(()=>{if(active)setImpactBusy(false)});return()=>{active=false}},[api,projectId,selected])
+  const openAssessment=(id:string)=>{setSelectedId(id);onAssessmentSelected(id)},closeAssessment=()=>{setSelectedId('');onAssessmentSelected(undefined)}
+  const act=async(id:string,path:string,body:object={})=>{setBusy(id);setError('');try{await apiRequest(`${api}/api/downstream-assessments/${id}/${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});setRevision(value=>value+1);return true}catch(problem){setError(operationError(problem,'The downstream assessment could not be updated.'));return false}finally{setBusy('')}}
+  const openDecision=(row:Assessment,kind:RationaleDecision['kind'])=>{setError('');setRationale('');setDecision({assessmentId:row.id,sourceNumber:row.sourceChangeRequestNumber,kind})},closeDecision=()=>{if(busy)return;setDecision(undefined);setRationale('');setError('')}
+  const confirmDecision=async()=>{if(decision&&rationale.trim()&&await act(decision.assessmentId,decision.kind,{rationale:rationale.trim()})){setDecision(undefined);setRationale('')}}
+  const downward=impacts.flatMap(impact=>impact.derivedRequirements)
   if(!rows.length)return null
   return <section className="downstreamQueue" aria-labelledby="downstream-title">
-    <header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>Approved upstream changes waiting for an explicit HLR or LLR engineering conclusion.</p></div></header>
-    {error&&<div className="workspaceError" role="alert">{error}</div>}
-    {rows.map((row,index)=><article className={`downstreamAssessment ${row.state.toLowerCase()}`} key={row.id}>
-      <div className="downstreamSource"><b>{row.sourceChangeRequestNumber}</b><span>{row.sourceTitle}</span><i>{row.targetLevel==='HighLevel'?'HLR':'LLR'} assessment</i></div>
-      <div className="downstreamConclusion">
-        <strong>{row.state==='Superseded'?'Out of date — update required':row.state==='InReview'?'Awaiting approval':row.state}</strong>
-        {row.state==='Superseded'&&<p>{row.supersededReason}</p>}
-        {row.rationale&&<p>{row.rationale}</p>}
-        {row.linkedChangeRequests.map(link=><button type="button" className="linkedScr" key={link.changeRequestId} onClick={()=>onOpenScr(link.changeRequestId)}>{link.changeRequestNumber}</button>)}
-      </div>
-      <div className="downstreamActions">
-        {row.capabilities.canAssign&&<button type="button" disabled={busy===row.id} onClick={()=>void act(row.id,'assign',{engineerId:user.userName})}>Take it on</button>}
-        {row.capabilities.canEdit&&<>
-          <button type="button" className="quiet" disabled={busy===row.id} onClick={()=>openDecision(row,'no-change')}>No change required</button>
-          <label>Link Draft SWCR<select defaultValue="" onChange={event=>{if(event.target.value)void act(row.id,'change-requests',{changeRequestId:event.target.value})}}><option value="">Choose…</option>{drafts.map(d=><option value={d.id} key={d.id}>{d.displayNumber} · {d.title}</option>)}</select></label>
-          {row.capabilities.canSubmit&&<><PersonPicker api={api} projectId={projectId} value={approvers[row.id]?.userId??''} name={approvers[row.id]?.name??''} index={9300+index} label={`Approver for ${row.sourceChangeRequestNumber}`} excludeUserNames={[row.assignedEngineerId??user.userName,user.userName]} onSelect={person=>setApprovers(current=>({...current,[row.id]:person}))}/><button type="button" disabled={busy===row.id||!approvers[row.id]?.userId} onClick={()=>void act(row.id,'submit',{approverId:approvers[row.id].userId})}>Send for approval</button></>}
-        </>}
-        {row.state==='Open'&&!row.assignedEngineerId&&!row.capabilities.canAssign&&<span>Software engineering authority is required to claim this assessment.</span>}
-        {row.state==='InReview'&&<span>Selected approver: <PersonName userName={row.selectedApproverId??''}/></span>}
-        {row.capabilities.canApprove&&<button type="button" onClick={()=>void act(row.id,'approve')}>Approve</button>}{row.capabilities.canReturn&&<button type="button" className="quiet" onClick={()=>openDecision(row,'return')}>Return</button>}
-      </div>
-    </article>)}
-    <p className="downstreamHelp">Need a new downstream SWCR? Create the HLR or LLR Draft first, then link it here. One Draft may answer several assessments, and one assessment may link several Drafts.</p>
-    {decision&&<div className="downstreamDialogBackdrop" role="presentation">
-      <section className="downstreamDecisionDialog" role="dialog" aria-modal="true" aria-labelledby="downstream-decision-title">
-        <p className="eyebrow">DOWNSTREAM ASSESSMENT</p>
-        <h2 id="downstream-decision-title">{decision.kind==='no-change'?`Record no-change conclusion for ${decision.sourceNumber}`:`Return ${decision.sourceNumber} assessment`}</h2>
-        <p>{decision.kind==='no-change'?'Explain why the approved upstream change requires no downstream requirement revision.':'State exactly what the assigned engineer must update before this assessment can be approved.'}</p>
-        {error&&<div className="workspaceError" role="alert">{error}</div>}
-        <label>Decision rationale<textarea autoFocus value={rationale} onChange={event=>setRationale(event.target.value)}/></label>
-        <div className="downstreamDialogActions">
-          <button type="button" className="quiet" disabled={!!busy} onClick={closeDecision}>Cancel</button>
-          <button type="button" disabled={!!busy||!rationale.trim()} onClick={()=>void confirmDecision()}>{busy?'Recording…':decision.kind==='no-change'?'Record no-change conclusion':'Return assessment'}</button>
-        </div>
-      </section>
-    </div>}
+    <header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>Approved upstream changes waiting for an explicit HLR or LLR engineering conclusion.</p></div></header>{error&&<div className="workspaceError" role="alert">{error}</div>}
+    {rows.map((row,index)=><article className={`downstreamAssessment ${row.state.toLowerCase()}`} data-state={row.state} key={row.id}>
+      <button type="button" className="downstreamSource" onClick={()=>openAssessment(row.id)} aria-label={`Open ${levelName(row.targetLevel)} assessment for ${row.sourceChangeRequestNumber}`}><b>{row.sourceChangeRequestNumber}</b><span>{row.sourceTitle}</span><i>{levelName(row.targetLevel)} assessment</i></button>
+      <div className="downstreamConclusion"><strong>{engineeringStatus(row)}</strong>{row.state==='Superseded'&&<p>{row.supersededReason}</p>}{row.rationale&&<p>{row.rationale}</p>}{row.linkedChangeRequests.map(link=><button type="button" className="linkedScr" key={link.changeRequestId} onClick={()=>onOpenScr(link.changeRequestId)}>{link.changeRequestNumber}</button>)}</div>
+      <div className="downstreamActions">{row.capabilities.canAssign&&<button type="button" disabled={busy===row.id} onClick={()=>void act(row.id,'assign',{engineerId:user.userName})}>Take it on</button>}{row.capabilities.canEdit&&<><button type="button" className="quiet" disabled={busy===row.id} onClick={()=>openDecision(row,'no-change')}>No change required</button><button type="button" className="quiet" disabled={busy===row.id||row.outcome==='ChangeRequestsLinked'} onClick={()=>void act(row.id,'change-required')}>Change required</button>{row.outcome==='ChangeRequired'&&<button type="button" onClick={()=>onCreateScr(row.targetLevel,row.id,row.sourceChangeRequestNumber)}>Create Draft {levelName(row.targetLevel)} SWCR</button>}<label>Link Draft SWCR<select value="" onChange={event=>{if(event.target.value)void act(row.id,'change-requests',{changeRequestId:event.target.value})}}><option value="">Choose…</option>{drafts.map(d=><option value={d.id} key={d.id}>{d.displayNumber} · {d.title}</option>)}</select></label>{row.capabilities.canSubmit&&<><PersonPicker api={api} projectId={projectId} value={approvers[row.id]?.userId??''} name={approvers[row.id]?.name??''} index={9300+index} label={`Approver for ${row.sourceChangeRequestNumber}`} excludeUserNames={[row.assignedEngineerId??user.userName,user.userName]} onSelect={person=>setApprovers(current=>({...current,[row.id]:person}))}/><button type="button" disabled={busy===row.id||!approvers[row.id]?.userId} onClick={()=>void act(row.id,'submit',{approverId:approvers[row.id].userId})}>Send for approval</button></>}</>}{row.state==='Open'&&!row.assignedEngineerId&&!row.capabilities.canAssign&&<span>Software engineering authority is required to claim this assessment.</span>}{row.state==='InReview'&&<span>Selected approver: <PersonName userName={row.selectedApproverId??''}/></span>}{row.capabilities.canApprove&&<button type="button" onClick={()=>void act(row.id,'approve')}>Approve</button>}{row.capabilities.canReturn&&<button type="button" className="quiet" onClick={()=>openDecision(row,'return')}>Return</button>}</div>
+    </article>)}<p className="downstreamHelp">One Draft may answer several assessments, and one assessment may link several Drafts.</p>
+    {selected&&<div className="downstreamDrawerBackdrop" role="presentation"><aside className="downstreamDrawer" role="dialog" aria-modal="true" aria-labelledby="downstream-context-title"><header><div><p className="eyebrow">{levelName(selected.targetLevel)} ENGINEERING DECISION</p><h2 id="downstream-context-title">{selected.sourceChangeRequestNumber} downstream impact</h2><strong>{engineeringStatus(selected)}</strong></div><button type="button" className="quiet" onClick={closeAssessment} aria-label="Close downstream assessment">Close</button></header><section><h3>Source change request</h3><button type="button" className="drawerArtifactLink" onClick={()=>onOpenScr(selected.sourceChangeRequestId)}>{selected.sourceChangeRequestNumber} · {selected.sourceTitle}</button><dl className="sourceCase"><div><dt>Problem</dt><dd>{selected.sourceProblem||'Not recorded'}</dd></div><div><dt>Analysis</dt><dd>{selected.sourceAnalysis||'Not recorded'}</dd></div><div><dt>Solution</dt><dd>{selected.sourceSolution||'Not recorded'}</dd></div></dl></section><section><h3>Approved requirement changes</h3>{selected.sourceChanges.length?<ul className="drawerChanges">{selected.sourceChanges.map(change=><li key={change.id}><b>{change.displayNumber}</b><span>{change.kind} · {change.statement}</span></li>)}</ul>:<p className="drawerEmpty">No approved requirement changes were recorded on the source request.</p>}</section><section><h3>Current downward requirement trace</h3>{impactBusy?<p>Loading current trace…</p>:downward.length?<ul className="drawerChanges">{downward.map(requirement=><li key={`${requirement.id}-${requirement.displayNumber}`}><button type="button" className="drawerArtifactLink" onClick={()=>onOpenRequirement(requirement.id,requirement.level)}>{requirement.displayNumber}</button><span>{requirement.linkType} · {requirement.statement}</span></li>)}</ul>:<p className="drawerEmpty">No current downward requirement trace is recorded for the changed requirements.</p>}</section></aside></div>}
+    {decision&&<div className="downstreamDialogBackdrop" role="presentation"><section className="downstreamDecisionDialog" role="dialog" aria-modal="true" aria-labelledby="downstream-decision-title"><p className="eyebrow">DOWNSTREAM ASSESSMENT</p><h2 id="downstream-decision-title">{decision.kind==='no-change'?`Record no-change conclusion for ${decision.sourceNumber}`:`Return ${decision.sourceNumber} assessment`}</h2><p>{decision.kind==='no-change'?'Explain why the approved upstream change requires no downstream requirement revision.':'State exactly what the assigned engineer must update before this assessment can be approved.'}</p>{error&&<div className="workspaceError" role="alert">{error}</div>}<label>Decision rationale<textarea autoFocus value={rationale} onChange={event=>setRationale(event.target.value)}/></label><div className="downstreamDialogActions"><button type="button" className="quiet" disabled={!!busy} onClick={closeDecision}>Cancel</button><button type="button" disabled={!!busy||!rationale.trim()} onClick={()=>void confirmDecision()}>{busy?'Recording…':decision.kind==='no-change'?'Record no-change conclusion':'Return assessment'}</button></div></section></div>}
   </section>
 }

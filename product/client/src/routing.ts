@@ -73,7 +73,7 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (!path || path === "command-center") return { ...base, view: "dashboard", discipline: "system" };
   if (path === "my-work") return { ...base, view: "mywork", discipline: "system" };
   if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "System" };
-  if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", artifactKind: query.get("level") === "LLR" ? "LowLevel" : "HighLevel", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
+  if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", artifactId: query.get("assessment") || undefined, artifactKind: query.get("level") === "LLR" ? "LowLevel" : "HighLevel", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
   if (path === "systems/change-requests/new") return { ...base, view: "createSystemScr", discipline: "system", artifactId: query.get("requirement") || undefined };
   if (path === "software/change-requests/new") return { ...base, view: "createSoftwareChange", discipline: "software", artifactId: query.get("requirement") || undefined, artifactKind: query.get("level") === "HLR" ? "HighLevel" : query.get("level") === "LLR" ? "LowLevel" : undefined };
   if (tail[0] === "systems" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[2]) };
@@ -150,6 +150,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     if (stateIntent) query.set("state", stateIntent);
     if (typeIntent === "All") query.set("type", "All");
     if (scope === "software") query.set("level", artifactKind === "LowLevel" ? "LLR" : "HLR");
+    if (scope === "software" && artifactId) query.set("assessment", artifactId);
     return query.size ? `${path}?${query}` : path;
   };
   switch (view) {

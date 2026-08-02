@@ -49,6 +49,9 @@ public static class DownstreamAssessmentEndpoints
                     x.ApprovedBy, x.ApprovedAt, x.SupersededByAssessmentId, x.SupersededReason,
                     x.CreatedAt, x.UpdatedAt, x.Version,
                     sourceTitle = request?.Title ?? "Approved upstream change",
+                    sourceProblem = request?.Problem ?? "",
+                    sourceAnalysis = request?.Analysis ?? "",
+                    sourceSolution = request?.Solution ?? "",
                     sourceChanges = request?.RequirementChanges.Select(change => new
                     {
                         change.Id, change.DisplayNumber, level = change.Level.ToString(), kind = change.Kind.ToString(),
@@ -64,7 +67,7 @@ public static class DownstreamAssessmentEndpoints
                         canEdit = canEngineer && x.State == DownstreamAssessmentState.Open
                             && string.Equals(x.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
                         canSubmit = canEngineer && x.State == DownstreamAssessmentState.Open
-                            && x.Outcome != DownstreamAssessmentOutcome.Pending
+                            && x.Outcome is DownstreamAssessmentOutcome.NoChangeRequired or DownstreamAssessmentOutcome.ChangeRequestsLinked
                             && string.Equals(x.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
                         canApprove = canApprove && x.State == DownstreamAssessmentState.InReview
                             && string.Equals(x.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase),
@@ -106,6 +109,24 @@ public static class DownstreamAssessmentEndpoints
             try
             {
                 assessment.RecordNoChange(http.UserAccount().UserName, request.Rationale, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct); return Results.Ok(new { assessment.Id, outcome = assessment.Outcome.ToString(), assessment.Version });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/downstream-assessments/{id:guid}/change-required", async (Guid id,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var assessment = await db.DownstreamChangeAssessments.Include(x => x.ChangeRequestLinks)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (assessment is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == assessment.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build downstream assessments are read-only." });
+            if (!await http.HasProjectRoleAsync(db, identity, assessment.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ProgramManager))
+                return Results.Forbid();
+            try
+            {
+                assessment.RecordChangeRequired(http.UserAccount().UserName, DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct); return Results.Ok(new { assessment.Id, outcome = assessment.Outcome.ToString(), assessment.Version });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }

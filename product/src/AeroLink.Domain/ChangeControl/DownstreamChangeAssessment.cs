@@ -3,7 +3,7 @@ using AeroLink.Domain.Common;
 namespace AeroLink.Domain.ChangeControl;
 
 public enum DownstreamAssessmentState { Open, InReview, Approved, Superseded }
-public enum DownstreamAssessmentOutcome { Pending, NoChangeRequired, ChangeRequestsLinked }
+public enum DownstreamAssessmentOutcome { Pending, ChangeRequired, NoChangeRequired, ChangeRequestsLinked }
 
 /// <summary>
 /// The consuming discipline's controlled answer to an approved upstream change.
@@ -77,6 +77,17 @@ public sealed class DownstreamChangeAssessment
         Touch(now);
     }
 
+    public void RecordChangeRequired(string actorId, DateTimeOffset now)
+    {
+        EnsureOpen();
+        EnsureAssignee(actorId);
+        if (_changeRequestLinks.Count != 0)
+            throw new DomainException("The downstream change is already controlled by a linked SWCR.");
+        Outcome = DownstreamAssessmentOutcome.ChangeRequired;
+        Rationale = "";
+        Touch(now);
+    }
+
     public void LinkChangeRequest(string actorId, Guid changeRequestId, string displayNumber, DateTimeOffset now)
     {
         EnsureOpen();
@@ -93,8 +104,8 @@ public sealed class DownstreamChangeAssessment
     {
         EnsureOpen();
         EnsureAssignee(actorId);
-        if (Outcome == DownstreamAssessmentOutcome.Pending)
-            throw new DomainException("Record the downstream conclusion before submitting the assessment.");
+        if (Outcome is DownstreamAssessmentOutcome.Pending or DownstreamAssessmentOutcome.ChangeRequired)
+            throw new DomainException("Record the downstream conclusion and link required SWCR work before submitting the assessment.");
         var approver = Required(approverId, "selected approver");
         if (string.Equals(approver, actorId, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("The downstream assessment approver must be independent from its submitting engineer.");

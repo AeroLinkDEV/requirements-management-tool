@@ -35,6 +35,21 @@ public sealed class DownstreamChangeAssessmentTests
     }
 
     [Fact]
+    public void Change_required_is_honest_pending_work_and_cannot_be_submitted_without_an_SWCR()
+    {
+        var assessment = Create();
+        assessment.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
+        assessment.RecordChangeRequired("software.engineer", Now.AddMinutes(2));
+
+        Assert.Equal(DownstreamAssessmentOutcome.ChangeRequired, assessment.Outcome);
+        Assert.Throws<DomainException>(() => assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(3)));
+
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "SWCR-00079.00", Now.AddMinutes(4));
+        assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(5));
+        Assert.Equal(DownstreamAssessmentState.InReview, assessment.State);
+    }
+
+    [Fact]
     public void Superseded_assessment_retains_history_but_refuses_new_work()
     {
         var assessment = Create();
