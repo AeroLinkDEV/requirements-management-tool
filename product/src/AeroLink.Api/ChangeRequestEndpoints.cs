@@ -235,6 +235,17 @@ public static class ChangeRequestEndpoints
             }
             else if (selectedIds.Count > 0) source = source.Where(x => selectedIds.Contains(x.revisionId));
             var rows = await source.OrderBy(x => x.BaseNumber).Take(Math.Clamp(Math.Max(limit ?? 12, selectedIds.Count), 1, 50)).ToListAsync(ct);
+            // A proposal must retain the exact revision it already traces to, even when that parent belongs to
+            // an older baseline and has since been superseded. Keep normal search candidates build-scoped and
+            // active, but explicitly hydrate already-selected immutable references from their owning Project.
+            if (selectedIds.Count > 0)
+            {
+                var selectedRows = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x => selectedIds.Contains(x.Id))
+                                          join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == parentLevel) on revision.ArtifactId equals artifact.Id
+                                          select new { revisionId = revision.Id, artifactId = artifact.Id, artifact.BaseNumber, revision.Revision, revision.Statement })
+                    .ToListAsync(ct);
+                rows = rows.Concat(selectedRows).DistinctBy(x => x.revisionId).OrderBy(x => x.BaseNumber).ToList();
+            }
             return Results.Ok(rows.Select(x => new { x.revisionId, x.artifactId, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", level = parentLevel.ToString(), x.Statement }));
         });
 
