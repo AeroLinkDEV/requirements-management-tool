@@ -59,9 +59,17 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var releasedId = db.Releases.Single(x => x.ProjectId == summary.ProjectId && x.IsReleased).Id;
+        // The released build introduced every LLR in its baseline, so it owes evidence for all of them and
+        // carries a labelled sample of five. It used to report 5 of 5 complete because the projection quietly
+        // measured the first five LLRs by number for this Program alone — a gate that looked satisfied while
+        // 695 introduced requirements owed evidence nobody had recorded.
         var released = await client.GetFromJsonAsync<JsonElement>($"/api/code-traceability?projectId={summary.ProjectId}&releaseId={releasedId}");
         Assert.True(released.GetProperty("build").GetProperty("readOnly").GetBoolean());
-        Assert.True(released.GetProperty("summary").GetProperty("gateComplete").GetBoolean());
+        Assert.True(released.GetProperty("demonstrationScope").GetBoolean());
+        var releasedSummary = released.GetProperty("summary");
+        Assert.Equal(700, releasedSummary.GetProperty("required").GetInt32());
+        Assert.Equal(5, releasedSummary.GetProperty("mapped").GetInt32());
+        Assert.False(releasedSummary.GetProperty("gateComplete").GetBoolean());
 
         // Remove one historical mapping inside this private database copy so the request cannot be rejected merely
         // by the unique index. The endpoint itself must enforce released-build immutability.

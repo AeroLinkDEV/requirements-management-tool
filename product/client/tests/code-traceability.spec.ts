@@ -48,14 +48,17 @@ test('Code shows the released build as evaluated, complete, and historical', asy
 
   await expect(page.getByText('Historical · read-only', { exact: true })).toBeVisible()
   await expect(page.getByText('Demonstration data', { exact: true })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '5 of 5 exact LLR revisions mapped' })).toBeVisible()
-  await expect(page.locator('.codeGate')).toContainText('100%')
-  await expect(page.locator('.codeRecords article')).toHaveCount(5)
+  // The released build introduced every LLR in its baseline, so it owes evidence for all of them and carries
+  // a labelled sample of five. It read '5 of 5, 100%' while 695 introduced requirements owed evidence nobody
+  // had recorded, because the projection measured the first five LLRs by number for this Program alone.
+  await expect(page.getByRole('heading', { name: '5 of 700 exact LLR revisions mapped' })).toBeVisible()
+  await expect(page.locator('.codeGate')).toContainText('0%')
+  await expect(page.locator('.codeRecords article')).toHaveCount(700)
   await expect(page.getByRole('button', { name: '+ Record code mapping' })).toHaveCount(0)
 
   await page.reload()
   await expect(page.getByText('Historical · read-only', { exact: true })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '5 of 5 exact LLR revisions mapped' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '5 of 700 exact LLR revisions mapped' })).toBeVisible()
 })
 
 test('Digital Thread shows one exact SYSR-to-build lifecycle path while retaining traversal', async ({ page }) => {

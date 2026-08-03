@@ -59,10 +59,16 @@ The released build is `FMS-1.5.0-RELEASE`. It references the frozen and material
 
 The baseline records a SYSRD, HLR SWRD, LLR SWRD, System Test Procedures, HLR Test Procedures, and LLR Test Procedures. Each record identifies its exact release, baseline, revision, artifact count, generation time, and content hash.
 
-The Code center uses a deliberately small demonstration contract rather than inventing hundreds of GitLab MRs.
-Five exact LLR revisions are required in each build scope. Build 1.5 has five historical mappings; Build 1.6
-starts with four mappings and one visible release-gate gap. Every seeded mapping is labelled demonstration data,
-and GitLab is identified as the source of truth for code and merge content.
+The Code center seeds a deliberately small sample rather than inventing hundreds of GitLab MRs, but the sample
+no longer decides the gate. Every build owes implementation evidence for exactly the LLR revisions it
+introduced or modified. Build 1.5 is the originating build, so it introduced all 700 LLR revisions in its
+baseline and owes evidence for every one of them; five labelled demonstration mappings stand against that
+total. Build 1.6 owes evidence for the LLR revisions its own change requests alter, once its baseline is
+materialized.
+
+A released build carrying almost no code evidence is what adopting AeroLink mid-life actually looks like: the
+code for 1.5 was written before anything recorded the link. Every seeded mapping is labelled demonstration
+data, and GitLab is identified as the source of truth for code and merge content.
 
 ## Active FMS 1.6 development
 

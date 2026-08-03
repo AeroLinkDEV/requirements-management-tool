@@ -137,9 +137,13 @@ are locked, then restart through `product/scripts/Start-AeroLink.ps1` so readine
 - GitLab is authoritative for source, MRs, review, and commit content. AeroLink records immutable pointers from
   exact approved LLR revisions to GitLab MRs and merge SHAs, or a justified `No code change required` decision.
 - Build 1.5 code evidence is historical/read-only; Build 1.6 is active. The small FMS mapping set is explicitly
-  labelled demonstration data and does not pretend that every seeded LLR has a real GitLab MR.
-- The Code center and release-readiness service share the exact required-LLR projection. Every required mapping
-  participates in the signed review manifest; a real build with no changed LLRs passes the gate at 0/0.
+  labelled demonstration data and does not pretend that every seeded LLR has a real GitLab MR — Build 1.5
+  introduced 700 LLR revisions and carries five sample mappings, so its code gate reads 5 of 700 rather than
+  complete.
+- The Code center and release-readiness service share both the required-LLR projection and the campaign
+  baseline it is computed from. Every required mapping participates in the signed review manifest; a build with
+  no changed LLRs passes the gate at 0/0, and a build with no materialized baseline reports the gate as not
+  evaluated in both places.
 - The Software Builds lineage ends with **Plan next build**, a non-record placeholder. It creates no future
   build identity or version.
 - Digital Thread presents SYSR → HLR → LLR → procedure → execution/result → evidence → build on one screen and
