@@ -57,6 +57,7 @@ type Requirement = {
   verificationMethod: string;
   state: string;
   sourceScrId: string;
+  sourceScr: string;
   createdAt: string;
   richText: string;
   attributesJson: string;
@@ -386,6 +387,7 @@ export default function RequirementsWorkspace({
         verificationMethod: latest.verificationMethod,
         state: latest.state,
         sourceScrId: latest.sourceScrId,
+        sourceScr: latest.sourceScr,
         createdAt: latest.createdAt,
         richText: latest.statement,
         attributesJson: latest.attributesJson,
@@ -1212,8 +1214,12 @@ export default function RequirementsWorkspace({
                   <div>
                     <dt>Source authority</dt>
                     <dd>
+                      {/* Named after the record it opens, not after the page it is on. HLR and LLR changes
+                          only ever come from an SWCR, so a fixed "Open SCR" was wrong every time this
+                          appeared on a software requirement. The controlled identifier already says which
+                          kind of change request it is, so the label follows it rather than the workspace. */}
                       <button onClick={() => onOpenScr(selected.sourceScrId)}>
-                        Open SCR →
+                        Open {selected.sourceScr?.startsWith("SWCR") ? "SWCR" : "SCR"} →
                       </button>
                     </dd>
                   </div>
