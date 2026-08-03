@@ -61,7 +61,7 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 - reusable, revision-controlled test procedures with many-to-many links to exact requirement revisions
 - externally executed Pass, Fail, and Blocked results with configuration, human determination, and evidence references
 - immutable retest chains and release/build-specific coverage and verified-status dashboards
-- governed FMS 1.6 release campaign with nine computed readiness gates, consuming-engineer/release impact dispositions, build selection, and ordered release approval; detailed planning/baseline UI is currently dormant
+- governed FMS 1.6 release campaign with thirteen computed readiness gates, consuming-engineer/release impact dispositions, build selection, and ordered release approval; detailed planning/baseline UI is currently dormant
 - checksum-protected evidence upload, download, and exact test-execution linkage with cross-project isolation
 - live 1.5-to-1.6 comparison covering effective and proposed requirement changes
 - deterministic, downloadable SYSRD, HLR SWRD, LLR SWRD, and three test-procedure documents in DOCX and PDF

@@ -33,21 +33,25 @@ The campaign is deliberately incomplete at seed time. Managers and engineers can
 
 ## Computed Readiness Gates
 
-The campaign calculates rather than manually declares nine gates:
+The campaign calculates rather than manually declares thirteen gates:
 
 | Gate | Completion evidence |
 | --- | --- |
 | Change control integrated | Selected approved change requests are represented in the release baseline |
 | Impact disposition | Every identified requirement, traceability, verification, and document impact is Addressed or explicitly Not Applicable with rationale |
 | Baseline frozen | The candidate baseline has been materialized and frozen with exact contents and hashes |
+| Verification impact decided | Every new, modified, or orphaned requirement has an approved procedure decision or an accepted no-test rationale |
+| Test change requests approved | Every controlled System, HLR, and LLR Test Change Request for the build has completed test-lead approval |
 | Derived trace completeness | Required system-to-HLR and HLR-to-LLR revision-aware traces exist |
 | Requirement coverage | Every effective requirement has at least one applicable test-procedure revision |
+| Code traceability | Every required exact LLR revision has immutable GitLab merge evidence or an attributable no-code decision |
 | Verification passed | The latest applicable execution for every required procedure is Pass for the selected build |
 | Evidence uploaded | Verification executions have checksum-protected uploaded evidence, not only free-text references |
+| Problem-report blockers resolved | Every release-blocking Problem Report is resolved, formally dispositioned, or covered by an attributable waiver |
 | Controlled outputs | SYSRD, HLR SWRD, LLR SWRD, and all three test-procedure document sets exist for the exact baseline |
 | Release approval | Every ordered release approver has approved the frozen review snapshot |
 
-Readiness percentage is the average completion percentage across the nine gates, so partial disposition and verification progress is visible without declaring a gate complete. Each incomplete gate reports a concrete blocker and supporting counts.
+Readiness percentage is the average completion percentage across the thirteen gates, so partial disposition and verification progress is visible without declaring a gate complete. Each incomplete gate reports a concrete blocker and supporting counts.
 
 ## Controlled Outputs
 

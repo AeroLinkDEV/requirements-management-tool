@@ -115,6 +115,10 @@ Focused evidence from the final increments includes:
 - Build 1.5/1.6 navigation, direct-link, refresh, showcase and verification-chooser journeys passed on #267;
   both full CI browser shards then passed.
 - Client lint, type-check and production build passed for every affected client increment.
+- PR #287 passed the complete GitHub Product Quality Gate, including PostgreSQL bootstrap/migrations, the
+  production-build journeys, both browser shards, and the aggregate anti-false-pass report. Exact merge
+  `da29de50` then passed a Release build with zero warnings/errors, three focused API tests, three focused
+  infrastructure tests, client lint/build, and four focused Code/Digital Thread/Decision Room browser journeys.
 
 ## Runtime and data
 
