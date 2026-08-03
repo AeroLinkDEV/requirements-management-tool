@@ -112,6 +112,144 @@ public static class VerificationEndpoints
             return Results.Ok(new { baselineId, page, pageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)pageSize), items });
         });
 
+        // A compact, exact end-to-end thread for the selected baseline. The general traceability endpoint above
+        // remains the exploration surface; this projection answers the separate assurance question "show me one
+        // complete controlled path" without implying that a nearby requirement, procedure, or build is related.
+        app.MapGet("/api/traceability/path", async (Guid projectId, Guid baselineId, Guid? requirementRevisionId,
+            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var baseline = await db.CandidateBaselines.AsNoTracking()
+                .Where(x => x.Id == baselineId && x.ProjectId == projectId)
+                .Select(x => new { x.Id, x.ReleaseId, x.DisplayNumber, x.Name })
+                .SingleOrDefaultAsync(ct);
+            if (baseline is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+
+            var nodes = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
+                               join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
+                               join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id
+                               select new
+                               {
+                                   id = artifact.Id,
+                                   revisionId = revision.Id,
+                                   displayNumber = artifact.BaseNumber + "." + revision.Revision.ToString("D2"),
+                                   level = artifact.Level.ToString(),
+                                   revision.Statement,
+                               }).ToListAsync(ct);
+            if (nodes.Count == 0) return Results.Ok(new { baselineId, nodes = Array.Empty<object>() });
+
+            var byRevision = nodes.ToDictionary(x => x.revisionId);
+            var revisionIds = byRevision.Keys.ToList();
+            var links = await db.RequirementTraces.AsNoTracking()
+                .Where(x => revisionIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId))
+                .ToListAsync(ct);
+            var coveredIds = await db.TestCoverage.AsNoTracking()
+                .Where(x => revisionIds.Contains(x.RequirementRevisionId) && !x.IsSuspect)
+                .Select(x => x.RequirementRevisionId).Distinct().ToListAsync(ct);
+            var covered = coveredIds.ToHashSet();
+
+            var focus = requirementRevisionId is Guid requested && byRevision.TryGetValue(requested, out var selected)
+                ? selected
+                : nodes.OrderBy(x => x.level == "System" ? 0 : x.level == "HighLevel" ? 1 : 2)
+                    .ThenBy(x => x.displayNumber).First();
+
+            // Source is the child and Target is its parent. Walk both directions from the reader's focus so the
+            // path always includes it. Prefer a covered descendant, then use the stable controlled number.
+            var ancestors = new List<Guid>();
+            var cursor = focus.revisionId;
+            var seen = new HashSet<Guid> { cursor };
+            while (links.Where(x => x.SourceRevisionId == cursor)
+                       .OrderBy(x => byRevision[x.TargetRevisionId].displayNumber)
+                       .Select(x => (Guid?)x.TargetRevisionId).FirstOrDefault() is Guid parent
+                   && seen.Add(parent))
+            {
+                ancestors.Add(parent);
+                cursor = parent;
+            }
+            ancestors.Reverse();
+
+            var descendants = new List<Guid>();
+            cursor = focus.revisionId;
+            while (links.Where(x => x.TargetRevisionId == cursor)
+                       .Select(x => x.SourceRevisionId)
+                       .OrderByDescending(x => covered.Contains(x))
+                       .ThenBy(x => byRevision[x].displayNumber)
+                       .Select(x => (Guid?)x).FirstOrDefault() is Guid child
+                   && seen.Add(child))
+            {
+                descendants.Add(child);
+                cursor = child;
+            }
+            var pathIds = ancestors.Append(focus.revisionId).Concat(descendants).ToList();
+            var verificationRequirementId = pathIds.AsEnumerable().Reverse().FirstOrDefault(covered.Contains);
+
+            var procedure = verificationRequirementId == Guid.Empty
+                ? null
+                : await (from coverage in db.TestCoverage.AsNoTracking().Where(x => x.RequirementRevisionId == verificationRequirementId && !x.IsSuspect)
+                         join revision in db.TestProcedureRevisions.AsNoTracking() on coverage.ProcedureRevisionId equals revision.Id
+                         join item in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals item.Id
+                         orderby item.BaseNumber
+                         select new
+                         {
+                             id = item.Id,
+                             revisionId = revision.Id,
+                             displayNumber = item.BaseNumber + "." + revision.Revision.ToString("D2"),
+                             item.Title,
+                             level = item.Level.ToString(),
+                             state = revision.State.ToString(),
+                         }).FirstOrDefaultAsync(ct);
+
+            object? execution = null;
+            if (procedure is not null)
+            {
+                var runQuery = db.TestExecutions.AsNoTracking()
+                    .Where(x => x.ProcedureRevisionId == procedure.revisionId && x.ReleaseId == baseline.ReleaseId);
+                var run = db.Database.IsSqlite()
+                    ? (await runQuery.ToListAsync(ct)).OrderByDescending(x => x.ExecutedAt).ThenByDescending(x => x.RecordedAt).FirstOrDefault()
+                    : await runQuery.OrderByDescending(x => x.ExecutedAt).ThenByDescending(x => x.RecordedAt).FirstOrDefaultAsync(ct);
+                if (run is not null)
+                {
+                    var files = await (from link in db.TestExecutionEvidence.AsNoTracking().Where(x => x.TestExecutionId == run.Id)
+                                       join item in db.EvidenceRecords.AsNoTracking() on link.EvidenceId equals item.Id
+                                       select new { item.Id, item.OriginalFileName, item.Sha256, item.Size, item.UploadedAt }).ToListAsync(ct);
+                    execution = new
+                    {
+                        run.Id,
+                        outcome = run.Outcome.ToString(),
+                        run.ExecutedBy,
+                        run.ExecutedAt,
+                        run.Determination,
+                        run.EvidenceReference,
+                        evidence = files,
+                    };
+                }
+            }
+
+            var buildQuery = db.SoftwareBuilds.AsNoTracking().Where(x => x.BaselineId == baselineId);
+            var buildRecord = db.Database.IsSqlite()
+                ? (await buildQuery.ToListAsync(ct)).OrderByDescending(x => x.RecordedAt).FirstOrDefault()
+                : await buildQuery.OrderByDescending(x => x.RecordedAt).FirstOrDefaultAsync(ct);
+            var build = buildRecord is null ? null : new
+            {
+                buildRecord.Id,
+                buildRecord.BuildNumber,
+                state = buildRecord.State.ToString(),
+                buildRecord.RecordedAt,
+                buildRecord.ReleasedAt,
+            };
+
+            return Results.Ok(new
+            {
+                baselineId,
+                baseline = new { baseline.DisplayNumber, baseline.Name },
+                focusRevisionId = focus.revisionId,
+                nodes = pathIds.Select(id => byRevision[id]),
+                procedure,
+                execution,
+                build,
+            });
+        });
+
         // The workspace rendered every procedure it was given — 440 cards on the software side — with no
         // search, filter or page. This returns a bounded page and the total, and every predicate below runs
         // in the database, because a page of twenty-five that costs a full table read is not paging.

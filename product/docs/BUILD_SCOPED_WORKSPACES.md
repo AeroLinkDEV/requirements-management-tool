@@ -40,6 +40,7 @@ The build boundary follows relationships that already exist:
 | Prospective upward allocations | target build plus exact child and proposed parent revisions |
 | Test executions | `TestExecution.ReleaseId`; an optional immutable `SoftwareBuildId` adds exact configuration provenance |
 | Problem reports | explicit `ProblemReportLink` to the owning `SoftwareRelease`; failure-origin reports derive it from their execution build |
+| Code traceability | `CodeTraceabilityRecord.ReleaseId` plus exact LLR artifact and immutable revision IDs; GitLab remains the code authority |
 | Requirement history | revision plus source SCR and effective baseline; historical rows retain their origin |
 
 Project configuration such as schemas, document structure, directory membership, integrations, and review
@@ -112,3 +113,8 @@ from failed verification derive that same explicit link from the execution's rel
 
 Records that are genuinely project governance, rather than build content, are intentionally not duplicated per
 release. This increment never infers build ownership from affected-configuration free text.
+
+The Software Builds lineup may show **Plan next build** after the active release. It is a non-record entry point:
+it has no `SoftwareRelease`, route, baseline, or version and cannot be opened. A future planning workflow must
+create the next release explicitly and validate its predecessor; the placeholder never fabricates a future
+build record.

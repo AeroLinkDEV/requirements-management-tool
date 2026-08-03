@@ -1,0 +1,62 @@
+import { expect, test } from '@playwright/test'
+import { login, openNavigationGroup } from './auth'
+
+test('Code maps exact active LLR revisions while released build evidence stays historical', async ({ page }) => {
+  test.setTimeout(90_000)
+  await login(page)
+
+  const nav = page.getByRole('navigation', { name: 'Primary navigation' })
+  await nav.getByRole('link', { name: 'Code traceability' }).click()
+  await expect(page.getByRole('heading', { name: 'Code', level: 1 })).toBeVisible()
+  await expect(page).toHaveURL(/\/code$/)
+  await expect(page.getByText('GitLab is the source of truth', { exact: true })).toBeVisible()
+  await expect(page.getByText('Demonstration data', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '4 of 5 exact LLR revisions mapped' })).toBeVisible()
+  await expect(page.getByText('Active development', { exact: true })).toBeVisible()
+  await expect(page.locator('.codeRecords article')).toHaveCount(5)
+  await expect(page.locator('.codeRecords article.missing')).toHaveCount(1)
+
+  const activeUrl = page.url()
+  await page.reload()
+  await expect(page).toHaveURL(activeUrl)
+  await expect(page.getByRole('heading', { name: '4 of 5 exact LLR revisions mapped' })).toBeVisible()
+
+  await page.getByRole('button', { name: '+ Record code mapping' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Record code mapping' })
+  await dialog.getByRole('radio', { name: 'No code change required' }).check()
+  await dialog.getByLabel('No-code rationale').fill('The approved LLR clarifies already implemented behavior and requires no executable change.')
+  await dialog.getByRole('button', { name: 'Record immutable mapping' }).click()
+  await expect(page.getByRole('heading', { name: '5 of 5 exact LLR revisions mapped' })).toBeVisible()
+  await expect(page.locator('.codeGate')).toContainText('100%')
+
+  await page.getByRole('button', { name: 'Back to Software Builds' }).click()
+  await page.getByRole('button', { name: 'Open build 1.5' }).click()
+  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Code traceability' }).click()
+  await expect(page.getByText('Historical · read-only', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '5 of 5 exact LLR revisions mapped' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '+ Record code mapping' })).toHaveCount(0)
+  await page.reload()
+  await expect(page.getByText('Historical · read-only', { exact: true })).toBeVisible()
+})
+
+test('Digital Thread shows one exact SYSR-to-build lifecycle path while retaining traversal', async ({ page }) => {
+  await login(page)
+  await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
+  await page.getByRole('link', { name: 'Digital Thread' }).click()
+
+  const path = page.getByRole('list', { name: /Complete digital thread for/ })
+  await expect(path).toBeVisible()
+  for (const stage of ['SYSTEM REQUIREMENT', 'HLR', 'LLR', 'TEST PROCEDURE', 'TEST RESULT', 'TEST EVIDENCE', 'BUILD'])
+    await expect(path.getByText(stage, { exact: true })).toBeVisible()
+  await expect(path.getByText(/^SYSR-/)).toBeVisible()
+  await expect(path.getByText(/^HLR-/)).toBeVisible()
+  await expect(path.getByText(/^LLR-/)).toBeVisible()
+  await expect(path.getByText(/^LLRTP-/)).toBeVisible()
+  await expect(path.getByText('Pass', { exact: true })).toBeVisible()
+  await expect(page.getByText('SYSR → HLR → LLR → procedure → result → evidence → build')).toBeVisible()
+
+  await path.getByRole('button').first().click()
+  await expect(page.getByText('SELECTED CONTROLLED RECORD')).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('list', { name: /Complete digital thread for/ })).toBeVisible()
+})

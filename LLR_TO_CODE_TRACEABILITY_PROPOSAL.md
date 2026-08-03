@@ -1,4 +1,15 @@
-# LLR-to-Code Traceability Proposal
+# LLR-to-Code Traceability MVP and Direction
+
+## Delivery status
+
+The first increment is delivered. AeroLink records one immutable build-scoped mapping for each required exact
+approved LLR revision: a GitLab MR URL/reference plus merge commit SHA and merge time, or a justified
+`No code change required` disposition. Build 1.5 is historical/read-only; Build 1.6 is active. The Code center
+shows the release-gate count and labels seeded FMS examples as demonstration data.
+
+The broader synchronized external-code-change model below remains direction, not claimed behavior. AeroLink
+does not yet call GitLab, synchronize MR state/author/branches/CI, prove commit inclusion in a compiled binary,
+or normalize one MR shared by several LLR revisions.
 
 ## Recommendation
 
@@ -8,28 +19,26 @@ AeroLink should record immutable links between those two authorities; it should 
 
 Use **MR** consistently for a GitLab merge request so **PR** continues to mean Problem Report in AeroLink.
 
-## Minimum viable record
+## Delivered minimum record
 
-Add one external code-change record for each GitLab MR:
+The delivered record stores:
 
-- provider (`GitLab` initially), GitLab project ID, repository URL, and MR IID;
-- MR URL, title, author, source branch, target branch, and current state;
+- GitLab repository path, MR reference, URL, and title;
 - merge commit SHA and merged time once merged;
-- last synchronized time and a hash of the synchronized metadata;
-- links to one or more **exact LLR revision IDs**, with relationship `Implements`, `Modifies`, or `Retires`;
+- one **exact LLR artifact and revision ID**;
 - target AeroLink Project and build.
 
-The MR IID is human-friendly; the repository identity plus merge commit SHA is immutable evidence. Never link
-only to `LLR-000123` because that loses which wording was implemented. One MR may implement several LLR
-revisions, and one LLR revision may require several MRs.
+The MR reference is human-friendly; the repository identity plus merge commit SHA is immutable evidence. Never
+link only to `LLR-000123` because that loses which wording was implemented. Many-to-many MR/LLR mapping remains
+a later normalization if real usage requires it.
 
-## Proposed workflow
+## Delivered manual workflow and later synchronization
 
 1. An SWCR is approved and its LLR revisions are selected into Build 1.6.
 2. A developer creates a GitLab branch and MR. The MR template contains an `AeroLink LLRs` field with controlled
    identifiers such as `LLR-000123.02`.
-3. A read-only GitLab integration receives a webhook or periodic synchronization event, resolves each identifier
-   to the exact approved revision in the target build, and creates or refreshes the external code-change record.
+3. In the delivered MVP, an authorized engineer records the merged GitLab evidence or a justified no-code
+   decision. A later read-only GitLab integration may receive a webhook or periodic synchronization event.
 4. AeroLink rejects unknown, cross-Project, obsolete, or wrong-build LLR revisions. Draft LLRs may be shown as
    unresolved references but do not satisfy traceability.
 5. When GitLab reports the MR merged, AeroLink fixes the merge commit SHA and merged metadata as evidence. Later

@@ -29,7 +29,7 @@ Disposition values:
 | System requirements linked to one or more system tests | First slice | Features ST-001/ST-002 and workflow Sections 6-8 |
 | Capture results and generate system test result/traceability documents | First slice | Features ST-004-ST-006, TR-003/TR-004, DOC-004 |
 | Equivalent software testing for HLRs and LLRs | Delivered | Feature SW-003; each level has isolated procedures, coverage, TCRs and results |
-| PR management as a possible module with lifecycle and broad linkages | Accepted incrementally | Features PR-001/PR-002; the delivered build-scoped center and change/test linkages precede broader lifecycle policy |
+| PR management as a possible module with lifecycle and broad linkages | Delivered MVP | Features PR-001/PR-002 and DEC-087; the agreed lifecycle, fields, filters, corrective actions, test evidence, and independent closure are delivered |
 | Full traceability document | Accepted incrementally | System traceability in Phase 3; complete system/software traceability after Phase 4 |
 | All produced documents as PDF | Corrected/Open | Controlled PDF is the intended output direction; exact document formats and reproducibility definition remain OQ-012 |
 | Multiple programs, 150+ concurrent users, on-premises, username/password, admin portal | Accepted | [PROJECT_VISION.md](PROJECT_VISION.md), [QUALITY_ATTRIBUTES.md](QUALITY_ATTRIBUTES.md), features PF-001-PF-004 |
@@ -65,7 +65,7 @@ Disposition values:
 | Source Intent | Disposition | Authoritative Destination |
 | --- | --- | --- |
 | Reuse most system behavior for HLRs, LLRs, and tests | Delivered | HLR/LLR requirements, controlled procedures, downstream assessments, and verification workflows are build scoped |
-| Do not manage code initially | Excluded now | [SCOPE_AND_BOUNDARIES.md](SCOPE_AND_BOUNDARIES.md) |
+| Do not manage code initially | Boundary preserved | GitLab manages code; AeroLink now stores only exact approved LLR-to-merge traceability pointers under DEC-088 |
 | SWCR and SWRD | Delivered incrementally | SWCR editing/review and controlled HLR/LLR document generation are delivered; later increments may deepen document policy |
 | Unique HLR/LLR identities, derived status, PR links, and tests | Delivered incrementally | Features SW-001/SW-003 and PR-002; exact-revision traces and build isolation are enforced |
 | Repeated system-level material | Consolidated | Disposition is captured in the `System Level.docx` table above |
@@ -74,9 +74,9 @@ Disposition values:
 
 | Source Intent | Disposition | Authoritative Destination |
 | --- | --- | --- |
-| PR module remains in the conversation | Delivered foundation | Features PR-001/PR-002 and DEC-085 |
-| PR contains description, dates, originator, type, severity, and other controlled fields | Later/Open | Full field set will be decided before Phase 5 |
-| PR lifecycle includes new, approval, in-work, closed, and rejected states | Delivered with product terminology | Draft, Open, Investigating, Resolution Proposed, Awaiting Closure Approval and Closed are controlled states; later policy may refine them |
+| PR module remains in the conversation | Delivered MVP | Features PR-001/PR-002 and DEC-085/DEC-087 |
+| PR contains description, dates, originator, type, severity, and other controlled fields | Delivered selectively | Immutable origin/date, rich description and supporting fields, target build, owner, corrective action, root cause, impact decisions, closure date, and evidence are delivered; optional classifications remain later |
+| PR lifecycle includes new, approval, in-work, closed, and rejected states | Delivered with product terminology | Draft, Ready for SCCB, Open, Implementing, Verifying, Awaiting SQA Closure, and Closed are controlled states |
 | PRs link broadly across requirements, tests, changes, and releases | Delivered incrementally | Feature PR-002; SCR/SWCR/TCR selection, corrective actions, and test evidence are implemented |
 | PR-driven impact analysis is crucial | Delivered incrementally | Feature PR-002; requirement change remains downstream of a PR, not an automatic PR creator |
 
@@ -100,7 +100,7 @@ Disposition values:
 | Review independence, quorum, signatures, comments, and separate artifact/baseline approval | Corrected/Open | The author selects an ordered approval sequence and unanimous sequential approval is required; future approvers may be replaced, while a wrong completed approver forces cancellation/restart. Independence and approval ceremony remain OQ-004/OQ-005 |
 | Test procedure, execution, result, configuration, evidence, failure, and retest are distinct | Accepted | Glossary and workflow Sections 6-7 |
 | Interactive traceability and completeness analysis | Accepted | Features TR-003/TR-004 |
-| Full PR schema and lifecycle | Delivered foundation / Later expansion | PR-001/PR-002 deliver the center and causal thread; exact expanded policy remains later work |
+| Full PR schema and lifecycle | Delivered agreed MVP / Later options | PR-001/PR-002 and DEC-087 deliver the chosen fields and lifecycle; unrequested classifications, attachments, containment/preventive action, and configurable policy remain later |
 | Plans/standards, architecture/code/builds, broader verification/CM/QA/certification functions | Mostly excluded now or later | Explicit scope boundaries and future phases prevent accidental first-slice expansion |
 | On-premises modular-monolith technology suggestion | Deferred | No technology or architecture decision is authorized in Phase 0 |
 | AI suggestions under human control | Later | Feature AI-001 and Product Principle 12 |

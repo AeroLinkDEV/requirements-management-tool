@@ -171,11 +171,15 @@ session, authority, assignment, independence, and password confirmation succeed.
 **Suspect Link**: A link whose continuing validity requires reassessment because a linked artifact changed or another defined trigger occurred. Suspect does not automatically mean invalid.
 
 **Problem Report (PR)**: A build-scoped controlled record of an identified product, lifecycle-data, or process
-problem. The delivered foundation retains its controlled number, raised date, title, description, additional
-information, target build, status and relationships. PRs drive change; requirements do not automatically create
-PRs. Any SCR, SWCR or TCR may cite one or more driving PRs. Approved changes appear on the PR as corrective
-actions, and applicable executions/results appear as test evidence. Additional classification and closure-policy
-depth remains incremental product work rather than implied behavior.
+problem. It progresses through Draft, Ready for SCCB, Open, Implementing, Verifying, Awaiting SQA Closure, and
+Closed. Raised-by/date are immutable; owner and target build may change with history. PRs drive change;
+requirements do not automatically create PRs. Any SCR, SWCR or TCR may cite one or more driving PRs. Approved
+changes appear as corrective actions and deliberately selected closure-supporting executions/results appear as
+test evidence.
+
+**Code Traceability Record**: An immutable, build-scoped pointer from one exact approved LLR revision to a
+GitLab merge request and merge commit SHA, or to a justified `No code change required` decision. GitLab remains
+authoritative for code and review content; AeroLink owns the lifecycle relationship and release-gate status.
 
 **Impact Analysis**: Identification and review of artifacts, links, tests, results, documents, and releases potentially affected by a proposed change or PR.
 

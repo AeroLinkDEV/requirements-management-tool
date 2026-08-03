@@ -35,6 +35,11 @@ public sealed class FmsShowcaseSeederTests
             var active = db.SystemChangeRequests.Where(x => x.TargetReleaseId == first.ActiveReleaseId);
             Assert.Equal(8, await active.CountAsync()); Assert.Equal(2, await active.CountAsync(x => x.State == ScrState.SelectedForBaseline));
             Assert.Equal(1, await active.CountAsync(x => x.State == ScrState.Approved)); Assert.Equal(1, await active.CountAsync(x => x.State == ScrState.InReview)); Assert.Equal(3, await active.CountAsync(x => x.State == ScrState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ScrState.Deferred));
+            var codeRecords = await db.CodeTraceabilityRecords.AsNoTracking().ToListAsync();
+            Assert.Equal(9, codeRecords.Count);
+            Assert.Equal(5, codeRecords.Count(x => x.ReleaseId != first.ActiveReleaseId));
+            Assert.Equal(4, codeRecords.Count(x => x.ReleaseId == first.ActiveReleaseId));
+            Assert.All(codeRecords, x => Assert.True(x.IsDemonstration));
         }
         finally { File.Delete(path); }
     }

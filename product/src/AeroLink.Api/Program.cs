@@ -225,6 +225,7 @@ app.MapWorkspaceEndpoints();
 app.MapChangeRequestEndpoints();
 app.MapDownstreamAssessmentEndpoints();
 app.MapRequirementsEndpoints();
+app.MapCodeTraceabilityEndpoints();
 app.MapBaselineEndpoints();
 app.MapVerificationEndpoints();
 app.MapAeroLinkBuildTestSetEndpoints();

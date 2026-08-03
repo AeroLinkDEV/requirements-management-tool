@@ -60,7 +60,9 @@ demonstrations use the `FMSLIVE` dataset described in
 | Document | Purpose |
 | --- | --- |
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
-| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) | **Current restart point.** Draft SWCR controls, HLR/LLR scope, searchable references, actionable assessments, Problem Reports integration, navigation, validation, and safe continuation |
+| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) | **Current restart point.** Draft SWCR controls, HLR/LLR scope, downstream assessments, agreed Problem Report workflow, Code/GitLab traceability, complete Digital Thread paths, validation, and safe continuation |
+| [Technical overview](docs/AEROLINK_TECHNICAL_OVERVIEW.md) | Two-page-oriented explanation of architecture, PostgreSQL persistence, controlled versioning, traceability, security, backup, and quality gates |
+| [August 2 afternoon observation reconciliation](docs/AUGUST_2_AFTERNOON_OBSERVATION_RECONCILIATION.md) | Line-by-line map from the observation document and follow-up decisions to delivered issues, behavior, and regression evidence |
 | [1 August handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) | Historical delivery record for build-scoped verification roles and live engineering workflow qualification |
 | [31 July handoff](CURRENT_PRODUCT_HANDOFF_2026-07-31.md) | Historical delivery record for the verification rebuild and downstream-assessment increment |
 | [29 July handoff](CURRENT_PRODUCT_HANDOFF_2026-07-29.md) | Historical delivery record for build-scoped navigation and the product-surface simplification |

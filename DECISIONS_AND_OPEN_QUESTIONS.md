@@ -1147,20 +1147,54 @@ Future entries use:
   revisions require a passing build execution with evidence before release. Released builds remain read-only.
   Broader PR classification, lifecycle, and closure policy will be added only as product decisions settle.
 
-### DEC-086 - Primary Navigation Follows Engineering Work and Verification Evidence
+### DEC-086 - Primary Navigation Follows Requirements Work and Verification Evidence
 
 - **Date:** 2026-08-02
 - **Status:** Accepted
-- **Decision:** The primary sidebar groups requirement change, controlled documents, and the Digital Thread
-  under **Engineering**. Coverage, results, and verification documents sit under **Verification**. Problem
-  Reports remain a standalone operational center. Existing discipline chooser routes remain compatible entry
-  points even though they are not duplicate sidebar destinations.
+- **Decision:** The primary sidebar groups change requests, requirements, requirements documents, and the
+  Digital Thread under **Requirements**. Coverage, results, and verification documents sit under
+  **Verification**. **Code** is a standalone destination between Verification and the standalone Problem
+  Reports center. Existing discipline chooser routes remain compatible entry points even though they are not
+  duplicate sidebar destinations.
 - **Rationale:** Engineers follow a change and its trace consequences, while verification users work from
   coverage and evidence. A standalone PR center preserves the problem-to-correction thread without treating it
   as either a requirement level or a verification subtype.
 - **Consequences:** Navigation labels describe user work rather than internal modules. Direct links and browser
   refreshes remain supported, and historical URLs continue to resolve while the visible information
   architecture stays compact.
+
+### DEC-087 - Problem Reports Use a Progressive, Independently Closed Lifecycle
+
+- **Date:** 2026-08-02
+- **Status:** Accepted
+- **Decision:** A PR progresses through Draft, Ready for SCCB, Open, Implementing, Verifying, Awaiting SQA
+  Closure, and Closed. Title and rich Problem Description are the only Draft requirements. Raised-by and date
+  are automatic and immutable; owner and one target build are auditable but reassignable. Additional
+  Information, Proposed Corrective Action, Root Cause, combined System/Aircraft Impact, and Unknown/No/Yes
+  impact decisions for requirements, code, tests, documents, and safety are disclosed progressively. History
+  is an internal tab. SCCB opening is a light approver action and SQA closure is independent.
+- **Rationale:** Draft reporting must be fast enough to capture a real observation while implementation and
+  closure need enough structure and role separation to be trusted. Containment, preventive action, saved
+  filter views, attachments, and configurable classifications would add process the current users have not
+  requested.
+- **Consequences:** Approved linked CRs appear automatically as read-only corrective-action cards. Only test
+  results deliberately selected to support closure appear as PR test evidence. Build 1.5 remains readable and
+  immutable; Build 1.6 remains active.
+
+### DEC-088 - GitLab Owns Code and AeroLink Owns Exact LLR-to-Merge Evidence
+
+- **Date:** 2026-08-02
+- **Status:** Accepted
+- **Decision:** GitLab is the source of truth for source, branches, merge requests, review, and commit content.
+  AeroLink records an immutable pointer from an exact approved LLR revision in one build to the GitLab MR and
+  merge commit SHA, or an attributable `No code change required` disposition with rationale. Code is not stored
+  or reviewed in AeroLink. A compact demonstration set is conspicuously labelled as demonstration data.
+- **Rationale:** Reviewers need to answer which merged code implements the exact LLR wording in this build
+  without creating a second code authority or confusing GitLab merge requests with AeroLink Problem Reports.
+- **Consequences:** Code traceability is a release gate for changed LLR scope. Build 1.5 exposes historical
+  mappings read-only; Build 1.6 permits active mappings. The Software Builds lineage includes a non-record
+  **Plan next build** placeholder, but no future build identity is created until an authorized user performs a
+  later governed planning workflow.
 
 ## Working Assumptions
 
@@ -1211,8 +1245,10 @@ choices are created as focused issues only when their trigger and acceptance bou
 ## Open Questions for Later Phases
 
 - What program-defined feedback workflow applies to derived HLRs and LLRs?
-- Which architecture, source, Git, build, and release references provide useful traceability without expanding into code management?
-- What complete PR classification, lifecycle, field set, and closure rules are required?
+- Which additional GitLab metadata or automated synchronization is useful after the exact LLR-to-merge MVP is
+  proven, without expanding AeroLink into code management?
+- Which optional PR classifications, attachments, or configurable closure rules are useful after the agreed
+  lifecycle is exercised on real work?
 - Which external identity, test, document, or issue systems need integration?
 - Whether standards-plan management or compliance-objective mapping should ever enter product scope.
 - Whether local AI assistance provides sufficient value after the controlled domain model is proven.

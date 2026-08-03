@@ -44,3 +44,39 @@ html .traceVerification > section.suspect em { color: #765313; font-weight: 650;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
+
+.completeThreadPath {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 38px 16px;
+}
+
+.completeThreadStep { display: flex; align-items: center; min-width: 0; }
+.completeThreadStep > .threadConnector { width: 20px; flex: 0 0 20px; }
+.completeThreadStep article,
+.completeThreadStep button {
+  width: 112px;
+  min-width: 112px;
+  height: 126px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  overflow: hidden;
+  border: 1px solid #d6e1e8;
+  border-radius: 12px;
+  background: white;
+  padding: 10px;
+  color: var(--ink-900);
+  box-shadow: 0 7px 19px rgba(16,36,57,.08);
+  text-align: left;
+}
+.completeThreadStep button { cursor: pointer; }
+.completeThreadStep button:hover { border-color: #79b9b0; }
+.completeThreadStep button.selected { border-color: #49ad9f; box-shadow: 0 0 0 3px rgba(58,167,151,.12),0 10px 23px rgba(16,70,68,.12); }
+.completeThreadStep article.missing { border-style: dashed; background: #fffaf0; }
+.completeThreadStep small { min-height: 25px; color: #637180; font-size: 12px; font-weight: 800; letter-spacing: .05em; }
+.completeThreadStep b { width: 100%; margin: 7px 0 5px; overflow: hidden; color: #17324d; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.completeThreadStep span { display: -webkit-box; overflow: hidden; color: #657284; font-size: 12px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 4; word-break: break-word; }

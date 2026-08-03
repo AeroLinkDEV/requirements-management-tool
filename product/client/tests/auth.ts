@@ -33,7 +33,10 @@ export async function showcaseSeed(request:APIRequestContext){
   const prepared=process.env.AEROLINK_SHOWCASE_SEED
   if(prepared){cachedShowcase=JSON.parse(prepared) as ShowcaseSeed;return cachedShowcase}
   await apiLogin(request)
-  const response=await request.post(`${apiBase}/api/showcase/seed`,{timeout:120_000})
+  // A fresh production database materializes the complete 1,250-requirement showcase plus controlled
+  // procedures, executions, evidence and upgrade records. Slower Windows runners can legitimately take
+  // longer than two minutes; the surrounding production job still has its own bounded timeout.
+  const response=await request.post(`${apiBase}/api/showcase/seed`,{timeout:240_000})
   const body=await response.text()
   expect(response.ok(),body).toBeTruthy()
   cachedShowcase=JSON.parse(body) as ShowcaseSeed
@@ -57,8 +60,9 @@ export async function selectProgram(page:Page,label:string){
 }
 export async function openNavigationGroup(page:Page,name:string){
   const currentName:{[key:string]:string}={
-    'SYSTEMS ENGINEERING':'ENGINEERING',
-    'SOFTWARE ENGINEERING':'ENGINEERING',
+    'ENGINEERING':'REQUIREMENTS',
+    'SYSTEMS ENGINEERING':'REQUIREMENTS',
+    'SOFTWARE ENGINEERING':'REQUIREMENTS',
     'VERIFICATION':'VERIFICATION',
     'ASSURANCE':'VERIFICATION',
     'RELEASE & CONFIGURATION':'RELEASE',
@@ -67,7 +71,7 @@ export async function openNavigationGroup(page:Page,name:string){
   if(await group.getAttribute('open')===null)await group.locator('summary').click()
   const engineeringScope=name==='SOFTWARE ENGINEERING'?'Software':name==='SYSTEMS ENGINEERING'?'System':''
   if(engineeringScope){
-    const scopeButton=group.getByRole('group',{name:'Engineering scope'}).getByRole('button',{name:engineeringScope})
+    const scopeButton=group.getByRole('group',{name:'Requirements scope'}).getByRole('button',{name:engineeringScope})
     if(await scopeButton.getAttribute('aria-pressed')!=='true')await scopeButton.click()
   }
 }

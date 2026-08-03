@@ -1,25 +1,30 @@
 import{expect,test}from'@playwright/test'
 import{apiBase,apiLogin,login,showcaseSeed}from'./auth'
 
-test('primary navigation separates engineering, verification and problem reporting without breaking historical routes',async({page,request})=>{
+test('primary navigation separates requirements, verification, code and problem reporting without breaking historical routes',async({page,request})=>{
   test.setTimeout(90_000)
   const showcase=await showcaseSeed(request)
   await login(page)
   const nav=page.getByRole('navigation',{name:'Primary navigation'})
-  const engineering=nav.locator('.navGroup').filter({has:page.locator('summary').filter({hasText:'ENGINEERING'})})
+  const engineering=nav.locator('.navGroup').filter({has:page.locator('summary').filter({hasText:'REQUIREMENTS'})})
   const verification=nav.locator('.navGroup').filter({has:page.locator('summary').filter({hasText:'VERIFICATION'})})
   await expect(engineering).toBeVisible()
   await expect(verification).toBeVisible()
   await expect(nav.locator('summary').filter({hasText:'ASSURANCE'})).toHaveCount(0)
   await engineering.locator('summary').click()
+  await expect(engineering.getByRole('group',{name:'Requirements scope'})).toBeVisible()
   await verification.locator('summary').click()
   await expect(verification.getByRole('group',{name:'Verification scope'})).toBeVisible()
   await expect(nav.getByRole('link',{name:'System Verification',exact:true})).toHaveCount(0)
   await expect(engineering.getByRole('link',{name:'Digital Thread'})).toBeVisible()
   await expect(verification.getByRole('link',{name:'Digital Thread'})).toHaveCount(0)
   const reports=nav.locator('.navStandalone').getByRole('link',{name:'Problem Reports'})
+  const code=nav.locator('.navStandalone').getByRole('link',{name:'Code traceability'})
+  await expect(code).toBeVisible()
   await expect(reports).toBeVisible()
   await expect(nav.locator('.navStandalone details')).toHaveCount(0)
+  const standaloneNames=await nav.locator('.navStandalone a').evaluateAll(items=>items.map(item=>item.getAttribute('aria-label')))
+  expect(standaloneNames).toEqual(['Code traceability','Problem Reports'])
 
   await expect(verification.getByRole('link',{name:'System Testing Coverage'})).toBeVisible()
   await expect(verification.getByRole('link',{name:'System Test Results'})).toBeVisible()
