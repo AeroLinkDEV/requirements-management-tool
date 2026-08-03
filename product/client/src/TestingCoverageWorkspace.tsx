@@ -892,7 +892,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               </ol>
             )}
             <div className="procedureRecordActions">
-              {procedureView === 'record' && <button type="button" className="quiet" onClick={() => void openProcedure(history.id, undefined, 'history')}>History</button>}
+              {procedureView === 'record' && <button type="button" className="quiet" onClick={() => void openProcedure(history.id, selectedProcedureRevision.id, 'history')}>History</button>}
               <button type="button" onClick={closeHistory}>Close</button>
             </div>
           </div>
