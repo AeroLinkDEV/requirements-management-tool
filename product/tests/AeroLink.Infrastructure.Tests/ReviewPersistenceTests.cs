@@ -21,7 +21,7 @@ public sealed class ReviewPersistenceTests
                 var program = new ProgramRecord("Review Program", "REV");
                 var project = new ProjectRecord(program.Id, "Software", "Review Software");
                 var release = new SoftwareRelease(project.Id, "1.0", false);
-                var scr = new SystemChangeRequest("SCR-00001", 0, project.Id, release.Id, "Review ordering", "P", "A", "S", "author", DateTimeOffset.UtcNow);
+                var scr = new SystemChangeRequest("SWCR-00001", 0, project.Id, release.Id, "Review ordering", "P", "A", "S", "author", DateTimeOffset.UtcNow, ChangeRequestType.Software);
                 scr.AddRequirementChange("author", "SWR-00000001", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "Statement", "Rationale", "Test", DateTimeOffset.UtcNow);
                 scr.SubmitForReview("author", [new("r1", "One"), new("r2", "Two"), new("r3", "Three")], DateTimeOffset.UtcNow);
                 setup.AddRange(program, project, release, scr);

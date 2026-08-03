@@ -67,6 +67,84 @@ public sealed class DownstreamImpactServiceTests
         finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
     }
 
+    [Fact]
+    public async Task Legacy_mismatched_change_request_does_not_raise_more_invalid_assessments()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-downstream-legacy-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            Guid requestId;
+            await using (var seed = new AeroLinkDbContext(options))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                var program = new ProgramRecord("Legacy Program", "DSL");
+                var project = new ProjectRecord(program.Id, "FMS", "FMS");
+                var release = new SoftwareRelease(project.Id, "1.6", false);
+                var request = Approved(project.Id, release.Id, "SCR-00032", RequirementLevel.System, "SYSR-000075");
+                requestId = request.Id;
+                seed.AddRange(program, project, release, request);
+                await seed.SaveChangesAsync();
+                await seed.Database.ExecuteSqlRawAsync(
+                    "UPDATE requirement_changes SET Level = 'HighLevel' WHERE ScrId = {0}", requestId);
+            }
+
+            await using var db = new AeroLinkDbContext(options);
+            var legacy = await db.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == requestId);
+            var service = new DownstreamImpactService(db);
+
+            Assert.Equal(0, await service.RaiseForApprovedChangeRequestAsync(legacy, Now, default));
+            Assert.Empty(await db.DownstreamChangeAssessments.ToListAsync());
+        }
+        finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Correctly_classified_replacement_supersedes_matching_legacy_assessment()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-downstream-remediation-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            Guid projectId;
+            Guid releaseId;
+            await using (var seed = new AeroLinkDbContext(options))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                var program = new ProgramRecord("Legacy Program", "DSX");
+                var project = new ProjectRecord(program.Id, "FMS", "FMS");
+                var release = new SoftwareRelease(project.Id, "1.6", false);
+                var legacy = Approved(project.Id, release.Id, "SCR-00032", RequirementLevel.System, "HLR-000075", revision: 2);
+                var invalidAssessment = new DownstreamChangeAssessment(project.Id, release.Id, legacy.Id,
+                    legacy.DisplayNumber, RequirementLevel.LowLevel, Now);
+                projectId = project.Id;
+                releaseId = release.Id;
+                seed.AddRange(program, project, release, legacy, invalidAssessment);
+                await seed.SaveChangesAsync();
+                await seed.Database.ExecuteSqlRawAsync(
+                    "UPDATE requirement_changes SET Level = 'HighLevel' WHERE ScrId = {0}", legacy.Id);
+            }
+
+            await using var db = new AeroLinkDbContext(options);
+            var replacement = Approved(projectId, releaseId, "SWCR-00104", RequirementLevel.HighLevel,
+                "HLR-000075", ChangeRequestType.Software, revision: 2);
+            db.Add(replacement);
+            await db.SaveChangesAsync();
+
+            var service = new DownstreamImpactService(db);
+            Assert.Equal(1, await service.RaiseForApprovedChangeRequestAsync(replacement, Now.AddHours(1), default));
+            await db.SaveChangesAsync();
+
+            var rows = (await db.DownstreamChangeAssessments.AsNoTracking().ToListAsync())
+                .OrderBy(x => x.CreatedAt).ToList();
+            Assert.Equal(DownstreamAssessmentState.Superseded, rows[0].State);
+            Assert.Equal(rows[1].Id, rows[0].SupersededByAssessmentId);
+            Assert.Contains("correctly classified replacement", rows[0].SupersededReason);
+            Assert.Equal(DownstreamAssessmentState.Open, rows[1].State);
+        }
+        finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
     private static SystemChangeRequest Approved(Guid projectId, Guid releaseId, string number,
         RequirementLevel level, string requirement, ChangeRequestType type = ChangeRequestType.System, int revision = 0)
     {

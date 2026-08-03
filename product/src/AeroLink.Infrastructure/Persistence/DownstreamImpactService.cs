@@ -14,6 +14,10 @@ public sealed class DownstreamImpactService(AeroLinkDbContext db)
         DateTimeOffset now, CancellationToken ct)
     {
         if (request.State is not (ScrState.Approved or ScrState.SelectedForBaseline)) return 0;
+        // Old showcase data predates the aggregate invariant. Refuse to turn a mismatched CR into more
+        // controlled work; reconciliation remediates that source explicitly and preserves its history.
+        if (request.RequirementChanges.Any(x => !SystemChangeRequest.AcceptsRequirementLevel(request.Type, x.Level)))
+            return 0;
 
         var targets = new HashSet<RequirementLevel>();
         if (request.RequirementChanges.Any(x => x.Level == RequirementLevel.System))
@@ -41,8 +45,51 @@ public sealed class DownstreamImpactService(AeroLinkDbContext db)
             foreach (var historical in prior.Where(x => x.TargetLevel == target))
                 historical.Supersede(assessment.Id,
                     $"{request.DisplayNumber} supersedes the source revision. Reassess the downstream impact against the approved replacement.", now);
+            await SupersedeLegacyMisclassifiedAssessmentsAsync(request, assessment, now, ct);
             raised++;
         }
         return raised;
+    }
+
+    private async Task SupersedeLegacyMisclassifiedAssessmentsAsync(SystemChangeRequest replacement,
+        DownstreamChangeAssessment successor, DateTimeOffset now, CancellationToken ct)
+    {
+        var candidates = await db.DownstreamChangeAssessments
+            .Where(x => x.ProjectId == replacement.ProjectId
+                && x.ReleaseId == replacement.TargetReleaseId
+                && x.TargetLevel == successor.TargetLevel
+                && x.SourceChangeRequestId != replacement.Id
+                && x.State != DownstreamAssessmentState.Superseded)
+            .ToListAsync(ct);
+        if (candidates.Count == 0) return;
+
+        var sourceIds = candidates.Select(x => x.SourceChangeRequestId).Distinct().ToList();
+        var legacySources = await db.SystemChangeRequests.AsNoTracking().Include(x => x.RequirementChanges)
+            .Where(x => sourceIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+
+        foreach (var candidate in candidates)
+        {
+            if (!legacySources.TryGetValue(candidate.SourceChangeRequestId, out var legacy)
+                || legacy.RequirementChanges.All(x => SystemChangeRequest.AcceptsRequirementLevel(legacy.Type, x.Level))
+                || !SharesExactSourceWork(legacy, replacement, successor.TargetLevel)) continue;
+
+            candidate.Supersede(successor.Id,
+                $"{replacement.DisplayNumber} is the correctly classified replacement for the same requirement change. Reassess the downstream impact against that controlled source.", now);
+        }
+    }
+
+    private static bool SharesExactSourceWork(SystemChangeRequest legacy, SystemChangeRequest replacement,
+        RequirementLevel downstreamTarget)
+    {
+        var sourceLevel = downstreamTarget == RequirementLevel.HighLevel
+            ? RequirementLevel.System
+            : RequirementLevel.HighLevel;
+        return legacy.RequirementChanges.Where(x => x.Level == sourceLevel).Any(oldChange =>
+            replacement.RequirementChanges.Any(newChange =>
+                newChange.Level == oldChange.Level
+                && newChange.Kind == oldChange.Kind
+                && newChange.Revision == oldChange.Revision
+                && string.Equals(newChange.BaseNumber, oldChange.BaseNumber, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(newChange.Statement, oldChange.Statement, StringComparison.Ordinal)));
     }
 }

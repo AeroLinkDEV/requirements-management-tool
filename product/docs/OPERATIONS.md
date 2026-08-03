@@ -244,6 +244,18 @@ Playwright starts disposable APIs and SQLite databases and does not reuse the li
 serves the compiled client and API on one origin, performs protected writes, and verifies their durable server
 state; `test:e2e` exercises the wider development-client journey matrix.
 
+### Attended workflow qualification
+
+Use the persistent `aerolink` database only when the created records are intentional engineering demonstration
+records that will remain visible after the qualification. A disposable probe, temporary baseline, destructive
+boundary case, or record whose only purpose is to prove an endpoint belongs in the isolated Playwright/API
+environment on port 5082, never the live development API on port 5080.
+
+Before an attended live workflow creates or changes controlled configuration, create and verify a backup and
+name every artifact as real engineering work. Do not use `test`, `probe`, or throwaway identifiers in FMSLIVE.
+If the scenario cannot safely leave every created record in the programme, stop and move it to the disposable
+environment. This is an operator guard for exploratory work; the automated suites already enforce isolation.
+
 ## Controlled numbering: scope and gaps
 
 Controlled numbers are issued from `identifier_sequences`, one row per prefix, by a single atomic increment.

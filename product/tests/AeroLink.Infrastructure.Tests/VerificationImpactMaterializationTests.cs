@@ -38,7 +38,7 @@ public sealed class VerificationImpactMaterializationTests
         RequirementChangeKind kind, string statement, Guid projectId, Guid releaseId, DateTimeOffset now,
         string verificationMethod = "Test")
     {
-        var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now);
+        var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software);
         scr.AddRequirementChange("author", requirementNumber, revision, RequirementLevel.HighLevel, kind,
             statement, "Rationale", verificationMethod, now);
         scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
@@ -346,8 +346,8 @@ public sealed class VerificationImpactMaterializationTests
             await using var db = new AeroLinkDbContext(seed.Options);
 
             // Two requirements, one procedure covering both.
-            var introduce = new SystemChangeRequest("SCR-00001", 0, seed.ProjectId, seed.ReleaseId,
-                "Introduce", "P", "A", "S", "author", now);
+            var introduce = new SystemChangeRequest("SWCR-00001", 0, seed.ProjectId, seed.ReleaseId,
+                "Introduce", "P", "A", "S", "author", now, ChangeRequestType.Software);
             introduce.AddRequirementChange("author", "SWR-00002375", 0, RequirementLevel.HighLevel,
                 RequirementChangeKind.Introduce, "The FMS shall sequence oceanic waypoints.", "R", "Test", now);
             introduce.AddRequirementChange("author", "SWR-00002376", 0, RequirementLevel.HighLevel,

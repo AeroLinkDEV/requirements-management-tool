@@ -73,6 +73,14 @@ public sealed class SystemChangeRequest
     public IReadOnlyCollection<AuditEvent> AuditEvents => _auditEvents.AsReadOnly();
     public ReviewCycle? ActiveReviewCycle => _reviewCycles.LastOrDefault(x => x.State == ReviewCycleState.Active);
 
+    /// <summary>
+    /// System change requests govern System requirements. Software change requests govern HLRs and LLRs.
+    /// Keeping the rule beside the aggregate prevents imports, integrations, seed reconciliation, and future
+    /// endpoints from creating a request which looks valid until its downstream assessment is raised.
+    /// </summary>
+    public static bool AcceptsRequirementLevel(ChangeRequestType type, RequirementLevel level) =>
+        type == ChangeRequestType.System ? level == RequirementLevel.System : level != RequirementLevel.System;
+
     public RequirementChange AddRequirementChange(string actorId, string baseNumber, int revision,
         RequirementLevel level, RequirementChangeKind kind, string statement, string rationale,
         string verificationMethod, DateTimeOffset now, string richText = "", string attributesJson = "{}",
@@ -82,6 +90,7 @@ public sealed class SystemChangeRequest
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
+        EnsureRequirementLevel(level);
         if (string.IsNullOrWhiteSpace(statement) && kind != RequirementChangeKind.Retire)
             throw new DomainException("A requirement statement is required.");
         var change = new RequirementChange(Id, baseNumber, revision, level, kind, statement, rationale, verificationMethod,
@@ -102,6 +111,7 @@ public sealed class SystemChangeRequest
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException("An SCR title is required.");
+        foreach (var item in changes) EnsureRequirementLevel(item.Level);
         Title = title.Trim();
         SetCase(problem, analysis, solution, problemRich, analysisRich, solutionRich);
         _requirementChanges.Clear();
@@ -355,6 +365,15 @@ public sealed class SystemChangeRequest
             throw new DomainException("Problem, Analysis, and Solution are required before review.");
         if (_requirementChanges.Count == 0)
             throw new DomainException("At least one requirement change is required before review.");
+        foreach (var item in _requirementChanges) EnsureRequirementLevel(item.Level);
+    }
+
+    private void EnsureRequirementLevel(RequirementLevel level)
+    {
+        if (AcceptsRequirementLevel(Type, level)) return;
+        throw new DomainException(Type == ChangeRequestType.System
+            ? "A System change request can contain System requirements only. Use an SWCR for HLR or LLR work."
+            : "A Software change request can contain HLR or LLR requirements only. Use an SCR for System work.");
     }
 
     /// <summary>

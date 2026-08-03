@@ -157,6 +157,35 @@ public sealed class ChangeAuthoringInvariantApiTests
         Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
     }
 
+    [Theory]
+    [InlineData("System", "HighLevel", "only System requirement changes")]
+    [InlineData("Software", "System", "only HLR and LLR changes")]
+    public async Task Change_request_type_rejects_incompatible_requirement_level(
+        string type, string level, string expectedGuidance)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var scenario = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        using var response = await client.PostAsJsonAsync("/api/scr-drafts", new
+        {
+            projectId = scenario.ProjectId, targetReleaseId = scenario.ReleaseId, type,
+            title = "Reject incompatible level", problem = "P", analysis = "A", solution = "S",
+            requirementChanges = new[]
+            {
+                new { level, kind = "Introduce", statement = "The product shall reject incompatible work.",
+                    rationale = "Controlled causality", verificationMethod = "Test", isDerived = true }
+            }
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains(expectedGuidance, await response.Content.ReadAsStringAsync());
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.False(await db.SystemChangeRequests.AnyAsync(x => x.Title == "Reject incompatible level"));
+    }
+
     [Fact]
     public async Task Legacy_impact_disposition_metadata_does_not_block_selection_or_freeze()
     {
