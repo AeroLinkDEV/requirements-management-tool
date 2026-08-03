@@ -73,4 +73,20 @@ public sealed class DownstreamChangeAssessmentTests
         Assert.Throws<DomainException>(() => assessment.Approve("another.approver", Now.AddMinutes(4)));
         Assert.Throws<DomainException>(() => Create().Submit("software.engineer", "software.engineer", Now));
     }
+
+    [Fact]
+    public void Returned_review_rationale_survives_linking_additional_change_work()
+    {
+        var assessment = Create();
+        assessment.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
+        assessment.RecordChangeRequired("software.engineer", Now.AddMinutes(2));
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "SWCR-00079.00", Now.AddMinutes(3));
+        assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(4));
+        assessment.ReturnToWork("assurance.reviewer", "Clarify the allocation before approval.", Now.AddMinutes(5));
+
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "SWCR-00080.00", Now.AddMinutes(6));
+
+        Assert.Equal("Clarify the allocation before approval.", assessment.Rationale);
+        Assert.Equal(2, assessment.ChangeRequestLinks.Count);
+    }
 }

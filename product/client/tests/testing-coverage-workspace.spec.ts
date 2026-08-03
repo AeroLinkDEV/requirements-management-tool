@@ -60,6 +60,9 @@ test('a package opens onto its decisions, and each one is an explicit judgement'
   await claimable.getByRole('button', { name: 'Take it on' }).click()
   const first = page.locator('.coverageRow').filter({ hasText: displayNumber }).first()
   await first.getByRole('button', { name: 'Decisions' }).click()
+  await expect(first.getByText('Source change requests', { exact: true })).toBeVisible()
+  await expect(first.getByText('Responsibility', { exact: true })).toBeVisible()
+  await expect(first.getByText('Linked Problem Reports', { exact: true })).toBeVisible()
 
   const undecided = first.locator('.decisionList li').filter({ has: page.getByRole('button', { name: 'Decide' }) })
   await expect(undecided.first()).toBeVisible({ timeout: 30_000 })
