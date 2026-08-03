@@ -141,6 +141,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             ("verification-impact", ReconcileVerificationImpactAsync),
             ("downstream-impact", ReconcileDownstreamImpactAsync),
             ("test-change-reviews", EnsureTestChangeReviewsAsync),
+            ("problem-report-build-scope", ReconcileProblemReportBuildScopeAsync),
+            ("controlled-test-change-identity", ReconcileControlledTestChangeIdentityAsync),
             ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
             ("approver-identity", ReconcileApproverIdentityAsync),
             ("released-campaign", EnsureReleasedCampaignAsync),
@@ -156,6 +158,70 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             applied.Add($"{step.Key}: {detail ?? "No change required."}");
         }
         return applied;
+    }
+
+    private async Task<string?> ReconcileProblemReportBuildScopeAsync(Guid programId, CancellationToken ct)
+    {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleAsync(ct);
+        var activeReleases = await db.Releases.Where(x => x.ProjectId == projectId && !x.IsReleased).ToListAsync(ct);
+        if (activeReleases.Count != 1) return "No unique active build was available; unscoped records were preserved.";
+
+        var active = activeReleases[0];
+        var reports = await db.ProblemReports.Where(x => x.ProjectId == projectId && x.TargetReleaseId == null).ToListAsync(ct);
+        var terminal = new[] { ProblemReportState.Closed, ProblemReportState.Duplicate, ProblemReportState.CannotReproduce,
+            ProblemReportState.NoFaultFound, ProblemReportState.AcceptedRisk, ProblemReportState.Rejected };
+        var reconciled = 0;
+        foreach (var report in reports.Where(x => !terminal.Contains(x.State)))
+        {
+            var now = DateTimeOffset.UtcNow;
+            report.Retarget(report.ResponsibleEngineerId, active.Id, now);
+            if (!await db.ProblemReportLinks.AnyAsync(x => x.ProblemReportId == report.Id && x.ArtifactType == "Release" && x.Relationship == "BuildScope", ct))
+                db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, "Release", active.Id, "BuildScope", "system.workspace", now));
+            var snapshot = JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision,
+                report.DisplayNumber, report.Title, report.ResponsibleEngineerId, report.TargetReleaseId,
+                state = report.State.ToString(), report.Version });
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, "TargetBuildReconciled",
+                "system.workspace", report.CanonicalHash(), snapshot, now));
+            reconciled++;
+        }
+        return $"Scoped {reconciled} active problem report(s) to Build {active.Version}; terminal history was preserved.";
+    }
+
+    private async Task<string?> ReconcileControlledTestChangeIdentityAsync(Guid programId, CancellationToken ct)
+    {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleAsync(ct);
+        // SQLite cannot order DateTimeOffset server-side; this is one Project's bounded TCR collection.
+        var reviews = (await db.TestChangeReviews.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+            .OrderBy(x => x.CreatedAt).ToList();
+        var sources = await db.SystemChangeRequests.Where(x => x.ProjectId == projectId)
+            .ToDictionaryAsync(x => x.Id, ct);
+        var items = await db.VerificationImpactItems.Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var numbered = 0;
+        foreach (var review in reviews.Where(x => string.IsNullOrEmpty(x.BaseNumber)))
+        {
+            review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct), DateTimeOffset.UtcNow);
+            numbered++;
+        }
+
+        var superseded = 0;
+        foreach (var legacy in reviews.Where(x => x.State != TestChangeReviewState.Superseded
+            && x.Discipline != TestChangeReviewDiscipline.System
+            && sources.TryGetValue(x.ChangeRequestId, out var source) && source.Type == ChangeRequestType.System))
+        {
+            var subjects = items.Where(x => x.TestChangeReviewId == legacy.Id).Select(x => x.SubjectDisplayNumber)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var successor = reviews.FirstOrDefault(candidate => candidate.Id != legacy.Id
+                && candidate.ReleaseId == legacy.ReleaseId && candidate.Discipline == legacy.Discipline
+                && candidate.State != TestChangeReviewState.Superseded
+                && sources.TryGetValue(candidate.ChangeRequestId, out var candidateSource) && candidateSource.Type == ChangeRequestType.Software
+                && items.Any(item => item.TestChangeReviewId == candidate.Id && subjects.Contains(item.SubjectDisplayNumber)));
+            if (successor is null) continue;
+            legacy.Supersede(successor.Id,
+                $"Replaced by {successor.DisplayNumber}, raised from the correctly classified software change request for the same verification subject.", DateTimeOffset.UtcNow);
+            foreach (var item in items.Where(x => x.TestChangeReviewId == legacy.Id)) item.Supersede(DateTimeOffset.UtcNow);
+            superseded++;
+        }
+        return $"Assigned {numbered} legacy controlled TCR number(s) and superseded {superseded} incorrectly classified software package(s).";
     }
 
     private async Task<string?> EnsureCodeTraceabilityAsync(Guid programId, CancellationToken ct)

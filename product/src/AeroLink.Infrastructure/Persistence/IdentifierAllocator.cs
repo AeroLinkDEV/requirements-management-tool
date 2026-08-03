@@ -182,6 +182,7 @@ public static class IdentifierAllocator
         Consider(await db.Requirements.AsNoTracking().Where(x => x.BaseNumber.StartsWith(scope + "-")).Select(x => x.BaseNumber).ToListAsync(ct));
         Consider(await db.RequirementChanges.AsNoTracking().Where(x => x.BaseNumber.StartsWith(scope + "-")).Select(x => x.BaseNumber).ToListAsync(ct));
         Consider(await db.TestProcedures.AsNoTracking().Where(x => x.BaseNumber.StartsWith(scope + "-")).Select(x => x.BaseNumber).ToListAsync(ct));
+        Consider(await db.TestChangeReviews.AsNoTracking().Where(x => x.BaseNumber.StartsWith(scope + "-")).Select(x => x.BaseNumber).ToListAsync(ct));
         Consider(await db.ProblemReports.AsNoTracking().Where(x => x.ReportNumber.StartsWith(scope + "-")).Select(x => x.ReportNumber).ToListAsync(ct));
         return highest + 1;
     }

@@ -4,7 +4,7 @@ Date: 2026-07-19
 
 > **Historical engineering decision record.** Measurements and job topology describe the July 2026
 > optimization increment. The repository workflows and required GitHub checks are the live authority; current
-> qualification evidence is summarized in [the current handoff](../../CURRENT_PRODUCT_HANDOFF_2026-08-02.md).
+> qualification evidence is summarized in [the current handoff](../../CURRENT_PRODUCT_HANDOFF_2026-08-03.md).
 
 ## Purpose
 

@@ -25,7 +25,14 @@ test("Lifecycle Decision Room connects readiness, impact, evidence, people, and 
   await expect(page.getByRole("button", { name: /Explore changes vs 1\.5/ })).toBeVisible();
 
   await page.getByRole("button", { name: "Explore baseline changes →" }).click();
+  await expect(page.getByRole("heading", { name: "Baseline changes" })).toBeVisible();
+  const changeRows = page.locator('.releaseChanges > div > button');
+  await expect(changeRows).toHaveCount(await changeRows.count());
+  expect(await changeRows.count()).toBeGreaterThan(1);
+  const selectedNumber = (await changeRows.nth(1).locator('b').textContent())!;
+  await changeRows.nth(1).click();
   await expect(page.getByRole("heading", { name: "Change Impact Review" })).toBeVisible();
+  await expect(page.getByText(selectedNumber, { exact: false }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Lifecycle impact" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Requirement revision preview" })).toBeVisible();
   await expect(page.getByText(/SYSR-\d{6}\.\d{2}/).first()).toBeVisible();

@@ -32,8 +32,8 @@ public sealed class TestChangeReview
         ChangeRequestId = changeRequestId;
         Discipline = discipline;
         SourceChangeRequestNumber = Required(sourceChangeRequestNumber, "source change request number");
-        // Empty is allowed: rows raised before this had a controlled number keep answering by the change
-        // request they came from, rather than being retrospectively given a number they never had.
+        // Empty remains readable for databases created before controlled TCR numbering. The showcase
+        // upgrade assigns those rows a real number without changing their identity or evidence.
         BaseNumber = baseNumber.Trim();
         State = TestChangeReviewState.Open;
         CreatedAt = now;
@@ -77,6 +77,22 @@ public sealed class TestChangeReview
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; } = 1;
+
+    public void AssignControlledNumber(string baseNumber, DateTimeOffset now)
+    {
+        if (!string.IsNullOrEmpty(BaseNumber)) return;
+        var number = Required(baseNumber, "controlled test change request number");
+        var expectedPrefix = Discipline switch
+        {
+            TestChangeReviewDiscipline.System => "SYSTCR-",
+            TestChangeReviewDiscipline.HighLevelSoftware => "HLRTCR-",
+            _ => "LLRTCR-",
+        };
+        if (!number.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException($"A {Discipline} test change request requires a {expectedPrefix.TrimEnd('-')} number.");
+        BaseNumber = number;
+        Touch(now);
+    }
 
     public void Assign(string leadActorId, string engineerId, DateTimeOffset now)
     {

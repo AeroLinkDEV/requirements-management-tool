@@ -112,7 +112,7 @@ test('an assessment deep link explains impact and a required change creates and 
   await assessment.getByRole('button',{name:/Open HLR assessment/}).click()
   const decisionWorkbench=page.getByRole('dialog',{name:`${candidate.sourceChangeRequestNumber} downstream impact`})
   await decisionWorkbench.getByRole('button',{name:'Change required',exact:true}).click()
-  await expect(decisionWorkbench).toContainText('HLR change required — SWCR pending')
+  await expect(decisionWorkbench).toContainText('Draft SWCR needed')
   await decisionWorkbench.getByRole('button',{name:'Create Draft HLR SWCR'}).click()
   await expect(page.getByRole('heading',{name:'Create HLR Change Request'})).toBeVisible()
   await page.getByLabel('Title').fill(`Implement ${candidate.sourceChangeRequestNumber} downstream impact`)

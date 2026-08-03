@@ -1,7 +1,7 @@
 # Aerospace Development Assurance Platform
 
 > **New here — human or model? Read [PROJECT_STATE.md](PROJECT_STATE.md) first, then the
-> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md).** They record what
+> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-03.md).** They record what
 > exists today, what is deliberately excluded, where delivery stands, and the known limitations. The
 > documents indexed below are durable definitions and historical records; `PROJECT_STATE.md` describes
 > the present.
@@ -60,7 +60,8 @@ demonstrations use the `FMSLIVE` dataset described in
 | Document | Purpose |
 | --- | --- |
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
-| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) | **Current restart point.** Draft SWCR controls, HLR/LLR scope, downstream assessments, agreed Problem Report workflow, Code/GitLab traceability, complete Digital Thread paths, validation, and safe continuation |
+| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-03.md) | **Current restart point.** Truthful Build-scoped PR/TCR queues, persistent HLR/LLR Draft scope, evidence-first assessments, all-change release exploration, Code/GitLab traceability, validation, and safe continuation |
+| [2 August handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) | Historical delivery record for Draft SWCR controls, downstream assessments, Problem Reports, Digital Thread, and Code/GitLab traceability |
 | [Technical overview](docs/AEROLINK_TECHNICAL_OVERVIEW.md) | Two-page-oriented explanation of architecture, PostgreSQL persistence, controlled versioning, traceability, security, backup, and quality gates |
 | [August 2 afternoon observation reconciliation](docs/AUGUST_2_AFTERNOON_OBSERVATION_RECONCILIATION.md) | Line-by-line map from the observation document and follow-up decisions to delivered issues, behavior, and regression evidence |
 | [1 August handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) | Historical delivery record for build-scoped verification roles and live engineering workflow qualification |

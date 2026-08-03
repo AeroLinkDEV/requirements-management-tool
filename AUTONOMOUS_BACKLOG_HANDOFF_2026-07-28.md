@@ -6,7 +6,7 @@
 
 > **Historical checkpoint; do not restart from its issue list.** Work continued through PR #168 on
 > 2026-07-29, and several product decisions changed the active surface. Use
-> [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) for current routes,
+> [CURRENT_PRODUCT_HANDOFF_2026-08-03.md](CURRENT_PRODUCT_HANDOFF_2026-08-03.md) for current routes,
 > issue state, deliberate dormant code and restart instructions.
 
 ## Why work stopped
