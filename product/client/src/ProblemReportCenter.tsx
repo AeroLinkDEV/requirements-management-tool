@@ -50,7 +50,14 @@ export default function ProblemReportCenter({api,projectId,releaseId,releases,re
   const canSccb=hasRole(["Approver","ConfigurationManager","ProgramManager"]);
   const canClose=hasRole(["Approver","SoftwareQualityAnalyst","ConfigurationManager","ProgramManager"]);
 
-  const refresh=async(selectId?:string)=>{try{setError("");const params=new URLSearchParams({projectId,page:"1",pageSize:"10"});if(search.trim())params.set("search",search.trim());if(stateFilter)params.set("state",stateFilter);if(severityFilter)params.set("severity",severityFilter);if(priorityFilter)params.set("priority",priorityFilter);if(ownerFilter.trim())params.set("owner",ownerFilter.trim());const scope=new URLSearchParams({projectId});const [list,summary]=await Promise.all([call(api,`/api/problem-reports?${params}`),call(api,`/api/problem-reports/dashboard?${scope}`)]);setReports(list.items);setReportTotal(list.totalCount??list.items.length);setDashboard(summary);const id=selectId??initialReportId??selected?.id??list.items[0]?.id;if(id){const detail=await call(api,`/api/problem-reports/${id}`);setSelected(detail);setOwner({userId:detail.responsibleEngineerId,name:detail.responsibleEngineerId})}else setSelected(undefined)}catch(reason){setError(reason instanceof Error?reason.message:"Unable to load problem reports.")}};
+  const refresh=async(selectId?:string)=>{try{setError("");const params=new URLSearchParams({projectId,page:"1",pageSize:"10"});if(search.trim())params.set("search",search.trim());if(stateFilter)params.set("state",stateFilter);if(severityFilter)params.set("severity",severityFilter);if(priorityFilter)params.set("priority",priorityFilter);if(ownerFilter.trim())params.set("owner",ownerFilter.trim());const scope=new URLSearchParams({projectId});const [list,summary]=await Promise.all([call(api,`/api/problem-reports?${params}`),call(api,`/api/problem-reports/dashboard?${scope}`)]);setReports(list.items);setReportTotal(list.totalCount??list.items.length);setDashboard(summary);const id=selectId??initialReportId??selected?.id??list.items[0]?.id;if(id){const detail=await call(api,`/api/problem-reports/${id}`);setSelected(detail);setOwner({userId:detail.responsibleEngineerId,name:detail.responsibleEngineerId});
+    // The record being read belongs in the address, or a refresh lands on whatever happens to be first.
+    //
+    // Opening a report from the queue already did this; creating one did not, and the gap was invisible while
+    // the queue was filtered by build — the new report was usually the only row, so falling back to items[0]
+    // picked it by luck. Project-scoped, the queue holds every report in the Project and that luck is gone:
+    // a refresh after creating a report jumped to the lowest-numbered record in the database.
+    if(selectId)onSelected(selectId)}else setSelected(undefined)}catch(reason){setError(reason instanceof Error?reason.message:"Unable to load problem reports.")}};
   // oxlint-disable-next-line react-hooks/exhaustive-deps -- filters are applied deliberately with Apply filters.
   useEffect(()=>{void refresh()},[api,projectId,releaseId]);
   const visible=useMemo(()=>reports,[reports]);
