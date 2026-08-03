@@ -173,10 +173,12 @@ test('a procedure is created here as a Draft and needs somebody else to approve 
   await form.getByRole('button', { name: 'Create procedure' }).click()
 
   await expect(form).toHaveCount(0, { timeout: 30_000 })
-  await expect(page.getByRole('status')).toContainText('needs independent approval')
+  const confirmation = page.getByRole('status')
+  await expect(confirmation).toContainText(/SYSTP-\d{6}\.00 created as a Draft/)
+  const issued = (await confirmation.textContent())!.match(/SYSTP-\d{6}\.00/)![0]
 
   // It is findable by its own controlled number, in Draft, with the approval offered.
-  await page.getByLabel('Find a procedure').fill(title)
+  await expect(page.getByLabel('Find a procedure')).toHaveValue(issued)
   const created = page.locator('.procedureLibrary .coverageRow').filter({ hasText: title }).first()
   await expect(created).toBeVisible({ timeout: 30_000 })
   await expect(created).toContainText('Awaiting approval')
@@ -184,6 +186,70 @@ test('a procedure is created here as a Draft and needs somebody else to approve 
   // the page says why the control is absent rather than presenting one the server would refuse.
   await expect(created.getByRole('button', { name: 'Review & approve' })).toHaveCount(0)
   await expect(created).toContainText('Awaiting')
+  await expect(created.getByRole('button', { name: 'Edit' })).toBeVisible()
+  await expect(created.getByRole('button', { name: 'History' })).toBeVisible()
+  await created.getByRole('button', { name: 'Edit' }).click()
+  const editor = page.getByRole('dialog', { name: `Edit ${issued}` })
+  await expect(editor).toBeVisible()
+  await expect(editor.getByLabel('Procedure title')).toHaveValue(title)
+  await editor.getByRole('button', { name: 'Close controlled editor' }).click()
+  await expect(editor).toHaveCount(0)
+
+  // The controlled number is the primary record link. Its exact revision survives refresh; History remains
+  // a separate action rather than being the only way to read the procedure.
+  await created.getByRole('button', { name: `Open procedure ${issued}` }).click()
+  const record = page.getByRole('dialog', { name: `Procedure ${issued}` })
+  await expect(record).toContainText('Prove sequencing holds across the oceanic transition.')
+  await expect(record).toContainText('Enter the oceanic route, then force a transition.')
+  await expect(page).toHaveURL(/procedureId=.*procedureRevisionId=.*procedureView=record/)
+  await page.reload()
+  await expect(page.getByRole('dialog', { name: `Procedure ${issued}` })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('dialog', { name: `Procedure ${issued}` }).getByRole('button', { name: 'History' }).click()
+  await expect(page.getByRole('dialog', { name: new RegExp(`History of ${issued.split('.')[0]}`) })).toBeVisible()
+})
+
+test('procedure creation failures stay in the dialog and preserve the engineering input', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await page.getByRole('button', { name: '+ New test procedure' }).click()
+
+  const form = page.getByRole('dialog', { name: 'Create a test procedure' })
+  await form.getByLabel('Title').fill('Rejected navigation alert procedure')
+  await form.getByLabel('Objective').fill('Verify the rejected content remains editable.')
+  await form.getByLabel('Preconditions').fill('The active build is loaded.')
+  await form.getByLabel('Steps').fill('Stimulate the navigation alert.')
+  await form.getByLabel('Expected result').fill('The correct alert is shown.')
+  await form.getByLabel('Requirements it verifies').selectOption({ index: 0 })
+  await form.getByLabel('Independent procedure approver').fill('systems.lead')
+  await form.locator('.personSuggestions button[data-user-name="systems.lead"]').click()
+  await page.route('**/api/test-procedures', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'The selected exact requirement changed. Refresh and choose it again.' }) })
+    : route.continue())
+
+  await form.getByRole('button', { name: 'Create procedure' }).click()
+  await expect(form.getByRole('alert')).toContainText('The selected exact requirement changed')
+  await expect(form.getByLabel('Title')).toHaveValue('Rejected navigation alert procedure')
+  await expect(form.getByLabel('Steps')).toHaveValue('Stimulate the navigation alert.')
+  await expect(form.getByRole('button', { name: 'Create procedure' })).toBeEnabled()
+})
+
+test('released Build 1.5 procedures remain readable without create or edit actions', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page)
+  await page.getByRole('button', { name: /Back to Software Builds/ }).click()
+  await page.getByRole('button', { name: 'Open build 1.5' }).click()
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await expect(page.getByRole('button', { name: '+ New test procedure' })).toHaveCount(0)
+  await page.getByLabel('Find a procedure').fill('SYSTP-000001.00')
+  const row = page.locator('.procedureLibrary .coverageRow').filter({ hasText: 'SYSTP-000001.00' }).first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await expect(row.getByRole('button', { name: 'Edit' })).toHaveCount(0)
+  await row.getByRole('button', { name: /Open procedure SYSTP-000001\.00/ }).click()
+  await expect(page.getByRole('dialog', { name: 'Procedure SYSTP-000001.00' })).toBeVisible()
 })
 
 /**

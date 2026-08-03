@@ -31,6 +31,12 @@
   padding: 2px 8px; border-radius: 999px; background: #eef2f6; color: var(--ink-500);
 }
 .coverageRow.attention i { background: #fdf3e2; color: #8a5a00; }
+.procedureRecordLink, .procedureTitleLink {
+  border: 0; background: transparent; color: inherit; padding: 0; text-align: left; cursor: pointer;
+}
+.procedureRecordLink:hover b, .procedureTitleLink:hover { color: var(--accent, #1769d2); text-decoration: underline; }
+.procedureRecordLink:focus-visible, .procedureTitleLink:focus-visible { outline: 2px solid var(--accent, #1769d2); outline-offset: 3px; }
+.procedureTitleLink { font: inherit; }
 
 .coverageEmpty { display: flex; flex-direction: column; gap: 4px; padding: 20px; border: 1px dashed var(--line); border-radius: 10px; }
 .coverageEmpty b { font: 750 15px var(--font-display); }
@@ -57,6 +63,15 @@
 .revisionList i { font-style: normal; font-size: 12px; color: var(--ink-500); }
 .revisionList small, .revisionDriver, .revisionCovers { color: var(--ink-500); font-size: 12px; }
 .revisionDriver.quiet { color: #9aa6b2; }
+.procedureRecordContent { display: flex; flex-direction: column; gap: 12px; margin: 18px 0; }
+.procedureRecordMeta { display: flex; align-items: center; gap: 10px; color: var(--ink-500); font-size: 12px; }
+.procedureRecordMeta i { padding: 2px 8px; border-radius: 999px; background: #eef2f6; color: var(--ink-600); font-style: normal; font-weight: 700; }
+.procedureRecordContent dl { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 0; margin: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.procedureRecordContent dt, .procedureRecordContent dd { margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: pre-wrap; }
+.procedureRecordContent dt { background: #f7f9fb; color: var(--ink-600); font-size: 12px; font-weight: 750; }
+.procedureRecordContent dd { color: var(--ink-900); font-size: 13px; line-height: 1.5; }
+.procedureRecordContent dt:last-of-type, .procedureRecordContent dd:last-of-type { border-bottom: 0; }
+.procedureRecordActions { display: flex; justify-content: flex-end; gap: 8px; }
 
 .decisionList { display: flex; flex-direction: column; gap: 6px; grid-column: 1 / -1; margin: 8px 0 0; padding: 10px 0 0; list-style: none; border-top: 1px dashed var(--line); }
 .decisionList li { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: baseline; gap: 8px; }
@@ -75,6 +90,22 @@
 .decisionModal label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-500); }
 .decisionModal textarea { min-height: 80px; }
 .decisionActions { display: flex; gap: 8px; margin-top: 6px; }
+.createProcedureError { padding: 10px 12px; border: 1px solid #d66; border-radius: 8px; background: #fff5f5; color: #8a2020; font-size: 13px; }
+
+.procedureEditorBackdrop { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 24px; background: rgba(11, 26, 48, .45); }
+.procedureEditor { width: min(720px, 100%); max-height: 88vh; overflow-y: auto; padding: 22px; border-radius: 14px; background: #fff; }
+.procedureEditor header { display: flex; justify-content: space-between; gap: 16px; }
+.procedureEditor header h2 { margin: 4px 0 0; }
+.procedureEditor header p:last-child { margin-bottom: 0; color: var(--ink-500); }
+.procedureEditor form { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+.procedureEditor label { display: flex; flex-direction: column; gap: 4px; color: var(--ink-600); font-size: 13px; }
+.procedureEditor textarea { min-height: 88px; }
+.procedureEditorGrid { display: grid; grid-template-columns: minmax(180px, .55fr) minmax(0, 1fr); gap: 12px; }
+.procedureEditorMeta, .procedureEditor footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.procedureEditorMeta { color: var(--ink-500); font-size: 12px; }
+.procedureEditor footer { justify-content: flex-end; margin-top: 4px; }
+.procedureEditorError { margin-top: 12px; padding: 10px 12px; border: 1px solid #d66; border-radius: 8px; background: #fff5f5; color: #8a2020; }
+.procedureEditorLoading { padding: 24px 0; color: var(--ink-500); }
 
 /* Browsing the inventory. The software side renders 440 of these, so finding one had to stop meaning
    scrolling — search narrows by name, the two filters narrow by what somebody actually wants to see. */
