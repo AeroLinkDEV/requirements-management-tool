@@ -8,12 +8,11 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
 ## Repository checkpoint
 
 - Repository: `seanmccarthyns/requirements-management-tool`
-- Feature checkpoint before the final live sweep: `c52af21` on `main` - *Align primary navigation around
-  engineering and verification (#267)*
-- Documentation checkpoint: `5121b1e` on `main` - *Align documentation to August 2 product checkpoint (#268)*
-- GitHub backlog at handoff: **zero open issues**
-- Issues closed in this delivery: #258, #259, #260, #261, #262 and the live-sweep defect #269
-- Pull requests merged: #263, #264, #265, #266, #267, #268 and #270
+- August observation reconciliation: issues #277, #278, #279 and #280; pull requests #281, #282, #283
+  and #284
+- GitHub backlog after this delivery: **zero open issues**
+- Earlier 2 August delivery: issues #258, #259, #260, #261, #262 and #269; pull requests #263, #264,
+  #265, #266, #267, #268 and #270
 - Delivery rule remains: focused `codex/*` branch, pull request, required Product Quality Gate, squash merge,
   exact-merge requalification; never push implementation directly to `main`
 - The persistent PostgreSQL demonstration database remains the one real-life database. Its engineering records
