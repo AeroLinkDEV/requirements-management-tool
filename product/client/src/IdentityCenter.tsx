@@ -156,30 +156,10 @@ export function LoginPage({
           required
         />
       </label>
-      <label>
-        Authenticator or recovery code{" "}
-          <small id="mfa-code-help">Required only when MFA is enrolled.</small>
-          <input
-            aria-label="Authenticator or recovery code"
-            aria-describedby="mfa-code-help"
-            name="mfaCode"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          placeholder="6-digit or recovery code"
-        />
-      </label>
       {error && <div className="loginError">{error}</div>}
       <button disabled={busy}>
         {busy ? "Authenticating…" : "Sign in securely →"}
       </button>
-      <aside>
-        <b>Controlled access</b>
-        <span>Use the account issued by your workspace administrator.</span>
-        <small>
-          Credentials are authenticated locally and are never sent outside this
-          deployment.
-        </small>
-      </aside>
     </form>
   );
   const setupPanel = setup?.bootstrapRequired ? (
@@ -283,25 +263,6 @@ export function LoginPage({
       <section className="loginStory">
         <div className="loginBrand">
           <span>▲</span>AeroLink
-        </div>
-        <div>
-          <p className="eyebrow">DEVELOPMENT ASSURANCE · CONTROLLED ACCESS</p>
-          <h1>
-            Every decision.
-            <br />
-            Every revision.
-            <br />
-            <em>Accountable.</em>
-          </h1>
-          <p>
-            A secure engineering workspace for requirements, verification
-            evidence, baselines, and release authority.
-          </p>
-        </div>
-        <div className="trustStrip">
-          <span>IMMUTABLE HISTORY</span>
-          <span>PROGRAM-SCOPED ROLES</span>
-          <span>ELECTRONIC SIGNATURES</span>
         </div>
       </section>
       <section className="loginPanel">

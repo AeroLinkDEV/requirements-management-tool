@@ -102,7 +102,7 @@ const normalizeProposal = (
   ...value,
   baseNumber: value.baseNumber === "Assigned when saved" ? "" : value.baseNumber || "",
   level: value.level || fallbackLevel,
-  richText: value.richText || value.statement || "",
+  richText: value.richText || "",
   attributesJson: value.attributesJson || JSON.stringify({ criticality: "Normal", owner: "" }),
   impactDispositionJson:
     value.impactDispositionJson && value.impactDispositionJson !== "{}"
@@ -214,7 +214,7 @@ export default function ScrEditor({
               statement: latest.statement,
               rationale: latest.rationale,
               verificationMethod: latest.verificationMethod,
-              richText: latest.richText || latest.statement,
+              richText: latest.richText || "",
               attributesJson: latest.attributesJson || "{}",
             }, defaultLevel)]);
         setTitle((value) => value || `Update ${latest.displayNumber} through controlled change`);
@@ -291,13 +291,7 @@ export default function ScrEditor({
     setChanges((items) =>
       items.map((item, position) => {
         if (position !== index) return item;
-        const next = { ...item, [key]: value } as ControlledRequirementDraft;
-        // While supporting content is nothing more than a restatement of the statement, it follows the
-        // statement. The moment an author writes a table or a figure, it stops following and is theirs.
-        if (key === "statement" && (!item.richText || toPlainText(item.richText) === item.statement)) {
-          next.richText = fromPlainText(String(value));
-        }
-        return next;
+        return { ...item, [key]: value } as ControlledRequirementDraft;
       }),
     );
   };

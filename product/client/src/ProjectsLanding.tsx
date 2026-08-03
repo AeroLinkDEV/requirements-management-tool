@@ -235,13 +235,11 @@ function ProjectCard({
 }
 
 export default function ProjectsLanding({
-  api,
   user,
   workspaceHref,
   onOpenWorkspace,
   onSignOut,
 }: {
-  api: string;
   user: AuthUser;
   workspaceHref?: string;
   onOpenWorkspace: () => void;
@@ -249,7 +247,7 @@ export default function ProjectsLanding({
 }) {
   return (
     <div className="projectsPage">
-      <PortalHeader api={api} user={user} onSignOut={onSignOut}/>
+      <PortalHeader user={user} onSignOut={onSignOut}/>
       <main className="projectsMain">
         <header>
           <div>

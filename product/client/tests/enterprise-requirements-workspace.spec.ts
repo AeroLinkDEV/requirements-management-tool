@@ -6,7 +6,6 @@ test("requirements stay read-only while controlled proposals and imports move in
   request,
 }) => {
   test.setTimeout(120_000);
-  const viewName = `System requirement 150 review ${Date.now()}`;
   const commentText = `Please confirm coverage with @test.engineer before baseline ${Date.now()}.`;
   await apiLogin(request);
   await login(page, 'admin', { openProject: false });
@@ -36,20 +35,8 @@ test("requirements stay read-only while controlled proposals and imports move in
   await page.getByRole("button", { name: "Add comment" }).click();
   await expect(page.getByText(commentText)).toBeVisible();
   await page.getByRole("button", { name: "Close requirement inspector" }).click();
-  await page.getByText("Workspace tools", { exact: true }).click();
-  await page.getByRole("button", { name: "☆ Save view" }).click();
-  await page.getByLabel("View name").fill(viewName);
-  await page.getByRole("button", { name: "Save view", exact: true }).click();
-  if ((await page.locator('.savedViews').getAttribute('open')) === null)
-    await page.locator('.savedViews > summary').click();
-  await expect(page.getByText(viewName)).toBeVisible();
-  if ((await page.locator('.pageActionsMenu').getAttribute('open')) === null)
-    await page.getByText("Workspace tools", { exact: true }).click();
-  await page.getByRole("button", { name: /Schemas/ }).click();
-  await expect(page.locator(".pageActionsMenu")).not.toHaveAttribute("open", "");
-  await expect(page.getByRole("heading", { name: "Artifact schemas" })).toBeVisible();
-  await expect(page.getByText("High-Level Software Requirement", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByText("Authoritative view", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Workspace tools", { exact: true })).toHaveCount(0);
   await page.getByLabel("Search requirements").fill("SYSR-000150");
   await page.getByRole("button", { name: /SYSR-000150\.\d{2}/ }).first().click();
   await page.getByRole("button", { name: "Trace & impact" }).click();

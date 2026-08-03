@@ -51,7 +51,7 @@ test('an author chooses the section a new requirement goes in', async ({ page })
   await expect(page.getByRole('textbox', { name: 'Author', exact: true })).toHaveValue('systems.author')
 })
 
-test('modifying a requirement offers to leave it where it already is', async ({ page }) => {
+test('modifying a requirement selects its current controlled section', async ({ page }) => {
   test.setTimeout(180_000)
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
@@ -59,9 +59,10 @@ test('modifying a requirement offers to leave it where it already is', async ({ 
   await openNewSystemChangeRequest(page)
   await page.getByRole('button', { name: 'Modify existing' }).first().click()
 
-  // Before a requirement is chosen there is nothing to keep, so the default reads as a move rather than a stay.
+  // Before a requirement is chosen, the editor asks for a concrete section rather than an ambiguous stay value.
   const section = page.getByLabel('Section for proposal 1')
-  await expect(section.locator('option').first()).toHaveText('Leave where it is')
+  await expect(section.locator('option').first()).toHaveText('Choose a section…')
+  await expect(section.locator('option').first()).toHaveAttribute('disabled', '')
 
   const search = page.getByRole('textbox', { name: /Find controlled requirement/ }).last()
   await search.fill('SYSR-000001')
@@ -72,4 +73,6 @@ test('modifying a requirement offers to leave it where it already is', async ({ 
   // The requirement arrives with the section it is already in, so choosing one to modify does not silently
   // relocate it — which is the commonest way document structure gets rearranged by accident.
   await expect(section).not.toHaveValue('', { timeout: 30_000 })
+  await expect(page.getByLabel(/Formatted supporting content paragraph/)).toHaveCount(0)
+  await expect(page.getByText('No supporting content recorded.')).toBeVisible()
 })

@@ -28,7 +28,7 @@ const softwareBuilds: readonly BuildDefinition[] = [
   { id: "fms-0-5", version: "0.5", status: "released", statusLabel: "Released", title: "Baseline release", description: "Initial baseline for core FMS capabilities.", isAccessible: false, isReleased: true, isReadOnly: true, isCurrent: false, sortOrder: 1 },
   { id: "fms-1-0", version: "1.0", status: "released", statusLabel: "Released", title: "Feature release", description: "Adds advanced navigation and performance features.", isAccessible: false, isReleased: true, isReadOnly: true, isCurrent: false, sortOrder: 2 },
   { id: "fms-1-5", version: "1.5", status: "released", statusLabel: "Released", title: "Stability release", description: "Reliability improvements and defect remediation.", isAccessible: true, isReleased: true, isReadOnly: true, isCurrent: false, sortOrder: 3 },
-  { id: "fms-1-6", version: "1.6", status: "in-work", statusLabel: "In Work", title: "Current in-work build", description: "Ongoing enhancements and integration for the upcoming release.", isAccessible: true, isReleased: false, isReadOnly: false, isCurrent: true, sortOrder: 4 },
+  { id: "fms-1-6", version: "1.6", status: "in-work", statusLabel: "In Work", title: "Current in-work build", description: "", isAccessible: true, isReleased: false, isReadOnly: false, isCurrent: true, sortOrder: 4 },
 ];
 
 function MetadataIcon({ kind }: { kind: "owner" | "created" | "phase" }) {
@@ -41,14 +41,12 @@ function MetadataIcon({ kind }: { kind: "owner" | "created" | "phase" }) {
 }
 
 export default function SoftwareBuildsLanding({
-  api,
   user,
   releases,
   onOpenBuild,
   onProjectOverview,
   onSignOut,
 }: {
-  api: string;
   user: AuthUser;
   releases: SelectableRelease[];
   onOpenBuild: (release: SelectableRelease) => void;
@@ -59,7 +57,7 @@ export default function SoftwareBuildsLanding({
 
   return (
     <div className="buildsLandingPage">
-      <PortalHeader api={api} user={user} onSignOut={onSignOut}/>
+      <PortalHeader user={user} onSignOut={onSignOut}/>
       <main className="buildsLandingMain">
         <nav className="buildBreadcrumb" aria-label="Breadcrumb">
           <button type="button" onClick={onProjectOverview}>Projects</button>
@@ -98,7 +96,6 @@ export default function SoftwareBuildsLanding({
             {[...softwareBuilds].sort((a, b) => a.sortOrder - b.sortOrder).map((build, index) => {
               const release = releaseByVersion.get(build.version);
               const enabled = build.isAccessible && Boolean(release);
-              const availabilityId = `${build.id}-availability`;
               return (
                 <li key={build.id}>
                   <article
@@ -111,7 +108,7 @@ export default function SoftwareBuildsLanding({
                       <span className={`buildStatus ${build.status}`}>{build.statusLabel}</span>
                     </div>
                     <h3>{build.title}</h3>
-                    <p>{build.description}</p>
+                    {build.description && <p>{build.description}</p>}
                     {/*
                       The visible label is "Open build", so the accessible name has to contain that text
                       (WCAG 2.2 AA, Label in Name). "Open software build …" split those two words apart,
@@ -123,13 +120,10 @@ export default function SoftwareBuildsLanding({
                       disabled={!enabled}
                       onClick={() => release && onOpenBuild(release)}
                       aria-label={`Open build ${build.version} (${officialBuildName(build.version)})`}
-                      aria-describedby={!enabled ? availabilityId : undefined}
+                      title={!enabled ? "Controlled workspace not available" : undefined}
                     >
                       <span aria-hidden="true">↗</span> Open build
                     </button>
-                    {!enabled && <small id={availabilityId}>This earlier build is shown for lineage only; its controlled workspace is not available.</small>}
-                    {build.isReadOnly && enabled && <small>Informally Build {build.version} · read-only historical workspace</small>}
-                    {build.isCurrent && <small>Informally Build {build.version} · active development workspace</small>}
                   </article>
                   {index < softwareBuilds.length - 1 && <span className="buildConnector" aria-hidden="true">→</span>}
                 </li>

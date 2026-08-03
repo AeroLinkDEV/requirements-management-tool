@@ -23,12 +23,14 @@ test('administrators see current Program roles and retain revoke failures', asyn
   await expect(currentRole).toBeEnabled()
 })
 
-test('account security identifies the current session and retains delegation history controls', async ({ page }) => {
+test('security implementation remains dormant while MFA and account-security controls are hidden', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByLabel(/MFA|authentication code/i)).toHaveCount(0)
+  await expect(page.getByText('Built for Engineering Excellence')).toHaveCount(0)
+  await expect(page.getByText('Systems Engineering Ready')).toHaveCount(0)
   await login(page, 'admin', { openProject: false })
-  await page.getByRole('button', { name: 'Account security' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Account security' })
-  await expect(dialog.getByText('Current session')).toBeVisible()
-  await expect(dialog.getByRole('heading', { name: 'Delegated authority' })).toBeVisible()
-  await expect(dialog.getByText(/No delegation history|Active|Future|Expired|Revoked/).first()).toBeVisible()
-  await expect(dialog.getByRole('button', { name: 'Revoke other active sessions' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Account security/i })).toHaveCount(0)
+  await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
+  await expect(page.getByText('Ongoing enhancements and integration for the upcoming release.')).toHaveCount(0)
+  await expect(page.getByText(/Informally Build/)).toHaveCount(0)
 })

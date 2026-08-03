@@ -10,6 +10,9 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
 
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()
   await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
+  await expect(page.getByText('Build-scoped systems, software, and verification work.')).toHaveCount(0)
+  await expect(page.getByText('Live data',{exact:true})).toHaveCount(0)
+  await expect(page.getByText(/This build is complete|Changes and verification triage are shown below/)).toHaveCount(0)
   await expect(page.getByRole('heading',{name:'System change control'})).toBeVisible()
   await expect(page.getByRole('heading',{name:'Software change control'})).toBeVisible()
   await expect(page.getByRole('heading',{name:'Change triage'})).toBeVisible()
@@ -49,9 +52,8 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   await page.getByLabel('Search requirements').fill('SYSR-000150')
   await expect(page.getByRole('button',{name:/Remove Search: SYSR-000150 filter/})).toBeVisible()
   await page.getByRole('button',{name:/Remove Search: SYSR-000150 filter/}).click()
-  await expect(page.getByRole('button',{name:'☆ Save view'})).toBeHidden()
-  await page.getByText('Workspace tools',{exact:true}).click()
-  await expect(page.getByRole('button',{name:'☆ Save view'})).toBeVisible()
+  await expect(page.getByText('Authoritative view',{exact:true})).toHaveCount(0)
+  await expect(page.getByText('Workspace tools',{exact:true})).toHaveCount(0)
   await expect(page.getByRole('button',{name:'Table view'})).toBeVisible()
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()
 
