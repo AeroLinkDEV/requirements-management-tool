@@ -38,6 +38,9 @@ public static class DownstreamAssessmentEndpoints
             var sourceIds = rows.Select(x => x.SourceChangeRequestId).ToList();
             var requests = await db.SystemChangeRequests.AsNoTracking().Include(x => x.RequirementChanges)
                 .Where(x => sourceIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+            var linkedIds = rows.SelectMany(x => x.ChangeRequestLinks).Select(x => x.ChangeRequestId).Distinct().ToList();
+            var linkedRequests = await db.SystemChangeRequests.AsNoTracking()
+                .Where(x => linkedIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
             return Results.Ok(rows.Select(x =>
             {
                 requests.TryGetValue(x.SourceChangeRequestId, out var request);
@@ -59,7 +62,10 @@ public static class DownstreamAssessmentEndpoints
                     }) ?? [],
                     linkedChangeRequests = x.ChangeRequestLinks.OrderBy(link => link.ChangeRequestNumber).Select(link => new
                     {
-                        link.ChangeRequestId, link.ChangeRequestNumber, link.LinkedBy, link.LinkedAt
+                        link.ChangeRequestId, link.ChangeRequestNumber,
+                        title = linkedRequests.GetValueOrDefault(link.ChangeRequestId)?.Title ?? "Linked downstream change",
+                        state = linkedRequests.GetValueOrDefault(link.ChangeRequestId)?.State.ToString() ?? "Unavailable",
+                        link.LinkedBy, link.LinkedAt
                     }),
                     capabilities = new
                     {

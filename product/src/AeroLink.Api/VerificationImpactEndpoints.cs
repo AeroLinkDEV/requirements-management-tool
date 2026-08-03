@@ -56,6 +56,10 @@ public static class VerificationImpactEndpoints
                 .OrderBy(x => x.State).ThenBy(x => x.Discipline).ThenBy(x => x.CreatedAt)
                 .ToList();
             var reviewIds = reviews.Select(x => x.Id).ToList();
+            var changeRequestIds = reviews.Select(x => x.ChangeRequestId)
+                .Concat(reviews.SelectMany(x => x.AdditionalSources).Select(x => x.ChangeRequestId)).Distinct().ToList();
+            var changeRequests = await db.SystemChangeRequests.AsNoTracking().Where(x => changeRequestIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.Title, ct);
             var items = await db.VerificationImpactItems.AsNoTracking()
                 .Where(x => reviewIds.Contains(x.TestChangeReviewId)).ToListAsync(ct);
             var reportLinks = await db.ProblemReportLinks.AsNoTracking()
@@ -76,9 +80,9 @@ public static class VerificationImpactEndpoints
                 review.DisplayNumber,
                 // Every change request this package answers for, the one it was raised from first. A reader
                 // scanning the list needs to see that two changes are being tested together without opening it.
-                coveredChangeRequests = new[] { new { id = review.ChangeRequestId, number = review.SourceChangeRequestNumber, originating = true } }
+                coveredChangeRequests = new[] { new { id = review.ChangeRequestId, number = review.SourceChangeRequestNumber, title = changeRequests.GetValueOrDefault(review.ChangeRequestId) ?? "Source change request", originating = true } }
                     .Concat(review.AdditionalSources.OrderBy(x => x.ChangeRequestNumber)
-                        .Select(x => new { id = x.ChangeRequestId, number = x.ChangeRequestNumber, originating = false })),
+                        .Select(x => new { id = x.ChangeRequestId, number = x.ChangeRequestNumber, title = changeRequests.GetValueOrDefault(x.ChangeRequestId) ?? "Source change request", originating = false })),
                 review.AssignedEngineerId,
                 review.SubmittedBy,
                 review.SelectedApproverId,
@@ -508,6 +512,14 @@ public static class VerificationImpactEndpoints
     private static async Task<IReadOnlyList<object>> MapAsync(
         IReadOnlyCollection<VerificationImpactItem> items, AeroLinkDbContext db, CancellationToken ct)
     {
+        var revisionIdsForSubjects = items.Where(x => x.RequirementRevisionId is not null)
+            .Select(x => x.RequirementRevisionId!.Value).Distinct().ToList();
+        var revisionSubjects = await db.RequirementRevisions.AsNoTracking()
+            .Where(x => revisionIdsForSubjects.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Statement, ct);
+        var changeIdsForSubjects = items.Where(x => x.RequirementChangeId is not null)
+            .Select(x => x.RequirementChangeId!.Value).Distinct().ToList();
+        var changeSubjects = await db.RequirementChanges.AsNoTracking()
+            .Where(x => changeIdsForSubjects.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Statement, ct);
         var exactIds = items.Where(x => x.ResolvedProcedureRevisionId is not null)
             .Select(x => x.ResolvedProcedureRevisionId!.Value).Distinct().ToList();
 
@@ -578,6 +590,10 @@ public static class VerificationImpactEndpoints
                 trigger = x.Trigger.ToString(),
                 state = x.State.ToString(),
                 x.SubjectDisplayNumber,
+                subjectStatement = x.RequirementRevisionId is not null && revisionSubjects.TryGetValue(x.RequirementRevisionId.Value, out var revisionStatement)
+                    ? revisionStatement
+                    : x.RequirementChangeId is not null && changeSubjects.TryGetValue(x.RequirementChangeId.Value, out var changeStatement)
+                        ? changeStatement : "",
                 x.DeclaredVerificationMethod,
                 x.RequirementChangeId,
                 x.RequirementRevisionId,

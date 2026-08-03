@@ -83,8 +83,9 @@ public sealed class DownstreamChangeAssessment
         EnsureAssignee(actorId);
         if (_changeRequestLinks.Count != 0)
             throw new DomainException("The downstream change is already controlled by a linked SWCR.");
+        if (Outcome == DownstreamAssessmentOutcome.NoChangeRequired)
+            Rationale = "";
         Outcome = DownstreamAssessmentOutcome.ChangeRequired;
-        Rationale = "";
         Touch(now);
     }
 
@@ -96,7 +97,6 @@ public sealed class DownstreamChangeAssessment
         if (_changeRequestLinks.Any(x => x.ChangeRequestId == changeRequestId)) return;
         _changeRequestLinks.Add(new(Id, changeRequestId, Required(displayNumber, "downstream change request number"), actorId, now));
         Outcome = DownstreamAssessmentOutcome.ChangeRequestsLinked;
-        Rationale = "";
         Touch(now);
     }
 

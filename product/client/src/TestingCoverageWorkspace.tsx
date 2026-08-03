@@ -19,7 +19,7 @@ type CoverageItem = {
   coveredBy: { procedureId: string; revisionId: string; displayNumber: string; title: string; state: string; coverageState: 'Confirmed' | 'Suspect' }[]
 }
 type Coverage = { total: number; covered: number; suspect: number; verified: number; uncovered: number; items: CoverageItem[] }
-type ChangeRequestCover = { id: string; number: string; originating: boolean }
+type ChangeRequestCover = { id: string; number: string; title: string; originating: boolean }
 type TestChangeRequest = {
   id: string
   displayNumber: string
@@ -40,10 +40,12 @@ type ImpactItem = {
   trigger: string
   state: string
   subjectDisplayNumber: string
+  subjectStatement: string
   declaredVerificationMethod: string
   assignedEngineerId?: string
   outcome?: string
   resolutionRationale: string
+  resolvedProcedure?: { id:string; revisionId:string; displayNumber:string; title:string; state:string }
   holdsRelease?: boolean
   decisionHistory: { id: string; action: string; outcome?: string; rationale: string; actor: string; occurredAt: string }[]
 }
@@ -480,16 +482,24 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               )}
             </div>
             {opened === request.id && (
+              <div className="testPackageWorkbench">
+                <section className="testPackageContext" aria-label={`${request.displayNumber} context`}>
+                  <div><b>Source change requests</b>{request.coveredChangeRequests.map(change=><span key={change.id}><strong>{change.number}</strong> · {change.title}</span>)}</div>
+                  <div><b>Responsibility</b><span>{request.assignedEngineerId?<><PersonName userName={request.assignedEngineerId}/> owns this package</>:'Unassigned'}</span>{request.selectedApproverId&&<span><PersonName userName={request.selectedApproverId}/> is the independent approver</span>}</div>
+                  <div><b>Linked Problem Reports</b>{request.problemReports?.length?request.problemReports.map(report=><span key={report.id}><strong>{report.displayNumber}</strong> · {report.title}</span>):<span>None linked</span>}</div>
+                </section>
               <ul className="decisionList">
                 {impact.filter(x => x.testChangeReviewId === request.id).map(item => (
                   <li key={item.id}>
                     <b>{item.subjectDisplayNumber}</b>
                     <i>{item.state === 'Resolved' ? (item.outcome ?? 'Resolved') : item.state}</i>
+                    {item.subjectStatement&&<p>{item.subjectStatement}</p>}
                     <small>
                       Author declared {item.declaredVerificationMethod || 'no method'}
                       {item.assignedEngineerId ? <> · <PersonName userName={item.assignedEngineerId} /></> : ''}
                       {item.resolutionRationale ? ` · ${item.resolutionRationale}` : ''}
                     </small>
+                    {item.resolvedProcedure&&<div className="resolvedProcedure"><b>{item.resolvedProcedure.displayNumber}</b><span>{item.resolvedProcedure.title} · {item.resolvedProcedure.state}</span></div>}
                     {request.capabilities.canDecide && item.state !== 'Resolved' && (
                       <button type="button" className="quiet" disabled={busy} onClick={() => {
                         setOutcome(item.trigger === 'ProcedureOrphaned' ? 'ProcedureRetired' : 'ProcedureCoverageConfirmed')
@@ -521,6 +531,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                 ))}
                 {!impact.some(x => x.testChangeReviewId === request.id) && <li className="decisionNone">This package has no decisions recorded against it.</li>}
               </ul>
+              </div>
             )}
           </article>
         ))}
