@@ -114,6 +114,7 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
     await page.screenshot({ path: process.env.AEROLINK_BUILD_15_SCREENSHOT, fullPage: true })
   }
 
+  await page.getByRole('dialog', { name: /History of SYSTP-000001/ }).getByRole('button', { name: 'Close' }).click()
   await page.getByRole('button', { name: 'Back to Software Builds' }).click()
   await expect(page).toHaveURL(/\/projects\/fms-product-development\/builds$/)
   await page.getByRole('button', { name: 'Open build 1.6' }).click()

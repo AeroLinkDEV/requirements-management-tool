@@ -43,10 +43,8 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(publicationText).toContain('MODIFIED REQUIREMENTS - OLD AND NEW')
  expect(publicationText).toContain('RETIRED REQUIREMENTS')
  const mixedSoftware=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Allocate HLR and LLR changes together',problem:'Both software levels require coordinated change',analysis:'The allocation crosses high and low level software requirements',solution:'Review both exact proposals in one SWCR',requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall coordinate acceptance state.',rationale:'High-level architecture-derived coordination.',verificationMethod:'Test',isDerived:true},{level:'LowLevel',kind:'Introduce',targetSectionId:llrSection,statement:'The acceptance component shall persist the coordinated state.',rationale:'Low-level architecture-derived implementation.',verificationMethod:'Test',isDerived:true}]}})
- expect(mixedSoftware.status(),await mixedSoftware.text()).toBe(201)
- const mixed=await mixedSoftware.json()
- expect(mixed.baseNumber).toMatch(/^SWCR-\d{5}$/)
- expect(mixed.requirementChanges.map((x:any)=>x.level)).toEqual(['HighLevel','LowLevel'])
+ expect(mixedSoftware.status()).toBe(400)
+ expect(await mixedSoftware.text()).toContain('cannot mix both levels')
 
  const reviewDraftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Sequential activation acceptance',problem:'Ordered authority must be proven',analysis:'Only the current reviewer may act',solution:'Exercise two controlled stages',requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall activate one sequential reviewer at a time.',rationale:'Architecture-derived control prevents out-of-order approval.',verificationMethod:'Test',impactDispositionJson:completeImpacts,isDerived:true}]}})
  const reviewDraft=await reviewDraftResponse.json()

@@ -153,9 +153,9 @@ type Workspace = {
  */
 const API = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://127.0.0.1:5080" : "");
 
-function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, context, density, onNavigate, onSearch, onDisplay, onExitBuild, onSignOut }:{
+function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, context, density, onNavigate, onSearch, onDisplay, onExitBuild, onSignOut }:{
   user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;
-  density:WorkspaceDensity;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
+  artifactKind:string;density:WorkspaceDensity;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
 }) {
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
@@ -163,13 +163,13 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   const officialBuild = release ? officialBuildName(release.version) : "";
   // `kind` carries the software level for the verification pages, which split into HLR and LLR. It is the
   // same field the change-request routes use for it, so no new axis had to be threaded through the shell.
-  const item = (label:string,target:View,icon:string,area:Discipline="system",accessibleLabel=label,kind?:string) => {
-    const activeItem = (view===target || (target==="history" && view==="scr") || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area;
+  const item = (label:string,target:View,icon:string,area:Discipline="system",accessibleLabel=label,kind?:string,topLevel=false) => {
+    const activeItem = (view===target || (target==="history" && view==="scr") || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area && (!kind || artifactKind===kind);
     // Fetched on hover or keyboard focus, so the workspace's code is usually already here by the time the
     // click is. Both events, because a keyboard user never hovers anything.
     const warm = () => viewCode[target]?.warm();
-    return <a href={context ? routePath(context,target,area,undefined,kind) : "#"} className={activeItem?"active":""} aria-label={accessibleLabel} aria-current={activeItem?"page":undefined} onPointerEnter={warm} onFocus={warm} onClick={event=>{event.preventDefault();onNavigate(target,area,undefined,kind)}}>
-      <i aria-hidden="true">{icon}</i><span>{label}</span>
+    return <a href={context ? routePath(context,target,area,undefined,kind) : "#"} className={`${topLevel?"navSectionLink ":""}${activeItem?"active":""}`.trim()} aria-label={accessibleLabel} aria-current={activeItem?"page":undefined} onPointerEnter={warm} onFocus={warm} onClick={event=>{event.preventDefault();onNavigate(target,area,undefined,kind)}}>
+      <i aria-hidden="true">{icon}</i><span>{topLevel?label.toUpperCase():label}</span>
     </a>;
   };
   const engineeringView = ["createSystemScr","createSoftwareChange","history","requirements","scr","lifecycle"].includes(view)
@@ -204,8 +204,8 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
         <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}><summary>VERIFICATION</summary><div className="navScopeSwitch" role="group" aria-label="Verification scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{verificationScope==="softwareTest"
           ? <>{item("HLR Testing Coverage","testingCoverage","◫","softwareTest","Software HLR Testing Coverage","HighLevel")}{item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}{item("LLR Testing Coverage","testingCoverage","◫","softwareTest","Software LLR Testing Coverage","LowLevel")}{item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}</>
           : <>{item("Testing Coverage","testingCoverage","◫","systemTest","System Testing Coverage")}{item("Test Results","testResults","▦","systemTest","System Test Results")}</>}{item("Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Software Verification Documents":"System Verification Documents")}</details>
-        <div className="navStandalone">{item("Code","code","{ }","software","Code traceability")}</div>
-        <div className="navStandalone">{item("Problem Reports","problemReports","!","system","Problem Reports")}</div>
+        <div className="navStandalone">{item("Code","code","{ }","software","Code traceability",undefined,true)}</div>
+        <div className="navStandalone">{item("Problem Reports","problemReports","!","system","Problem Reports",undefined,true)}</div>
         <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("Review Workflows","reviewWorkflows","⇉","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","↗","system","Integration Command Center")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
       </nav>
@@ -432,7 +432,7 @@ function App() {
   const exitBuild=()=>{setPaletteOpen(false);setDisplayOpen(false);setView("builds");setSelectedArtifactId("");setSelectedArtifactKind("");setSelectedScrId("");history.pushState({},"",buildsPath)};
   if(view==="projects")return <ProjectsLanding user={user} workspaceHref={buildsPath} onOpenWorkspace={()=>{setView("builds");history.pushState({},"",buildsPath)}} onSignOut={signOut}/>;
   if(view==="builds")return <SoftwareBuildsLanding user={user} releases={project?.releases??[]} onProjectOverview={showProjects} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;setSelectedReleaseId(selected.id);setView("dashboard");history.pushState({},"",routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
-  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} context={context} density={density} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
+  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} density={density} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
   const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",dashboard:"Command Center",createSystemScr:"New System SCR",createSoftwareChange:"New Software SWCR",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Testing Coverage",testResults:"Test Results",documents:"Documents",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};

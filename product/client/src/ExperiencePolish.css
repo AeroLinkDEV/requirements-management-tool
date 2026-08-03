@@ -8,7 +8,7 @@ html { scroll-behavior: smooth; }
 .appBoot i { display: block; width: 100%; height: 3px; margin-top: 21px; overflow: hidden; border-radius: 2px; background: #1e3b54; }
 .appBoot i b { display: block; width: 38%; height: 100%; background: #69cdbc; animation: bootProgress 1.15s ease-in-out infinite alternate; }
 @keyframes bootProgress { to { transform: translateX(165%); } }
-.workspaceView { min-width: 0; animation: workspaceReveal .24s cubic-bezier(.2,.72,.25,1) both; }
+.workspaceView { min-width: 0; animation: workspaceReveal .24s cubic-bezier(.2,.72,.25,1); }
 .workspaceView > main { max-width: none; }
 @keyframes workspaceReveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 

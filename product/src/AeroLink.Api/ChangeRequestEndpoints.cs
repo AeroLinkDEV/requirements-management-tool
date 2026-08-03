@@ -422,6 +422,8 @@ public static class ChangeRequestEndpoints
             if (closed is not null) return Results.BadRequest(new { error = closed, code = "release_is_closed" });
             if (string.IsNullOrWhiteSpace(request.Title))
                 return Results.BadRequest(new { error = "Title of change request must be filled out before save is available." });
+            if (request.Type == ChangeRequestType.Software && request.SoftwareLevel is not (RequirementLevel.HighLevel or RequirementLevel.LowLevel))
+                return Results.BadRequest(new { error = "Choose whether this Software Draft belongs to the HLR or LLR workspace." });
             var problemReportError = await problemReports.ValidateSelectionAsync(request.ProjectId,
                 request.TargetReleaseId, request.ProblemReportIds, ct);
             if (problemReportError is not null) return Results.BadRequest(new { error = problemReportError });
@@ -430,7 +432,7 @@ public static class ChangeRequestEndpoints
                 var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, ct);
                 var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
                     request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, DateTimeOffset.UtcNow, request.Type,
-                    request.ProblemRich, request.AnalysisRich, request.SolutionRich);
+                    request.ProblemRich, request.AnalysisRich, request.SolutionRich, request.SoftwareLevel);
                 await problemReports.LinkChangeRequestAsync(scr.Id, request.ProblemReportIds,
                     http.UserAccount().UserName, DateTimeOffset.UtcNow, ct);
                 await repository.AddAsync(scr, ct); await repository.SaveAsync(ct);
@@ -448,6 +450,17 @@ public static class ChangeRequestEndpoints
             // form is not a controlled record and must not consume the next SCR/SWCR number.
             if (string.IsNullOrWhiteSpace(request.Title))
                 return Results.BadRequest(new { error = "Title of change request must be filled out before save is available." });
+            var softwareLevel = request.SoftwareLevel;
+            if (request.Type == ChangeRequestType.Software && softwareLevel is null)
+            {
+                var authoredLevels = request.RequirementChanges.Select(x => x.Level).Distinct().ToArray();
+                if (authoredLevels.Length == 0)
+                    return Results.BadRequest(new { error = "Choose whether this Software Draft belongs to the HLR or LLR workspace." });
+                if (authoredLevels.Length == 1 && authoredLevels[0] != RequirementLevel.System)
+                    softwareLevel = authoredLevels[0];
+                else if (!authoredLevels.Contains(RequirementLevel.System))
+                    return Results.BadRequest(new { error = "A Software Draft belongs to one HLR or LLR workspace and cannot mix both levels." });
+            }
             var problemReportError = await problemReports.ValidateSelectionAsync(request.ProjectId,
                 request.TargetReleaseId, request.ProblemReportIds, ct);
             if (problemReportError is not null) return Results.BadRequest(new { error = problemReportError });
@@ -463,7 +476,7 @@ public static class ChangeRequestEndpoints
                     .ToDictionaryAsync(x => x.AppliesTo, StringComparer.OrdinalIgnoreCase, ct);
                 var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
                     request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, now, request.Type,
-                    request.ProblemRich, request.AnalysisRich, request.SolutionRich);
+                    request.ProblemRich, request.AnalysisRich, request.SolutionRich, softwareLevel);
                 var nextNumbers = new Dictionary<string, int>();
                 foreach (var change in request.RequirementChanges)
                 {

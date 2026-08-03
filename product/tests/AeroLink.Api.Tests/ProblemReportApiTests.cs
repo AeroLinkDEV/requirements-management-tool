@@ -12,6 +12,35 @@ namespace AeroLink.Api.Tests;
 public sealed class ProblemReportApiTests
 {
     [Fact]
+    public async Task Build_queue_is_numeric_oldest_first_and_reports_when_more_than_ten_match()
+    {
+        using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
+        Guid projectId, releaseId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("PR queue Program", $"PQ{Guid.NewGuid():N}"[..12]);
+            var project = new ProjectRecord(program.Id, "Flight Management Product", "Flight Management System");
+            var release = new SoftwareRelease(project.Id, "1.6", false);
+            db.AddRange(program, project, release); await db.SaveChangesAsync(); projectId = project.Id; releaseId = release.Id;
+        }
+        for (var index = 1; index <= 12; index++)
+        {
+            using var created = await client.PostAsJsonAsync("/api/problem-reports", new
+            {
+                projectId, releaseId, title = $"Queue report {index}", problem = $"Observed anomaly {index}."
+            });
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        }
+
+        var queue = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports?projectId={projectId}&releaseId={releaseId}");
+        Assert.Equal(12, queue.GetProperty("totalCount").GetInt32());
+        var numbers = queue.GetProperty("items").EnumerateArray().Select(x => x.GetProperty("reportNumber").GetString()).ToArray();
+        Assert.Equal(10, numbers.Length);
+        Assert.Equal(Enumerable.Range(1, 10).Select(x => $"PR-{x:D5}"), numbers);
+    }
+
+    [Fact]
     public async Task Draft_fields_SCCB_lifecycle_filters_and_linked_change_implementation_are_audited()
     {
         using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
@@ -51,7 +80,7 @@ public sealed class ProblemReportApiTests
         using var opened = await client.PostAsJsonAsync($"/api/problem-reports/{id}/sccb/open", new { expectedVersion = version });
         Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
 
-        using var change = await client.PostAsJsonAsync("/api/scrs", new { projectId, targetReleaseId = releaseId, type = "Software", title = "Keep disagreement alert active", problem = "P", analysis = "A", solution = "S", problemReportIds = new[] { id } });
+        using var change = await client.PostAsJsonAsync("/api/scrs", new { projectId, targetReleaseId = releaseId, type = "Software", softwareLevel = "HighLevel", title = "Keep disagreement alert active", problem = "P", analysis = "A", solution = "S", problemReportIds = new[] { id } });
         Assert.Equal(HttpStatusCode.Created, change.StatusCode);
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
         Assert.Equal("Implementing", detail.GetProperty("state").GetString());
@@ -92,7 +121,7 @@ public sealed class ProblemReportApiTests
         using var createdChange = await client.PostAsJsonAsync("/api/scrs", new
         {
             projectId, targetReleaseId = releaseId, type = type.ToString(), title = "Correct source selection",
-            problem = "P", analysis = "A", solution = "S", problemReportIds = new[] { reportId }
+            problem = "P", analysis = "A", solution = "S", softwareLevel = type == ChangeRequestType.Software ? "HighLevel" : null, problemReportIds = new[] { reportId }
         });
         var text = await createdChange.Content.ReadAsStringAsync();
         Assert.True(createdChange.StatusCode == HttpStatusCode.Created, text);

@@ -36,7 +36,9 @@ public static class BaselineEndpoints
             page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
             var source = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId);
             if (type is not null) source = source.Where(x => x.Type == type);
-            if (level is not null) source = source.Where(x => x.RequirementChanges.Any(change => change.Level == level));
+            if (level is not null) source = source.Where(x =>
+                x.RequirementChanges.Any(change => change.Level == level) ||
+                (!x.RequirementChanges.Any() && x.SoftwareLevel == level));
             if (!string.IsNullOrWhiteSpace(state))
             {
                 if (state.Equals("ApprovedOrSelected", StringComparison.OrdinalIgnoreCase))
@@ -62,7 +64,7 @@ public static class BaselineEndpoints
             var items = await ordered
                 .Skip((page - 1) * pageSize).Take(pageSize).Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision,
                     x.BaseNumber, x.Revision, x.Title, state = x.State.ToString(), deferredFromState = x.DeferredFromState == null ? null : x.DeferredFromState.ToString(),
-                    x.AuthorId, x.TargetReleaseId, requirementCount = x.RequirementChanges.Count, x.CreatedAt, x.UpdatedAt,
+                    x.AuthorId, x.TargetReleaseId, softwareLevel = x.SoftwareLevel == null ? null : x.SoftwareLevel.ToString(), requirementCount = x.RequirementChanges.Count, x.CreatedAt, x.UpdatedAt,
                     hasHighLevelChanges = x.RequirementChanges.Any(change => change.Level == RequirementLevel.HighLevel),
                     hasLowLevelChanges = x.RequirementChanges.Any(change => change.Level == RequirementLevel.LowLevel),
                     revisionCount = db.SystemChangeRequests.Count(other => other.ProjectId == projectId && other.BaseNumber == x.BaseNumber) }).ToListAsync(ct);

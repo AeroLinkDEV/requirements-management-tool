@@ -11,9 +11,10 @@
 .workspaceStage > main { max-width: none; }
 .primaryNavigation { display: flex; flex-direction: column; gap: 8px; }
 .navHome { display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid #223752; }
-.navStandalone { padding: 4px 0; border-top: 1px solid #223752; border-bottom: 1px solid #223752; }
+.navStandalone { padding: 0; }
 .navGroup { display: flex; flex-direction: column; gap: 2px; }
-.navGroup > summary {
+.navGroup > summary,
+.primaryNavigation a.navSectionLink {
   cursor: pointer;
   list-style: none;
   padding: 8px 12px 6px;
@@ -21,7 +22,14 @@
   font-size: 12px;
   font-weight: 800;
   letter-spacing: .08em;
+  min-height: 32px;
+  border-radius: 8px;
 }
+.primaryNavigation a.navSectionLink { gap: 0; }
+.primaryNavigation a.navSectionLink i { display: none; }
+.primaryNavigation a.navSectionLink:hover,
+.primaryNavigation a.navSectionLink:focus-visible { color: white; background: #162b49; }
+.primaryNavigation a.navSectionLink.active { color: white; background: #1b385e; box-shadow: inset 4px 0 #68d3c3; }
 .navGroup > summary::-webkit-details-marker { display: none; }
 .navGroup > summary::after { content: '›'; float: right; transform: rotate(90deg); transition: transform .15s; font-size: 16px; line-height: 1; }
 .navGroup:not([open]) > summary::after { transform: rotate(0); }

@@ -18,7 +18,8 @@ public sealed class SystemChangeRequest
     public SystemChangeRequest(string baseNumber, int revision, Guid projectId, Guid targetReleaseId,
         string title, string problem, string analysis, string solution, string authorId, DateTimeOffset now,
         ChangeRequestType type = ChangeRequestType.System,
-        string? problemRich = null, string? analysisRich = null, string? solutionRich = null)
+        string? problemRich = null, string? analysisRich = null, string? solutionRich = null,
+        RequirementLevel? softwareLevel = null)
     {
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A change request title is required.");
         Id = Guid.NewGuid();
@@ -30,6 +31,11 @@ public sealed class SystemChangeRequest
         SetCase(problem, analysis, solution, problemRich, analysisRich, solutionRich);
         AuthorId = authorId;
         Type = type;
+        if (type == ChangeRequestType.System && softwareLevel is not null)
+            throw new DomainException("A System SCR cannot declare a software requirement level.");
+        if (type == ChangeRequestType.Software && softwareLevel is RequirementLevel.System)
+            throw new DomainException("A Software SWCR must declare HLR or LLR scope.");
+        SoftwareLevel = softwareLevel;
         State = ScrState.Draft;
         CreatedAt = now;
         UpdatedAt = now;
@@ -64,6 +70,12 @@ public sealed class SystemChangeRequest
     public string SolutionRich { get; private set; } = Content.RichContent.Empty;
     public string AuthorId { get; private set; } = string.Empty;
     public ChangeRequestType Type { get; private set; }
+    /// <summary>
+    /// The HLR or LLR workspace in which an empty Software Draft was started. Once proposals exist their
+    /// controlled levels remain authoritative, but this field keeps a case-only Draft discoverable instead
+    /// of making it disappear from both engineering work lists.
+    /// </summary>
+    public RequirementLevel? SoftwareLevel { get; private set; }
     public ScrState State { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -257,7 +269,7 @@ public sealed class SystemChangeRequest
             throw new DomainException(
                 "This SCR is incorporated in a released build and cannot be revised. Raise a new SCR against the in-work build.");
         var next = new SystemChangeRequest(BaseNumber, Revision + 1, ProjectId, TargetReleaseId,
-            Title, Problem, Analysis, Solution, AuthorId, now, Type, ProblemRich, AnalysisRich, SolutionRich);
+            Title, Problem, Analysis, Solution, AuthorId, now, Type, ProblemRich, AnalysisRich, SolutionRich, SoftwareLevel);
         foreach (var item in _requirementChanges)
             next.AddRequirementChange(actorId, item.BaseNumber, item.Revision, item.Level, item.Kind,
                 item.Statement, item.Rationale, item.VerificationMethod, now, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
@@ -370,10 +382,12 @@ public sealed class SystemChangeRequest
 
     private void EnsureRequirementLevel(RequirementLevel level)
     {
-        if (AcceptsRequirementLevel(Type, level)) return;
-        throw new DomainException(Type == ChangeRequestType.System
-            ? "A System change request can contain System requirements only. Use an SWCR for HLR or LLR work."
-            : "A Software change request can contain HLR or LLR requirements only. Use an SCR for System work.");
+        if (!AcceptsRequirementLevel(Type, level))
+            throw new DomainException(Type == ChangeRequestType.System
+                ? "A System change request can contain System requirements only. Use an SWCR for HLR or LLR work."
+                : "A Software change request can contain HLR or LLR requirements only. Use an SCR for System work.");
+        if (Type == ChangeRequestType.Software && SoftwareLevel is not null && level != SoftwareLevel)
+            throw new DomainException($"This Software Draft belongs to the {(SoftwareLevel == RequirementLevel.HighLevel ? "HLR" : "LLR")} workspace and cannot contain {(level == RequirementLevel.HighLevel ? "HLR" : "LLR")} changes.");
     }
 
     /// <summary>

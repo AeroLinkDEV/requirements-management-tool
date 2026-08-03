@@ -73,4 +73,17 @@ public sealed class TestChangeReviewTests
         Assert.Null(review.SubmittedBy);
         Assert.Null(review.SubmittedAt);
     }
+
+    [Fact]
+    public void A_legacy_review_can_receive_only_its_disciplines_controlled_number()
+    {
+        var review = Create(TestChangeReviewDiscipline.HighLevelSoftware);
+
+        Assert.Equal("SCR-00039.00", review.DisplayNumber);
+        Assert.Throws<DomainException>(() => review.AssignControlledNumber("LLRTCR-000001", Now.AddMinutes(1)));
+        review.AssignControlledNumber("HLRTCR-000014", Now.AddMinutes(2));
+        review.AssignControlledNumber("HLRTCR-999999", Now.AddMinutes(3));
+
+        Assert.Equal("HLRTCR-000014.00", review.DisplayNumber);
+    }
 }

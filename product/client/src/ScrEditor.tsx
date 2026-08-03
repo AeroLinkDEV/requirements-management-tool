@@ -351,6 +351,7 @@ export default function ScrEditor({
           solutionRich,
           problemReportIds,
           type: scope,
+          softwareLevel: scope === "Software" ? softwareLevel : null,
           // An unset section is sent as null, not as "". A Guid? will not bind an empty string, and the failure
           // would be a 400 on the whole change request because one optional field was left alone.
           requirementChanges: started.map((item) => ({ ...item, targetSectionId: item.targetSectionId || null })),

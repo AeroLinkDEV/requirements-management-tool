@@ -13,6 +13,34 @@ namespace AeroLink.Api.Tests;
 public sealed class SoftwareChangeRequestLevelHistoryTests
 {
     [Fact]
+    public async Task Empty_software_draft_requires_and_persists_its_workspace_level()
+    {
+        using var factory = new AeroLinkApiFactory();
+        Guid projectId, releaseId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Draft scope program", $"DS{Guid.NewGuid():N}"[..12]);
+            var project = new ProjectRecord(program.Id, "Flight Software", "Scoped Software");
+            var release = new SoftwareRelease(project.Id, "1.6", false);
+            var account = new UserAccount("scope.engineer", "Scope Engineer", "scope@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(program, project, release, account, new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
+            await db.SaveChangesAsync(); projectId = project.Id; releaseId = release.Id;
+        }
+        using var client = factory.CreateClient();
+        await client.PostAsJsonAsync("/api/auth/login", new { userName = "scope.engineer", password = AeroLinkApiFactory.MemberPassword });
+        var body = new { projectId, targetReleaseId = releaseId, type = "Software", title = "Empty scoped Draft", problem = "P", analysis = "A", solution = "S" };
+        using var rejected = await client.PostAsJsonAsync("/api/scr-drafts", new { body.projectId, body.targetReleaseId, body.type, body.title, body.problem, body.analysis, body.solution, requirementChanges = Array.Empty<object>() });
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        using var created = await client.PostAsJsonAsync("/api/scr-drafts", new { body.projectId, body.targetReleaseId, body.type, body.title, body.problem, body.analysis, body.solution, softwareLevel = "LowLevel", requirementChanges = Array.Empty<object>() });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var draft = await created.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("LowLevel", draft.GetProperty("softwareLevel").GetString());
+        var low = await client.GetFromJsonAsync<JsonElement>($"/api/history/scrs?projectId={projectId}&releaseId={releaseId}&type=Software&level=LowLevel&page=1&pageSize=50");
+        Assert.Contains(low.GetProperty("items").EnumerateArray(), item => item.GetProperty("id").GetGuid() == draft.GetProperty("id").GetGuid());
+    }
+
+    [Fact]
     public async Task Software_history_filters_by_requirement_level_and_keeps_mixed_requests_in_both_tabs()
     {
         using var factory = new AeroLinkApiFactory();
@@ -36,11 +64,15 @@ public sealed class SoftwareChangeRequestLevelHistoryTests
                 ("LLR-000001", RequirementLevel.LowLevel));
             var mixed = SoftwareRequest("SWCR-00003", "Mixed scope", project.Id, release.Id, now,
                 ("HLR-000002", RequirementLevel.HighLevel), ("LLR-000002", RequirementLevel.LowLevel));
+            var emptyHlr = new SystemChangeRequest("SWCR-00004", 0, project.Id, release.Id, "Empty HLR Draft", "P", "A", "S",
+                "scope.engineer", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+            var emptyLlr = new SystemChangeRequest("SWCR-00005", 0, project.Id, release.Id, "Empty LLR Draft", "P", "A", "S",
+                "scope.engineer", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel);
             var system = new SystemChangeRequest("SCR-00001", 0, project.Id, release.Id,
                 "System only", "P", "A", "S", "scope.engineer", now);
             system.AddRequirementChange("scope.engineer", "SYSR-000001", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "System statement", "R", "Test", now);
-            db.AddRange(hlr, llr, mixed, system);
+            db.AddRange(hlr, llr, mixed, emptyHlr, emptyLlr, system);
             await db.SaveChangesAsync();
             projectId = project.Id;
             releaseId = release.Id;
@@ -53,7 +85,7 @@ public sealed class SoftwareChangeRequestLevelHistoryTests
 
         using var high = await ReadAsync(client,
             $"/api/history/scrs?projectId={projectId}&releaseId={releaseId}&type=Software&level=HighLevel&page=1&pageSize=50");
-        Assert.Equal(["SWCR-00001.00", "SWCR-00003.00"], Numbers(high));
+        Assert.Equal(["SWCR-00001.00", "SWCR-00003.00", "SWCR-00004.00"], Numbers(high));
         var mixedHigh = high.RootElement.GetProperty("items").EnumerateArray()
             .Single(item => item.GetProperty("displayNumber").GetString() == "SWCR-00003.00");
         Assert.True(mixedHigh.GetProperty("hasHighLevelChanges").GetBoolean());
@@ -61,7 +93,7 @@ public sealed class SoftwareChangeRequestLevelHistoryTests
 
         using var low = await ReadAsync(client,
             $"/api/history/scrs?projectId={projectId}&releaseId={releaseId}&type=Software&level=LowLevel&page=1&pageSize=50");
-        Assert.Equal(["SWCR-00002.00", "SWCR-00003.00"], Numbers(low));
+        Assert.Equal(["SWCR-00002.00", "SWCR-00003.00", "SWCR-00005.00"], Numbers(low));
 
         using var systems = await ReadAsync(client,
             $"/api/history/scrs?projectId={projectId}&releaseId={releaseId}&type=System&page=1&pageSize=50");

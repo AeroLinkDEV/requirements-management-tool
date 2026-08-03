@@ -104,8 +104,8 @@ public static class ProblemReportEndpoints
         if (!string.IsNullOrWhiteSpace(owner)) { var normalizedOwner = owner.Trim().ToLower(); query = query.Where(x => x.ResponsibleEngineerId.ToLower().Contains(normalizedOwner)); }
         if (blockersOnly == true) query = query.Where(x => x.IsReleaseBlocker && string.IsNullOrEmpty(x.WaiverRationale));
         if (!string.IsNullOrWhiteSpace(search)) { var term = search.Trim().ToLower(); query = query.Where(x => x.ReportNumber.ToLower().Contains(term) || x.Title.ToLower().Contains(term) || x.Problem.ToLower().Contains(term) || x.RootCause.ToLower().Contains(term)); }
-        var size = Math.Clamp(pageSize ?? 50, 1, 200); var current = Math.Max(page ?? 1, 1); var matching = await query.ToListAsync(ct); var total = matching.Count;
-        var items = matching.OrderByDescending(x => x.IsReleaseBlocker).ThenByDescending(x => x.Severity).ThenByDescending(x => x.UpdatedAt).Skip((current - 1) * size).Take(size).ToList();
+        var size = Math.Clamp(pageSize ?? 10, 1, 200); var current = Math.Max(page ?? 1, 1); var matching = await query.ToListAsync(ct); var total = matching.Count;
+        var items = matching.OrderBy(x => IdentifierAllocator.Sequence(x.ReportNumber)).ThenBy(x => x.Revision).Skip((current - 1) * size).Take(size).ToList();
         return Results.Ok(new { page = current, pageSize = size, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)size), items = items.Select(Summary) });
     }
 

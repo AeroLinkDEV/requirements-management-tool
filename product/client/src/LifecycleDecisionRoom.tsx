@@ -58,6 +58,7 @@ export default function LifecycleDecisionRoom({ api, projectId, activeReleaseId,
   const [notice, setNotice] = useState("");
   const [decision, setDecision] = useState<"Approve" | "Approve with conditions" | "Return for rework">("Approve");
   const [signing, setSigning] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,7 +142,8 @@ export default function LifecycleDecisionRoom({ api, projectId, activeReleaseId,
   return <main className="decisionRoom">
     {error && <div className="decisionAlert" role="alert">{error}<button onClick={() => setError("")}>×</button></div>}
     {notice && <div className="decisionNotice" role="status">✓ {notice}<button onClick={() => setNotice("")}>×</button></div>}
-    {screen === "readiness" && <ReadinessView detail={detail} comparison={comparison} blockers={blockers} gate={gate} onBack={onBack} onOpenDecision={onOpenDecision} onOpenImpact={onOpenImpact} openGate={openGate} />}
+    {screen === "readiness" && showChanges && <ChangesView detail={detail} comparison={comparison} onBack={() => setShowChanges(false)} onOpenImpact={onOpenImpact} onOpenDecision={onOpenDecision} />}
+    {screen === "readiness" && !showChanges && <ReadinessView detail={detail} comparison={comparison} blockers={blockers} gate={gate} onBack={onBack} onOpenDecision={onOpenDecision} onExploreChanges={() => setShowChanges(true)} openGate={openGate} />}
     {screen === "impact" && <ImpactView detail={detail} scr={scr} affected={affected} selectedIndex={selectedRequirement} selected={selected} onSelect={setSelectedRequirement} onBack={onBackToReadiness} onOpenScr={() => effectiveScrId && onOpenScr(effectiveScrId)} onOpenVerification={onOpenVerification} />}
     {screen === "decision" && <DecisionView detail={detail} comparison={comparison} documents={documents} blockers={blockers} decision={decision} onDecision={setDecision} onBack={onBackToReadiness} onRecord={recordDecision} onOpenDocuments={onOpenDocuments} openGate={openGate} />}
     {signing && <SignatureDialog title={`Approve release ${detail.release}`} meaning="I approve this exact release decision package and authorize controlled progression." onCancel={() => setSigning(false)} onSign={sign} />}
@@ -157,7 +159,7 @@ function ReleaseHero({ detail, decision = false }: { detail: CampaignDetail; dec
   return <section className="decisionHero"><div><p>{decision ? "DECISION PACKAGE" : "ACTIVE RELEASE"}</p><h2>{decision ? `Candidate baseline ${compactNumber(detail.baseline)}` : `Flight Management System ${detail.release}`}</h2><span>{decision ? `Flight Management System ${detail.release} · Built from baseline 1.5` : `${compactNumber(detail.baseline)} · ${detail.baselineState}`}</span>{decision && <small>◇ Integrity {detail.requirementsHash ? "verified" : "awaiting checkpoint"}</small>}</div><div className={`decisionScore${decision ? " compact" : ""}`}>{!decision && <div className="readinessRing" style={{ "--readiness": `${percent * 3.6}deg` } as React.CSSProperties}><b>{percent}%</b></div>}{decision && <b>{percent}%</b>}<span>Decision readiness</span><small>{detail.readiness.gates.filter((item) => !item.complete).length} blockers remain</small>{decision && <i><em style={{ width: `${percent}%` }} /></i>}</div></section>;
 }
 
-function ReadinessView({ detail, comparison, blockers, gate, onBack, onOpenDecision, onOpenImpact, openGate }: { detail: CampaignDetail; comparison?: Comparison; blockers: Gate[]; gate: (code: string) => Gate | undefined; onBack: () => void; onOpenDecision: () => void; onOpenImpact: (id: string) => void; openGate: (gate: Gate) => void }) {
+function ReadinessView({ detail, comparison, blockers, gate, onBack, onOpenDecision, onExploreChanges, openGate }: { detail: CampaignDetail; comparison?: Comparison; blockers: Gate[]; gate: (code: string) => Gate | undefined; onBack: () => void; onOpenDecision: () => void; onExploreChanges: () => void; openGate: (gate: Gate) => void }) {
   const trace = gate("traceability"), verification = gate("verification") ?? gate("coverage"), approval = gate("release_approval");
   const gateStatus = (item?: Gate) => !item ? "Not evaluated" : item.complete ? "Complete" : item.evaluationState === "WaitingForPrerequisite" ? "Waiting for baseline" : item.total > 0 ? `${Math.max(0, item.total - item.completed)} gaps` : "Review required";
   const stages = [
@@ -169,7 +171,7 @@ function ReadinessView({ detail, comparison, blockers, gate, onBack, onOpenDecis
     ["Release", detail.state === "Released" ? "Authorized" : "Awaiting decision", detail.state === "Released"],
   ] as [string, string | number, boolean | undefined][];
   return <>
-    <PageHeader eyebrow={`FMS LIVE / RELEASE ${detail.release}`} title="Release Readiness" subtitle="A decision-ready view of the complete lifecycle." onBack={onBack} backLabel="Command Center" secondaryLabel={`Explore changes vs ${comparison?.fromRelease ?? "1.5"} →`} onSecondary={() => detail.changes[0] && onOpenImpact(detail.changes[0].id)} actionLabel="Review release evidence" onAction={onOpenDecision} />
+    <PageHeader eyebrow={`FMS LIVE / RELEASE ${detail.release}`} title="Release Readiness" subtitle="A decision-ready view of the complete lifecycle." onBack={onBack} backLabel="Command Center" secondaryLabel={`Explore changes vs ${comparison?.fromRelease ?? "1.5"} →`} onSecondary={onExploreChanges} actionLabel="Review release evidence" onAction={onOpenDecision} />
     <ReleaseHero detail={detail} />
     <section className="lifecycleRail" aria-label="Release lifecycle">{stages.map(([label, value, complete], index) => <article className={complete ? "complete" : index < 4 ? "attention" : "pending"} key={label}><i>{complete ? "✓" : index === 5 ? "◇" : "!"}</i><b>{label}</b><span>{value}</span></article>)}</section>
     <div className="readinessGrid">
@@ -180,9 +182,23 @@ function ReadinessView({ detail, comparison, blockers, gate, onBack, onOpenDecis
           organisational facts up, least of all in the view a release is approved from. Remaining work and the
           action that clears it are real, and are what a reader actually needs. */}
       <section className="attentionCard"><div className="decisionCardTitle"><div><h2>What needs attention</h2><p>The exact work preventing a release decision</p></div><b>{blockers.length}</b></div>{blockers.map((item) => <article className={item.evaluationState === "WaitingForPrerequisite" ? "waiting" : ""} key={item.code}><span className="attentionIcon">{item.evaluationState === "WaitingForPrerequisite" ? "…" : "!"}</span><div className="attentionCopy"><b>{item.name}</b><small>{item.detail}</small></div><div className="attentionRemaining"><span className="attentionMeta">{item.evaluationState === "WaitingForPrerequisite" ? "Status" : "Remaining"}</span><b>{item.evaluationState === "WaitingForPrerequisite" ? "Not evaluated" : item.total > 0 ? `${Math.max(0, item.total - item.completed)} of ${item.total}` : "Not started"}</b></div><div className="attentionAction"><span className="attentionMeta">To clear this</span><small>{item.action}</small></div><button onClick={() => openGate(item)}>{item.evaluationState === "WaitingForPrerequisite" ? "Open prerequisite →" : "Open exact work →"}</button></article>)}{!blockers.length && <div className="decisionEmpty"><b>✓ Every release gate is complete</b><span>The package is ready for formal authority.</span></div>}</section>
-      <aside className="comparisonCard"><div className="decisionCardTitle"><div><h2>Release comparison</h2><p>Released baseline to current candidate</p></div></div><div className="versionFlow"><div><b>{comparison?.fromRelease ?? "1.5"}</b><span>Released</span></div><i>→</i><div><b>{detail.release}</b><span>Candidate</span></div></div><dl>{[["Introduced", comparison?.summary.added ?? 0, "added"],["Modified", comparison?.summary.modified ?? comparison?.summary.proposed ?? 0, "modified"],["Retired", comparison?.summary.retired ?? 0, "retired"],["Unchanged", comparison?.summary.unchanged ?? 0, "unchanged"]].map(([label, value, tone]) => <div key={String(label)} className={String(tone)}><dt>{label}</dt><dd>{comparison?.toMaterialized ? value : "—"}</dd></div>)}</dl>{comparison && !comparison.toMaterialized && <p className="comparisonPending">Counts become exact when the candidate baseline is materialized.</p>}<button onClick={() => detail.changes[0] && onOpenImpact(detail.changes[0].id)}>Explore baseline changes →</button></aside>
+      <aside className="comparisonCard"><div className="decisionCardTitle"><div><h2>Release comparison</h2><p>Released baseline to current candidate</p></div></div><div className="versionFlow"><div><b>{comparison?.fromRelease ?? "1.5"}</b><span>Released</span></div><i>→</i><div><b>{detail.release}</b><span>Candidate</span></div></div><dl>{[["Introduced", comparison?.summary.added ?? 0, "added"],["Modified", comparison?.summary.modified ?? comparison?.summary.proposed ?? 0, "modified"],["Retired", comparison?.summary.retired ?? 0, "retired"],["Unchanged", comparison?.summary.unchanged ?? 0, "unchanged"]].map(([label, value, tone]) => <div key={String(label)} className={String(tone)}><dt>{label}</dt><dd>{comparison?.toMaterialized ? value : "—"}</dd></div>)}</dl>{comparison && !comparison.toMaterialized && <p className="comparisonPending">Counts become exact when the candidate baseline is materialized.</p>}<button onClick={onExploreChanges}>Explore baseline changes →</button></aside>
     </div>
     <section className="healthStrip"><HealthCard label="Trace coverage" gate={trace} tone="green" /><HealthCard label="Verification pass" gate={verification} tone="amber" /><HealthCard label="Approval progress" gate={approval} tone="blue" /></section>
+  </>;
+}
+
+function ChangesView({ detail, comparison, onBack, onOpenImpact, onOpenDecision }: { detail: CampaignDetail; comparison?: Comparison; onBack: () => void; onOpenImpact: (id: string) => void; onOpenDecision: () => void }) {
+  const [query, setQuery] = useState("");
+  const changes = detail.changes
+    .filter(item => !query.trim() || `${item.displayNumber} ${item.title} ${item.state}`.toLowerCase().includes(query.trim().toLowerCase()))
+    .sort((a, b) => a.displayNumber.localeCompare(b.displayNumber, undefined, { numeric: true }));
+  return <>
+    <PageHeader eyebrow={`FMS LIVE / RELEASE ${detail.release}`} title="Baseline changes" subtitle={`Every controlled change between ${comparison?.fromRelease ?? "the released build"} and ${detail.release}.`} onBack={onBack} backLabel="Back to readiness" actionLabel="Review release evidence" onAction={onOpenDecision} />
+    <section className="releaseChanges"><label>Find a change<input value={query} onChange={event => setQuery(event.target.value)} placeholder="Number, title, or state" /></label><p>{changes.length} of {detail.changes.length} changes</p>
+      <div>{changes.map(item => <button key={item.id} onClick={() => onOpenImpact(item.id)}><b>{item.displayNumber}</b><span>{item.title}</span><small>{item.type} · {item.state} · {countLabel(item.requirementCount, "requirement change")}</small><i>{item.included ? "Included" : "Proposed"}</i></button>)}</div>
+      {!changes.length && <p className="affectedEmpty">No controlled changes match this search.</p>}
+    </section>
   </>;
 }
 

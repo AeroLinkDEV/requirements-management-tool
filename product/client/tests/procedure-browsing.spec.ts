@@ -10,7 +10,7 @@ import { apiBase, apiLogin, login, selectProgram } from "./auth";
  */
 test("the procedure workspace pages, filters and deep-links instead of rendering everything", async ({ page, request }) => {
   test.setTimeout(240_000);
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 1440, height: 450 });
   await apiLogin(request);
   await login(page, 'admin', { openProject: false });
   await selectProgram(page, "Flight Management System Live Program");
@@ -35,6 +35,24 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   const rendered = await rows.count();
   expect(rendered, `${rendered} of ${all.totalCount} procedures rendered at once`).toBeLessThanOrEqual(25);
   await expect(page.getByText(`${all.totalCount} controlled software hlr procedures.`, { exact: false })).toBeVisible();
+
+  // A controlled dialog is viewport UI even when it is opened at the bottom of a long engineering queue.
+  // The workspace entrance animation used to leave a transform behind, making fixed dialogs relative to the
+  // whole scrolled workspace and placing their top thousands of pixels above the visible browser window.
+  await page.evaluate(() => {
+    document.body.style.overflow = 'auto';
+    const depth = document.createElement('div'); depth.dataset.testScrollDepth = 'true'; depth.style.height = '2000px'; document.body.append(depth);
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  });
+  const scrolledY = await page.evaluate(() => window.scrollY);
+  expect(scrolledY).toBeGreaterThan(0);
+  await rows.first().getByRole('button', { name: /Open procedure HLRTP-/ }).evaluate((button: HTMLButtonElement) => button.click());
+  const procedureDialog = page.getByRole('dialog', { name: /Procedure HLRTP-/ });
+  await expect(procedureDialog).toBeVisible();
+  const dialogBox = await procedureDialog.boundingBox();
+  expect(dialogBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+  expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(450);
+  await procedureDialog.getByRole('button', { name: 'Close' }).click();
 
   // Filtering narrows the set and the count, and is reflected in the address.
   await page.getByLabel("Procedure state").selectOption("Approved");

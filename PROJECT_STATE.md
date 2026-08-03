@@ -1,6 +1,6 @@
 # Project State — Start Here
 
-**Last updated: 2026-08-02.**
+**Last updated: 2026-08-03.**
 
 This is the orientation record for anyone — human or model — picking up AeroLink. It answers *what
 exists, what is true today, what is deliberately not being built, and where to start*. Every other
@@ -118,6 +118,12 @@ one and the procedures that verify it. The author does not disposition downstrea
 document, baseline/build, collaboration or lifecycle consequences; the engineers who consume and triage the
 change make those decisions in their governed workspaces (DEC-071, which supersedes DEC-059 and the
 impact-disposition portion of DEC-062).
+
+Software Drafts retain their HLR or LLR workspace even before the first requirement proposal exists. Problem
+Reports and test change requests are Build-scoped controlled records with explicit identifiers, truthful totals,
+and preserved superseded history. Downstream assessment evidence is read before the engineer records a
+conclusion, and Release Readiness exposes every candidate change through a searchable selector rather than
+choosing one implicitly. Controlled dialogs are viewport-bound at any scroll depth.
 
 Documents are offered where the requirements are read, not only on the Digital Thread. The build decides which:
 the approved controlled document for a released build, or a draft at the revision the released document will
