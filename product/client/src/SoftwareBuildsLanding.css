@@ -94,7 +94,7 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .softwareBuildCard small { margin-top: 7px; color: var(--ink-500); font-size: 12px; text-align: center; }
 .softwareBuildCard.current { border-color: #278cd2; background: linear-gradient(145deg, #fff 15%, #edf7ff); box-shadow: 0 0 0 1px rgba(39, 140, 210, .14), 0 12px 27px rgba(20, 96, 151, .1); }
 .softwareBuildCard.current .buildVersion { border-color: #2d92d3; color: #105f98; }
-.softwareBuildCard.current button { background: #0878df; border-color: #0878df; color: white; }
+.softwareBuildCard.current button { background: #0671d3; border-color: #0671d3; color: white; }
 .softwareBuildCard.current button:hover { background: #0069c6; }
 
 .buildDetailsHelper { display: flex; align-items: center; gap: 17px; margin-top: 24px; border: 1px solid #e0e6ec; border-radius: var(--radius-md); background: white; padding: 15px 20px; box-shadow: 0 5px 18px rgba(18, 38, 61, .045); }
