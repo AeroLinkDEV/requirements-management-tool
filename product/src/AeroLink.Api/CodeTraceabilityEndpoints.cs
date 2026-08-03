@@ -22,22 +22,7 @@ public static class CodeTraceabilityEndpoints
         var baselineId = await AeroLink.Api.BuildScope.EffectiveBaselineAsync(db, projectId, releaseId, ct);
         if (baselineId is null) return Results.Ok(Response(release.Version, release.IsReleased, [], []));
 
-        var candidates = await (from selection in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
-                                join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == RequirementLevel.LowLevel) on selection.ArtifactId equals artifact.Id
-                                join revision in db.RequirementRevisions.AsNoTracking() on selection.RevisionId equals revision.Id
-                                join change in db.SystemChangeRequests.AsNoTracking() on revision.SourceScrId equals change.Id into changes
-                                from change in changes.DefaultIfEmpty()
-                                select new Candidate(artifact.Id, revision.Id, artifact.BaseNumber, revision.Revision, revision.Statement,
-                                    change != null && change.TargetReleaseId == releaseId)).ToListAsync(ct);
-
-        var programCode = await (from project in db.Projects.AsNoTracking().Where(x => x.Id == projectId)
-                                 join program in db.Programs.AsNoTracking() on project.ProgramId equals program.Id
-                                 select program.Code).SingleAsync(ct);
-        // The FMS showcase deliberately uses five exact LLRs so the GitLab boundary is understandable without
-        // pretending that 700 demonstration merge requests exist. Real Projects use every LLR changed in-build.
-        var required = programCode == FmsShowcaseSeeder.ProgramCode
-            ? candidates.OrderBy(x => x.BaseNumber).Take(5).ToList()
-            : candidates.Where(x => x.ChangedInBuild).OrderBy(x => x.BaseNumber).ToList();
+        var required = await CodeTraceabilityProjection.RequiredAsync(db, projectId, releaseId, baselineId.Value, ct);
         var revisionIds = required.Select(x => x.RevisionId).ToList();
         var mappings = await db.CodeTraceabilityRecords.AsNoTracking()
             .Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId && revisionIds.Contains(x.RequirementRevisionId))
@@ -48,7 +33,9 @@ public static class CodeTraceabilityEndpoints
     private static async Task<IResult> CreateAsync(CreateCodeTraceabilityRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
-        if (!await db.Releases.AnyAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct)) return Results.BadRequest(new { error = "The selected build does not belong to this Project." });
+        var release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct);
+        if (release is null) return Results.BadRequest(new { error = "The selected build does not belong to this Project." });
+        if (release.IsReleased) return Results.Conflict(new { error = $"Build {release.Version} is released and read-only." });
         var baselineId = await AeroLink.Api.BuildScope.EffectiveBaselineAsync(db, request.ProjectId, request.ReleaseId, ct);
         var exactLlr = baselineId is not null && await (from selection in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId && x.RevisionId == request.RequirementRevisionId)
                                                        join artifact in db.Requirements.AsNoTracking().Where(x => x.Id == request.RequirementArtifactId && x.ProjectId == request.ProjectId && x.Level == RequirementLevel.LowLevel) on selection.ArtifactId equals artifact.Id
@@ -71,7 +58,7 @@ public static class CodeTraceabilityEndpoints
         catch (DbUpdateException) { return Results.Conflict(new { error = "That exact LLR revision already has code traceability for this build." }); }
     }
 
-    private static object Response(string version, bool readOnly, IReadOnlyList<Candidate> candidates, IReadOnlyList<CodeTraceabilityRecord> mappings)
+    private static object Response(string version, bool readOnly, IReadOnlyList<RequiredCodeTraceabilityRequirement> candidates, IReadOnlyList<CodeTraceabilityRecord> mappings)
     {
         var byRevision = mappings.ToDictionary(x => x.RequirementRevisionId);
         var mapped = candidates.Count(candidate => byRevision.ContainsKey(candidate.RevisionId));
@@ -93,8 +80,6 @@ public static class CodeTraceabilityEndpoints
             })
         };
     }
-
-    private sealed record Candidate(Guid ArtifactId, Guid RevisionId, string BaseNumber, int Revision, string Statement, bool ChangedInBuild);
     private sealed record CreateCodeTraceabilityRequest(Guid ProjectId, Guid ReleaseId, Guid RequirementArtifactId, Guid RequirementRevisionId,
         CodeTraceDisposition Disposition, string? RepositoryPath, string? MergeRequestReference, string? MergeRequestTitle,
         string? MergeRequestUrl, string? MergeCommitSha, DateTimeOffset? MergedAt, string? NoCodeChangeRationale);

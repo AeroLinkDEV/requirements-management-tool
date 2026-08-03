@@ -183,30 +183,56 @@ public static class VerificationEndpoints
             var pathIds = ancestors.Append(focus.revisionId).Concat(descendants).ToList();
             var verificationRequirementId = pathIds.AsEnumerable().Reverse().FirstOrDefault(covered.Contains);
 
-            var procedure = verificationRequirementId == Guid.Empty
-                ? null
+            var buildQuery = db.SoftwareBuilds.AsNoTracking().Where(x => x.BaselineId == baselineId);
+            var buildRecord = db.Database.IsSqlite()
+                ? (await buildQuery.ToListAsync(ct)).OrderByDescending(x => x.RecordedAt).FirstOrDefault()
+                : await buildQuery.OrderByDescending(x => x.RecordedAt).FirstOrDefaultAsync(ct);
+            Guid? selectedBuildId = buildRecord?.Id;
+
+            IReadOnlyList<PathProcedureCandidate> procedureCandidates = verificationRequirementId == Guid.Empty
+                ? Array.Empty<PathProcedureCandidate>()
                 : await (from coverage in db.TestCoverage.AsNoTracking().Where(x => x.RequirementRevisionId == verificationRequirementId && !x.IsSuspect)
                          join revision in db.TestProcedureRevisions.AsNoTracking() on coverage.ProcedureRevisionId equals revision.Id
                          join item in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals item.Id
-                         orderby item.BaseNumber
-                         select new
-                         {
-                             id = item.Id,
-                             revisionId = revision.Id,
-                             displayNumber = item.BaseNumber + "." + revision.Revision.ToString("D2"),
+                         select new PathProcedureCandidate(
+                             item.Id,
+                             revision.Id,
+                             item.BaseNumber + "." + revision.Revision.ToString("D2"),
                              item.Title,
-                             level = item.Level.ToString(),
-                             state = revision.State.ToString(),
-                         }).FirstOrDefaultAsync(ct);
+                             item.Level.ToString(),
+                             revision.State.ToString())).ToListAsync(ct);
+
+            var candidateRevisionIds = procedureCandidates.Select(x => x.RevisionId).ToList();
+            IReadOnlyList<TestExecution> candidateRuns = candidateRevisionIds.Count == 0
+                ? Array.Empty<TestExecution>()
+                : await db.TestExecutions.AsNoTracking()
+                    .Where(x => candidateRevisionIds.Contains(x.ProcedureRevisionId) && x.ReleaseId == baseline.ReleaseId
+                        && x.SoftwareBuildId == selectedBuildId)
+                    .ToListAsync(ct);
+            var latestByProcedure = candidateRuns.GroupBy(x => x.ProcedureRevisionId)
+                .ToDictionary(x => x.Key, x => x
+                    .OrderByDescending(run => run.ExecutedAt)
+                    .ThenByDescending(run => run.RecordedAt).First());
+            var candidateRunIds = latestByProcedure.Values.Select(x => x.Id).ToList();
+            IReadOnlyList<Guid> evidencedRunIds = candidateRunIds.Count == 0
+                ? Array.Empty<Guid>()
+                : await db.TestExecutionEvidence.AsNoTracking().Where(x => candidateRunIds.Contains(x.TestExecutionId))
+                    .Select(x => x.TestExecutionId).Distinct().ToListAsync(ct);
+            var evidenced = evidencedRunIds.ToHashSet();
+
+            // Prefer a genuinely complete path, then any build-scoped result, and use the controlled number only
+            // as a stable tie-breaker. Choosing the first procedure number could report a gap while another exact
+            // confirmed procedure already carried the result and immutable evidence the reader asked to see.
+            var procedure = procedureCandidates
+                .OrderByDescending(x => latestByProcedure.TryGetValue(x.RevisionId, out var run) && evidenced.Contains(run.Id))
+                .ThenByDescending(x => latestByProcedure.ContainsKey(x.RevisionId))
+                .ThenBy(x => x.DisplayNumber)
+                .FirstOrDefault();
 
             object? execution = null;
             if (procedure is not null)
             {
-                var runQuery = db.TestExecutions.AsNoTracking()
-                    .Where(x => x.ProcedureRevisionId == procedure.revisionId && x.ReleaseId == baseline.ReleaseId);
-                var run = db.Database.IsSqlite()
-                    ? (await runQuery.ToListAsync(ct)).OrderByDescending(x => x.ExecutedAt).ThenByDescending(x => x.RecordedAt).FirstOrDefault()
-                    : await runQuery.OrderByDescending(x => x.ExecutedAt).ThenByDescending(x => x.RecordedAt).FirstOrDefaultAsync(ct);
+                latestByProcedure.TryGetValue(procedure.RevisionId, out var run);
                 if (run is not null)
                 {
                     var files = await (from link in db.TestExecutionEvidence.AsNoTracking().Where(x => x.TestExecutionId == run.Id)
@@ -225,10 +251,6 @@ public static class VerificationEndpoints
                 }
             }
 
-            var buildQuery = db.SoftwareBuilds.AsNoTracking().Where(x => x.BaselineId == baselineId);
-            var buildRecord = db.Database.IsSqlite()
-                ? (await buildQuery.ToListAsync(ct)).OrderByDescending(x => x.RecordedAt).FirstOrDefault()
-                : await buildQuery.OrderByDescending(x => x.RecordedAt).FirstOrDefaultAsync(ct);
             var build = buildRecord is null ? null : new
             {
                 buildRecord.Id,
@@ -244,7 +266,15 @@ public static class VerificationEndpoints
                 baseline = new { baseline.DisplayNumber, baseline.Name },
                 focusRevisionId = focus.revisionId,
                 nodes = pathIds.Select(id => byRevision[id]),
-                procedure,
+                procedure = procedure is null ? null : new
+                {
+                    id = procedure.Id,
+                    revisionId = procedure.RevisionId,
+                    displayNumber = procedure.DisplayNumber,
+                    procedure.Title,
+                    level = procedure.Level,
+                    state = procedure.State,
+                },
                 execution,
                 build,
             });
@@ -603,4 +633,12 @@ public static class VerificationEndpoints
             });
         });
     }
+
+    private sealed record PathProcedureCandidate(
+        Guid Id,
+        Guid RevisionId,
+        string DisplayNumber,
+        string Title,
+        string Level,
+        string State);
 }

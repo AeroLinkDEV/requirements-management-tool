@@ -28,9 +28,11 @@ snapshot. Baseline materialization alone creates the resulting immutable `Alloca
 
 The human Digital Thread projection walks only exact revisions in one materialized baseline. It follows the
 selected requirement through its System/HLR/LLR ancestry or descendants, then joins exact procedure coverage,
-the build-specific execution and recorded evidence reference/files, and the immutable software-build record.
-The general relationship explorer remains available; the compact path is an assurance projection, not a new
-trace store.
+the build-specific execution, linked checksummed evidence files, and the immutable software-build record. When
+several confirmed procedures cover the exact requirement, it prefers one whose latest build-scoped execution
+has linked evidence, then one with a result, then the controlled number as a stable tie-breaker. A free-text
+evidence reference remains useful context but does not make the evidence stage complete. The general
+relationship explorer remains available; the compact path is an assurance projection, not a new trace store.
 
 Software-build identity is canonical: a release version such as `1.6` is represented by `SW-01.60`. The
 historical `CandidateBaseline` and executable `SoftwareBuild` persistence records are implementation facets of
@@ -42,7 +44,9 @@ GitLab is the source of truth for repositories, source code, branches, merge req
 and commit content. AeroLink's `CodeTraceabilityRecord` is an immutable lifecycle pointer: Project, build,
 exact LLR artifact/revision, GitLab repository/MR reference and URL, merge commit SHA/time, or an attributable
 `No code change required` rationale. A uniqueness constraint prevents competing mappings for the same exact
-LLR revision in one build. Released-build mutation protection applies server-side.
+LLR revision in one build. The Code center and release readiness use the same required-LLR projection; exact
+mappings are included in the signed review manifest. Released-build mutation protection applies server-side
+at the endpoint even when a caller does not supply browser workspace context.
 
 The first integration is manual evidence capture and a small, conspicuously labelled FMS demonstration set.
 Webhook synchronization, GitLab project allow-lists, CI state, many-to-many MR/LLR mapping, and automated

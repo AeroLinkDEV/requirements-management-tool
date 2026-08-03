@@ -53,6 +53,10 @@ test('Digital Thread shows one exact SYSR-to-build lifecycle path while retainin
   await expect(path.getByText(/^LLR-/)).toBeVisible()
   await expect(path.getByText(/^LLRTP-/)).toBeVisible()
   await expect(path.getByText('Pass', { exact: true })).toBeVisible()
+  const evidenceCard = path.locator('.completeThreadStep').filter({ hasText: 'TEST EVIDENCE' }).locator('article')
+  await expect(evidenceCard).toHaveClass(/missing/)
+  await expect(evidenceCard).toContainText('Not attached')
+  await expect(evidenceCard).toContainText('External reference only:')
   await expect(page.getByText('SYSR → HLR → LLR → procedure → result → evidence → build')).toBeVisible()
 
   await path.getByRole('button').first().click()

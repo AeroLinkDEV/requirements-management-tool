@@ -103,7 +103,20 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
             var imported = await service.ImportVerificationAsync(campaign.Id, manifest, evidence, "FMS-1.6-RC1-verification.zip", "application/zip", "test.lead", now, default);
             Assert.Equal(516, imported.ExecutionsRecorded); Assert.Equal(516, imported.Passed); Assert.Equal(516, await db.TestExecutionEvidence.CountAsync(x => x.EvidenceId == imported.EvidenceId));
 
+            var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default);
+            Assert.Contains(readiness.Gates, x => x.Code == "code_traceability" && !x.Complete && x.Completed == 4 && x.Total == 5);
+            var beforeCodeMappingHash = await service.ComputeReviewManifestHashAsync(campaign.Id, default);
+            var requiredCode = await CodeTraceabilityProjection.RequiredAsync(db, campaign.ProjectId, campaign.ReleaseId, baseline.Id, default);
+            var mappedCodeIds = await db.CodeTraceabilityRecords.Where(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId).Select(x => x.RequirementRevisionId).ToListAsync();
+            var missingCode = requiredCode.Single(x => !mappedCodeIds.Contains(x.RevisionId));
+            db.CodeTraceabilityRecords.Add(new CodeTraceabilityRecord(campaign.ProjectId, campaign.ReleaseId, missingCode.ArtifactId, missingCode.RevisionId,
+                CodeTraceDisposition.NoCodeChangeRequired, "", "", "", "", "", null,
+                "The exact LLR change is limited to clarification of already implemented behavior.", false, "software.lead", now));
+            await db.SaveChangesAsync();
             var initialManifestHash = await service.ComputeReviewManifestHashAsync(campaign.Id, default);
+            Assert.NotEqual(beforeCodeMappingHash, initialManifestHash);
+            readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default);
+            Assert.Contains(readiness.Gates, x => x.Code == "code_traceability" && x.Complete && x.Completed == 5 && x.Total == 5);
             Assert.Equal(64, initialManifestHash.Length); Assert.Equal(initialManifestHash, await service.ComputeReviewManifestHashAsync(campaign.Id, default));
             var pendingImpact = await db.ImpactDispositions.FirstAsync(x => x.CampaignId == campaign.Id && x.State == ImpactDispositionState.Pending);
             pendingImpact.Disposition(ImpactDispositionState.Addressed, "Disposition changes are part of the signed release package.", "assurance.test", now.AddMinutes(1)); await db.SaveChangesAsync();
