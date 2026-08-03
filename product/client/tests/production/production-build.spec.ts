@@ -23,9 +23,20 @@ import { apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } fro
  * looks exactly like a chunk that failed to load. Asking the navigation removes both the guess and the
  * dependence on identifiers that change every seed.
  */
-async function navigationRoutes(page: Page) {
+async function navigationRoutes(page: Page, expected?: RegExp) {
   const links = page.locator('nav[aria-label="Primary navigation"] a[href]')
   await expect(links.first()).toBeAttached({ timeout: 30_000 })
+  // Waiting for the *first* link is not waiting for the navigation.
+  //
+  // The sidebar renders its groups and their entries across renders, so the first anchor can be attached
+  // while the one the caller needs is still on its way. Reading every href at that moment returns a partial
+  // list, and the caller then fails with "the navigation must offer …" — a message that reads like the route
+  // is gone when it had simply not arrived. It passes locally and fails on a loaded runner, which is exactly
+  // the shape of a race rather than a missing route.
+  if (expected) await expect.poll(async () =>
+    (await links.evaluateAll(nodes => nodes.map(node => (node as HTMLAnchorElement).getAttribute('href') ?? '')))
+      .some(href => expected.test(href)),
+    { timeout: 30_000, message: `the navigation never rendered a route matching ${expected}` }).toBe(true)
   const hrefs = await links.evaluateAll(nodes => nodes.map(node => (node as HTMLAnchorElement).getAttribute('href') ?? ''))
   return hrefs.filter(Boolean)
 }
@@ -124,8 +135,8 @@ test('a deep link reloads, because the server falls back to the client', async (
   await login(page)
   await selectProgram(page, 'Flight Management System Live Program')
 
-  const routes = await navigationRoutes(page)
-  const deepLink = routes.find(href => href.includes('/change-requests'))
+  const routes = await navigationRoutes(page, /\/change-requests/)
+  const deepLink = routes.find(href => href.includes("/change-requests"))
   expect(deepLink, 'the navigation must offer a change-request route to deep link into').toBeTruthy()
   await page.goto(deepLink!, { waitUntil: 'load' })
   const headings = page.locator('h1, h2, h3')
