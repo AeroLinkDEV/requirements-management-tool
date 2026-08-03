@@ -62,6 +62,8 @@ async function raiseReport(page: Page, projectId: string, releaseId: string, sco
 
   // Advance to the state whose call to action is the one under test.
   for (const [path, body] of [
+    ["ready-for-sccb", {}],
+    ["sccb/open", {}],
     ["investigation", { analysis: "Root cause identified in the corrective routing fixture." }],
     ["resolution", { correctiveAction: "Re-run the procedure once the correction is in place." }],
   ] as const) {

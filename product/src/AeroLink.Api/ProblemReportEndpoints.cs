@@ -19,6 +19,13 @@ public static class ProblemReportEndpoints
         group.MapPost("/from-test-execution/{executionId:guid}", CreateFromFailureAsync);
         group.MapGet("/{id:guid}", DetailAsync);
         group.MapGet("/{id:guid}/corrective-action", CorrectiveActionAsync);
+        group.MapPost("/{id:guid}/details", UpdateDetailsAsync);
+        group.MapPost("/{id:guid}/owner", ReassignAsync);
+        group.MapPost("/{id:guid}/target-build", RetargetAsync);
+        group.MapPost("/{id:guid}/ready-for-sccb", ReadyForSccbAsync);
+        group.MapPost("/{id:guid}/sccb/open", OpenBySccbAsync);
+        group.MapPost("/{id:guid}/implementation", BeginImplementationAsync);
+        group.MapPost("/{id:guid}/resume", ResumeAsync);
         group.MapPost("/{id:guid}/investigation", InvestigateAsync);
         group.MapPost("/{id:guid}/resolution", ProposeResolutionAsync);
         group.MapPost("/{id:guid}/verify", VerifyAsync);
@@ -41,7 +48,8 @@ public static class ProblemReportEndpoints
         {
             var now = DateTimeOffset.UtcNow; var actor = http.UserAccount();
             var item = new ProblemReport(request.ProjectId, await IdentifierAllocator.NextProblemReportAsync(db, ct), request.Title, request.Problem, request.Analysis ?? "", actor.UserName, now,
-                request.Classification ?? "Software anomaly", request.Severity ?? ProblemReportSeverity.Major, request.Priority ?? ProblemReportPriority.Normal, request.Origin ?? "Manual report", request.AffectedConfiguration ?? "");
+                request.Classification ?? "Software anomaly", request.Severity ?? ProblemReportSeverity.Major, request.Priority ?? ProblemReportPriority.Normal, request.Origin ?? "Manual report", request.AffectedConfiguration ?? "",
+                request.ReleaseId, actor.UserName, request.ProblemRich ?? "", request.AdditionalInformation ?? "", request.AdditionalInformationRich ?? "", request.SystemAircraftImpact ?? "", request.ImpactAssessmentJson ?? "{}");
             db.ProblemReports.Add(item);
             if (request.ReleaseId is not null)
                 db.ProblemReportLinks.Add(new ProblemReportLink(item.Id, "Release", request.ReleaseId.Value, "BuildScope", actor.UserName, now));
@@ -63,15 +71,15 @@ public static class ProblemReportEndpoints
         try
         {
             var now = DateTimeOffset.UtcNow; var actor = http.UserAccount();
-            var item = new ProblemReport(execution.ProjectId, await IdentifierAllocator.NextProblemReportAsync(db, ct), request.Title ?? $"Failed execution {execution.Id.ToString()[..8]}", request.Problem ?? execution.Determination,
-                request.Analysis ?? "Created from failed verification execution.", actor.UserName, now, request.Classification ?? "Verification failure", request.Severity ?? ProblemReportSeverity.Major,
-                request.Priority ?? ProblemReportPriority.High, "Test execution", request.AffectedConfiguration ?? execution.Configuration);
             var executionReleaseId = await db.SoftwareBuilds.AsNoTracking().Where(x => x.Id == execution.SoftwareBuildId).Select(x => (Guid?)x.ReleaseId).SingleOrDefaultAsync(ct);
             // A current build may own corrective work raised from predecessor evidence. The execution link
             // retains the historical origin; an explicit selected build owns the new problem report.
             var releaseId = request.ReleaseId ?? executionReleaseId;
             if (releaseId is not null && !await db.Releases.AnyAsync(x => x.Id == releaseId && x.ProjectId == execution.ProjectId, ct))
                 return Results.BadRequest(new { error = "The selected build does not belong to this project." });
+            var item = new ProblemReport(execution.ProjectId, await IdentifierAllocator.NextProblemReportAsync(db, ct), request.Title ?? $"Failed execution {execution.Id.ToString()[..8]}", request.Problem ?? execution.Determination,
+                request.Analysis ?? "Created from failed verification execution.", actor.UserName, now, request.Classification ?? "Verification failure", request.Severity ?? ProblemReportSeverity.Major,
+                request.Priority ?? ProblemReportPriority.High, "Test execution", request.AffectedConfiguration ?? execution.Configuration, releaseId, actor.UserName);
             db.ProblemReports.Add(item); db.ProblemReportLinks.Add(new ProblemReportLink(item.Id, "TestExecution", execution.Id, "OriginatingFailure", actor.UserName, now));
             if (releaseId is not null)
                 db.ProblemReportLinks.Add(new ProblemReportLink(item.Id, "Release", releaseId.Value, "BuildScope", actor.UserName, now));
@@ -84,7 +92,7 @@ public static class ProblemReportEndpoints
         catch (DbUpdateException) { return Results.Conflict(new { error = "A problem report number was allocated concurrently. Retry the create request.", code = "number_allocation_conflict" }); }
     }
 
-    private static async Task<IResult> ListAsync(Guid projectId, Guid? releaseId, string? search, ProblemReportState? state, ProblemReportSeverity? severity, bool? blockersOnly, int? page, int? pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(Guid projectId, Guid? releaseId, string? search, ProblemReportState? state, ProblemReportSeverity? severity, ProblemReportPriority? priority, string? owner, bool? blockersOnly, int? page, int? pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var query = db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId);
@@ -92,6 +100,8 @@ public static class ProblemReportEndpoints
             query = query.Where(x => db.ProblemReportLinks.Any(link => link.ProblemReportId == x.Id && link.ArtifactType == "Release" && link.ArtifactId == releaseId));
         if (state is not null) query = query.Where(x => x.State == state);
         if (severity is not null) query = query.Where(x => x.Severity == severity);
+        if (priority is not null) query = query.Where(x => x.Priority == priority);
+        if (!string.IsNullOrWhiteSpace(owner)) { var normalizedOwner = owner.Trim().ToLower(); query = query.Where(x => x.ResponsibleEngineerId.ToLower().Contains(normalizedOwner)); }
         if (blockersOnly == true) query = query.Where(x => x.IsReleaseBlocker && string.IsNullOrEmpty(x.WaiverRationale));
         if (!string.IsNullOrWhiteSpace(search)) { var term = search.Trim().ToLower(); query = query.Where(x => x.ReportNumber.ToLower().Contains(term) || x.Title.ToLower().Contains(term) || x.Problem.ToLower().Contains(term) || x.RootCause.ToLower().Contains(term)); }
         var size = Math.Clamp(pageSize ?? 50, 1, 200); var current = Math.Max(page ?? 1, 1); var matching = await query.ToListAsync(ct); var total = matching.Count;
@@ -106,11 +116,11 @@ public static class ProblemReportEndpoints
         if (releaseId is not null)
             query = query.Where(x => db.ProblemReportLinks.Any(link => link.ProblemReportId == x.Id && link.ArtifactType == "Release" && link.ArtifactId == releaseId));
         var reports = await query.ToListAsync(ct);
-        var active = reports.Where(x => x.State is ProblemReportState.Open or ProblemReportState.Investigating or ProblemReportState.ResolutionProposed or ProblemReportState.AwaitingClosureApproval).ToList();
+        var active = reports.Where(x => x.State is ProblemReportState.Draft or ProblemReportState.ReadyForSccb or ProblemReportState.Open or ProblemReportState.Implementing or ProblemReportState.Verifying or ProblemReportState.AwaitingSqaClosure or ProblemReportState.Deferred).ToList();
         return Results.Ok(new
         {
             generatedAt = DateTimeOffset.UtcNow,
-            summary = new { total = reports.Count, active = active.Count, closureAwaitingApproval = reports.Count(x => x.State == ProblemReportState.AwaitingClosureApproval), closed = reports.Count(x => x.State == ProblemReportState.Closed), releaseBlockers = reports.Count(x => x.IsReleaseBlocker && string.IsNullOrEmpty(x.WaiverRationale)), waivedBlockers = reports.Count(x => x.IsReleaseBlocker && !string.IsNullOrEmpty(x.WaiverRationale)) },
+            summary = new { total = reports.Count, active = active.Count, closureAwaitingApproval = reports.Count(x => x.State == ProblemReportState.AwaitingSqaClosure), closed = reports.Count(x => x.State == ProblemReportState.Closed), releaseBlockers = reports.Count(x => x.IsReleaseBlocker && string.IsNullOrEmpty(x.WaiverRationale)), waivedBlockers = reports.Count(x => x.IsReleaseBlocker && !string.IsNullOrEmpty(x.WaiverRationale)) },
             bySeverity = reports.GroupBy(x => x.Severity).OrderBy(x => x.Key).Select(x => new { severity = x.Key.ToString(), count = x.Count() }),
             byState = reports.GroupBy(x => x.State).OrderBy(x => x.Key).Select(x => new { state = x.Key.ToString(), count = x.Count() }),
             attention = active.OrderByDescending(x => x.IsReleaseBlocker).ThenByDescending(x => x.Severity).ThenBy(x => x.CreatedAt).Take(12).Select(Summary)
@@ -135,6 +145,55 @@ public static class ProblemReportEndpoints
         return Results.Ok(Detail(report, await LinkViewsAsync(links, db, ct), revisions));
     }
 
+    private static Task<IResult> UpdateDetailsAsync(Guid id, UpdateDetailsRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ProblemReportDetailsUpdated", (report, actor, now) => report.UpdateDetails(actor.UserName,
+            request.Title, request.Problem, request.ProblemRich ?? "", request.AdditionalInformation ?? "", request.AdditionalInformationRich ?? "",
+            request.Analysis ?? "", request.RootCause ?? "", request.CorrectiveAction ?? "", request.SystemAircraftImpact ?? "", request.ImpactAssessmentJson ?? "{}", request.Severity, request.Priority, now));
+
+    private static async Task<IResult> ReassignAsync(Guid id, ReassignRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.UserName == request.ResponsibleEngineerId && x.State == AccountState.Active, ct);
+        if (account is null) return Results.BadRequest(new { error = "The selected responsible engineer is not an active account." });
+        return await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ResponsibleEngineerReassigned", (report, actor, now) => report.Reassign(actor.UserName, request.ResponsibleEngineerId, now));
+    }
+
+    private static async Task<IResult> RetargetAsync(Guid id, RetargetRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
+        if (request.ExpectedVersion is not null && request.ExpectedVersion != report.Version) return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = report.Version });
+        if (!await db.Releases.AnyAsync(x => x.Id == request.TargetReleaseId && x.ProjectId == report.ProjectId, ct)) return Results.BadRequest(new { error = "The selected target build does not belong to this project." });
+        try
+        {
+            var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
+            report.Retarget(actor.UserName, request.TargetReleaseId, now);
+            var existing = await db.ProblemReportLinks.Where(x => x.ProblemReportId == id && x.ArtifactType == "Release" && x.Relationship == "BuildScope").ToListAsync(ct);
+            db.ProblemReportLinks.RemoveRange(existing);
+            db.ProblemReportLinks.Add(new ProblemReportLink(id, "Release", request.TargetReleaseId, "BuildScope", actor.UserName, now));
+            AddRevision(db, report, "TargetBuildChanged", actor.UserName, now);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { id = report.Id, displayNumber = report.DisplayNumber, state = report.State.ToString(), version = report.Version, snapshotHash = report.CanonicalHash() });
+        }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "This problem report was updated concurrently. Refresh before continuing.", code = "stale_version" }); }
+    }
+
+    private static Task<IResult> ReadyForSccbAsync(Guid id, VersionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ReadyForSccb", (report, actor, now) => report.ReadyForSccb(actor.UserName, now));
+
+    private static async Task<IResult> OpenBySccbAsync(Guid id, VersionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+    {
+        var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
+        if (!await http.HasProjectRoleAsync(db, identity, report.ProjectId, ct, ProgramRole.Approver, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+        return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "OpenedBySccb", (item, actor, now) => item.OpenBySccb(actor.UserName, now));
+    }
+
+    private static Task<IResult> BeginImplementationAsync(Guid id, VersionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ImplementationStarted", (report, actor, now) => report.BeginImplementation(actor.UserName, now));
+
+    private static Task<IResult> ResumeAsync(Guid id, VersionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ProblemReportResumed", (report, actor, now) => report.ResumeDeferred(actor.UserName, now));
+
     private static async Task<IResult> InvestigateAsync(Guid id, InvestigationRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "InvestigationRecorded", (report, actor, now) => report.BeginInvestigation(actor.UserName, request.Analysis, request.RootCause ?? "", request.Effects ?? "", "", now));
     private static async Task<IResult> ProposeResolutionAsync(Guid id, ResolutionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ResolutionProposed", (report, actor, now) => report.ProposeResolution(actor.UserName, request.CorrectiveAction, now));
 
@@ -150,7 +209,7 @@ public static class ProblemReportEndpoints
     private static async Task<IResult> ApproveClosureAsync(Guid id, ClosureApprovalRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
-        if (!await http.HasProjectRoleAsync(db, identity, report.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Approver)) return Results.Forbid();
+        if (!await http.HasProjectRoleAsync(db, identity, report.ProjectId, ct, ProgramRole.SoftwareQualityAnalyst, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Approver)) return Results.Forbid();
         var actor = http.UserAccount();
         return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ClosureApproved", (item, user, now) => item.ApproveClosure(user.UserName, user.Id, now));
     }
@@ -209,7 +268,7 @@ public static class ProblemReportEndpoints
 
     private static void AddRevision(AeroLinkDbContext db, ProblemReport report, string eventType, string actor, DateTimeOffset now)
     {
-        var snapshot = JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision, report.DisplayNumber, report.Title, report.Problem, report.Analysis, report.ReportedBy, report.Classification, severity = report.Severity.ToString(), priority = report.Priority.ToString(), report.Origin, report.AffectedConfiguration, report.RootCause, report.Effects, report.Containment, report.CorrectiveAction, disposition = report.Disposition?.ToString(), report.DispositionRationale, report.ResolutionVerificationExecutionId, report.ClosureApprovedByName, report.ClosureApprovedAt, report.IsReleaseBlocker, report.WaiverRationale, report.WaivedBy, state = report.State.ToString(), report.Version });
+        var snapshot = JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision, report.DisplayNumber, report.Title, report.Problem, report.ProblemRich, report.AdditionalInformation, report.AdditionalInformationRich, report.Analysis, report.ReportedBy, report.ResponsibleEngineerId, report.TargetReleaseId, report.Classification, severity = report.Severity.ToString(), priority = report.Priority.ToString(), report.Origin, report.AffectedConfiguration, report.RootCause, report.Effects, report.CorrectiveAction, report.SystemAircraftImpact, report.ImpactAssessmentJson, disposition = report.Disposition?.ToString(), report.DispositionRationale, report.ResolutionVerificationExecutionId, report.ClosureApprovedByName, report.ClosureApprovedAt, report.IsReleaseBlocker, report.WaiverRationale, report.WaivedBy, state = report.State.ToString(), report.Version });
         db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, eventType, actor, report.CanonicalHash(), snapshot, now));
     }
 
@@ -243,15 +302,13 @@ public static class ProblemReportEndpoints
         _ => artifactType.Trim()
     };
 
-    private static object Summary(ProblemReport x) => new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = x.State.ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Classification, x.ReportedBy, x.IsReleaseBlocker, waived = !string.IsNullOrWhiteSpace(x.WaiverRationale), x.UpdatedAt, x.Version };
+    private static object Summary(ProblemReport x) => new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = x.State.ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Classification, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.IsReleaseBlocker, waived = !string.IsNullOrWhiteSpace(x.WaiverRationale), x.UpdatedAt, x.Version };
     private static object Detail(ProblemReport x, IEnumerable<ProblemReportLinkView> links, IEnumerable<ProblemReportRevision> revisions)
     {
         var materializedLinks = links.ToList();
-        var approvedChanges = materializedLinks.Where(link => link.Relationship == "ApprovedCorrectiveAction")
-            .Select(link => link.Identifier).Where(identifier => !string.IsNullOrWhiteSpace(identifier)).ToList();
-        var correctiveAction = string.Join("; ", new[] { x.CorrectiveAction }.Concat(approvedChanges)
-            .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct());
-        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.Analysis, x.ReportedBy, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, correctiveAction, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.WaiverRationale, x.WaivedBy, x.WaivedAt, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), links = materializedLinks, revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotHash, x.OccurredAt }) };
+        var approvedCorrectiveActions = materializedLinks.Where(link => link.Relationship == "ApprovedCorrectiveAction").ToList();
+        var testEvidence = materializedLinks.Where(link => link.ArtifactType == "TestExecution" && link.Relationship == "ResolutionVerification").ToList();
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.CorrectiveAction, x.SystemAircraftImpact, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.WaiverRationale, x.WaivedBy, x.WaivedAt, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), links = materializedLinks, approvedCorrectiveActions, testEvidence, revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotHash, x.OccurredAt }) };
     }
 
     /// <summary>
@@ -418,7 +475,7 @@ public static class ProblemReportEndpoints
     }
 
     private sealed record ProblemReportLinkView(string ArtifactType, Guid ArtifactId, string? Identifier, string Relationship, string AddedBy, DateTimeOffset AddedAt);
-    private sealed record CreateProblemReportRequest(Guid ProjectId, Guid? ReleaseId, string Title, string Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? Origin, string? AffectedConfiguration);
+    private sealed record CreateProblemReportRequest(Guid ProjectId, Guid? ReleaseId, string Title, string Problem, string? ProblemRich, string? AdditionalInformation, string? AdditionalInformationRich, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? Origin, string? AffectedConfiguration, string? SystemAircraftImpact, string? ImpactAssessmentJson);
     private sealed record CreateProblemReportFromExecutionRequest(Guid? ReleaseId, string? Title, string? Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? AffectedConfiguration);
     private sealed record InvestigationRequest(long? ExpectedVersion, string Analysis, string? RootCause, string? Effects, string? Containment);
     private sealed record ResolutionRequest(long? ExpectedVersion, string CorrectiveAction);
@@ -428,4 +485,8 @@ public static class ProblemReportEndpoints
     private sealed record ReopenRequest(long? ExpectedVersion, string Rationale);
     private sealed record BlockerRequest(long? ExpectedVersion, bool IsReleaseBlocker, string? WaiverRationale);
     private sealed record LinkRequest(string ArtifactType, Guid ArtifactId, string Relationship);
+    private sealed record UpdateDetailsRequest(long? ExpectedVersion, string Title, string Problem, string? ProblemRich, string? AdditionalInformation, string? AdditionalInformationRich, string? Analysis, string? RootCause, string? CorrectiveAction, string? SystemAircraftImpact, string? ImpactAssessmentJson, ProblemReportSeverity Severity, ProblemReportPriority Priority);
+    private sealed record ReassignRequest(long? ExpectedVersion, string ResponsibleEngineerId);
+    private sealed record RetargetRequest(long? ExpectedVersion, Guid TargetReleaseId);
+    private sealed record VersionRequest(long? ExpectedVersion);
 }

@@ -203,7 +203,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   const recordResult = (procedure: SetProcedure, form: FormData) => act(async () => {
     const determination = String(form.get('determination') ?? '').trim()
     if (!determination) { setError('Say what the run showed. A verdict without reasoning cannot be read back.'); return }
-    await apiRequest(`${api}/api/test-executions`, {
+    const execution = await apiRequest<{ id: string }>(`${api}/api/test-executions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         projectId,
@@ -220,9 +220,22 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
         executedAt: new Date(String(form.get('executedAt'))).toISOString(),
       }),
     })
+    // When the engineer arrived from a Verifying PR and ran its identified procedure, a passing result is
+    // explicitly selected as closure evidence. Other passing runs remain ordinary build evidence.
+    if (correctiveProblemReportId && corrective?.procedureRevisionId === procedure.procedureRevisionId && form.get('outcome') === 'Pass') {
+      const report = await apiRequest<{ version: number; state: string }>(`${api}/api/problem-reports/${correctiveProblemReportId}`)
+      if (report.state === 'Verifying') {
+        await apiRequest(`${api}/api/problem-reports/${correctiveProblemReportId}/verify`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expectedVersion: report.version, testExecutionId: execution.id }),
+        })
+        setSaved(`Recorded against ${procedure.displayNumber} and selected as PR closure evidence.`)
+      }
+    }
     setRecording(undefined)
     setSupersedes(undefined)
-    setSaved(`Recorded against ${procedure.displayNumber}.`)
+    if (!correctiveProblemReportId || corrective?.procedureRevisionId !== procedure.procedureRevisionId || form.get('outcome') !== 'Pass')
+      setSaved(`Recorded against ${procedure.displayNumber}.`)
   }, 'The result could not be recorded.')
 
   const attachEvidence = (procedure: SetProcedure, file: File) => act(async () => {

@@ -633,6 +633,7 @@ function App() {
         api={API}
         projectId={project.project.id}
         releaseId={release?.id ?? ""}
+        releases={project.releases}
         readOnly={release?.isReleased ?? false}
         user={user}
         initialReportId={selectedArtifactId||undefined}
