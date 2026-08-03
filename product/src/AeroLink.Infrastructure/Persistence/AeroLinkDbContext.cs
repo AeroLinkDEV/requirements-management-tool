@@ -87,6 +87,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ProblemReport> ProblemReports => Set<ProblemReport>();
     public DbSet<ProblemReportRevision> ProblemReportRevisions => Set<ProblemReportRevision>();
     public DbSet<ProblemReportLink> ProblemReportLinks => Set<ProblemReportLink>();
+    public DbSet<CodeTraceabilityRecord> CodeTraceabilityRecords => Set<CodeTraceabilityRecord>();
     public DbSet<ConfigurationChangeSet> ConfigurationChangeSets => Set<ConfigurationChangeSet>();
     public DbSet<ControlledAttachment> ControlledAttachments => Set<ControlledAttachment>();
     public DbSet<ArtifactEditSession> ArtifactEditSessions => Set<ArtifactEditSession>();
@@ -813,6 +814,19 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("problem_report_links"); b.HasKey(x => x.Id); b.Property(x => x.ArtifactType).HasMaxLength(80).IsRequired(); b.Property(x => x.Relationship).HasMaxLength(80).IsRequired(); b.Property(x => x.AddedBy).HasMaxLength(100).IsRequired();
             b.HasIndex(x => new { x.ProblemReportId, x.ArtifactType, x.ArtifactId, x.Relationship }).IsUnique(); b.HasIndex(x => new { x.ArtifactType, x.ArtifactId }); b.HasOne<ProblemReport>().WithMany().HasForeignKey(x => x.ProblemReportId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<CodeTraceabilityRecord>(b =>
+        {
+            b.ToTable("code_traceability_records"); b.HasKey(x => x.Id);
+            b.Property(x => x.Disposition).HasConversion<string>().HasMaxLength(40); b.Property(x => x.RepositoryPath).HasMaxLength(300);
+            b.Property(x => x.MergeRequestReference).HasMaxLength(80); b.Property(x => x.MergeRequestTitle).HasMaxLength(500);
+            b.Property(x => x.MergeRequestUrl).HasMaxLength(1000); b.Property(x => x.MergeCommitSha).HasMaxLength(64);
+            b.Property(x => x.NoCodeChangeRationale).HasMaxLength(4000); b.Property(x => x.RecordedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ReleaseId, x.RequirementRevisionId }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.ReleaseId });
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<RequirementArtifact>().WithMany().HasForeignKey(x => x.RequirementArtifactId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.RequirementRevisionId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ConfigurationChangeSet>(b =>
         {

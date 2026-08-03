@@ -26,9 +26,27 @@ Downstream engineering work and upward allocation are separate controls. Approva
 discipline assessments; prospective HLR/LLR changes carry exact proposed parent revision IDs in their review
 snapshot. Baseline materialization alone creates the resulting immutable `AllocatedFrom` trace links.
 
+The human Digital Thread projection walks only exact revisions in one materialized baseline. It follows the
+selected requirement through its System/HLR/LLR ancestry or descendants, then joins exact procedure coverage,
+the build-specific execution and recorded evidence reference/files, and the immutable software-build record.
+The general relationship explorer remains available; the compact path is an assurance projection, not a new
+trace store.
+
 Software-build identity is canonical: a release version such as `1.6` is represented by `SW-01.60`. The
 historical `CandidateBaseline` and executable `SoftwareBuild` persistence records are implementation facets of
 that one software build, not separate product concepts presented to the user.
+
+## Code traceability boundary
+
+GitLab is the source of truth for repositories, source code, branches, merge requests, review discussion, CI,
+and commit content. AeroLink's `CodeTraceabilityRecord` is an immutable lifecycle pointer: Project, build,
+exact LLR artifact/revision, GitLab repository/MR reference and URL, merge commit SHA/time, or an attributable
+`No code change required` rationale. A uniqueness constraint prevents competing mappings for the same exact
+LLR revision in one build. Released-build mutation protection applies server-side.
+
+The first integration is manual evidence capture and a small, conspicuously labelled FMS demonstration set.
+Webhook synchronization, GitLab project allow-lists, CI state, many-to-many MR/LLR mapping, and automated
+commit-in-build proof remain later integration depth. AeroLink never clones a repository or approves a merge.
 
 ## Persistence
 

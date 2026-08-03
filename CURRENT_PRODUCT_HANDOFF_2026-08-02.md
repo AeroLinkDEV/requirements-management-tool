@@ -62,8 +62,10 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
 
 ### Primary navigation
 
-- **Engineering** contains Change Requests, Requirements Explorer, engineering Documents and Digital Thread.
+- **Requirements** contains Change Requests, Requirements Explorer, requirements Documents and Digital Thread.
 - **Verification** contains direct System or HLR/LLR Coverage, Results and verification Documents.
+- **Code** is a standalone destination between Verification and Problem Reports. It maps exact LLR revisions to
+  GitLab merge evidence while GitLab remains source of truth.
 - **Problem Reports** is a standalone top-level destination with no submenu.
 - The redundant generic Verification sidebar entry is gone; `/system-verification` and
   `/software-verification` remain backward-compatible chooser routes.
@@ -84,6 +86,11 @@ Problem Reports lead to corrective work; requirement changes do not automaticall
 SWCR and discipline-specific TCR may select one or more driving PRs. Approved changes are projected to the PR
 as corrective actions. Applicable executions/results are projected as test evidence. Connected controlled
 records are searchable and refresh-safe.
+
+The PR lifecycle is Draft → Ready for SCCB → Open → Implementing → Verifying → Awaiting SQA Closure → Closed.
+Title and rich Problem Description are the only Draft requirements. Raised-by/date are immutable; owner and one
+target build are auditable but reassignable. Rich supporting fields and Unknown/No/Yes impact decisions are
+progressive, filters combine with AND, History is an internal tab, and SQA closure is independent.
 
 When a build introduces or modifies a requirement, procedures covering the impacted exact revisions enter the
 build test set as mandatory changed-requirement scope. They cannot be removed, and release readiness requires
@@ -119,16 +126,26 @@ Focused evidence from the final increments includes:
 Never reset the persistent database to simplify a test. Stop the demo API before backend builds if assemblies
 are locked, then restart through `product/scripts/Start-AeroLink.ps1` so readiness is checked rather than assumed.
 
+## Code traceability and future-build planning
+
+- GitLab is authoritative for source, MRs, review, and commit content. AeroLink records immutable pointers from
+  exact approved LLR revisions to GitLab MRs and merge SHAs, or a justified `No code change required` decision.
+- Build 1.5 code evidence is historical/read-only; Build 1.6 is active. The small FMS mapping set is explicitly
+  labelled demonstration data and does not pretend that every seeded LLR has a real GitLab MR.
+- The Software Builds lineage ends with **Plan next build**, a non-record placeholder. It creates no future
+  build identity or version.
+- Digital Thread presents SYSR → HLR → LLR → procedure → execution/result → evidence → build on one screen and
+  retains focused traversal and evidence views.
+
 ## Deliberate boundaries and next work
 
-- AeroLink is not a Git host and does not manage source code. The approved
-  [LLR-to-code traceability proposal](LLR_TO_CODE_TRACEABILITY_PROPOSAL.md) remains a proposal: link approved LLR
-  revisions to immutable external Git provider/project/commit or merge-request references without importing
-  code or claiming a merge satisfies the requirement.
+- AeroLink is not a Git host and does not manage source code. The delivered
+  [LLR-to-code traceability MVP](LLR_TO_CODE_TRACEABILITY_PROPOSAL.md) records exact approved LLR-to-GitLab merge
+  pointers without importing code or claiming a merge satisfies the requirement.
 - Fine-grained permission expansion and rule-based requirement-quality checks remain unimplemented product
   choices, not hidden features.
-- Problem Report classification, status policy and closure depth should continue incrementally from the current
-  connected foundation when the user supplies the next process decisions.
+- Optional Problem Report classification, attachments, and configurable closure policy should continue only
+  when later product decisions justify them.
 - Build 1.6 should continue through realistic, incomplete engineering work. Do not force it to release merely
   to demonstrate a completed state; use Build 1.5 for immutable historical behavior.
 

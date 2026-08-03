@@ -1,6 +1,6 @@
 export type View =
   | "projects" | "builds" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "testingCoverage" | "testResults" | "documents" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
+  | "verification" | "testingCoverage" | "testResults" | "documents" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
@@ -111,6 +111,7 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (tail[0] === "software-verification" && tail[1] === "llr" && tail[2] === "results" && tail[3]) return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "LowLevel", artifactId: decoded(tail[3]) };
   if (path === "system-verification") return { ...base, view: "verification", discipline: "systemTest" };
   if (path === "software-verification") return { ...base, view: "verification", discipline: "softwareTest" };
+  if (path === "code") return { ...base, view: "code", discipline: "software" };
   if (path === "problem-reports") return { ...base, view: "problemReports", discipline: "system" };
   if (tail[0] === "problem-reports" && tail[1]) return { ...base, view: "problemReports", discipline: "system", artifactId: decoded(tail[1]) };
   if (path === "traceability") return { ...base, view: "lifecycle", discipline: "system" };
@@ -178,6 +179,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
       return `${root}/${discipline === "software" ? "software" : "systems"}/documents`;
     }
     case "problemReports": return `${root}/problem-reports${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
+    case "code": return `${root}/code`;
     case "lifecycle": return artifactId ? `${root}/traceability/${encodeURIComponent(artifactId)}` : `${root}/traceability`;
     case "planning": return `${root}/release-planning`;
     case "baselines": return `${root}/baselines`;

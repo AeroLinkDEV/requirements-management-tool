@@ -18,7 +18,7 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   await expect(page.getByRole('heading',{name:'Change triage'})).toBeVisible()
   await expect(page.getByText('Release attention')).toHaveCount(0)
   await expect(page.getByText('Change request flow')).toHaveCount(0)
-  await expect(page.locator('.navGroup > summary')).toHaveText(['ENGINEERING','VERIFICATION','RELEASE','ADMINISTRATION'])
+  await expect(page.locator('.navGroup > summary')).toHaveText(['REQUIREMENTS','VERIFICATION','RELEASE','ADMINISTRATION'])
 
   await openNavigationGroup(page,'SYSTEMS ENGINEERING')
   await page.getByRole('link',{name:'System Change Requests'}).click()

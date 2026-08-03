@@ -91,9 +91,13 @@ The following are not part of Phase 0 or the first product slice:
 - **Approval and baselines:** Approval of an artifact revision does not automatically place it in a release baseline. Baseline inclusion is a distinct controlled decision.
 - **Testing:** A test procedure is a reusable controlled definition. A test execution is a historical occurrence using a specific procedure revision and configuration.
 - **Standards:** Standards inform product language and rigor. Program-specific processes remain authoritative for actual certification use.
-- **PRs:** The product now provides a build-scoped Problem Reports center and controlled PR links from SCRs,
-  SWCRs, and System/HLR/LLR TCRs. Approved engineering changes appear as corrective actions and linked test
-  results provide verification evidence. Broader classification, lifecycle, closure policy, and external issue
-  integration remain later scope.
+- **PRs:** The product provides the agreed Draft-to-independent-SQA-closure lifecycle, progressive rich fields,
+  Unknown/No/Yes impact decisions, AND filters, internal history, and controlled PR links from SCRs, SWCRs,
+  and System/HLR/LLR TCRs. Approved engineering changes appear as corrective actions and selected
+  closure-supporting test results provide verification evidence. Optional classifications, attachments,
+  containment/preventive action, saved views, and external issue integration remain later scope.
+- **Code:** GitLab owns source, MRs, review, and commit content. AeroLink stores immutable build-scoped pointers
+  from exact approved LLR revisions to GitLab merges, or a justified no-code disposition. Repository browsing,
+  code editing/review, branch management, and GitLab enforcement remain out of scope.
 
 Scope changes must be recorded in [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md) and reflected in [FEATURE_CATALOG.md](FEATURE_CATALOG.md).

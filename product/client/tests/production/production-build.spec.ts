@@ -374,8 +374,17 @@ test('every workspace chunk arrives and keeps the design contract in both densit
     expect(await page.evaluate(() => document.documentElement.dataset.density)).toBe(density)
 
     for (const route of routes) {
-      await page.goto(route, { waitUntil: 'load' })
-      await page.waitForTimeout(1200)
+      const previousMain = await page.locator('main').innerText().catch(() => '')
+      await page.goto(route, { waitUntil: 'networkidle' })
+      // React keeps the preceding workspace visible while the next lazy chunk resolves. Waiting for any
+      // heading therefore accepts stale content; require the main content to change before evaluating the
+      // destination, then wait for its user-visible readiness signal. A failed or empty chunk still falls
+      // through to the report below.
+      await page.waitForFunction(previous => {
+        const current = (document.querySelector('main')?.textContent || '').trim()
+        return current.length > 0 && current !== previous
+      }, previousMain.trim(), { timeout: 15_000 }).catch(() => {})
+      await page.locator('main h1, main h2, main h3').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
       const where = `${route.replace(/^.*\/releases\/[^/]+/, '')} [${density}]`
 
       const report = await page.evaluate(() => {

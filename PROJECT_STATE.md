@@ -201,11 +201,13 @@ Software and Verification work. System change creation is direct; Software creat
 Change history, requirements, search and verification are scoped to the active build, and historical evidence
 is labelled with its originating build without changing workspace context.
 
-Problem Reports are active and build scoped under DEC-085. Their center is searchable by controlled number and
-content, supports durable detail links, and links forward to SCRs, SWCRs, every TCR discipline, requirements,
-procedures, executions/evidence, documents, and releases where those records exist. Every change-request type
-can select one or more driving PRs; approved engineering changes are projected back as corrective actions, and
-verification results are projected as test evidence. Product Versions, Candidate
+Problem Reports are active and build scoped under DEC-085 and DEC-087. They carry the agreed Draft-to-Closed
+lifecycle, progressive rich fields, immutable raised-by/date, auditable owner/target-build changes, structured
+impact decisions, AND filters, and an internal History tab. Their center supports durable detail links and
+links forward to SCRs, SWCRs, every TCR discipline, requirements, procedures, executions/evidence, documents,
+and releases where those records exist. Every change-request type can select one or more driving PRs; approved
+engineering changes are projected back as corrective actions, and only results selected to support closure
+are projected as test evidence. Product Versions, Candidate
 Baselines, and the old Change Request Software Builds view remain dormant under DEC-072. Lifecycle Decision
 Room remains visible.
 
@@ -224,9 +226,10 @@ System has one pair; software has two, HLR and LLR, because that work is planned
 separately. `/system-verification` and `/software-verification` are now a chooser between the pages rather
 than a workspace of their own.
 
-Primary navigation mirrors that work: **Engineering** owns change requests, requirements, engineering
+Primary navigation mirrors that work: **Requirements** owns change requests, requirements, requirements
 documents, and Digital Thread; **Verification** owns the direct coverage, results, and verification-document
-destinations; **Problem Reports** is a standalone destination. The older verification chooser URLs remain
+destinations; **Code** and **Problem Reports** are standalone destinations in that order. Code records exact
+LLR-revision-to-GitLab-merge pointers without hosting source, and released Build 1.5 is read-only. The older verification chooser URLs remain
 valid deep links, but no redundant generic Verification entry occupies the sidebar. Legitimate assurance role
 names and production-assurance terminology are unchanged.
 
@@ -261,9 +264,8 @@ The tool never auto-creates or auto-approves a successor release. Details in
 ## Where delivery stands
 
 The AeroLink 3.0 implementation program and its review follow-ups have been reconciled. GitHub issue #29 and
-every child/follow-up are closed. The later Problem Reports increment and the 2 August engineering-observation
-set (#258-#262) followed the same focused, gated pull-request path; all are closed and GitHub has no open issue
-at this checkpoint. Residual identity federation
+every child/follow-up are closed. The later Problem Reports increment and both 2 August engineering-observation
+sets (#258-#262 and #277-#280) followed the same focused, gated pull-request path. Residual identity federation
 and deployment operations were closed with explicit resume conditions because they require a real provider or
 hosting contract, not generic product simulation.
 
@@ -530,7 +532,8 @@ reason the document set can be trusted.
 
 Current `main` includes trustworthy Draft SWCR persistence, HLR/LLR-scoped histories and assessments,
 searchable controlled references, actionable downstream assessment decisions with automatic Draft linking,
-active Problem Reports traceability, mandatory changed-requirement testing, and the Engineering / Verification /
+the agreed Problem Report lifecycle and fields, mandatory changed-requirement testing, complete
+SYSR-to-build Digital Thread paths, GitLab LLR-to-code evidence, and the Requirements / Verification / Code /
 Problem Reports navigation model.
 Non-authoritative Concurrency and count-only IntegrityScan simulations are retired. Each focused delivery is
 qualified through the GitHub Product Quality Gate and exact-merge local checks; the persistent PostgreSQL

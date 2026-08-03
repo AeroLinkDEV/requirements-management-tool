@@ -11,6 +11,15 @@ type TraceExecution = { id: string; outcome: string; executedBy: string; execute
 type TraceTest = { procedureId: string; revisionId: string; displayNumber: string; title: string; level: string; state: string; isSuspect: boolean; coverageState: "Confirmed" | "Suspect"; executions: TraceExecution[] };
 type TraceRelation = { id: string; displayNumber: string; level: string; type: string };
 type Trace = { id: string; revisionId: string; displayNumber: string; level: string; statement: string; testCount: number; suspectTestCount: number; parents: TraceRelation[]; children: TraceRelation[]; tests: TraceTest[] };
+type CompletePath = {
+  baselineId: string;
+  focusRevisionId: string;
+  baseline: { displayNumber: string; name: string };
+  nodes: { id: string; revisionId: string; displayNumber: string; level: string; statement: string }[];
+  procedure?: { id: string; revisionId: string; displayNumber: string; title: string; level: string; state: string };
+  execution?: TraceExecution;
+  build?: { id: string; buildNumber: string; state: string; recordedAt: string; releasedAt?: string };
+};
 type Props = {
   api: string;
   projectId: string;
@@ -36,6 +45,7 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
   const [baselineId, setBaselineId] = useState("");
   const [documents, setDocuments] = useState<Document[]>([]);
   const [traces, setTraces] = useState<Trace[]>([]);
+  const [completePath, setCompletePath] = useState<CompletePath>();
   const [focusId, setFocusId] = useState("");
   const [query, setQuery] = useState("");
   const [total, setTotal] = useState(0);
@@ -113,6 +123,23 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
     const timer = setTimeout(load, 150);
     return () => clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (!baselineId || !focusId) {
+      setCompletePath(undefined);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const response = await fetch(`${api}/api/traceability/path?projectId=${projectId}&baselineId=${baselineId}&requirementRevisionId=${focusId}`);
+      if (!response.ok) throw new Error("The complete lifecycle path could not be loaded.");
+      const body = await response.json() as CompletePath;
+      if (!cancelled) setCompletePath(body);
+    })().catch((reason) => {
+      if (!cancelled) setError(reason instanceof Error ? reason.message : "The complete lifecycle path could not be loaded.");
+    });
+    return () => { cancelled = true; };
+  }, [api, projectId, baselineId, focusId]);
 
   // The thread loads one page of traces, so a requirement outside that page cannot be focused however
   // precisely the route asks for it — which is why passing the identity through was necessary but not
@@ -212,22 +239,21 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
         {threadMode === "map" ? focus ? <section className="digitalThreadStage">
           <div className="threadCanvas">
             {requestedButAbsent && <p className="threadFocusMissing" role="status">The requested requirement is not in the current baseline or search results, so the thread is showing {focus.displayNumber} instead. Clear the search or choose the baseline that contains it.</p>}
-            <header><div><span>FOCUSED PATH</span><b>{focus.displayNumber}</b></div><small>Select a related record to traverse the controlled network</small></header>
-            <div className="threadPath" role="list" aria-label={`Digital thread for ${focus.displayNumber}`}>
-              <div className="threadLane authority">
-                <small>DERIVED FROM</small>
-                {focus.parents.length ? focus.parents.slice(0, 3).map((parent) => <button key={parent.id} onClick={() => traverse(parent)}><i>UP</i><b>{parent.displayNumber}</b><span>{parent.level}</span></button>) : <article><i>TOP</i><b>Top-level authority</b><span>No parent requirement</span></article>}
-              </div>
-              <i className="threadConnector" aria-hidden="true">›</i>
-              <div className="threadLane requirement"><small>FOCUS REQUIREMENT</small><article className="selected"><i>RQ</i><b>{focus.displayNumber}</b><span>{focus.level} · controlled</span><p>{focus.statement}</p></article></div>
-              <i className="threadConnector" aria-hidden="true">›</i>
-              <div className="threadLane verification"><small>VERIFIED BY</small>{focus.tests.length ? focus.tests.slice(0, 3).map((test) => <article className={test.isSuspect ? "suspect" : ""} key={test.revisionId}><i>TP</i><b>{test.displayNumber}</b><span>{test.isSuspect ? "Suspect applicability" : `${test.executions.length} execution${test.executions.length === 1 ? "" : "s"}`}</span></article>) : <article className="missing"><i>!</i><b>No procedure</b><span>Verification link required</span></article>}</div>
-              <i className="threadConnector" aria-hidden="true">›</i>
-              <div className="threadLane evidence"><small>EVIDENCE</small>{executions.length ? executions.slice(0, 3).map((run) => <article key={run.id}><i>{run.outcome === "Pass" ? "✓" : "!"}</i><b>{run.outcome}</b><span>{run.evidence.length} immutable file{run.evidence.length === 1 ? "" : "s"}</span></article>) : <article className="missing"><i>!</i><b>No execution</b><span>Authoritative result required</span></article>}</div>
-              <i className="threadConnector" aria-hidden="true">›</i>
-              <div className="threadLane configuration"><small>CONFIGURED IN</small><article><i>BL</i><b>{selectedBaseline?.displayNumber ?? "Baseline"}</b><span>{selectedBaseline?.name ?? "Controlled configuration"}</span></article></div>
-            </div>
-            <footer><b>{1 + focus.parents.length + focus.children.length + focus.tests.length + executions.length} connected records</b><span>{focus.children.length} downstream requirement{focus.children.length === 1 ? "" : "s"} · {evidence.length} evidence file{evidence.length === 1 ? "" : "s"}</span></footer>
+            <header><div><span>COMPLETE LIFECYCLE PATH</span><b>{focus.displayNumber}</b></div><small>Select a requirement to traverse; every card is exact to this baseline</small></header>
+            {completePath ? <div className="completeThreadPath" role="list" aria-label={`Complete digital thread for ${focus.displayNumber}`}>
+              {completePath.nodes.map((node, index) => <div className="completeThreadStep" key={node.revisionId}>
+                {index > 0 && <i className="threadConnector" aria-hidden="true">›</i>}
+                <button type="button" className={node.revisionId === focus.revisionId ? "selected" : ""} onClick={() => { setQuery(node.displayNumber.replace(/\.\d{2}$/, "")); setFocusId(node.revisionId); }}>
+                  <small>{node.level === "System" ? "SYSTEM REQUIREMENT" : node.level === "HighLevel" ? "HLR" : "LLR"}</small>
+                  <b>{node.displayNumber}</b><span>{node.statement}</span>
+                </button>
+              </div>)}
+              <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.procedure ? "missing" : ""}><small>TEST PROCEDURE</small><b>{completePath.procedure?.displayNumber ?? "Not linked"}</b><span>{completePath.procedure?.title ?? "Procedure linkage required"}</span></article></div>
+              <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.execution ? "missing" : ""}><small>TEST RESULT</small><b>{completePath.execution?.outcome ?? "Not executed"}</b><span>{completePath.execution?.determination ?? "Authoritative result required"}</span></article></div>
+              <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.execution?.evidenceReference ? "missing" : ""}><small>TEST EVIDENCE</small><b>{completePath.execution?.evidence[0]?.originalFileName ?? (completePath.execution?.evidenceReference ? "Recorded evidence" : "Not attached")}</b><span>{completePath.execution?.evidence[0]?.sha256 ?? completePath.execution?.evidenceReference ?? "Evidence required"}</span></article></div>
+              <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.build ? "missing" : ""}><small>BUILD</small><b>{completePath.build?.buildNumber ?? completePath.baseline.displayNumber}</b><span>{completePath.build ? `${completePath.build.state} · ${completePath.baseline.displayNumber}` : completePath.baseline.name}</span></article></div>
+            </div> : <div className="traceEmpty"><b>Resolving complete path…</b><p>Following exact requirement revisions into verification evidence and build configuration.</p></div>}
+            <footer><b>{completePath ? `${completePath.nodes.length} requirement levels in this path` : "Resolving connected records"}</b><span>SYSR → HLR → LLR → procedure → result → evidence → build</span></footer>
           </div>
           <aside className="threadInspector">
             <div className="threadFocusMark"><i>{focus.level.slice(0, 2).toUpperCase()}</i><span>{focus.level}</span></div>

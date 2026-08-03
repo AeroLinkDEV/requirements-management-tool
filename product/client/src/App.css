@@ -323,3 +323,11 @@ main > header p { margin: 0; color: var(--ink-500); font-size: 15px; max-width: 
   font-size: 13px;
 }
 .assessmentLinkRecovery{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:1rem;padding:1rem;border:1px solid #d6972c;border-radius:10px;background:#fff8e8}.assessmentLinkRecovery div{display:flex;flex-direction:column;gap:.25rem}.assessmentLinkRecovery span{color:#5c6878}
+
+/* Evidence labels remain readable in the compiled bundle regardless of component stylesheet load order. */
+.codeRecords article > header span,
+.mergeEvidence small,
+.mergeEvidence span,
+.codeRecords footer {
+  font-size: 12px !important;
+}

@@ -65,7 +65,7 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .buildLineage { margin-top: 20px; }
 .buildLineage > header h2 { margin: 0 0 3px; font: 650 16px var(--font-display); }
 .buildLineage > header p { margin: 0; color: #6a798b; font-size: 12px; }
-.buildLineage ol { list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 52px; margin: 11px 0 0; padding: 0; }
+.buildLineage ol { list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 36px; margin: 11px 0 0; padding: 0; }
 .buildLineage li { position: relative; min-width: 0; }
 .buildConnector { position: absolute; z-index: 2; top: 50%; right: -39px; width: 26px; height: 26px; display: grid; place-items: center; transform: translateY(-50%); border: 1px solid #8697a9; border-radius: 50%; background: var(--canvas); color: #354b65; font-size: 18px; }
 .buildConnector::before { content: ""; position: absolute; z-index: -1; right: 25px; width: 28px; border-top: 1px solid #8797a8; }
@@ -86,6 +86,8 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .buildStatus { border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 750; line-height: 1; }
 .buildStatus.released { border: 1px solid #91cfa5; background: #e9f7ed; color: #207044; }
 .buildStatus.in-work { border: 1px solid #58a2d4; background: #eef7fd; color: #12659d; }
+.buildStatus.planned { border: 1px solid #b7a8d8; background: #f4f0fb; color: #624b96; }
+.softwareBuildCard:has(.buildStatus.planned){border-style:dashed;background:#faf9fc}
 .softwareBuildCard h3 { margin: 14px 0 5px; font: 650 14px var(--font-display); }
 .softwareBuildCard > p { flex: 1; margin: 0 0 13px; color: #536376; font-size: 12px; line-height: 1.45; }
 .softwareBuildCard button { min-height: 38px; border: 1px solid #278aca; border-radius: 7px; background: white; color: #136eaa; font: 650 13px var(--font-body); cursor: pointer; }

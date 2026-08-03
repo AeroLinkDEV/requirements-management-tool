@@ -18,7 +18,8 @@ After authentication, the user selects **FMS Product Development** on the Projec
 Software Build. Build 1.5 opens this released dataset as a read-only historical workspace. Build 1.6 opens the
 in-work successor and scopes normal queries and mutations to that release. Builds 0.5 and 1.0 are lineage-only
 placeholders. Historical Build 1.5 evidence may appear inside 1.6 when clearly labelled, but it never switches
-the active workspace. See DEC-070.
+the active workspace. A final **Plan next build** card is a non-record placeholder and creates no future release
+or version. See DEC-070 and DEC-088.
 
 ## Released FMS 1.5 baseline
 
@@ -57,6 +58,11 @@ The released build is `FMS-1.5.0-RELEASE`. It references the frozen and material
 ## Controlled outputs
 
 The baseline records a SYSRD, HLR SWRD, LLR SWRD, System Test Procedures, HLR Test Procedures, and LLR Test Procedures. Each record identifies its exact release, baseline, revision, artifact count, generation time, and content hash.
+
+The Code center uses a deliberately small demonstration contract rather than inventing hundreds of GitLab MRs.
+Five exact LLR revisions are required in each build scope. Build 1.5 has five historical mappings; Build 1.6
+starts with four mappings and one visible release-gate gap. Every seeded mapping is labelled demonstration data,
+and GitLab is identified as the source of truth for code and merge content.
 
 ## Active FMS 1.6 development
 

@@ -13,8 +13,8 @@ For project-wide orientation, start at [PROJECT_STATE.md](../PROJECT_STATE.md), 
 The current entry path is login → Projects → FMS Product Development → Software Builds → one explicit
 build-scoped workspace. `SW-01.50` (informally Build 1.5) is released/read-only; `SW-01.60` (informally Build
 1.6) is in work. A baseline and software build are one product concept. System and Software remain
-separate, while Command Center summarizes System, Software and Verification. Problem Reports is an active,
-standalone build-scoped workspace; Product Versions, Candidate Baselines and the old Change Request Software
+separate, while Command Center summarizes System, Software and Verification. Requirements and Verification are
+the primary grouped work areas; Code and Problem Reports are standalone build-scoped workspaces. Product Versions, Candidate Baselines and the old Change Request Software
 Builds view remain deliberately dormant even though underlying lifecycle implementation remains.
 
 The 2026-07-13 enterprise control increment adds durable URL routing and context restoration, a keyboard command palette, Program-aware universal artifact search, authoritative artifact detail links, SCR/SWCR exclusive checkout, renewable leases, server autosave snapshots, read-only observers, check-in/discard, forced-unlock auditing, authentication throttling, Program-scope enforcement, isolated browser-test infrastructure, and verified backup/restore operations.
@@ -28,6 +28,11 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
   no-change rationale, automatic/retryable correct-level Draft SWCR linking, and supersession behavior
 - searchable, durable Problem Report relationships from every SCR/SWCR/TCR type through corrective actions and
   applicable test evidence, without turning requirement changes into automatic PRs
+- the agreed Problem Report lifecycle and rich field set, progressive impact decisions, AND filters, internal
+  History, SCCB opening, and independent SQA closure
+- exact approved LLR-revision-to-GitLab MR/merge SHA evidence or justified no-code decisions, with GitLab kept as
+  source of truth and released-build mappings read-only
+- a complete SYSR-to-HLR-to-LLR-to-procedure-to-result-to-evidence-to-build Digital Thread path
 - prospective build-scoped upward allocation: HLR proposals select current System revisions, LLR proposals
   select current HLR revisions, and justified derived requirements are the explicit exception
 - controlled Test Change Requests with assignment, explicit verification decisions, independent approval,

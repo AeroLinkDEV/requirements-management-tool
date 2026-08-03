@@ -13,7 +13,7 @@ export type SelectableRelease = {
 type BuildDefinition = {
   id: string;
   version: string;
-  status: "released" | "in-work";
+  status: "released" | "in-work" | "planned";
   statusLabel: string;
   title: string;
   description: string;
@@ -22,6 +22,7 @@ type BuildDefinition = {
   isReadOnly: boolean;
   isCurrent: boolean;
   sortOrder: number;
+  isPlan?: boolean;
 };
 
 const softwareBuilds: readonly BuildDefinition[] = [
@@ -29,6 +30,7 @@ const softwareBuilds: readonly BuildDefinition[] = [
   { id: "fms-1-0", version: "1.0", status: "released", statusLabel: "Released", title: "Feature release", description: "Adds advanced navigation and performance features.", isAccessible: false, isReleased: true, isReadOnly: true, isCurrent: false, sortOrder: 2 },
   { id: "fms-1-5", version: "1.5", status: "released", statusLabel: "Released", title: "Stability release", description: "Reliability improvements and defect remediation.", isAccessible: true, isReleased: true, isReadOnly: true, isCurrent: false, sortOrder: 3 },
   { id: "fms-1-6", version: "1.6", status: "in-work", statusLabel: "In Work", title: "Current in-work build", description: "", isAccessible: true, isReleased: false, isReadOnly: false, isCurrent: true, sortOrder: 4 },
+  { id: "plan-next", version: "next", status: "planned", statusLabel: "Planned", title: "Plan next build", description: "Future-build placeholder. No build record has been created.", isAccessible: false, isReleased: false, isReadOnly: false, isCurrent: false, sortOrder: 5, isPlan: true },
 ];
 
 function MetadataIcon({ kind }: { kind: "owner" | "created" | "phase" }) {
@@ -104,7 +106,7 @@ export default function SoftwareBuildsLanding({
                     data-build-version={build.version}
                   >
                     <div className="buildCardTop">
-                      <strong className="buildVersion">{officialBuildName(build.version)}</strong>
+                      <strong className="buildVersion">{build.isPlan ? "Next" : officialBuildName(build.version)}</strong>
                       <span className={`buildStatus ${build.status}`}>{build.statusLabel}</span>
                     </div>
                     <h3>{build.title}</h3>
@@ -119,10 +121,10 @@ export default function SoftwareBuildsLanding({
                       type="button"
                       disabled={!enabled}
                       onClick={() => release && onOpenBuild(release)}
-                      aria-label={`Open build ${build.version} (${officialBuildName(build.version)})`}
-                      title={!enabled ? "Controlled workspace not available" : undefined}
+                      aria-label={build.isPlan ? "Plan next build placeholder" : `Open build ${build.version} (${officialBuildName(build.version)})`}
+                      title={!enabled ? build.isPlan ? "No future build record has been created" : "Controlled workspace not available" : undefined}
                     >
-                      <span aria-hidden="true">↗</span> Open build
+                      <span aria-hidden="true">{build.isPlan ? "+" : "↗"}</span> {build.isPlan ? "Not created" : "Open build"}
                     </button>
                   </article>
                   {index < softwareBuilds.length - 1 && <span className="buildConnector" aria-hidden="true">→</span>}

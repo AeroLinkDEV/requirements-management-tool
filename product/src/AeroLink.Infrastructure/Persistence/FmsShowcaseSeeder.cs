@@ -144,6 +144,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
             ("approver-identity", ReconcileApproverIdentityAsync),
             ("released-campaign", EnsureReleasedCampaignAsync),
+            ("code-traceability-demo", EnsureCodeTraceabilityAsync),
         };
 
         foreach (var step in steps)
@@ -155,6 +156,46 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             applied.Add($"{step.Key}: {detail ?? "No change required."}");
         }
         return applied;
+    }
+
+    private async Task<string?> EnsureCodeTraceabilityAsync(Guid programId, CancellationToken ct)
+    {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleAsync(ct);
+        var releases = await db.Releases.Where(x => x.ProjectId == projectId && (x.Version == "1.5" || x.Version == "1.6")).ToListAsync(ct);
+        var released = releases.SingleOrDefault(x => x.Version == "1.5"); var active = releases.SingleOrDefault(x => x.Version == "1.6");
+        if (released is null || active is null) return "The showcase build pair is not available.";
+        // SQLite cannot order DateTimeOffset server-side. There are only the controlled baselines for one
+        // released build here, so materialize that bounded set and make the deterministic choice in memory.
+        var baseline = (await db.CandidateBaselines.AsNoTracking()
+            .Where(x => x.ReleaseId == released.Id && x.RequirementsMaterializedAt != null).ToListAsync(ct))
+            .OrderBy(x => x.CreatedAt).FirstOrDefault();
+        if (baseline is null) return "The released LLR baseline is not materialized.";
+        var llrs = await (from selection in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id)
+                          join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == RequirementLevel.LowLevel) on selection.ArtifactId equals artifact.Id
+                          join revision in db.RequirementRevisions.AsNoTracking() on selection.RevisionId equals revision.Id
+                          orderby artifact.BaseNumber
+                          select new { ArtifactId = artifact.Id, RevisionId = revision.Id }).Take(5).ToListAsync(ct);
+        if (llrs.Count < 5) return "Fewer than five LLR revisions are available for the demo scope.";
+        var now = new DateTimeOffset(2026, 6, 18, 15, 0, 0, TimeSpan.Zero); var added = 0;
+        foreach (var release in new[] { released, active })
+        {
+            var count = release.Id == released.Id ? 5 : 4;
+            for (var index = 0; index < count; index++)
+            {
+                var llr = llrs[index];
+                if (await db.CodeTraceabilityRecords.AnyAsync(x => x.ReleaseId == release.Id && x.RequirementRevisionId == llr.RevisionId, ct)) continue;
+                var noCode = index == count - 1;
+                var reference = $"!{1842 + index + (release.Id == active.Id ? 20 : 0)}";
+                var sha = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes($"{release.Version}:{llr.RevisionId}:{reference}"))).ToLowerInvariant();
+                db.CodeTraceabilityRecords.Add(new CodeTraceabilityRecord(projectId, release.Id, llr.ArtifactId, llr.RevisionId,
+                    noCode ? CodeTraceDisposition.NoCodeChangeRequired : CodeTraceDisposition.GitLabMerge,
+                    "aerolink-demo/fms-navigation", reference, $"Implement exact FMS LLR behavior for Build {release.Version}",
+                    $"https://gitlab.com/aerolink-demo/fms-navigation/-/merge_requests/{reference[1..]}", sha,
+                    now.AddDays(index), noCode ? "The approved LLR wording clarifies existing behavior; code already conforms and only verification evidence is required." : "",
+                    true, "software.lead", now.AddDays(index))); added++;
+            }
+        }
+        return $"Recorded {added} demonstration GitLab traceability mapping(s); Build 1.6 deliberately retains one visible gap.";
     }
 
     /// <summary>
