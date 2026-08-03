@@ -40,12 +40,13 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   // The workspace entrance animation used to leave a transform behind, making fixed dialogs relative to the
   // whole scrolled workspace and placing their top thousands of pixels above the visible browser window.
   await page.evaluate(() => {
+    document.documentElement.style.overflow = 'auto';
     document.body.style.overflow = 'auto';
-    const depth = document.createElement('div'); depth.dataset.testScrollDepth = 'true'; depth.style.height = '2000px'; document.body.append(depth);
-    window.scrollTo(0, document.documentElement.scrollHeight);
+    document.body.style.minHeight = '3000px';
   });
-  const scrolledY = await page.evaluate(() => window.scrollY);
-  expect(scrolledY).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight)).toBeGreaterThan(2500);
+  await page.evaluate(() => { if (document.scrollingElement) document.scrollingElement.scrollTop = 1000; });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   await rows.first().getByRole('button', { name: /Open procedure HLRTP-/ }).evaluate((button: HTMLButtonElement) => button.click());
   const procedureDialog = page.getByRole('dialog', { name: /Procedure HLRTP-/ });
   await expect(procedureDialog).toBeVisible();
