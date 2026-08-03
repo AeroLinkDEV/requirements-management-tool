@@ -181,7 +181,7 @@ public sealed class SectionPlacementOnMaterializationTests
         RequirementChangeKind kind, string statement, Guid projectId, Guid releaseId, DateTimeOffset now,
         Guid? targetSectionId)
     {
-        var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now);
+        var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software);
         scr.AddRequirementChange("author", requirementNumber, revision, RequirementLevel.HighLevel, kind, statement,
             "Rationale", "Test", now, targetSectionId: targetSectionId);
         scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);

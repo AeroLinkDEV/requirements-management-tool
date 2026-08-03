@@ -44,12 +44,15 @@ public sealed class SystemChangeRequestTests
     [Fact]
     public void Author_can_replace_draft_content_without_changing_revision()
     {
-        var scr = CreateDraftWithRequirement();
+        var scr = new SystemChangeRequest("SWCR-01049", 1, ProjectId, ReleaseId,
+            "Round Robin", "Problem", "Analysis", "Solution", "author", Now, ChangeRequestType.Software);
+        scr.AddRequirementChange("author", "HLR-00002375", 1, RequirementLevel.HighLevel,
+            RequirementChangeKind.Modify, "The software shall sequence waypoints.", "Clarification.", "Test", Now);
         scr.UpdateDraft("author", "Updated Round Robin", "Updated problem", "Updated analysis", "Updated solution",
         [
-            new RequirementChangeDraft("SYSR-00002375", 2, RequirementLevel.System, RequirementChangeKind.Modify,
-                "The FMS shall sequence Round Robin waypoints deterministically.", "Clarified behavior.", "Test"),
-            new RequirementChangeDraft("SWR-00002376", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce,
+            new RequirementChangeDraft("HLR-00002375", 2, RequirementLevel.HighLevel, RequirementChangeKind.Modify,
+                "The FMS software shall sequence Round Robin waypoints deterministically.", "Clarified behavior.", "Test"),
+            new RequirementChangeDraft("LLR-00002376", 0, RequirementLevel.LowLevel, RequirementChangeKind.Introduce,
                 "The software shall expose the selected sequence.", "New HLR.", "Test")
         ], Now.AddMinutes(1));
 
@@ -57,6 +60,34 @@ public sealed class SystemChangeRequestTests
         Assert.Equal("Updated Round Robin", scr.Title);
         Assert.Equal(2, scr.RequirementChanges.Count);
         Assert.Contains(scr.AuditEvents, x => x.EventType == "ScrDraftUpdated");
+    }
+
+    [Theory]
+    [InlineData(RequirementLevel.HighLevel)]
+    [InlineData(RequirementLevel.LowLevel)]
+    public void System_change_request_rejects_software_requirement_levels(RequirementLevel level)
+    {
+        var scr = new SystemChangeRequest("SCR-01050", 0, ProjectId, ReleaseId,
+            "System change", "Problem", "Analysis", "Solution", "author", Now, ChangeRequestType.System);
+
+        var error = Assert.Throws<DomainException>(() => scr.AddRequirementChange("author", "HLR-00000001", 0,
+            level, RequirementChangeKind.Introduce, "Software behavior.", "Rationale.", "Test", Now));
+
+        Assert.Contains("System requirements only", error.Message);
+        Assert.Empty(scr.RequirementChanges);
+    }
+
+    [Fact]
+    public void Software_change_request_rejects_system_requirement_level()
+    {
+        var swcr = new SystemChangeRequest("SWCR-01050", 0, ProjectId, ReleaseId,
+            "Software change", "Problem", "Analysis", "Solution", "author", Now, ChangeRequestType.Software);
+
+        var error = Assert.Throws<DomainException>(() => swcr.AddRequirementChange("author", "SYSR-00000001", 0,
+            RequirementLevel.System, RequirementChangeKind.Introduce, "System behavior.", "Rationale.", "Test", Now));
+
+        Assert.Contains("HLR or LLR requirements only", error.Message);
+        Assert.Empty(swcr.RequirementChanges);
     }
 
     [Fact]

@@ -18,7 +18,7 @@ public sealed class VerificationPersistenceTests
         {
             await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync(); var now = DateTimeOffset.UtcNow;
             var program = new ProgramRecord("Verification", "VRFY"); var project = new ProjectRecord(program.Id, "Software", "FMS"); var release = new SoftwareRelease(project.Id, "3.3", false);
-            var scr = new SystemChangeRequest("SCR-00010", 0, project.Id, release.Id, "Requirements", "P", "A", "S", "author", now);
+            var scr = new SystemChangeRequest("SWCR-00010", 0, project.Id, release.Id, "Requirements", "P", "A", "S", "author", now, ChangeRequestType.Software);
             scr.AddRequirementChange("author", "SWR-00000001", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "First behavior", "R", "Test", now);
             scr.AddRequirementChange("author", "SWR-00000002", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "Second behavior", "R", "Test", now);
             scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now); scr.ApproveActiveStage("reviewer", now);
