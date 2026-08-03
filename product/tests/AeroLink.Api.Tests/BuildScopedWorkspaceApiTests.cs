@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -201,6 +202,77 @@ public sealed class BuildScopedWorkspaceApiTests
         using var crossBuildDetail = await client.GetAsync($"/api/test-executions/{executionId}");
         Assert.Equal(HttpStatusCode.Conflict, crossBuildDetail.StatusCode);
         Assert.Contains("cross_build_resource", await crossBuildDetail.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>
+    /// A released build is read-only whether or not the caller behaves like the browser.
+    ///
+    /// The workspace middleware refuses this, but only when the build-context header is supplied — which is a
+    /// browser guarantee rather than a product one. A service account, integration or script that omitted the
+    /// header reached the endpoint's final validation with the released boundary never checked, and a
+    /// well-formed request would have written an immutable determination against a released build.
+    ///
+    /// The request below is otherwise entirely acceptable: approved procedure revision, correct project, no
+    /// retest reference, no frozen campaign. Nothing but the released check can refuse it, so this cannot pass
+    /// because some unrelated rule happened to reject the request.
+    /// </summary>
+    [Fact]
+    public async Task Released_build_execution_is_refused_without_the_build_context_header()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var seeded = await SeedAsync(factory);
+        var releasedBuildId = await RecordReleasedSoftwareBuildAsync(factory, seeded.ProjectId, seeded.ReleasedId);
+        await SignInAsync(client);
+
+        Assert.False(client.DefaultRequestHeaders.Contains("X-AeroLink-Build-Context"));
+        using var refused = await client.PostAsJsonAsync("/api/test-executions", new
+        {
+            projectId = seeded.ProjectId,
+            procedureRevisionId = seeded.ProcedureRevisionId,
+            softwareBuildId = releasedBuildId,
+            outcome = "Pass",
+            configuration = "Released rig",
+            determination = "This determination must never reach a released build.",
+            evidenceReference = "evidence/should-not-exist.json",
+            executedAt = DateTimeOffset.UtcNow
+        });
+
+        var body = await refused.Content.ReadAsStringAsync();
+        Assert.True(refused.StatusCode == HttpStatusCode.Conflict, $"Expected Conflict, got {(int)refused.StatusCode}: {body}");
+        Assert.Contains("released_build_read_only", body);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Empty(db.TestExecutions.Where(x => x.SoftwareBuildId == releasedBuildId));
+        }
+
+        // The same headerless caller must still be able to record against work in progress, or the refusal
+        // would be protecting the released build by breaking the active one.
+        using var accepted = await client.PostAsJsonAsync("/api/test-executions", new
+        {
+            projectId = seeded.ProjectId,
+            procedureRevisionId = seeded.ProcedureRevisionId,
+            outcome = "Pass",
+            configuration = "FMS 1.6 integration rig",
+            determination = "The in-work behavior was observed.",
+            evidenceReference = "evidence/build-1.6.json",
+            executedAt = DateTimeOffset.UtcNow
+        });
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+    }
+
+    private static async Task<Guid> RecordReleasedSoftwareBuildAsync(AeroLinkApiFactory factory, Guid projectId, Guid releasedId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var baseline = new CandidateBaseline("SW-01.50", 0, projectId, releasedId, null, "Released software build", "build.user", now);
+        var build = new SoftwareBuild(projectId, releasedId, baseline.Id, "SW-01.50", "Released configuration", "build.user", now);
+        db.AddRange(baseline, build);
+        await db.SaveChangesAsync();
+        return build.Id;
     }
 
     private static async Task SignInAsync(HttpClient client)

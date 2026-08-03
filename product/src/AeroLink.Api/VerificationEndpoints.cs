@@ -557,6 +557,25 @@ public static class VerificationEndpoints
             if (activeReleaseId is not null && softwareBuildReleaseId is not null && softwareBuildReleaseId != activeReleaseId)
                 return Results.Conflict(new { error = "The software build belongs to a different active build workspace.", code = "cross_build_resource" });
             var executionReleaseId = activeReleaseId ?? softwareBuildReleaseId;
+            // A released build is read-only, and this endpoint has to say so itself.
+            //
+            // The workspace middleware already refuses this, but only when the caller supplies the build-context
+            // header. That is a browser guarantee, not a product one: a service account, an integration or a
+            // script that omits the header reached the final validation with the released boundary never
+            // checked, and a well-formed request would have written an immutable determination against a
+            // released build. Checked here, before the campaign-freeze and retest rules, so no unrelated
+            // failure can mask the refusal and make the endpoint look protected when it is not.
+            if (executionReleaseId is not null && await db.Releases.AsNoTracking()
+                    .AnyAsync(x => x.Id == executionReleaseId && x.ProjectId == request.ProjectId && x.IsReleased, ct))
+            {
+                var version = await db.Releases.AsNoTracking().Where(x => x.Id == executionReleaseId)
+                    .Select(x => x.Version).SingleAsync(ct);
+                return Results.Conflict(new
+                {
+                    error = $"Build {version} is released and read-only. Exit this workspace and select an in-work build to make changes.",
+                    code = "released_build_read_only"
+                });
+            }
             if (request.SoftwareBuildId is not null && await db.ReleaseCampaigns.AsNoTracking().AnyAsync(x => x.SoftwareBuildId == request.SoftwareBuildId && x.State == ReleaseCampaignState.InReview, ct))
                 return Results.Conflict(new { error = "The release package is frozen while approval is in progress.", code = "release_package_frozen" });
             if (request.RetestOfExecutionId is not null && !await db.TestExecutions.AnyAsync(x => x.Id == request.RetestOfExecutionId && x.ProcedureRevisionId == request.ProcedureRevisionId, ct)) return Results.BadRequest(new { error = "A retest must reference an earlier execution of the same procedure revision." });
