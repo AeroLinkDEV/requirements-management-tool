@@ -187,6 +187,7 @@ public static class VerificationEndpoints
             var buildRecord = db.Database.IsSqlite()
                 ? (await buildQuery.ToListAsync(ct)).OrderByDescending(x => x.RecordedAt).FirstOrDefault()
                 : await buildQuery.OrderByDescending(x => x.RecordedAt).FirstOrDefaultAsync(ct);
+            Guid? selectedBuildId = buildRecord?.Id;
 
             IReadOnlyList<PathProcedureCandidate> procedureCandidates = verificationRequirementId == Guid.Empty
                 ? Array.Empty<PathProcedureCandidate>()
@@ -206,12 +207,11 @@ public static class VerificationEndpoints
                 ? Array.Empty<TestExecution>()
                 : await db.TestExecutions.AsNoTracking()
                     .Where(x => candidateRevisionIds.Contains(x.ProcedureRevisionId) && x.ReleaseId == baseline.ReleaseId
-                        && (buildRecord == null || x.SoftwareBuildId == null || x.SoftwareBuildId == buildRecord.Id))
+                        && x.SoftwareBuildId == selectedBuildId)
                     .ToListAsync(ct);
             var latestByProcedure = candidateRuns.GroupBy(x => x.ProcedureRevisionId)
                 .ToDictionary(x => x.Key, x => x
-                    .OrderByDescending(run => buildRecord != null && run.SoftwareBuildId == buildRecord.Id)
-                    .ThenByDescending(run => run.ExecutedAt)
+                    .OrderByDescending(run => run.ExecutedAt)
                     .ThenByDescending(run => run.RecordedAt).First());
             var candidateRunIds = latestByProcedure.Values.Select(x => x.Id).ToList();
             IReadOnlyList<Guid> evidencedRunIds = candidateRunIds.Count == 0

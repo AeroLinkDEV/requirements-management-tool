@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -106,17 +105,16 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
             var releasedId = db.Releases.Single(x => x.ProjectId == summary.ProjectId && x.IsReleased).Id;
             var buildId = db.SoftwareBuilds.Single(x => x.ReleaseId == releasedId).Id;
             var now = DateTimeOffset.UtcNow;
-            var otherBuild = new SoftwareBuild(summary.ProjectId, releasedId, summary.ReleasedBaselineId, "FMS-1.5-DECOY", "An older immutable build in the same release.", "build.engineer", new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero));
-            var decoyProcedure = new TestProcedure(summary.ProjectId, "LLRTP-000000", "Wrong-build evidenced procedure", "test.engineer", now, TestProcedureLevel.LowLevel);
-            var decoyRevision = new TestProcedureRevision(decoyProcedure.Id, 0, "Verify a different build.", "Load another build.", "Exercise the behavior.", "The behavior is observed.", TestProcedureState.Approved, "test.engineer", now);
-            var decoyExecution = new TestExecution(summary.ProjectId, decoyRevision.Id, otherBuild.Id, null, TestOutcome.Pass, "test.engineer", "Other build", "This result belongs to another immutable software build.", "external://run/wrong-build", now.AddMinutes(1), now.AddMinutes(1), releasedId);
-            var decoyEvidence = new EvidenceRecord(summary.ProjectId, "wrong-build.json", "application/json", 128, new string('c', 64), "test/wrong-build.json", "test.engineer", now);
+            var decoyProcedure = new TestProcedure(summary.ProjectId, "LLRTP-000000", "Unscoped evidenced procedure", "test.engineer", now, TestProcedureLevel.LowLevel);
+            var decoyRevision = new TestProcedureRevision(decoyProcedure.Id, 0, "Verify an unspecified build.", "Load an unspecified build.", "Exercise the behavior.", "The behavior is observed.", TestProcedureState.Approved, "test.engineer", now);
+            var decoyExecution = new TestExecution(summary.ProjectId, decoyRevision.Id, null, null, TestOutcome.Pass, "test.engineer", "Legacy release scope", "This result has no immutable software-build identity.", "external://run/unscoped", now.AddMinutes(1), now.AddMinutes(1), releasedId);
+            var decoyEvidence = new EvidenceRecord(summary.ProjectId, "unscoped-run.json", "application/json", 128, new string('c', 64), "test/unscoped-run.json", "test.engineer", now);
             var procedure = new TestProcedure(summary.ProjectId, "LLRTP-999999", "Verify the evidenced exact LLR path", "test.engineer", now, TestProcedureLevel.LowLevel);
             var revision = new TestProcedureRevision(procedure.Id, 0, "Verify the exact approved behavior.", "Load the released build.", "Exercise the approved LLR behavior.", "The behavior matches the exact LLR revision.", TestProcedureState.Approved, "test.engineer", now);
             var execution = new TestExecution(summary.ProjectId, revision.Id, buildId, null, TestOutcome.Pass, "test.engineer", "FMS 1.5", "The observed behavior satisfies the approved expected result.", "external://run/evidenced", now, now, releasedId);
             var evidence = new EvidenceRecord(summary.ProjectId, "evidenced-run.json", "application/json", 128, new string('a', 64), "test/evidenced-run.json", "test.engineer", now);
             db.AddRange(
-                otherBuild, decoyProcedure, decoyRevision, new TestRequirementCoverage(decoyRevision.Id, llrRevisionId), decoyExecution, decoyEvidence, new TestExecutionEvidence(decoyExecution.Id, decoyEvidence.Id),
+                decoyProcedure, decoyRevision, new TestRequirementCoverage(decoyRevision.Id, llrRevisionId), decoyExecution, decoyEvidence, new TestExecutionEvidence(decoyExecution.Id, decoyEvidence.Id),
                 procedure, revision, new TestRequirementCoverage(revision.Id, llrRevisionId), execution, evidence, new TestExecutionEvidence(execution.Id, evidence.Id));
             await db.SaveChangesAsync();
             evidencedExecutionId = execution.Id;
