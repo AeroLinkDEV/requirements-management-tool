@@ -4,6 +4,7 @@ using System.Text.Json;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -19,30 +20,41 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
         await BootstrapAsync(client);
         var summary = showcase.Summary;
 
+        // The active build's campaign baseline is not materialized, so there is no exact requirement
+        // population to owe evidence against and the gate says exactly that — in the same words release
+        // readiness uses, and with no percentage. A number here was previously computed from the baseline
+        // this build *inherits*, which reported "80%" for a gate the Decision Room had not evaluated.
         var active = await client.GetFromJsonAsync<JsonElement>($"/api/code-traceability?projectId={summary.ProjectId}&releaseId={summary.ActiveReleaseId}");
         Assert.False(active.GetProperty("build").GetProperty("readOnly").GetBoolean());
-        Assert.True(active.GetProperty("demonstrationScope").GetBoolean());
-        Assert.Equal(5, active.GetProperty("summary").GetProperty("required").GetInt32());
-        Assert.Equal(4, active.GetProperty("summary").GetProperty("mapped").GetInt32());
-        Assert.False(active.GetProperty("summary").GetProperty("gateComplete").GetBoolean());
+        Assert.Equal("WaitingForPrerequisite", active.GetProperty("evaluationState").GetString());
+        Assert.Equal(JsonValueKind.Null, active.GetProperty("summary").ValueKind);
+        Assert.Empty(active.GetProperty("requirements").EnumerateArray());
+        Assert.Contains("materialized baseline", active.GetProperty("waiting").GetProperty("detail").GetString());
         Assert.Contains("GitLab is the source of truth", active.GetProperty("sourceOfTruth").GetString());
 
-        var missing = active.GetProperty("requirements").EnumerateArray().Single(x => x.GetProperty("mapping").ValueKind == JsonValueKind.Null);
-        using var created = await client.PostAsJsonAsync("/api/code-traceability", new
+        // Both surfaces answer the same question the same way. This is the assertion that stops the workspace
+        // and the release decision drifting apart again.
+        var campaigns = await client.GetFromJsonAsync<JsonElement>($"/api/release-campaigns?projectId={summary.ProjectId}");
+        var campaign = campaigns.EnumerateArray().Single(x => x.GetProperty("releaseId").GetGuid() == summary.ActiveReleaseId);
+        var codeGate = campaign.GetProperty("readiness").GetProperty("gates").EnumerateArray()
+            .Single(x => x.GetProperty("code").GetString() == "code_traceability");
+        Assert.Equal("WaitingForPrerequisite", codeGate.GetProperty("evaluationState").GetString());
+        Assert.False(codeGate.GetProperty("complete").GetBoolean());
+
+        // And nothing may be recorded against a population that does not exist yet: an inherited predecessor
+        // revision would produce an attributable record the real gate could never count.
+        var inheritedRevisionId = await InheritedLlrRevisionAsync(factory, summary.ProjectId, summary.ActiveReleaseId);
+        using var premature = await client.PostAsJsonAsync("/api/code-traceability", new
         {
             projectId = summary.ProjectId,
             releaseId = summary.ActiveReleaseId,
-            requirementArtifactId = missing.GetProperty("artifactId").GetGuid(),
-            requirementRevisionId = missing.GetProperty("revisionId").GetGuid(),
+            requirementArtifactId = inheritedRevisionId.ArtifactId,
+            requirementRevisionId = inheritedRevisionId.RevisionId,
             disposition = "NoCodeChangeRequired",
-            noCodeChangeRationale = "The approved LLR clarifies existing behavior and requires no executable change.",
+            noCodeChangeRationale = "Recorded before the build had an exact requirement population.",
         });
-        var createdBody = await created.Content.ReadAsStringAsync();
-        Assert.True(created.StatusCode == HttpStatusCode.Created, $"Expected Created, got {(int)created.StatusCode}: {createdBody}");
-
-        var completed = await client.GetFromJsonAsync<JsonElement>($"/api/code-traceability?projectId={summary.ProjectId}&releaseId={summary.ActiveReleaseId}");
-        Assert.Equal(5, completed.GetProperty("summary").GetProperty("mapped").GetInt32());
-        Assert.True(completed.GetProperty("summary").GetProperty("gateComplete").GetBoolean());
+        Assert.Equal(HttpStatusCode.Conflict, premature.StatusCode);
+        Assert.Contains("waiting_for_materialized_baseline", await premature.Content.ReadAsStringAsync());
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -69,6 +81,27 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
         });
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
         Assert.Contains("released and read-only", await refused.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// An exact LLR revision the active build would inherit from its predecessor's baseline — the population
+    /// the Code page used to measure, and the one a mapping must no longer be recorded against.
+    private static async Task<(Guid ArtifactId, Guid RevisionId)> InheritedLlrRevisionAsync(
+        Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> factory, Guid projectId, Guid activeReleaseId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        // The predecessor's materialized baseline, resolved the way the page used to resolve it.
+        var predecessorId = (await db.Releases.Where(x => x.Id == activeReleaseId)
+            .Select(x => x.PredecessorReleaseId).ToListAsync()).Single();
+        var inheritedBaselineId = await db.CandidateBaselines
+            .Where(x => x.ReleaseId == predecessorId && x.RequirementsMaterializedAt != null)
+            .Select(x => x.Id).FirstAsync();
+        var row = await (from selection in db.BaselineRequirements.Where(x => x.BaselineId == inheritedBaselineId)
+                         join artifact in db.Requirements.Where(x => x.Level == AeroLink.Domain.ChangeControl.RequirementLevel.LowLevel)
+                             on selection.ArtifactId equals artifact.Id
+                         orderby artifact.BaseNumber
+                         select new { artifact.Id, selection.RevisionId }).FirstAsync();
+        return (row.Id, row.RevisionId);
     }
 
     [Fact]
