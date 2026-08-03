@@ -92,7 +92,7 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/scrs/{id:guid}/reinstate", async (Guid id, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/scrs/{id:guid}/reinstate", async (Guid id, ReinstateChangeRequest? request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
@@ -100,7 +100,23 @@ public static class ChangeRequestEndpoints
             if (!CanAdminister(scr, actor)) return Results.Forbid();
             try
             {
-                scr.Reinstate(actor.UserName, DateTimeOffset.UtcNow, actor.IsAdministrator);
+                var now = DateTimeOffset.UtcNow;
+                // Reinstating into the build the reader is standing in, rather than the one that shelved it.
+                //
+                // Deferred work is offered to the successor build, so the build it comes back into is the
+                // active one — otherwise reinstating from 1.7 would silently return the change request to 1.6
+                // and it would vanish from the list the reader is looking at. Retarget first so both moves are
+                // audited and the record names both builds.
+                var into = request?.IntoReleaseId;
+                if (into is not null && into != scr.TargetReleaseId)
+                {
+                    var target = await db.Releases.AsNoTracking()
+                        .SingleOrDefaultAsync(x => x.Id == into && x.ProjectId == scr.ProjectId, ct);
+                    if (target is null) return Results.BadRequest(new { error = "The selected build does not belong to this Project." });
+                    if (target.IsReleased) return Results.Conflict(new { error = $"Build {target.Version} is released and read-only.", code = "released_build_read_only" });
+                    scr.Retarget(actor.UserName, into.Value, "Reinstated into the active build.", now, actor.IsAdministrator);
+                }
+                scr.Reinstate(actor.UserName, now, actor.IsAdministrator);
                 await repository.SaveAsync(ct);
                 return Results.Ok(ApiMap.ScrDetail(scr));
             }

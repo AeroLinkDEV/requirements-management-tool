@@ -13,7 +13,22 @@ public sealed class ScrRepository(AeroLinkDbContext db) : IScrRepository
         var page = Math.Max(1, query.Page);
         var pageSize = Math.Clamp(query.PageSize, 1, 200);
         var source = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == query.ProjectId);
-        if (query.TargetReleaseId is not null) source = source.Where(x => x.TargetReleaseId == query.TargetReleaseId);
+        if (query.TargetReleaseId is not null)
+        {
+            // Work shelved by a predecessor build comes with the build that follows it.
+            //
+            // Deferring means "put away for another day with the state it had reached remembered", and the
+            // next build is exactly the day it should come back and be considered. Listing strictly by target
+            // build meant a change request deferred in 1.6 vanished when 1.7 opened, and the only route to it
+            // was to navigate back to the build that shelved it — so the shelf was somewhere work went to be
+            // forgotten rather than to wait.
+            //
+            // Only Deferred records travel. Anything else belongs to the build that owns it.
+            var predecessors = db.Releases.Where(x => x.Id == query.TargetReleaseId)
+                .Select(x => x.PredecessorReleaseId);
+            source = source.Where(x => x.TargetReleaseId == query.TargetReleaseId
+                || (x.State == ScrState.Deferred && predecessors.Contains(x.TargetReleaseId)));
+        }
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             var search = query.Search.Trim();
