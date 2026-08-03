@@ -129,19 +129,12 @@ public static class BuildTestSetEndpoints
                 .ToListAsync(ct);
         var byRevision = procedures.ToDictionary(x => x.Id);
 
-        // The latest run of each selected procedure on this build, so a reader sees what the gate sees.
-        // Materialized before ordering: SQLite cannot translate an ORDER BY over a DateTimeOffset.
+        // The latest run of each selected procedure on this build, so a reader sees exactly what the gate sees.
+        // ExecutionScope is the shared authority: written separately, this list and the release gate drifted
+        // into counting another release's determinations whenever the build had no immutable software build.
         var buildId = await db.SoftwareBuilds.AsNoTracking().Where(x => x.ReleaseId == releaseId)
             .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
-        var latest = revisionIds.Count == 0
-            ? []
-            : (await db.TestExecutions.AsNoTracking()
-                    .Where(x => revisionIds.Contains(x.ProcedureRevisionId)
-                        && (buildId == null || x.SoftwareBuildId == buildId))
-                    .ToListAsync(ct))
-                .GroupBy(x => x.ProcedureRevisionId)
-                .ToDictionary(group => group.Key,
-                    group => group.OrderByDescending(x => x.ExecutedAt).ThenByDescending(x => x.RecordedAt).First());
+        var latest = await ExecutionScope.LatestByProcedureAsync(db, revisionIds, releaseId, buildId, ct);
         var runIds = latest.Values.Select(x => x.Id).ToList();
         var evidenced = runIds.Count == 0
             ? []

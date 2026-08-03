@@ -46,9 +46,6 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         // with the gate it is meant to be preparing for.
         var coverage = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
         var coveredIds = await VerificationCoverageProjection.SettledCoveredAsync(db, revisionIds, ct);
-        var procedureIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList(); var executions = await db.TestExecutions.AsNoTracking().Where(x => procedureIds.Contains(x.ProcedureRevisionId) && (campaign.SoftwareBuildId == null || x.SoftwareBuildId == campaign.SoftwareBuildId)).ToListAsync(ct);
-        var latestRuns = executions.GroupBy(x => x.ProcedureRevisionId).Select(x => x.OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).First()).ToList();
-        var runIds = latestRuns.Select(x => x.Id).ToList(); var evidenceRunIds = await db.TestExecutionEvidence.AsNoTracking().Where(x => runIds.Contains(x.TestExecutionId)).Select(x => x.TestExecutionId).Distinct().ToListAsync(ct);
         var docs = await db.ControlledDocuments.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
         // A release cannot be declared ready while an unwaived controlled problem report remains a blocker.
         // This is deliberately project-scoped until product-line configuration provides exact release applicability.
@@ -71,15 +68,16 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         var selectedRevisionIds = await db.BuildTestSetEntries.AsNoTracking()
             .Where(x => db.BuildTestSets.Any(set => set.Id == x.BuildTestSetId && set.ReleaseId == campaign.ReleaseId))
             .Select(x => x.ProcedureRevisionId).Distinct().ToListAsync(ct);
-        var selectedLatest = selectedRevisionIds.Count == 0
-            ? []
-            : (await db.TestExecutions.AsNoTracking()
-                    .Where(x => selectedRevisionIds.Contains(x.ProcedureRevisionId)
-                        && (campaign.SoftwareBuildId == null || x.SoftwareBuildId == campaign.SoftwareBuildId))
-                    .ToListAsync(ct))
-                .GroupBy(x => x.ProcedureRevisionId)
-                .Select(group => group.OrderByDescending(x => x.ExecutedAt).ThenByDescending(x => x.RecordedAt).First())
-                .ToList();
+        // Scoped through the one shared rule, not a local predicate.
+        //
+        // The previous condition relaxed to "any execution at all" whenever the campaign had no software
+        // build, because `campaign.SoftwareBuildId == null || ...` is simply true for every row in that case
+        // and nothing constrained the release. A determination recorded against released Build 1.5 could
+        // therefore satisfy Build 1.6's verification and evidence gates. ExecutionScope is now the single
+        // authority, shared with the Test Results workspace so the gate and the page it prepares cannot
+        // disagree about which runs belong to the build.
+        var selectedLatest = (await ExecutionScope.LatestByProcedureAsync(
+            db, selectedRevisionIds, campaign.ReleaseId, campaign.SoftwareBuildId, ct)).Values.ToList();
         var selectedPassed = selectedLatest.Count(x => x.Outcome == TestOutcome.Pass);
         var selectedRunIds = selectedLatest.Select(x => x.Id).ToList();
         var selectedEvidenced = selectedRunIds.Count == 0 ? 0 : await db.TestExecutionEvidence.AsNoTracking()
