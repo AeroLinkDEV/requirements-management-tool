@@ -22,7 +22,7 @@ export default function ProblemReportPicker({ api, projectId, releaseId, selecte
     const timer=window.setTimeout(()=>{
       setBusy(true);setError('')
       const search=query.trim()?`&search=${encodeURIComponent(query.trim())}`:''
-      fetch(`${api}/api/problem-reports?projectId=${projectId}&releaseId=${releaseId}&pageSize=50${search}`)
+      fetch(`${api}/api/problem-reports?projectId=${projectId}&pageSize=50${search}`)
         .then(async response => {
           if (!response.ok) throw new Error('Problem reports could not be loaded.')
           return response.json()

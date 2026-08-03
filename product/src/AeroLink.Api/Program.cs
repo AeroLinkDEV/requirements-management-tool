@@ -202,7 +202,10 @@ app.Use(async (context, next) =>
             "release-campaigns"=>await db.ReleaseCampaigns.Where(x=>x.Id==buildOwnedResourceId).Select(x=>(Guid?)x.ReleaseId).SingleOrDefaultAsync(context.RequestAborted),
             "releases"=>await db.Releases.Where(x=>x.Id==buildOwnedResourceId).Select(x=>(Guid?)x.Id).SingleOrDefaultAsync(context.RequestAborted),
             "verification-impact"=>await db.VerificationImpactItems.Where(x=>x.Id==buildOwnedResourceId).Select(x=>(Guid?)x.ReleaseId).SingleOrDefaultAsync(context.RequestAborted),
-            "problem-reports"=>await db.ProblemReportLinks.Where(x=>x.ProblemReportId==buildOwnedResourceId&&x.ArtifactType=="Release").Select(x=>(Guid?)x.ArtifactId).SingleOrDefaultAsync(context.RequestAborted),
+            // Problem Reports are deliberately absent from this list. They are one Project-level database read
+            // the same from any build (DEC-089): a report names a target build, but that is an attribute of the
+            // record rather than the build that owns it, so opening one from another workspace is ordinary
+            // rather than a cross-build violation.
             "test-executions"=>await (from execution in db.TestExecutions.Where(x=>x.Id==buildOwnedResourceId)
                 join build in db.SoftwareBuilds on execution.SoftwareBuildId equals build.Id into buildRows
                 from build in buildRows.DefaultIfEmpty()

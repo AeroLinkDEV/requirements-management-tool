@@ -119,8 +119,20 @@ public sealed class BuildScopedWorkspaceApiTests
         Assert.Equal(2, body.GetProperty("summary").GetProperty("drafts").GetInt32());
     }
 
+    /// <summary>
+    /// One Problem Report database, read the same from any build.
+    ///
+    /// This test previously asserted the opposite — that a report was owned by one build, invisible from the
+    /// others, and refused as a cross-build resource. That was a reasonable reading of consistency with
+    /// requirements and change requests, and it was wrong: a report *names* a target build, but the database
+    /// of what is open and in work is a Project-level record set. Filtering it by whichever workspace the
+    /// reader stands in does not produce a different view of one database; it produces what looks like a
+    /// different database. See DEC-089.
+    ///
+    /// The target build survives as an attribute and as an explicit filter, which is what the last block checks.
+    /// </summary>
     [Fact]
-    public async Task Problem_reports_are_explicitly_owned_by_one_build_and_cross_build_detail_is_rejected()
+    public async Task Problem_reports_are_one_project_database_visible_from_every_build()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -131,29 +143,35 @@ public sealed class BuildScopedWorkspaceApiTests
         {
             projectId = seeded.ProjectId,
             releaseId = seeded.InWorkId,
-            title = "BUILD-ONE-SIX-ONLY anomaly",
-            problem = "An anomaly isolated to the in-work build."
+            title = "RAISED-AGAINST-ONE-SIX anomaly",
+            problem = "An anomaly raised while Build 1.6 was the active workspace."
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        var body = await created.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
-        var reportId = body.GetProperty("id").GetGuid();
+        var reportId = (await created.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("id").GetGuid();
 
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", seeded.InWorkId.ToString());
-        using var inWorkList = await client.GetAsync(
-            $"/api/problem-reports?projectId={seeded.ProjectId}&releaseId={seeded.InWorkId}");
-        Assert.Equal(HttpStatusCode.OK, inWorkList.StatusCode);
-        Assert.Contains("BUILD-ONE-SIX-ONLY", await inWorkList.Content.ReadAsStringAsync());
+        using var fromInWork = await client.GetAsync($"/api/problem-reports?projectId={seeded.ProjectId}");
+        Assert.Equal(HttpStatusCode.OK, fromInWork.StatusCode);
+        Assert.Contains("RAISED-AGAINST-ONE-SIX", await fromInWork.Content.ReadAsStringAsync());
+        using var detailFromInWork = await client.GetAsync($"/api/problem-reports/{reportId}");
+        Assert.Equal(HttpStatusCode.OK, detailFromInWork.StatusCode);
 
+        // The same database, from the other build. Both the list and the record itself.
         client.DefaultRequestHeaders.Remove("X-AeroLink-Build-Context");
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", seeded.ReleasedId.ToString());
-        using var releasedList = await client.GetAsync(
-            $"/api/problem-reports?projectId={seeded.ProjectId}&releaseId={seeded.ReleasedId}");
-        Assert.Equal(HttpStatusCode.OK, releasedList.StatusCode);
-        Assert.DoesNotContain("BUILD-ONE-SIX-ONLY", await releasedList.Content.ReadAsStringAsync());
+        using var fromReleased = await client.GetAsync($"/api/problem-reports?projectId={seeded.ProjectId}");
+        Assert.Equal(HttpStatusCode.OK, fromReleased.StatusCode);
+        Assert.Contains("RAISED-AGAINST-ONE-SIX", await fromReleased.Content.ReadAsStringAsync());
+        using var detailFromReleased = await client.GetAsync($"/api/problem-reports/{reportId}");
+        Assert.Equal(HttpStatusCode.OK, detailFromReleased.StatusCode);
 
-        using var crossBuildDetail = await client.GetAsync($"/api/problem-reports/{reportId}");
-        Assert.Equal(HttpStatusCode.Conflict, crossBuildDetail.StatusCode);
-        Assert.Contains("cross_build_resource", await crossBuildDetail.Content.ReadAsStringAsync());
+        // Target build is still recorded, and still filters when somebody asks for it deliberately.
+        using var targeted = await client.GetAsync(
+            $"/api/problem-reports?projectId={seeded.ProjectId}&targetReleaseId={seeded.InWorkId}");
+        Assert.Contains("RAISED-AGAINST-ONE-SIX", await targeted.Content.ReadAsStringAsync());
+        using var otherTarget = await client.GetAsync(
+            $"/api/problem-reports?projectId={seeded.ProjectId}&targetReleaseId={seeded.ReleasedId}");
+        Assert.DoesNotContain("RAISED-AGAINST-ONE-SIX", await otherTarget.Content.ReadAsStringAsync());
     }
 
     [Fact]
