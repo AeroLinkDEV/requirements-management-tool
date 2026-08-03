@@ -3,6 +3,7 @@ import { PersonName } from './People'
 import { SignatureDialog } from './IdentityCenter'
 import PersonPicker from './PersonPicker'
 import ProblemReportPicker, { type ProblemReportOption } from './ProblemReportPicker'
+import ControlledProcedureEditor from './ControlledProcedureEditor'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
@@ -62,6 +63,7 @@ type Revision = {
   covers: string[]
 }
 type History = { id: string; baseNumber: string; title: string; ownerId: string; createdAt: string; selectedRevisionId?: string; revisions: Revision[] }
+type CreatedProcedure = { id: string; revisionId: string; displayNumber: string; state: string; selectedApproverId: string }
 
 const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'Software HLR' : 'Software LLR'
@@ -108,6 +110,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
   const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [procedureView, setProcedureView] = useState<'record' | 'history'>('record')
+  const [editing, setEditing] = useState<Procedure>()
   const [approving, setApproving] = useState<Procedure>()
   const [reviewDecision, setReviewDecision] = useState<{ request: TestChangeRequest; action: 'approve' | 'return' }>()
   const [linkingProblemReports, setLinkingProblemReports] = useState<TestChangeRequest>()
@@ -119,7 +124,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [revision, setRevision] = useState(0)
   // Seeded from the address, so a shared or reloaded worklist opens on the list it names rather than on the
   // unfiltered first page.
-  const opening = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()
+  const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
   const openingProcedureId = opening.get('procedureId') ?? ''
   const openingProcedureRevisionId = opening.get('procedureRevisionId') ?? ''
   const [procedureState, setProcedureState] = useState(opening.get('procedureState') ?? '')
@@ -326,30 +331,41 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     setSaved(`PR links updated for ${request.displayNumber}.`)
   }, 'The PR links could not be updated.')
 
-  const createProcedure = (form: FormData) => act(async () => {
+  const createProcedure = async (form: FormData) => {
+    if (busy) return
     const requirementRevisionIds = form.getAll('requirement').map(String).filter(Boolean)
-    if (!requirementRevisionIds.length) { setError('A procedure has to say which requirements it verifies.'); return }
-    await apiRequest(`${api}/api/test-procedures`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        projectId,
-        // The server issues the controlled number. A client that chose one would be choosing it twice under
-        // concurrency, which is the whole reason identifiers are claimed from a sequence.
-        baseNumber: 'SERVER-ALLOCATED',
-        title: form.get('title'),
-        objective: form.get('objective'),
-        preconditions: form.get('preconditions'),
-        steps: form.get('steps'),
-        expectedResult: form.get('expectedResult'),
-        requirementRevisionIds,
-        approverId: procedureApprover.userId,
-        level: discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel',
-      }),
-    })
-    setCreating(false)
-    setProcedureApprover({ userId: '', name: '' })
-    setSaved('Procedure created as a Draft. It needs independent approval before it can be run.')
-  }, 'The procedure could not be created.')
+    if (!requirementRevisionIds.length) { setCreateError('A procedure has to say which requirements it verifies.'); return }
+    setBusy(true); setCreateError(''); setError(''); setSaved('')
+    try {
+      const created = await apiRequest<CreatedProcedure>(`${api}/api/test-procedures`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          // The server issues the controlled number. A client that chose one would be choosing it twice under
+          // concurrency, which is the whole reason identifiers are claimed from a sequence.
+          baseNumber: 'SERVER-ALLOCATED',
+          title: form.get('title'),
+          objective: form.get('objective'),
+          preconditions: form.get('preconditions'),
+          steps: form.get('steps'),
+          expectedResult: form.get('expectedResult'),
+          requirementRevisionIds,
+          approverId: procedureApprover.userId,
+          level: discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel',
+        }),
+      })
+      setCreating(false)
+      setProcedureApprover({ userId: '', name: '' })
+      setQuery(created.displayNumber)
+      setProcedurePage(1)
+      setSaved(`${created.displayNumber} created as a Draft. It needs independent approval before it can be run.`)
+      await load()
+      setRevision(current => current + 1)
+    } catch (problem) {
+      recordClientOperationFailure('verification.procedure.create', problem)
+      setCreateError(operationError(problem, 'The procedure could not be created.'))
+    } finally { setBusy(false) }
+  }
 
   // Approval is a signature, and it is somebody else's. A procedure approved by its own author is a
   // formality rather than an independent judgement, which the server refuses and this does not offer.
@@ -362,13 +378,23 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     setSaved(`${procedure.displayNumber} approved and available to run.`)
   }, 'The approval could not be recorded.')
 
-  const openHistory = useCallback(async (procedureId: string, procedureRevisionId?: string) => {
+  const openProcedure = useCallback(async (procedureId: string, procedureRevisionId?: string,
+    view: 'record' | 'history' = 'record', updateAddress = true) => {
     setError('')
     const params = new URLSearchParams({ releaseId })
     if (procedureRevisionId) params.set('revisionId', procedureRevisionId)
     const response = await fetch(`${api}/api/test-procedures/${procedureId}/history?${params}`)
     if (!response.ok) { setError('That procedure’s history could not be read.'); return }
     setHistory(await response.json())
+    setProcedureView(view)
+    if (updateAddress) {
+      const address = new URLSearchParams(location.search)
+      address.set('procedureId', procedureId)
+      if (procedureRevisionId) address.set('procedureRevisionId', procedureRevisionId)
+      else address.delete('procedureRevisionId')
+      address.set('procedureView', view)
+      window.history.pushState({}, '', `${location.pathname}?${address}`)
+    }
   }, [api, releaseId])
 
   const closeHistory = () => {
@@ -376,14 +402,19 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     const params = new URLSearchParams(location.search)
     params.delete('procedureId')
     params.delete('procedureRevisionId')
+    params.delete('procedureView')
     params.delete('procedure')
     window.history.replaceState({}, '', `${location.pathname}${params.toString() ? `?${params}` : ''}`)
     setQuery('')
   }
 
   useEffect(() => {
-    if (openingProcedureId) void openHistory(openingProcedureId, openingProcedureRevisionId || undefined)
-  }, [openHistory, openingProcedureId, openingProcedureRevisionId])
+    if (openingProcedureId) void openProcedure(openingProcedureId, openingProcedureRevisionId || undefined,
+      opening.get('procedureView') === 'history' ? 'history' : 'record', false)
+  }, [openProcedure, opening, openingProcedureId, openingProcedureRevisionId])
+
+  const selectedProcedureRevision = history?.revisions.find(item => item.id === history.selectedRevisionId)
+    ?? history?.revisions[0]
 
   return (
     <main className="testingCoveragePage">
@@ -562,7 +593,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               type="button"
               disabled={!canTest || !requirements.length}
               title={requirements.length ? undefined : 'Materialize the software build requirements before creating a procedure.'}
-              onClick={() => setCreating(true)}
+              onClick={() => { setCreateError(''); setCreating(true) }}
             >+ New test procedure</button>
           )}
         </div>
@@ -613,8 +644,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         </div>
         {procedures.map(procedure => (
           <article className="coverageRow" key={procedure.id}>
-            <div><b>{procedure.displayNumber}</b><i>{procedure.state === 'Draft' ? 'Awaiting approval' : procedure.state}</i></div>
-            <p>{procedure.title}</p>
+            <div><button type="button" className="procedureRecordLink" aria-label={`Open procedure ${procedure.displayNumber}`}
+              onClick={() => void openProcedure(procedure.id, procedure.revisionId)}><b>{procedure.displayNumber}</b></button><i>{procedure.state === 'Draft' ? 'Awaiting approval' : procedure.state}</i></div>
+            <p><button type="button" className="procedureTitleLink" aria-label={`Open procedure ${procedure.title}`}
+              onClick={() => void openProcedure(procedure.id, procedure.revisionId)}>{procedure.title}</button></p>
             <small>{procedure.requirementCount} exact requirement link{procedure.requirementCount === 1 ? '' : 's'} · authored by <PersonName userName={procedure.ownerId} /></small>
             <div className="coverageRowActions">
               {/* A Draft cannot be run, so approving it is the action that matters here. The server refuses
@@ -625,7 +658,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                   ? <button type="button" disabled={busy} onClick={() => setApproving(procedure)}>Review &amp; approve</button>
                   : <span className="procedureHold">{procedure.ownerId === user.userName ? 'Independent approval is required before execution.' : procedure.selectedApproverId ? <>Awaiting <PersonName userName={procedure.selectedApproverId} />.</> : 'A named approver is required.'}</span>
               )}
-              <button type="button" className="quiet" onClick={() => void openHistory(procedure.id)}>History</button>
+              {!readOnly && procedure.state === 'Draft' && canTest && (user.isAdministrator || procedure.ownerId === user.userName) &&
+                <button type="button" className="quiet" onClick={() => setEditing(procedure)}>Edit</button>}
+              <button type="button" className="quiet" onClick={() => void openProcedure(procedure.id, undefined, 'history')}>History</button>
             </div>
           </article>
         ))}
@@ -649,6 +684,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <p className="eyebrow">CONTROLLED PROCEDURE</p>
             <h2>New {disciplineLabel(discipline)} test procedure</h2>
             <p>The server issues the next controlled number. It is created as a Draft and needs independent approval before it can be run.</p>
+            {createError && <div className="createProcedureError" role="alert" aria-live="assertive">{createError}</div>}
             <label>Title<input name="title" required /></label>
             <label>Objective<textarea name="objective" required /></label>
             <label>Preconditions<textarea name="preconditions" required /></label>
@@ -669,8 +705,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <PersonPicker api={api} projectId={projectId} value={procedureApprover.userId} name={procedureApprover.name}
               index={9101} label="Independent procedure approver" excludeUserNames={[user.userName]} onSelect={setProcedureApprover} />
             <div className="decisionActions">
-              <button type="submit" disabled={busy || !procedureApprover.userId}>Create procedure</button>
-              <button type="button" className="quiet" disabled={busy} onClick={() => setCreating(false)}>Cancel</button>
+              <button type="submit" disabled={busy || !procedureApprover.userId}>{busy ? 'Creating procedureâ€¦' : 'Create procedure'}</button>
+              <button type="button" className="quiet" disabled={busy} onClick={() => { setCreating(false); setCreateError('') }}>Cancel</button>
             </div>
           </form>
         </div>
@@ -719,6 +755,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           onSign={(password, meaning) => approveProcedure(approving, password, meaning)}
         />
       )}
+
+      {editing && <ControlledProcedureEditor api={api} procedure={editing} onClose={() => setEditing(undefined)}
+        onCommitted={async () => { await load(); setRevision(current => current + 1) }} />}
 
       {reviewDecision && (
         <div className="decisionModal" role="dialog" aria-label={`${reviewDecision.action === 'approve' ? 'Approve' : 'Return'} ${reviewDecision.request.displayNumber}`}>
@@ -817,32 +856,45 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         </div>
       )}
 
-      {history && (
-        <div className="procedureHistoryModal" role="dialog" aria-label={`History of ${history.baseNumber}`}>
+      {history && selectedProcedureRevision && (
+        <div className="procedureHistoryModal" role="dialog" aria-modal="true"
+          aria-label={procedureView === 'record' ? `Procedure ${selectedProcedureRevision.displayNumber}` : `History of ${history.baseNumber}`}>
           <div>
             <p className="eyebrow">CONTROLLED PROCEDURE</p>
-            <h2>{history.baseNumber}</h2>
+            <h2>{procedureView === 'record' ? selectedProcedureRevision.displayNumber : history.baseNumber}</h2>
             <p>{history.title}</p>
             <small>Created by <PersonName userName={history.ownerId} /> on {new Date(history.createdAt).toLocaleDateString()}</small>
-            <ol className="revisionList">
-              {history.revisions.map(revision => (
-                <li key={revision.id} className={revision.selected ? 'selectedRevision' : undefined}>
-                  <b>{revision.displayNumber}</b>
-                  <i>{revision.state}</i>
-                  {revision.selected && <strong>{history.revisions[0]?.id === revision.id ? 'Selected exact revision' : 'Selected historical build revision'}</strong>}
-                  <small>Written by <PersonName userName={revision.authorId} /> on {new Date(revision.createdAt).toLocaleDateString()}</small>
-                  <p>{revision.objective}</p>
-                  <details><summary>Controlled procedure content</summary><dl><dt>Preconditions</dt><dd>{revision.preconditions}</dd><dt>Steps</dt><dd>{revision.steps}</dd><dt>Expected result</dt><dd>{revision.expectedResult}</dd></dl></details>
-                  {/* What made somebody write this revision. Reached through the verification decision that
-                      resolved to it, which is the record that actually connects a procedure to a change. */}
-                  {revision.drivenBy.length
-                    ? <span className="revisionDriver">Driven by {revision.drivenBy.map(x => `${x.changeRequest} (${x.package})`).join(', ')}</span>
-                    : <span className="revisionDriver quiet">No change request is recorded against this revision.</span>}
-                  {revision.covers.length > 0 && <span className="revisionCovers">Covers {revision.covers.join(', ')}</span>}
-                </li>
-              ))}
-            </ol>
-            <button type="button" onClick={closeHistory}>Close</button>
+            {procedureView === 'record' ? (
+              <div className="procedureRecordContent">
+                <div className="procedureRecordMeta"><i>{selectedProcedureRevision.state}</i><span>Written by <PersonName userName={selectedProcedureRevision.authorId} /> on {new Date(selectedProcedureRevision.createdAt).toLocaleDateString()}</span></div>
+                <dl><dt>Objective</dt><dd>{selectedProcedureRevision.objective}</dd><dt>Preconditions</dt><dd>{selectedProcedureRevision.preconditions}</dd><dt>Steps</dt><dd>{selectedProcedureRevision.steps}</dd><dt>Expected result</dt><dd>{selectedProcedureRevision.expectedResult}</dd></dl>
+                {selectedProcedureRevision.drivenBy.length
+                  ? <span className="revisionDriver">Driven by {selectedProcedureRevision.drivenBy.map(x => `${x.changeRequest} (${x.package})`).join(', ')}</span>
+                  : <span className="revisionDriver quiet">No change request is recorded against this revision.</span>}
+                {selectedProcedureRevision.covers.length > 0 && <span className="revisionCovers">Covers {selectedProcedureRevision.covers.join(', ')}</span>}
+              </div>
+            ) : (
+              <ol className="revisionList">
+                {history.revisions.map(revision => (
+                  <li key={revision.id} className={revision.selected ? 'selectedRevision' : undefined}>
+                    <b>{revision.displayNumber}</b>
+                    <i>{revision.state}</i>
+                    {revision.selected && <strong>{history.revisions[0]?.id === revision.id ? 'Selected exact revision' : 'Selected historical build revision'}</strong>}
+                    <small>Written by <PersonName userName={revision.authorId} /> on {new Date(revision.createdAt).toLocaleDateString()}</small>
+                    <p>{revision.objective}</p>
+                    <details><summary>Controlled procedure content</summary><dl><dt>Preconditions</dt><dd>{revision.preconditions}</dd><dt>Steps</dt><dd>{revision.steps}</dd><dt>Expected result</dt><dd>{revision.expectedResult}</dd></dl></details>
+                    {revision.drivenBy.length
+                      ? <span className="revisionDriver">Driven by {revision.drivenBy.map(x => `${x.changeRequest} (${x.package})`).join(', ')}</span>
+                      : <span className="revisionDriver quiet">No change request is recorded against this revision.</span>}
+                    {revision.covers.length > 0 && <span className="revisionCovers">Covers {revision.covers.join(', ')}</span>}
+                  </li>
+                ))}
+              </ol>
+            )}
+            <div className="procedureRecordActions">
+              {procedureView === 'record' && <button type="button" className="quiet" onClick={() => void openProcedure(history.id, selectedProcedureRevision.id, 'history')}>History</button>}
+              <button type="button" onClick={closeHistory}>Close</button>
+            </div>
           </div>
         </div>
       )}
