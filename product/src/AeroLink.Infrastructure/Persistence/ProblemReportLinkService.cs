@@ -2,6 +2,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Requirements;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Persistence;
 
@@ -28,9 +29,13 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
             : "Every selected PR must belong to this Project and target build.";
     }
 
-    public Task LinkChangeRequestAsync(Guid changeRequestId, IEnumerable<Guid>? problemReportIds,
+    public async Task LinkChangeRequestAsync(Guid changeRequestId, IEnumerable<Guid>? problemReportIds,
         string actor, DateTimeOffset now, CancellationToken ct)
-        => AddLinksAsync("ChangeRequest", changeRequestId, "ProposedCorrectiveAction", problemReportIds, actor, now, ct);
+    {
+        var selected = Selected(problemReportIds);
+        await AddLinksAsync("ChangeRequest", changeRequestId, "ProposedCorrectiveAction", selected, actor, now, ct);
+        await StartImplementationForOpenReportsAsync(selected, actor, now, ct);
+    }
 
     public async Task ReplaceDraftChangeRequestLinksAsync(SystemChangeRequest request,
         IEnumerable<Guid>? problemReportIds, string actor, DateTimeOffset now, CancellationToken ct)
@@ -50,6 +55,7 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
         db.ProblemReportLinks.RemoveRange(existing.Where(link => !selectedIds.Contains(link.ProblemReportId)));
         await AddLinksAsync("ChangeRequest", request.Id, "ProposedCorrectiveAction",
             selectedIds.Except(existingIds), actor, now, ct);
+        await StartImplementationForOpenReportsAsync(selectedIds.Except(existingIds), actor, now, ct);
         db.AuditEvents.Add(new AuditEvent(request.Id, "ProblemReportLinksUpdated", actor,
             $"Updated the driving Problem Report set to {selectedIds.Count} record(s).", now));
     }
@@ -93,6 +99,19 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
             if (!alreadyTracked && !alreadySaved)
                 db.ProblemReportLinks.Add(new ProblemReportLink(reportId, artifactType, artifactId,
                     relationship, actor, now));
+        }
+    }
+
+    private async Task StartImplementationForOpenReportsAsync(IEnumerable<Guid> reportIds, string actor, DateTimeOffset now, CancellationToken ct)
+    {
+        var ids = reportIds.Distinct().ToList();
+        if (ids.Count == 0) return;
+        var reports = await db.ProblemReports.Where(report => ids.Contains(report.Id) && report.State == ProblemReportState.Open).ToListAsync(ct);
+        foreach (var report in reports)
+        {
+            report.BeginImplementation(actor, now, automatic: true);
+            var snapshot = JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision, report.DisplayNumber, report.Title, report.ResponsibleEngineerId, report.TargetReleaseId, state = report.State.ToString(), report.Version });
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, "ImplementationStartedByLinkedChangeRequest", actor, report.CanonicalHash(), snapshot, now));
         }
     }
 
