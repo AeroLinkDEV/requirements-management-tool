@@ -8,6 +8,8 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
 
 - Repository: `seanmccarthyns/requirements-management-tool`
 - Aug 3 observation reconciliation: GitHub issues #298 through #304
+- Observation reconciliation merged through PR #305 at `dcff112`; deterministic deep-scroll qualification
+  followed through issue #306 and PR #307, leaving `main` at `82d941c`.
 - Delivery rule remains: focused `codex/*` branch, pull request, required Product Quality Gate, squash merge,
   and exact-merge requalification; never push implementation directly to `main`.
 - The persistent PostgreSQL database remains the sole real-life database. Its records were preserved and a
@@ -35,11 +37,32 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
 
 ## Persistent FMS 1.6 evidence
 
-- PR-00001.00 through PR-00004.00 are visible in the Build 1.6 Problem Report queue.
+- PR-00001.00 through PR-00010.00 are visible in the Build 1.6 Problem Report queue. The final qualification
+  population deliberately spans Draft, Ready for SCCB, Open, Implementing, and Verifying rather than forcing
+  every report to closure.
+- SWCR-00127.00 through SWCR-00134.00 are independently approved, level-scoped software changes linked to
+  their originating Problem Reports. They modify controlled HLR or LLR revisions and retain their current
+  upstream allocations.
+- The current verification population contains at least five HLR assessments, five LLR assessments, and five
+  current TCRs in each of the System, HLR, and LLR workspaces. Selected packages record claim, submission,
+  independent assurance return, and approval paths; open packages remain as realistic Build 1.6 work.
+- HLRTP-000120.00, LLRTP-000220.00, and LLRTP-000221.00 are mandatory Build 1.6 pre-release procedures with
+  `ChangedRequirement` selection reasons. They intentionally have no execution evidence yet, so readiness
+  remains blocked rather than implying Build 1.6 is complete.
 - The legacy HLR verification package has a controlled HLRTCR identity and is Superseded; the correct
   HLRTCR-000002.00 remains current.
 - Existing approved and in-work SCRs, SWCRs, assessments, procedures, results, evidence, documents, and code
   mappings were retained. Build 1.5 remains historical and read-only.
+
+## Qualification checkpoint
+
+- Product Quality Gate passed on PR #305: API, domain, infrastructure, client lint/build, PostgreSQL
+  migrations/bootstrap, production-browser journeys, and both source-browser shards.
+- Exact merge qualification passed 178 API, 211 domain, and 171 infrastructure tests. Client lint and the
+  production build passed; the corrected deep-scroll procedure journey passed five repetitions before PR
+  #307 and three more repetitions on exact merged `main`.
+- The final repository tree is clean and synchronized with `origin/main`; the persistent website and API are
+  healthy at the runtime addresses below.
 
 ## Runtime and operations
 
