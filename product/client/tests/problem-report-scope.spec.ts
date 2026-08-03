@@ -31,9 +31,12 @@ test('the Problem Report queue is identical in the active and the released build
   await page.getByRole('link', { name: 'Problem Reports' }).click()
   await expect(page.getByRole('heading', { name: 'Problem Report queue' })).toBeVisible({ timeout: 30_000 })
 
+  // The heading paints before the queue has loaded, so the record is waited for and only then counted.
+  // Counting first reads zero on a slower runner and fails as "the build lists nothing" when the answer had
+  // simply not arrived yet — which is exactly what this journey did on its first CI run.
+  await expect(page.locator('.prList').getByText(title)).toBeVisible({ timeout: 30_000 })
   const inWorkCount = await page.locator('.prList button').count()
   expect(inWorkCount, 'the in-work build should list the report it raised').toBeGreaterThan(0)
-  await expect(page.locator('.prList').getByText(title)).toBeVisible()
 
   // The released build is a different workspace, not a different database.
   await page.getByRole('button', { name: 'Back to Software Builds' }).click()
@@ -41,7 +44,7 @@ test('the Problem Report queue is identical in the active and the released build
   await page.getByRole('link', { name: 'Problem Reports' }).click()
   await expect(page.getByRole('heading', { name: 'Problem Report queue' })).toBeVisible({ timeout: 30_000 })
 
-  await expect(page.locator('.prList').getByText(title)).toBeVisible()
+  await expect(page.locator('.prList').getByText(title)).toBeVisible({ timeout: 30_000 })
   expect(await page.locator('.prList button').count(), 'the released build must show the same database').toBe(inWorkCount)
 
   // And the record itself opens from the build that is not its target, rather than being refused as a
