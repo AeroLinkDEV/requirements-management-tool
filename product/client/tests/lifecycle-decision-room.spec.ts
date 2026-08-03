@@ -17,9 +17,11 @@ test("Lifecycle Decision Room connects readiness, impact, evidence, people, and 
   // this assertion used to require that fabrication to be present.
   await expect(page.getByText("To clear this").first()).toBeVisible();
   await expect(page.getByText("Remaining").first()).toBeVisible();
-  await expect(page.getByText("Waiting for a materialized baseline", { exact: false })).toHaveCount(4);
-  await expect(page.getByText("Not evaluated", { exact: true })).toHaveCount(4);
-  await expect(page.getByRole("button", { name: /Open prerequisite/ })).toHaveCount(4);
+  // Traceability, coverage, code traceability, verification and evidence all depend on the exact materialized
+  // requirement population. The Code gate is deliberately counted here so removing it cannot leave a green UI.
+  await expect(page.getByText("Waiting for a materialized baseline", { exact: false })).toHaveCount(5);
+  await expect(page.getByText("Not evaluated", { exact: true })).toHaveCount(5);
+  await expect(page.getByRole("button", { name: /Open prerequisite/ })).toHaveCount(5);
   await expect(page.getByRole("button", { name: /Explore changes vs 1\.5/ })).toBeVisible();
 
   await page.getByRole("button", { name: "Explore baseline changes →" }).click();
