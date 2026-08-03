@@ -176,6 +176,17 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
                           orderby artifact.BaseNumber
                           select new { ArtifactId = artifact.Id, RevisionId = revision.Id }).Take(5).ToListAsync(ct);
         if (llrs.Count < 5) return "Fewer than five LLR revisions are available for the demo scope.";
+        // Five sample mappings, against a build that introduced 700 LLR revisions.
+        //
+        // This is deliberately a sample and no longer pretends to be the whole scope. Build 1.5 is the
+        // originating build, so every LLR in its baseline was introduced by one of its own change requests
+        // and every one of them owes implementation evidence — the honest number is 700, not five. The gate
+        // used to read complete because the projection quietly measured the first five LLRs by number for
+        // this Program alone.
+        //
+        // A released build carrying almost no code evidence is what adopting AeroLink mid-life actually looks
+        // like: the code for 1.5 was written before anything recorded the link. Seeding 700 invented merge
+        // requests would make the demonstration less truthful, not more.
         var now = new DateTimeOffset(2026, 6, 18, 15, 0, 0, TimeSpan.Zero); var added = 0;
         foreach (var release in new[] { released, active })
         {
@@ -195,7 +206,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
                     true, "software.lead", now.AddDays(index))); added++;
             }
         }
-        return $"Recorded {added} demonstration GitLab traceability mapping(s); Build 1.6 deliberately retains one visible gap.";
+        return $"Recorded {added} demonstration GitLab traceability mapping(s) as a labelled sample; the released build introduced far more LLR revisions than the sample covers.";
     }
 
     /// <summary>

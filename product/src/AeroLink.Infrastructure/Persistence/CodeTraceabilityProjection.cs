@@ -39,14 +39,18 @@ public static class CodeTraceabilityProjection
                                     revision.Statement,
                                     change != null && change.TargetReleaseId == releaseId)).ToListAsync(ct);
 
-        var programCode = await (from project in db.Projects.AsNoTracking().Where(x => x.Id == projectId)
-                                 join program in db.Programs.AsNoTracking() on project.ProgramId equals program.Id
-                                 select program.Code).SingleAsync(ct);
-
-        // Five records keep the FMS boundary understandable without inventing hundreds of demo merge requests.
-        // Real Projects owe evidence only for exact LLR revisions introduced or modified in this build.
-        return programCode == FmsShowcaseSeeder.ProgramCode
-            ? candidates.OrderBy(x => x.BaseNumber).Take(5).ToList()
-            : candidates.Where(x => x.ChangedInBuild).OrderBy(x => x.BaseNumber).ToList();
+        // One rule, every Project: a build owes implementation evidence for exactly the LLR revisions it
+        // introduced or modified.
+        //
+        // The demonstration Program used to take the first five LLRs by number instead, to keep the seeded
+        // dataset small without inventing hundreds of merge requests. That capped the sample evidence by
+        // redefining the gate: on the only Program anybody can actually use, an authoritative release gate
+        // measured requirements the build had never touched, and would have reported complete while every
+        // genuinely changed LLR lacked code evidence. A demonstration boundary may limit what is seeded; it
+        // may not decide which changes owe evidence.
+        //
+        // A build that changed no LLR owes nothing and passes at 0/0, which is the honest answer rather than
+        // a convenient one.
+        return candidates.Where(x => x.ChangedInBuild).OrderBy(x => x.BaseNumber).ToList();
     }
 }

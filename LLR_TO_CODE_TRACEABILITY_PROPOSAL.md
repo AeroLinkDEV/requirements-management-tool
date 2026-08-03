@@ -7,9 +7,15 @@ approved LLR revision: a GitLab MR URL/reference plus merge commit SHA and merge
 `No code change required` disposition. Build 1.5 is historical/read-only; Build 1.6 is active. The Code center
 shows the release-gate count and labels seeded FMS examples as demonstration data.
 
-The gate is authoritative, not presentational: the Code center and release-readiness service share the exact
-required-LLR projection, the mappings participate in the signed review manifest, and the create endpoint
-independently refuses released targets. A real build with no changed LLR revisions passes this gate at 0/0.
+The gate is authoritative, not presentational: the Code center and release-readiness service share both the
+required-LLR projection and the campaign baseline it is computed from, the mappings participate in the signed
+review manifest, and the create endpoint independently refuses released targets and builds with no
+materialized requirement population. Any build with no changed LLR revisions passes this gate at 0/0.
+
+The release rule below applies to every Project. The FMS demonstration seeds a small labelled sample of
+mappings; it does not narrow the set of changes that owe evidence. Build 1.5 introduced 700 LLR revisions and
+carries five sample mappings, so its gate reads 5 of 700 — which is what adopting AeroLink after a build has
+already shipped actually looks like.
 
 The broader synchronized external-code-change model below remains direction, not claimed behavior. AeroLink
 does not yet call GitLab, synchronize MR state/author/branches/CI, prove commit inclusion in a compiled binary,
