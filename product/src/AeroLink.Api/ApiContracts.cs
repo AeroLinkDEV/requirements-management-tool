@@ -35,6 +35,8 @@ record ApproverRequest(string UserId, string Name);
 record SubmitReviewRequest(long? ExpectedVersion, List<ApproverRequest> Approvers, ReviewMode Mode=ReviewMode.Sequential);
 record RestartReviewRequest(long? ExpectedVersion, string Reason, List<ApproverRequest> Approvers, ReviewMode Mode=ReviewMode.Sequential);
 record ActorRequest(long? ExpectedVersion);
+/// Optional target build for reinstatement. Absent means "back into the build that shelved it".
+record ReinstateChangeRequest(Guid? IntoReleaseId);
 record SignatureRequest(string Password, string Meaning, long? ExpectedVersion);
 record RequestChangesRequest(long? ExpectedVersion, string Reason);
 record CreateBaselineRequest(string BaseNumber, int Revision, Guid ProjectId, Guid ReleaseId, Guid? PredecessorBaselineId, string Name);
