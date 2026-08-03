@@ -37,10 +37,13 @@ AeroLink artifact revisioning versions controlled engineering content. Candidate
 approved revisions into a build. Generated DOCX/PDF outputs and release packages record their source baseline,
 template revision, and content hashes.
 
-Digital Thread follows exact baseline revisions across SYSR, HLR, LLR, procedure, execution/result, evidence,
-and software build. GitLab remains authoritative for source code. AeroLink records only immutable pointers from
+Digital Thread follows exact baseline revisions across SYSR, HLR, LLR, procedure, execution/result, linked
+checksummed evidence, and software build. When several confirmed procedures cover the same exact requirement,
+it prefers the build-scoped run with linked evidence; a free-text reference remains context, not proof of an
+attached evidence file. GitLab remains authoritative for source code. AeroLink records immutable pointers from
 an exact approved LLR revision to a GitLab merge request and merge commit SHA, or a justified `No code change
-required` decision.
+required` decision. That same exact-LLR scope drives the Code workspace, release-readiness gate, and signed
+review manifest.
 
 ## Identity, review, and operation
 

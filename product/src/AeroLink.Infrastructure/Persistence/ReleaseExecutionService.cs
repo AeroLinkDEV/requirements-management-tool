@@ -137,6 +137,9 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         var evidenceIds = evidenceLinks.Select(x => x.EvidenceId).Distinct().ToList();
         var evidence = await db.EvidenceRecords.AsNoTracking().Where(x => evidenceIds.Contains(x.Id)).ToListAsync(ct);
         var documents = await db.ControlledDocuments.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
+        var codeTraceability = await db.CodeTraceabilityRecords.AsNoTracking()
+            .Where(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId && revisionIds.Contains(x.RequirementRevisionId))
+            .ToListAsync(ct);
 
         var canonical = JsonSerializer.Serialize(new
         {
@@ -153,6 +156,23 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             procedures = (from revision in procedureRevisions join procedure in procedures on revision.ProcedureId equals procedure.Id orderby procedure.BaseNumber, revision.Revision select new { procedure.Id, procedure.BaseNumber, procedure.Title, revisionId = revision.Id, revision.Revision, state = revision.State.ToString(), revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult }),
             executions = executions.OrderBy(x => x.ProcedureRevisionId).ThenBy(x => x.ExecutedAt).ThenBy(x => x.Id).Select(x => new { x.Id, x.ProcedureRevisionId, x.SoftwareBuildId, x.RetestOfExecutionId, outcome = x.Outcome.ToString(), x.ExecutedBy, x.Configuration, x.Determination, x.EvidenceReference, x.ExecutedAt, x.RecordedAt }),
             evidence = (from link in evidenceLinks join item in evidence on link.EvidenceId equals item.Id orderby link.TestExecutionId, item.Id select new { link.TestExecutionId, item.Id, item.OriginalFileName, item.ContentType, item.Size, item.Sha256, item.UploadedBy, item.UploadedAt }),
+            codeTraceability = codeTraceability.OrderBy(x => x.RequirementRevisionId).Select(x => new
+            {
+                x.Id,
+                x.RequirementArtifactId,
+                x.RequirementRevisionId,
+                disposition = x.Disposition.ToString(),
+                x.RepositoryPath,
+                x.MergeRequestReference,
+                x.MergeRequestTitle,
+                x.MergeRequestUrl,
+                x.MergeCommitSha,
+                x.MergedAt,
+                x.NoCodeChangeRationale,
+                x.IsDemonstration,
+                x.RecordedBy,
+                x.RecordedAt,
+            }),
             documents = documents.OrderBy(x => x.Type).ThenBy(x => x.DocumentNumber).ThenBy(x => x.Revision).Select(x => new { x.Id, type = x.Type.ToString(), x.DocumentNumber, x.Revision, x.ContentHash, x.ArtifactCount, x.GeneratedAt })
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();

@@ -128,6 +128,10 @@ The abbreviation `SRD` is not used on its own because it is ambiguous.
 
 **Test Evidence**: Controlled attachments or references supporting an execution or result, such as logs, screenshots, measurements, or data files. Evidence records include integrity and provenance metadata.
 
+For release readiness and the compact Digital Thread evidence stage, an external text reference is contextual
+metadata; only a linked evidence record with stored identity, provenance, and SHA-256 satisfies the evidence
+relationship. This distinction prevents a path from appearing complete when no controlled file is attached.
+
 **Retest**: A new test execution performed after a failure or change. It relates to but never replaces or modifies the prior execution.
 
 ## Review and Control Terms
@@ -180,6 +184,7 @@ test evidence.
 **Code Traceability Record**: An immutable, build-scoped pointer from one exact approved LLR revision to a
 GitLab merge request and merge commit SHA, or to a justified `No code change required` decision. GitLab remains
 authoritative for code and review content; AeroLink owns the lifecycle relationship and release-gate status.
+The Code workspace, readiness calculation, and signed release-review manifest use the same required-LLR scope.
 
 **Impact Analysis**: Identification and review of artifacts, links, tests, results, documents, and releases potentially affected by a proposed change or PR.
 

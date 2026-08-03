@@ -96,6 +96,12 @@ one of the inputs that seeds a new set. Execution work outside the set may conti
 against that released software build. If software caused the failure, correction is made through a change
 request in a later software build; the released build is never rewritten.
 
+Code traceability is a separate release gate. For the FMS demonstration it intentionally evaluates five exact
+LLR revisions; for a real Project it evaluates only LLR revisions introduced or modified in that build. Every
+required revision must have either immutable GitLab merge evidence or an attributable no-code decision. A real
+build with no changed LLRs therefore passes this gate at 0/0. The same projection drives the Code workspace,
+release readiness, and the signed review manifest.
+
 ## Schema impact
 
 `TestExecution.ReleaseId`, `TestChangeReview`, and the review/action/pre-release-evidence fields on

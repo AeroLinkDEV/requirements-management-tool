@@ -532,8 +532,8 @@ reason the document set can be trusted.
 
 Current `main` includes trustworthy Draft SWCR persistence, HLR/LLR-scoped histories and assessments,
 searchable controlled references, actionable downstream assessment decisions with automatic Draft linking,
-the agreed Problem Report lifecycle and fields, mandatory changed-requirement testing, complete
-SYSR-to-build Digital Thread paths, GitLab LLR-to-code evidence, and the Requirements / Verification / Code /
+the agreed Problem Report lifecycle and fields, mandatory changed-requirement testing, evidence-aware
+SYSR-to-build Digital Thread paths, authoritative GitLab LLR-to-code release gating, and the Requirements / Verification / Code /
 Problem Reports navigation model.
 Non-authoritative Concurrency and count-only IntegrityScan simulations are retired. Each focused delivery is
 qualified through the GitHub Product Quality Gate and exact-merge local checks; the persistent PostgreSQL

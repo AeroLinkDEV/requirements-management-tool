@@ -89,6 +89,15 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         // "nothing left to run" about a decision nobody has made.
         var nothingToTest = testChangeReviews.Count == 0;
 
+        IReadOnlyList<RequiredCodeTraceabilityRequirement> requiredCode = baseline.RequirementsMaterializedAt is null
+            ? Array.Empty<RequiredCodeTraceabilityRequirement>()
+            : await CodeTraceabilityProjection.RequiredAsync(db, campaign.ProjectId, campaign.ReleaseId, baseline.Id, ct);
+        var requiredCodeRevisionIds = requiredCode.Select(x => x.RevisionId).ToList();
+        var mappedCode = requiredCodeRevisionIds.Count == 0 ? 0 : await db.CodeTraceabilityRecords.AsNoTracking()
+            .Where(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId
+                && requiredCodeRevisionIds.Contains(x.RequirementRevisionId))
+            .Select(x => x.RequirementRevisionId).Distinct().CountAsync(ct);
+
         var integrated = requests.Count(x => x.State == ScrState.SelectedForBaseline); var disposed = impacts.Count(x => x.State != ImpactDispositionState.Pending);
         var baselineMaterialized = baseline.RequirementsMaterializedAt is not null;
         var gates = new List<ReadinessGate>
@@ -122,6 +131,13 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
                         ? "Inspect the selected changes and materialized manifest; a releasable baseline must contain an effective requirement population."
                         : "Approve every procedure being changed, then confirm the coverage each changed requirement needs.")
                 : WaitingForMaterializedBaseline("coverage", "Requirement coverage complete"),
+            baselineMaterialized
+                ? new("code_traceability", "Code traceability complete", mappedCode == requiredCode.Count, mappedCode, requiredCode.Count,
+                    requiredCode.Count == 0
+                        ? "No LLR revision changed in this build, so no implementation mapping is owed."
+                        : $"{requiredCode.Count-mappedCode} exact LLR revision(s) lack a GitLab merge mapping or an attributable no-code decision.",
+                    "Record immutable GitLab merge evidence or a justified no-code decision for every required exact LLR revision.")
+                : WaitingForMaterializedBaseline("code_traceability", "Code traceability complete"),
             // The gate codes stay as they were. They are what the decision room looks its blockers up by, and
             // a build is rarely worth its whole suite whichever way the set of procedures was arrived at.
             baselineMaterialized
