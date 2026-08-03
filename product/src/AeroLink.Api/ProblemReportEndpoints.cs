@@ -92,12 +92,22 @@ public static class ProblemReportEndpoints
         catch (DbUpdateException) { return Results.Conflict(new { error = "A problem report number was allocated concurrently. Retry the create request.", code = "number_allocation_conflict" }); }
     }
 
-    private static async Task<IResult> ListAsync(Guid projectId, Guid? releaseId, string? search, ProblemReportState? state, ProblemReportSeverity? severity, ProblemReportPriority? priority, string? owner, bool? blockersOnly, int? page, int? pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(Guid projectId, Guid? targetReleaseId, string? search, ProblemReportState? state, ProblemReportSeverity? severity, ProblemReportPriority? priority, string? owner, bool? blockersOnly, int? page, int? pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+        // One Problem Report database, read the same from any build.
+        //
+        // A report points at a target build and may be closed during a particular one, but the database itself
+        // is a Project-level record set: the list of what is open and in work does not change because the
+        // reader happens to be standing in 1.5 rather than 1.6. Applying the active build as an implicit
+        // filter made ten reports invisible from the other build, which is not a different view of one
+        // database — it is a different database as far as the reader can tell.
+        //
+        // `targetReleaseId` still filters, but only when a user asks for it. The workspace no longer supplies
+        // it silently. This deliberately reverses the build-scoping half of #298; see DEC-089.
         var query = db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId);
-        if (releaseId is not null)
-            query = query.Where(x => db.ProblemReportLinks.Any(link => link.ProblemReportId == x.Id && link.ArtifactType == "Release" && link.ArtifactId == releaseId));
+        if (targetReleaseId is not null)
+            query = query.Where(x => db.ProblemReportLinks.Any(link => link.ProblemReportId == x.Id && link.ArtifactType == "Release" && link.ArtifactId == targetReleaseId));
         if (state is not null) query = query.Where(x => x.State == state);
         if (severity is not null) query = query.Where(x => x.Severity == severity);
         if (priority is not null) query = query.Where(x => x.Priority == priority);
@@ -109,12 +119,14 @@ public static class ProblemReportEndpoints
         return Results.Ok(new { page = current, pageSize = size, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)size), items = items.Select(Summary) });
     }
 
-    private static async Task<IResult> DashboardAsync(Guid projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> DashboardAsync(Guid projectId, Guid? targetReleaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var query = db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId);
-        if (releaseId is not null)
-            query = query.Where(x => db.ProblemReportLinks.Any(link => link.ProblemReportId == x.Id && link.ArtifactType == "Release" && link.ArtifactId == releaseId));
+        // The dashboard counts the same database the list shows. Filtering it by the active build while the
+        // list is Project-scoped would give two different answers about one record set.
+        if (targetReleaseId is not null)
+            query = query.Where(x => db.ProblemReportLinks.Any(link => link.ProblemReportId == x.Id && link.ArtifactType == "Release" && link.ArtifactId == targetReleaseId));
         var reports = await query.ToListAsync(ct);
         var active = reports.Where(x => x.State is ProblemReportState.Draft or ProblemReportState.ReadyForSccb or ProblemReportState.Open or ProblemReportState.Implementing or ProblemReportState.Verifying or ProblemReportState.AwaitingSqaClosure or ProblemReportState.Deferred).ToList();
         return Results.Ok(new

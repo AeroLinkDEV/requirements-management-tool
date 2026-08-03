@@ -1196,6 +1196,24 @@ Future entries use:
   **Plan next build** placeholder, but no future build identity is created until an authorized user performs a
   later governed planning workflow.
 
+### DEC-089 - The Problem Report Database Is Project-Scoped, Not Build-Scoped
+
+- **Date:** 2026-08-03
+- **Status:** Accepted; reverses the build-scoping half of DEC-085 as implemented under issue #298
+- **Decision:** There is one Problem Report database per Project. The list of open and in-work reports, the
+  dashboard counts over it, and the ability to open and modify a report are identical whichever build the
+  reader is standing in. A report names one target build and may be closed during a particular build; that
+  target is an attribute of the record and an explicit filter a user may choose, never an implicit filter
+  applied by the workspace.
+- **Rationale:** Requirements, change requests, baselines and verification are owned by a build — a requirement
+  revision only exists inside the configuration that carries it. A Problem Report is not: it is a report about
+  the product, raised by whoever found the problem, and it outlives and crosses the builds that respond to it.
+  Filtering the database by the active workspace did not present a different view of one database; it presented
+  what looked like a different database, with ten reports visible in Build 1.6 and none in Build 1.5.
+- **Consequences:** Problem Report queues and dashboards are Project-scoped. Problem Reports are exempt from
+  cross-build resource refusal, so a report opens from any build. Genuinely build-owned records keep their
+  scoping unchanged. `targetReleaseId` remains available as a deliberate filter.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
