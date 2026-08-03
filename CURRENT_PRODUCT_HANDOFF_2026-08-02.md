@@ -10,6 +10,9 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
 - Repository: `seanmccarthyns/requirements-management-tool`
 - August observation reconciliation: issues #277, #278, #279 and #280; pull requests #281, #282, #283
   and #284
+- Post-delivery challenge review: issues #285 and #286; pull request #287. It made Code an authoritative
+  release-readiness gate, made the signed review manifest sensitive to code mappings, enforced released-build
+  refusal at the endpoint, and made Digital Thread evidence-aware and exact-software-build scoped.
 - GitHub backlog after this delivery: **zero open issues**
 - Earlier 2 August delivery: issues #258, #259, #260, #261, #262 and #269; pull requests #263, #264,
   #265, #266, #267, #268 and #270
@@ -131,10 +134,14 @@ are locked, then restart through `product/scripts/Start-AeroLink.ps1` so readine
   exact approved LLR revisions to GitLab MRs and merge SHAs, or a justified `No code change required` decision.
 - Build 1.5 code evidence is historical/read-only; Build 1.6 is active. The small FMS mapping set is explicitly
   labelled demonstration data and does not pretend that every seeded LLR has a real GitLab MR.
+- The Code center and release-readiness service share the exact required-LLR projection. Every required mapping
+  participates in the signed review manifest; a real build with no changed LLRs passes the gate at 0/0.
 - The Software Builds lineage ends with **Plan next build**, a non-record placeholder. It creates no future
   build identity or version.
 - Digital Thread presents SYSR → HLR → LLR → procedure → execution/result → evidence → build on one screen and
-  retains focused traversal and evidence views.
+  retains focused traversal and evidence views. When several procedures cover the same exact requirement, it
+  prefers the selected software build's result with linked checksummed evidence. A free-text evidence reference
+  remains visible context but does not satisfy the evidence stage.
 
 ## Deliberate boundaries and next work
 
