@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { stateLabel } from './presentation'
 import { RichContentEditor, RichContentView } from "./RichContent";
-import { emptyRichContent, fromPlainText } from "./richContentModel";
+import { emptyRichContent } from "./richContentModel";
 import "./ControlledRequirementEditor.css";
 
 export type RequirementLevel = "System" | "HighLevel" | "LowLevel";
@@ -124,6 +124,8 @@ export default function ControlledRequirementEditor({
   onKindChange,
   onRemove,
 }: Props) {
+  const onChangeRef = useRef(onChange);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
   const attributes = useMemo(() => parse(item.attributesJson), [item.attributesJson]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ExistingRequirement[]>([]);
@@ -199,7 +201,11 @@ export default function ControlledRequirementEditor({
         if (!response.ok) return;
         const rows = (await response.json()) as ExistingRequirement[];
         const match = rows.find((row) => row.baseNumber === item.baseNumber);
-        if (!cancelled) setApprovedWording(match?.statement);
+        if (!cancelled) {
+          setApprovedWording(match?.statement);
+          if (match?.currentSectionId && !item.targetSectionId)
+            onChangeRef.current("targetSectionId", match.currentSectionId);
+        }
       } catch {
         // A missing original is shown as unavailable rather than as an error: it must never block authoring.
         if (!cancelled) setApprovedWording(undefined);
@@ -208,7 +214,7 @@ export default function ControlledRequirementEditor({
     return () => {
       cancelled = true;
     };
-  }, [api, item.baseNumber, item.kind, projectId, scope]);
+  }, [api, item.baseNumber, item.kind, item.targetSectionId, projectId, scope]);
 
   const selectExisting = (selected: ExistingRequirement) => {
     onChange("baseNumber", selected.baseNumber);
@@ -217,7 +223,7 @@ export default function ControlledRequirementEditor({
     onChange("statement", item.kind === "Retire" ? "" : selected.statement);
     onChange("rationale", selected.rationale);
     onChange("verificationMethod", selected.verificationMethod);
-    onChange("richText", item.kind === "Retire" ? emptyRichContent : fromPlainText(selected.statement));
+    onChange("richText", emptyRichContent);
     // Its existing section comes with it, so choosing a requirement to modify does not quietly relocate it.
     onChange("targetSectionId", selected.currentSectionId ?? "");
     onChange("upstreamRevisionIds", item.kind === "Modify" ? selected.currentUpstreamRevisionIds ?? [] : []);
@@ -407,8 +413,8 @@ export default function ControlledRequirementEditor({
                   person who knew the answer — the author writing it — to whoever later assembled the
                   baseline, by which time the requirement had already landed wherever a backfill put it.
                   A modification may still be left alone: it already has a section. */}
-              <option value="" disabled={item.kind !== "Modify"}>
-                {item.kind === "Modify" ? "Leave where it is" : "Choose a section…"}
+              <option value="" disabled>
+                Choose a section…
               </option>
               {sections.map((section) => (
                 // Indented by depth and numbered from the structure, so 4.1.1 reads as being inside 4.1.
@@ -550,7 +556,7 @@ export default function ControlledRequirementEditor({
                 <RichContentView
                   api={api}
                   value={item.richText}
-                  empty={item.statement || "No supporting content recorded."}
+                  empty="No supporting content recorded."
                 />
               </div>
               {/* Criticality was asked of the author on every proposal and used by nothing. It remains a

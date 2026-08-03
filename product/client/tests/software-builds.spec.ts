@@ -42,8 +42,9 @@ test('FMS selection opens the ordered, accessible Software Builds lineage', asyn
 
   await expect(page.getByRole('button', { name: 'Open build 0.5' })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Open build 1.0' })).toBeDisabled()
-  await expect(cards.filter({ hasText: '0.5' })).toContainText('shown for lineage only')
-  await expect(cards.filter({ hasText: '1.0' })).toContainText('controlled workspace is not available')
+  await expect(page.getByRole('button', { name: 'Open build 0.5' })).toHaveAttribute('title', 'Controlled workspace not available')
+  await expect(page.getByRole('button', { name: 'Open build 1.0' })).toHaveAttribute('title', 'Controlled workspace not available')
+  await expect(page.getByText(/shown for lineage only|controlled workspace is not available/)).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Open build 1.5' })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Open build 1.6' })).toBeEnabled()
 

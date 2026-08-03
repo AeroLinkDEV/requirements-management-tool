@@ -290,6 +290,10 @@ html .approvedWording > textarea {
   resize: none;
 }
 
+html .approvedWording {
+  margin-bottom: 20px !important;
+}
+
 html .approvedWording > small {
   display: block;
   margin-top: 5px;

@@ -193,7 +193,6 @@ export default function RequirementsWorkspace({
   const appliedInitialView = useRef(false);
   const autoSelected = useRef(false);
   const loadGeneration = useRef(0);
-  const actionsMenu = useRef<HTMLDetailsElement>(null);
   const [data, setData] = useState<Workspace>(),
     [loading, setLoading] = useState(true),
     [search, setSearch] = useState(""),
@@ -654,32 +653,6 @@ export default function RequirementsWorkspace({
             CONTROLLED REQUIREMENTS / READ-ONLY EXPLORER
           </p>
           <h1>{scope} Requirements Explorer</h1>
-          <p>
-            Read, trace, compare, and understand authoritative requirements.
-            Controlled content changes are created only through SCRs and SWCRs.
-          </p>
-        </div>
-        <div className="reqHeaderActions">
-          {/* The System/Software switch belongs to the context bar, beside program, project and release,
-              because discipline is part of what you are looking at rather than a setting of this page. It was
-              repeated here as well, roughly 140px below its own copy and setting exactly the same thing. */}
-          <span className="explorerBoundary">
-            <i aria-hidden="true">◈</i>
-            <span><b>Authoritative view</b><small>Requirement content is read-only here</small></span>
-          </span>
-          {!release?.isReleased && <details className="pageActionsMenu" ref={actionsMenu}>
-            <summary>Workspace tools</summary>
-            <div>
-              <button onClick={() => {
-                actionsMenu.current?.removeAttribute("open");
-                setShowSchema(true);
-              }}>⚙ Schemas</button>
-              <button onClick={() => {
-                actionsMenu.current?.removeAttribute("open");
-                setShowSave(true);
-              }}>☆ Save view</button>
-            </div>
-          </details>}
         </div>
       </header>
       {error && <div className="workspaceError">{error}</div>}

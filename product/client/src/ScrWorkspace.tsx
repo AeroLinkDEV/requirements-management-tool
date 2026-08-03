@@ -249,7 +249,7 @@ const normalizeRequirement = (
     ...item,
     baseNumber: item.baseNumber || "",
     level: item.level || fallbackLevel,
-    richText: item.richText || item.statement || "",
+    richText: item.richText || "",
     attributesJson: item.attributesJson || JSON.stringify({ criticality: "Normal", owner: "" }),
     impactDispositionJson:
       item.impactDispositionJson && item.impactDispositionJson !== "{}"
@@ -829,10 +829,7 @@ export default function ScrWorkspace({
     setRequirements((items) =>
       items.map((item, position) => {
         if (position !== index) return item;
-        const next = { ...item, [key]: value } as DraftRequirement;
-        if (key === "statement" && (!item.richText || toPlainText(item.richText) === item.statement))
-          next.richText = fromPlainText(String(value));
-        return next;
+        return { ...item, [key]: value } as DraftRequirement;
       }),
     );
 
