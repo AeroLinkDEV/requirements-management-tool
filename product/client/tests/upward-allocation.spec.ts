@@ -114,7 +114,7 @@ test('modifying an HLR hydrates its exact parent and preserves an engineer repla
   await page.locator('.proposalLookupResults button').filter({hasText:replacement.displayNumber}).last().click()
   await expect(page.locator('.controlledEditor .roleCloud button').filter({hasText:replacement.displayNumber})).toBeVisible()
   await page.getByLabel('Title').fill('Replace HLR upward allocation')
-  await page.getByRole('button',{name:'Save SWCR Draft'}).click()
+  await page.getByRole('button',{name:'Save HLRCR Draft'}).click()
 
   const controlledParent=page.locator('.artifactReferenceCloud button').filter({hasText:replacement.displayNumber})
   await expect(controlledParent).toBeVisible()

@@ -427,7 +427,7 @@ test('a test change request opens onto its source changes, its requirements and 
   // requirement it created with the coverage that requirement already has.
   await expect(row.getByText('Source change requests', { exact: true })).toBeVisible()
   await expect(row.getByText('Responsibility', { exact: true })).toBeVisible()
-  await expect(row.locator('.testPackageContext')).toContainText(/SCR-\d{5}/)
+  await expect(row.locator('.testPackageContext')).toContainText(/SRCR-\d{5}/)
 
   const decisions = row.locator('.decisionList li')
   await expect(decisions.first()).toBeVisible({ timeout: 30_000 })

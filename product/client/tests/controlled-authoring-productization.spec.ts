@@ -71,7 +71,7 @@ test('Software Draft keeps downstream impact with consuming engineers before an 
   await page.locator('.derivedControl button').click()
   await page.getByLabel('Rationale').fill('Architecture-derived behavior for this isolated software workspace.')
   await page.getByRole('textbox',{name:'Author',exact:true}).fill('software.author')
-  await page.getByRole('button',{name:'Save SWCR Draft'}).click()
+  await page.getByRole('button',{name:'Save HLRCR Draft'}).click()
 
   await expect(page.getByRole('heading',{name:'Control software authoring readiness'})).toBeVisible()
   await expect(page.getByRole('button',{name:'Configure & Submit Review'})).toBeVisible()
@@ -111,7 +111,7 @@ test('an incomplete Draft can be saved and checked in while review remains gated
   await openNewSoftwareChangeRequest(page,'HLR')
 
   await page.getByLabel('Title').fill('Draft navigation behavior')
-  await page.getByRole('button',{name:'Save SWCR Draft'}).click()
+  await page.getByRole('button',{name:'Save HLRCR Draft'}).click()
   await expect(page.getByRole('heading',{name:'Draft navigation behavior'})).toBeVisible()
   await expect(page.getByRole('button',{name:'Configure & Submit Review'})).toHaveCount(0)
 

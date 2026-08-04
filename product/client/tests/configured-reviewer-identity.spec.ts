@@ -67,7 +67,7 @@ test('configured reviewer identity remains canonical from assignment through sig
   await login(page, 'systems.reviewer')
   await page.getByRole('link', { name: 'My Work' }).click()
   const assigned = page.locator('.workQueue article').filter({ hasText: draft.displayNumber })
-  await expect(assigned).toContainText('SCR approval')
+  await expect(assigned).toContainText('Change request approval')
   await assigned.click()
   await expect(page).toHaveURL(new RegExp(`/systems/change-requests/${draft.id}$`))
 

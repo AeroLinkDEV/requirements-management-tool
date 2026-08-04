@@ -7,7 +7,7 @@ test('a Draft needs only a title and never consumes an identifier for an empty f
   await selectProgram(page, 'Flight Management System Live Program')
   await openNewSystemChangeRequest(page)
 
-  const save = page.getByRole('button', { name: 'Save SCR Draft' })
+  const save = page.getByRole('button', { name: 'Save SRCR Draft' })
   await expect(save).toBeEnabled()
   await save.click()
   await expect(page.getByRole('alert')).toContainText(
@@ -34,7 +34,7 @@ test('proposal validation clears when the author corrects the proposal', async (
   // The browser's required-field guard normally stops this before React submission. Disable only that native
   // layer here so the application's fallback validation and its correction lifecycle are covered directly.
   await page.locator('form').evaluate((form: HTMLFormElement) => { form.noValidate = true })
-  await page.getByRole('button', { name: 'Save SCR Draft' }).click()
+  await page.getByRole('button', { name: 'Save SRCR Draft' }).click()
 
   const alert = page.getByRole('alert')
   await expect(alert).toContainText(/Add a statement to (SYSR-\d+|the new requirement)/)

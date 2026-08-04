@@ -21,10 +21,10 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(released.isReleased).toBeTruthy()
  expect(active.isReleased).toBeFalsy()
 
- const systemDraftResponse=await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Introduce authenticated system acceptance requirement',problem:'Acceptance authority must be explicit',analysis:'A controlled System requirement is needed',solution:'Introduce the requirement through an SCR',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:sysSection,statement:'The FMS shall retain authenticated acceptance authority.',rationale:'Supports controlled acceptance.',verificationMethod:'Inspection'}]}})
+ const systemDraftResponse=await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Introduce authenticated system acceptance requirement',problem:'Acceptance authority must be explicit',analysis:'A controlled System requirement is needed',solution:'Introduce the requirement through an SRCR',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:sysSection,statement:'The FMS shall retain authenticated acceptance authority.',rationale:'Supports controlled acceptance.',verificationMethod:'Inspection'}]}})
  expect(systemDraftResponse.status(),await systemDraftResponse.text()).toBe(201)
  const systemDraft=await systemDraftResponse.json()
- expect(systemDraft.baseNumber).toMatch(/^SCR-\d{5}$/)
+ expect(systemDraft.baseNumber).toMatch(/^SRCR-\d{5}$/)
  expect(systemDraft.authorId).toBe('admin')
  expect(systemDraft.requirementChanges[0].displayNumber).toMatch(/^SYSR-\d{6}\.00$/)
  const partialLookup=await request.get(`${apiBase}/api/authoring/requirements?projectId=${project.id}&scope=System&search=0150&limit=8`)
@@ -35,14 +35,14 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(modifiedSystem.status(),await modifiedSystem.text()).toBe(201)
  expect((await modifiedSystem.json()).requirementChanges[0].displayNumber).toBe(`${existingSystem.baseNumber}.${String(existingSystem.nextRevision).padStart(2,'0')}`)
  const systemCandidates=await (await request.get(`${apiBase}/api/authoring/requirements?projectId=${project.id}&scope=System&search=SYSR-&limit=3`)).json()
- const publicationDraft=await (await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Publication category acceptance',problem:'All change categories need an explicit publication',analysis:'Introduced, old/new modified, and retired records must remain reviewable',solution:'Render each category in the exact SCR',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:sysSection,statement:'The FMS shall publish every controlled change category.',rationale:'Publication completeness.',verificationMethod:'Inspection'},{baseNumber:systemCandidates[0].baseNumber,level:'System',kind:'Modify',statement:systemCandidates[0].statement+' The published wording shall show this proposed revision.',rationale:'Old and new comparison.',verificationMethod:systemCandidates[0].verificationMethod},{baseNumber:systemCandidates[1].baseNumber,level:'System',kind:'Retire',statement:'',rationale:'The obsolete behavior is retired while history remains.',verificationMethod:systemCandidates[1].verificationMethod}]}})).json()
+ const publicationDraft=await (await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Publication category acceptance',problem:'All change categories need an explicit publication',analysis:'Introduced, old/new modified, and retired records must remain reviewable',solution:'Render each category in the exact SRCR',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:sysSection,statement:'The FMS shall publish every controlled change category.',rationale:'Publication completeness.',verificationMethod:'Inspection'},{baseNumber:systemCandidates[0].baseNumber,level:'System',kind:'Modify',statement:systemCandidates[0].statement+' The published wording shall show this proposed revision.',rationale:'Old and new comparison.',verificationMethod:systemCandidates[0].verificationMethod},{baseNumber:systemCandidates[1].baseNumber,level:'System',kind:'Retire',statement:'',rationale:'The obsolete behavior is retired while history remains.',verificationMethod:systemCandidates[1].verificationMethod}]}})).json()
  const publicationPdf=await request.get(`${apiBase}/api/change-requests/${publicationDraft.id}/download?format=pdf`)
  expect(publicationPdf.ok(),await publicationPdf.text()).toBeTruthy()
  const publicationText=(await publicationPdf.body()).toString('latin1')
  expect(publicationText).toContain('NEW REQUIREMENTS')
  expect(publicationText).toContain('MODIFIED REQUIREMENTS - OLD AND NEW')
  expect(publicationText).toContain('RETIRED REQUIREMENTS')
- const mixedSoftware=await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Allocate HLR and LLR changes together',problem:'Both software levels require coordinated change',analysis:'The allocation crosses high and low level software requirements',solution:'Review both exact proposals in one SWCR',requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall coordinate acceptance state.',rationale:'High-level architecture-derived coordination.',verificationMethod:'Test',isDerived:true},{level:'LowLevel',kind:'Introduce',targetSectionId:llrSection,statement:'The acceptance component shall persist the coordinated state.',rationale:'Low-level architecture-derived implementation.',verificationMethod:'Test',isDerived:true}]}})
+ const mixedSoftware=await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Allocate HLR and LLR changes together',problem:'Both software levels require coordinated change',analysis:'The allocation crosses high and low level software requirements',solution:'Review both exact proposals in one HLRCR',requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall coordinate acceptance state.',rationale:'High-level architecture-derived coordination.',verificationMethod:'Test',isDerived:true},{level:'LowLevel',kind:'Introduce',targetSectionId:llrSection,statement:'The acceptance component shall persist the coordinated state.',rationale:'Low-level architecture-derived implementation.',verificationMethod:'Test',isDerived:true}]}})
  expect(mixedSoftware.status()).toBe(400)
  expect(await mixedSoftware.text()).toContain('cannot mix both levels')
 
@@ -93,7 +93,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  }})
  expect(draftResponse.status(),await draftResponse.text()).toBe(201)
  const draft=await draftResponse.json()
- expect(draft.baseNumber).toMatch(/^SWCR-\d{5}$/)
+ expect(draft.baseNumber).toMatch(/^HLRCR-\d{5}$/)
  expect(draft.authorId).toBe('admin')
  expect(draft.requirementChanges[0].displayNumber).toMatch(/^HLR-\d{6}\.00$/)
 
@@ -162,7 +162,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  }
 
  const searchKinds=new Set<string>()
- for(const query of ['SCR','SWCR','SYSR','SW-01','SYSRD','1.5','FMS-1.5.0','SYSTP-000001','evidence/fms-1.5']){
+ for(const query of ['SRCR','HLRCR','SYSR','SW-01','SYSRD','1.5','FMS-1.5.0','SYSTP-000001','evidence/fms-1.5']){
   const response=await request.get(`${apiBase}/api/search?projectId=${project.id}&query=${encodeURIComponent(query)}&limit=50`)
   expect(response.ok(),await response.text()).toBeTruthy()
   for(const item of (await response.json()).items)searchKinds.add(item.kind)

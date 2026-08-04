@@ -129,7 +129,7 @@ public static class RequirementsEndpoints
             var revisionIds=rows.Select(x=>x.revisionId).ToList();
             // The controlled number of the change request that authorized each revision. The inspector names
             // its source authority after this rather than after the workspace it is being read in — a fixed
-            // "Open SCR" was wrong every time it appeared on an HLR or LLR, whose authority is always an SWCR.
+            // A fixed "Open SCR" was wrong every time it appeared on an HLR or LLR, whose authority is an HLRCR or LLRCR.
             var sourceScrIds=rows.Select(x=>x.SourceScrId).Distinct().ToList();
             var sourceNumbers=await db.SystemChangeRequests.AsNoTracking().Where(x=>sourceScrIds.Contains(x.Id))
                 .Select(x=>new{x.Id,x.BaseNumber,x.Revision}).ToDictionaryAsync(x=>x.Id,x=>x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,ct);

@@ -31,7 +31,7 @@ test("a checked-in change reads as a narrative and keeps its technical evidence 
   const scr = await created.json();
 
   const checkout = await request.post(`${apiBase}/api/controlled-editing/checkout`,
-    { data: { artifactType: "SCR", artifactId: scr.id, leaseMinutes: 15 } });
+    { data: { artifactType: "ChangeRequest", artifactId: scr.id, leaseMinutes: 15 } });
   expect(checkout.ok(), await checkout.text()).toBe(true);
   const lock = await checkout.json();
 

@@ -9,7 +9,7 @@ async function openPageFromPalette(page:Page,label:string){
   await palette.getByRole('link',{name:new RegExp(label)}).click()
 }
 
-test('author creates, edits, submits, and sequentially approves an SCR', async ({ page }) => {
+test('author creates, edits, submits, and sequentially approves a change request', async ({ page }) => {
   test.setTimeout(60_000)
   await login(page, 'admin', { openProject: false })
   const suffix=Date.now().toString().slice(-7),programName=`Browser Workflow ${suffix}`
@@ -54,18 +54,18 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await expect(page.getByText('SWR-000001')).toHaveCount(0)
   await page.getByLabel('Title').fill('Introduce controlled browser workflow')
   await page.getByLabel('Problem', { exact: true }).fill('The workflow is not yet controlled end to end.')
-  await page.getByLabel('Analysis', { exact: true }).fill('SCR content, reviewers, and history must remain attributable.')
+  await page.getByLabel('Analysis', { exact: true }).fill('Change request content, reviewers, and history must remain attributable.')
   await page.getByLabel('Solution').fill('Add an ordered and auditable approval workflow.')
-  await page.getByLabel('Requirement statement').fill('The software shall enforce ordered SCR approval.')
+  await page.getByLabel('Requirement statement').fill('The software shall enforce ordered change request approval.')
   // A new requirement must be given a place in the document before it can be sent for review.
   await page.getByLabel('Section for proposal 1').selectOption({ index: 1 })
   await page.locator('.derivedControl button').click()
   await page.getByLabel('Rationale').fill('Architecture-derived behavior for this isolated software workspace.')
-  await page.getByRole('button', { name: 'Save SWCR Draft' }).click()
+  await page.getByRole('button', { name: 'Save HLRCR Draft' }).click()
 
   await expect(page.getByRole('heading', { name: 'Introduce controlled browser workflow' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Download DOCX' })).toHaveAttribute('href', /\/api\/scrs\/.+\/download\?format=docx/)
-  await expect(page.getByRole('link', { name: 'Download PDF' })).toHaveAttribute('href', /\/api\/scrs\/.+\/download\?format=pdf/)
+  await expect(page.getByRole('link', { name: 'Download DOCX' })).toHaveAttribute('href', /\/api\/change-requests\/.+\/download\?format=docx/)
+  await expect(page.getByRole('link', { name: 'Download PDF' })).toHaveAttribute('href', /\/api\/change-requests\/.+\/download\?format=pdf/)
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   await page.getByLabel('Title').fill('Introduce controlled approval workflow')
   await expect(page.getByText('Known downstream context',{exact:true})).toBeVisible()
@@ -90,7 +90,7 @@ test('author creates, edits, submits, and sequentially approves an SCR', async (
   await page.getByLabel('Re-enter your password').fill('AeroLink!2026')
   await page.getByRole('button', { name: 'Sign & approve' }).click()
   await expect(page.getByText('Approved', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('Scr Approved')).toBeVisible()
+  await expect(page.getByText('Change request approved')).toBeVisible()
 
   // Once approved, the only thing you can do to a change request is supersede it. The action that does that
   // is Revise, and it must be where Check out & edit was — the same position holding whatever applies now,

@@ -83,7 +83,7 @@ test('audit history reads as events, in the product\'s own abbreviation', async 
   const history = page.getByRole('heading', { name: 'Audit history' }).locator('../../..')
   await expect(history).toBeVisible({ timeout: 30_000 })
   // Splitting the stored event name on its capitals title-cased the product's own abbreviation.
-  await expect(history.locator('.auditRow b').filter({ hasText: /^SCR created$/ })).toBeVisible({ timeout: 30_000 })
+  await expect(history.locator('.auditRow b').filter({ hasText: /^Change request created$/ })).toBeVisible({ timeout: 30_000 })
   // A subtitle describing the storage model rather than the contents.
   await expect(history).not.toContainText('Append-only material events')
 })

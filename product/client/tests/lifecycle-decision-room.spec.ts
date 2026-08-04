@@ -29,8 +29,15 @@ test("Lifecycle Decision Room connects readiness, impact, evidence, people, and 
   const changeRows = page.locator('.releaseChanges > div > button');
   await expect(changeRows).toHaveCount(await changeRows.count());
   expect(await changeRows.count()).toBeGreaterThan(1);
-  const selectedNumber = (await changeRows.nth(1).locator('b').textContent())!;
-  await changeRows.nth(1).click();
+  // A System change request specifically, not whichever row sorts second. This assertion is about a SYSR
+  // revision and the systems lead who approved it, and picking by position tied the test to where the
+  // identifier prefixes happen to fall alphabetically.
+  // Matched on the identifier element, not on the row's text: other journeys leave software change requests
+  // whose titles quote an SRCR number, and those would satisfy a whole-row text match while carrying HLR work.
+  const systemRow = changeRows.filter({ has: page.locator('b', { hasText: /^SRCR-/ }) }).first();
+  await expect(systemRow).toBeVisible({ timeout: 30_000 });
+  const selectedNumber = (await systemRow.locator('b').textContent())!;
+  await systemRow.click();
   await expect(page.getByRole("heading", { name: "Change Impact Review" })).toBeVisible();
   await expect(page.getByText(selectedNumber, { exact: false }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Lifecycle impact" })).toBeVisible();

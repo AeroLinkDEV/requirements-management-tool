@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { apiBase, apiLogin, login, selectProgram } from './auth'
 
-test('a PR drives an SCR and can be added to a System TCR through the active center', async ({ page, request }) => {
+test('a PR drives a change request and can be added to a System TCR through the active center', async ({ page, request }) => {
   test.setTimeout(240_000)
   await apiLogin(request)
   await login(page, 'admin', { openProject: false })
@@ -30,7 +30,7 @@ test('a PR drives an SCR and can be added to a System TCR through the active cen
   await expect(reportChoice).toBeVisible()
   await expect(reportChoice).toBeChecked()
   await page.getByLabel('Title').fill('Correct persistent disagreement annunciation')
-  await page.getByRole('button', { name: 'Save SCR Draft' }).click()
+  await page.getByRole('button', { name: 'Save SRCR Draft' }).click()
   await expect(page).toHaveURL(/\/systems\/change-requests\/[0-9a-f-]+$/i)
   await expect(page.getByRole('heading', { name: 'Driving Problem Reports' })).toBeVisible()
   await expect(page.getByText(report.displayNumber, { exact: true })).toBeVisible()
@@ -83,7 +83,7 @@ test('a PR drives an SCR and can be added to a System TCR through the active cen
   await expect(page.getByText('Proposed Corrective Action')).toBeVisible()
   await expect(page.getByText('Verification For Problem')).toBeVisible()
   const correctiveAction = page.locator('.prEvidence .artifactReferenceCard').filter({hasText:change.displayNumber})
-  await expect(correctiveAction).toContainText(`System Change Request (SCR) · ${change.displayNumber}`)
+  await expect(correctiveAction).toContainText(`System Requirement Change Request (SRCR) · ${change.displayNumber}`)
   await expect(correctiveAction).toContainText('Open →')
   await correctiveAction.click()
   await expect(page).toHaveURL(new RegExp(`/systems/change-requests/${changeRequestId}$`))

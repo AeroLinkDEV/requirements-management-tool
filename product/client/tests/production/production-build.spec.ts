@@ -191,12 +191,12 @@ test('typed change-request URLs preserve System and Software navigation context'
   await page.goto(`${root}/systems/change-requests/${system!.id}`)
   await expect(page).toHaveURL(`${root}/systems/change-requests/${system!.id}`)
   await expect(page.getByRole('link', { name: 'System Change Requests' })).toHaveAttribute('aria-current', 'page')
-  await expect(page.getByRole('link', { name: 'New System SCR' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'New System SRCR' })).toHaveCount(0)
 
   await page.goto(`${root}/software/change-requests/${software!.id}`)
   await expect(page).toHaveURL(`${root}/software/change-requests/${software!.id}`)
   await expect(page.getByRole('link', { name: 'Software Change Requests' })).toHaveAttribute('aria-current', 'page')
-  await expect(page.getByRole('link', { name: 'New Software SWCR' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'New Software Change Request' })).toHaveCount(0)
 
   // Old links and a caller-supplied type mismatch are both replaced from the authorized record type.
   await page.goto(`${root}/change-requests/${software!.id}`)
@@ -225,7 +225,7 @@ test('the first protected production mutation after deep-linked sign-in creates 
   await page.getByRole('textbox', { name: 'Analysis', exact: true }).fill('A durable server query must prove the write rather than trusting the success ceremony.')
   await page.getByLabel('Solution').fill('Resolve relative API URLs and bind CSRF state to the signed-in session.')
   await page.getByLabel('Requirement statement').fill('The production client shall preserve authenticated mutation capability.')
-  await page.getByRole('button', { name: 'Save SCR Draft' }).click()
+  await page.getByRole('button', { name: 'Save SRCR Draft' }).click()
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 
   await apiLogin(request)

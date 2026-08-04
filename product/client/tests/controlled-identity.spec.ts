@@ -11,7 +11,7 @@ test('draft updates preserve controlled identities and normalize new proposals o
   const created=await request.post(`${apiBase}/api/change-request-drafts`,{data:draftRequest});expect(created.ok(),await created.text()).toBeTruthy();const scr=await created.json();expect(scr.requirementChanges).toHaveLength(1)
   const original=scr.requirementChanges[0];expect(original.baseNumber).toMatch(/^SYSR-\d{6}$/);expect(original.revision).toBe(0)
 
-  const checkout=await request.post(`${apiBase}/api/controlled-editing/checkout`,{data:{artifactType:'SCR',artifactId:scr.id,leaseMinutes:15}});expect(checkout.ok(),await checkout.text()).toBeTruthy();const lock=await checkout.json()
+  const checkout=await request.post(`${apiBase}/api/controlled-editing/checkout`,{data:{artifactType:"ChangeRequest",artifactId:scr.id,leaseMinutes:15}});expect(checkout.ok(),await checkout.text()).toBeTruthy();const lock=await checkout.json()
   const draft={title:scr.title,problem:scr.problem,analysis:scr.analysis,solution:scr.solution}
   const tamperedSave=await request.put(`${apiBase}/api/controlled-editing/sessions/${lock.id}/autosave`,{data:{expectedVersion:lock.version,draftJson:JSON.stringify({...draft,requirementChanges:[{...original,revision:99}]}),leaseMinutes:15}});expect(tamperedSave.ok(),await tamperedSave.text()).toBeTruthy();const tamperedLock=await tamperedSave.json()
   const tampered=await request.post(`${apiBase}/api/controlled-editing/sessions/${lock.id}/check-in`,{data:{expectedVersion:tamperedLock.version}})

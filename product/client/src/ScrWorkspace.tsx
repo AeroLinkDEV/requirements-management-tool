@@ -77,7 +77,10 @@ const auditEventTitle = (eventType: string, buildVersion: string) => {
   if (eventType === "SelectedForBaseline") return buildVersion ? `Allocated to Build ${buildVersion}` : "Allocated to a build";
   return eventType
     .replace(/([A-Z])/g, " $1").trim().split(/\s+/)
-    .map((word) => (word === "Scr" ? "SRCR" : word === "Swcr" ? "CR" : word))
+    // "Scr" is the internal name of the aggregate, not a statement about this record's prefix. Rendering it
+    // as SRCR would have labelled an HLRCR's own history "SRCR approved", which is exactly backwards: the
+    // identifier at the top of the page already says which kind of change request this is.
+    .map((word) => (word === "Scr" || word === "Swcr" ? "Change request" : word))
     .map((word, index) => (index === 0 || word === word.toUpperCase() ? word : word.toLowerCase()))
     .join(" ");
 };

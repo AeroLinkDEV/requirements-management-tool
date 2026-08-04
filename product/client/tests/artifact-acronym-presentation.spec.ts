@@ -3,7 +3,7 @@ import { artifactAcronym, artifactTypeLabel, documentTypeLabel, targetsFor } fro
 
 test('numbered artifacts keep their canonical uppercase acronym in presentation', () => {
   const examples = [
-    ['SCR-00076.00', 'SCR'], ['SWCR-00087.00', 'SWCR'],
+    ['SRCR-00076.00', 'SRCR'], ['HLRCR-00087.00', 'HLRCR'], ['LLRCR-00088.00', 'LLRCR'],
     ['SYSR-000008.01', 'SYSR'], ['HLR-000008.01', 'HLR'], ['LLR-000008.01', 'LLR'],
     ['SYSTCR-000002.00', 'SYSTCR'], ['HLRTCR-000003.00', 'HLRTCR'], ['LLRTCR-000004.00', 'LLRTCR'],
     ['SYSTP-000008.00', 'SYSTP'], ['HLRTP-000009.00', 'HLRTP'], ['LLRTP-000010.00', 'LLRTP'],
@@ -14,7 +14,9 @@ test('numbered artifacts keep their canonical uppercase acronym in presentation'
   ] as const
 
   for (const [identifier, acronym] of examples) expect(artifactAcronym(identifier)).toBe(acronym)
-  expect(artifactTypeLabel('change-request', 'SWCR-00087.00')).toBe('Software Change Request (SWCR)')
+  expect(artifactTypeLabel('change-request', 'SRCR-00076.00')).toBe('System Requirement Change Request (SRCR)')
+  expect(artifactTypeLabel('change-request', 'HLRCR-00087.00')).toBe('HLR Change Request (HLRCR)')
+  expect(artifactTypeLabel('change-request', 'LLRCR-00088.00')).toBe('LLR Change Request (LLRCR)')
   expect(artifactTypeLabel('requirement', 'HLR-000008.01')).toBe('High-Level Software Requirement (HLR)')
   expect(artifactTypeLabel('test-procedure', 'LLRTP-000010.00')).toBe('LLR Test Procedure (LLRTP)')
 })
