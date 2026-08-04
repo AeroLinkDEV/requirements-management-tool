@@ -350,11 +350,17 @@ test('a decision can ask for a procedure that does not exist, and author it from
   await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
 
   // Any package with an undecided item will do; the point is the outcome, not which requirement it is on.
+  // Its number is read before it is claimed, because "Take it on" is what identifies the row and claiming it
+  // is exactly what makes that button disappear — reselecting by the same filter afterwards would silently
+  // land on somebody else's package, whose items offer no Decide button at all.
   const claimable = page.locator('.coverageRow').filter({ has: page.getByRole('button', { name: 'Take it on' }) }).first()
   await expect(claimable).toBeVisible({ timeout: 30_000 })
+  const packageNumber = ((await claimable.locator('b').first().textContent()) ?? '').trim()
+  expect(packageNumber).toMatch(/^SYSTCR-/)
   await claimable.getByRole('button', { name: 'Take it on' }).click()
 
-  const packageRow = page.locator('.coverageRow').filter({ has: page.getByRole('button', { name: /Decisions|Hide decisions/ }) }).first()
+  const packageRow = page.locator('.coverageRow').filter({ hasText: packageNumber }).first()
+  await expect(packageRow.getByRole('button', { name: 'Decisions' })).toBeVisible({ timeout: 30_000 })
   await packageRow.getByRole('button', { name: 'Decisions' }).click()
   const undecided = packageRow.locator('.decisionList li').filter({ has: page.getByRole('button', { name: 'Decide' }) }).first()
   await expect(undecided).toBeVisible({ timeout: 30_000 })
