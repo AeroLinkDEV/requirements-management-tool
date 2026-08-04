@@ -347,9 +347,9 @@ public sealed class RequirementInterchangeJob
     public EnterpriseJobState State { get; private set; }
     public string CreatedBy { get; private set; }="";
     public DateTimeOffset CreatedAt { get; private set; }
-    public Guid? CreatedScrId { get; private set; }
+    public Guid? CreatedChangeRequestId { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
-    public void Commit(Guid scrId,DateTimeOffset now){if(State!=EnterpriseJobState.Preview)throw new DomainException("Only previewed imports can be committed.");State=EnterpriseJobState.Completed;CreatedScrId=scrId;CompletedAt=now;}
+    public void Commit(Guid changeRequestId,DateTimeOffset now){if(State!=EnterpriseJobState.Preview)throw new DomainException("Only previewed imports can be committed.");State=EnterpriseJobState.Completed;CreatedChangeRequestId=changeRequestId;CompletedAt=now;}
 }
 
 /// <summary>

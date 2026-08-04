@@ -164,7 +164,7 @@ public sealed class LiveTestRegressionApiTests
     public async Task Change_request_audit_projection_normalizes_legacy_requirement_padding()
     {
         using var factory = new AeroLinkApiFactory();
-        Guid scrId;
+        Guid changeRequestId;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -180,12 +180,12 @@ public sealed class LiveTestRegressionApiTests
             db.AddRange(program, project, release, scr, member,
                 new ProgramMembership(member.Id, program.Id, ProgramRole.Engineer, "setup", now));
             await db.SaveChangesAsync();
-            scrId = scr.Id;
+            changeRequestId = scr.Id;
         }
 
         using var client = factory.CreateClient();
         await LoginAsync(client, "audit.reader");
-        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/change-requests/{scrId}");
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/change-requests/{changeRequestId}");
         var added = detail.GetProperty("audit").EnumerateArray()
             .Single(x => x.GetProperty("eventType").GetString() == "RequirementChangeAdded");
         Assert.Contains("SYSR-000001.00", added.GetProperty("detail").GetString());

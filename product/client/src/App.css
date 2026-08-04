@@ -312,7 +312,7 @@ main > header p { margin: 0; color: var(--ink-500); font-size: 15px; max-width: 
 }
 
 /* Three surfaces in three different bundles render a .formError, so it lives here rather than in whichever
-   one happened to define it. It used to sit in ScrEditor.css, which meant the requirements import panel's
+   one happened to define it. It used to sit in ChangeRequestEditor.css, which meant the requirements import panel's
    error box was styled only when the change-request editor's stylesheet had also been loaded. */
 .formError {
   padding: 13px 15px;

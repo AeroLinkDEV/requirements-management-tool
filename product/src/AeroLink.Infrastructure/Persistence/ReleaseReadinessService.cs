@@ -25,7 +25,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
     {
         var campaign = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).SingleAsync(x => x.Id == campaignId, ct);
         var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == campaign.BaselineId, ct);
-        var requests = await db.SystemChangeRequests.AsNoTracking().Where(x => x.TargetReleaseId == campaign.ReleaseId && x.State != ScrState.Deferred).ToListAsync(ct);
+        var requests = await db.SystemChangeRequests.AsNoTracking().Where(x => x.TargetReleaseId == campaign.ReleaseId && x.State != ChangeRequestState.Deferred).ToListAsync(ct);
         var impacts = await db.ImpactDispositions.AsNoTracking().Where(x => x.CampaignId == campaignId).ToListAsync(ct);
         var members = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct); var revisionIds = members.Select(x => x.RevisionId).ToList();
         var derivedIds = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id where artifact.Level != RequirementLevel.System select member.RevisionId).ToListAsync(ct);
@@ -96,7 +96,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
                 && requiredCodeRevisionIds.Contains(x.RequirementRevisionId))
             .Select(x => x.RequirementRevisionId).Distinct().CountAsync(ct);
 
-        var integrated = requests.Count(x => x.State == ScrState.SelectedForBaseline); var disposed = impacts.Count(x => x.State != ImpactDispositionState.Pending);
+        var integrated = requests.Count(x => x.State == ChangeRequestState.SelectedForBaseline); var disposed = impacts.Count(x => x.State != ImpactDispositionState.Pending);
         var baselineMaterialized = baseline.RequirementsMaterializedAt is not null;
         var gates = new List<ReadinessGate>
         {

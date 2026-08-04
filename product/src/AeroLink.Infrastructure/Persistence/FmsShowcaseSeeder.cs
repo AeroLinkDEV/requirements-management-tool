@@ -53,7 +53,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         foreach (var row in currentRows.Where(x => x.revision.Revision > 0))
             for (var rev = 0; rev < row.revision.Revision; rev++) db.RequirementRevisions.Add(new RequirementRevision(row.artifact.Id, rev,
                 HistoricalStatement(row.artifact.Level, row.artifact.BaseNumber, rev), "Earlier approved wording retained for history.", row.revision.VerificationMethod,
-                RequirementRevisionState.Superseded, row.revision.SourceScrId, baseline15.Id, start.AddDays(10 + rev)));
+                RequirementRevisionState.Superseded, row.revision.SourceChangeRequestId, baseline15.Id, start.AddDays(10 + rev)));
         await db.SaveChangesAsync(ct);
 
         var current = currentRows.ToDictionary(x => x.artifact.BaseNumber, x => new CurrentRequirement(x.artifact, x.revision));
@@ -103,14 +103,14 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         // the one state the product says is impossible.
         var verificationImpact = new VerificationImpactService(db);
         var downstreamImpact = new DownstreamImpactService(db);
-        foreach (var request in activeRequests.Where(x => x.State is ScrState.Approved or ScrState.SelectedForBaseline))
+        foreach (var request in activeRequests.Where(x => x.State is ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline))
         {
             await verificationImpact.RaiseForApprovedChangeRequestAsync(request, start.AddDays(305), ct);
             await downstreamImpact.RaiseForApprovedChangeRequestAsync(request, start.AddDays(305), ct);
         }
         await db.SaveChangesAsync(ct);
         var baseline16 = new CandidateBaseline("SW-01.60", 0, project.Id, release16.Id, baseline15.Id, "FMS 1.6 In-Work Software Build", "cm.fms", start.AddDays(310));
-        foreach (var request in activeRequests.Where(x => x.State == ScrState.Approved).Take(2)) baseline16.Select(request, "cm.fms", start.AddDays(311));
+        foreach (var request in activeRequests.Where(x => x.State == ChangeRequestState.Approved).Take(2)) baseline16.Select(request, "cm.fms", start.AddDays(311));
         db.CandidateBaselines.Add(baseline16); await db.SaveChangesAsync(ct);
         // The fresh path runs the same ordered steps, so a database seeded today records them as applied
         // and a later start does not try to reconcile what was just built.
@@ -297,7 +297,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var placeholders = new[] { "Engineering Lead", "Engineering Manager" };
         var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleAsync(ct);
         var cycleIds = await db.ReviewCycles
-            .Where(cycle => db.SystemChangeRequests.Any(scr => scr.Id == cycle.ScrId && scr.ProjectId == projectId))
+            .Where(cycle => db.SystemChangeRequests.Any(scr => scr.Id == cycle.ChangeRequestId && scr.ProjectId == projectId))
             .Select(cycle => cycle.Id).ToListAsync(ct);
         var steps = await db.ApprovalSteps
             .Where(step => cycleIds.Contains(step.ReviewCycleId) && placeholders.Contains(step.ApproverName))
@@ -329,7 +329,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var requests = await db.SystemChangeRequests
             .Include(x => x.RequirementChanges)
             .Where(x => x.ProjectId == projectId
-                && (x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline))
+                && (x.State == ChangeRequestState.Approved || x.State == ChangeRequestState.SelectedForBaseline))
             .ToListAsync(ct);
         var existingReviews = await db.TestChangeReviews
             .Where(x => x.ProjectId == projectId).ToListAsync(ct);
@@ -502,7 +502,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var baselines = await db.CandidateBaselines.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
         var materialized = baselines.Where(x => x.RequirementsMaterializedAt is not null).ToList();
         var approved = await db.SystemChangeRequests.AsNoTracking()
-            .CountAsync(x => x.ProjectId == projectId && (x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline), ct);
+            .CountAsync(x => x.ProjectId == projectId && (x.State == ChangeRequestState.Approved || x.State == ChangeRequestState.SelectedForBaseline), ct);
         var impacts = await db.VerificationImpactItems.CountAsync(ct);
         var procedures = await db.TestProcedures.CountAsync(x => x.ProjectId == projectId, ct);
         var executions = await db.TestExecutions.CountAsync(x => x.ProjectId == projectId, ct);
@@ -541,7 +541,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         if (projectId == Guid.Empty) return null;
         var requests = await db.SystemChangeRequests
             .Include(x => x.RequirementChanges)
-            .Where(x => x.ProjectId == projectId && (x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline))
+            .Where(x => x.ProjectId == projectId && (x.State == ChangeRequestState.Approved || x.State == ChangeRequestState.SelectedForBaseline))
             .ToListAsync(ct);
         if (requests.Count == 0) return null;
 
@@ -558,7 +558,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleOrDefaultAsync(ct);
         if (projectId == Guid.Empty) return null;
         var requests = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
-            .Where(x => x.ProjectId == projectId && (x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline))
+            .Where(x => x.ProjectId == projectId && (x.State == ChangeRequestState.Approved || x.State == ChangeRequestState.SelectedForBaseline))
             .ToListAsync(ct);
         var before = await db.DownstreamChangeAssessments.CountAsync(ct);
         var service = new DownstreamImpactService(db);
@@ -723,7 +723,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             dispositions.Add(new(campaign.Id, request.Id, ImpactKind.Traceability, request.DisplayNumber, "Update and review all upstream and downstream trace links affected by this change."));
             dispositions.Add(new(campaign.Id, request.Id, ImpactKind.Verification, request.DisplayNumber, "Update test coverage and execute the required verification on the selected 1.6 build."));
             dispositions.Add(new(campaign.Id, request.Id, ImpactKind.Document, request.DisplayNumber, "Regenerate every controlled output affected by this change."));
-            if (request.State == ScrState.SelectedForBaseline) foreach (var item in dispositions) item.Disposition(ImpactDispositionState.Addressed, "Completed during approved change integration; final release verification remains governed by campaign gates.", "release.manager", now.AddDays(1));
+            if (request.State == ChangeRequestState.SelectedForBaseline) foreach (var item in dispositions) item.Disposition(ImpactDispositionState.Addressed, "Completed during approved change integration; final release verification remains governed by campaign gates.", "release.manager", now.AddDays(1));
             db.ImpactDispositions.AddRange(dispositions);
         }
         await db.SaveChangesAsync(ct);

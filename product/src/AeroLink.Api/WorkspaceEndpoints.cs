@@ -196,7 +196,7 @@ public static class WorkspaceEndpoints
                 lowLevelRequirements = await requirements.CountAsync(x => x.Level == RequirementLevel.LowLevel, ct),
                 historicalScrs = await requests.CountAsync(x => x.Type == ChangeRequestType.System, ct),
                 historicalSwcrs = await requests.CountAsync(x => x.Type == ChangeRequestType.Software, ct),
-                activeRequests = await requests.CountAsync(x => x.State != ScrState.Deferred, ct),
+                activeRequests = await requests.CountAsync(x => x.State != ChangeRequestState.Deferred, ct),
                 traceLinks = await db.RequirementTraces.CountAsync(x => revisionIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId), ct),
                 testProcedures = await db.TestProcedures.CountAsync(x => procedureIds.Contains(x.Id), ct),
                 testExecutions = await db.TestExecutions.CountAsync(x => x.SoftwareBuildId != null && executionBuildIds.Contains(x.SoftwareBuildId.Value), ct),
@@ -226,8 +226,8 @@ public static class WorkspaceEndpoints
             ChangeDashboardSummary ChangeSummary(ChangeRequestType type)
             {
                 var rows = requests.Where(x => x.Type == type).ToList();
-                return new(rows.Count, rows.Count(x => x.State == ScrState.Draft), rows.Count(x => x.State == ScrState.InReview),
-                    rows.Count(x => x.State is ScrState.Approved or ScrState.SelectedForBaseline), rows.Count(x => x.State == ScrState.Deferred));
+                return new(rows.Count, rows.Count(x => x.State == ChangeRequestState.Draft), rows.Count(x => x.State == ChangeRequestState.InReview),
+                    rows.Count(x => x.State is ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline), rows.Count(x => x.State == ChangeRequestState.Deferred));
             }
             VerificationDashboardSummary VerificationSummary(string area)
             {
@@ -281,7 +281,7 @@ public static class WorkspaceEndpoints
             var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
             var activeScrSteps = await (from step in db.ApprovalSteps.AsNoTracking().Where(x => x.ApproverId == actor.UserName && x.State == ApprovalStepState.Active)
                                         join cycle in db.ReviewCycles.AsNoTracking() on step.ReviewCycleId equals cycle.Id
-                                        join scr in db.SystemChangeRequests.AsNoTracking() on cycle.ScrId equals scr.Id
+                                        join scr in db.SystemChangeRequests.AsNoTracking() on cycle.ChangeRequestId equals scr.Id
                                         where (projectId == null || scr.ProjectId == projectId) && (releaseId == null || scr.TargetReleaseId == releaseId)
                                         select new { id = scr.Id, type = "Change request approval", artifact = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, title = scr.Title, priority = "High", dueAt = cycle.StartedAt.AddDays(5), ageDays = (int)(now - cycle.StartedAt).TotalDays, route = "scr", discipline = scr.Type == ChangeRequestType.Software ? "software" : "system" }).ToListAsync(ct);
             activeScrSteps = activeScrSteps.OrderBy(x => x.dueAt).ToList();
@@ -292,7 +292,7 @@ public static class WorkspaceEndpoints
             releaseSteps = releaseSteps.OrderBy(x => x.dueAt).ToList();
             // Ordered after materialisation: SQLite cannot ORDER BY a DateTimeOffset, and this set is bounded by
             // the drafts one person authored, so sorting in memory costs nothing and works on every provider.
-            var authoredDrafts = (await db.SystemChangeRequests.AsNoTracking().Where(x => x.AuthorId == actor.UserName && x.State == ScrState.Draft && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.TargetReleaseId == releaseId))
+            var authoredDrafts = (await db.SystemChangeRequests.AsNoTracking().Where(x => x.AuthorId == actor.UserName && x.State == ChangeRequestState.Draft && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.TargetReleaseId == releaseId))
                 .Select(x => new { id = x.Id, type = "Draft to complete", artifact = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, title = x.Title, priority = "Normal", dueAt = x.UpdatedAt.AddDays(10), ageDays = (int)(now - x.UpdatedAt).TotalDays, route = "scr", discipline = x.Type == ChangeRequestType.Software ? "software" : "system" }).ToListAsync(ct))
                 .OrderBy(x => x.dueAt).ToList();
             var assignedTestWork = (await db.TestChangeReviews.AsNoTracking().Where(x =>

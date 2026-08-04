@@ -33,8 +33,8 @@ public sealed class FmsShowcaseSeederTests
             Assert.Equal(historicalReviews.Count, historicalReviews.Select(x => new { x.ChangeRequestId, x.Discipline }).Distinct().Count());
             Assert.True(await db.RequirementRevisions.GroupBy(x => x.ArtifactId).AllAsync(x => x.Count() >= 1));
             var active = db.SystemChangeRequests.Where(x => x.TargetReleaseId == first.ActiveReleaseId);
-            Assert.Equal(8, await active.CountAsync()); Assert.Equal(2, await active.CountAsync(x => x.State == ScrState.SelectedForBaseline));
-            Assert.Equal(1, await active.CountAsync(x => x.State == ScrState.Approved)); Assert.Equal(1, await active.CountAsync(x => x.State == ScrState.InReview)); Assert.Equal(3, await active.CountAsync(x => x.State == ScrState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ScrState.Deferred));
+            Assert.Equal(8, await active.CountAsync()); Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.SelectedForBaseline));
+            Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Approved)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.InReview)); Assert.Equal(3, await active.CountAsync(x => x.State == ChangeRequestState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Deferred));
             var codeRecords = await db.CodeTraceabilityRecords.AsNoTracking().ToListAsync();
             Assert.Equal(9, codeRecords.Count);
             Assert.Equal(5, codeRecords.Count(x => x.ReleaseId != first.ActiveReleaseId));

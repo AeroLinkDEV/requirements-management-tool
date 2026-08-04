@@ -181,7 +181,7 @@ public static class DownstreamAssessmentEndpoints
             if (changeRequest.ProjectId != assessment.ProjectId || changeRequest.TargetReleaseId != assessment.ReleaseId
                 || changeRequest.Type != ChangeRequestType.Software)
                 return Results.BadRequest(new { error = "Choose a Software SWCR from this Project and build." });
-            if (changeRequest.State != ScrState.Draft)
+            if (changeRequest.State != ChangeRequestState.Draft)
                 return Results.BadRequest(new { error = "Only a Draft SWCR can accept another upstream assessment." });
             if (changeRequest.RequirementChanges.Count != 0 && changeRequest.RequirementChanges.All(x => x.Level != assessment.TargetLevel))
                 return Results.BadRequest(new { error = $"That SWCR does not contain {assessment.TargetLevel} requirement work." });

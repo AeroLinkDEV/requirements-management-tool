@@ -232,8 +232,8 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         // mistake surfaces as a 500 from a working-looking endpoint.
         var changes = await (from scr in db.SystemChangeRequests.AsNoTracking()
                              where scr.ProjectId == projectId && scr.TargetReleaseId == releaseId
-                                && (scr.State == ScrState.Approved || scr.State == ScrState.SelectedForBaseline)
-                             join change in db.RequirementChanges.AsNoTracking() on scr.Id equals change.ScrId
+                                && (scr.State == ChangeRequestState.Approved || scr.State == ChangeRequestState.SelectedForBaseline)
+                             join change in db.RequirementChanges.AsNoTracking() on scr.Id equals change.ChangeRequestId
                              where change.Level == level
                              select new { scr.BaseNumber, scr.Revision, scr.UpdatedAt, change.Kind, ChangeBase = change.BaseNumber, ChangeRevision = change.Revision, change.Statement, change.Rationale, change.VerificationMethod, change.RichText })
             .ToListAsync(ct);

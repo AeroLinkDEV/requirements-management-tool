@@ -34,7 +34,7 @@ public sealed class BuildProvenanceTests
             {
                 var build = await verify.SoftwareBuilds.SingleAsync(x => x.Id == buildId);
                 var baseline = await verify.CandidateBaselines.Include(x => x.Selections).SingleAsync(x => x.Id == build.BaselineId);
-                var scr = await verify.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == baseline.Selections.Single().ScrId);
+                var scr = await verify.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == baseline.Selections.Single().ChangeRequestId);
                 Assert.Equal("FMS-3.3.0-001", build.BuildNumber); Assert.Equal(64, baseline.ContentHash!.Length);
                 Assert.Equal("HLRCR-00042.01", scr.DisplayNumber); Assert.Equal("SWR-00002375.04", scr.RequirementChanges.Single().DisplayNumber);
             }

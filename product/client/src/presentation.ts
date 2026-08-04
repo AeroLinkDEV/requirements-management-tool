@@ -68,7 +68,7 @@ export const coverageLabel = (state?: string) => {
  * `Incorporated` is derived rather than stored, deliberately. It becomes true when the *build* is released, so
  * it is a fact about the release and not a transition somebody has to remember to perform — it can never
  * disagree with reality, and no new value has to be threaded through the readiness gates, the browser
- * journeys, the history filters and the seeded showcase that `ScrState` already reaches.
+ * journeys, the history filters and the seeded showcase that `ChangeRequestState` already reaches.
  */
 export const changeRequestStateLabel = (
   state: string | undefined,
@@ -84,7 +84,7 @@ export const changeRequestStateLabel = (
 /**
  * Allocation and state, as two separate answers.
  *
- * `ScrState` was carrying both, and the two questions have different answers: *which build is this going into*
+ * `ChangeRequestState` was carrying both, and the two questions have different answers: *which build is this going into*
  * and *how far has it got*. Two of the five stored values were really allocations — `Deferred` says where the
  * work sits, `SelectedForBaseline` says which build it was picked into — so a reader asking either question got
  * a word that half answered the other.

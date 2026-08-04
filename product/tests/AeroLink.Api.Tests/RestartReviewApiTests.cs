@@ -19,7 +19,7 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class RestartReviewApiTests
 {
-    private static async Task<(Guid ScrId, Guid ProjectId)> SeedAsync(AeroLinkApiFactory factory)
+    private static async Task<(Guid ChangeRequestId, Guid ProjectId)> SeedAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -64,7 +64,7 @@ public sealed class RestartReviewApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "author.user");
 
-        using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
             new { reason = "Routed to the wrong discipline approver.", approvers = new[] { new { userId = "right.user" } } });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -76,7 +76,7 @@ public sealed class RestartReviewApiTests
         var scr = await db.SystemChangeRequests.AsNoTracking()
             .Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
             .Include(x => x.AuditEvents)
-            .SingleAsync(x => x.Id == fixture.ScrId);
+            .SingleAsync(x => x.Id == fixture.ChangeRequestId);
 
         // The misrouted cycle is retained and cancelled rather than erased, and the new cycle names the
         // corrected approver. History is the product's whole claim, so nothing may be rewritten.
@@ -94,7 +94,7 @@ public sealed class RestartReviewApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "wrong.user");
 
-        using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
             new { reason = "I would rather someone else reviewed this.", approvers = new[] { new { userId = "right.user" } } });
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
@@ -107,11 +107,11 @@ public sealed class RestartReviewApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "author.user");
 
-        using var noReason = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
+        using var noReason = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
             new { reason = "  ", approvers = new[] { new { userId = "right.user" } } });
         Assert.Equal(HttpStatusCode.BadRequest, noReason.StatusCode);
 
-        using var unknownApprover = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
+        using var unknownApprover = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
             new { reason = "Routed to the wrong discipline approver.", approvers = new[] { new { userId = "nobody.here" } } });
         Assert.Equal(HttpStatusCode.BadRequest, unknownApprover.StatusCode);
     }

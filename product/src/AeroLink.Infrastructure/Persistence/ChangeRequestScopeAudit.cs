@@ -26,7 +26,7 @@ public static class ChangeRequestScopeAudit
     public static async Task<IReadOnlyList<CrossLevelRequirementChange>> ViolationsAsync(
         AeroLinkDbContext db, CancellationToken ct = default) =>
         await (from change in db.RequirementChanges.AsNoTracking()
-               join request in db.SystemChangeRequests.AsNoTracking() on change.ScrId equals request.Id
+               join request in db.SystemChangeRequests.AsNoTracking() on change.ChangeRequestId equals request.Id
                where request.Type == ChangeRequestType.System
                    ? change.Level != RequirementLevel.System
                    : change.Level == RequirementLevel.System

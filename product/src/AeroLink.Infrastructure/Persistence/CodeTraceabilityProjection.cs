@@ -29,7 +29,7 @@ public static class CodeTraceabilityProjection
         var candidates = await (from selection in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
                                 join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == RequirementLevel.LowLevel) on selection.ArtifactId equals artifact.Id
                                 join revision in db.RequirementRevisions.AsNoTracking() on selection.RevisionId equals revision.Id
-                                join change in db.SystemChangeRequests.AsNoTracking() on revision.SourceScrId equals change.Id into changes
+                                join change in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals change.Id into changes
                                 from change in changes.DefaultIfEmpty()
                                 select new RequiredCodeTraceabilityRequirement(
                                     artifact.Id,

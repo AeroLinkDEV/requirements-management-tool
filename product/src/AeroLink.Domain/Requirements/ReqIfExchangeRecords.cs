@@ -37,7 +37,7 @@ public sealed class ReqIfExchangeJob
     public ReqIfExchangeState State { get; private set; }
     public string CreatedBy { get; private set; } = "";
     public DateTimeOffset CreatedAt { get; private set; }
-    public Guid? CreatedScrId { get; private set; }
+    public Guid? CreatedChangeRequestId { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
     public int ProcessedCount { get; private set; }
     public string CheckpointJson { get; private set; } = "{}";
@@ -47,11 +47,11 @@ public sealed class ReqIfExchangeJob
     public void Checkpoint(int processed,string checkpointJson,DateTimeOffset now){if(State!=ReqIfExchangeState.Processing)throw new DomainException("Only a processing ReqIF job can checkpoint.");if(processed<ProcessedCount||processed>RequirementCount)throw new DomainException("ReqIF checkpoint progress is invalid.");ProcessedCount=processed;CheckpointJson=Required(checkpointJson);if(ProcessedCount>=RequirementCount)State=ReqIfExchangeState.Ready;}
     public void Fail(string error,DateTimeOffset now){if(State!=ReqIfExchangeState.Processing)throw new DomainException("Only a processing ReqIF job can fail.");State=ReqIfExchangeState.Failed;LastError=Required(error);CompletedAt=now;}
     public void Cancel(DateTimeOffset now){if(State is ReqIfExchangeState.Committed or ReqIfExchangeState.Rejected)throw new DomainException("A completed ReqIF exchange is immutable.");State=ReqIfExchangeState.Cancelled;CompletedAt=now;}
-    public void Commit(Guid scrId, DateTimeOffset now)
+    public void Commit(Guid changeRequestId, DateTimeOffset now)
     {
         if (Direction != ReqIfExchangeDirection.Import || State != ReqIfExchangeState.Ready)
             throw new DomainException("Only a validated ReqIF import can be committed.");
-        CreatedScrId = scrId; State = ReqIfExchangeState.Committed; CompletedAt = now;
+        CreatedChangeRequestId = changeRequestId; State = ReqIfExchangeState.Committed; CompletedAt = now;
     }
     public void Reject(DateTimeOffset now) { if (State == ReqIfExchangeState.Committed) throw new DomainException("A committed exchange is immutable."); State = ReqIfExchangeState.Rejected; CompletedAt = now; }
     private static string Required(string value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A required ReqIF exchange value is missing.") : value.Trim();

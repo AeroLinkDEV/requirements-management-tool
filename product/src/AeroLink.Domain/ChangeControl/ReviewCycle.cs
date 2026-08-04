@@ -50,7 +50,7 @@ public sealed class ReviewCycle
     private readonly List<ApprovalStep> _steps = [];
     private ReviewCycle() { }
 
-    internal ReviewCycle(Guid scrId, int sequence, string snapshotHash, IReadOnlyList<ApproverSelection> approvers,
+    internal ReviewCycle(Guid changeRequestId, int sequence, string snapshotHash, IReadOnlyList<ApproverSelection> approvers,
         DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null)
     {
         if (approvers.Count == 0) throw new DomainException("At least one approver is required.");
@@ -61,7 +61,7 @@ public sealed class ReviewCycle
         workflow?.Validate(approvers);
 
         Id = Guid.NewGuid();
-        ScrId = scrId;
+        ChangeRequestId = changeRequestId;
         Sequence = sequence;
         SnapshotHash = snapshotHash;
         // The procedure's own mode wins when there is one. A team that recorded a sequential board does not
@@ -86,7 +86,7 @@ public sealed class ReviewCycle
     }
 
     public Guid Id { get; private set; }
-    public Guid ScrId { get; private set; }
+    public Guid ChangeRequestId { get; private set; }
     public int Sequence { get; private set; }
     public string SnapshotHash { get; private set; } = string.Empty;
     public ReviewMode Mode { get; private set; }

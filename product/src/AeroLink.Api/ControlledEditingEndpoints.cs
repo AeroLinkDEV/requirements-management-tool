@@ -338,7 +338,7 @@ public static class ControlledEditingEndpoints
             {
                 var item = await db.RequirementChanges.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
                 if (item is null) return null;
-                var parent = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == item.ScrId, ct);
+                var parent = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == item.ChangeRequestId, ct);
                 return new(parent.ProjectId, parent.State.ToString(), null,
                     RequirementProposalControlledEditingAdapter.Snapshot(item, parent.Version),
                     "RequirementProposal", parent.Id, parent.AuthorId);

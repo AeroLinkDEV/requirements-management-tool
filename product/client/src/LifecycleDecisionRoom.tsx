@@ -13,16 +13,16 @@ type CampaignDetail = {
   requirementsHash?: string; softwareBuildId?: string; releaseHash?: string;
   readiness: { percent: number; readyForRelease: boolean; gates: Gate[] };
   changes: { id: string; displayNumber: string; title: string; type: string; state: string; authorId: string; requirementCount: number; included: boolean }[];
-  impacts: { id: string; scrId: string; scr: string; title: string; kind: string; artifactReference: string; description: string; state: string; rationale: string }[];
+  impacts: { id: string; changeRequestId: string; scr: string; title: string; kind: string; artifactReference: string; description: string; state: string; rationale: string }[];
   approvals: Approval[];
   events: { eventType: string; actorId: string; detail: string; occurredAt: string }[];
 };
 type Comparison = {
   fromRelease: string; toRelease: string; fromBaseline?: string; toBaseline?: string; toMaterialized: boolean;
   summary: { added: number; modified: number; retired: number; unchanged: number; proposed: number };
-  proposed: { scrId: string; scr: string; title: string; state: string; type: string; displayNumber: string; level: string; kind: string; statement: string }[];
+  proposed: { changeRequestId: string; scr: string; title: string; state: string; type: string; displayNumber: string; level: string; kind: string; statement: string }[];
 };
-type ScrDetail = {
+type ChangeRequestDetail = {
   id: string; displayNumber: string; title: string; problem: string; analysis: string; solution: string; authorId: string; state: string; updatedAt: string;
   requirementChanges: { id: string; baseNumber: string; revision: number; displayNumber: string; level: string; kind: string; statement: string; rationale: string; verificationMethod: string }[];
   reviewCycles: { steps: { position: number; approverId: string; approverName: string; state: string; decidedAt?: string }[] }[];
@@ -35,7 +35,7 @@ type RequirementImpact = {
   baselines: { baseline: string; release: string; state: string }[];
   documents: { id: string; documentNumber: string; revision: number; title: string; type: string; contentHash: string }[];
 };
-type AffectedRequirement = ScrDetail["requirementChanges"][number] & { artifactId?: string; currentStatement?: string; impact?: RequirementImpact };
+type AffectedRequirement = ChangeRequestDetail["requirementChanges"][number] & { artifactId?: string; currentStatement?: string; impact?: RequirementImpact };
 type DocumentRecord = { id: string; type: string; displayNumber: string; title: string; contentHash: string; artifactCount: number; generatedAt: string; release: string; baseline: string };
 type Screen = "readiness" | "impact" | "decision";
 
@@ -50,7 +50,7 @@ export default function LifecycleDecisionRoom({ api, projectId, activeReleaseId,
   const [detail, setDetail] = useState<CampaignDetail>();
   const [comparison, setComparison] = useState<Comparison>();
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
-  const [scr, setScr] = useState<ScrDetail>();
+  const [scr, setScr] = useState<ChangeRequestDetail>();
   const [affected, setAffected] = useState<AffectedRequirement[]>([]);
   const [selectedRequirement, setSelectedRequirement] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -95,7 +95,7 @@ export default function LifecycleDecisionRoom({ api, projectId, activeReleaseId,
     (async () => {
       const response = await fetch(`${api}/api/change-requests/${effectiveScrId}`);
       if (!response.ok) { setError("The selected controlled change could not be loaded."); return; }
-      const nextScr: ScrDetail = await response.json();
+      const nextScr: ChangeRequestDetail = await response.json();
       const nextAffected = await Promise.all(nextScr.requirementChanges.map(async (change): Promise<AffectedRequirement> => {
         if (change.kind === "Introduce") return change;
         const scope = change.level === "System" ? "System" : "Software";
@@ -209,7 +209,7 @@ function HealthCard({ label, gate, tone }: { label: string; gate?: Gate; tone: s
   return <article className={`${tone}${!measured && !gate?.complete ? " pendingMetric" : ""}`}><span>{label}</span><b>{measured || gate?.complete ? `${percent}%` : "Pending"}</b><small>{gate?.complete ? "Target achieved" : waiting ? "Waiting for baseline materialization" : measured ? `${Math.max(0, gate!.total - gate!.completed)} checks remaining` : "Evaluation not started"}</small><i><em style={{ width: `${percent}%` }} /></i></article>;
 }
 
-function ImpactView({ detail, scr, affected, selectedIndex, selected, onSelect, onBack, onOpenScr, onOpenVerification }: { detail: CampaignDetail; scr?: ScrDetail; affected: AffectedRequirement[]; selectedIndex: number; selected?: AffectedRequirement; onSelect: (index: number) => void; onBack: () => void; onOpenScr: () => void; onOpenVerification: () => void }) {
+function ImpactView({ detail, scr, affected, selectedIndex, selected, onSelect, onBack, onOpenScr, onOpenVerification }: { detail: CampaignDetail; scr?: ChangeRequestDetail; affected: AffectedRequirement[]; selectedIndex: number; selected?: AffectedRequirement; onSelect: (index: number) => void; onBack: () => void; onOpenScr: () => void; onOpenVerification: () => void }) {
   const [query, setQuery] = useState("");
   if (!scr) return <section className="decisionState"><div className="decisionLoader" /><h1>Loading controlled impact</h1></section>;
   const counts = scr.requirementChanges.reduce<Record<string, number>>((total, item) => ({ ...total, [item.kind]: (total[item.kind] ?? 0) + 1 }), {});

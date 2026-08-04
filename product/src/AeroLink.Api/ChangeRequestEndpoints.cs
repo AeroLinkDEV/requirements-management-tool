@@ -23,7 +23,7 @@ public static class ChangeRequestEndpoints
 {
     public static void MapChangeRequestEndpoints(this WebApplication app)
     {
-        app.MapPost("/api/change-requests/{id:guid}/retarget", async (Guid id, RetargetScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/retarget", async (Guid id, RetargetChangeRequestRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
@@ -38,7 +38,7 @@ public static class ChangeRequestEndpoints
                 scr.Retarget(actor.UserName, request.TargetReleaseId, request.Reason, now, actor.IsAdministrator);
                 await verificationImpact.RetargetAsync(scr.Id, request.TargetReleaseId, now, ct);
                 await repository.SaveAsync(ct);
-                return Results.Ok(ApiMap.ScrDetail(scr));
+                return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -50,7 +50,7 @@ public static class ChangeRequestEndpoints
         // one could exist was for the demonstration seeder to create it. The shelf was visible and unreachable.
         //
         // Deferring is the author's decision about their own work, so it takes the same authority as editing it.
-        app.MapPost("/api/change-requests/{id:guid}/defer", async (Guid id, DeferScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/defer", async (Guid id, DeferChangeRequestRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
@@ -60,7 +60,7 @@ public static class ChangeRequestEndpoints
             {
                 scr.Defer(actor.UserName, request.Reason ?? "", DateTimeOffset.UtcNow, actor.IsAdministrator);
                 await repository.SaveAsync(ct);
-                return Results.Ok(ApiMap.ScrDetail(scr));
+                return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -72,7 +72,7 @@ public static class ChangeRequestEndpoints
         /// somebody with no part in a change halt a review they have nothing to do with, and a controlled tool
         /// should not make that an accident anybody can have.
         app.MapPost("/api/change-requests/{id:guid}/cancel-review", async (Guid id, CancelReviewRequest request, HttpContext http,
-            IScrRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
@@ -87,12 +87,12 @@ public static class ChangeRequestEndpoints
             {
                 scr.CancelReview(actor.UserName, request.Reason ?? "", DateTimeOffset.UtcNow);
                 await repository.SaveAsync(ct);
-                return Results.Ok(ApiMap.ScrDetail(scr));
+                return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/reinstate", async (Guid id, ReinstateChangeRequest? request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/reinstate", async (Guid id, ReinstateChangeRequest? request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
@@ -118,12 +118,12 @@ public static class ChangeRequestEndpoints
                 }
                 scr.Reinstate(actor.UserName, now, actor.IsAdministrator);
                 await repository.SaveAsync(ct);
-                return Results.Ok(ApiMap.ScrDetail(scr));
+                return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/next-revision", async (Guid id, ActorRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/next-revision", async (Guid id, ActorRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var approved = await repository.GetAsync(id, ct); if (approved is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, approved.ProjectId, ct)) return Results.Forbid();
@@ -146,22 +146,22 @@ public static class ChangeRequestEndpoints
                 await new ProblemReportLinkService(db).LinkChangeRequestAsync(next.Id, reportIds,
                     actor.UserName, now, ct);
                 await repository.SaveAsync(ct);
-                return Results.Created($"/api/change-requests/{next.Id}", ApiMap.ScrDetail(next));
+                return Results.Created($"/api/change-requests/{next.Id}", ApiMap.ChangeRequestDetail(next));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (DbUpdateException) { return Results.Conflict(new { error = $"A later revision of {approved.BaseNumber} already exists." }); }
         });
 
-        app.MapGet("/api/change-requests", async (Guid projectId, Guid? releaseId, int? page, int? pageSize, string? search, ScrState? state, IScrRepository repository, CancellationToken ct) =>
+        app.MapGet("/api/change-requests", async (Guid projectId, Guid? releaseId, int? page, int? pageSize, string? search, ChangeRequestState? state, IChangeRequestRepository repository, CancellationToken ct) =>
         {
             var result = await repository.QueryAsync(new ScrQuery(projectId, page is null or 0 ? 1 : page.Value, pageSize is null or 0 ? 50 : pageSize.Value, search, state, releaseId), ct);
-            return Results.Ok(new { result.Page, result.PageSize, result.TotalCount, result.TotalPages, items = result.Items.Select(ApiMap.ScrSummary) });
+            return Results.Ok(new { result.Page, result.PageSize, result.TotalCount, result.TotalPages, items = result.Items.Select(ApiMap.ChangeRequestSummary) });
         });
 
-        app.MapGet("/api/change-requests/{id:guid}", async (Guid id, IScrRepository repository, CancellationToken ct) =>
+        app.MapGet("/api/change-requests/{id:guid}", async (Guid id, IChangeRequestRepository repository, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct);
-            return scr is null ? Results.NotFound() : Results.Ok(ApiMap.ScrDetail(scr));
+            return scr is null ? Results.NotFound() : Results.Ok(ApiMap.ChangeRequestDetail(scr));
         });
 
         // A software change request is numbered per level, so the preview needs to know which workspace is
@@ -380,11 +380,11 @@ public static class ChangeRequestEndpoints
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             var rows = await (from change in db.RequirementChanges.AsNoTracking()
-                              join scr in db.SystemChangeRequests.AsNoTracking() on change.ScrId equals scr.Id
+                              join scr in db.SystemChangeRequests.AsNoTracking() on change.ChangeRequestId equals scr.Id
                               where scr.ProjectId == projectId
                               select new
                               {
-                                  scr.Id, scrDisplayNumber = scr.BaseNumber + "." +
+                                  scr.Id, changeRequestDisplayNumber = scr.BaseNumber + "." +
                                       (scr.Revision < 10 ? "0" : "") + scr.Revision,
                                   scr.Title, scr.AuthorId, scr.State, changeId = change.Id,
                                   requirementDisplayNumber = change.BaseNumber + "." +
@@ -395,10 +395,10 @@ public static class ChangeRequestEndpoints
             {
                 var keys = AttributeKeys(row.AttributesJson);
                 var missing = new[] { "criticality", "owner" }.Where(key => !keys.Contains(key)).ToArray();
-                return new { row.Id, displayNumber = row.scrDisplayNumber, row.Title, row.AuthorId,
+                return new { row.Id, displayNumber = row.changeRequestDisplayNumber, row.Title, row.AuthorId,
                     state = row.State.ToString(), row.changeId, requirement = row.requirementDisplayNumber,
                     level = row.Level.ToString(), missing,
-                    reconciliation = row.State == ScrState.Draft ? $"scr:{row.Id}" : "Create a controlled successor revision; approved history is immutable." };
+                    reconciliation = row.State == ChangeRequestState.Draft ? $"scr:{row.Id}" : "Create a controlled successor revision; approved history is immutable." };
             }).Where(x => x.missing.Length > 0).OrderBy(x => x.displayNumber).ThenBy(x => x.requirement);
             return Results.Ok(gaps);
         });
@@ -421,7 +421,7 @@ public static class ChangeRequestEndpoints
             page = Math.Max(1, page == 0 ? 1 : page);
             pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
             var source = db.RequirementChanges.AsNoTracking()
-                .Where(x => db.SystemChangeRequests.Any(scr => scr.Id == x.ScrId && scr.ProjectId == projectId));
+                .Where(x => db.SystemChangeRequests.Any(scr => scr.Id == x.ChangeRequestId && scr.ProjectId == projectId));
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var term = search.Trim();
@@ -430,14 +430,14 @@ public static class ChangeRequestEndpoints
             var totalCount = await source.CountAsync(ct);
             var items = await source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
                 .Skip((page - 1) * pageSize).Take(pageSize)
-                .Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + x.Revision, level = x.Level.ToString(), kind = x.Kind.ToString(), x.Statement, x.VerificationMethod, x.ScrId })
+                .Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + x.Revision, level = x.Level.ToString(), kind = x.Kind.ToString(), x.Statement, x.VerificationMethod, x.ChangeRequestId })
                 .ToListAsync(ct);
             return Results.Ok(new { page, pageSize, totalCount, totalPages = (int)Math.Ceiling(totalCount / (double)pageSize), items });
         });
 
         // Historical discovery endpoints deliberately include every revision and lifecycle state.
 
-        app.MapPost("/api/change-requests", async (CreateScrRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, ProblemReportLinkService problemReports, CancellationToken ct) =>
+        app.MapPost("/api/change-requests", async (CreateChangeRequestRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
             var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
@@ -458,12 +458,12 @@ public static class ChangeRequestEndpoints
                 await problemReports.LinkChangeRequestAsync(scr.Id, request.ProblemReportIds,
                     http.UserAccount().UserName, DateTimeOffset.UtcNow, ct);
                 await repository.AddAsync(scr, ct); await repository.SaveAsync(ct);
-                return Results.Created($"/api/change-requests/{scr.Id}", ApiMap.ScrDetail(scr));
+                return Results.Created($"/api/change-requests/{scr.Id}", ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-request-drafts", async (CreateScrDraftRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, EnterpriseRequirementsService enterpriseRequirements, ProblemReportLinkService problemReports, CancellationToken ct) =>
+        app.MapPost("/api/change-request-drafts", async (CreateChangeRequestDraftRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, EnterpriseRequirementsService enterpriseRequirements, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
             var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
@@ -548,13 +548,13 @@ public static class ChangeRequestEndpoints
                 await problemReports.LinkChangeRequestAsync(scr.Id, request.ProblemReportIds, actor, now, ct);
                 await repository.SaveAsync(ct);
                 await transaction.CommitAsync(ct);
-                return Results.Created($"/api/change-requests/{scr.Id}", ApiMap.ScrDetail(scr));
+                return Results.Created($"/api/change-requests/{scr.Id}", ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (DbUpdateException) { return Results.Conflict(new { error = "Another author created an artifact at the same instant. No duplicate was saved; submit again to receive the next available numbers." }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/requirements", async (Guid id, RequirementChangeRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/requirements", async (Guid id, RequirementChangeRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
@@ -566,12 +566,12 @@ public static class ChangeRequestEndpoints
                     request.Statement, request.Rationale, request.VerificationMethod, DateTimeOffset.UtcNow,
                     impactDispositionJson: RequirementAuthoringJson.PendingImpactDispositions,
                     administratorAuthority: actor.IsAdministrator);
-                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
+                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before submitting.", code = "stale_version" });
@@ -607,7 +607,7 @@ public static class ChangeRequestEndpoints
                     actor.IsAdministrator);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
                     db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
-                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
+                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -619,7 +619,7 @@ public static class ChangeRequestEndpoints
         // Recovering from a misrouted review. Without this the only way out of a review sent to the wrong approver
         // was for that approver to act, which is exactly what cannot happen when they are the wrong person, on leave,
         // or no longer with the organization. The domain has always supported it; nothing exposed it.
-        app.MapPost("/api/change-requests/{id:guid}/restart-review", async (Guid id, RestartReviewRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/restart-review", async (Guid id, RestartReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before restarting the review.", code = "stale_version" });
@@ -644,12 +644,12 @@ public static class ChangeRequestEndpoints
                     administratorAuthority: actor.IsAdministrator);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
                     db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
-                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr));
+                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, DownstreamImpactService downstreamImpact, ProblemReportLinkService problemReports, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, DownstreamImpactService downstreamImpact, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
@@ -662,15 +662,15 @@ public static class ChangeRequestEndpoints
                 await verificationImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct, actor.UserName);
                 await downstreamImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct);
                 await problemReports.RecordApprovedCorrectiveActionsAsync(scr, actor.UserName, now, ct);
-                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
+                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr)); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/request-changes", async (Guid id, RequestChangesRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/request-changes", async (Guid id, RequestChangesRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
-            try { var now=DateTimeOffset.UtcNow;scr.RequestChanges(http.UserAccount().UserName, request.Reason, now);db.UserNotifications.Add(new(scr.ProjectId,scr.AuthorId,"ReviewChangesRequested",$"Changes requested for {scr.DisplayNumber}",request.Reason,$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now)); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ScrDetail(scr)); }
+            try { var now=DateTimeOffset.UtcNow;scr.RequestChanges(http.UserAccount().UserName, request.Reason, now);db.UserNotifications.Add(new(scr.ProjectId,scr.AuthorId,"ReviewChangesRequested",$"Changes requested for {scr.DisplayNumber}",request.Reason,$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now)); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr)); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
