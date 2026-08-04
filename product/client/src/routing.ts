@@ -1,5 +1,5 @@
 export type View =
-  | "projects" | "builds" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
+  | "projects" | "builds" | "baselineImports" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
   | "verification" | "testingCoverage" | "testResults" | "documents" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
@@ -64,6 +64,10 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
     return { view: "projects", discipline: "system" };
   if (parts.length === 3 && parts[0] === "projects" && parts[1] === "fms-product-development" && parts[2] === "builds")
     return { view: "builds", discipline: "system" };
+  // Alongside Software Builds rather than inside a build, because an import does not belong to a build — it
+  // creates one. There is no build to have entered when this page is the thing you need.
+  if (parts.length === 3 && parts[0] === "projects" && parts[1] === "fms-product-development" && parts[2] === "imported-baselines")
+    return { view: "baselineImports", discipline: "system" };
   if (parts[0] !== "programs" || parts[2] !== "projects" || parts[4] !== "releases")
     return { view: "notFound", discipline: "system" };
 
@@ -157,6 +161,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
   switch (view) {
     case "projects": return "/projects";
     case "builds": return "/projects/fms-product-development/builds";
+    case "baselineImports": return "/projects/fms-product-development/imported-baselines";
     case "dashboard": return `${root}/command-center`;
     case "mywork": return `${root}/my-work`;
     case "createSystemScr": return `${root}/systems/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;

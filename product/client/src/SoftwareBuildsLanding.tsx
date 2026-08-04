@@ -47,12 +47,14 @@ export default function SoftwareBuildsLanding({
   releases,
   onOpenBuild,
   onProjectOverview,
+  onImportedBaselines,
   onSignOut,
 }: {
   user: AuthUser;
   releases: SelectableRelease[];
   onOpenBuild: (release: SelectableRelease) => void;
   onProjectOverview: () => void;
+  onImportedBaselines: () => void;
   onSignOut: () => void;
 }) {
   const releaseByVersion = new Map(releases.map((release) => [release.version, release]));
@@ -71,9 +73,16 @@ export default function SoftwareBuildsLanding({
             <h1>Software Builds</h1>
             <p>Select a build to explore or work on.</p>
           </div>
-          <button type="button" className="projectOverviewButton" onClick={onProjectOverview}>
-            <span aria-hidden="true">←</span> Project overview
-          </button>
+          <div className="buildsLandingActions">
+            {/* Sits here rather than in a build's navigation because an import does not belong to a build —
+                it creates one. Somebody porting a program in has no build to have entered yet. */}
+            <button type="button" className="importedBaselinesButton" onClick={onImportedBaselines}>
+              Imported baselines
+            </button>
+            <button type="button" className="projectOverviewButton" onClick={onProjectOverview}>
+              <span aria-hidden="true">←</span> Project overview
+            </button>
+          </div>
         </header>
 
         <section className="buildProjectSummary" aria-labelledby="build-project-name">

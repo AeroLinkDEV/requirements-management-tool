@@ -22,7 +22,10 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .buildsLandingHeading h1 { margin: 0 0 5px; font-size: 32px; }
 .buildsLandingHeading p { margin: 0; color: var(--ink-500); font-size: 14px; }
 
+.buildsLandingActions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
 .projectOverviewButton,
+.importedBaselinesButton,
 .buildDetailsHelper button {
   min-height: 39px;
   border: 1px solid #cfd9e3;
@@ -34,7 +37,9 @@ body:has(.buildsLandingPage) { min-width: 0; }
   box-shadow: 0 3px 10px rgba(17, 35, 58, .05);
   cursor: pointer;
 }
-.projectOverviewButton:hover { border-color: #8da5bc; color: #173e61; }
+.projectOverviewButton:hover,
+.importedBaselinesButton:hover { border-color: #8da5bc; color: #173e61; }
+.importedBaselinesButton:focus-visible,
 .projectOverviewButton:focus-visible,
 .softwareBuildCard button:focus-visible { outline: 3px solid #2c95cc; outline-offset: 3px; }
 
