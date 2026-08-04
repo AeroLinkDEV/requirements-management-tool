@@ -1297,6 +1297,92 @@ Future entries use:
   no longer reproducible. **The frozen hashes were not recomputed** — doing so would make a signature attest to
   content its signer never approved.
 
+### DEC-093 - An Imported Baseline Is an Assertion, Not a Change
+
+- **Date:** 2026-08-04
+- **Status:** Accepted; to be implemented under issue #332
+- **Decision:** A program that already exists in another requirements tool is brought in as an **externally
+  sourced baseline**, created directly with its provenance. It never becomes a change request. The import
+  runs through five gates — Source, Analyse, Map, Reconcile, Accept — the last of which is signed by a named
+  person. The resulting baseline is permanently marked externally sourced wherever it appears, and carries a
+  provenance record holding the extract's SHA-256, the source system and version, the source baseline name
+  and date, the mapping used, and the reconciliation report.
+- **Rationale:** Both existing import paths commit into a Draft change request. That is right for proposing
+  requirements into a controlled program and wrong for porting one in: nobody at the customer approved those
+  requirements *in this tool*, so routing them through review and approval would produce a real signature
+  attesting to a fiction. An imported baseline must never be indistinguishable from one built through this
+  product's own controlled chain — the whole value of the chain is that it can be told apart from a claim.
+- **Consequences:**
+  - **Identifiers.** New controlled numbers are issued, and the source identifier is kept forever as a
+    searchable **external identity record** joined by a typed trace reading *`SYSR-000148.00` originates from
+    `SYS-0147`* — the controlled requirement is the subject, the source object is what it came from.
+    Discarding the source identifier was rejected because every drawing, CDRL and test procedure outside this
+    tool still names it. Preserving source identifiers verbatim was rejected because they fail
+    `ArtifactNumber.ValidateBase` and would leave two schemes coexisting forever. This is deliberately the
+    opposite of [DEC-092](#), where no record of the retired names was kept: there the old names were our own
+    naming mistake, here they are another organisation's system of record.
+  - **Traces gain a second recognised origin.** A trace created by an import records the import as its
+    origin, never a change request, so nothing suggests a build carried work it did not.
+  - **Source-system authorship is never imported as ours.** DOORS `Created By`, `Created On`,
+    `Last Modified By` and `Status` describe activity in DOORS. Writing them as AeroLink authorship would
+    attribute work here to people who never touched this tool — the same class of error as fabricating an
+    approval. They stay in the provenance record.
+  - **Nothing is dropped silently.** Every source object is accounted for at Reconcile. Duplicate source
+    identities block the import; dangling links are either accepted as recorded gaps or block it; every
+    attribute is mapped or explicitly excluded with a reason before the Map gate will close.
+  - **Mapping covers values, not only names.** An attribute mapping without a value mapping is incomplete —
+    DOORS `T/A/I/D` has to become Test, Analysis, Inspection, Demonstration.
+  - **Link mappings state direction explicitly**, because a reversed mapping produces a complete, plausible
+    and entirely wrong traceability tree.
+  - **Re-import is a delta**, keyed on source system, module and absolute number. Programs re-extract, and a
+    second import must not produce a duplicate set.
+  - **One import per Program for now, but scoped by artifact kind in the model.** A Program is expected to be
+    ported from a single source. It is foreseeable that requirements come from one system and test procedures
+    from another, so an import declares which artifact kinds it carries and its provenance is recorded per
+    import rather than per Program. Nothing is built for the second source now; the model simply does not
+    preclude it, which is cheap today and expensive to retrofit.
+  - **A single source baseline, not a chain.** An import brings in the source's current state as one baseline
+    — the program's V1.0. Importing a sequence of historical source baselines would mean inventing revision
+    records with authors and dates from a system that is not ours, which is the same error as fabricating an
+    approval, one level down. (Resolves OQ-019.)
+  - **An externally sourced baseline may be the predecessor of a normally built one.** Importing V1.0 and
+    then building V1.1 in this product is the point of the feature, so the imported baseline takes its place
+    in the release lineage like any other predecessor. (Resolves OQ-020.)
+  - **An imported baseline arrives released, and therefore never runs readiness gates.** Gates evaluate a
+    build before it is released; an imported V1.0 is already past that. The prior decisions — review,
+    approval, verification — are credited to the source's own release rather than re-litigated here, and this
+    product never claims to have made them.
+  - **Inherited requirements count as settled coverage, and are always shown apart.** In a successor build
+    the coverage gate still counts every effective requirement revision, and one inherited from an imported
+    baseline is settled by the source's release. The gate's summary must always split the two — "4,900
+    confirmed here, 280 inherited from the DOORS import" — so a claim made elsewhere can never be read as one
+    this product verified. Where an import also carries verification data, that is recorded as the richer
+    evidence it is. (Resolves OQ-021.)
+  - **Modifying an inherited requirement expires its credit.** The source's assertion covers the wording it
+    released. As soon as a later build modifies an inherited requirement, its inherited coverage goes suspect
+    exactly as any other modified requirement's would, and must be answered here. Without this boundary,
+    crediting prior decisions would quietly become never verifying anything again.
+  - **Source history is imported as reported facts, and this product makes no claim about it.** Where an
+    extract carries the source's own history — a requirement's wording at V0.8 and V0.9, who changed it and
+    when, the source's own change reference — it is recorded verbatim as *what the source system reported*.
+    It is never restated as this product's revisions, never signed for, and never participates in any gate,
+    coverage figure or readiness computation. The Accept signature covers the V1.0 mapping and reconciliation
+    only. This is what makes importing history safe: an incomplete or messy chain can be recorded honestly
+    because nothing downstream reasons over it. (Resolves OQ-019, replacing the earlier answer.)
+  - **History is not imported as revisions, because a revision means something here.** `RequirementRevision`
+    binds a non-nullable `SourceChangeRequestId` and `EffectiveBaselineId` — a revision *is* what an approved
+    change request put into a materialized baseline. Importing V0.8 and V0.9 as revisions would require
+    fabricating a change request and a baseline for each, or making those fields nullable and weakening the
+    invariant for every requirement in the product. Source history is held against the external identity
+    record instead, where it costs neither.
+  - **Only objects present in the imported baseline join the live graph.** A requirement in V1.0 gets its
+    external identity and its trace. An object that existed at V0.9 and was retired before V1.0 appears in
+    source history and nowhere else: no requirement, no identity, no trace. History is narrative, not nodes,
+    so a retired ancestor never becomes a dangling reference in the traceability network.
+  - **Source history is searchable.** Somebody holding a drawing that cites a source identifier retired two
+    baselines ago should get an answer — "`SYS-01233` appears in the source history of `SYS-01234`, retired
+    at V0.9" — rather than an empty result they read as the tool having lost it.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
