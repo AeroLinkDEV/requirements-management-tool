@@ -63,6 +63,19 @@ label now follows the controlled identifier of the change request that authorise
 workspace projection. Deriving it from the requirement's level was rejected: the database still holds a System
 change request carrying an HLR change, and a label computed from the rule would confidently mislabel it.
 
+### Change-request identifiers renamed (#327, PRs #328 and #329, DEC-092)
+
+`SCR` became `SRCR`; `SWCR` became `HLRCR` or `LLRCR` according to the level the change request carries. Every
+existing record was renamed in place with its number preserved — 40 SRCR, 44 HLRCR, 55 LLRCR — and no record
+of the former identifiers is kept, by the product owner's decision. The prefix now comes from one authority,
+`ChangeRequestNumbering.Prefix`, which makes the software level a hard invariant: a change request that cannot
+say whether it is HLR or LLR cannot be named, so it cannot exist. The two software prefixes are numbered
+independently and resume above the highest number already used at each level.
+
+**Accepted cost:** 126 frozen review-cycle hashes, 17 electronic signatures and 1 frozen baseline hash were
+computed over the old identifiers and no longer recompute. They were deliberately not recomputed — that would
+make a signature attest to content its signer never approved. Nothing re-verifies them at runtime.
+
 ## Lessons this session, worth not relearning
 
 - **A finished branch is not a merged branch.** #312 was reported closed and #317 reported merged; both were
@@ -75,6 +88,17 @@ change request carrying an HLR change, and a label computed from the rule would 
   tests covered what was built rather than what was asked for. A pull request that closes an issue should
   state each criterion and where it is satisfied; anything that cannot be pointed at is not delivered, and
   the issue stays open.
+- **Renaming a route silently disables any middleware that keys on the old path.** Moving `/api/scrs` to
+  `/api/change-requests` turned off both the cross-build resource check and the released-build write refusal:
+  a released build would have accepted writes. Nothing in the UI showed it; only the existing tests did. After
+  any route rename, grep the middleware for the old path prefix before trusting a green screen.
+- **EF scaffolds a table rename as DropTable plus CreateTable.** Applied as written it would have deleted the
+  107 baseline selection rows. When `dotnet ef migrations add` prints "may result in the loss of data", read
+  the migration before running it, and rewrite table renames as `RenameTable`.
+- **A test that picks a row by position is tied to how identifiers sort.** Three tests broke on the rename for
+  no reason other than `HLRCR` sorting before `SRCR` where `SCR` sorted before `SWCR`. Select by what the test
+  actually means — and match on the identifier element, not the row text, or a title quoting another record's
+  number will match instead.
 - **A conflicting pull request runs no checks at all, and that looks exactly like a slow queue.** PR #323 sat
   for an hour reporting "no checks reported" because `main` had moved underneath it. Waiting produces
   nothing; `gh pr view <n> --json mergeable` is the check that actually answers the question. Rebase, push,
@@ -99,9 +123,9 @@ change request carrying an HLR change, and a label computed from the rule would 
 ## Where things stand
 
 - `main` carries every issue listed above. Issues #312, #313, #314 and #316 are closed through pull requests
-  #317, #321, #322, #323 and #325. There are no open issues and no open pull requests.
-- Backend suite on `main` at the end of this session: **589 passed, 0 failed** — 221 domain, 177
-  infrastructure, 191 API. Browser journeys, production-build journeys and the PostgreSQL migration gate all
+  #317, #321, #322, #323 and #325; the identifier rename is #327, closed through #328 and #329.
+- Backend suite on `main` at the end of this session: **602 passed, 0 failed** — 228 domain, 177
+  infrastructure, 197 API. Browser journeys, production-build journeys and the PostgreSQL migration gate all
   passed on the final merge.
 - Stale local `codex/*` branches remain from squash merges. They are leftovers, not unmerged work — verify
   with `gh pr list --state all`, never with `git log main..branch`.
