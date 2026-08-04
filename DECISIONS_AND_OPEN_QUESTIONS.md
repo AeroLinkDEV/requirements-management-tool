@@ -1336,6 +1336,19 @@ Future entries use:
     and entirely wrong traceability tree.
   - **Re-import is a delta**, keyed on source system, module and absolute number. Programs re-extract, and a
     second import must not produce a duplicate set.
+  - **One import per Program for now, but scoped by artifact kind in the model.** A Program is expected to be
+    ported from a single source. It is foreseeable that requirements come from one system and test procedures
+    from another, so an import declares which artifact kinds it carries and its provenance is recorded per
+    import rather than per Program. Nothing is built for the second source now; the model simply does not
+    preclude it, which is cheap today and expensive to retrofit.
+  - **A single source baseline, not a chain.** An import brings in the source's current state as one baseline
+    — the program's V1.0. Importing a sequence of historical source baselines would mean inventing revision
+    records with authors and dates from a system that is not ours, which is the same error as fabricating an
+    approval, one level down. (Resolves OQ-019.)
+  - **An externally sourced baseline may be the predecessor of a normally built one.** Importing V1.0 and
+    then building V1.1 in this product is the point of the feature, so the imported baseline takes its place
+    in the release lineage like any other predecessor. (Resolves OQ-020.) What the release readiness gates
+    do about requirements inherited unchanged from it is a separate and unsettled question — see OQ-021.
 
 ## Working Assumptions
 
@@ -1382,8 +1395,7 @@ choices are created as focused issues only when their trigger and acceptance bou
 | OQ-016 | Which specific decisions and recurring tasks must the accepted Manager and System Engineer dashboards support first? | Determines dashboard information priority and avoids generic views | Product owner and representative users before showcase build |
 | OQ-017 | What exact definitions, thresholds, applicability rules, and owners govern the initial dashboard measures? | Prevents misleading readiness and completeness indicators | Product/process owners before showcase validation |
 | OQ-018 | Which details in the accepted FMS Version 3.3 fictional story need correction or richer realism before the showcase build? | Keeps the reusable prototype data credible without using sensitive real program data | Product owner before showcase build |
-| OQ-019 | May an import bring in more than one historical source baseline, or only the source's current state? | Importing a chain means inventing revision records with authors and dates from a system that is not ours | Product owner before the import feature is built (DEC-093, issue #332) |
-| OQ-020 | May an externally sourced baseline act as predecessor to a normally built one? | It is the whole point of porting a program in, and it decides how release readiness gates treat a baseline nobody approved here | Product owner before the import feature is built (DEC-093, issue #332) |
+| OQ-021 | What do the release readiness gates do about requirements inherited unchanged from an externally sourced baseline? | `ReleaseReadinessService` counts coverage over every effective requirement revision in the materialized baseline, not only the ones this build changed. A successor to an imported baseline therefore inherits thousands of requirements with no coverage recorded here, and cannot release until each is answered. Whatever is chosen decides what a passing gate means once any imported program exists. | Product owner before the import feature is built (DEC-093, issue #332) |
 
 ## Open Questions for Later Phases
 
