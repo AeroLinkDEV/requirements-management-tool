@@ -1387,10 +1387,13 @@ Future entries use:
     establishes a Project — while reading an import and searching source identities is open to anyone with
     Project access. An engineer has every right to work inside a Program; declaring that a whole baseline
     arrived from elsewhere, already released, is Program setup rather than engineering work on a build.
-  - **An import is not a mutation of the active build, and is deliberately outside the released-build write
-    refusal.** That refusal exists to stop a released build being edited. An import creates a new build from
-    a source that is already released, so keying it off the same prefix list would block the one operation it
-    was never meant to describe.
+  - **An import is not a mutation of the active build, and is exempted from the released-build write refusal
+    by name.** That refusal exists to stop a released build being edited. An import creates a new build from
+    a source that is already released, so the refusal would answer a question nobody asked. Exempting it by
+    name rather than by leaving it off the prefix list is deliberate: the list entry `/api/baseline` is loose
+    enough to catch `/api/baselines`, and so catches `/api/baseline-imports` with it. A regression test pins
+    both halves — an import runs with a released build in the workspace, and `/api/baselines` is still
+    refused there.
   - **Externally sourced is derived from the provenance, never stored as a flag on the build.** A build is
     externally sourced exactly when an accepted import points at it. A duplicated boolean could drift away
     from the record that justifies it, and the whole value of the marking is that it cannot be wrong.

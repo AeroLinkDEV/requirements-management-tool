@@ -364,6 +364,41 @@ public sealed class BaselineImportApiTests
     }
 
     [Fact]
+    public async Task A_released_build_in_the_workspace_does_not_refuse_an_import()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory, "RLS");
+        Guid releasedId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var released = new SoftwareRelease(projectId, "1.5", isReleased: false);
+            released.MarkReleased(DateTimeOffset.UtcNow);
+            db.Releases.Add(released);
+            await db.SaveChangesAsync();
+            releasedId = released.Id;
+        }
+
+        client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", releasedId.ToString());
+
+        // The released-build refusal stops a released build being edited. An import creates a new build from
+        // a source that is already released, so refusing it would answer a question nobody asked — and it
+        // would, because "/api/baseline" is loose enough to catch "/api/baselines" and so catches
+        // "/api/baseline-imports" with it.
+        var id = await StartAsync(client, projectId);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/baseline-imports/{id}/analysis", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await RecordSourceRecordsAsync(client, id, SourceRecord(1234))).StatusCode);
+
+        // The refusal still holds for everything it was written for.
+        using var refused = await client.PostAsJsonAsync($"/api/baselines?projectId={projectId}&releaseId={releasedId}",
+            new { name = "Attempted baseline" });
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Contains("released_build_read_only", await refused.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task Porting_a_program_in_takes_Program_authority_not_engineering_authority()
     {
         using var factory = new AeroLinkApiFactory();
