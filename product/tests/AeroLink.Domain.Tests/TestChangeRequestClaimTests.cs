@@ -12,7 +12,7 @@ namespace AeroLink.Domain.Tests;
 public sealed class TestChangeRequestClaimTests
 {
     private static TestChangeReview Package(string number = "SYSTCR-000001") =>
-        new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), TestChangeReviewDiscipline.System, "SCR-00031", DateTimeOffset.UtcNow, number);
+        new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), TestChangeReviewDiscipline.System, "SRCR-00031", DateTimeOffset.UtcNow, number);
 
     [Fact]
     public void A_package_carries_a_controlled_number_and_a_revision()
@@ -31,7 +31,7 @@ public sealed class TestChangeRequestClaimTests
     public void A_package_raised_before_numbering_still_identifies_itself()
     {
         var package = Package("");
-        Assert.Equal("SCR-00031", package.DisplayNumber);
+        Assert.Equal("SRCR-00031", package.DisplayNumber);
     }
 
     [Fact]
@@ -47,13 +47,13 @@ public sealed class TestChangeRequestClaimTests
     {
         var package = Package();
         var second = Guid.NewGuid();
-        package.IncludeChangeRequest("test.engineer", second, "SCR-00032", DateTimeOffset.UtcNow);
+        package.IncludeChangeRequest("test.engineer", second, "SRCR-00032", DateTimeOffset.UtcNow);
 
         Assert.Equal([package.ChangeRequestId, second], package.CoveredChangeRequestIds);
         var claim = package.AdditionalSources.Single();
         // Who folded it in and when: the decision to test two changes together is a judgement somebody made.
         Assert.Equal("test.engineer", claim.ClaimedBy);
-        Assert.Equal("SCR-00032", claim.ChangeRequestNumber);
+        Assert.Equal("SRCR-00032", claim.ChangeRequestNumber);
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class TestChangeRequestClaimTests
     {
         var package = Package();
         var error = Assert.Throws<DomainException>(() =>
-            package.IncludeChangeRequest("test.engineer", package.ChangeRequestId, "SCR-00031", DateTimeOffset.UtcNow));
+            package.IncludeChangeRequest("test.engineer", package.ChangeRequestId, "SRCR-00031", DateTimeOffset.UtcNow));
         Assert.Contains("already covers it", error.Message);
     }
 
@@ -70,9 +70,9 @@ public sealed class TestChangeRequestClaimTests
     {
         var package = Package();
         var second = Guid.NewGuid();
-        package.IncludeChangeRequest("test.engineer", second, "SCR-00032", DateTimeOffset.UtcNow);
+        package.IncludeChangeRequest("test.engineer", second, "SRCR-00032", DateTimeOffset.UtcNow);
         Assert.Throws<DomainException>(() =>
-            package.IncludeChangeRequest("test.engineer", second, "SCR-00032", DateTimeOffset.UtcNow));
+            package.IncludeChangeRequest("test.engineer", second, "SRCR-00032", DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public sealed class TestChangeRequestClaimTests
     {
         var package = Package();
         var second = Guid.NewGuid();
-        package.IncludeChangeRequest("test.engineer", second, "SCR-00032", DateTimeOffset.UtcNow);
+        package.IncludeChangeRequest("test.engineer", second, "SRCR-00032", DateTimeOffset.UtcNow);
         package.ExcludeChangeRequest(second, DateTimeOffset.UtcNow);
 
         // Released for another package to claim: exclusivity would be a trap otherwise.
@@ -100,7 +100,7 @@ public sealed class TestChangeRequestClaimTests
         package.Submit("test.engineer", "test.approver", everyItemResolved: true, now);
 
         Assert.Throws<DomainException>(() =>
-            package.IncludeChangeRequest("test.engineer", Guid.NewGuid(), "SCR-00033", now));
+            package.IncludeChangeRequest("test.engineer", Guid.NewGuid(), "SRCR-00033", now));
         Assert.Throws<DomainException>(() => package.ExcludeChangeRequest(Guid.NewGuid(), now));
     }
 

@@ -7,7 +7,7 @@ public sealed class DownstreamChangeAssessmentTests
 {
     private static readonly DateTimeOffset Now = new(2026, 7, 31, 12, 0, 0, TimeSpan.Zero);
     private static DownstreamChangeAssessment Create() => new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-        "SCR-00032.00", RequirementLevel.HighLevel, Now);
+        "SRCR-00032.00", RequirementLevel.HighLevel, Now);
 
     [Fact]
     public void Assigned_engineer_can_conclude_that_no_downstream_change_is_required()
@@ -27,8 +27,8 @@ public sealed class DownstreamChangeAssessmentTests
     {
         var assessment = Create();
         assessment.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
-        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "SWCR-00077.00", Now.AddMinutes(2));
-        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "SWCR-00078.00", Now.AddMinutes(3));
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00077.00", Now.AddMinutes(2));
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00078.00", Now.AddMinutes(3));
 
         Assert.Equal(2, assessment.ChangeRequestLinks.Count);
         Assert.Equal(DownstreamAssessmentOutcome.ChangeRequestsLinked, assessment.Outcome);
@@ -44,7 +44,7 @@ public sealed class DownstreamChangeAssessmentTests
         Assert.Equal(DownstreamAssessmentOutcome.ChangeRequired, assessment.Outcome);
         Assert.Throws<DomainException>(() => assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(3)));
 
-        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "SWCR-00079.00", Now.AddMinutes(4));
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00079.00", Now.AddMinutes(4));
         assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(5));
         Assert.Equal(DownstreamAssessmentState.InReview, assessment.State);
     }
@@ -55,7 +55,7 @@ public sealed class DownstreamChangeAssessmentTests
         var assessment = Create();
         assessment.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
         assessment.RecordNoChange("software.engineer", "No HLR change required for the original wording.", Now.AddMinutes(2));
-        assessment.Supersede(Guid.NewGuid(), "SCR-00032.01 revised the approved source; reassessment is required.", Now.AddMinutes(3));
+        assessment.Supersede(Guid.NewGuid(), "SRCR-00032.01 revised the approved source; reassessment is required.", Now.AddMinutes(3));
 
         Assert.Equal(DownstreamAssessmentState.Superseded, assessment.State);
         Assert.Contains("reassessment", assessment.SupersededReason);
@@ -80,11 +80,11 @@ public sealed class DownstreamChangeAssessmentTests
         var assessment = Create();
         assessment.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
         assessment.RecordChangeRequired("software.engineer", Now.AddMinutes(2));
-        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "SWCR-00079.00", Now.AddMinutes(3));
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00079.00", Now.AddMinutes(3));
         assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(4));
         assessment.ReturnToWork("assurance.reviewer", "Clarify the allocation before approval.", Now.AddMinutes(5));
 
-        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "SWCR-00080.00", Now.AddMinutes(6));
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00080.00", Now.AddMinutes(6));
 
         Assert.Equal("Clarify the allocation before approval.", assessment.Rationale);
         Assert.Equal(2, assessment.ChangeRequestLinks.Count);
@@ -109,7 +109,7 @@ public sealed class DownstreamChangeAssessmentTests
         var assessment = Create();
         assessment.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
         assessment.RecordChangeRequired("software.engineer", Now.AddMinutes(2));
-        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "SWCR-00079.00", Now.AddMinutes(3));
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00079.00", Now.AddMinutes(3));
 
         var reopening = assessment.Reopen("software.engineer", "The linked SWCR answers a different System change.", Now.AddMinutes(4));
 
@@ -122,7 +122,7 @@ public sealed class DownstreamChangeAssessmentTests
         // And what it used to hold survives the correction rather than being overwritten by it.
         Assert.Equal(DownstreamAssessmentOutcome.ChangeRequestsLinked, reopening.PreviousOutcome);
         Assert.Equal("software.engineer", reopening.PreviousDecidedBy);
-        Assert.Equal("SWCR-00079.00", reopening.DetachedChangeRequestNumbers);
+        Assert.Equal("HLRCR-00079.00", reopening.DetachedChangeRequestNumbers);
         Assert.Contains("different System change", reopening.Reason);
     }
 
@@ -171,7 +171,7 @@ public sealed class DownstreamChangeAssessmentTests
         var superseded = Create();
         superseded.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
         superseded.RecordNoChange("software.engineer", "No HLR change required.", Now.AddMinutes(2));
-        superseded.Supersede(Guid.NewGuid(), "SCR-00032.01 replaced the source.", Now.AddMinutes(3));
+        superseded.Supersede(Guid.NewGuid(), "SRCR-00032.01 replaced the source.", Now.AddMinutes(3));
         Assert.Throws<DomainException>(() => superseded.Reopen("software.engineer", "Reassessing.", Now.AddMinutes(4)));
     }
 
@@ -186,7 +186,7 @@ public sealed class DownstreamChangeAssessmentTests
         assessment.Reopen("assurance.reviewer", "An HLR gap was found after approval.", Now.AddMinutes(5));
 
         assessment.RecordChangeRequired("software.engineer", Now.AddMinutes(6));
-        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "SWCR-00081.00", Now.AddMinutes(7));
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00081.00", Now.AddMinutes(7));
         assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(8));
         assessment.Approve("assurance.reviewer", Now.AddMinutes(9));
 

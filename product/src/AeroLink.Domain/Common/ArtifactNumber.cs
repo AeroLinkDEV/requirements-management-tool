@@ -22,9 +22,18 @@ public static partial class ArtifactNumber
     /// </summary>
     private static readonly string[] ChangeRequestPrefixes = ["SRCR-", "HLRCR-", "LLRCR-"];
 
+    /// <summary>
+    /// Prefixes this product used to issue and no longer recognises. They are rejected outright rather than
+    /// merely unused: the generic pattern would otherwise accept them as some other kind of artifact, and
+    /// an identifier that reads like a retired change request is worse than one that is refused.
+    /// </summary>
+    private static readonly string[] RetiredPrefixes = ["SCR-", "SWCR-"];
+
     public static string ValidateBase(string value)
     {
         var normalized = value.Trim().ToUpperInvariant();
+        if (RetiredPrefixes.Any(prefix => normalized.StartsWith(prefix, StringComparison.Ordinal)))
+            throw new DomainException("SCR and SWCR are retired. System change requests are SRCR; software change requests are HLRCR or LLRCR.");
         if (!BasePattern().IsMatch(normalized)
             || (ChangeRequestPrefixes.Any(prefix => normalized.StartsWith(prefix, StringComparison.Ordinal))
                 && !ChangeRequestPattern().IsMatch(normalized)))

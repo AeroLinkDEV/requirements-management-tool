@@ -15,28 +15,28 @@ public sealed class SystemChangeRequestTests
     public void Display_number_appends_two_digit_revision()
     {
         var scr = CreateDraft();
-        Assert.Equal("SCR-01049.01", scr.DisplayNumber);
+        Assert.Equal("SRCR-01049.01", scr.DisplayNumber);
         Assert.Equal("SYSR-00002375.04", ArtifactNumber.Display("SYSR-00002375", 4));
     }
 
     [Fact]
     public void Change_requests_use_five_digits_and_software_builds_use_the_official_name()
     {
-        Assert.Equal("SCR-00039.00", ArtifactNumber.Display("SCR-00039", 0));
-        Assert.Equal("SWCR-00039.02", ArtifactNumber.Display("SWCR-00039", 2));
+        Assert.Equal("SRCR-00039.00", ArtifactNumber.Display("SRCR-00039", 0));
+        Assert.Equal("HLRCR-00039.02", ArtifactNumber.Display("HLRCR-00039", 2));
         Assert.Equal("SW-01.60", ArtifactNumber.Display("SW-01.60", 0));
         Assert.Equal("SW-01.60", SoftwareBuildIdentifier.FromVersion("1.6"));
-        Assert.Throws<DomainException>(() => ArtifactNumber.ValidateBase("SCR-00000039"));
+        Assert.Throws<DomainException>(() => ArtifactNumber.ValidateBase("SRCR-00000039"));
     }
 
     [Fact]
     public void Submit_requires_pas_and_at_least_one_requirement_change()
     {
-        var empty = new SystemChangeRequest("SCR-01049", 1, ProjectId, ReleaseId,
+        var empty = new SystemChangeRequest("SRCR-01049", 1, ProjectId, ReleaseId,
             "Round Robin", "", "Analysis", "Solution", "author", Now);
         Assert.Throws<DomainException>(() => empty.SubmitForReview("author", Approvers(), Now));
 
-        var noChange = new SystemChangeRequest("SCR-01049", 1, ProjectId, ReleaseId,
+        var noChange = new SystemChangeRequest("SRCR-01049", 1, ProjectId, ReleaseId,
             "Round Robin", "Problem", "Analysis", "Solution", "author", Now);
         Assert.Throws<DomainException>(() => noChange.SubmitForReview("author", Approvers(), Now));
     }
@@ -44,15 +44,17 @@ public sealed class SystemChangeRequestTests
     [Fact]
     public void Author_can_replace_draft_content_without_changing_revision()
     {
-        var scr = new SystemChangeRequest("SWCR-01049", 1, ProjectId, ReleaseId,
-            "Round Robin", "Problem", "Analysis", "Solution", "author", Now, ChangeRequestType.Software);
+        var scr = new SystemChangeRequest("HLRCR-01049", 1, ProjectId, ReleaseId,
+            "Round Robin", "Problem", "Analysis", "Solution", "author", Now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
         scr.AddRequirementChange("author", "HLR-00002375", 1, RequirementLevel.HighLevel,
             RequirementChangeKind.Modify, "The software shall sequence waypoints.", "Clarification.", "Test", Now);
         scr.UpdateDraft("author", "Updated Round Robin", "Updated problem", "Updated analysis", "Updated solution",
         [
             new RequirementChangeDraft("HLR-00002375", 2, RequirementLevel.HighLevel, RequirementChangeKind.Modify,
                 "The FMS software shall sequence Round Robin waypoints deterministically.", "Clarified behavior.", "Test"),
-            new RequirementChangeDraft("LLR-00002376", 0, RequirementLevel.LowLevel, RequirementChangeKind.Introduce,
+            // Both changes are HLR: this draft is an HLRCR, and a change request that carries a level cannot
+            // hold the other one. The test is about replacing draft content without moving the revision.
+            new RequirementChangeDraft("HLR-00002376", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce,
                 "The software shall expose the selected sequence.", "New HLR.", "Test")
         ], Now.AddMinutes(1));
 
@@ -67,7 +69,7 @@ public sealed class SystemChangeRequestTests
     [InlineData(RequirementLevel.LowLevel)]
     public void System_change_request_rejects_software_requirement_levels(RequirementLevel level)
     {
-        var scr = new SystemChangeRequest("SCR-01050", 0, ProjectId, ReleaseId,
+        var scr = new SystemChangeRequest("SRCR-01050", 0, ProjectId, ReleaseId,
             "System change", "Problem", "Analysis", "Solution", "author", Now, ChangeRequestType.System);
 
         var error = Assert.Throws<DomainException>(() => scr.AddRequirementChange("author", "HLR-00000001", 0,
@@ -80,8 +82,8 @@ public sealed class SystemChangeRequestTests
     [Fact]
     public void Software_change_request_rejects_system_requirement_level()
     {
-        var swcr = new SystemChangeRequest("SWCR-01050", 0, ProjectId, ReleaseId,
-            "Software change", "Problem", "Analysis", "Solution", "author", Now, ChangeRequestType.Software);
+        var swcr = new SystemChangeRequest("HLRCR-01050", 0, ProjectId, ReleaseId,
+            "Software change", "Problem", "Analysis", "Solution", "author", Now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
 
         var error = Assert.Throws<DomainException>(() => swcr.AddRequirementChange("author", "SYSR-00000001", 0,
             RequirementLevel.System, RequirementChangeKind.Introduce, "System behavior.", "Rationale.", "Test", Now));
@@ -205,7 +207,7 @@ public sealed class SystemChangeRequestTests
         Assert.Equal(ScrState.Approved, scr.State);
         Assert.Equal(ScrState.Draft, next.State);
         Assert.Equal(2, next.Revision);
-        Assert.Equal("SCR-01049.02", next.DisplayNumber);
+        Assert.Equal("SRCR-01049.02", next.DisplayNumber);
         Assert.Single(next.RequirementChanges);
     }
 
@@ -456,7 +458,7 @@ public sealed class SystemChangeRequestTests
     }
 
     private static SystemChangeRequest CreateDraft() =>
-        new("SCR-01049", 1, ProjectId, ReleaseId, "Introduce Round Robin",
+        new("SRCR-01049", 1, ProjectId, ReleaseId, "Introduce Round Robin",
             "Round Robin is not available.", "The existing sequence is linear.",
             "Add selectable deterministic Round Robin sequencing.", "author", Now);
 
