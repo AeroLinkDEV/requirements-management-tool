@@ -11,6 +11,7 @@ public sealed record DownstreamNoChangeRequest(string Rationale);
 public sealed record DownstreamLinkRequest(Guid ChangeRequestId);
 public sealed record DownstreamSubmitRequest(string ApproverId);
 public sealed record DownstreamReturnRequest(string Rationale);
+public sealed record DownstreamReopenRequest(string Reason);
 
 public static class DownstreamAssessmentEndpoints
 {
@@ -41,6 +42,14 @@ public static class DownstreamAssessmentEndpoints
             var linkedIds = rows.SelectMany(x => x.ChangeRequestLinks).Select(x => x.ChangeRequestId).Distinct().ToList();
             var linkedRequests = await db.SystemChangeRequests.AsNoTracking()
                 .Where(x => linkedIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+            var assessmentIds = rows.Select(x => x.Id).ToList();
+            // SQLite cannot order DateTimeOffset server-side, so the withdrawal history is sorted in memory
+            // for the same reason the queue itself is.
+            var reopenings = (await db.DownstreamAssessmentReopenings.AsNoTracking()
+                    .Where(x => assessmentIds.Contains(x.AssessmentId)).ToListAsync(ct))
+                .OrderByDescending(x => x.OccurredAt)
+                .GroupBy(x => x.AssessmentId)
+                .ToDictionary(x => x.Key, x => x.ToList());
             return Results.Ok(rows.Select(x =>
             {
                 requests.TryGetValue(x.SourceChangeRequestId, out var request);
@@ -48,9 +57,13 @@ public static class DownstreamAssessmentEndpoints
                 {
                     x.Id, x.ProjectId, x.ReleaseId, x.SourceChangeRequestId, x.SourceChangeRequestNumber,
                     targetLevel = x.TargetLevel.ToString(), state = x.State.ToString(), outcome = x.Outcome.ToString(),
-                    x.AssignedEngineerId, x.Rationale, x.SubmittedBy, x.SelectedApproverId, x.SubmittedAt,
+                    x.AssignedEngineerId, x.Rationale, x.DecidedBy, x.DecidedAt,
+                    x.SubmittedBy, x.SelectedApproverId, x.SubmittedAt,
                     x.ApprovedBy, x.ApprovedAt, x.SupersededByAssessmentId, x.SupersededReason,
                     x.CreatedAt, x.UpdatedAt, x.Version,
+                    // Every capability is false on a released build, and the drawer would otherwise explain
+                    // that absence as missing authority when the real reason is that the build is closed.
+                    buildReleased = released.Value,
                     sourceTitle = request?.Title ?? "Approved upstream change",
                     sourceProblem = request?.Problem ?? "",
                     sourceAnalysis = request?.Analysis ?? "",
@@ -67,6 +80,14 @@ public static class DownstreamAssessmentEndpoints
                         state = linkedRequests.GetValueOrDefault(link.ChangeRequestId)?.State.ToString() ?? "Unavailable",
                         link.LinkedBy, link.LinkedAt
                     }),
+                    reopenings = reopenings.GetValueOrDefault(x.Id, []).Select(entry => new
+                    {
+                        entry.Id, previousState = entry.PreviousState.ToString(),
+                        previousOutcome = entry.PreviousOutcome.ToString(),
+                        entry.PreviousRationale, entry.PreviousDecidedBy, entry.PreviousDecidedAt,
+                        entry.PreviousApprovedBy, entry.PreviousApprovedAt,
+                        entry.DetachedChangeRequestNumbers, entry.Reason, entry.ActorId, entry.OccurredAt
+                    }),
                     capabilities = new
                     {
                         canAssign = canEngineer && x.State == DownstreamAssessmentState.Open && x.AssignedEngineerId == null,
@@ -78,7 +99,13 @@ public static class DownstreamAssessmentEndpoints
                         canApprove = canApprove && x.State == DownstreamAssessmentState.InReview
                             && string.Equals(x.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase),
                         canReturn = canApprove && x.State == DownstreamAssessmentState.InReview
-                            && string.Equals(x.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(x.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase),
+                        // An unapproved conclusion is the assignee's to withdraw; an approved one has left
+                        // their hands and takes Approver authority to reopen.
+                        canReopen = (canEngineer && x.State == DownstreamAssessmentState.Open
+                                && x.Outcome != DownstreamAssessmentOutcome.Pending
+                                && string.Equals(x.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase))
+                            || (canApprove && x.State == DownstreamAssessmentState.Approved)
                     }
                 };
             }));
@@ -223,6 +250,32 @@ public static class DownstreamAssessmentEndpoints
             {
                 assessment.ReturnToWork(http.UserAccount().UserName, request.Rationale, DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct); return Results.Ok(new { assessment.Id, state = assessment.State.ToString(), assessment.Version });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/downstream-assessments/{id:guid}/reopen", async (Guid id,
+            DownstreamReopenRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var assessment = await db.DownstreamChangeAssessments.Include(x => x.ChangeRequestLinks)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (assessment is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == assessment.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build downstream assessments are read-only." });
+            // Withdrawing an approved conclusion is an approval-authority act; withdrawing one that was never
+            // approved is ordinary engineering work, and the aggregate then checks the actor is the assignee.
+            var required = assessment.State == DownstreamAssessmentState.Approved
+                ? new[] { ProgramRole.Approver }
+                : [ProgramRole.Engineer, ProgramRole.ProgramManager];
+            if (!await http.HasProjectRoleAsync(db, identity, assessment.ProjectId, ct, required))
+                return Results.Forbid();
+            try
+            {
+                var reopening = assessment.Reopen(http.UserAccount().UserName, request.Reason, DateTimeOffset.UtcNow);
+                db.DownstreamAssessmentReopenings.Add(reopening);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { assessment.Id, state = assessment.State.ToString(),
+                    outcome = assessment.Outcome.ToString(), assessment.Version });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });

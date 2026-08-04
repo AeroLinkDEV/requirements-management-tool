@@ -36,5 +36,11 @@ test('software change control keeps HLR and LLR context through links, refresh, 
   await expect(page.getByRole('button',{name:/^HLR High-level requirements$/})).toHaveAttribute('aria-current','page')
   await expect(page.getByRole('button',{name:/^LLR Low-level requirements$/})).toBeVisible()
   await expect(page.getByRole('button',{name:/^\+ New (HLR|LLR) Change Request$/})).toHaveCount(0)
+  // The queue offers one entry control in every state, so a released build's read-only-ness has to be
+  // checked where the actions actually live: inside the drawer.
   await expect(page.locator('.downstreamQueue button',{hasText:/Take it on|No change required|Send for approval|Approve|Return/})).toHaveCount(0)
+  await page.locator('.downstreamAssessment').first().getByRole('button',{name:'Open assessment'}).click()
+  const released=page.getByRole('dialog',{name:/downstream impact/})
+  await expect(released).toBeVisible({timeout:30_000})
+  await expect(released.locator('.drawerDecisionActions button')).toHaveCount(0)
 })

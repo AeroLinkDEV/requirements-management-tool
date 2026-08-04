@@ -1214,6 +1214,34 @@ Future entries use:
   cross-build resource refusal, so a report opens from any build. Genuinely build-owned records keep their
   scoping unchanged. `targetReleaseId` remains available as a deliberate filter.
 
+### DEC-090 - A Downstream Assessment's Surface Follows Its State, and a Wrong Conclusion Is Withdrawn Explicitly
+
+- **Date:** 2026-08-04
+- **Status:** Accepted; implemented under issue #313
+- **Decision:** The downstream assessment queue offers one entry control, worded "Open assessment", on every
+  row in every state. What may be done about an assessment is decided inside the drawer from the assessment's
+  state: unclaimed offers "Take it on"; claimed and undecided is the only state offering both conclusions;
+  concluded offers the SWCR work and a withdrawal; in review offers approve and return to the approver alone;
+  approved offers no conclusion control at all. Wherever a conclusion exists it is stated outright with its
+  author, its rationale and, once approved, its approver. Changing a recorded conclusion is not a second press
+  of a conclusion button: it is "Reopen assessment", which requires a stated reason, returns the assessment to
+  undecided, detaches any linked Draft SWCR without altering the SWCRs themselves, and writes an immutable
+  `downstream_assessment_reopenings` row holding everything the withdrawn conclusion carried.
+- **Rationale:** The entry control used to read "Review assessment" or "View assessment" depending on approval
+  state, putting state in the one place a reader looks for an action and saying it twice, in near-synonyms,
+  next to a status column that already said it. Underneath, the drawer rendered the same conclusion controls
+  regardless of state, so an assessment already answered — even an approved one — showed both conclusions live
+  and indistinguishable from a first-time answer. Pressing one silently overwrote a controlled engineering
+  judgement with no record that it had ever been made. A controlled record must be able to say that a
+  conclusion was reached, by whom, and that it was later withdrawn and why.
+- **Consequences:** Withdrawing an unapproved conclusion is the assigned engineer's act; withdrawing an
+  approved one requires Approver authority, because the conclusion has left the engineer's hands. An assessment
+  in review is returned, never withdrawn behind its approver. A superseded assessment cannot be reopened. A
+  released build refuses the withdrawal like every other change, and the drawer now names the released build
+  as the reason rather than blaming the reader's authority. Existing conclusions were backfilled with their
+  deciding engineer, which the aggregate has always constrained to be the assignee; the deciding instant was
+  never recorded and is deliberately left empty rather than invented.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
