@@ -1362,6 +1362,26 @@ Future entries use:
     released. As soon as a later build modifies an inherited requirement, its inherited coverage goes suspect
     exactly as any other modified requirement's would, and must be answered here. Without this boundary,
     crediting prior decisions would quietly become never verifying anything again.
+  - **Source history is imported as reported facts, and this product makes no claim about it.** Where an
+    extract carries the source's own history — a requirement's wording at V0.8 and V0.9, who changed it and
+    when, the source's own change reference — it is recorded verbatim as *what the source system reported*.
+    It is never restated as this product's revisions, never signed for, and never participates in any gate,
+    coverage figure or readiness computation. The Accept signature covers the V1.0 mapping and reconciliation
+    only. This is what makes importing history safe: an incomplete or messy chain can be recorded honestly
+    because nothing downstream reasons over it. (Resolves OQ-019, replacing the earlier answer.)
+  - **History is not imported as revisions, because a revision means something here.** `RequirementRevision`
+    binds a non-nullable `SourceChangeRequestId` and `EffectiveBaselineId` — a revision *is* what an approved
+    change request put into a materialized baseline. Importing V0.8 and V0.9 as revisions would require
+    fabricating a change request and a baseline for each, or making those fields nullable and weakening the
+    invariant for every requirement in the product. Source history is held against the external identity
+    record instead, where it costs neither.
+  - **Only objects present in the imported baseline join the live graph.** A requirement in V1.0 gets its
+    external identity and its trace. An object that existed at V0.9 and was retired before V1.0 appears in
+    source history and nowhere else: no requirement, no identity, no trace. History is narrative, not nodes,
+    so a retired ancestor never becomes a dangling reference in the traceability network.
+  - **Source history is searchable.** Somebody holding a drawing that cites a source identifier retired two
+    baselines ago should get an answer — "`SYS-01233` appears in the source history of `SYS-01234`, retired
+    at V0.9" — rather than an empty result they read as the tool having lost it.
 
 ## Working Assumptions
 
