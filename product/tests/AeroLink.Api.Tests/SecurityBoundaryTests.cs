@@ -113,7 +113,7 @@ public sealed class SecurityBoundaryTests
         {
             await client.DeleteAsync($"/api/baselines/{baselineId}/selections/{Guid.NewGuid()}"),
             await client.PostAsJsonAsync($"/api/release-campaigns/{campaignId}/start-verification", new { }),
-            await client.PutAsJsonAsync($"/api/release-campaigns/{campaignId}/impact-dispositions", new { scrId = (Guid?)null, state = "Addressed", rationale = "Unauthorized.", actorId = "ignored" }),
+            await client.PutAsJsonAsync($"/api/release-campaigns/{campaignId}/impact-dispositions", new { changeRequestId = (Guid?)null, state = "Addressed", rationale = "Unauthorized.", actorId = "ignored" }),
             await client.PostAsJsonAsync($"/api/release-campaigns/{campaignId}/reconcile-lifecycle-links", new { actorId = "ignored" }),
             await client.PostAsync($"/api/release-campaigns/{campaignId}/verification-package", new StringContent("{}", System.Text.Encoding.UTF8, "application/json")),
             await client.PostAsJsonAsync($"/api/release-campaigns/{campaignId}/verification-build", new { softwareBuildId = Guid.NewGuid(), actorId = "ignored" })

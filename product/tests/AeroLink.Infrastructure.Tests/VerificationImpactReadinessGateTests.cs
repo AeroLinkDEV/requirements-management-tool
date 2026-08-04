@@ -21,7 +21,7 @@ public sealed class VerificationImpactReadinessGateTests
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
-    private static async Task<(DbContextOptions<AeroLinkDbContext> Options, Guid CampaignId, Guid ReleaseId, Guid ProjectId, Guid ScrId, string Path)> SeedAsync()
+    private static async Task<(DbContextOptions<AeroLinkDbContext> Options, Guid CampaignId, Guid ReleaseId, Guid ProjectId, Guid ChangeRequestId, string Path)> SeedAsync()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-vgate-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
@@ -50,13 +50,13 @@ public sealed class VerificationImpactReadinessGateTests
 
     private static VerificationImpactItem AddIntroduced(
         AeroLinkDbContext db,
-        (DbContextOptions<AeroLinkDbContext> Options, Guid CampaignId, Guid ReleaseId, Guid ProjectId, Guid ScrId, string Path) seed,
+        (DbContextOptions<AeroLinkDbContext> Options, Guid CampaignId, Guid ReleaseId, Guid ProjectId, Guid ChangeRequestId, string Path) seed,
         string subject, string method)
     {
-        var review = new TestChangeReview(seed.ProjectId, seed.ReleaseId, seed.ScrId,
+        var review = new TestChangeReview(seed.ProjectId, seed.ReleaseId, seed.ChangeRequestId,
             TestChangeReviewDiscipline.System, "SRCR-10.00", Now);
         var item = VerificationImpactItem.ForIntroducedRequirement(
-            seed.ProjectId, seed.ReleaseId, seed.ScrId, review.Id, Guid.NewGuid(), subject, method, Now);
+            seed.ProjectId, seed.ReleaseId, seed.ChangeRequestId, review.Id, Guid.NewGuid(), subject, method, Now);
         db.AddRange(review, item);
         return item;
     }
@@ -227,7 +227,7 @@ public sealed class VerificationImpactReadinessGateTests
                 var baseline = await arrange.CandidateBaselines.SingleAsync();
                 var artifact = new RequirementArtifact(seed.ProjectId, "SYSR-00000101", RequirementLevel.System, Now);
                 var revision = new RequirementRevision(artifact.Id, 0, "The FMS shall sequence oceanic waypoints.",
-                    "R", "Test", RequirementRevisionState.Active, seed.ScrId, baseline.Id, Now);
+                    "R", "Test", RequirementRevisionState.Active, seed.ChangeRequestId, baseline.Id, Now);
                 var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", Now);
                 var approved = new TestProcedureRevision(procedure.Id, 0, "Verify sequencing", "On ground",
                     "Sequence", "Sequenced", TestProcedureState.Approved, "test.engineer", Now);

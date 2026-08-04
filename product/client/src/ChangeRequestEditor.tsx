@@ -15,8 +15,8 @@ import { useLocalDraft } from "./autosave";
 import { fromPlainText, toPlainText } from "./richContentModel";
 import { apiRequest, operationError, recordClientOperationFailure } from "./apiClient";
 import ProblemReportPicker from "./ProblemReportPicker";
-import "./ScrEditor.css";
-import "./ScrEditorEnhancements.css";
+import "./ChangeRequestEditor.css";
+import "./ChangeRequestEditorEnhancements.css";
 
 type ChangeScope = "System" | "Software";
 type AuthoringContext = {
@@ -35,7 +35,7 @@ type Props = {
   user: AuthUser;
   sourceRequirementId?: string;
   onCancel: () => void;
-  onSaved: (scrId: string, displayNumber: string) => void;
+  onSaved: (changeRequestId: string, displayNumber: string) => void;
 };
 type SavedDraft = {
   title: string;
@@ -111,7 +111,7 @@ const normalizeProposal = (
       : pendingImpact,
 });
 
-export default function ScrEditor({
+export default function ChangeRequestEditor({
   api,
   projectId,
   releaseId,

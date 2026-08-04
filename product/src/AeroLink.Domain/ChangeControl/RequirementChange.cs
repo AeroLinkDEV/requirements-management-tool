@@ -16,14 +16,14 @@ public sealed class RequirementChange
 {
     private RequirementChange() { }
 
-    internal RequirementChange(Guid scrId, string baseNumber, int revision, RequirementLevel level,
+    internal RequirementChange(Guid changeRequestId, string baseNumber, int revision, RequirementLevel level,
         RequirementChangeKind kind, string statement, string rationale, string verificationMethod,
         string richText = "", string attributesJson = "{}",
         string impactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
         Guid? targetSectionId = null, string proposedUpstreamRevisionIdsJson = "[]")
     {
         Id = Guid.NewGuid();
-        ScrId = scrId;
+        ChangeRequestId = changeRequestId;
         BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
         Revision = revision;
         Level = level;
@@ -46,7 +46,7 @@ public sealed class RequirementChange
     }
 
     public Guid Id { get; private set; }
-    public Guid ScrId { get; private set; }
+    public Guid ChangeRequestId { get; private set; }
     public string BaseNumber { get; private set; } = string.Empty;
     public int Revision { get; private set; }
     public string DisplayNumber => ArtifactNumber.Display(BaseNumber, Revision);

@@ -173,7 +173,7 @@ public sealed class JiraConnectorTests
 
             Assert.Equal(JiraLinkState.Failed, link.State);
             Assert.Contains("Connection refused", link.LastError);
-            Assert.Equal(ScrState.Draft, (await db.SystemChangeRequests.AsNoTracking().SingleAsync()).State);
+            Assert.Equal(ChangeRequestState.Draft, (await db.SystemChangeRequests.AsNoTracking().SingleAsync()).State);
         }
         finally { File.Delete(seed.Path); }
     }

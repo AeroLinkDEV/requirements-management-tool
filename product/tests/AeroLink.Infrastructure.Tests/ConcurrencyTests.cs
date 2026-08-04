@@ -12,7 +12,7 @@ public sealed class ConcurrencyTests
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
-        Guid scrId;
+        Guid changeRequestId;
         try
         {
             await using (var setup = new AeroLinkDbContext(options))
@@ -25,13 +25,13 @@ public sealed class ConcurrencyTests
                     "Problem", "Analysis", "Solution", "author", DateTimeOffset.UtcNow, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
                 setup.AddRange(program, project, release, scr);
                 await setup.SaveChangesAsync();
-                scrId = scr.Id;
+                changeRequestId = scr.Id;
             }
             await using (var first = new AeroLinkDbContext(options))
             await using (var second = new AeroLinkDbContext(options))
             {
-                var firstCopy = await first.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.AuditEvents).SingleAsync(x => x.Id == scrId);
-                var secondCopy = await second.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.AuditEvents).SingleAsync(x => x.Id == scrId);
+                var firstCopy = await first.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.AuditEvents).SingleAsync(x => x.Id == changeRequestId);
+                var secondCopy = await second.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.AuditEvents).SingleAsync(x => x.Id == changeRequestId);
                 Assert.Equal(1, firstCopy.Version);
                 Assert.Equal(1, secondCopy.Version);
                 firstCopy.AddRequirementChange("author", "SWR-00000001", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "First update", "Test", "Test", DateTimeOffset.UtcNow);

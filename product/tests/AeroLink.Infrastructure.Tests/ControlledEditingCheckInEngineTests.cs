@@ -202,7 +202,7 @@ public sealed class ControlledEditingCheckInEngineTests
 
         Assert.Equal("artifact_not_editable", result.Code);
         scenario.Db.ChangeTracker.Clear();
-        Assert.Equal(ScrState.InReview, (await scenario.Db.SystemChangeRequests.SingleAsync(x => x.Id == scenario.Scr.Id)).State);
+        Assert.Equal(ChangeRequestState.InReview, (await scenario.Db.SystemChangeRequests.SingleAsync(x => x.Id == scenario.Scr.Id)).State);
         Assert.Equal(EditSessionState.Active, (await scenario.Db.ArtifactEditSessions.SingleAsync(x => x.Id == scenario.Session.Id)).State);
     }
 

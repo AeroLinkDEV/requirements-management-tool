@@ -18,7 +18,7 @@ public sealed class VerificationImpactServiceTests
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
         try
         {
-            Guid scrId, releaseId, projectId;
+            Guid changeRequestId, releaseId, projectId;
             await using (var setup = new AeroLinkDbContext(options))
             {
                 await setup.Database.EnsureCreatedAsync();
@@ -38,12 +38,12 @@ public sealed class VerificationImpactServiceTests
                 scr.ApproveActiveStage("reviewer", Now);
                 setup.AddRange(program, project, release, scr);
                 await setup.SaveChangesAsync();
-                scrId = scr.Id; releaseId = release.Id; projectId = project.Id;
+                changeRequestId = scr.Id; releaseId = release.Id; projectId = project.Id;
             }
 
             await using (var act = new AeroLinkDbContext(options))
             {
-                var scr = await act.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == scrId);
+                var scr = await act.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == changeRequestId);
                 var raised = await new VerificationImpactService(act).RaiseForApprovedChangeRequestAsync(scr, Now, default);
                 await act.SaveChangesAsync();
                 Assert.Equal(3, raised); // two introductions and one modification; retirement raises nothing here
@@ -78,7 +78,7 @@ public sealed class VerificationImpactServiceTests
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
         try
         {
-            Guid scrId, deferredReleaseId;
+            Guid changeRequestId, deferredReleaseId;
             await using (var setup = new AeroLinkDbContext(options))
             {
                 await setup.Database.EnsureCreatedAsync();
@@ -93,12 +93,12 @@ public sealed class VerificationImpactServiceTests
                 scr.ApproveActiveStage("reviewer", Now);
                 setup.AddRange(program, project, release, deferred, scr);
                 await setup.SaveChangesAsync();
-                scrId = scr.Id; deferredReleaseId = deferred.Id;
+                changeRequestId = scr.Id; deferredReleaseId = deferred.Id;
             }
 
             await using (var first = new AeroLinkDbContext(options))
             {
-                var scr = await first.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == scrId);
+                var scr = await first.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == changeRequestId);
                 Assert.Equal(1, await new VerificationImpactService(first).RaiseForApprovedChangeRequestAsync(scr, Now, default));
                 await first.SaveChangesAsync();
             }
@@ -106,7 +106,7 @@ public sealed class VerificationImpactServiceTests
             await using (var repeat = new AeroLinkDbContext(options))
             {
                 // A retried approval must not duplicate the verification team's work.
-                var scr = await repeat.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == scrId);
+                var scr = await repeat.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == changeRequestId);
                 Assert.Equal(0, await new VerificationImpactService(repeat).RaiseForApprovedChangeRequestAsync(scr, Now, default));
                 await repeat.SaveChangesAsync();
                 Assert.Equal(1, await repeat.VerificationImpactItems.CountAsync());
@@ -115,7 +115,7 @@ public sealed class VerificationImpactServiceTests
             await using (var retarget = new AeroLinkDbContext(options))
             {
                 var service = new VerificationImpactService(retarget);
-                Assert.Equal(1, await service.RetargetAsync(scrId, deferredReleaseId, Now.AddDays(1), default));
+                Assert.Equal(1, await service.RetargetAsync(changeRequestId, deferredReleaseId, Now.AddDays(1), default));
                 await retarget.SaveChangesAsync();
 
                 var outstanding = await service.OutstandingForReleaseAsync(deferredReleaseId, default);
@@ -133,7 +133,7 @@ public sealed class VerificationImpactServiceTests
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
         try
         {
-            Guid scrId, releaseId;
+            Guid changeRequestId, releaseId;
             await using (var setup = new AeroLinkDbContext(options))
             {
                 await setup.Database.EnsureCreatedAsync();
@@ -149,12 +149,12 @@ public sealed class VerificationImpactServiceTests
                 scr.ApproveActiveStage("reviewer", Now);
                 setup.AddRange(program, project, release, scr);
                 await setup.SaveChangesAsync();
-                scrId = scr.Id; releaseId = release.Id;
+                changeRequestId = scr.Id; releaseId = release.Id;
             }
 
             await using (var raise = new AeroLinkDbContext(options))
             {
-                var scr = await raise.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == scrId);
+                var scr = await raise.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == changeRequestId);
                 await new VerificationImpactService(raise).RaiseForApprovedChangeRequestAsync(scr, Now, default);
                 await raise.SaveChangesAsync();
             }
@@ -187,7 +187,7 @@ public sealed class VerificationImpactServiceTests
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
         try
         {
-            Guid scrId;
+            Guid changeRequestId;
             await using (var setup = new AeroLinkDbContext(options))
             {
                 await setup.Database.EnsureCreatedAsync();
@@ -201,15 +201,15 @@ public sealed class VerificationImpactServiceTests
                 scr.ApproveActiveStage("reviewer", Now);
                 var baseline = new AeroLink.Domain.Baselines.CandidateBaseline("SW-01.30", 0, project.Id, release.Id, null, "Candidate", "cm", Now);
                 baseline.Select(scr, "cm", Now);
-                Assert.Equal(ScrState.SelectedForBaseline, scr.State);
+                Assert.Equal(ChangeRequestState.SelectedForBaseline, scr.State);
                 setup.AddRange(program, project, release, scr, baseline);
                 await setup.SaveChangesAsync();
-                scrId = scr.Id;
+                changeRequestId = scr.Id;
             }
 
             await using (var raise = new AeroLinkDbContext(options))
             {
-                var scr = await raise.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == scrId);
+                var scr = await raise.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == changeRequestId);
                 Assert.Equal(1, await new VerificationImpactService(raise).RaiseForApprovedChangeRequestAsync(scr, Now, default));
                 await raise.SaveChangesAsync();
                 Assert.Equal(1, await raise.VerificationImpactItems.CountAsync());

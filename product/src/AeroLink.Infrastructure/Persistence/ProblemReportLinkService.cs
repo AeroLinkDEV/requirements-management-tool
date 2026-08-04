@@ -40,7 +40,7 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
     public async Task ReplaceDraftChangeRequestLinksAsync(SystemChangeRequest request,
         IEnumerable<Guid>? problemReportIds, string actor, DateTimeOffset now, CancellationToken ct)
     {
-        if (request.State != ScrState.Draft)
+        if (request.State != ChangeRequestState.Draft)
             throw new DomainException("Problem Report links can be changed only while the change request is a Draft.");
         var selected = Selected(problemReportIds);
         var validation = await ValidateSelectionAsync(request.ProjectId, request.TargetReleaseId, selected, ct);
@@ -77,7 +77,7 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
     public async Task RecordApprovedCorrectiveActionsAsync(SystemChangeRequest request, string actor,
         DateTimeOffset now, CancellationToken ct)
     {
-        if (request.State is not (ScrState.Approved or ScrState.SelectedForBaseline)) return;
+        if (request.State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)) return;
         var reportIds = await db.ProblemReportLinks.AsNoTracking()
             .Where(link => link.ArtifactType == "ChangeRequest" && link.ArtifactId == request.Id
                 && link.Relationship == "ProposedCorrectiveAction")

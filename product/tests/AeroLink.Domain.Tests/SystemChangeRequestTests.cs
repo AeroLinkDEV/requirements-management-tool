@@ -108,12 +108,12 @@ public sealed class SystemChangeRequestTests
 
         Assert.Throws<DomainException>(() => scr.ApproveActiveStage("verification", Now));
         scr.ApproveActiveStage("systems", Now);
-        Assert.Equal(ScrState.InReview, scr.State);
+        Assert.Equal(ChangeRequestState.InReview, scr.State);
         Assert.Equal(1, scr.ActiveReviewCycle!.ActivePosition);
         scr.ApproveActiveStage("software", Now);
         scr.ApproveActiveStage("verification", Now);
 
-        Assert.Equal(ScrState.Approved, scr.State);
+        Assert.Equal(ChangeRequestState.Approved, scr.State);
         Assert.Contains(scr.AuditEvents, x => x.EventType == "ScrApproved");
     }
 
@@ -128,10 +128,10 @@ public sealed class SystemChangeRequestTests
 
         scr.ApproveActiveStage("verification", Now.AddMinutes(1));
         scr.ApproveActiveStage("systems", Now.AddMinutes(2));
-        Assert.Equal(ScrState.InReview, scr.State);
+        Assert.Equal(ChangeRequestState.InReview, scr.State);
 
         scr.ApproveActiveStage("software", Now.AddMinutes(3));
-        Assert.Equal(ScrState.Approved, scr.State);
+        Assert.Equal(ChangeRequestState.Approved, scr.State);
         Assert.All(cycle.Steps, step => Assert.Equal(ApprovalStepState.Approved, step.State));
     }
 
@@ -155,7 +155,7 @@ public sealed class SystemChangeRequestTests
         scr.SubmitForReview("author", Approvers(), Now);
         scr.RequestChanges("systems", "Clarify trigger behavior.", Now.AddMinutes(5));
 
-        Assert.Equal(ScrState.Draft, scr.State);
+        Assert.Equal(ChangeRequestState.Draft, scr.State);
         Assert.Equal(1, scr.Revision);
         Assert.Equal(ReviewCycleState.ChangesRequested, scr.ReviewCycles.Single().State);
 
@@ -195,7 +195,7 @@ public sealed class SystemChangeRequestTests
         Assert.Equal(ReviewCycleState.Cancelled, first.State);
         Assert.Equal(first.SnapshotHash, second.SnapshotHash);
         Assert.Equal(0, second.ActivePosition);
-        Assert.Equal(ScrState.InReview, scr.State);
+        Assert.Equal(ChangeRequestState.InReview, scr.State);
     }
 
     [Fact]
@@ -204,8 +204,8 @@ public sealed class SystemChangeRequestTests
         var scr = FullyApprove();
         var next = scr.StartNextRevision("author", Now.AddHours(1), targetReleaseIsReleased: false);
 
-        Assert.Equal(ScrState.Approved, scr.State);
-        Assert.Equal(ScrState.Draft, next.State);
+        Assert.Equal(ChangeRequestState.Approved, scr.State);
+        Assert.Equal(ChangeRequestState.Draft, next.State);
         Assert.Equal(2, next.Revision);
         Assert.Equal("SRCR-01049.02", next.DisplayNumber);
         Assert.Single(next.RequirementChanges);
@@ -224,13 +224,13 @@ public sealed class SystemChangeRequestTests
     {
         var scr = FullyApprove();
         scr.MarkSelectedForBaseline("cm", Now.AddMinutes(30));
-        Assert.Equal(ScrState.SelectedForBaseline, scr.State);
+        Assert.Equal(ChangeRequestState.SelectedForBaseline, scr.State);
 
         var next = scr.StartNextRevision("author", Now.AddHours(1), targetReleaseIsReleased: false);
 
-        Assert.Equal(ScrState.Draft, next.State);
+        Assert.Equal(ChangeRequestState.Draft, next.State);
         Assert.Equal(2, next.Revision);
-        Assert.Equal(ScrState.SelectedForBaseline, scr.State);
+        Assert.Equal(ChangeRequestState.SelectedForBaseline, scr.State);
     }
 
     /// <summary>
@@ -272,7 +272,7 @@ public sealed class SystemChangeRequestTests
         var approved = FullyApprove();
         baseline.Select(approved, "cm", Now);
         Assert.Single(baseline.Selections);
-        Assert.Equal(ScrState.SelectedForBaseline, approved.State);
+        Assert.Equal(ChangeRequestState.SelectedForBaseline, approved.State);
     }
 
     [Fact]
@@ -284,7 +284,7 @@ public sealed class SystemChangeRequestTests
         baseline.Select(approved, "cm", Now);
         baseline.Remove(approved, "cm", Now.AddMinutes(1));
         Assert.Empty(baseline.Selections);
-        Assert.Equal(ScrState.Approved, approved.State);
+        Assert.Equal(ChangeRequestState.Approved, approved.State);
         Assert.Contains(baseline.Events, x => x.EventType == "ScrRemoved");
     }
 
@@ -320,11 +320,11 @@ public sealed class SystemChangeRequestTests
     {
         var draft = CreateDraftWithRequirement();
         draft.Defer("author", "Descoped from 1.6.", Now);
-        Assert.Equal(ScrState.Deferred, draft.State);
+        Assert.Equal(ChangeRequestState.Deferred, draft.State);
 
         var approved = FullyApprove();
         approved.Defer("author", "Correct, but not shipping in 1.6.", Now);
-        Assert.Equal(ScrState.Deferred, approved.State);
+        Assert.Equal(ChangeRequestState.Deferred, approved.State);
 
         // The case that had nowhere to go. A change request under review that the programme drops had to be
         // rejected — discarding a review that raised no objection — or left in review holding a release gate
@@ -333,7 +333,7 @@ public sealed class SystemChangeRequestTests
         inReview.SubmitForReview("author", Approvers(), Now);
         inReview.ApproveActiveStage("systems", Now);
         inReview.Defer("author", "Programme cut the scope mid-review.", Now);
-        Assert.Equal(ScrState.Deferred, inReview.State);
+        Assert.Equal(ChangeRequestState.Deferred, inReview.State);
 
         // The cycle in flight is closed with the deferral as its reason, not abandoned mid-flight.
         var cycle = Assert.Single(inReview.ReviewCycles);
@@ -349,18 +349,18 @@ public sealed class SystemChangeRequestTests
     ///
     /// Storing only "Deferred" lost the difference between a signed-off change put away and an unwritten one, and
     /// a shelf that cannot tell those apart is a shelf nobody can plan from. Allocation and state are two facts
-    /// and `ScrState` was carrying both.
+    /// and `ChangeRequestState` was carrying both.
     /// </summary>
     [Fact]
     public void Deferring_remembers_how_far_the_work_had_got()
     {
         var draft = CreateDraftWithRequirement();
         draft.Defer("author", "Descoped from 1.6.", Now);
-        Assert.Equal(ScrState.Draft, draft.DeferredFromState);
+        Assert.Equal(ChangeRequestState.Draft, draft.DeferredFromState);
 
         var approved = FullyApprove();
         approved.Defer("author", "Correct, but not shipping in 1.6.", Now);
-        Assert.Equal(ScrState.Approved, approved.DeferredFromState);
+        Assert.Equal(ChangeRequestState.Approved, approved.DeferredFromState);
     }
 
     [Fact]
@@ -371,7 +371,7 @@ public sealed class SystemChangeRequestTests
 
         approved.Reinstate("author", Now.AddDays(30));
 
-        Assert.Equal(ScrState.Approved, approved.State);
+        Assert.Equal(ChangeRequestState.Approved, approved.State);
         Assert.Null(approved.DeferredFromState);
         Assert.Contains(approved.AuditEvents, x => x.EventType == "ChangeRequestReinstated");
     }
@@ -387,11 +387,11 @@ public sealed class SystemChangeRequestTests
         var inReview = CreateDraftWithRequirement();
         inReview.SubmitForReview("author", Approvers(), Now);
         inReview.Defer("author", "Programme cut the scope mid-review.", Now);
-        Assert.Equal(ScrState.InReview, inReview.DeferredFromState);
+        Assert.Equal(ChangeRequestState.InReview, inReview.DeferredFromState);
 
         inReview.Reinstate("author", Now.AddDays(30));
 
-        Assert.Equal(ScrState.Draft, inReview.State);
+        Assert.Equal(ChangeRequestState.Draft, inReview.State);
         Assert.Equal(ReviewCycleState.Cancelled, Assert.Single(inReview.ReviewCycles).State);
     }
 
@@ -418,7 +418,7 @@ public sealed class SystemChangeRequestTests
 
         approved.UnmarkSelectedForBaseline("cm", Now);
         approved.Defer("author", "Now it can be put away.", Now);
-        Assert.Equal(ScrState.Deferred, approved.State);
+        Assert.Equal(ChangeRequestState.Deferred, approved.State);
 
         Assert.Throws<DomainException>(() => approved.Defer("author", "Twice.", Now));
     }
@@ -441,7 +441,7 @@ public sealed class SystemChangeRequestTests
         draft.Reinstate("admin", Now.AddMinutes(4), administratorAuthority: true);
 
         Assert.Equal("author", draft.AuthorId);
-        Assert.Equal(ScrState.Draft, draft.State);
+        Assert.Equal(ChangeRequestState.Draft, draft.State);
         Assert.Contains(draft.AuditEvents, x => x.ActorId == "admin" && x.EventType == "ScrDraftUpdated");
         Assert.Contains(draft.AuditEvents, x => x.ActorId == "admin" && x.EventType == "ChangeRequestDeferred");
 

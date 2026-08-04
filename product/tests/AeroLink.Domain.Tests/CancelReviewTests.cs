@@ -33,7 +33,7 @@ public sealed class CancelReviewTests
 
         scr.CancelReview("change.author", "Superseded by a wider change.", DateTimeOffset.UtcNow);
 
-        Assert.Equal(ScrState.Draft, scr.State);
+        Assert.Equal(ChangeRequestState.Draft, scr.State);
         // The same revision, because cancelling a review is not a rejection of the record. A new revision
         // would strand every reference to this one for a decision nobody made about its content.
         Assert.Equal(revision, scr.Revision);
@@ -80,7 +80,7 @@ public sealed class CancelReviewTests
         // accident — and the person who knew is the one who just left.
         var error = Assert.Throws<DomainException>(() => scr.CancelReview("change.author", "   ", DateTimeOffset.UtcNow));
         Assert.Contains("why", error.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(ScrState.InReview, scr.State);
+        Assert.Equal(ChangeRequestState.InReview, scr.State);
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public sealed class CancelReviewTests
 
         // The point of returning to Draft rather than to some terminal state: the work continues.
         scr.SubmitForReview("change.author", [new ApproverSelection("first.reviewer", "First Reviewer")], now);
-        Assert.Equal(ScrState.InReview, scr.State);
+        Assert.Equal(ChangeRequestState.InReview, scr.State);
         Assert.Equal(2, scr.ReviewCycles.Count);
     }
 }

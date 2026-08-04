@@ -31,7 +31,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ApprovalStep> ApprovalSteps => Set<ApprovalStep>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<CandidateBaseline> CandidateBaselines => Set<CandidateBaseline>();
-    public DbSet<BaselineScrSelection> BaselineSelections => Set<BaselineScrSelection>();
+    public DbSet<BaselineChangeRequestSelection> BaselineSelections => Set<BaselineChangeRequestSelection>();
     public DbSet<BaselineEvent> BaselineEvents => Set<BaselineEvent>();
     public DbSet<RequirementArtifact> Requirements => Set<RequirementArtifact>();
     public DbSet<RequirementRevision> RequirementRevisions => Set<RequirementRevision>();
@@ -228,8 +228,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasIndex(x => new { x.ProjectId, x.BaseNumber, x.Revision }).IsUnique();
             b.HasIndex(x => new { x.ProjectId, x.UpdatedAt });
             b.HasIndex(x => new { x.ProjectId, x.State });
-            b.HasMany(x => x.RequirementChanges).WithOne().HasForeignKey(x => x.ScrId).OnDelete(DeleteBehavior.Cascade);
-            b.HasMany(x => x.ReviewCycles).WithOne().HasForeignKey(x => x.ScrId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.RequirementChanges).WithOne().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.ReviewCycles).WithOne().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.AuditEvents).WithOne().HasForeignKey(x => x.AggregateId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<RequirementChange>(b =>
@@ -246,7 +246,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ImpactDispositionJson).IsRequired();
             b.Property(x => x.ProposedUpstreamRevisionIdsJson).IsRequired();
             b.Ignore(x => x.DisplayNumber);
-            b.HasIndex(x => new { x.ScrId, x.BaseNumber, x.Revision }).IsUnique();
+            b.HasIndex(x => new { x.ChangeRequestId, x.BaseNumber, x.Revision }).IsUnique();
             b.HasIndex(x => x.BaseNumber);
         });
         modelBuilder.Entity<DownstreamChangeAssessment>(b =>
@@ -306,7 +306,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ClosureReason).HasMaxLength(2000);
             b.Property(x => x.WorkflowName).HasMaxLength(200);
             b.Ignore(x => x.ActivePosition);
-            b.HasIndex(x => new { x.ScrId, x.Sequence }).IsUnique();
+            b.HasIndex(x => new { x.ChangeRequestId, x.Sequence }).IsUnique();
             b.HasMany(x => x.Steps).WithOne().HasForeignKey(x => x.ReviewCycleId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<ApprovalStep>(b =>
@@ -356,11 +356,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasMany(x => x.Selections).WithOne().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Events).WithOne().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Cascade);
         });
-        modelBuilder.Entity<BaselineScrSelection>(b =>
+        modelBuilder.Entity<BaselineChangeRequestSelection>(b =>
         {
-            b.ToTable("baseline_scr_selections"); b.HasKey(x => x.Id);
-            b.Property(x => x.ScrDisplayNumber).HasMaxLength(40).IsRequired();
-            b.HasIndex(x => new { x.BaselineId, x.ScrId }).IsUnique();
+            b.ToTable("baseline_change_request_selections"); b.HasKey(x => x.Id);
+            b.Property(x => x.ChangeRequestDisplayNumber).HasMaxLength(40).IsRequired();
+            b.HasIndex(x => new { x.BaselineId, x.ChangeRequestId }).IsUnique();
         });
         modelBuilder.Entity<BaselineEvent>(b =>
         {
@@ -386,9 +386,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.VerificationMethod).HasMaxLength(100);
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.HasIndex(x => new { x.ArtifactId, x.Revision }).IsUnique();
-            b.HasIndex(x => x.SourceScrId); b.HasIndex(x => x.EffectiveBaselineId);
+            b.HasIndex(x => x.SourceChangeRequestId); b.HasIndex(x => x.EffectiveBaselineId);
             b.HasOne<RequirementArtifact>().WithMany().HasForeignKey(x => x.ArtifactId).OnDelete(DeleteBehavior.Restrict);
-            b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.SourceScrId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.SourceChangeRequestId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.EffectiveBaselineId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<BaselineRequirementSelection>(b =>
@@ -590,7 +590,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("change_impact_dispositions"); b.HasKey(x => x.Id); b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(30); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.ArtifactReference).HasMaxLength(100).IsRequired(); b.Property(x => x.Description).HasMaxLength(2000).IsRequired(); b.Property(x => x.Rationale).HasMaxLength(2000); b.Property(x => x.DispositionedBy).HasMaxLength(100);
-            b.HasIndex(x => new { x.CampaignId, x.ScrId, x.Kind, x.ArtifactReference }).IsUnique(); b.HasOne<ReleaseCampaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Restrict); b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ScrId).OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(x => new { x.CampaignId, x.ChangeRequestId, x.Kind, x.ArtifactReference }).IsUnique(); b.HasOne<ReleaseCampaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Restrict); b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<EvidenceRecord>(b =>
         {
@@ -912,7 +912,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             cycle.State = EntityState.Added;
             foreach (var step in cycle.Entity.Steps) Entry(step).State = EntityState.Added;
         }
-        foreach (var entry in ChangeTracker.Entries<BaselineScrSelection>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
+        foreach (var entry in ChangeTracker.Entries<BaselineChangeRequestSelection>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         foreach (var entry in ChangeTracker.Entries<BaselineEvent>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         foreach (var entry in ChangeTracker.Entries<ReleaseCampaignEvent>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         foreach (var entry in ChangeTracker.Entries<SystemChangeRequest>())
@@ -976,7 +976,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             var projectId=ChangeTracker.Entries<RequirementArtifact>().FirstOrDefault(x=>x.Entity.Id==entry.Entity.ArtifactId)?.Entity.ProjectId;
             projectId??=await Requirements.AsNoTracking().Where(x=>x.Id==entry.Entity.ArtifactId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
-            if(projectId is Guid id)pending.Add((id,"aerolink.requirement.revision-created","RequirementRevision",entry.Entity.Id,new{entry.Entity.ArtifactId,entry.Entity.Revision,state=entry.Entity.State.ToString(),entry.Entity.SourceScrId,entry.Entity.EffectiveBaselineId},"aerolink.lifecycle"));
+            if(projectId is Guid id)pending.Add((id,"aerolink.requirement.revision-created","RequirementRevision",entry.Entity.Id,new{entry.Entity.ArtifactId,entry.Entity.Revision,state=entry.Entity.State.ToString(),entry.Entity.SourceChangeRequestId,entry.Entity.EffectiveBaselineId},"aerolink.lifecycle"));
         }
         foreach(var entry in ChangeTracker.Entries<ReleaseCampaign>().Where(x=>x.State is EntityState.Added or EntityState.Modified))
             pending.Add((entry.Entity.ProjectId,"aerolink.release-campaign.changed","ReleaseCampaign",entry.Entity.Id,new{state=entry.Entity.State.ToString(),entry.Entity.ReleaseId,entry.Entity.BaselineId,entry.Entity.SoftwareBuildId,entry.Entity.ReleaseHash},entry.Entity.Events.OrderByDescending(x=>x.OccurredAt).FirstOrDefault()?.ActorId??entry.Entity.OwnerId));

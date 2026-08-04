@@ -15,7 +15,7 @@ namespace AeroLink.Api.Tests;
 /// <summary>
 /// Revising an approved change request, from the state approved change requests are actually in.
 ///
-/// The action was gated on exactly `ScrState.Approved`, which reads correctly in the enum and was unreachable
+/// The action was gated on exactly `ChangeRequestState.Approved`, which reads correctly in the enum and was unreachable
 /// in the product: allocating an approved change request to a candidate baseline moves it to
 /// SelectedForBaseline, and there it stays. Across the demonstration programme's 113 change requests not one
 /// was in `Approved` — 107 were SelectedForBaseline — so the button existed, was correct, and could never
@@ -26,7 +26,7 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class ReviseChangeRequestApiTests
 {
-    private static async Task<(Guid ScrId, Guid ReleaseId)> SeedAsync(AeroLinkApiFactory factory,
+    private static async Task<(Guid ChangeRequestId, Guid ReleaseId)> SeedAsync(AeroLinkApiFactory factory,
         bool allocate, bool releaseTheBuild)
     {
         using var scope = factory.Services.CreateScope();
@@ -54,7 +54,7 @@ public sealed class ReviseChangeRequestApiTests
             RequirementChangeKind.Introduce, "The FMS shall sequence oceanic waypoints.", "New", "Test", now);
         scr.SubmitForReview("revise.author", [new("revise.approver", "Revise Approver")], now);
         scr.ApproveActiveStage("revise.approver", now);
-        Assert.Equal(ScrState.Approved, scr.State);
+        Assert.Equal(ChangeRequestState.Approved, scr.State);
         if (allocate) scr.MarkSelectedForBaseline("revise.author", now);
         db.SystemChangeRequests.Add(scr);
         var report = new ProblemReport(project.Id, "PR-00001", "Oceanic sequence anomaly",
@@ -88,10 +88,10 @@ public sealed class ReviseChangeRequestApiTests
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
-        var (scrId, _) = await SeedAsync(factory, allocate: allocated, releaseTheBuild: false);
+        var (changeRequestId, _) = await SeedAsync(factory, allocate: allocated, releaseTheBuild: false);
         await SignInAsync(client);
 
-        using var response = await client.PostAsJsonAsync($"/api/change-requests/{scrId}/next-revision", new { });
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{changeRequestId}/next-revision", new { });
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
 
@@ -118,10 +118,10 @@ public sealed class ReviseChangeRequestApiTests
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
-        var (scrId, _) = await SeedAsync(factory, allocate: allocated, releaseTheBuild: true);
+        var (changeRequestId, _) = await SeedAsync(factory, allocate: allocated, releaseTheBuild: true);
         await SignInAsync(client);
 
-        using var response = await client.PostAsJsonAsync($"/api/change-requests/{scrId}/next-revision", new { });
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{changeRequestId}/next-revision", new { });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("released build", body);

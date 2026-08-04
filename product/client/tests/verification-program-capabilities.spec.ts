@@ -37,7 +37,7 @@ test('verification actions follow authority in the selected Program',async({page
     expect(baselineResponse.ok(),await baselineResponse.text()).toBeTruthy()
     const baseline=await baselineResponse.json()
     for(const [path,data] of [
-      [`selections`,{scrId:draft.id}],
+      [`selections`,{changeRequestId:draft.id}],
       [`freeze`,{}],
       [`materialize-requirements`,{}],
     ] as const){

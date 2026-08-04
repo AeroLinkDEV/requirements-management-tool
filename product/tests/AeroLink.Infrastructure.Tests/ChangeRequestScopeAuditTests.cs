@@ -74,7 +74,7 @@ public sealed class ChangeRequestScopeAuditTests
 
         await db.Database.ExecuteSqlRawAsync("""
             INSERT INTO requirement_changes
-                ("Id","ScrId","BaseNumber","Revision","Level","Kind","Statement","Rationale","VerificationMethod",
+                ("Id","ChangeRequestId","BaseNumber","Revision","Level","Kind","Statement","Rationale","VerificationMethod",
                  "RichText","AttributesJson","ImpactDispositionJson","ProposedUpstreamRevisionIdsJson")
             VALUES ({0},{1},'HLR-000075',2,'HighLevel','Modify','The software shall hold the clarified behavior.',
                     'Legacy contamination.','Test','','{{}}','{{}}','[]')
@@ -101,7 +101,7 @@ public sealed class ChangeRequestScopeAuditTests
 
         await db.Database.ExecuteSqlRawAsync("""
             INSERT INTO requirement_changes
-                ("Id","ScrId","BaseNumber","Revision","Level","Kind","Statement","Rationale","VerificationMethod",
+                ("Id","ChangeRequestId","BaseNumber","Revision","Level","Kind","Statement","Rationale","VerificationMethod",
                  "RichText","AttributesJson","ImpactDispositionJson","ProposedUpstreamRevisionIdsJson")
             VALUES ({0},{1},'SYSR-000900',0,'System','Introduce','The system shall do the wrongly placed thing.',
                     'Legacy contamination.','Test','','{{}}','{{}}','[]')

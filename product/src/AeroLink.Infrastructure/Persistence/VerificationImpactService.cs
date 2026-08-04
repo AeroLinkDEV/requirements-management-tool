@@ -45,7 +45,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         // Selecting an approved change into a candidate baseline moves it to SelectedForBaseline, so both
         // states mean "approved". Testing only for Approved would make a retried raise silently do nothing
         // once the change had been selected.
-        if (request.State is not (ScrState.Approved or ScrState.SelectedForBaseline)) return 0;
+        if (request.State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)) return 0;
 
         var alreadyRaised = await db.VerificationImpactItems
             .Where(x => x.ChangeRequestId == request.Id)

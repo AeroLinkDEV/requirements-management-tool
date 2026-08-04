@@ -121,7 +121,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
 
     private async Task<List<PublicationRecord>> RequirementPublicationRows(Guid baselineId, RequirementLevel level, CancellationToken ct)
     {
-        var rows = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId) join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceScrId equals scr.Id orderby artifact.BaseNumber select new { RevisionId = revision.Id, artifact.BaseNumber, revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, Scr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision }).ToListAsync(ct);
+        var rows = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId) join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals scr.Id orderby artifact.BaseNumber select new { RevisionId = revision.Id, artifact.BaseNumber, revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, Scr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision }).ToListAsync(ct);
 
         // The tables, figures, and symbols an author wrote belong in the document that carries the
         // requirement. Publishing only the plain statement would put a requirement in front of an approver
@@ -194,8 +194,8 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
     }
     private async Task<List<PublicationApproval>> ApprovalBasis(Guid baselineId, Guid releaseId, DateTimeOffset generatedAt, CancellationToken ct)
     {
-        var scrIds = await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == baselineId).Select(x => x.ScrId).ToListAsync(ct);
-        var cycles = (await db.ReviewCycles.AsNoTracking().Include(x => x.Steps).Where(x => scrIds.Contains(x.ScrId) && x.State == ReviewCycleState.Approved).ToListAsync(ct)).Where(x => x.CompletedAt <= generatedAt).ToList();
+        var scrIds = await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == baselineId).Select(x => x.ChangeRequestId).ToListAsync(ct);
+        var cycles = (await db.ReviewCycles.AsNoTracking().Include(x => x.Steps).Where(x => scrIds.Contains(x.ChangeRequestId) && x.State == ReviewCycleState.Approved).ToListAsync(ct)).Where(x => x.CompletedAt <= generatedAt).ToList();
         var approvals = cycles.SelectMany(x => x.Steps.Where(s => s.State == ApprovalStepState.Approved && s.DecidedAt <= generatedAt).Select(s => new PublicationApproval("Change Authority", s.ApproverName, s.ApproverId, "Approved", s.DecidedAt))).ToList();
         var campaigns = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
         approvals.AddRange(campaigns.SelectMany(x => x.Approvals.Where(a => a.State == AeroLink.Domain.Releases.ReleaseApprovalState.Approved && a.ApprovedAt <= generatedAt).Select(a => new PublicationApproval("Release Authority", a.ApproverName, a.ApproverId, "Approved", a.ApprovedAt))));
@@ -205,7 +205,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
 
     private async Task<List<OutputRow>> RequirementRows(Guid baselineId, RequirementLevel level, CancellationToken ct) => await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
         join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id
-        join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceScrId equals scr.Id orderby artifact.BaseNumber select new OutputRow(artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, level.ToString(), revision.Statement, scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision)).ToListAsync(ct);
+        join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals scr.Id orderby artifact.BaseNumber select new OutputRow(artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, level.ToString(), revision.Statement, scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision)).ToListAsync(ct);
 
     private async Task<List<OutputRow>> ProcedureRows(Guid projectId, TestProcedureLevel level, CancellationToken ct) => await (from procedure in db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == level)
         join revision in db.TestProcedureRevisions.AsNoTracking() on procedure.Id equals revision.ProcedureId orderby procedure.BaseNumber select new OutputRow(procedure.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, level.ToString(), revision.Objective + " Expected result: " + revision.ExpectedResult, revision.AuthorId)).ToListAsync(ct);

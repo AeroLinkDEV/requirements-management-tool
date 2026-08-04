@@ -12,8 +12,8 @@ public sealed class ServerAuthorityContractTests
 {
     private static readonly string[] AuthenticatedMutationContracts =
     [
-        "CreateScrRequest",
-        "CreateScrDraftRequest",
+        "CreateChangeRequestRequest",
+        "CreateChangeRequestDraftRequest",
         "RequirementChangeRequest",
         "SubmitReviewRequest",
         "ActorRequest",
