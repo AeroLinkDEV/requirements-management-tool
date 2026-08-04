@@ -130,7 +130,7 @@ Quality will be demonstrated with known reference projects and adverse scenarios
 
 - concurrent modification and approval attempts;
 - unauthorized cross-program access;
-- incomplete or conflicting SCR selections;
+- incomplete or conflicting SRCR selections;
 - missing and suspect traces;
 - failed imports and document jobs;
 - backup and restoration;

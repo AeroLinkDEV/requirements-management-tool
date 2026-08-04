@@ -1,6 +1,6 @@
 # Universal Controlled Editing
 
-Issue #31 extends AeroLink's renewable exclusive edit-session contract beyond SCR/SWCR drafts.
+Issue #31 extends AeroLink's renewable exclusive edit-session contract beyond change request drafts.
 
 ## Shared lease API
 
@@ -22,7 +22,7 @@ The `/api/controlled-editing` endpoints provide one policy-aware implementation 
 This increment resolves and snapshots the controlled families that already have authoritative records:
 
 - change requests;
-- requirement proposals inside Draft SCR/SWCR records;
+- requirement proposals inside Draft change request records;
 - requirement specification structures;
 - test procedures and exact procedure revisions;
 - requirement trace links; and
@@ -43,19 +43,19 @@ This increment resolves and snapshots the controlled families that already have 
 
 Production adapters now cover every existing first-class controlled artifact model:
 
-- `SystemChangeRequestControlledEditingAdapter` preserves SCR/SWCR identity allocation and aggregate validation through `SystemChangeRequest.UpdateDraft`.
-- `RequirementProposalControlledEditingAdapter` updates a proposal through its owning SCR aggregate without changing the proposal identity.
+- `SystemChangeRequestControlledEditingAdapter` preserves change request identity allocation and aggregate validation through `SystemChangeRequest.UpdateDraft`.
+- `RequirementProposalControlledEditingAdapter` updates a proposal through its owning SRCR aggregate without changing the proposal identity.
 - `SpecificationStructureControlledEditingAdapter` controls specification metadata plus reordering/retitling existing structure nodes, validates parent ownership and cycles, and rejects identity-changing node edits.
 - `TestProcedureControlledEditingAdapter` updates only a Draft procedure revision through its owning procedure root; approved revisions remain immutable.
 - `TraceLinkProposalControlledEditingAdapter` preserves source/target identity while validating a controlled classification/rationale update.
-- `ReleasePlanningControlledEditingAdapter` controls Draft baseline naming and exact SCR membership through `CandidateBaseline.Select` and `Remove`.
+- `ReleasePlanningControlledEditingAdapter` controls Draft baseline naming and exact SRCR membership through `CandidateBaseline.Select` and `Remove`.
 - `DocumentTemplateControlledEditingAdapter` preserves the assigned template number while validating title, body, and ownership changes.
 - `ProblemReportControlledEditingAdapter` preserves the report identity and reporter while validating the controlled problem and analysis record.
 - `ConfigurationChangeSetControlledEditingAdapter` preserves the change-set identity while validating its scoped configuration content.
 
-Each of the four non-SCR roots has a persisted optimistic-concurrency version. The legacy `audit_events` table is
-foreign-keyed to SCRs, so universal immutable evidence is the authoritative audit trail for every other family;
-SCR and proposal evidence additionally attaches to the existing SCR audit stream. The live SCR workspace uses this
+Each of the four non-SRCR roots has a persisted optimistic-concurrency version. The legacy `audit_events` table is
+foreign-keyed to SRCRs, so universal immutable evidence is the authoritative audit trail for every other family;
+SRCR and proposal evidence additionally attaches to the existing SRCR audit stream. The live SRCR workspace uses this
 universal pipeline, and the retired direct-update route returns HTTP 410.
 
 Verification Center now exposes the same controlled authoring contract for Draft test procedures: an author chooses

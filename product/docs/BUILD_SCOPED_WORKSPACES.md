@@ -41,7 +41,7 @@ The build boundary follows relationships that already exist:
 | Test executions | `TestExecution.ReleaseId`; an optional immutable `SoftwareBuildId` adds exact configuration provenance |
 | Problem reports | explicit `ProblemReportLink` to the owning `SoftwareRelease`; failure-origin reports derive it from their execution build |
 | Code traceability | `CodeTraceabilityRecord.ReleaseId` plus exact LLR artifact and immutable revision IDs; GitLab remains the code authority |
-| Requirement history | revision plus source SCR and effective baseline; historical rows retain their origin |
+| Requirement history | revision plus source SRCR and effective baseline; historical rows retain their origin |
 
 Project configuration such as schemas, document structure, directory membership, integrations, and review
 workflow definitions remains project-scoped. It governs how every build is worked; it is not primary build
@@ -113,7 +113,7 @@ backfills existing execution rows from their linked software build and leaves ge
 nullable. New browser-workspace results take the validated route release directly; release-campaign execution
 imports take the campaign release.
 
-The existing predecessor-release, baseline membership, source-SCR, controlled-document, software-build,
+The existing predecessor-release, baseline membership, source-SRCR, controlled-document, software-build,
 campaign, verification-impact, and typed problem-report link relationships provide the remaining build
 identity and lineage. New manual problem reports are linked to the route build at creation; reports created
 from failed verification derive that same explicit link from the execution's release/build context.

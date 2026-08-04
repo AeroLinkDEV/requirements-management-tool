@@ -23,7 +23,7 @@ Use a stable base identifier:
 
 Examples:
 
-- `SCR-00001049`
+- `SRCR-00001049`
 - `SYSR-00002375`
 - `HLR-00003142`
 - `LLR-00006721`
@@ -36,8 +36,8 @@ Recommended type prefixes:
 
 | Artifact | Prefix |
 | --- | --- |
-| System Change Request | `SCR` |
-| Software Change Request | `SWCR` |
+| System Change Request | `SRCR` |
+| Software Change Request | `HLRCR`, `LLRCR` |
 | System Requirement | `SYSR` |
 | Software High-Level Requirement | `HLR` |
 | Software Low-Level Requirement | `LLR` |
@@ -58,7 +58,7 @@ Append a dot and a minimum two-digit revision suffix when identifying a specific
 
 ```text
 SYSR-00002375.04
-SCR-00001049.02
+SRCR-00001049.02
 TP-00004502.06
 ```
 
@@ -67,10 +67,10 @@ The stable requirement identity remains `SYSR-00002375`; `SYSR-00002375.04` mean
 Use positive whole-number revisions for controlled artifact content and render values below 10 with a leading zero:
 
 - Draft work begins as `Revision 1`.
-- Requested changes before the SCR has ever been approved keep the same SCR revision number and create a new review cycle after resubmission.
-- Any content change after SCR approval creates the next SCR revision number.
+- Requested changes before the SRCR has ever been approved keep the same SRCR revision number and create a new review cycle after resubmission.
+- Any content change after SRCR approval creates the next SRCR revision number.
 - Revision numbers are never reused or renumbered.
-- The application retains every submitted review-cycle snapshot even when the unapproved SCR returns to Draft and is edited at the same revision number.
+- The application retains every submitted review-cycle snapshot even when the unapproved SRCR returns to Draft and is edited at the same revision number.
 - The same base artifact identifier remains stable across all revisions.
 - Revisions above 99 expand naturally, such as `.100`; revision numbers are not limited to two digits.
 
@@ -112,7 +112,7 @@ The exact document-number convention may follow existing organizational policy.
 
 ## What “Mandatory Requirement Fields” Means
 
-A mandatory field is information required for the SCR author to submit the complete SCR package for review. Requirements do not enter an independent review/approval workflow; their proposed revisions are reviewed as part of the SCR.
+A mandatory field is information required for the SRCR author to submit the complete SRCR package for review. Requirements do not enter an independent review/approval workflow; their proposed revisions are reviewed as part of the SRCR.
 
 There are three useful categories:
 
@@ -120,7 +120,7 @@ There are three useful categories:
 2. **Program-mandatory fields:** Required by a particular program or process, configured through controlled administration.
 3. **Optional fields:** Available when useful but not required for approval.
 
-The SCR author controls when drafting is complete enough to attempt submission. The system should then validate the SCR package and clearly identify missing required information, while the author remains responsible for deciding that the technical content is ready.
+The SRCR author controls when drafting is complete enough to attempt submission. The system should then validate the SRCR package and clearly identify missing required information, while the author remains responsible for deciding that the technical content is ready.
 
 ## Proposed Platform-Mandatory Fields
 
@@ -134,7 +134,7 @@ The SCR author controls when drafting is complete enough to attempt submission. 
 - last modified by and modified time; and
 - complete audit history.
 
-### Required in a Requirement Change Item Before SCR Submission
+### Required in a Requirement Change Item Before SRCR Submission
 
 - requirement statement;
 - short title or summary;
@@ -144,28 +144,28 @@ The SCR author controls when drafting is complete enough to attempt submission. 
 - verification method;
 - derived/non-derived indicator;
 - applicability or target release context;
-- originating SCR or approved source/change rationale; and
+- originating SRCR or approved source/change rationale; and
 - any images/figures referenced by the statement stored as controlled revision content.
 
 ### Required Before Approval
 
-- the enclosing SCR has complete Problem, Analysis, and Solution content;
+- the enclosing SRCR has complete Problem, Analysis, and Solution content;
 - all proposed requirement introductions, modifications, and retirements are identified;
-- the SCR author has selected and ordered every person whose approval is required;
+- the SRCR author has selected and ordered every person whose approval is required;
 - required links and impact information are present or explicitly justified; and
-- the SCR package has no unresolved submission-validation errors.
+- the SRCR package has no unresolved submission-validation errors.
 
-### Required Before SCR Approval
+### Required Before SRCR Approval
 
 - every author-selected approver approves the exact submitted snapshot in the defined sequence;
 - every blocking review comment is dispositioned;
-- the proposed requirement revisions remain exactly those reviewed within the SCR;
+- the proposed requirement revisions remain exactly those reviewed within the SRCR;
 - required impact analysis is complete; and
-- the approval record identifies the exact SCR revision and complete change package.
+- the approval record identifies the exact SRCR revision and complete change package.
 
 ### Required Before Baseline Inclusion
 
-- requirement revision authorized by an approved SCR;
+- requirement revision authorized by an approved SRCR;
 - applicability to the candidate release/configuration;
 - resolved selection conflicts;
 - acceptable trace/suspect status according to the baseline policy; and
@@ -197,11 +197,11 @@ These may be mandatory for some projects but should not be hard-coded as univers
 - A requirement must be testable/verifiable or carry an approved rationale explaining why a non-test method applies.
 - Controlled figures referenced by the statement must belong to the same revision.
 - An approved revision cannot be edited in place.
-- A new revision must identify the SCR or other approved change authority.
+- A new revision must identify the SRCR or other approved change authority.
 - Derived requirements require explicit rationale and the applicable review path.
-- An SCR cannot enter review with unresolved package-level required-field errors.
-- Requirements are not approved independently; every author-selected approver approves the exact submitted snapshot of the SCR revision containing the requirement changes.
-- SCR approval authorizes its proposed requirement revisions but does not automatically include them in a baseline.
+- An SRCR cannot enter review with unresolved package-level required-field errors.
+- Requirements are not approved independently; every author-selected approver approves the exact submitted snapshot of the SRCR revision containing the requirement changes.
+- SRCR approval authorizes its proposed requirement revisions but does not automatically include them in a baseline.
 
 ## Remaining Decisions Requested
 

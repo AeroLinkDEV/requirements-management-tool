@@ -13,7 +13,7 @@ When work changes the state of the project, update this file in the same change.
 
 An on-premises aerospace development assurance platform: the authoritative record for controlled
 requirements and the evidence chain around them. It manages system requirements, software HLRs and
-LLRs, change requests (SCR/SWCR), review and approval workflows, immutable baselines, generated
+LLRs, change requests (change request), review and approval workflows, immutable baselines, generated
 controlled documents, test procedures, externally produced results and evidence, typed traceability,
 release campaigns, and a complete audit trail.
 
@@ -77,7 +77,7 @@ infrastructure and API boundaries. See [product/docs/ARCHITECTURE.md](product/do
 
 The full controlled chain runs end to end:
 
-SCR/SWCR authoring with server-leased exclusive checkout and autosave recovery → sequential *and*
+change request authoring with server-leased exclusive checkout and autosave recovery → sequential *and*
 parallel author-selected approval sequences with frozen snapshot hashes → password-confirmed
 electronic signatures → candidate baseline assembly with SHA-256 freeze → deterministic baseline
 materialization → generated SYSRD/SWRD and test-procedure documents in DOCX and PDF with approval
@@ -88,7 +88,7 @@ verified → a governed release campaign with computed readiness gates and order
 
 Around that core: enterprise requirements workspace, configurable artifact schemas, saved views and
 structured queries, governed bulk operations, visual redlines, CSV/XLSX onboarding that lands in a
-Draft SCR rather than bypassing approval, ReqIF 1.2 round trip, a versioned REST API with scoped
+Draft SRCR rather than bypassing approval, ReqIF 1.2 round trip, a versioned REST API with scoped
 service identities, webhooks with HMAC signing and dead-letter replay, OSLC RM, product-line libraries
 and variants, backup with integrity manifests, a current-user automatic daily backup schedule, and isolated
 restore drills.
@@ -150,17 +150,17 @@ its existing exact upstream revisions, including historical revisions no longer 
 without widening the current-build candidate search.
 
 Downstream assessments now read as engineering decisions rather than storage states: pending, in progress, in
-review, complete with no impact, complete with controlled impact, change required with SWCR pending, or
-superseded, always labelled HLR or LLR. A deep-linked assessment drawer shows the source SCR and its complete
+review, complete with no impact, complete with controlled impact, change required with a Draft change request pending, or
+superseded, always labelled HLR or LLR. A deep-linked assessment drawer shows the source SRCR and its complete
 change case, changed requirements, and the current downward trace. An engineer may record no impact, link a
-level-compatible Draft SWCR, or create the correct HLR/LLR Draft directly; the new Draft is linked automatically,
+level-compatible Draft change request, or create the correct HLR/LLR Draft directly; the new Draft is linked automatically,
 and a failed link remains visible and retryable without losing the saved Draft.
 
 Each queue row carries one control, "Open assessment", whatever state the assessment is in; the drawer offers
 only the actions that state permits. Both conclusions appear in exactly one state — claimed and undecided.
 Wherever a conclusion exists it is stated with its author, its rationale and, once approved, its approver.
 Correcting a wrong conclusion is its own act: **Reopen assessment** takes a stated reason, returns the
-assessment to undecided, detaches any linked Draft SWCR without changing the SWCRs, and keeps the withdrawn
+assessment to undecided, detaches any linked Draft change request without changing the change requests themselves, and keeps the withdrawn
 conclusion — outcome, author, rationale, approver and detached numbers — in the drawer's withdrawn-conclusions
 record. An unapproved conclusion is the assigned engineer's to withdraw; an approved one takes Approver
 authority; an assessment in review is returned rather than withdrawn behind its approver (DEC-090).
@@ -238,7 +238,7 @@ server lease as every other controlled record — **Check out & edit**, autosave
 named holder while somebody else has it — in every state except Closed and the terminal dispositions, where
 reopening is the route back. Each check-in lands in the report's own History as `Details Checked In` with its
 actor and time (DEC-091). Their center supports durable detail links and
-links forward to SCRs, SWCRs, every TCR discipline, requirements, procedures, executions/evidence, documents,
+links forward to SRCRs, HLRCRs, LLRCRs, every TCR discipline, requirements, procedures, executions/evidence, documents,
 and releases where those records exist. Every change-request type can select one or more driving PRs; approved
 engineering changes are projected back as corrective actions, and only results selected to support closure
 are projected as test evidence. Product Versions, Candidate
@@ -287,7 +287,7 @@ rules as any user-created program — not a mock data layer. Enabled by `DemoDat
 default in production configuration.
 
 Released **FMS 1.5** baseline: 150 system requirements, 400 HLRs, 700 LLRs, 1,250 effective revisions,
-30 SCRs, 75 SWCRs, 1,100 typed traces, 515 procedures, 520 executions including retained retests, 6
+30 SRCRs, 44 HLRCRs and 55 LLRCRs, 1,100 typed traces, 515 procedures, 520 executions including retained retests, 6
 controlled documents, 1 released build. **FMS 1.6** is derived from it and deliberately in work, with
 persistent controlled work spread across approved, in-review, draft and deferred states. Its counts evolve as
 realistic engineering qualification adds records; they are not a fixed seed-data contract.
@@ -376,7 +376,7 @@ already-built API and cut about a minute per run.
 Everything else serves the client with `vite dev`, which is a different artifact — unbundled modules with
 stylesheets injected as they evaluate, rather than chunked code and one extracted, hashed stylesheet. Expect
 it to catch things the dev journeys structurally cannot. It now performs protected writes immediately after
-deep-linked sign-in, verifies the resulting System SCR and immutable verification result through the API, and
+deep-linked sign-in, verifies the resulting System SRCR and immutable verification result through the API, and
 fault-injects network and conflict responses to prove that failed writes preserve input and create no record
 (DEC-061).
 
@@ -388,7 +388,7 @@ Local demonstration identities (`admin`, `systems.author`, `software.author`, `s
 `release.manager`) share a local-only password documented in `product/README.md`. Production
 deployment uses the one-time protected administrator bootstrap instead.
 
-Requirement proposal metadata is now one durable server contract (DEC-062). Initial SCR/SWCR creation preserves
+Requirement proposal metadata is now one durable server contract (DEC-062). Initial change request creation preserves
 schema-allowed `owner`, `criticality`, and future configured attributes while recomputing the server-owned
 `derived` flag. Exact section placement survives create, detail, checkout/check-in, review and baseline
 materialization; stale section identifiers are rejected with a repair instruction. Administrators can identify
@@ -564,7 +564,7 @@ reason the document set can be trusted.
   failure through the other mechanism, and the same fix applies. When a rule matters, make it win on purpose.
 # Current implementation checkpoint — 2026-08-02
 
-Current `main` includes trustworthy Draft SWCR persistence, HLR/LLR-scoped histories and assessments,
+Current `main` includes trustworthy Draft change request persistence, HLR/LLR-scoped histories and assessments,
 searchable controlled references, actionable downstream assessment decisions with automatic Draft linking,
 the agreed Problem Report lifecycle and fields, mandatory changed-requirement testing, evidence-aware
 SYSR-to-build Digital Thread paths, authoritative GitLab LLR-to-code release gating, and the Requirements / Verification / Code /

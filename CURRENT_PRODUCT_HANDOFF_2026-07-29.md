@@ -75,7 +75,7 @@ readiness percentage.
   deferred changes raised in that build.
 - System **New change request** opens System authoring directly.
 - Software **New change request** first asks HLR or LLR.
-- Search is intentionally limited to text and lifecycle state; System/SWCR and Release filters are removed.
+- Search is intentionally limited to text and lifecycle state; System and software change request and Release filters are removed.
 - The old sidebar **New Change Request** action and Change Request **Software Builds** tab are removed.
 - An empty create form does not allocate a number. A title is required before the first save; after that,
   incomplete Drafts can be saved.
@@ -128,7 +128,7 @@ approval boundaries.
 
 ### Naming and navigation additions
 
-- SCR and SWCR identifiers use five digits everywhere: `SCR-00039.00`, not `SCR-00000039.00`. The migration
+- change request identifiers use five digits everywhere: `SRCR-00039.00`, not `SRCR-00000039.00`. The migration
   rewrites existing primary identifiers and stored textual references; new allocation uses the five-digit form.
 - A baseline and a software build are the same product concept. `SW-01.60` is the official name; “Build 1.6”
   is informal supporting language only.

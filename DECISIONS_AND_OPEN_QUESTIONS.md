@@ -48,9 +48,9 @@ Future entries use:
 
 - **Date:** 2026-07-11
 - **Status:** Accepted
-- **Decision:** First prove the complete system-level chain from SCR through requirement, baseline, SYSRD, test procedure, external result/evidence capture, and traceability.
+- **Decision:** First prove the complete system-level chain from SRCR through requirement, baseline, SYSRD, test procedure, external result/evidence capture, and traceability.
 - **Rationale:** A coherent vertical slice validates the hardest lifecycle concepts better than a shallow full-V prototype.
-- **Consequences:** HLR, LLR, SWCR, and software-test functions are later phases.
+- **Consequences:** HLR, LLR, software change request, and software-test functions are later phases.
 
 ### DEC-005 - Artifact Platform, Not Document Master
 
@@ -72,7 +72,7 @@ Future entries use:
 
 - **Date:** 2026-07-11
 - **Status:** Accepted
-- **Decision:** A requirement may be retired from future effective baselines through an approved SCR, while all historical data remains intact.
+- **Decision:** A requirement may be retired from future effective baselines through an approved SRCR, while all historical data remains intact.
 - **Rationale:** This preserves the user's desired “deletion” outcome and the complete certification/history story.
 - **Consequences:** Normal product interfaces never physically delete approved or historical controlled records.
 
@@ -112,7 +112,7 @@ Future entries use:
 
 - **Date:** 2026-07-11
 - **Status:** Accepted
-- **Decision:** Preserve the AeroLink dashboard, SCR review, traceability, and test-evidence mockups as guiding visual and interaction inspiration, subject to validation and refinement rather than pixel-for-pixel implementation.
+- **Decision:** Preserve the AeroLink dashboard, SRCR review, traceability, and test-evidence mockups as guiding visual and interaction inspiration, subject to validation and refinement rather than pixel-for-pixel implementation.
 - **Rationale:** The concepts make the intended controlled lifecycle experience tangible and establish a coherent, modern product direction for managers and engineers.
 - **Consequences:** Future UX work should retain the calm mission-control character, visible state/provenance, actionable drill-downs, and role-aware information priorities defined in [DESIGN_VISION_AND_DASHBOARDS.md](DESIGN_VISION_AND_DASHBOARDS.md).
 
@@ -165,7 +165,7 @@ Future entries use:
 - **Status:** Accepted
 - **Decision:** A requirement retired by an approved change is not present in the next effective SYSRD.
 - **Rationale:** The effective document should contain the requirements applicable to that baseline.
-- **Consequences:** The retired requirement remains retrievable through prior baselines, SCR history, comparison reports, traceability, and audit records, but is omitted from the successor SYSRD body.
+- **Consequences:** The retired requirement remains retrievable through prior baselines, SRCR history, comparison reports, traceability, and audit records, but is omitted from the successor SYSRD body.
 
 ### DEC-019 - Verification Outcomes Require Human Judgment
 
@@ -179,17 +179,17 @@ Future entries use:
 
 - **Date:** 2026-07-11
 - **Status:** Accepted
-- **Decision:** Use an FMS Version 3.2 to 3.3 release story driven by two SCRs: one introduces a Round Robin function and one incorporates fixes for four linked PRs.
+- **Decision:** Use an FMS Version 3.2 to 3.3 release story driven by two SRCRs: one introduces a Round Robin function and one incorporates fixes for four linked PRs.
 - **Rationale:** This reflects a realistic software-oriented program and exercises change, requirements, verification coverage, problem reports, baselines, dashboards, and traceability in one story.
 - **Consequences:** [SHOWCASE_STORY_FMS_3_3.md](SHOWCASE_STORY_FMS_3_3.md) is the canonical fictional dataset and walkthrough. The second-change interpretation remains an assumption until confirmed.
 
-### DEC-021 - Requirements Are Reviewed Through the SCR
+### DEC-021 - Requirements Are Reviewed Through the SRCR
 
 - **Date:** 2026-07-11
 - **Status:** Accepted
-- **Decision:** Requirements do not enter an independent review/approval workflow. Reviewers evaluate and unanimously approve the exact SCR revision containing Problem, Analysis, Solution, and all proposed requirement introductions, modifications, and retirements.
-- **Rationale:** The SCR is the controlled change package and provides the context required to judge its requirement changes together.
-- **Consequences:** The SCR author decides when the package is ready to submit; submission validation checks completeness. Requirement revisions authorized by an approved SCR do not become effective until explicitly selected into a baseline.
+- **Decision:** Requirements do not enter an independent review/approval workflow. Reviewers evaluate and unanimously approve the exact SRCR revision containing Problem, Analysis, Solution, and all proposed requirement introductions, modifications, and retirements.
+- **Rationale:** The SRCR is the controlled change package and provides the context required to judge its requirement changes together.
+- **Consequences:** The SRCR author decides when the package is ready to submit; submission validation checks completeness. Requirement revisions authorized by an approved SRCR do not become effective until explicitly selected into a baseline.
 
 ### DEC-022 - Revision Is Appended to the Stable Requirement ID
 
@@ -205,37 +205,37 @@ Future entries use:
 - **Status:** Accepted
 - **Decision:** The FMS Version 3.3 Round Robin showcase includes system requirements allocated to software HLRs.
 - **Rationale:** Current programs are software-oriented, but the full change story must demonstrate the relationship between externally meaningful system behavior and software requirements.
-- **Consequences:** Both system and HLR revisions appear inside the SCR package and trace through verification and the Version 3.3 baseline. This showcase breadth does not by itself redefine the production implementation sequence.
+- **Consequences:** Both system and HLR revisions appear inside the SRCR package and trace through verification and the Version 3.3 baseline. This showcase breadth does not by itself redefine the production implementation sequence.
 
-### DEC-024 - Pre-Approval Rework Keeps the SCR Revision
+### DEC-024 - Pre-Approval Rework Keeps the SRCR Revision
 
 - **Date:** 2026-07-11
 - **Status:** Accepted
-- **Decision:** When an SCR has never been approved and an approver requests a change, it returns to Draft at the same revision number. Resubmission creates a new review cycle, not a new SCR revision.
+- **Decision:** When an SRCR has never been approved and an approver requests a change, it returns to Draft at the same revision number. Resubmission creates a new review cycle, not a new SRCR revision.
 - **Rationale:** The revision has not yet achieved an approved controlled state, so ordinary review rework belongs to the original revision.
 - **Consequences:** Every review-cycle submission, comment, decision, and snapshot remains historical. Earlier approvals do not carry into the resubmitted cycle.
 
-### DEC-025 - Post-Approval SCR Change Creates the Next Revision
+### DEC-025 - Post-Approval SRCR Change Creates the Next Revision
 
 - **Date:** 2026-07-11
 - **Status:** Accepted
-- **Decision:** Any change to an approved SCR creates the next SCR revision, even when the associated SYSRD/SWRD or release baseline has not yet been approved or released.
-- **Rationale:** The approved SCR revision is a completed controlled record and cannot be edited in place.
+- **Decision:** Any change to an approved SRCR creates the next SRCR revision, even when the associated SYSRD/SWRD or release baseline has not yet been approved or released.
+- **Rationale:** The approved SRCR revision is a completed controlled record and cannot be edited in place.
 - **Consequences:** The new revision begins in Draft, receives an author-selected ordered approval sequence, and requires unanimous fresh approval. The earlier approved revision remains visible and may be superseded for release selection.
 
-### DEC-026 - SCR Author Selects the Approval Group
+### DEC-026 - SRCR Author Selects the Approval Group
 
 - **Date:** 2026-07-11
 - **Status:** Accepted
-- **Decision:** The SCR author has authority to select the people whose approval is required for that SCR review cycle.
+- **Decision:** The SRCR author has authority to select the people whose approval is required for that SRCR review cycle.
 - **Rationale:** The author determines the appropriate approval participants for the content and affected disciplines.
 - **Consequences:** Approval requires every selected approver in the author-defined order. DEC-027 defines how that sequence may change after submission.
 
-### DEC-027 - SCR Review Is Sequential with Controlled Approver Replacement
+### DEC-027 - SRCR Review Is Sequential with Controlled Approver Replacement
 
 - **Date:** 2026-07-11
 - **Status:** Accepted
-- **Decision:** SCR review proceeds through the author-selected approvers in order. Before a future approver’s turn is reached, the author may replace that approver without restarting completed stages. Active and completed stages are locked. If a completed approval used the wrong person, the review cycle is cancelled and restarted from the first approver.
+- **Decision:** SRCR review proceeds through the author-selected approvers in order. Before a future approver’s turn is reached, the author may replace that approver without restarting completed stages. Active and completed stages are locked. If a completed approval used the wrong person, the review cycle is cancelled and restarted from the first approver.
 - **Rationale:** Sequential review reflects the actual process, permits practical correction of future assignments, and prevents an invalid completed approval from contributing to final approval.
 - **Consequences:** Every substitution and cancellation is audited. Cancelled decisions remain historical but do not count. Restart uses the same submitted snapshot when content is unchanged; content changes follow the applicable Draft/revision rules.
 
@@ -250,7 +250,7 @@ Future entries use:
 
 - **Date:** 2026-07-12
 - **Status:** Accepted
-- **Decision:** SCR and release approvals require password re-entry, assigned-stage identity, Program Approver authority, an explicit signature meaning, and an immutable signature record tied to the controlled snapshot hash.
+- **Decision:** SRCR and release approvals require password re-entry, assigned-stage identity, Program Approver authority, an explicit signature meaning, and an immutable signature record tied to the controlled snapshot hash.
 - **Rationale:** A visible approval button is insufficient evidence of intent, identity, and exact approved content.
 
 ### DEC-030 - Disabled Identities Remain Historically Resolvable
@@ -276,13 +276,13 @@ Future entries use:
 - **Rationale:** This is the largest current competitive gap and provides the data/configuration model required by ReqIF, reporting, product-line reuse, and integrations.
 - **Consequences:** ReqIF/OSLC, streams/variants, enterprise federation, and risk/compliance follow as explicit waves rather than being mixed into the first authoring slice.
 
-### DEC-033 - Requirement Authoring Remains Subordinate to SCR/SWCR Authority
+### DEC-033 - Requirement Authoring Remains Subordinate to change request Authority
 
 - **Date:** 2026-07-12
 - **Status:** Accepted
-- **Decision:** An engineer may discover an approved requirement, analyze its lifecycle impact, and author a proposed next revision in the Enterprise Requirements Workspace, but the proposal must belong to a Draft SCR/SWCR. Only the complete change package is reviewed and approved; approved requirement revisions remain immutable and new effective revisions arise only through baseline materialization.
+- **Decision:** An engineer may discover an approved requirement, analyze its lifecycle impact, and author a proposed next revision in the Enterprise Requirements Workspace, but the proposal must belong to a Draft change request. Only the complete change package is reviewed and approved; approved requirement revisions remain immutable and new effective revisions arise only through baseline materialization.
 - **Rationale:** Enterprise-speed authoring must not create a second approval path or weaken the accepted change-authority model.
-- **Consequences:** Rich proposal content, Program fields, relationship impact, assignments, and dispositions are included in the exact SCR/SWCR review snapshot and audit story.
+- **Consequences:** Rich proposal content, Program fields, relationship impact, assignments, and dispositions are included in the exact change request review snapshot and audit story.
 
 ### DEC-034 - Enterprise Control Records Surround but Do Not Replace Lifecycle Authority
 
@@ -304,7 +304,7 @@ Future entries use:
 
 - **Date:** 2026-07-13
 - **Status:** Accepted
-- **Decision:** The server assigns the next never-reused identifier for every new SCR, SWCR, and requirement; derives the author from the authenticated session; and assigns the next requirement revision when an existing requirement is modified or retired.
+- **Decision:** The server assigns the next never-reused identifier for every new SRCR, HLRCR, LLRCR, and requirement; derives the author from the authenticated session; and assigns the next requirement revision when an existing requirement is modified or retired.
 - **Rationale:** User-entered identifiers, authors, and revision counters invite collision, impersonation, and inconsistent history.
 - **Consequences:** Interfaces may preview the reserved format but cannot authoritatively choose these values. Requirement modification begins by searching and selecting an existing controlled requirement. Sequences are installation-wide and independent per artifact prefix.
 
@@ -312,7 +312,7 @@ Future entries use:
 
 - **Date:** 2026-07-13
 - **Status:** Accepted
-- **Decision:** System SCR creation accepts only System requirement changes. Software SWCR creation is a separate route and accepts only HLR and LLR changes, including an explicit derived-requirement classification.
+- **Decision:** System SRCR creation accepts only System requirement changes. Software change request creation is a separate route and accepts only HLR and LLR changes, including an explicit derived-requirement classification.
 - **Rationale:** Mixing both disciplines in one form obscures ownership, validation, review context, and document consequences.
 
 ### DEC-038 - Sequential or Parallel Review Activation
@@ -329,7 +329,7 @@ Future entries use:
 - **Status:** Accepted
 - **Decision:** Editable controlled artifacts use an attributable check-out/edit session with renewable ownership, server-side draft auto-save, explicit check-in, administrative recovery, and read-only visibility to everyone else.
 - **Rationale:** Silent concurrent overwrite is unacceptable, while abandoned locks must not stop Program work.
-- **Consequences:** Browser-local recovery may supplement but never replace server-side draft state. The existing edit-session and merge-conflict foundation will be generalized from requirements to SCR/SWCR and document authoring.
+- **Consequences:** Browser-local recovery may supplement but never replace server-side draft state. The existing edit-session and merge-conflict foundation will be generalized from requirements to change request and document authoring.
 
 ### DEC-040 - Trace-Rich Publications and Release Lineage
 
@@ -366,7 +366,7 @@ Future entries use:
 - **Status:** Accepted
 - **Decision:** An exclusive checkout is a server-enforced, uniquely indexed lease with a fifteen-minute inactivity expiry, heartbeat renewal, version-checked autosave snapshots, explicit check-in/discard, and privileged forced unlock with a mandatory reason.
 - **Rationale:** A durable lease prevents silent concurrent overwrite while allowing abandoned work to recover without hiding the artifact from readers.
-- **Consequences:** Review submission is rejected while an incompatible lease is active. Approved/frozen content is never made editable through autosave. The first complete vertical implementation applies to SCR and SWCR drafts; other controlled draft types will adopt the same domain contract incrementally.
+- **Consequences:** Review submission is rejected while an incompatible lease is active. Approved/frozen content is never made editable through autosave. The first complete vertical implementation applies to change request drafts; other controlled draft types will adopt the same domain contract incrementally.
 
 ### DEC-045 - Recovery Is Proved Outside the Authoritative Database First
 
@@ -713,7 +713,7 @@ Future entries use:
   use each relative address as a URL base. Every protected production mutation therefore threw before reaching
   the server, and the production gate stayed green because it performed reads only. A token cached before
   sign-in could also survive into the new session and deterministically fail the first protected action.
-- **Consequences:** The compiled-production gate creates a real System SCR and records an immutable verification
+- **Consequences:** The compiled-production gate creates a real System SRCR and records an immutable verification
   result, then queries the API to prove both durable outcomes. Mutation surfaces use one error-envelope contract:
   non-JSON, empty, authorization, conflict and network failures remain visible, release busy state, preserve safe
   input, and never display success until the server confirms it. Client failure diagnostics record only an
@@ -748,7 +748,7 @@ Future entries use:
   Review steps retain the selected account name and resolved Program authority as frozen fields. Presentation
   uses those fields directly and records the actual signing principal separately in electronic-signature
   evidence.
-- **Rationale:** A generic route made an SWCR appear inside System navigation, and the showcase people registry
+- **Rationale:** A generic route made a software change request appear inside System navigation, and the showcase people registry
   replaced `systems.reviewer` with the System author even though authorization and the signature used the
   reviewer account. Both defects let surrounding presentation contradict the controlled record.
 - **Consequences:** Refresh, new-tab, history, search, My Work, notification and Jira entry paths keep the
@@ -871,7 +871,7 @@ Future entries use:
 
 - **Date:** 2026-07-29
 - **Status:** Accepted
-- **Decision:** Every controlled identifier (`SCR`, `SWCR`, `SYSR`, `HLR`, `LLR`, `SYSTP`, `HLRTP`, `LLRTP`,
+- **Decision:** Every controlled identifier (`SRCR`, `HLRCR`, `LLRCR`, `SYSR`, `HLR`, `LLR`, `SYSTP`, `HLRTP`, `LLRTP`,
   `PR`) and every controlled attachment version is claimed by a single atomic increment against a row in
   `identifier_sequences`, keyed by prefix — repository-wide, not per Program or Project. Attachment versions
   use one sequence per logical file. A number is spent when it is handed out, so an abandoned or rolled-back
@@ -965,13 +965,13 @@ Future entries use:
 - **Date:** 2026-07-29
 - **Status:** Accepted; the pre-release evidence flag is superseded by DEC-076 and the workspace shape by DEC-077
 - **Decision:** A baseline and software build are one product concept. The official identifier derives from the
-  release version (`1.6` becomes `SW-01.60`); “Build 1.6” is informal wording. SCR/SWCR identifiers use five
+  release version (`1.6` becomes `SW-01.60`); “Build 1.6” is informal wording. change request identifiers use five
   digits for existing and future records. Every approved change request creates one controlled Test Change
   Review per affected System, Software HLR, or Software LLR discipline.
 - **Rationale:** Separate baseline/build names implied two configurations where the product owner intends one.
   Verification procedure maintenance is specialist downstream work, not author impact disposition. Treating
   each approved change as a governed discipline-specific review creates a clear handoff and release gate.
-- **Consequences:** Existing SCR/SWCR and FMS software-build identifiers are destructively normalized by
+- **Consequences:** Existing change request and FMS software-build identifiers are destructively normalized by
   migration. Each Test Change Review records create/link/modify/retire/no-test decisions and requires complete
   decisions plus independent approval. Procedure alignment is required for release. Only procedures explicitly
   marked during that review require passing evidence before release; other evidence may be captured after
@@ -1039,16 +1039,16 @@ Future entries use:
   Results page, at `…/results/{problemReportId}`. The "evidence required before release" checkbox is gone; the
   server field remains only as one of the inputs that seeds a new test set.
 
-### DEC-078 - Downstream Requirement Impact Is Assessed Before an SWCR Is Created
+### DEC-078 - Downstream Requirement Impact Is Assessed Before a software change request Is Created
 
 - **Date:** 2026-07-31
 - **Status:** Accepted
 - **Decision:** Final approval of a System change raises an HLR downstream change assessment; final approval
   of an HLR change raises an LLR assessment. The consuming engineer may conclude that no downstream change is
-  required or link one or more Draft SWCRs. A Draft SWCR may answer multiple assessments, so both one-to-one
+  required or link one or more Draft software change requests. A Draft software change request may answer multiple assessments, so both one-to-one
   and consolidated delivery remain possible without allocating empty controlled change-request numbers.
 - **Rationale:** The author of an upstream change cannot responsibly decide the consuming discipline's impact.
-  Creating an SWCR before that engineering conclusion falsely asserts that a downstream requirement change is
+  Creating a software change request before that engineering conclusion falsely asserts that a downstream requirement change is
   required and wastes a controlled identifier when the correct answer is no change.
 - **Consequences:** Assessments are build-scoped, assigned, independently approved by an explicitly selected
   approver, and server-governed. Revising an approved source change creates fresh assessment work and marks the
@@ -1134,7 +1134,7 @@ Future entries use:
 
 - **Date:** 2026-08-01
 - **Status:** Accepted
-- **Decision:** Reactivate the build-scoped Problem Reports center. A PR may drive an SCR, SWCR, or System/HLR/LLR
+- **Decision:** Reactivate the build-scoped Problem Reports center. A PR may drive an SRCR, software change request, or System/HLR/LLR
   TCR. Requirement changes do not create PRs. Final engineering-change approval is automatically presented as
   an approved corrective action on every linked PR. Containment and preventive-action authoring are outside
   this increment. Every approved procedure covering a requirement introduced or modified in a build is
@@ -1221,11 +1221,11 @@ Future entries use:
 - **Decision:** The downstream assessment queue offers one entry control, worded "Open assessment", on every
   row in every state. What may be done about an assessment is decided inside the drawer from the assessment's
   state: unclaimed offers "Take it on"; claimed and undecided is the only state offering both conclusions;
-  concluded offers the SWCR work and a withdrawal; in review offers approve and return to the approver alone;
+  concluded offers the software change request work and a withdrawal; in review offers approve and return to the approver alone;
   approved offers no conclusion control at all. Wherever a conclusion exists it is stated outright with its
   author, its rationale and, once approved, its approver. Changing a recorded conclusion is not a second press
   of a conclusion button: it is "Reopen assessment", which requires a stated reason, returns the assessment to
-  undecided, detaches any linked Draft SWCR without altering the SWCRs themselves, and writes an immutable
+  undecided, detaches any linked Draft software change request without altering the software change requests themselves, and writes an immutable
   `downstream_assessment_reopenings` row holding everything the withdrawn conclusion carried.
 - **Rationale:** The entry control used to read "Review assessment" or "View assessment" depending on approval
   state, putting state in the one place a reader looks for an action and saying it twice, in near-synonyms,
@@ -1267,6 +1267,36 @@ Future entries use:
   audit lives in `ProblemReportRevision` rather than `AuditEvent`, whose aggregate key is a foreign key to a
   change request.
 
+### DEC-092 - Change Requests Are SRCR, HLRCR and LLRCR, and the Prefix Names the Level
+
+- **Date:** 2026-08-04
+- **Status:** Accepted; implemented under issue #327
+- **Decision:** A System change request is an **SRCR**. A software change request is an **HLRCR** or an
+  **LLRCR** according to the requirement level it carries. `SCR` and `SWCR` are retired and rejected outright.
+  The prefix is derived from type and level by one authority, `ChangeRequestNumbering.Prefix`, which the
+  allocator and the data migration both ask. HLRCR and LLRCR are numbered independently, matching
+  SYSTCR/HLRTCR/LLRTCR and the procedures they govern. Every existing record was renamed in place with its
+  numeric part preserved exactly; no record was renumbered, and no record of the former identifiers is kept.
+- **Rationale:** One software prefix could not say which discipline a change request belonged to, while the
+  work, the reviewers and the approvals are separate for HLR and LLR. A reader who sees the identifier should
+  already know which of the three they are holding. Making the prefix depend on the level also turns a
+  previously optional field into an invariant: a software change request that cannot say whether it is HLR or
+  LLR is a controlled record that cannot be named, so it can no longer exist.
+- **Consequences:** A software change request must declare its level before it exists, and the identifier and
+  the declared scope can never disagree — an LLRCR holding HLR work is refused. Mixed-level software change
+  requests are impossible; they were already unreachable through the authoring endpoint, and are now
+  unreachable through the domain. Each new prefix resumes numbering above the highest number already used at
+  its own level, so the sequences begin with gaps, which is honest. The API routes moved from `/api/scrs` and
+  `/api/scr-drafts` to `/api/change-requests` and `/api/change-request-drafts`; two middleware guards keyed on
+  the old path — the cross-build resource check and the released-build write refusal — had to move with them.
+- **Accepted consequence:** `SystemChangeRequest.ComputeSnapshotHash()` places the display number first in the
+  hashed content, and `CandidateBaseline.Freeze()` hashes every selection's display number. Renaming therefore
+  means 126 frozen review-cycle hashes, 17 electronic signatures and 1 frozen baseline hash no longer recompute
+  from the records they attest to, and nothing in the database explains why. Nothing re-verifies them at
+  runtime, so no behaviour breaks; the cost is that a review snapshot hash printed on a generated document is
+  no longer reproducible. **The frozen hashes were not recomputed** — doing so would make a signature attest to
+  content its signer never approved.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
@@ -1275,7 +1305,7 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 - **ASM-002:** Artifact numbers are globally unique across programs; exact prefixes, digit lengths, and revision display syntax are configurable or decided later.
 - **ASM-003:** The first slice supports multiple programs even if initial validation uses one reference program.
 - **ASM-004:** Requirements may include controlled images/figures as part of revisioned content.
-- **ASM-005:** Exact review roles and independence rules vary by organization/program; the SCR author selects the ordered approval sequence and unanimous sequential approval is fixed initial behavior.
+- **ASM-005:** Exact review roles and independence rules vary by organization/program; the SRCR author selects the ordered approval sequence and unanimous sequential approval is fixed initial behavior.
 - **ASM-006:** Superseded by DEC-085. PRs are controlled first-class records in the product; external issue
   references may be added later without replacing them.
 - **ASM-007:** The initial platform records Pass, Fail, Blocked, Not Run, and Not Applicable using the meanings in [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md); detailed step/result transition rules still require validation.
@@ -1285,7 +1315,7 @@ Assumptions are not decisions. They remain valid only until confirmed or replace
 - **ASM-010:** Dashboard values are computed only from records the current user is authorized to know exist.
 - **ASM-011:** Fulfilled and superseded by DEC-046. Live demonstrations use the real application and persistent
   `FMSLIVE` data; the static showcase is retired.
-- **ASM-012:** Confirmed: the second Version 3.3 change package is an SCR linked to four PRs.
+- **ASM-012:** Confirmed: the second Version 3.3 change package is an SRCR linked to four PRs.
 
 ## Historical Open Questions Required Before Phase 1 Technical Planning
 
@@ -1297,14 +1327,14 @@ choices are created as focused issues only when their trigger and acceptance bou
 | --- | --- | --- | --- |
 | OQ-001 | Which optional product/system/configuration layers are needed beyond the accepted `Program -> Project -> Software Product -> Software Release` default? | Determines applicability and baseline scope for programs that do not fit the software-oriented default | Product owner before domain/data design |
 | OQ-002 | Should numeric sequences be global across all artifact types or unique within each prefix? The accepted base/suffix format is documented in [IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md](IDENTIFIERS_AND_REQUIREMENT_FIELDS_PROPOSAL.md). | Affects identifier generation and external references | Product/configuration stakeholders before data design |
-| OQ-003 | Which proposed requirement-change fields must be complete before an SCR can be submitted, and which existing FMS fields must be preserved or program-configurable? | Controls SCR package validation, import, review, and generated documents | Requirements stakeholders before Phase 1 |
+| OQ-003 | Which proposed requirement-change fields must be complete before an SRCR can be submitted, and which existing FMS fields must be preserved or program-configurable? | Controls SRCR package validation, import, review, and generated documents | Requirements stakeholders before Phase 1 |
 | OQ-004 | Which independence or organizational policy constraints, if any, may prevent the author from selecting a particular approver? | Controls review integrity while preserving accepted author authority and sequential replacement behavior | Quality/configuration/product stakeholders before Phase 2 design |
 | OQ-006 | What are the allowed verification methods, and can one requirement require multiple methods? | Affects completeness logic and document output | Verification stakeholders before Phase 1 completion |
 | OQ-007 | Are test case and test suite separate first-slice artifacts, or is procedure plus execution configuration sufficient? | Avoids redundant objects and unclear trace semantics | Verification stakeholders before Phase 3 design |
 | OQ-008 | What detailed transition, amendment, and release-gate rules apply to the accepted Pass, Fail, Not Applicable, Blocked, and Not Run meanings? | Prevents misleading traceability and release status | Verification/quality stakeholders before Phase 3 |
 | OQ-009 | When must a failed execution have a PR, anomaly, or formal disposition? | Controls completeness and release gates | Quality/program stakeholders before Phase 3 |
 | OQ-010 | Should a successor SYSRD include a separate change summary listing retired requirements even though they are omitted from its effective requirement body? | Affects document change communication without weakening the effective-content rule | Product/configuration stakeholders before Phase 2 |
-| OQ-011 | How are conflicting approved SCRs affecting the same requirement ordered or resolved? | Required for deterministic candidate-baseline construction | Configuration/product stakeholders before Phase 2 |
+| OQ-011 | How are conflicting approved SRCRs affecting the same requirement ordered or resolved? | Required for deterministic candidate-baseline construction | Configuration/product stakeholders before Phase 2 |
 | OQ-012 | Does reproducible document generation require byte-identical PDFs or content-equivalent outputs with explained metadata differences? | Drives generator, archive, validation, and platform constraints | Product/quality stakeholders before Phase 2 |
 | OQ-013 | What legacy SYSRD structure and import quality should the first migration workflow support? | Import was requested but depends heavily on source format and validation needs | Product owner after sample documents are available |
 | OQ-014 | What production data volumes, response-time targets, availability, RPO, and RTO are required? | Converts quality ambitions into testable architecture constraints | Operations/product owner before production architecture |

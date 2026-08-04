@@ -25,12 +25,12 @@ verification work remain isolated by Project, build, discipline, and exact revis
 The active engineering chain is:
 
 ```text
-SCR approval
+SRCR approval
   -> HLR downstream assessment
-      -> Draft/linked SWCR or justified no-change decision
+      -> Draft/linked software change request or justified no-change decision
           -> HLR approval
               -> LLR downstream assessment
-                  -> Draft/linked SWCR or justified no-change decision
+                  -> Draft/linked software change request or justified no-change decision
 
 Approved change
   -> discipline-specific controlled Test Change Request
@@ -39,7 +39,7 @@ Approved change
               -> immutable executions, results, evidence, and retest history
 ```
 
-Problem Reports now provide the causal front door for that chain. A build-scoped PR may drive any SCR, SWCR,
+Problem Reports now provide the causal front door for that chain. A build-scoped PR may drive any SRCR, software change request,
 or TCR; an approved CR becomes corrective-action evidence on the PR. Requirement changes never create PRs.
 Procedures linked to a requirement introduced or modified by the build become mandatory pre-release test scope.
 
@@ -122,7 +122,7 @@ HTTP 200 and `/health/ready` returned HTTP 200 with PostgreSQL connected.
 ## Intentional boundaries
 
 - AeroLink makes no certification or tool-qualification claim.
-- Problem Reports are active for each build. A PR can drive SCR/SWCR/TCR work; final CR approval is projected
+- Problem Reports are active for each build. A PR can drive change request/TCR work; final CR approval is projected
   as an approved corrective action, and TCRs inherit the source CR's PR links. Released-build records are
   readable but immutable. Containment and preventive-action authoring remain intentionally outside the current
   product increment (DEC-085).

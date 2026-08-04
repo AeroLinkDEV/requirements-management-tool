@@ -66,8 +66,8 @@ The long-term ambition is a trustworthy multi-user production platform. Delivery
 
 The product direction succeeds when qualified users can establish and demonstrate a complete, controlled story for a released system requirement:
 
-1. an SCR explains and authorizes the change;
-2. the complete SCR revision containing the requirement change is reviewed and unanimously approved;
+1. an SRCR explains and authorizes the change;
+2. the complete SRCR revision containing the requirement change is reviewed and unanimously approved;
 3. an exact baseline includes it;
 4. a controlled SYSRD is generated from that baseline;
 5. approved system test procedures trace to it;

@@ -85,7 +85,7 @@ The following are required before AeroLink can credibly be called an enterprise 
 
 AeroLink should not merely reach parity. It should be better in areas that matter to aerospace development assurance:
 
-- **Change-authority-first requirements:** requirement revisions are approved through an explicit SCR/SWCR package containing the complete Problem, Analysis, Solution, and impact set.
+- **Change-authority-first requirements:** requirement revisions are approved through an explicit change request package containing the complete Problem, Analysis, Solution, and impact set.
 - **Exact release evidence:** every baseline, build, document, test result, approval, and signature resolves to exact revisions and hashes.
 - **Honest readiness:** dashboards expose blockers and provenance instead of presenting unqualified percentages.
 - **Professional controlled outputs:** documents are generated from controlled records with named approvals, front matter, revision history, hashes, and reproducible source metadata.
@@ -148,7 +148,7 @@ Wave 1 is complete only when a systems engineer can:
 6. Save and share a permission-safe view.
 7. Bulk classify or link a selected set with preview and one attributable atomic outcome.
 8. Discuss, mention, resolve, and formally disposition review comments.
-9. Submit an exact specification subset into the existing controlled SCR/approval/baseline workflow.
+9. Submit an exact specification subset into the existing controlled SRCR/approval/baseline workflow.
 10. Demonstrate responsive paging/virtualization and safe concurrent edits at realistic scale.
 
 ## Product decision

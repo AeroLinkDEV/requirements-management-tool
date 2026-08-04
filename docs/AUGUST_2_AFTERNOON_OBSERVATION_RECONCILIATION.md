@@ -17,8 +17,8 @@ small change from being mistaken for the complete request.
 | 6: artifact number and wording are cramped | Add consistent vertical separation between controlled identity and statement | #277 / PR #281 |
 | 7: supporting content mirrors the statement | Start supporting content empty while retaining paragraph/table/image authoring | #277 / PR #281 |
 | 8: “Leave where it is” section choice | Hydrate and select the requirement's current section for Modify work | #277 / PR #281 |
-| 9-10: downstream decisions and SWCR actions belong inside the selected assessment | Queue rows open the workbench; decision, create/link, submit, approve, and return actions live inside it and appear only when applicable | #278 / PR #282 |
-| 10: “impact controlled” collapses two different facts | Show the assessment conclusion separately from each linked SWCR's current state | #278 / PR #282 |
+| 9-10: downstream decisions and software change request actions belong inside the selected assessment | Queue rows open the workbench; decision, create/link, submit, approve, and return actions live inside it and appear only when applicable | #278 / PR #282 |
+| 10: “impact controlled” collapses two different facts | Show the assessment conclusion separately from each linked software change request's current state | #278 / PR #282 |
 | 11: CR author defaults to creator | Authenticated creator remains the immutable author; ownership/assignment is the later-change mechanism | Existing server-authoritative identity plus #278 verification |
 | 12: Testing Coverage lacks downstream decision depth | Verification decision drawers carry source change, exact requirements, proposed procedures, PRs, responsibility, rationale, history, return, and independent approval | #278 / PR #282 |
 | 13-16: PR fields, creation, filters, and hidden history | Deliver the agreed progressive field set, lifecycle, AND filters, Corrective Actions, closure evidence, and internal History tab | #279 / PR #283 |

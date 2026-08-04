@@ -27,9 +27,9 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
 ### Draft software change requests
 
 - Saving an empty form creates no record and consumes no identifier.
-- **Save SWCR Draft** persists incomplete, attributable work. **Save and check in** applies a controlled working
+- **Save software change request Draft** persists incomplete, attributable work. **Save and check in** applies a controlled working
   copy and closes the edit session.
-- Reopened Draft SWCRs expose every proposal action at their correct level: introduce, modify and retire HLR or
+- Reopened Draft software change requests expose every proposal action at their correct level: introduce, modify and retire HLR or
   LLR work.
 - Dirty/no-op state and asynchronous save behavior are explicit and regression tested.
 
@@ -47,14 +47,14 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
 - Requirement modification hydrates its exact current upstream trace. Already-selected historical parent
   revisions remain intelligible and navigable even if no longer active in the current baseline; new candidates
   remain scoped to the current build.
-- Source SCRs, driving PRs, requirements, procedures, executions/evidence, documents and releases use durable,
+- Source SRCRs, driving PRs, requirements, procedures, executions/evidence, documents and releases use durable,
   permission-checked links where supported. Unavailable targets say so rather than acting clickable.
 
 ### Actionable downstream assessments
 
 - Storage states are presented as HLR/LLR engineering decisions: impact pending, in progress, in review,
-  complete with no impact, complete with controlled impact, change required with SWCR pending, and superseded.
-- A refresh-safe assessment drawer shows the source SCR, full Problem/Analysis/Solution case, approved requirement
+  complete with no impact, complete with controlled impact, change required with software change request pending, and superseded.
+- A refresh-safe assessment drawer shows the source SRCR, full Problem/Analysis/Solution case, approved requirement
   changes and current downward trace, including a genuine no-trace state.
 - An engineer may record no impact, link an existing level-compatible Draft, or create the correct HLR/LLR Draft
   directly. A new Draft links automatically; a simulated link outage proves the saved Draft remains visible and
@@ -78,14 +78,14 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
 - The persistent Build 1.6 Problem Reports center exposed malformed separator, arrow and ellipsis literals in
   controlled-reference cards and related loading/action text.
 - The observation was reproduced on PR-00002.00, recorded as durable engineering artifact PR-00003.00, and
-  corrected through GitHub issue #269 / PR #270 with a focused PR-to-SCR regression.
+  corrected through GitHub issue #269 / PR #270 with a focused PR-to-SRCR regression.
 - The persistent relationship card was refreshed after the fix and rendered `Software Build (SW) · SW-01.60`
   and `Open →` correctly; PR-00003.00 remains open as realistic unfinished Build 1.6 work.
 
 ## Problem Reports and mandatory verification
 
-Problem Reports lead to corrective work; requirement changes do not automatically create PRs. Every SCR,
-SWCR and discipline-specific TCR may select one or more driving PRs. Approved changes are projected to the PR
+Problem Reports lead to corrective work; requirement changes do not automatically create PRs. Every SRCR,
+software change request and discipline-specific TCR may select one or more driving PRs. Approved changes are projected to the PR
 as corrective actions. Applicable executions/results are projected as test evidence. Connected controlled
 records are searchable and refresh-safe.
 

@@ -12,19 +12,19 @@ Entity Framework migrations under `src/AeroLink.Infrastructure/Persistence/Migra
 
 ## Bounded queries
 
-SCR and proposed-requirement list endpoints perform filtering, ordering, counting, and pagination in PostgreSQL. Page sizes are capped at 200. Dashboard counts are SQL aggregates and do not load full artifact collections.
+SRCR and proposed-requirement list endpoints perform filtering, ordering, counting, and pagination in PostgreSQL. Page sizes are capped at 200. Dashboard counts are SQL aggregates and do not load full artifact collections.
 
-Key indexes currently cover stable artifact identifiers, project plus state, project plus update time, SCR-to-requirement membership, and requirement identifiers.
+Key indexes currently cover stable artifact identifiers, project plus state, project plus update time, SRCR-to-requirement membership, and requirement identifiers.
 
 ## Concurrency
 
-SCRs carry a numeric optimistic-concurrency version. Every changed SCR advances the version. A stale concurrent write fails rather than overwriting newer work; the API translates this condition to HTTP `409 Conflict` with a refresh-and-reapply instruction.
+SRCRs carry a numeric optimistic-concurrency version. Every changed SRCR advances the version. A stale concurrent write fails rather than overwriting newer work; the API translates this condition to HTTP `409 Conflict` with a refresh-and-reapply instruction.
 
 ## Deterministic scale data
 
 `tools/AeroLink.Scale` generates synthetic, non-proprietary lifecycle data with fixed identifiers, content, timestamps, review sequences, and state distribution.
 
-| Profile | SCRs | Proposed requirement changes |
+| Profile | SRCRs | Proposed requirement changes |
 | --- | ---: | ---: |
 | `smoke` | 200 | 1,000 |
 | `small` | 1,000 | 5,000 |
@@ -54,7 +54,7 @@ The `--reset` safeguard works only when the connection string names an `aerolink
 
 Run on July 12, 2026 using local PostgreSQL 18.4:
 
-- 10,000 SCRs
+- 10,000 SRCRs
 - 50,000 proposed requirement changes
 - 92,000 audit events
 - 8,000 review cycles
@@ -68,7 +68,7 @@ Warm-query p95 observations over five samples:
 | Operation | Target | Observed p95 |
 | --- | ---: | ---: |
 | Dashboard aggregates | 2,000 ms | 4 ms |
-| First 50 SCRs | 500 ms | <1 ms |
+| First 50 SRCRs | 500 ms | <1 ms |
 | Exact requirement identifier | 300 ms | <1 ms |
 | First 50 requirements | 500 ms | <1 ms |
 

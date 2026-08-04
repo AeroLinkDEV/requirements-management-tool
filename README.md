@@ -12,7 +12,7 @@ The production-oriented application uses React/TypeScript, ASP.NET Core, Entity 
 After sign-in, users select a Project and then a Software Build. Its FMS workspace retains released version
 1.5 as immutable, read-only history and version 1.6 as an explicitly user-controlled in-work successor.
 
-Release evolution is user-controlled: authorized users plan an in-work successor (for example 1.6), approve the exact SCR/SWCR revisions they intend to include, assemble a candidate over an exact materialized predecessor baseline, complete verification and release approvals, and only then release it. The tool never auto-creates or auto-approves 1.6, 1.7, or later product baselines.
+Release evolution is user-controlled: authorized users plan an in-work successor (for example 1.6), approve the exact change request revisions they intend to include, assemble a candidate over an exact materialized predecessor baseline, complete verification and release approvals, and only then release it. The tool never auto-creates or auto-approves 1.6, 1.7, or later product baselines.
 
 ## One-click local startup
 
@@ -36,9 +36,9 @@ Operational shortcuts are also provided for [stopping AeroLink](STOP_AEROLINK.ba
 
 The first usable vertical slice is system-level:
 
-> SCR -> system requirement revisions -> review and approval -> baseline -> SYSRD -> system test procedure -> externally produced results and evidence -> traceability
+> SRCR -> system requirement revisions -> review and approval -> baseline -> SYSRD -> system test procedure -> externally produced results and evidence -> traceability
 
-This slice proved controlled change, immutable history, exact baselines, controlled document generation, verification evidence, and an end-to-end audit story. Implementation has now expanded through software HLRs, LLRs, SWCRs, typed traceability, and build-specific verification.
+This slice proved controlled change, immutable history, exact baselines, controlled document generation, verification evidence, and an end-to-end audit story. Implementation has now expanded through software HLRs, LLRs, software change requests, typed traceability, and build-specific verification.
 
 ## The application
 
@@ -62,7 +62,7 @@ demonstrations use the `FMSLIVE` dataset described in
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
 | [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-04.md) | **Current restart point.** State-aware downstream assessments with withdrawable conclusions, Problem Report editing under the universal lease, the "a procedure must be written" verification outcome, source authority by change-request type, and safe continuation |
 | [3 August handoff](CURRENT_PRODUCT_HANDOFF_2026-08-03.md) | Historical delivery record for truthful Build-scoped PR/TCR queues, persistent HLR/LLR Draft scope, evidence-first assessments, and Code/GitLab traceability |
-| [2 August handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) | Historical delivery record for Draft SWCR controls, downstream assessments, Problem Reports, Digital Thread, and Code/GitLab traceability |
+| [2 August handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) | Historical delivery record for Draft software change request controls, downstream assessments, Problem Reports, Digital Thread, and Code/GitLab traceability |
 | [Technical overview](docs/AEROLINK_TECHNICAL_OVERVIEW.md) | Two-page-oriented explanation of architecture, PostgreSQL persistence, controlled versioning, traceability, security, backup, and quality gates |
 | [August 2 afternoon observation reconciliation](docs/AUGUST_2_AFTERNOON_OBSERVATION_RECONCILIATION.md) | Line-by-line map from the observation document and follow-up decisions to delivered issues, behavior, and regression evidence |
 | [1 August handoff](CURRENT_PRODUCT_HANDOFF_2026-08-01.md) | Historical delivery record for build-scoped verification roles and live engineering workflow qualification |

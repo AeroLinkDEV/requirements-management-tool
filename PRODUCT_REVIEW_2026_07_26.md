@@ -103,7 +103,7 @@ The general rule was checked across the product rather than taken on trust. The 
 are a discussion thread and two revision sequences, where oldest-first is correct and reversing them would be
 the defect. No change made.
 
-### Only SCR-000031 on the Change Impact Review
+### Only SRCR-000031 on the Change Impact Review
 
 That page is the detail view of one change — `/release-readiness/changes/{id}`, reached from a specific row
 in readiness. Showing one change is what it is for.

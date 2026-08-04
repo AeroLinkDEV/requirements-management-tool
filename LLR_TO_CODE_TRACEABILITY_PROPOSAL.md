@@ -44,7 +44,7 @@ a later normalization if real usage requires it.
 
 ## Delivered manual workflow and later synchronization
 
-1. An SWCR is approved and its LLR revisions are selected into Build 1.6.
+1. An software change request is approved and its LLR revisions are selected into Build 1.6.
 2. A developer creates a GitLab branch and MR. The MR template contains an `AeroLink LLRs` field with controlled
    identifiers such as `LLR-000123.02`.
 3. In the delivered MVP, an authorized engineer records the merged GitLab evidence or a justified no-code
@@ -60,7 +60,7 @@ a later normalization if real usage requires it.
 
 The delivered MVP uses one release gate:
 
-> Every LLR introduced or modified by a non-deferred SWCR in this build has at least one merged code change at
+> Every LLR introduced or modified by a non-deferred software change request in this build has at least one merged code change at
 > an exact commit included in the build, or an approved `No code change required` disposition with rationale.
 
 This avoids falsely requiring code for documentation-only or data-only LLR changes while making the exception

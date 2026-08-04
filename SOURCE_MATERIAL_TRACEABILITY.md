@@ -23,7 +23,7 @@ Disposition values:
 | --- | --- | --- |
 | Web tool covering much of the system/software development-assurance V | Corrected | [PROJECT_VISION.md](PROJECT_VISION.md): lifecycle-data platform with explicit exclusions and no “complete lifecycle” claim |
 | Capture and change system requirements; generate revised system requirements document | First slice | [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md), Sections 3-5 |
-| Human review and approval of requirements and documents | Corrected/First slice | Requirement changes are reviewed within the complete SCR package; controlled documents have their own review/approval workflow |
+| Human review and approval of requirements and documents | Corrected/First slice | Requirement changes are reviewed within the complete SRCR package; controlled documents have their own review/approval workflow |
 | HLRs linked to system requirements; derived requirements; software requirements document | Delivered | Features SW-001/SW-002; exact upward allocation and controlled HLR documents are implemented |
 | LLRs linked to HLRs or derived | Delivered | Feature SW-001; LLR scope and exact HLR allocation are implemented |
 | System requirements linked to one or more system tests | First slice | Features ST-001/ST-002 and workflow Sections 6-8 |
@@ -38,20 +38,20 @@ Disposition values:
 
 | Source Intent | Disposition | Authoritative Destination |
 | --- | --- | --- |
-| SCR introduces, modifies, or deletes requirements | Corrected/First slice | “Delete” is controlled retirement; workflow Sections 3-4; DEC-007 |
-| SCR numbering and revisions | First slice | Glossary and feature SCR-001; exact syntax is OQ-002 |
-| One SCR contains multiple requirement changes | First slice | SCR definition and workflow Required SCR Content |
+| SRCR introduces, modifies, or deletes requirements | Corrected/First slice | “Delete” is controlled retirement; workflow Sections 3-4; DEC-007 |
+| SRCR numbering and revisions | First slice | Glossary and feature SRCR-001; exact syntax is OQ-002 |
+| One SRCR contains multiple requirement changes | First slice | SRCR definition and workflow Required SRCR Content |
 | Multi-person review, comments, rejection, approval | First slice | Workflow Section 3; features WF-001/WF-002 |
-| SCR targets a software/release version and may skip an upcoming version | Corrected/First slice | Release target and controlled deferral, SCR-003; Scenario 4 |
-| SCR problem, analysis, solution, plus individual changes | First slice | Workflow Required SCR Content |
-| Link PRs to SCRs | Delivered incrementally | Controlled PR selection on SCRs, approved corrective-action projection, and verification evidence are delivered; broader lifecycle policy remains later |
+| SRCR targets a software/release version and may skip an upcoming version | Corrected/First slice | Release target and controlled deferral, SRCR-003; Scenario 4 |
+| SRCR problem, analysis, solution, plus individual changes | First slice | Workflow Required SRCR Content |
+| Link PRs to SRCRs | Delivered incrementally | Controlled PR selection on SRCRs, approved corrective-action projection, and verification evidence are delivered; broader lifecycle policy remains later |
 | Globally unique requirement numbers, never reused across projects | First slice | Principle 2; feature PF-005; exact syntax OQ-002 |
 | Requirement revisions and complete history | First slice | Glossary; feature SR-002 |
 | Verification method and derived status | First slice | Feature SR-004; allowed values OQ-006 |
 | Future upward linkage to ICD or similar | Later | Scope allows upstream/interface artifacts; precise model deferred |
 | Requirement images | First slice | Workflow Section 4; feature SR-001/PF-008 |
 | SYSRD contains approved system requirements | Corrected/First slice | SYSRD contains exact approved revisions selected in an approved baseline |
-| Current baseline plus selected approved SCRs creates next SYSRD | First slice | Workflow Section 5 |
+| Current baseline plus selected approved SRCRs creates next SYSRD | First slice | Workflow Section 5 |
 | Draft SYSRD with watermark | First slice | Feature DOC-001; Scenario 5 |
 | Test case and procedure levels, but procedure-first may be preferable | Corrected/Open | DEC-009 chooses procedure-first; separate test-case need is OQ-007 |
 | Many-to-many requirement/procedure links and test reuse | First slice | Workflow Section 6; Scenario 6 |
@@ -66,7 +66,7 @@ Disposition values:
 | --- | --- | --- |
 | Reuse most system behavior for HLRs, LLRs, and tests | Delivered | HLR/LLR requirements, controlled procedures, downstream assessments, and verification workflows are build scoped |
 | Do not manage code initially | Boundary preserved | GitLab manages code; AeroLink now stores only exact approved LLR-to-merge traceability pointers under DEC-088 |
-| SWCR and SWRD | Delivered incrementally | SWCR editing/review and controlled HLR/LLR document generation are delivered; later increments may deepen document policy |
+| software change request and SWRD | Delivered incrementally | software change request editing/review and controlled HLR/LLR document generation are delivered; later increments may deepen document policy |
 | Unique HLR/LLR identities, derived status, PR links, and tests | Delivered incrementally | Features SW-001/SW-003 and PR-002; exact-revision traces and build isolation are enforced |
 | Repeated system-level material | Consolidated | Disposition is captured in the `System Level.docx` table above |
 
@@ -77,7 +77,7 @@ Disposition values:
 | PR module remains in the conversation | Delivered MVP | Features PR-001/PR-002 and DEC-085/DEC-087 |
 | PR contains description, dates, originator, type, severity, and other controlled fields | Delivered selectively | Immutable origin/date, rich description and supporting fields, target build, owner, corrective action, root cause, impact decisions, closure date, and evidence are delivered; optional classifications remain later |
 | PR lifecycle includes new, approval, in-work, closed, and rejected states | Delivered with product terminology | Draft, Ready for SCCB, Open, Implementing, Verifying, Awaiting SQA Closure, and Closed are controlled states |
-| PRs link broadly across requirements, tests, changes, and releases | Delivered incrementally | Feature PR-002; SCR/SWCR/TCR selection, corrective actions, and test evidence are implemented |
+| PRs link broadly across requirements, tests, changes, and releases | Delivered incrementally | Feature PR-002; change request/TCR selection, corrective actions, and test evidence are implemented |
 | PR-driven impact analysis is crucial | Delivered incrementally | Feature PR-002; requirement change remains downstream of a PR, not an automatic PR creator |
 
 ## `Things I dont Need Tool to do.docx`
