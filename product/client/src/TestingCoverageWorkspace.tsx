@@ -72,6 +72,32 @@ const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'Software HLR' : 'Software LLR'
 
 /**
+ * The coverage a requirement already has, shown beside the decision about it.
+ *
+ * Three answers, and they are not the same. A requirement with a confirmed procedure may only need that
+ * procedure named. One whose only procedure was written against earlier wording is the case most likely to
+ * be answered wrongly, because a reader who sees "covered" stops looking — so suspect coverage is called
+ * out as suspect and the procedure that has to be reconfirmed or replaced is named. One with nothing is
+ * where "a new procedure is required" is the honest answer.
+ *
+ * Until the target build materializes its requirements there is no revision to look coverage up against;
+ * that is stated rather than rendered as "no procedure", which would read as a finding.
+ */
+function ExistingCoverage({ item, coverage }: { item: ImpactItem; coverage?: Coverage }) {
+  if (!item.requirementRevisionId)
+    return <span className="existingCoverage pending">Existing coverage is known once this build materializes its requirements.</span>
+  const row = coverage?.items.find(x => x.revisionId === item.requirementRevisionId)
+  if (!row || !row.coveredBy.length)
+    return <span className="existingCoverage none">No approved procedure covers this requirement yet.</span>
+  const suspect = row.coveredBy.filter(x => x.coverageState === 'Suspect')
+  const confirmed = row.coveredBy.filter(x => x.coverageState === 'Confirmed')
+  return <span className={`existingCoverage ${suspect.length ? 'suspect' : 'covered'}`}>
+    {confirmed.length > 0 && <>Covered by {confirmed.map(x => `${x.displayNumber} (${x.state})`).join(', ')}. </>}
+    {suspect.length > 0 && <>{suspect.map(x => x.displayNumber).join(', ')} {suspect.length === 1 ? 'was' : 'were'} written against earlier wording and {suspect.length === 1 ? 'does' : 'do'} not count as coverage until reconfirmed or replaced.</>}
+  </span>
+}
+
+/**
  * What this build's requirements are tested by, and what still has nobody looking at it.
  *
  * Two questions are asked here and they are different. "Is this requirement covered by a procedure?" is
@@ -290,6 +316,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       body: JSON.stringify({ engineerId: user.userName }),
     })
     setSaved(`${request.displayNumber} is yours — ${items.length} decision${items.length === 1 ? '' : 's'}.`)
+    // Claiming a package is claiming its decisions, so they are what opens next. Leaving the reader on a
+    // collapsed summary makes them press a second control to reach the work they just took on.
+    setOpened(request.id)
   }, 'The package could not be assigned.')
 
   const resolve = (item: ImpactItem, form: FormData) => act(async () => {
@@ -456,16 +485,21 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         )}
         {mine.map(request => (
           <article className={`coverageRow ${request.state === 'Open' && !request.assignedEngineerId ? 'attention' : ''}`} key={request.id}>
-            <div><b>{request.displayNumber}</b><i>{request.state === 'InReview' ? 'In review' : request.state}</i></div>
-            <p>Covers {request.coveredChangeRequests.map(x => x.number).join(', ')}</p>
-            <small>
-              {request.resolvedItems} of {request.totalItems} decisions recorded
-              {request.assignedEngineerId ? <> · <PersonName userName={request.assignedEngineerId} /></> : ' · nobody has picked this up'}
-            </small>
+            {/* The package opens by pressing the package, not by pressing a button called "Decisions" that
+                sat among the real actions and read as a peer of them. A test change request is a controlled
+                record with source changes, requirements and a decision each; the row is a summary of it, so
+                the row is what expands. */}
+            <button type="button" className="packageDisclosure" aria-expanded={opened === request.id}
+              aria-label={`${opened === request.id ? 'Collapse' : 'Open'} ${request.displayNumber}`}
+              onClick={() => setOpened(current => current === request.id ? '' : request.id)}>
+              <span className="packageHead"><b>{request.displayNumber}</b><i>{request.state === 'InReview' ? 'In review' : request.state}</i></span>
+              <span className="packageCovers">Covers {request.coveredChangeRequests.map(x => x.number).join(', ')}</span>
+              <small>
+                {request.resolvedItems} of {request.totalItems} decisions recorded
+                {request.assignedEngineerId ? <> · <PersonName userName={request.assignedEngineerId} /></> : ' · nobody has picked this up'}
+              </small>
+            </button>
             <div className="coverageRowActions">
-              <button type="button" className="quiet" onClick={() => setOpened(current => current === request.id ? '' : request.id)}>
-                {opened === request.id ? 'Hide decisions' : 'Decisions'}
-              </button>
               {canTest && request.state === 'Open' && <button type="button" className="quiet" disabled={busy} onClick={() => {
                 setProblemReportIds((request.problemReports ?? []).map(report => report.id))
                 setLinkingProblemReports(request)
@@ -498,6 +532,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     <b>{item.subjectDisplayNumber}</b>
                     <i>{item.state === 'Resolved' ? (item.outcome ?? 'Resolved') : item.state}</i>
                     {item.subjectStatement&&<p>{item.subjectStatement}</p>}
+                    {/* What already tests this requirement, stated before the decision rather than after it.
+                        A verification engineer deciding whether a procedure must be written is answering a
+                        question about the library as it stands, and asking them to hold that in their head —
+                        or to leave and look it up — is how "a procedure probably exists" becomes a decision. */}
+                    {item.trigger !== 'ProcedureOrphaned' && <ExistingCoverage item={item} coverage={coverage} />}
                     <small>
                       Author declared {item.declaredVerificationMethod || 'no method'}
                       {item.assignedEngineerId ? <> · <PersonName userName={item.assignedEngineerId} /></> : ''}
