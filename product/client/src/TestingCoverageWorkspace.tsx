@@ -517,11 +517,17 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                         Pressing "New test procedure" in the library writes a procedure with no memory of why
                         it exists; starting here keeps the chain — change request, requirement, decision,
                         procedure — and the decision settles itself when that procedure is approved. */}
-                    {canTest && item.outcome === 'NewProcedureRequired' && item.requirementRevisionId && (
-                      <button type="button" disabled={busy} onClick={() => {
-                        setAuthoringFor(item.requirementRevisionId!)
-                        setCreating(true)
-                      }}>Author the procedure</button>
+                    {canTest && item.outcome === 'NewProcedureRequired' && (item.requirementRevisionId
+                      ? (
+                        <button type="button" disabled={busy} onClick={() => {
+                          setAuthoringFor(item.requirementRevisionId!)
+                          setCreating(true)
+                        }}>Author the procedure</button>
+                      )
+                      // A procedure binds to an exact approved revision, and a build that has not materialized
+                      // its requirements has none — the decision is still worth recording, so the reason the
+                      // work cannot start yet is stated rather than the action silently missing.
+                      : <span className="procedureHold">The procedure can be written once this build materializes its requirements.</span>
                     )}
                     {request.capabilities.canDecide && item.state === 'Resolved' && (
                       <button type="button" className="quiet" disabled={busy} onClick={() => setReopening(item)}>Reopen / change decision…</button>
