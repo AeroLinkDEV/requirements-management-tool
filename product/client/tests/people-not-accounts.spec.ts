@@ -118,7 +118,7 @@ test('no surface names a person by their account', async ({ page, request }) => 
   // `…/systems/change-requests`, and the record itself is `…/change-requests/{id}`.
   const releaseRoot = routes[0].replace(/\/[^/]+$/, '')
   const releaseId = releaseRoot.match(/\/releases\/([^/]+)/)?.[1]
-  const listed = await request.get(`${apiBase}/api/scrs?projectId=${projectId}&releaseId=${releaseId}&page=1&pageSize=5`)
+  const listed = await request.get(`${apiBase}/api/change-requests?projectId=${projectId}&releaseId=${releaseId}&page=1&pageSize=5`)
   expect(listed.ok(), await listed.text()).toBeTruthy()
   const body = (await listed.json()) as { items?: { id: string }[] } | { id: string }[]
   const items = Array.isArray(body) ? body : (body.items ?? [])

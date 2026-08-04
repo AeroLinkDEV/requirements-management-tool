@@ -60,13 +60,13 @@ public sealed class BuildScopedWorkspaceApiTests
         Assert.DoesNotContain("BUILD-ONE-SIX-ONLY", releasedBody);
 
         using var conflictingQuery = await client.GetAsync(
-            $"/api/scrs?projectId={seeded.ProjectId}&releaseId={seeded.InWorkId}");
+            $"/api/change-requests?projectId={seeded.ProjectId}&releaseId={seeded.InWorkId}");
         Assert.Equal(HttpStatusCode.Conflict, conflictingQuery.StatusCode);
         Assert.Contains("build_context_mismatch", await conflictingQuery.Content.ReadAsStringAsync());
 
         client.DefaultRequestHeaders.Remove("X-AeroLink-Build-Context");
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", seeded.InWorkId.ToString());
-        using var crossBuildRecord = await client.GetAsync($"/api/scrs/{seeded.ReleasedScrId}");
+        using var crossBuildRecord = await client.GetAsync($"/api/change-requests/{seeded.ReleasedScrId}");
         Assert.Equal(HttpStatusCode.Conflict, crossBuildRecord.StatusCode);
         Assert.Contains("cross_build_resource", await crossBuildRecord.Content.ReadAsStringAsync());
     }

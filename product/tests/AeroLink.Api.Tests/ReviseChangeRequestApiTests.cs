@@ -91,7 +91,7 @@ public sealed class ReviseChangeRequestApiTests
         var (scrId, _) = await SeedAsync(factory, allocate: allocated, releaseTheBuild: false);
         await SignInAsync(client);
 
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{scrId}/next-revision", new { });
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{scrId}/next-revision", new { });
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
 
@@ -121,7 +121,7 @@ public sealed class ReviseChangeRequestApiTests
         var (scrId, _) = await SeedAsync(factory, allocate: allocated, releaseTheBuild: true);
         await SignInAsync(client);
 
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{scrId}/next-revision", new { });
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{scrId}/next-revision", new { });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("released build", body);

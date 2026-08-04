@@ -28,7 +28,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
  const [query,setQuery]=useState(''),[softwareLevel,setSoftwareLevel]=useState<SoftwareLevel>(initialSoftwareLevel),[stateIntent,setStateIntent]=useState<HistoryStateIntent|undefined>(initialStateIntent),[scrPage,setScrPage]=useState(1),[scrTotal,setScrTotal]=useState(0),[scrTotalPages,setScrTotalPages]=useState(1),[scrs,setScrs]=useState<Scr[]>([]),[error,setError]=useState('')
  const activeRelease=releases.find(x=>x.id===activeReleaseId)
  const load=useCallback(async()=>{const params=new URLSearchParams({projectId,page:String(scrPage),pageSize:'50',releaseId:activeReleaseId,type:scope});if(scope==='Software')params.set('level',softwareLevel);if(stateIntent)params.set('state',stateIntent);if(query)params.set('search',query)
-  const response=await fetch(`${api}/api/history/scrs?${params}`)
+  const response=await fetch(`${api}/api/history/change-requests?${params}`)
   if(response.ok){const body=await response.json();setScrs(body.items);setScrTotal(body.totalCount);setScrTotalPages(Math.max(1,body.totalPages))}
  },[activeReleaseId,api,projectId,query,scope,scrPage,softwareLevel,stateIntent])
  useEffect(()=>{const timer=setTimeout(load,180);return()=>clearTimeout(timer)},[load])
@@ -47,7 +47,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
   if(expanded[row.baseNumber]){setExpanded(current=>{const next={...current};delete next[row.baseNumber];return next});return}
   setExpanded(current=>({...current,[row.baseNumber]:'loading'}))
   const params=new URLSearchParams({projectId,baseNumber:row.baseNumber,page:'1',pageSize:'50'})
-  const response=await fetch(`${api}/api/history/scrs?${params}`)
+  const response=await fetch(`${api}/api/history/change-requests?${params}`)
   if(!response.ok){setExpanded(current=>{const next={...current};delete next[row.baseNumber];return next});setError('The earlier revisions could not be loaded.');return}
   const body=await response.json() as {items:Scr[]}
   setExpanded(current=>({...current,[row.baseNumber]:body.items.filter(x=>x.revision<row.revision).sort((a,b)=>b.revision-a.revision)}))

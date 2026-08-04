@@ -9,6 +9,7 @@ import type {
   RequirementLevel,
 } from "./ControlledRequirementEditor";
 import { RichCaseField } from "./RichContent";
+import { changeRequestAcronym } from "./presentation";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useLocalDraft } from "./autosave";
 import { fromPlainText, toPlainText } from "./richContentModel";
@@ -122,7 +123,7 @@ export default function ScrEditor({
   onCancel,
   onSaved,
 }: Props) {
-  const abbreviation = scope === "System" ? "SCR" : "SWCR";
+  const abbreviation = changeRequestAcronym(scope === "System" ? "System" : softwareLevel ?? "HighLevel");
   const defaultLevel: RequirementLevel = scope === "System" ? "System" : softwareLevel ?? "HighLevel";
   const softwareLevelLabel = defaultLevel === "LowLevel" ? "LLR" : "HLR";
   const storageKey = `aerolink:new-${scope.toLowerCase()}-${scope === "Software" ? softwareLevelLabel.toLowerCase() : "system"}-change:${projectId}:${releaseId}`;
@@ -169,7 +170,9 @@ export default function ScrEditor({
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${api}/api/authoring/context?projectId=${projectId}&type=${scope}`)
+    // The number preview depends on the level: a software change request is an HLRCR or an LLRCR, and the
+    // two are numbered apart, so the server cannot answer without being told which workspace is asking.
+    fetch(`${api}/api/authoring/context?projectId=${projectId}&type=${scope}${scope === "System" ? "" : `&softwareLevel=${softwareLevel ?? "HighLevel"}`}`)
       .then(async (response) => {
         if (!response.ok) {
           const body = (await response.json()) as { error?: string };
@@ -406,6 +409,7 @@ export default function ScrEditor({
         projectId={projectId}
         releaseId={releaseId}
         scope={scope}
+        softwareLevel={softwareLevel}
         onCreated={(id) => {
           draft.clear();
           onSaved(id, "The change request");

@@ -177,7 +177,7 @@ test('a deep link reloads, because the server falls back to the client', async (
 test('typed change-request URLs preserve System and Software navigation context', async ({ page, request }) => {
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
-  const response = await request.get(`/api/scrs?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}&pageSize=200`)
+  const response = await request.get(`/api/change-requests?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}&pageSize=200`)
   expect(response.ok(), await response.text()).toBeTruthy()
   const records = (await response.json()).items as { id: string; type: 'System' | 'Software' }[]
   const system = records.find(item => item.type === 'System')
@@ -229,12 +229,12 @@ test('the first protected production mutation after deep-linked sign-in creates 
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 
   await apiLogin(request)
-  const list = await request.get(`/api/scrs?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)
+  const list = await request.get(`/api/change-requests?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)
   expect(list.ok(), await list.text()).toBeTruthy()
   const body = await list.json()
   const persisted = body.items.find((item: { title: string }) => item.title === title)
   expect(persisted, 'the success view must correspond to a durable server record').toBeTruthy()
-  const detail = await request.get(`/api/scrs/${persisted.id}`)
+  const detail = await request.get(`/api/change-requests/${persisted.id}`)
   expect(detail.ok(), await detail.text()).toBeTruthy()
   expect(await detail.json()).toEqual(expect.objectContaining({
     title,

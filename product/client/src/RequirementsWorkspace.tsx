@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PersonName } from "./People";
-import { coverageLabel, stateLabel } from './presentation'
+import { artifactAcronym, coverageLabel, stateLabel } from './presentation'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import type { FormEvent } from "react";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
@@ -825,14 +825,14 @@ export default function RequirementsWorkspace({
             />
           </label>
           <label>
-            Source SCR/SWCR
+            Source change request
             <input
               value={sourceScr}
               onChange={(e) => {
                 setSourceScr(e.target.value);
                 setPage(1);
               }}
-              placeholder="SCR number or title"
+              placeholder="Change request number or title"
             />
           </label>
           <label>
@@ -1199,7 +1199,7 @@ export default function RequirementsWorkspace({
               <div className="inspectorBody">
                 {release?.isReleased
                   ? <p className="changeBoundaryNote"><b>Read-only historical record — Build {release.version}</b><br/>Exit this workspace and select an in-work build to propose a change.</p>
-                  : <><button className="impactLaunch" onClick={() => onProposeChange(selected.id, selected.level)}>Propose controlled change →</button><p className="changeBoundaryNote">Opens a new Draft SCR/SWCR in Changes. This authoritative revision remains unchanged.</p></>}
+                  : <><button className="impactLaunch" onClick={() => onProposeChange(selected.id, selected.level)}>Propose controlled change →</button><p className="changeBoundaryNote">Opens a new Draft change request in Changes. This authoritative revision remains unchanged.</p></>}
                 <h3>Requirement statement</h3>
                 <div className="richRequirement">{selected.statement}</div>
                 <dl>
@@ -1214,12 +1214,11 @@ export default function RequirementsWorkspace({
                   <div>
                     <dt>Source authority</dt>
                     <dd>
-                      {/* Named after the record it opens, not after the page it is on. HLR and LLR changes
-                          only ever come from an SWCR, so a fixed "Open SCR" was wrong every time this
-                          appeared on a software requirement. The controlled identifier already says which
-                          kind of change request it is, so the label follows it rather than the workspace. */}
+                      {/* Named after the record it opens, not after the page it is on. The controlled
+                          identifier already says which kind of change request it is — SRCR, HLRCR or
+                          LLRCR — so the label reads it off rather than guessing from the workspace. */}
                       <button onClick={() => onOpenScr(selected.sourceScrId)}>
-                        Open {selected.sourceScr?.startsWith("SWCR") ? "SWCR" : "SCR"} →
+                        Open {artifactAcronym(selected.sourceScr, "changeRequest")} →
                       </button>
                     </dd>
                   </div>

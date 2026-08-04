@@ -36,7 +36,7 @@ public sealed class SoftwareChangeRequestLevelHistoryTests
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var draft = await created.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("LowLevel", draft.GetProperty("softwareLevel").GetString());
-        var low = await client.GetFromJsonAsync<JsonElement>($"/api/history/scrs?projectId={projectId}&releaseId={releaseId}&type=Software&level=LowLevel&page=1&pageSize=50");
+        var low = await client.GetFromJsonAsync<JsonElement>($"/api/history/change-requests?projectId={projectId}&releaseId={releaseId}&type=Software&level=LowLevel&page=1&pageSize=50");
         Assert.Contains(low.GetProperty("items").EnumerateArray(), item => item.GetProperty("id").GetGuid() == draft.GetProperty("id").GetGuid());
     }
 
@@ -84,7 +84,7 @@ public sealed class SoftwareChangeRequestLevelHistoryTests
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
 
         using var high = await ReadAsync(client,
-            $"/api/history/scrs?projectId={projectId}&releaseId={releaseId}&type=Software&level=HighLevel&page=1&pageSize=50");
+            $"/api/history/change-requests?projectId={projectId}&releaseId={releaseId}&type=Software&level=HighLevel&page=1&pageSize=50");
         Assert.Equal(["SWCR-00001.00", "SWCR-00003.00", "SWCR-00004.00"], Numbers(high));
         var mixedHigh = high.RootElement.GetProperty("items").EnumerateArray()
             .Single(item => item.GetProperty("displayNumber").GetString() == "SWCR-00003.00");
@@ -92,11 +92,11 @@ public sealed class SoftwareChangeRequestLevelHistoryTests
         Assert.True(mixedHigh.GetProperty("hasLowLevelChanges").GetBoolean());
 
         using var low = await ReadAsync(client,
-            $"/api/history/scrs?projectId={projectId}&releaseId={releaseId}&type=Software&level=LowLevel&page=1&pageSize=50");
+            $"/api/history/change-requests?projectId={projectId}&releaseId={releaseId}&type=Software&level=LowLevel&page=1&pageSize=50");
         Assert.Equal(["SWCR-00002.00", "SWCR-00003.00", "SWCR-00005.00"], Numbers(low));
 
         using var systems = await ReadAsync(client,
-            $"/api/history/scrs?projectId={projectId}&releaseId={releaseId}&type=System&page=1&pageSize=50");
+            $"/api/history/change-requests?projectId={projectId}&releaseId={releaseId}&type=System&page=1&pageSize=50");
         Assert.Equal(["SCR-00001.00"], Numbers(systems));
     }
 

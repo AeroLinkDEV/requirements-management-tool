@@ -109,7 +109,7 @@ public sealed class ProgramRoleAuthorityApiTests
         await LoginAsync(client, user);
 
         // Reads everything: membership alone is what grants that, and these roles are members.
-        using var read = await client.GetAsync($"/api/scrs?projectId={fixture.ProjectId}");
+        using var read = await client.GetAsync($"/api/change-requests?projectId={fixture.ProjectId}");
         Assert.True(read.IsSuccessStatusCode, $"{(int)read.StatusCode}: {await read.Content.ReadAsStringAsync()}");
 
         // And holds no authority over engineering content, which is the whole point of an oversight role.

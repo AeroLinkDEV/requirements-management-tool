@@ -93,7 +93,7 @@ export default function LifecycleDecisionRoom({ api, projectId, activeReleaseId,
     if (screen !== "impact" || !effectiveScrId) return;
     let cancelled = false;
     (async () => {
-      const response = await fetch(`${api}/api/scrs/${effectiveScrId}`);
+      const response = await fetch(`${api}/api/change-requests/${effectiveScrId}`);
       if (!response.ok) { setError("The selected controlled change could not be loaded."); return; }
       const nextScr: ScrDetail = await response.json();
       const nextAffected = await Promise.all(nextScr.requirementChanges.map(async (change): Promise<AffectedRequirement> => {
@@ -236,7 +236,7 @@ function Node({ tone, title, subtitle }: { tone: string; title: string; subtitle
 function DecisionView({ detail, comparison, documents, blockers, decision, onDecision, onBack, onRecord, onOpenDocuments, openGate }: { detail: CampaignDetail; comparison?: Comparison; documents: DocumentRecord[]; blockers: Gate[]; decision: "Approve" | "Approve with conditions" | "Return for rework"; onDecision: (decision: "Approve" | "Approve with conditions" | "Return for rework") => void; onBack: () => void; onRecord: () => void; onOpenDocuments: () => void; openGate: (gate: Gate) => void }) {
   const checklist = [
     ["Requirements baseline", detail.requirementsHash ? "Exact revisions · Complete" : "Materialization required", "baseline"],
-    ["Selected changes", `${countLabel(detail.changes.filter((item) => item.included).length, "approved SCR")} · ${detail.changes.some((item) => item.included) ? "Complete" : "Attention"}`, "change_control"],
+    ["Selected changes", `${countLabel(detail.changes.filter((item) => item.included).length, "approved change request")} · ${detail.changes.some((item) => item.included) ? "Complete" : "Attention"}`, "change_control"],
     ["Traceability", detail.readiness.gates.find((item) => item.code === "traceability")?.detail ?? "Trace evidence current", "traceability"],
     ["Verification results", detail.readiness.gates.find((item) => item.code === "verification")?.detail ?? "Results current", "verification"],
     ["Controlled documents", detail.readiness.gates.find((item) => item.code === "documents")?.detail ?? "Outputs generated", "documents"],

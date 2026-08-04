@@ -151,7 +151,7 @@ public sealed class ChangeAuthoringInvariantApiTests
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var draft = JsonSerializer.Deserialize<JsonElement>(await created.Content.ReadAsStringAsync());
 
-        using var submitted = await client.PostAsJsonAsync($"/api/scrs/{draft.GetProperty("id").GetGuid()}/submit",
+        using var submitted = await client.PostAsJsonAsync($"/api/change-requests/{draft.GetProperty("id").GetGuid()}/submit",
             new { actorId = "invariant.author", expectedVersion = draft.GetProperty("version").GetInt64(), mode = "Sequential",
                 approvers = new[] { new { userId = "invariant.reviewer", name = "Caller supplied name" } } });
         Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);

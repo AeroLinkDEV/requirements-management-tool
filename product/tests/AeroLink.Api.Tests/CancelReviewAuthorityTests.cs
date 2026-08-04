@@ -76,7 +76,7 @@ public sealed class CancelReviewAuthorityTests
         var scenario = await SeedAsync(factory);
         await SignInAsync(client, userName);
 
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{scenario.ScrId}/cancel-review", new { reason = Reason });
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{scenario.ScrId}/cancel-review", new { reason = Reason });
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
         Assert.Contains("\"state\":\"Draft\"", body);
@@ -90,7 +90,7 @@ public sealed class CancelReviewAuthorityTests
         var scenario = await SeedAsync(factory);
         await SignInAsync(client, "cancel.bystander");
 
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{scenario.ScrId}/cancel-review", new { reason = Reason });
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{scenario.ScrId}/cancel-review", new { reason = Reason });
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
@@ -102,7 +102,7 @@ public sealed class CancelReviewAuthorityTests
         var scenario = await SeedAsync(factory);
         await SignInAsync(client, "cancel.author");
 
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{scenario.ScrId}/cancel-review", new { reason = "  " });
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{scenario.ScrId}/cancel-review", new { reason = "  " });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("why", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
     }
@@ -119,7 +119,7 @@ public sealed class CancelReviewAuthorityTests
         var scenario = await SeedAsync(factory);
         await SignInAsync(client, "cancel.author");
 
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{scenario.ScrId}/cancel-review",
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{scenario.ScrId}/cancel-review",
             new { reason = Reason, expectedVersion = 9_999L });
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Contains("stale_version", await response.Content.ReadAsStringAsync());

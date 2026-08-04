@@ -57,7 +57,7 @@ public sealed class DeferredCarryForwardApiTests
         await SignInAsync(client);
 
         var successor = await client.GetFromJsonAsync<JsonElement>(
-            $"/api/scrs?projectId={seeded.ProjectId}&releaseId={seeded.SuccessorId}");
+            $"/api/change-requests?projectId={seeded.ProjectId}&releaseId={seeded.SuccessorId}");
         var listed = successor.GetProperty("items").EnumerateArray().ToList();
 
         // The shelved one travels; work still live in the predecessor does not.
@@ -71,7 +71,7 @@ public sealed class DeferredCarryForwardApiTests
 
         // And the build that shelved it still lists it, unchanged.
         var origin = await client.GetFromJsonAsync<JsonElement>(
-            $"/api/scrs?projectId={seeded.ProjectId}&releaseId={seeded.CurrentId}");
+            $"/api/change-requests?projectId={seeded.ProjectId}&releaseId={seeded.CurrentId}");
         Assert.Contains(origin.GetProperty("items").EnumerateArray(),
             x => x.GetProperty("title").GetString() == "SHELVED-IN-ONE-SIX oceanic sequencing");
     }
@@ -85,7 +85,7 @@ public sealed class DeferredCarryForwardApiTests
         await SignInAsync(client);
 
         using var reinstated = await client.PostAsJsonAsync(
-            $"/api/scrs/{seeded.DeferredId}/reinstate", new { intoReleaseId = seeded.SuccessorId });
+            $"/api/change-requests/{seeded.DeferredId}/reinstate", new { intoReleaseId = seeded.SuccessorId });
         var body = await reinstated.Content.ReadAsStringAsync();
         Assert.True(reinstated.StatusCode == HttpStatusCode.OK, $"Expected OK, got {(int)reinstated.StatusCode}: {body}");
 
@@ -98,7 +98,7 @@ public sealed class DeferredCarryForwardApiTests
 
         // One record, not a copy: the build that shelved it no longer lists it, because it moved.
         var origin = await client.GetFromJsonAsync<JsonElement>(
-            $"/api/scrs?projectId={seeded.ProjectId}&releaseId={seeded.CurrentId}");
+            $"/api/change-requests?projectId={seeded.ProjectId}&releaseId={seeded.CurrentId}");
         Assert.DoesNotContain(origin.GetProperty("items").EnumerateArray(),
             x => x.GetProperty("title").GetString() == "SHELVED-IN-ONE-SIX oceanic sequencing");
     }
@@ -112,7 +112,7 @@ public sealed class DeferredCarryForwardApiTests
         await SignInAsync(client);
 
         using var refused = await client.PostAsJsonAsync(
-            $"/api/scrs/{seeded.DeferredId}/reinstate", new { intoReleaseId = seeded.ReleasedId });
+            $"/api/change-requests/{seeded.DeferredId}/reinstate", new { intoReleaseId = seeded.ReleasedId });
 
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
         Assert.Contains("released_build_read_only", await refused.Content.ReadAsStringAsync());
@@ -133,7 +133,7 @@ public sealed class DeferredCarryForwardApiTests
         var seeded = await SeedAsync(factory);
         await SignInAsync(client);
 
-        using var reinstated = await client.PostAsJsonAsync($"/api/scrs/{seeded.DeferredId}/reinstate", new { });
+        using var reinstated = await client.PostAsJsonAsync($"/api/change-requests/{seeded.DeferredId}/reinstate", new { });
         Assert.Equal(HttpStatusCode.OK, reinstated.StatusCode);
 
         using var scope = factory.Services.CreateScope();

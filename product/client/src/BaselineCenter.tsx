@@ -217,7 +217,7 @@ export default function BaselineCenter({
           </p>
           <h1>Candidate Baselines</h1>
           <p>
-            Assemble exact Approved SCR revisions into an immutable release
+            Assemble exact Approved change request revisions into an immutable release
             manifest.
           </p>
         </div>
@@ -339,7 +339,7 @@ export default function BaselineCenter({
                 </div>
                 <p>{item.name}</p>
                 <small>
-                  {item.selectionCount} exact SCR revision
+                  {item.selectionCount} exact change request revision
                   {item.selectionCount === 1 ? "" : "s"}
                 </small>
               </button>
@@ -379,7 +379,7 @@ export default function BaselineCenter({
                   <div className="manifestStats">
                     <div>
                       <b>{detail.selections.length}</b>
-                      <span>SCR revisions</span>
+                      <span>change request revisions</span>
                     </div>
                     <div>
                       <b>{allRequirements.length}</b>
@@ -411,7 +411,7 @@ export default function BaselineCenter({
                     <span>SHA-256 CONTENT HASH</span>
                     <code>{detail.contentHash}</code>
                     <p>
-                      This hash identifies the exact ordered set of selected SCR
+                      This hash identifies the exact ordered set of selected change request
                       revisions.
                     </p>
                   </div>
@@ -454,7 +454,7 @@ export default function BaselineCenter({
                     <section className="baselineCard">
                       <div className="baselineCardTitle">
                         <div>
-                          <h3>Selected SCR revisions</h3>
+                          <h3>Selected change request revisions</h3>
                           <p>Exact approved inputs to this candidate</p>
                         </div>
                       </div>
@@ -480,7 +480,7 @@ export default function BaselineCenter({
                       ))}
                       {!detail.selections.length && (
                         <div className="baselineEmpty">
-                          Select at least one eligible Approved SCR.
+                          Select at least one eligible approved change request.
                         </div>
                       )}
                     </section>
@@ -489,7 +489,7 @@ export default function BaselineCenter({
                         <div>
                           <h3>Derived requirement-revision set</h3>
                           <p>
-                            Proposed changes carried by the exact selected SCR
+                            Proposed changes carried by the exact selected change request
                             revisions
                           </p>
                         </div>
@@ -514,7 +514,7 @@ export default function BaselineCenter({
                       ))}
                       {!allRequirements.length && (
                         <div className="baselineEmpty">
-                          Requirement changes will appear as SCRs are selected.
+                          Requirement changes will appear as change requests are selected.
                         </div>
                       )}
                     </section>
@@ -524,7 +524,7 @@ export default function BaselineCenter({
                       <section className="baselineCard">
                         <div className="baselineCardTitle">
                           <div>
-                            <h3>Eligible Approved SCRs</h3>
+                            <h3>Eligible approved change requests</h3>
                             <p>Same project and target release only</p>
                           </div>
                         </div>
@@ -549,7 +549,7 @@ export default function BaselineCenter({
                         ))}
                         {!eligible.length && (
                           <div className="baselineEmpty">
-                            No additional Approved SCRs are eligible.
+                            No additional approved change requests are eligible.
                           </div>
                         )}
                       </section>

@@ -97,7 +97,7 @@ public sealed class AuthoredSectionTests
         await SignInAsync(client);
 
         var draft = await CreateDraftAsync(client, Body(projectId, releaseId, "Introduce", null));
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{draft.Id}/submit", new
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{draft.Id}/submit", new
         {
             expectedVersion = draft.Version,
             mode = "Sequential",
@@ -120,7 +120,7 @@ public sealed class AuthoredSectionTests
         await SignInAsync(client);
 
         var draft = await CreateDraftAsync(client, Body(projectId, releaseId, "Introduce", sectionId));
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{draft.Id}/submit", new
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{draft.Id}/submit", new
         {
             expectedVersion = draft.Version,
             mode = "Sequential",

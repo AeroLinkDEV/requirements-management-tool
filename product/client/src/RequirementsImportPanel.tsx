@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import "./RequirementsImportPanel.css";
+import { changeRequestAcronym } from "./presentation";
 
 type ImportRow = {
   rowNumber: number;
@@ -26,15 +27,19 @@ type Props = {
   projectId: string;
   releaseId: string;
   scope: "System" | "Software";
+  /** Which software workspace is importing. A software import creates an HLRCR or an LLRCR, so the
+   * level is part of the request rather than something the server could infer afterwards. */
+  softwareLevel?: "HighLevel" | "LowLevel";
   onCreated: (changeRequestId: string) => void;
 };
 
-export default function RequirementsImportPanel({ api, projectId, releaseId, scope, onCreated }: Props) {
+export default function RequirementsImportPanel({ api, projectId, releaseId, scope, softwareLevel, onCreated }: Props) {
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<ImportPreview>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const abbreviation = scope === "System" ? "SCR" : "SWCR";
+  const level = scope === "System" ? "System" : softwareLevel ?? "HighLevel";
+  const abbreviation = changeRequestAcronym(level);
 
   const close = () => {
     setOpen(false);
@@ -71,6 +76,7 @@ export default function RequirementsImportPanel({ api, projectId, releaseId, sco
       body: JSON.stringify({
         targetReleaseId: releaseId,
         type: scope,
+        softwareLevel: scope === "System" ? null : level,
         title: form.get("title"),
         problem: form.get("problem"),
         analysis: form.get("analysis"),

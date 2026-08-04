@@ -33,7 +33,7 @@ test('software proposals govern exact build-scoped upward allocations and derive
     problem: 'Prospective allocation must be controlled.', analysis: 'Client-only filtering is not sufficient.',
     solution: 'Store and review exact upstream revision identities.', requirementChanges,
   } })
-  const submit = (id: string, version: number) => request.post(`${apiBase}/api/scrs/${id}/submit`, { data: {
+  const submit = (id: string, version: number) => request.post(`${apiBase}/api/change-requests/${id}/submit`, { data: {
     expectedVersion: version, mode: 'Sequential', approvers: [{ userId: 'systems.reviewer', name: 'Systems Reviewer' }],
   } })
 

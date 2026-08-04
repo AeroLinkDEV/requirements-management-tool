@@ -37,7 +37,7 @@ test('unfinished authoring survives a reload, is offered rather than applied, an
 
   // Nothing was submitted. A draft must never become part of the record on its own.
   const before = await page.request.get(
-    `${apiBase}/api/scrs?projectId=${workspace.project.id}&page=1&pageSize=50`)
+    `${apiBase}/api/change-requests?projectId=${workspace.project.id}&page=1&pageSize=50`)
   expect(JSON.stringify(await before.json())).not.toContain(title)
 
   await page.reload()

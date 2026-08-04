@@ -185,7 +185,7 @@ public sealed class LiveTestRegressionApiTests
 
         using var client = factory.CreateClient();
         await LoginAsync(client, "audit.reader");
-        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/scrs/{scrId}");
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/change-requests/{scrId}");
         var added = detail.GetProperty("audit").EnumerateArray()
             .Single(x => x.GetProperty("eventType").GetString() == "RequirementChangeAdded");
         Assert.Contains("SYSR-000001.00", added.GetProperty("detail").GetString());

@@ -36,7 +36,7 @@ export default function ScrJiraLink({
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const response = await fetch(`${api}/api/scrs/${scrId}/jira`);
+    const response = await fetch(`${api}/api/change-requests/${scrId}/jira`);
     if (!response.ok) return;
     const body = (await response.json()) as { configured: boolean; link: Link | null };
     setConfigured(body.configured);
@@ -54,7 +54,7 @@ export default function ScrJiraLink({
   const push = async () => {
     setBusy(true);
     setError("");
-    const response = await fetch(`${api}/api/scrs/${scrId}/jira`, { method: "POST" });
+    const response = await fetch(`${api}/api/change-requests/${scrId}/jira`, { method: "POST" });
     setBusy(false);
     if (!response.ok) {
       const detail = (await response.json().catch(() => ({}))) as { error?: string };

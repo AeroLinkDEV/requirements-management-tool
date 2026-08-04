@@ -30,7 +30,7 @@ public sealed class AdministratorChangeRequestApiTests
         {
             await LoginAsync(unrelated, "unrelated.engineer");
             using var rejectedDefer = await unrelated.PostAsJsonAsync(
-                $"/api/scrs/{scenario.ReadyId}/defer",
+                $"/api/change-requests/{scenario.ReadyId}/defer",
                 new { reason = "Spoofed author action.", actorId = "change.author" });
             Assert.Equal(HttpStatusCode.Forbidden, rejectedDefer.StatusCode);
             using var rejectedCheckout = await unrelated.PostAsJsonAsync(
@@ -43,7 +43,7 @@ public sealed class AdministratorChangeRequestApiTests
         {
             await LoginAsync(wrongProject, "other.program.engineer");
             using var rejected = await wrongProject.PostAsJsonAsync(
-                $"/api/scrs/{scenario.ReadyId}/defer",
+                $"/api/change-requests/{scenario.ReadyId}/defer",
                 new { reason = "No access to the governed project." });
             Assert.Equal(HttpStatusCode.Forbidden, rejected.StatusCode);
         }
@@ -52,11 +52,11 @@ public sealed class AdministratorChangeRequestApiTests
         {
             await LoginAsync(author, "change.author");
             using var authorDefer = await author.PostAsJsonAsync(
-                $"/api/scrs/{scenario.AddRequirementId}/defer",
+                $"/api/change-requests/{scenario.AddRequirementId}/defer",
                 new { reason = "Author-owned lifecycle action." });
             Assert.Equal(HttpStatusCode.OK, authorDefer.StatusCode);
             using var authorReinstate = await author.PostAsync(
-                $"/api/scrs/{scenario.AddRequirementId}/reinstate", null);
+                $"/api/change-requests/{scenario.AddRequirementId}/reinstate", null);
             Assert.Equal(HttpStatusCode.OK, authorReinstate.StatusCode);
         }
 
@@ -93,7 +93,7 @@ public sealed class AdministratorChangeRequestApiTests
             $"{(int)attachment.StatusCode}: {attachmentBody}");
 
         using var readiness = await administrator.PostAsJsonAsync(
-            $"/api/scrs/{scenario.AddRequirementId}/requirements", new
+            $"/api/change-requests/{scenario.AddRequirementId}/requirements", new
             {
                 baseNumber = type == ChangeRequestType.System ? "SYSR-00000902" : "HLR-00000902",
                 revision = 0,
@@ -106,7 +106,7 @@ public sealed class AdministratorChangeRequestApiTests
             });
         Assert.Equal(HttpStatusCode.OK, readiness.StatusCode);
 
-        using var submit = await administrator.PostAsJsonAsync($"/api/scrs/{scenario.ReadyId}/submit",
+        using var submit = await administrator.PostAsJsonAsync($"/api/change-requests/{scenario.ReadyId}/submit",
             new
             {
                 expectedVersion = (long?)null,
@@ -125,15 +125,15 @@ public sealed class AdministratorChangeRequestApiTests
             "/api/enterprise-hardening/attachments", immutableAttachment);
         Assert.Equal(HttpStatusCode.Conflict, rejectedAttachment.StatusCode);
 
-        using var defer = await administrator.PostAsJsonAsync($"/api/scrs/{scenario.ReadyId}/defer",
+        using var defer = await administrator.PostAsJsonAsync($"/api/change-requests/{scenario.ReadyId}/defer",
             new { reason = "Program authority paused the governed package." });
         Assert.Equal(HttpStatusCode.OK, defer.StatusCode);
         using var reinstate = await administrator.PostAsync(
-            $"/api/scrs/{scenario.ReadyId}/reinstate", null);
+            $"/api/change-requests/{scenario.ReadyId}/reinstate", null);
         Assert.Equal(HttpStatusCode.OK, reinstate.StatusCode);
 
         using var revise = await administrator.PostAsJsonAsync(
-            $"/api/scrs/{scenario.ApprovedId}/next-revision", new { actorId = "change.author" });
+            $"/api/change-requests/{scenario.ApprovedId}/next-revision", new { actorId = "change.author" });
         Assert.Equal(HttpStatusCode.Created, revise.StatusCode);
         var next = await revise.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("change.author", next.GetProperty("authorId").GetString());
@@ -141,7 +141,7 @@ public sealed class AdministratorChangeRequestApiTests
             item => item.GetProperty("actorId").GetString() == "admin");
 
         using var invalidLifecycle = await administrator.PostAsJsonAsync(
-            $"/api/scrs/{scenario.AddRequirementId}/next-revision", new { });
+            $"/api/change-requests/{scenario.AddRequirementId}/next-revision", new { });
         Assert.Equal(HttpStatusCode.BadRequest, invalidLifecycle.StatusCode);
 
         using var verificationScope = factory.Services.CreateScope();

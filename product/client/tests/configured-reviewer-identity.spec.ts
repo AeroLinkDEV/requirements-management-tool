@@ -35,7 +35,7 @@ test('configured reviewer identity remains canonical from assignment through sig
   } })
   expect(draftResponse.ok(), await draftResponse.text()).toBeTruthy()
   const draft = await draftResponse.json()
-  const submitResponse = await request.post(`${apiBase}/api/scrs/${draft.id}/submit`, { data: {
+  const submitResponse = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
     expectedVersion: draft.version,
     mode: 'Sequential',
     approvers: [{ userId: 'systems.reviewer', name: 'Caller supplied name is ignored' }],

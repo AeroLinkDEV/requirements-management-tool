@@ -40,7 +40,7 @@ test('a review cycle names the person waiting, their role, and whose turn it is'
       await firstSectionId(request, showcase.projectId)) })
   expect(created.ok(), await created.text()).toBeTruthy()
   const draft = await created.json()
-  const submitted = await request.post(`${apiBase}/api/scrs/${draft.id}/submit`, { data: {
+  const submitted = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
     expectedVersion: draft.version,
     mode: 'Sequential',
     approvers: [{ userId: 'lead.reviewer', name: 'Maya Patel' }, { userId: 'manager.reviewer', name: 'Olivia Chen' }],

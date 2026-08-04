@@ -52,11 +52,11 @@ test('modified requirement coverage stays suspect until an exact approved proced
   } })
   expect(draftResponse.ok(), await draftResponse.text()).toBeTruthy()
   const draft = await draftResponse.json()
-  const submitted = await request.post(`${apiBase}/api/scrs/${draft.id}/submit`, {
+  const submitted = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, {
     data: { approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }] },
   })
   expect(submitted.ok(), await submitted.text()).toBeTruthy()
-  const approved = await request.post(`${apiBase}/api/scrs/${draft.id}/approve`, {
+  const approved = await request.post(`${apiBase}/api/change-requests/${draft.id}/approve`, {
     data: { password: 'AeroLink!2026', meaning: 'Approved for suspect-coverage journey verification.' },
   })
   expect(approved.ok(), await approved.text()).toBeTruthy()

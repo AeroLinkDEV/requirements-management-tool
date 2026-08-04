@@ -32,7 +32,7 @@ test('an author stops a review they should not have started, and the history say
   } })
   expect(created.ok(), await created.text()).toBeTruthy()
   const draft = await created.json()
-  const submitted = await request.post(`${apiBase}/api/scrs/${draft.id}/submit`, { data: {
+  const submitted = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
     expectedVersion: draft.version,
     mode: 'Sequential',
     approvers: [{ userId: 'lead.reviewer', name: 'Maya Patel' }],
@@ -92,7 +92,7 @@ test('somebody with no part in a review is not offered the control', async ({ pa
     }],
   } })
   const draft = await created.json()
-  await request.post(`${apiBase}/api/scrs/${draft.id}/submit`, { data: {
+  await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
     expectedVersion: draft.version,
     mode: 'Sequential',
     approvers: [{ userId: 'lead.reviewer', name: 'Maya Patel' }],

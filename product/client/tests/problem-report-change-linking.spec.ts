@@ -52,7 +52,7 @@ test('a PR drives an SCR and can be added to a System TCR through the active cen
   await page.getByRole('button', { name: 'Discard checkout' }).click()
   await expect(page.getByRole('button', { name: 'Check out & edit' })).toBeVisible()
 
-  const change = await (await page.request.get(`${apiBase}/api/scrs/${changeRequestId}`)).json()
+  const change = await (await page.request.get(`${apiBase}/api/change-requests/${changeRequestId}`)).json()
   for (const controlledNumber of [change.displayNumber, report.displayNumber]) {
     await page.getByRole('button', { name: /Search & navigate/ }).click()
     const palette = page.getByRole('dialog', { name: 'Quick navigation' })

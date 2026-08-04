@@ -64,7 +64,7 @@ public sealed class RestartReviewApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "author.user");
 
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{fixture.ScrId}/restart-review",
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
             new { reason = "Routed to the wrong discipline approver.", approvers = new[] { new { userId = "right.user" } } });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -94,7 +94,7 @@ public sealed class RestartReviewApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "wrong.user");
 
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{fixture.ScrId}/restart-review",
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
             new { reason = "I would rather someone else reviewed this.", approvers = new[] { new { userId = "right.user" } } });
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
@@ -107,11 +107,11 @@ public sealed class RestartReviewApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "author.user");
 
-        using var noReason = await client.PostAsJsonAsync($"/api/scrs/{fixture.ScrId}/restart-review",
+        using var noReason = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
             new { reason = "  ", approvers = new[] { new { userId = "right.user" } } });
         Assert.Equal(HttpStatusCode.BadRequest, noReason.StatusCode);
 
-        using var unknownApprover = await client.PostAsJsonAsync($"/api/scrs/{fixture.ScrId}/restart-review",
+        using var unknownApprover = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
             new { reason = "Routed to the wrong discipline approver.", approvers = new[] { new { userId = "nobody.here" } } });
         Assert.Equal(HttpStatusCode.BadRequest, unknownApprover.StatusCode);
     }
