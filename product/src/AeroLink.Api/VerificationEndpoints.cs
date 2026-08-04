@@ -531,6 +531,33 @@ public static class VerificationEndpoints
                 var now = DateTimeOffset.UtcNow;
                 db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "TestProcedureRevision", revision.Id, $"{procedure.BaseNumber}.{revision.Revision:D2}", "Approve", request.Meaning, contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
                 db.UserNotifications.Add(new(procedure.ProjectId, revision.AuthorId, "ProcedureApproved", $"Procedure {procedure.BaseNumber}.{revision.Revision:D2} approved", $"{actor.DisplayName} approved the controlled procedure revision for execution.", "verification", procedure.Id, now));
+
+                // A decision that asked for this procedure settles itself now that it exists and is approved.
+                //
+                // Otherwise the engineer answers the same item twice: once to say a procedure must be written,
+                // and again afterwards to say the procedure covers the requirement — a second answer carrying
+                // no judgement the first did not. Only items awaiting a new procedure for one of the exact
+                // requirement revisions this procedure covers are advanced, so nothing else is quietly turned
+                // into coverage.
+                if (requirementRevisionIds.Count > 0)
+                {
+                    var awaiting = await db.VerificationImpactItems
+                        .Where(x => x.ProjectId == procedure.ProjectId
+                            && x.State == VerificationImpactState.Resolved
+                            && x.Outcome == VerificationImpactOutcome.NewProcedureRequired
+                            && x.RequirementRevisionId != null
+                            && requirementRevisionIds.Contains(x.RequirementRevisionId.Value))
+                        .ToListAsync(ct);
+                    foreach (var item in awaiting)
+                    {
+                        if (!item.SettleWithApprovedProcedure(procedure.Id, revision.Id, now)) continue;
+                        db.VerificationImpactDecisionHistory.Add(new VerificationImpactDecisionHistory(
+                            item.Id, VerificationImpactHistoryAction.Resolved, VerificationImpactOutcome.ProcedureCoverageConfirmed,
+                            procedure.Id, revision.Id,
+                            $"The requested procedure {procedure.BaseNumber}.{revision.Revision:D2} was approved and now covers this requirement.",
+                            actor.UserName, now));
+                    }
+                }
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new { revision.Id, state = revision.State.ToString(), contentHash });
             }

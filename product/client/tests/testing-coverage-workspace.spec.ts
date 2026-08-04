@@ -330,3 +330,55 @@ test('the full requirement coverage table is one toggle away', async ({ page }) 
   await expect(page.getByRole('button', { name: 'Show only what needs attention' })).toBeVisible()
   await expect(page.locator('.fullCoverage .coverageRow')).toHaveCount(listed, { timeout: 30_000 })
 })
+
+/**
+ * The answer a new requirement usually needs: a test is required and nobody has written the procedure yet.
+ *
+ * Until this existed the outcomes were "an approved procedure covers this" and "no test required", so an
+ * engineer whose honest answer was "one has to be written" had to leave the item unanswered, go to the
+ * library, author a procedure and come back. Nothing could tell that apart from an item nobody had looked at.
+ *
+ * The decision is recorded and the procedure is authored from it, so the chain from change request to
+ * procedure stays intact rather than depending on the engineer remembering why they were writing it.
+ */
+test('a decision can ask for a procedure that does not exist, and author it from there', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'VERIFICATION')
+  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
+
+  // Any package with an undecided item will do; the point is the outcome, not which requirement it is on.
+  // Its number is read before it is claimed, because "Take it on" is what identifies the row and claiming it
+  // is exactly what makes that button disappear — reselecting by the same filter afterwards would silently
+  // land on somebody else's package, whose items offer no Decide button at all.
+  const claimable = page.locator('.coverageRow').filter({ has: page.getByRole('button', { name: 'Take it on' }) }).first()
+  await expect(claimable).toBeVisible({ timeout: 30_000 })
+  const packageNumber = ((await claimable.locator('b').first().textContent()) ?? '').trim()
+  expect(packageNumber).toMatch(/^SYSTCR-/)
+  await claimable.getByRole('button', { name: 'Take it on' }).click()
+
+  const packageRow = page.locator('.coverageRow').filter({ hasText: packageNumber }).first()
+  await expect(packageRow.getByRole('button', { name: 'Decisions' })).toBeVisible({ timeout: 30_000 })
+  await packageRow.getByRole('button', { name: 'Decisions' }).click()
+  const undecided = packageRow.locator('.decisionList li').filter({ has: page.getByRole('button', { name: 'Decide' }) }).first()
+  await expect(undecided).toBeVisible({ timeout: 30_000 })
+  await undecided.getByRole('button', { name: 'Decide' }).click()
+
+  const decide = page.getByRole('dialog', { name: /Decide / })
+  await decide.getByLabel('Decision').selectOption('NewProcedureRequired')
+  // Naming a procedure here would claim coverage the decision explicitly says does not exist.
+  await expect(decide.getByLabel('Covering procedure')).toHaveCount(0)
+  await decide.getByLabel('Rationale').fill('No procedure exists for this behavior yet; one must be written.')
+  await decide.getByRole('button', { name: 'Record decision' }).click()
+  await expect(decide).toHaveCount(0, { timeout: 30_000 })
+
+  // Recorded rather than left blank, and the work it names is offered where the decision was made.
+  const decided = packageRow.locator('.decisionList li').filter({ hasText: 'No procedure exists for this behavior yet' }).first()
+  await expect(decided).toBeVisible({ timeout: 30_000 })
+  // A procedure binds to an exact approved revision, and this build has not materialized its requirements —
+  // so the decision stands and the page says why the authoring cannot start yet, rather than the action
+  // being silently absent. Where an exact revision exists, this is the 'Author the procedure' button.
+  await expect(decided).toContainText('once this build materializes its requirements')
+})

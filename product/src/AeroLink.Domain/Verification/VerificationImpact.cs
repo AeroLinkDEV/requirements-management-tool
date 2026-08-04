@@ -27,6 +27,20 @@ public enum VerificationImpactOutcome
     ProcedureCoverageConfirmed,
     /// <summary>Verification is satisfied without a test — for example by analysis or inspection.</summary>
     NoTestRequired,
+    /// <summary>
+    /// A test is required and no procedure exists yet, so one has to be written.
+    ///
+    /// For a newly introduced requirement this is the ordinary answer, and until now it could not be given.
+    /// The only outcomes were "an approved procedure covers this" and "no test required", so an engineer whose
+    /// honest answer was "a procedure must be written" had to leave the item unanswered, go and author the
+    /// procedure, get it approved, and come back. Meanwhile nothing could tell the difference between an item
+    /// nobody had looked at and one where somebody had looked and knew exactly what was needed.
+    ///
+    /// It is a recorded decision, so the item stops reading as untouched work and has a named owner. It is not
+    /// coverage: the coverage and evidence gates keep holding the release until the procedure actually exists,
+    /// which is the point — the answer is a plan, not a result.
+    /// </summary>
+    NewProcedureRequired,
     /// <summary>The orphaned procedure is no longer needed and has been retired.</summary>
     ProcedureRetired,
     /// <summary>The orphaned procedure is deliberately kept despite covering no current requirement.</summary>
@@ -206,11 +220,18 @@ public sealed class VerificationImpactItem
             throw new DomainException("Moving a procedure requires the requirement revision it now covers.");
         if (outcome != VerificationImpactOutcome.ProcedureRetargeted && retargetedRequirementRevisionId is not null)
             throw new DomainException("Only a retargeted procedure names the requirement it moves to.");
-        var action = procedureChangeAction ?? (outcome == VerificationImpactOutcome.NoTestRequired
-            ? TestProcedureChangeAction.NoTestRequired
-            : TestProcedureChangeAction.LinkExisting);
+        var action = procedureChangeAction ?? (outcome switch
+        {
+            VerificationImpactOutcome.NoTestRequired => TestProcedureChangeAction.NoTestRequired,
+            // Deciding that a procedure has to be written is the CreateNew action by definition; defaulting it
+            // to LinkExisting would record the item as pointing at a procedure that does not exist.
+            VerificationImpactOutcome.NewProcedureRequired => TestProcedureChangeAction.CreateNew,
+            _ => TestProcedureChangeAction.LinkExisting,
+        });
         if (outcome == VerificationImpactOutcome.NoTestRequired && action != TestProcedureChangeAction.NoTestRequired)
             throw new DomainException("A no-test decision must use the no-test-required action.");
+        if (outcome == VerificationImpactOutcome.NewProcedureRequired && action != TestProcedureChangeAction.CreateNew)
+            throw new DomainException("Deciding that a new procedure is required must use the create-new action.");
         if (outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed && preReleaseEvidenceRequired)
             throw new DomainException("Pre-release evidence can only be required for a selected test procedure.");
         ResolvedProcedureId = procedureId;
@@ -229,6 +250,32 @@ public sealed class VerificationImpactItem
         ResolvedAt = now;
         State = VerificationImpactState.Resolved;
         Touch(now);
+    }
+
+    /// <summary>
+    /// The procedure this item asked for now exists and is approved, so the decision becomes coverage.
+    ///
+    /// Without this an engineer would answer the item twice: once to say a procedure must be written, and
+    /// again after writing it to say the procedure covers the requirement. The second answer carries no
+    /// judgement the first did not — the decision was already made, and what changed is that the work it
+    /// named got done. Recording it automatically is also what keeps the causal chain intact: the procedure
+    /// is here *because* this item asked for it.
+    ///
+    /// Deliberately narrow. It only advances an item that is awaiting a new procedure, and it names the exact
+    /// approved revision, so nothing else can be quietly converted into coverage.
+    /// </summary>
+    public bool SettleWithApprovedProcedure(Guid procedureId, Guid procedureRevisionId, DateTimeOffset now)
+    {
+        if (!AwaitsNewProcedure) return false;
+        if (procedureId == Guid.Empty || procedureRevisionId == Guid.Empty)
+            throw new DomainException("Settling a new-procedure decision requires the exact approved procedure revision.");
+        Outcome = VerificationImpactOutcome.ProcedureCoverageConfirmed;
+        ProcedureChangeAction = TestProcedureChangeAction.CreateNew;
+        ResolvedProcedureId = procedureId;
+        ResolvedProcedureRevisionId = procedureRevisionId;
+        ResolutionRationale = $"{ResolutionRationale} Settled when the requested procedure was approved.".Trim();
+        Touch(now);
+        return true;
     }
 
     /// <summary>Withdraws the current decision without erasing its separately persisted history.</summary>
@@ -288,8 +335,20 @@ public sealed class VerificationImpactItem
         VerificationImpactTrigger.ProcedureOrphaned =>
             outcome is VerificationImpactOutcome.ProcedureRetired or VerificationImpactOutcome.ProcedureRetained
                 or VerificationImpactOutcome.ProcedureRetargeted,
+        // A new or modified requirement can also owe a procedure nobody has written yet. An orphaned procedure
+        // cannot: that item exists because a procedure already exists and has lost what it covered.
         _ => outcome is VerificationImpactOutcome.ProcedureCoverageConfirmed or VerificationImpactOutcome.NoTestRequired
+            or VerificationImpactOutcome.NewProcedureRequired
     };
+
+    /// <summary>
+    /// True when the decision is an answer but not yet coverage.
+    ///
+    /// The distinction the release gates need: the item has been decided, so it no longer reads as work nobody
+    /// has looked at, but nothing verifies the requirement yet and the coverage gate must keep holding.
+    /// </summary>
+    public bool AwaitsNewProcedure =>
+        State == VerificationImpactState.Resolved && Outcome == VerificationImpactOutcome.NewProcedureRequired;
 
     private void EnsureUnresolved()
     {

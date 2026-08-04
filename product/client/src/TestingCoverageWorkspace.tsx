@@ -42,6 +42,7 @@ type ImpactItem = {
   subjectDisplayNumber: string
   subjectStatement: string
   declaredVerificationMethod: string
+  requirementRevisionId?: string
   assignedEngineerId?: string
   outcome?: string
   resolutionRationale: string
@@ -112,6 +113,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
   const [creating, setCreating] = useState(false)
+  // The requirement a procedure is being authored for, when the author arrived from a decision that asked
+  // for one. It preselects that requirement so the link is not left to memory.
+  const [authoringFor, setAuthoringFor] = useState("")
   const [createError, setCreateError] = useState('')
   const [procedureView, setProcedureView] = useState<'record' | 'history'>('record')
   const [editing, setEditing] = useState<Procedure>()
@@ -509,6 +513,22 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     {/* A decision can be wrong, and a decision nobody can revisit is a decision people work
                         around. Reopening keeps what was decided in immutable history, returns the item to the
                         release gate, and puts any coverage it claimed back to suspect. */}
+                    {/* Authoring the procedure the decision asked for, from the decision itself.
+                        Pressing "New test procedure" in the library writes a procedure with no memory of why
+                        it exists; starting here keeps the chain — change request, requirement, decision,
+                        procedure — and the decision settles itself when that procedure is approved. */}
+                    {canTest && item.outcome === 'NewProcedureRequired' && (item.requirementRevisionId
+                      ? (
+                        <button type="button" disabled={busy} onClick={() => {
+                          setAuthoringFor(item.requirementRevisionId!)
+                          setCreating(true)
+                        }}>Author the procedure</button>
+                      )
+                      // A procedure binds to an exact approved revision, and a build that has not materialized
+                      // its requirements has none — the decision is still worth recording, so the reason the
+                      // work cannot start yet is stated rather than the action silently missing.
+                      : <span className="procedureHold">The procedure can be written once this build materializes its requirements.</span>
+                    )}
                     {request.capabilities.canDecide && item.state === 'Resolved' && (
                       <button type="button" className="quiet" disabled={busy} onClick={() => setReopening(item)}>Reopen / change decision…</button>
                     )}
@@ -705,7 +725,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                 here rather than linked afterwards, because a procedure with no exact link never counts as
                 coverage and would sit in the library looking like work that had been done. */}
             <label>Requirements it verifies
-              <select name="requirement" aria-describedby="procedure-requirements-help" multiple size={6} required>
+              <select name="requirement" aria-describedby="procedure-requirements-help" multiple size={6} required defaultValue={authoringFor ? [authoringFor] : []}>
                 {requirements.map(item => (
                   <option key={item.revisionId} value={item.revisionId}>{item.displayNumber} · {item.statement.slice(0, 70)}</option>
                 ))}
@@ -832,6 +852,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                 ) : (
                   <>
                     <option value="ProcedureCoverageConfirmed">An approved procedure covers this</option>
+                    {/* The ordinary answer for a newly introduced requirement, and until now it could not be
+                        given: an engineer whose honest answer was "a procedure has to be written" had to leave
+                        the item unanswered and go away to write one. */}
+                    <option value="NewProcedureRequired">A test is required and no procedure exists yet</option>
                     <option value="NoTestRequired">No test required</option>
                   </>
                 )}
