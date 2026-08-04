@@ -2,6 +2,7 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Imports;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Verification;
@@ -27,6 +28,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<DownstreamChangeAssessment> DownstreamChangeAssessments => Set<DownstreamChangeAssessment>();
     public DbSet<DownstreamAssessmentChangeRequestLink> DownstreamAssessmentChangeRequestLinks => Set<DownstreamAssessmentChangeRequestLink>();
     public DbSet<DownstreamAssessmentReopening> DownstreamAssessmentReopenings => Set<DownstreamAssessmentReopening>();
+    public DbSet<BaselineImport> BaselineImports => Set<BaselineImport>();
+    public DbSet<SourceIdentity> SourceIdentities => Set<SourceIdentity>();
+    public DbSet<SourceIdentityLink> SourceIdentityLinks => Set<SourceIdentityLink>();
+    public DbSet<SourceHistoryEntry> SourceHistoryEntries => Set<SourceHistoryEntry>();
     public DbSet<ReviewCycle> ReviewCycles => Set<ReviewCycle>();
     public DbSet<ApprovalStep> ApprovalSteps => Set<ApprovalStep>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
@@ -281,6 +286,61 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // Not unique on ChangeRequestId: one SWCR may deliberately answer several upstream assessments.
             b.HasIndex(x => x.ChangeRequestId);
             b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<BaselineImport>(b =>
+        {
+            b.ToTable("baseline_imports"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Carries).HasConversion<string>().HasMaxLength(60);
+            b.Property(x => x.SourceSystem).HasMaxLength(120).IsRequired();
+            b.Property(x => x.SourceSystemVersion).HasMaxLength(60).IsRequired();
+            b.Property(x => x.SourceBaselineName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.ExtractFileName).HasMaxLength(400).IsRequired();
+            b.Property(x => x.ExtractSha256).HasMaxLength(64).IsRequired();
+            b.Property(x => x.ExtractedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.StartedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.AcceptedBy).HasMaxLength(100);
+            b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasIndex(x => new { x.ProjectId, x.State });
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<SourceIdentity>(b =>
+        {
+            b.ToTable("source_identities"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.Property(x => x.SourceSystem).HasMaxLength(120).IsRequired();
+            b.Property(x => x.SourceModule).HasMaxLength(200).IsRequired();
+            b.Property(x => x.SourceObjectKey).HasMaxLength(120).IsRequired();
+            b.Property(x => x.SourceIdentifier).HasMaxLength(200).IsRequired();
+            // The key that makes a re-import a delta: one object in one module of one source system is one
+            // identity in this Project, however many extracts mention it.
+            b.HasIndex(x => new { x.ProjectId, x.SourceSystem, x.SourceModule, x.SourceObjectKey }).IsUnique();
+            // Somebody holding a drawing quotes the identifier, not the key, so that is what they search on.
+            b.HasIndex(x => new { x.ProjectId, x.SourceIdentifier });
+            b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.BaselineImportId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<SourceIdentityLink>(b =>
+        {
+            b.ToTable("source_identity_links"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.HasIndex(x => new { x.RequirementRevisionId, x.SourceIdentityId }).IsUnique();
+            b.HasIndex(x => x.SourceIdentityId);
+            b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.RequirementRevisionId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne<SourceIdentity>().WithMany().HasForeignKey(x => x.SourceIdentityId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.BaselineImportId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<SourceHistoryEntry>(b =>
+        {
+            b.ToTable("source_history_entries"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.Property(x => x.SourceBaselineName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.ChangedBy).HasMaxLength(200).IsRequired();
+            b.Property(x => x.SourceChangeReference).HasMaxLength(200).IsRequired();
+            b.HasIndex(x => new { x.SourceIdentityId, x.SourceBaselineName });
+            b.HasOne<SourceIdentity>().WithMany().HasForeignKey(x => x.SourceIdentityId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.BaselineImportId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<DownstreamAssessmentReopening>(b =>
         {
