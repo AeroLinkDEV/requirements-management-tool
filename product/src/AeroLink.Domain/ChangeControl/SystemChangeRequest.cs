@@ -8,6 +8,32 @@ namespace AeroLink.Domain.ChangeControl;
 public enum ScrState { Draft, InReview, Approved, Deferred, SelectedForBaseline }
 public enum ChangeRequestType { System, Software }
 
+/// <summary>
+/// Which identifier prefix a change request carries, decided by what it is allowed to change.
+///
+/// This is the single authority: the allocator asks it what to number a new record, and the data migration
+/// that renamed the existing ones asked it the same question. A change request that could not answer it
+/// would be a controlled record with no name, which is why a software change request must declare its level
+/// before it exists rather than acquiring one later.
+/// </summary>
+public static class ChangeRequestNumbering
+{
+    public const string SystemPrefix = "SRCR";
+    public const string HighLevelPrefix = "HLRCR";
+    public const string LowLevelPrefix = "LLRCR";
+
+    public static string Prefix(ChangeRequestType type, RequirementLevel? softwareLevel) => type switch
+    {
+        ChangeRequestType.System => SystemPrefix,
+        _ => softwareLevel switch
+        {
+            RequirementLevel.HighLevel => HighLevelPrefix,
+            RequirementLevel.LowLevel => LowLevelPrefix,
+            _ => throw new DomainException("A software change request must declare HLR or LLR scope before it can be numbered."),
+        },
+    };
+}
+
 public sealed class SystemChangeRequest
 {
     private readonly List<RequirementChange> _requirementChanges = [];
@@ -32,9 +58,14 @@ public sealed class SystemChangeRequest
         AuthorId = authorId;
         Type = type;
         if (type == ChangeRequestType.System && softwareLevel is not null)
-            throw new DomainException("A System SCR cannot declare a software requirement level.");
-        if (type == ChangeRequestType.Software && softwareLevel is RequirementLevel.System)
-            throw new DomainException("A Software SWCR must declare HLR or LLR scope.");
+            throw new DomainException("A System change request cannot declare a software requirement level.");
+        // Required, not merely constrained: HLR and LLR change requests are numbered apart, so a software
+        // change request without a level is a controlled record that cannot be named.
+        if (type == ChangeRequestType.Software && softwareLevel is not (RequirementLevel.HighLevel or RequirementLevel.LowLevel))
+            throw new DomainException("A software change request must declare HLR or LLR scope.");
+        if (ChangeRequestNumbering.Prefix(type, softwareLevel) is var expected
+            && !BaseNumber.StartsWith(expected + "-", StringComparison.Ordinal))
+            throw new DomainException($"A {(type == ChangeRequestType.System ? "System" : expected == ChangeRequestNumbering.HighLevelPrefix ? "HLR" : "LLR")} change request must be numbered {expected}-.");
         SoftwareLevel = softwareLevel;
         State = ScrState.Draft;
         CreatedAt = now;

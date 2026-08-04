@@ -164,16 +164,22 @@ public static class ChangeRequestEndpoints
             return scr is null ? Results.NotFound() : Results.Ok(ApiMap.ScrDetail(scr));
         });
 
-        app.MapGet("/api/authoring/context", async (Guid projectId, ChangeRequestType type, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        // A software change request is numbered per level, so the preview needs to know which workspace is
+        // asking. Without a level it can only answer for a System change request; the software authoring
+        // surfaces always know their own level and send it.
+        app.MapGet("/api/authoring/context", async (Guid projectId, ChangeRequestType type,
+            RequirementLevel? softwareLevel, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            if (type == ChangeRequestType.Software && softwareLevel is not (RequirementLevel.HighLevel or RequirementLevel.LowLevel))
+                return Results.BadRequest(new { error = "Say whether this software change request is HLR or LLR before previewing its number." });
             var prefixes = type == ChangeRequestType.System ? new[] { "SYSR" } : new[] { "HLR", "LLR" };
             var numbers = new Dictionary<string, string>();
             foreach (var prefix in prefixes) numbers[prefix] = await IdentifierAllocator.PreviewRequirementAsync(db, prefix, ct);
             return Results.Ok(new
             {
                 type = type.ToString(),
-                changeRequestNumber = await IdentifierAllocator.PreviewChangeRequestAsync(db, type, ct),
+                changeRequestNumber = await IdentifierAllocator.PreviewChangeRequestAsync(db, type, softwareLevel, ct),
                 author = new { http.UserAccount().UserName, http.UserAccount().DisplayName },
                 requirementNumbers = numbers
             });
@@ -445,7 +451,7 @@ public static class ChangeRequestEndpoints
             if (problemReportError is not null) return Results.BadRequest(new { error = problemReportError });
             try
             {
-                var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, ct);
+                var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, request.SoftwareLevel, ct);
                 var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
                     request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, DateTimeOffset.UtcNow, request.Type,
                     request.ProblemRich, request.AnalysisRich, request.SolutionRich, request.SoftwareLevel);
@@ -486,7 +492,10 @@ public static class ChangeRequestEndpoints
             {
                 var now = DateTimeOffset.UtcNow;
                 var actor = http.UserAccount().UserName;
-                var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, ct);
+                // The resolved level, not the requested one: this path infers HLR or LLR from the authored
+                // changes when the caller did not state it, and the number has to name the same level the
+                // record will carry.
+                var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, softwareLevel, ct);
                 var schemas = await db.ArtifactSchemas.Include(x => x.Fields)
                     .Where(x => x.ProjectId == request.ProjectId && x.IsActive)
                     .ToDictionaryAsync(x => x.AppliesTo, StringComparer.OrdinalIgnoreCase, ct);

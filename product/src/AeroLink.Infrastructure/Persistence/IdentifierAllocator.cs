@@ -18,18 +18,25 @@ using Microsoft.EntityFrameworkCore.Storage;
 // create leaves a permanent gap rather than returning its number to the pool.
 public static class IdentifierAllocator
 {
-    public static async Task<string> PreviewChangeRequestAsync(AeroLinkDbContext db, ChangeRequestType type, CancellationToken ct)
+    /// <summary>
+    /// Software change requests are numbered per level, so HLRCR and LLRCR each count on their own — the
+    /// same choice already made for SYSTCR/HLRTCR/LLRTCR and the procedures they govern. The prefix
+    /// disambiguates, and a reader of an HLRCR never has to wonder whether an LLR change is hiding in it.
+    /// </summary>
+    public static async Task<string> PreviewChangeRequestAsync(AeroLinkDbContext db, ChangeRequestType type,
+        RequirementLevel? softwareLevel, CancellationToken ct)
     {
-        var prefix = type == ChangeRequestType.System ? "SCR" : "SWCR";
+        var prefix = ChangeRequestNumbering.Prefix(type, softwareLevel);
         return FormatChangeRequest(prefix, await PreviewAsync(db, prefix, ct));
     }
 
     public static async Task<string> PreviewRequirementAsync(AeroLinkDbContext db, string prefix, CancellationToken ct) =>
         Format(prefix, await PreviewAsync(db, prefix, ct));
 
-    public static async Task<string> NextChangeRequestAsync(AeroLinkDbContext db, ChangeRequestType type, CancellationToken ct)
+    public static async Task<string> NextChangeRequestAsync(AeroLinkDbContext db, ChangeRequestType type,
+        RequirementLevel? softwareLevel, CancellationToken ct)
     {
-        var prefix = type == ChangeRequestType.System ? "SCR" : "SWCR";
+        var prefix = ChangeRequestNumbering.Prefix(type, softwareLevel);
         return FormatChangeRequest(prefix, await ClaimAsync(db, prefix, ct));
     }
 
