@@ -168,9 +168,13 @@ public static class ControlledEditingEndpoints
             // still the source of truth; once it selects a winner, treat that winner as a resumable checkout
             // when it belongs to this actor instead of presenting a spurious foreign-lock error.
             db.ChangeTracker.Clear();
-            var winner = await db.ArtifactEditSessions
-                .SingleOrDefaultAsync(x => x.ArtifactId == request.ArtifactId && x.ArtifactType == policy.CanonicalType
-                    && x.IsExclusive && x.State == EditSessionState.Active && x.ExpiresAt > DateTimeOffset.UtcNow, ct);
+            // SQLite cannot compare a DateTimeOffset server-side, so the lease expiry is applied in memory.
+            // Translating it in the query turned this recovery path — the one that exists to turn a
+            // collision into a usable answer — into a 500 on every SQLite deployment.
+            var winner = (await db.ArtifactEditSessions
+                    .Where(x => x.ArtifactId == request.ArtifactId && x.ArtifactType == policy.CanonicalType
+                        && x.IsExclusive && x.State == EditSessionState.Active).ToListAsync(ct))
+                .SingleOrDefault(x => x.ExpiresAt > DateTimeOffset.UtcNow);
             if (winner?.UserName == actor.UserName)
             {
                 var latest = await db.ArtifactDraftSnapshots.AsNoTracking().Where(x => x.SessionId == winner.Id)
@@ -395,8 +399,16 @@ public static class ControlledEditingEndpoints
             case ControlledArtifactFamily.ProblemReport:
             {
                 var item = await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+                // The responsible engineer governs the record, so a checkout is refused up front to anybody
+                // whose check-in the aggregate would refuse anyway. Offering a lease that cannot be
+                // completed is worse than refusing it.
+                //
+                // No audit aggregate: AuditEvent.AggregateId is a foreign key to a change request, and a
+                // Problem Report's controlled history is its own ProblemReportRevision chain, which the
+                // adapter writes on check-in.
                 return item is null ? null : new(item.ProjectId, item.State.ToString(), null,
-                    ProblemReportControlledEditingAdapter.Snapshot(item), "ProblemReport");
+                    ProblemReportControlledEditingAdapter.Snapshot(item), "ProblemReport",
+                    GoverningAuthorId: item.ResponsibleEngineerId);
             }
             case ControlledArtifactFamily.ConfigurationChangeSet:
             {

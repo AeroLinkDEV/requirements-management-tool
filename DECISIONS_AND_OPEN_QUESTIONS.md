@@ -1242,6 +1242,31 @@ Future entries use:
   deciding engineer, which the aggregate has always constrained to be the assignee; the deciding instant was
   never recorded and is deliberately left empty rather than invented.
 
+### DEC-091 - A Problem Report Is Edited Under the Universal Controlled-Editing Lease
+
+- **Date:** 2026-08-04
+- **Status:** Accepted; implemented under issue #314
+- **Decision:** A Problem Report is edited exactly as every other controlled record is: an exclusive
+  server-leased checkout, a recovery snapshot saved while the author types, an explicit check-in, and a
+  discard that restores the last checked-in content. Any state except Closed and the terminal dispositions
+  can be checked out; reopening is the route back from those. The lease is governed by the responsible
+  engineer, so a checkout is refused up front to anybody whose check-in the aggregate would refuse anyway.
+  A check-in writes a `DetailsCheckedIn` entry into the report's own `ProblemReportRevision` history with its
+  actor and time. The report's own `POST /details` write path is retired.
+- **Rationale:** The Problem Report MVP delivered the lifecycle and the field set but wired editing to a
+  form of its own, which posted the whole record with an expected version and hoped nobody else was doing
+  the same. Its controlled-editing policy still named `Investigating` and `ResolutionProposed` — states the
+  MVP lifecycle no longer produces — so in practice only a Draft could be checked out at all. Two write
+  paths to the same fields is the defect, not the fix for it: a Problem Report is the record most likely to
+  need correcting while the work it describes is in flight, and it is exactly the record that should not be
+  correctable by two people at once.
+- **Consequences:** The report number, its project, who raised it and who is responsible for it are checked
+  on check-in and never applied — they are facts about the record, not fields on the form. The working copy
+  is carried whole through check-in, so a field the editor does not show is preserved rather than reverted.
+  Reassigning the owner and retargeting the build stay separate audited lifecycle actions, unchanged. Its
+  audit lives in `ProblemReportRevision` rather than `AuditEvent`, whose aggregate key is a foreign key to a
+  change request.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

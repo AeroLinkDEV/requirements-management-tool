@@ -253,7 +253,12 @@ public sealed class ProblemReport
     public string CanonicalHash() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(CanonicalSnapshot()))).ToLowerInvariant();
     private void Touch(DateTimeOffset now) { UpdatedAt = now; Version++; }
     private void EnsureResponsible(string actor) { if (!string.Equals(actor, ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase)) throw new DomainException("Only the responsible engineer can perform this action."); }
-    private void EnsureEditable() { if (State is not (ProblemReportState.Draft or ProblemReportState.ReadyForSccb or ProblemReportState.Open or ProblemReportState.Implementing or ProblemReportState.Verifying)) throw new DomainException("The problem report is no longer editable."); }
+    /// <summary>
+    /// Editable unless the report is finished. A report is corrected while the work it describes is in
+    /// flight, so waiting on SQA closure or sitting deferred is no reason to refuse a correction — only
+    /// closure and the terminal dispositions are, and reopening is the route back from those.
+    /// </summary>
+    private void EnsureEditable() { if (State == ProblemReportState.Closed || IsTerminalDisposition()) throw new DomainException("The problem report is closed or dispositioned and is no longer editable. Reopen it first."); }
     private void EnsureNotTerminal() { if (State == ProblemReportState.Closed || IsTerminalDisposition()) throw new DomainException("The problem report is closed or dispositioned. Reopen it before changing lifecycle data."); }
     private bool IsTerminalDisposition() => State is ProblemReportState.Duplicate or ProblemReportState.CannotReproduce or ProblemReportState.NoFaultFound or ProblemReportState.AcceptedRisk or ProblemReportState.Rejected;
     private static string ValidImpactJson(string? value)

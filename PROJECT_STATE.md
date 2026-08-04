@@ -216,9 +216,16 @@ Software and Verification work. System change creation is direct; Software creat
 Change history, requirements, search and verification are scoped to the active build, and historical evidence
 is labelled with its originating build without changing workspace context.
 
-Problem Reports are active and build scoped under DEC-085 and DEC-087. They carry the agreed Draft-to-Closed
+Problem Reports are active and Project scoped: one Problem Report database per Project, identical whichever
+build the reader is standing in, with the target build an attribute of the record and an explicit filter a
+user may choose rather than one the workspace applies (DEC-089, superseding the build-scoping half of
+DEC-085 and DEC-087). They carry the agreed Draft-to-Closed
 lifecycle, progressive rich fields, immutable raised-by/date, auditable owner/target-build changes, structured
-impact decisions, AND filters, and an internal History tab. Their center supports durable detail links and
+impact decisions, AND filters, and an internal History tab. A report is corrected under the same exclusive
+server lease as every other controlled record — **Check out &amp; edit**, autosave, check in, discard, and a
+named holder while somebody else has it — in every state except Closed and the terminal dispositions, where
+reopening is the route back. Each check-in lands in the report's own History as `Details Checked In` with its
+actor and time (DEC-091). Their center supports durable detail links and
 links forward to SCRs, SWCRs, every TCR discipline, requirements, procedures, executions/evidence, documents,
 and releases where those records exist. Every change-request type can select one or more driving PRs; approved
 engineering changes are projected back as corrective actions, and only results selected to support closure
