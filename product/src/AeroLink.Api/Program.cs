@@ -227,6 +227,7 @@ app.MapAuthEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapChangeRequestEndpoints();
 app.MapDownstreamAssessmentEndpoints();
+app.MapBaselineImportEndpoints();
 app.MapRequirementsEndpoints();
 app.MapCodeTraceabilityEndpoints();
 app.MapBaselineEndpoints();
