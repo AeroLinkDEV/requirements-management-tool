@@ -1,0 +1,107 @@
+.importCenter>main{max-width:1180px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
+.importCrumbs{margin-bottom:1rem}.importCrumbs button{border:0;background:none;padding:0;color:#0868c9;text-decoration:underline;font:inherit;cursor:pointer}
+.importCenter h1{margin:.2rem 0 .35rem;font:700 30px Manrope;color:#17314f;text-wrap:balance}
+.importCenter .lede{max-width:66ch;margin:0;color:#52647a;line-height:1.55}
+.importCenter h2{margin:0 0 .35rem;font:700 19px Manrope;color:#17314f}
+.importCenter h3{margin:0;font:700 16px Manrope;color:#17314f}
+.importError{margin:1rem 0 0;padding:.75rem 1rem;border:1px solid #e3a7ae;border-left:3px solid #b53340;border-radius:8px;background:#fdeeef;color:#8c2732}
+.importEmpty{margin:.75rem 0 0;padding:1rem;border:1px dashed #b8c6d8;border-radius:8px;background:#f8fbff;color:#5c6878}
+/* Truncation is said out loud wherever it can happen: a list quietly cut short reads as the whole set. */
+.importCapped{margin:.5rem 0 0;color:#8a5a00;font-size:.85rem;font-weight:600}
+
+.importCenter>main>section{margin-top:1.75rem}
+.importFind{padding:1.25rem;border:1px solid #cbd7e6;border-radius:16px;background:#f7fbff}
+.importFind>p{max-width:70ch;margin:.25rem 0 .9rem;color:#52647a}
+.importFind form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:.6rem}
+.importFind label{display:block;font-size:.8rem;font-weight:700;color:#43516a}
+.importFind input{display:block;min-width:min(280px,100%);margin-top:.3rem;padding:.55rem .7rem;border:1px solid #cbd7e6;border-radius:8px;font:inherit}
+.importFind button{padding:.55rem 1rem;border:1px solid #0868c9;border-radius:8px;background:#0868c9;color:#fff;font:inherit;font-weight:650;cursor:pointer}
+
+.importFound{display:grid;gap:.65rem;margin:1rem 0 0;padding:0;list-style:none}
+.importFound>li{display:flex;flex-direction:column;gap:.2rem;padding:.85rem;border:1px solid #d9e2ec;border-radius:10px;background:#fff}
+.importFound>li>b{font-family:ui-monospace,'Cascadia Mono',Menlo,monospace;color:#17314f}
+.importFound>li>span{color:#5c6878;font-size:.85rem}
+.importFound em{font-style:normal;font-size:.85rem;color:#1f7a4c}
+.importFound em.importRetired{color:#8a5a00}
+.importHistory{display:grid;gap:.4rem;margin:.5rem 0 0;padding:.6rem .75rem;border-left:3px solid #b8c6d8;background:#f5f8fc;list-style:none}
+.importHistory li{display:flex;flex-direction:column;gap:.15rem}
+.importHistory b{font-size:.8rem;color:#43516a}
+.importHistory span{color:#3d4d61;font-size:.9rem}
+.importHistory small{color:#6b7889;font-size:.78rem}
+
+.importList{display:grid;gap:.6rem;margin:.75rem 0 0;padding:0;list-style:none}
+.importList button{display:grid;grid-template-columns:minmax(200px,1.3fr) minmax(200px,1.6fr) max-content;align-items:center;gap:1rem;width:100%;padding:.9rem 1rem;border:1px solid #d9e2ec;border-radius:12px;background:#fff;font:inherit;text-align:left;color:inherit;cursor:pointer}
+.importList button:hover{border-color:#a8bcd4}
+.importList b{color:#17314f}.importList span{color:#5c6878;font-size:.88rem}
+.importList em{font-style:normal;padding:.2rem .55rem;border-radius:999px;background:#e7f1ff;color:#13599e;font-size:.78rem;font-weight:650;white-space:nowrap}
+.importList em[data-state="Accepted"]{background:#f4faf6;color:#1f7a4c}
+.importList em[data-state="Abandoned"]{background:#f1f3f5;color:#6b7889}
+
+.importShell{display:grid;grid-template-columns:216px minmax(0,1fr);gap:1.5rem;margin-top:1.75rem;align-items:start}
+.importRail{position:sticky;top:1rem;display:grid;gap:2px}
+.importRail>p{margin:0 0 .5rem;font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#52647a}
+.importRail>div{display:grid;grid-template-columns:22px minmax(0,1fr);gap:.6rem;align-items:start;padding:.55rem .6rem;border:1px solid transparent;border-radius:8px}
+.importRail>div>span:first-child{display:grid;place-items:center;width:22px;height:22px;border:1px solid #b8c6d8;border-radius:50%;background:#fff;color:#52647a;font-size:.72rem;font-weight:700;font-variant-numeric:tabular-nums}
+.importRail b{display:block;font-size:.85rem;font-weight:650;color:#17314f}
+.importRail>div>span:last-child>span{display:block;font-size:.75rem;color:#5c6878}
+.importRail>div[data-state="done"]>span:first-child{border-color:#9fcdc7;background:#e6f3f1;color:#16766f}
+.importRail>div[data-state="current"]{border-color:#cbd7e6;background:#fff;box-shadow:0 8px 24px rgba(9,36,66,.06)}
+.importRail>div[data-state="current"]>span:first-child{border-color:#16766f;background:#16766f;color:#fff}
+.importRail>div[data-state="locked"]{opacity:.55}
+
+.importMain{display:grid;gap:1rem;min-width:0}
+.importCard{padding:1.1rem 1.25rem 1.25rem;border:1px solid #d9e2ec;border-radius:14px;background:#fff;box-shadow:0 8px 24px rgba(9,36,66,.05)}
+.importCard>header{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.9rem;margin-bottom:.9rem}
+.importCard>header p{max-width:68ch;margin:.25rem 0 0;color:#52647a;font-size:.88rem}
+.importPill{padding:.2rem .55rem;border-radius:999px;background:#e7f1ff;color:#13599e;font-size:.78rem;font-weight:650;white-space:nowrap}
+
+/* Rules on the cells, not a background showing through 1px gaps: when the last row is short, a gap-coloured
+   container leaves a block of divider colour where a cell simply is not. */
+.importProvenance{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));margin:0;border:1px solid #e5ebf2;border-radius:10px;background:#fff;overflow:hidden}
+.importProvenance>div{padding:.75rem .85rem;border-right:1px solid #e5ebf2;border-top:1px solid #e5ebf2}
+.importProvenance>div:last-child{border-right:0}
+.importProvenance dt{margin:0;font-size:.7rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#52647a}
+.importProvenance dd{margin:.3rem 0 0;font-size:.88rem;font-weight:600;color:#17314f;word-break:break-word}
+.importProvenance dd small{display:block;margin-top:.1rem;font-weight:400;color:#5c6878;font-size:.78rem}
+.importHash{font-family:ui-monospace,'Cascadia Mono',Menlo,monospace;font-size:.82rem}
+
+.importTiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:.75rem}
+.importTiles>div{padding:.8rem .9rem;border:1px solid #d9e2ec;border-left-width:3px;border-radius:9px;background:#f7fbff}
+.importTiles span{display:block;color:#5c6878;font-size:.78rem}
+.importTiles b{display:block;margin-top:.2rem;font:700 25px Manrope;color:#17314f;font-variant-numeric:tabular-nums}
+.importTiles em{display:block;font-style:normal;color:#5c6878;font-size:.78rem}
+.importTileOut{border-left-color:#16766f}
+/* Held apart from the counts beside it, because it is a different assertion: these join nothing. */
+.importTileHistory{border-left-color:#b06f16;background:#fffaf2}
+.importTileHistory b,.importTileHistory em{color:#8a5a00}
+
+.importScroller{overflow-x:auto}
+.importScroller table{width:100%;min-width:620px;border-collapse:collapse;font-size:.88rem}
+.importScroller th,.importScroller td{padding:.5rem .7rem;border-bottom:1px solid #e5ebf2;text-align:left;vertical-align:top}
+.importScroller th{background:#f5f8fc;color:#52647a;font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.importScroller tbody tr:last-child td{border-bottom:0}
+.importScroller code{padding:.05rem .3rem;border-radius:4px;background:#f0f4f9;font-family:ui-monospace,'Cascadia Mono',Menlo,monospace}
+.importNumeric{font-variant-numeric:tabular-nums}
+
+.importAssert{padding:.95rem 1.1rem;border:1px solid #9fcdc7;border-radius:12px;background:#e6f3f1}
+.importAssert h4{margin:0 0 .5rem;font:700 15px Manrope;color:#17314f}
+.importAssert ul{display:grid;gap:.3rem;margin:0;padding-left:1.1rem;color:#3d4d61;font-size:.9rem}
+.importAssert>p{max-width:72ch;margin:.7rem 0 0;color:#3d4d61;font-size:.85rem}
+.importAccepted{margin:.9rem 0 0;padding:.75rem .9rem;border:1px solid #cbd7e6;border-left:3px solid #1f7a4c;border-radius:8px;background:#f4faf6;color:#17314f}
+
+.importActions{display:flex;flex-wrap:wrap;align-items:center;gap:.7rem;margin-top:.95rem}
+.importActions button{padding:.55rem 1rem;border:1px solid #b8c6d8;border-radius:8px;background:#fff;color:#43516a;font:inherit;font-weight:650;cursor:pointer}
+.importActions button:hover:not(:disabled){border-color:#7e94ad}
+.importActions button:disabled{opacity:.55;cursor:not-allowed}
+.importActions .importPrimary{border-color:#16766f;background:#16766f;color:#fff}
+.importActions small{color:#5c6878;font-size:.82rem}
+.importForm{flex-direction:column;align-items:flex-start}
+.importForm label{font-size:.8rem;font-weight:700;color:#43516a}
+.importForm textarea,.importForm input{width:min(560px,100%);padding:.6rem .7rem;border:1px solid #cbd7e6;border-radius:8px;font:inherit;resize:vertical}
+.importForm textarea{font-family:ui-monospace,'Cascadia Mono',Menlo,monospace;font-size:.85rem}
+
+@media(max-width:900px){
+  .importShell{grid-template-columns:1fr}
+  .importRail{position:static}
+  .importList button{grid-template-columns:1fr}
+}
