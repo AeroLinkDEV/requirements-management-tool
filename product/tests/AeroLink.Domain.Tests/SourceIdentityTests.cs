@@ -65,6 +65,24 @@ public sealed class SourceIdentityTests
     }
 
     [Fact]
+    public void An_object_the_source_retired_cannot_have_anything_originate_from_it()
+    {
+        var retired = SourceIdentity.FromHistoryOnly(ProjectId, ImportId, "IBM Rational DOORS",
+            "FMS_System_Requirements", "1233", "SYS-01233", Now);
+
+        // The rule that keeps source history narrative rather than nodes, enforced where the identity is in
+        // hand. Nothing in the imported baseline came from an object that was gone before it — a link saying
+        // otherwise would be a lineage claim about a requirement nobody imported.
+        var refused = Assert.Throws<DomainException>(() => retired.LinkTo(Guid.NewGuid(), Now));
+        Assert.Contains("SYS-01233", refused.Message);
+
+        var live = Identity();
+        var link = live.LinkTo(Guid.NewGuid(), Now);
+        Assert.Equal(live.Id, link.SourceIdentityId);
+        Assert.Equal(ImportId, link.BaselineImportId);
+    }
+
+    [Fact]
     public void A_provenance_link_cannot_be_missing_either_end_or_its_origin()
     {
         Assert.Throws<DomainException>(() => new SourceIdentityLink(ProjectId, Guid.Empty, Guid.NewGuid(), ImportId, Now));

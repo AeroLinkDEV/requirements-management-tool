@@ -1394,6 +1394,23 @@ Future entries use:
   - **Externally sourced is derived from the provenance, never stored as a flag on the build.** A build is
     externally sourced exactly when an accepted import points at it. A duplicated boolean could drift away
     from the record that justifies it, and the whole value of the marking is that it cannot be wrong.
+  - **An import that accounts for no source objects cannot be reconciled.** "Every source object is accounted
+    for" is vacuously true against nothing, and accepting it would produce an empty build asserting that a
+    program was brought in from elsewhere — the one outcome no later gate would catch. The Reconcile gate
+    therefore refuses until the import has been told what the extract held.
+  - **What an import accounted for is held by the import, not counted from the identities it created.** A
+    re-extract is a delta: an object already recorded by an earlier import is marked seen again and keeps the
+    import that first recorded it. Counting rows would report a second import of the same program as holding
+    nothing, and refuse to reconcile the exact case the delta rule exists for.
+  - **Two objects claiming one source identity are refused at the point of recording, not reported as a gap.**
+    Other reconciliation findings are outcomes of a mapping somebody can accept. This one is not: a later
+    extract cannot tell the two apart, so the delta rule would silently merge them. There is no mapping
+    decision that makes it safe, so it is refused outright.
+  - **An object retired before the imported baseline cannot have anything originate from it, and the identity
+    itself enforces that.** The provenance link is created through the source identity rather than
+    constructed directly, because the rule that keeps source history narrative rather than nodes can only be
+    enforced where the identity is in hand. Constructing a link freely would let a real lineage claim hang
+    off an object nobody imported.
 
 ## Working Assumptions
 
