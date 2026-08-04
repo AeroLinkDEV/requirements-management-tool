@@ -7,9 +7,9 @@ namespace AeroLink.Infrastructure.Persistence;
 
 public sealed class ChangeRequestOutputGenerator(AeroLinkDbContext db)
 {
-    public async Task<GeneratedOutput?> GenerateAsync(Guid scrId, string format, CancellationToken ct)
+    public async Task<GeneratedOutput?> GenerateAsync(Guid changeRequestId, string format, CancellationToken ct)
     {
-        var scr = await db.SystemChangeRequests.AsNoTracking().Include(x => x.RequirementChanges).Include(x => x.ReviewCycles).ThenInclude(x => x.Steps).Include(x => x.AuditEvents).SingleOrDefaultAsync(x => x.Id == scrId, ct); if (scr is null) return null;
+        var scr = await db.SystemChangeRequests.AsNoTracking().Include(x => x.RequirementChanges).Include(x => x.ReviewCycles).ThenInclude(x => x.Steps).Include(x => x.AuditEvents).SingleOrDefaultAsync(x => x.Id == changeRequestId, ct); if (scr is null) return null;
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == scr.ProjectId, ct); var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct); var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == scr.TargetReleaseId, ct);
         var actorIds = scr.AuditEvents.Select(x => x.ActorId).Append(scr.AuthorId).Distinct().ToList();
         var people = await db.UserAccounts.AsNoTracking().Where(x => actorIds.Contains(x.UserName)).ToDictionaryAsync(x => x.UserName, x => x.DisplayName, ct);

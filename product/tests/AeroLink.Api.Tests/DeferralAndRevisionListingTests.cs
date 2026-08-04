@@ -20,7 +20,7 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class DeferralAndRevisionListingTests
 {
-    private static async Task<(Guid ProjectId, Guid ReleaseId, Guid ScrId)> SeedAsync(AeroLinkApiFactory factory)
+    private static async Task<(Guid ProjectId, Guid ReleaseId, Guid ChangeRequestId)> SeedAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -64,10 +64,10 @@ public sealed class DeferralAndRevisionListingTests
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
-        var (_, _, scrId) = await SeedAsync(factory);
+        var (_, _, changeRequestId) = await SeedAsync(factory);
         await SignInAsync(client);
 
-        using var deferred = await client.PostAsJsonAsync($"/api/change-requests/{scrId}/defer",
+        using var deferred = await client.PostAsJsonAsync($"/api/change-requests/{changeRequestId}/defer",
             new { reason = "Correct, but not shipping in 1.6." });
         var body = await deferred.Content.ReadAsStringAsync();
         Assert.True(deferred.StatusCode == HttpStatusCode.OK, $"{(int)deferred.StatusCode}: {body}");
@@ -75,7 +75,7 @@ public sealed class DeferralAndRevisionListingTests
         Assert.Contains("\"state\":\"Deferred\"", body);
         Assert.Contains("\"deferredFromState\":\"Approved\"", body);
 
-        using var reinstated = await client.PostAsync($"/api/change-requests/{scrId}/reinstate", null);
+        using var reinstated = await client.PostAsync($"/api/change-requests/{changeRequestId}/reinstate", null);
         var back = await reinstated.Content.ReadAsStringAsync();
         Assert.True(reinstated.StatusCode == HttpStatusCode.OK, $"{(int)reinstated.StatusCode}: {back}");
         Assert.Contains("\"state\":\"Approved\"", back);
@@ -87,11 +87,11 @@ public sealed class DeferralAndRevisionListingTests
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
-        var (_, _, scrId) = await SeedAsync(factory);
+        var (_, _, changeRequestId) = await SeedAsync(factory);
         await SignInAsync(client);
 
         // A shelf whose entries do not say why they are on it is a shelf nobody can plan from.
-        using var response = await client.PostAsJsonAsync($"/api/change-requests/{scrId}/defer", new { reason = "   " });
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{changeRequestId}/defer", new { reason = "   " });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("reason", await response.Content.ReadAsStringAsync());
     }
@@ -109,10 +109,10 @@ public sealed class DeferralAndRevisionListingTests
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
-        var (projectId, _, scrId) = await SeedAsync(factory);
+        var (projectId, _, changeRequestId) = await SeedAsync(factory);
         await SignInAsync(client);
 
-        using var revised = await client.PostAsJsonAsync($"/api/change-requests/{scrId}/next-revision", new { });
+        using var revised = await client.PostAsJsonAsync($"/api/change-requests/{changeRequestId}/next-revision", new { });
         Assert.Equal(HttpStatusCode.Created, revised.StatusCode);
 
         using var collapsed = await client.GetAsync($"/api/history/change-requests?projectId={projectId}&page=1&pageSize=50");

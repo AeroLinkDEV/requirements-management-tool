@@ -95,7 +95,7 @@ public sealed class ChangeAuthoringInvariantApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var scenario = await SeedAsync(factory);
-        Guid scrId;
+        Guid changeRequestId;
         using (var seedScope = factory.Services.CreateScope())
         {
             var seedDb = seedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -106,17 +106,17 @@ public sealed class ChangeAuthoringInvariantApiTests
                 DateTimeOffset.UtcNow, attributesJson: "{}", impactDispositionJson: "{}");
             seedDb.Add(scr);
             await seedDb.SaveChangesAsync();
-            scrId = scr.Id;
+            changeRequestId = scr.Id;
         }
         await SignInAsync(client);
 
         using var response = await client.GetAsync($"/api/authoring/attribute-gaps?projectId={scenario.ProjectId}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var rows = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
-        var row = Assert.Single(rows.EnumerateArray(), x => x.GetProperty("id").GetGuid() == scrId);
+        var row = Assert.Single(rows.EnumerateArray(), x => x.GetProperty("id").GetGuid() == changeRequestId);
         Assert.Equal(new[] { "criticality", "owner" },
             row.GetProperty("missing").EnumerateArray().Select(x => x.GetString()).ToArray());
-        Assert.Equal($"scr:{scrId}", row.GetProperty("reconciliation").GetString());
+        Assert.Equal($"scr:{changeRequestId}", row.GetProperty("reconciliation").GetString());
 
         using var checkpointResponse = await client.PostAsJsonAsync(
             "/api/enterprise-hardening/integrity-checkpoints", new { projectId = scenario.ProjectId });
@@ -127,7 +127,7 @@ public sealed class ChangeAuthoringInvariantApiTests
 
         using var verificationScope = factory.Services.CreateScope();
         var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        Assert.Equal("{}", (await verificationDb.RequirementChanges.SingleAsync(x => x.ScrId == scrId)).AttributesJson);
+        Assert.Equal("{}", (await verificationDb.RequirementChanges.SingleAsync(x => x.ChangeRequestId == changeRequestId)).AttributesJson);
     }
 
     [Fact]
@@ -219,7 +219,7 @@ public sealed class ChangeAuthoringInvariantApiTests
             db.AddRange(scr, selectionScr, selected, empty);
             await db.SaveChangesAsync();
             await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE requirement_changes SET ImpactDispositionJson = '{{}}' WHERE ScrId = {scr.Id} OR ScrId = {selectionScr.Id}");
+                $"UPDATE requirement_changes SET ImpactDispositionJson = '{{}}' WHERE ChangeRequestId = {scr.Id} OR ChangeRequestId = {selectionScr.Id}");
             selectedBaselineId = selected.Id;
             emptyBaselineId = empty.Id;
             selectionScrId = selectionScr.Id;
@@ -227,7 +227,7 @@ public sealed class ChangeAuthoringInvariantApiTests
         await SignInAsync(client);
 
         using var selection = await client.PostAsJsonAsync($"/api/baselines/{emptyBaselineId}/selections",
-            new { scrId = selectionScrId, actorId = "invariant.author" });
+            new { changeRequestId = selectionScrId, actorId = "invariant.author" });
         Assert.Equal(HttpStatusCode.OK, selection.StatusCode);
 
         using var freeze = await client.PostAsJsonAsync($"/api/baselines/{selectedBaselineId}/freeze",

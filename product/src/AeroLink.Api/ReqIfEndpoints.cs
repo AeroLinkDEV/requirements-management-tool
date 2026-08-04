@@ -92,7 +92,7 @@ public static class ReqIfEndpoints
         {
             var number=await IdentifierAllocator.NextChangeRequestAsync(db,request.Type,request.SoftwareLevel,ct);var scr=new SystemChangeRequest(number,0,job.ProjectId,request.TargetReleaseId,request.Title,request.Problem,request.Analysis,request.Solution,actor,now,request.Type,softwareLevel:request.SoftwareLevel);
             foreach(var item in manifest.Items){if(!Enum.TryParse<RequirementLevel>(item.Level,true,out var level))level=RequirementLevel.System;scr.AddRequirementChange(actor,item.Identifier,0,level,RequirementChangeKind.Introduce,item.Statement,item.Rationale,item.VerificationMethod,now,impactDispositionJson:RequirementAuthoringJson.PendingImpactDispositions);}
-            db.SystemChangeRequests.Add(scr);job.Commit(scr.Id,now);db.IntegrationEvents.Add(new(job.ProjectId,"aerolink.reqif.import.committed","ReqIfExchange",job.Id,JsonSerializer.Serialize(new{jobId=job.Id,scrId=scr.Id,job.Sha256,job.AttachmentCount,job.CheckpointJson,mappingProvenance=manifest.SourceTool}),actor,now,$"reqif-commit:{job.Id:N}"));await db.SaveChangesAsync(ct);
+            db.SystemChangeRequests.Add(scr);job.Commit(scr.Id,now);db.IntegrationEvents.Add(new(job.ProjectId,"aerolink.reqif.import.committed","ReqIfExchange",job.Id,JsonSerializer.Serialize(new{jobId=job.Id,changeRequestId=scr.Id,job.Sha256,job.AttachmentCount,job.CheckpointJson,mappingProvenance=manifest.SourceTool}),actor,now,$"reqif-commit:{job.Id:N}"));await db.SaveChangesAsync(ct);
             return Results.Created($"/api/change-requests/{scr.Id}",new{scr.Id,scr.DisplayNumber,imported=manifest.Items.Count,attachments=job.AttachmentCount,packageHash=job.Sha256,governance="Draft change request created; approval and baseline selection remain required."});
         }
         catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
@@ -107,7 +107,7 @@ public static class ReqIfEndpoints
     private static async Task<IResult> CancelAsync(Guid id,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
     {var job=await db.ReqIfExchangeJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();try{job.Cancel(DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.Ok(new{job=Map(job)});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}}
 
-    private static object Map(ReqIfExchangeJob x)=>new{x.Id,direction=x.Direction.ToString(),state=x.State.ToString(),x.FileName,x.Sha256,x.RequirementCount,x.HierarchyCount,x.RelationCount,x.AttachmentCount,x.WarningCount,x.ErrorCount,x.ProcessedCount,x.CheckpointJson,x.Attempt,x.LastError,x.CreatedBy,x.CreatedAt,x.CompletedAt,x.CreatedScrId,downloadUrl=$"/api/reqif/jobs/{x.Id}/download",attachmentsUrl=$"/api/reqif/jobs/{x.Id}/attachments"};
+    private static object Map(ReqIfExchangeJob x)=>new{x.Id,direction=x.Direction.ToString(),state=x.State.ToString(),x.FileName,x.Sha256,x.RequirementCount,x.HierarchyCount,x.RelationCount,x.AttachmentCount,x.WarningCount,x.ErrorCount,x.ProcessedCount,x.CheckpointJson,x.Attempt,x.LastError,x.CreatedBy,x.CreatedAt,x.CompletedAt,x.CreatedChangeRequestId,downloadUrl=$"/api/reqif/jobs/{x.Id}/download",attachmentsUrl=$"/api/reqif/jobs/{x.Id}/attachments"};
 }
 
 public sealed record ReqIfExportRequest(Guid ProjectId,Guid ReleaseId);

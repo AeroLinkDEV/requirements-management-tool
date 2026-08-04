@@ -42,8 +42,8 @@ public static class BaselineEndpoints
             if (!string.IsNullOrWhiteSpace(state))
             {
                 if (state.Equals("ApprovedOrSelected", StringComparison.OrdinalIgnoreCase))
-                    source = source.Where(x => x.State == ScrState.Approved || x.State == ScrState.SelectedForBaseline);
-                else if (Enum.TryParse<ScrState>(state, true, out var parsedState)) source = source.Where(x => x.State == parsedState);
+                    source = source.Where(x => x.State == ChangeRequestState.Approved || x.State == ChangeRequestState.SelectedForBaseline);
+                else if (Enum.TryParse<ChangeRequestState>(state, true, out var parsedState)) source = source.Where(x => x.State == parsedState);
                 else return Results.BadRequest(new { error = "The requested lifecycle state is not recognized." });
             }
             if (!string.IsNullOrWhiteSpace(search)) { var q = search.Trim().ToLower(); source = source.Where(x =>
@@ -52,7 +52,7 @@ public static class BaselineEndpoints
             if (releaseId is not null) source = source.Where(x => x.TargetReleaseId == releaseId);
             var selectedBaselineId = baselineId;
             if (buildId is not null) selectedBaselineId = await db.SoftwareBuilds.Where(x => x.Id == buildId && x.ProjectId == projectId).Select(x => (Guid?)x.BaselineId).SingleOrDefaultAsync(ct);
-            if (selectedBaselineId is not null) source = source.Where(x => db.BaselineSelections.Any(s => s.BaselineId == selectedBaselineId && s.ScrId == x.Id));
+            if (selectedBaselineId is not null) source = source.Where(x => db.BaselineSelections.Any(s => s.BaselineId == selectedBaselineId && s.ChangeRequestId == x.Id));
             if (!string.IsNullOrWhiteSpace(baseNumber))
                 source = source.Where(x => x.BaseNumber == baseNumber);
             else
@@ -79,8 +79,8 @@ public static class BaselineEndpoints
             if (releaseId is not null) scrs = scrs.Where(x => x.TargetReleaseId == releaseId);
             var selectedBaselineId = baselineId;
             if (buildId is not null) selectedBaselineId = await db.SoftwareBuilds.Where(x => x.Id == buildId && x.ProjectId == projectId).Select(x => (Guid?)x.BaselineId).SingleOrDefaultAsync(ct);
-            if (selectedBaselineId is not null) scrs = scrs.Where(x => db.BaselineSelections.Any(s => s.BaselineId == selectedBaselineId && s.ScrId == x.Id));
-            var source = from r in db.RequirementChanges.AsNoTracking() join s in scrs on r.ScrId equals s.Id select new { r, s };
+            if (selectedBaselineId is not null) scrs = scrs.Where(x => db.BaselineSelections.Any(s => s.BaselineId == selectedBaselineId && s.ChangeRequestId == x.Id));
+            var source = from r in db.RequirementChanges.AsNoTracking() join s in scrs on r.ChangeRequestId equals s.Id select new { r, s };
             if (!string.IsNullOrWhiteSpace(search)) { var q = search.Trim().ToLower(); source = source.Where(x =>
                 x.r.BaseNumber.ToLower().Contains(q) || x.r.Statement.ToLower().Contains(q) ||
                 x.r.Rationale.ToLower().Contains(q) || x.s.Title.ToLower().Contains(q)); }
@@ -89,7 +89,7 @@ public static class BaselineEndpoints
             var items = await ordered
                 .Skip((page - 1) * pageSize).Take(pageSize).Select(x => new { x.r.Id, displayNumber = x.r.BaseNumber + "." + (x.r.Revision < 10 ? "0" : "") + x.r.Revision,
                     x.r.BaseNumber, x.r.Revision, level = x.r.Level.ToString(), kind = x.r.Kind.ToString(), x.r.Statement, x.r.Rationale, x.r.VerificationMethod,
-                    scrId = x.s.Id, scrDisplayNumber = x.s.BaseNumber + "." + (x.s.Revision < 10 ? "0" : "") + x.s.Revision, scrTitle = x.s.Title, scrState = x.s.State.ToString(), x.s.TargetReleaseId }).ToListAsync(ct);
+                    changeRequestId = x.s.Id, changeRequestDisplayNumber = x.s.BaseNumber + "." + (x.s.Revision < 10 ? "0" : "") + x.s.Revision, scrTitle = x.s.Title, scrState = x.s.State.ToString(), x.s.TargetReleaseId }).ToListAsync(ct);
             return Results.Ok(new { page, pageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)pageSize), items });
         });
 
@@ -123,7 +123,7 @@ public static class BaselineEndpoints
         {
             var build = await db.SoftwareBuilds.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (build is null) return Results.NotFound();
             var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == build.BaselineId, ct);
-            var scrIds = await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == baseline.Id).Select(x => x.ScrId).ToListAsync(ct);
+            var scrIds = await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == baseline.Id).Select(x => x.ChangeRequestId).ToListAsync(ct);
             var scrs = await db.SystemChangeRequests.AsNoTracking().Where(x => scrIds.Contains(x.Id)).Include(x => x.RequirementChanges).OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision).ToListAsync(ct);
             var effectiveRequirements = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id)
                                                join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
@@ -178,7 +178,7 @@ public static class BaselineEndpoints
         app.MapGet("/api/baselines/{id:guid}", async (Guid id, IBaselineRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
-            var scrIds = baseline.Selections.Select(x => x.ScrId).ToList();
+            var scrIds = baseline.Selections.Select(x => x.ChangeRequestId).ToList();
             var selected = await db.SystemChangeRequests.AsNoTracking().Where(x => scrIds.Contains(x.Id))
                 .Include(x => x.RequirementChanges).ToListAsync(ct);
             return Results.Ok(ApiMap.BaselineDetail(baseline, selected));
@@ -188,25 +188,25 @@ public static class BaselineEndpoints
         {
             var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
             var items = await db.SystemChangeRequests.AsNoTracking()
-                .Where(x => x.ProjectId == baseline.ProjectId && x.TargetReleaseId == baseline.ReleaseId && x.State == ScrState.Approved)
+                .Where(x => x.ProjectId == baseline.ProjectId && x.TargetReleaseId == baseline.ReleaseId && x.State == ChangeRequestState.Approved)
                 .OrderBy(x => x.BaseNumber).Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, x.Title, requirementCount = x.RequirementChanges.Count, x.UpdatedAt }).ToListAsync(ct);
             return Results.Ok(items);
         });
 
-        app.MapPost("/api/baselines/{id:guid}/selections", async (Guid id, BaselineSelectionRequest request, HttpContext http, IBaselineRepository baselines, IScrRepository scrs, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/baselines/{id:guid}/selections", async (Guid id, BaselineSelectionRequest request, HttpContext http, IBaselineRepository baselines, IChangeRequestRepository scrs, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var baseline = await baselines.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-            var scr = await scrs.GetAsync(request.ScrId, ct); if (scr is null) return Results.NotFound();
+            var scr = await scrs.GetAsync(request.ChangeRequestId, ct); if (scr is null) return Results.NotFound();
             try { baseline.Select(scr, http.UserAccount().UserName, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapDelete("/api/baselines/{id:guid}/selections/{scrId:guid}", async (Guid id, Guid scrId, HttpContext http, IBaselineRepository baselines, IScrRepository scrs, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapDelete("/api/baselines/{id:guid}/selections/{changeRequestId:guid}", async (Guid id, Guid changeRequestId, HttpContext http, IBaselineRepository baselines, IChangeRequestRepository scrs, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var baseline = await baselines.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-            var scr = await scrs.GetAsync(scrId, ct); if (scr is null) return Results.NotFound();
+            var scr = await scrs.GetAsync(changeRequestId, ct); if (scr is null) return Results.NotFound();
             try { baseline.Remove(scr, http.UserAccount().UserName, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.NoContent(); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -248,10 +248,10 @@ public static class BaselineEndpoints
             var rows = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == id)
                               join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
                               join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id
-                              join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceScrId equals scr.Id
+                              join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals scr.Id
                               orderby artifact.BaseNumber
                               select new { artifact.Id, artifact.BaseNumber, revisionId = revision.Id, revision.Revision, displayNumber = artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
-                                  level = artifact.Level.ToString(), revision.Statement, revision.Rationale, revision.VerificationMethod, sourceScrId = scr.Id,
+                                  level = artifact.Level.ToString(), revision.Statement, revision.Rationale, revision.VerificationMethod, sourceChangeRequestId = scr.Id,
                                   sourceScr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision }).ToListAsync(ct);
             return Results.Ok(new { documentType = "SWRD", title = $"{project.SoftwareProduct} Software Requirements Document", release = release.Version,
                 baseline = baseline.DisplayNumber, baseline.Name, baseline.RequirementsHash, baseline.RequirementsMaterializedAt, requirementCount = rows.Count, requirements = rows });
@@ -290,7 +290,7 @@ public static class BaselineEndpoints
             var from = effectiveAvailable ? await Set(fromBaseline?.Id) : []; var to = effectiveAvailable ? await Set(toBaseline?.Id) : []; var keys = from.Keys.Union(to.Keys).OrderBy(x => x).ToList();
             var effective = keys.Select(key => { var hasFrom = from.TryGetValue(key, out var a); var hasTo = to.TryGetValue(key, out var b); var kind = !hasFrom ? "Added" : !hasTo ? "Retired" : a.Revision != b.Revision || a.Statement != b.Statement ? "Modified" : "Unchanged"; return new { baseNumber = key, kind, fromRevision = hasFrom ? a.Revision : (int?)null, toRevision = hasTo ? b.Revision : (int?)null, level = hasTo ? b.Level : a.Level }; }).ToList();
             var requests = await db.SystemChangeRequests.AsNoTracking().Where(x => x.TargetReleaseId == toReleaseId).Include(x => x.RequirementChanges).OrderBy(x => x.BaseNumber).ToListAsync(ct);
-            var proposed = requests.SelectMany(scr => scr.RequirementChanges.Select(change => new { scrId = scr.Id, scr = scr.DisplayNumber, scr.Title, state = scr.State.ToString(), type = scr.Type.ToString(), change.DisplayNumber, level = change.Level.ToString(), kind = change.Kind.ToString(), change.Statement })).ToList();
+            var proposed = requests.SelectMany(scr => scr.RequirementChanges.Select(change => new { changeRequestId = scr.Id, scr = scr.DisplayNumber, scr.Title, state = scr.State.ToString(), type = scr.Type.ToString(), change.DisplayNumber, level = change.Level.ToString(), kind = change.Kind.ToString(), change.Statement })).ToList();
             return Results.Ok(new { fromRelease = releases.Single(x => x.Id == fromReleaseId).Version, toRelease = releases.Single(x => x.Id == toReleaseId).Version,
                 fromBaseline = fromBaseline?.DisplayNumber, toBaseline = toBaseline?.DisplayNumber, toMaterialized = effectiveAvailable,
                 summary = new { added = effective.Count(x => x.kind == "Added"), modified = effective.Count(x => x.kind == "Modified"), retired = effective.Count(x => x.kind == "Retired"), unchanged = effective.Count(x => x.kind == "Unchanged"), proposed = proposed.Count }, effective, proposed });

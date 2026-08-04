@@ -13,7 +13,7 @@ public sealed class DownstreamImpactService(AeroLinkDbContext db)
     public async Task<int> RaiseForApprovedChangeRequestAsync(SystemChangeRequest request,
         DateTimeOffset now, CancellationToken ct)
     {
-        if (request.State is not (ScrState.Approved or ScrState.SelectedForBaseline)) return 0;
+        if (request.State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)) return 0;
         // Old showcase data predates the aggregate invariant. Refuse to turn a mismatched CR into more
         // controlled work; reconciliation remediates that source explicitly and preserves its history.
         if (request.RequirementChanges.Any(x => !SystemChangeRequest.AcceptsRequirementLevel(request.Type, x.Level)))

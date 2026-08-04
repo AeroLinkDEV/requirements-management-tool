@@ -93,7 +93,7 @@ public sealed class DeferredCarryForwardApiTests
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var record = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == seeded.DeferredId);
         Assert.Equal(seeded.SuccessorId, record.TargetReleaseId);
-        Assert.Equal(ScrState.Draft, record.State);
+        Assert.Equal(ChangeRequestState.Draft, record.State);
         Assert.Null(record.DeferredFromState);
 
         // One record, not a copy: the build that shelved it no longer lists it, because it moved.
@@ -120,7 +120,7 @@ public sealed class DeferredCarryForwardApiTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var record = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == seeded.DeferredId);
-        Assert.Equal(ScrState.Deferred, record.State);
+        Assert.Equal(ChangeRequestState.Deferred, record.State);
         Assert.Equal(seeded.CurrentId, record.TargetReleaseId);
     }
 
@@ -140,7 +140,7 @@ public sealed class DeferredCarryForwardApiTests
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var record = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == seeded.DeferredId);
         Assert.Equal(seeded.CurrentId, record.TargetReleaseId);
-        Assert.Equal(ScrState.Draft, record.State);
+        Assert.Equal(ChangeRequestState.Draft, record.State);
     }
 
     private static async Task SignInAsync(HttpClient client)

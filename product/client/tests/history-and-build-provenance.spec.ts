@@ -16,7 +16,7 @@ test('searches scoped change history while dormant build management stays unreac
   await request.post(`${apiBase}/api/change-requests/${scr.id}/submit`, { data: { approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }] } })
   await request.post(`${apiBase}/api/change-requests/${scr.id}/approve`, { data: { password: 'AeroLink!2026', meaning: 'Approved for test baseline assembly.' } })
   const baseline = await (await request.post(`${apiBase}/api/baselines`, { data: { baseNumber: 'SW-03.30', revision: 0, projectId: workspace.project.id, releaseId: workspace.release.id, name: 'FMS 3.3 exact manifest', actorId: 'cm' } })).json()
-  await request.post(`${apiBase}/api/baselines/${baseline.id}/selections`, { data: { scrId: scr.id, actorId: 'cm' } })
+  await request.post(`${apiBase}/api/baselines/${baseline.id}/selections`, { data: { changeRequestId: scr.id, actorId: 'cm' } })
   await request.post(`${apiBase}/api/baselines/${baseline.id}/freeze`, { data: { actorId: 'cm' } })
   await request.post(`${apiBase}/api/baselines/${baseline.id}/materialize-requirements`, { data: { actorId: 'cm' } })
   const historyResponse = await request.get(`${apiBase}/api/history/change-requests?projectId=${workspace.project.id}&page=1&pageSize=50`)

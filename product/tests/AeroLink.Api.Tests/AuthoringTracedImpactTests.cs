@@ -286,13 +286,13 @@ public sealed class AuthoringTracedImpactTests
             },
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        var scrId = JsonSerializer.Deserialize<JsonElement>(await created.Content.ReadAsStringAsync())
+        var changeRequestId = JsonSerializer.Deserialize<JsonElement>(await created.Content.ReadAsStringAsync())
             .GetProperty("id").GetGuid();
 
         using (var read = await client.GetAsync($"/api/authoring/impact?projectId={projectId}&baseNumber={parentNumber}"))
             Assert.Equal(HttpStatusCode.OK, read.StatusCode);
 
-        using var detail = await client.GetAsync($"/api/change-requests/{scrId}");
+        using var detail = await client.GetAsync($"/api/change-requests/{changeRequestId}");
         var change = JsonSerializer.Deserialize<JsonElement>(await detail.Content.ReadAsStringAsync())
             .GetProperty("requirementChanges").EnumerateArray().Single();
         var dispositions = JsonSerializer.Deserialize<Dictionary<string, string>>(

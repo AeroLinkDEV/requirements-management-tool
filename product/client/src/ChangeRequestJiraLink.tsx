@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import "./ScrJiraLink.css";
+import "./ChangeRequestJiraLink.css";
 
 /**
  * The change request's issue in the programme's tracker.
@@ -21,13 +21,13 @@ type Link = {
   statusReadAt?: string;
 };
 
-export default function ScrJiraLink({
+export default function ChangeRequestJiraLink({
   api,
-  scrId,
+  changeRequestId,
   displayNumber,
 }: {
   api: string;
-  scrId: string;
+  changeRequestId: string;
   displayNumber: string;
 }) {
   const [configured, setConfigured] = useState(false);
@@ -36,12 +36,12 @@ export default function ScrJiraLink({
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const response = await fetch(`${api}/api/change-requests/${scrId}/jira`);
+    const response = await fetch(`${api}/api/change-requests/${changeRequestId}/jira`);
     if (!response.ok) return;
     const body = (await response.json()) as { configured: boolean; link: Link | null };
     setConfigured(body.configured);
     setLink(body.link ?? undefined);
-  }, [api, scrId]);
+  }, [api, changeRequestId]);
 
   useEffect(() => {
     void load();
@@ -54,7 +54,7 @@ export default function ScrJiraLink({
   const push = async () => {
     setBusy(true);
     setError("");
-    const response = await fetch(`${api}/api/change-requests/${scrId}/jira`, { method: "POST" });
+    const response = await fetch(`${api}/api/change-requests/${changeRequestId}/jira`, { method: "POST" });
     setBusy(false);
     if (!response.ok) {
       const detail = (await response.json().catch(() => ({}))) as { error?: string };

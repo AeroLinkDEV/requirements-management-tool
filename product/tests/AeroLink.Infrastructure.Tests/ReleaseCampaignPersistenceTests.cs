@@ -75,10 +75,10 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
             var baseline = await db.CandidateBaselines.Include(x => x.Selections).Include(x => x.Events).SingleAsync(x => x.Id == campaign.BaselineId);
             var requests = await db.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.ReviewCycles).ThenInclude(x => x.Steps).Where(x => x.TargetReleaseId == campaign.ReleaseId).ToListAsync();
             var now = new DateTimeOffset(2025, 1, 10, 14, 0, 0, TimeSpan.Zero);
-            foreach (var request in requests.Where(x => x.State != ScrState.Deferred && x.State != ScrState.SelectedForBaseline))
+            foreach (var request in requests.Where(x => x.State != ChangeRequestState.Deferred && x.State != ChangeRequestState.SelectedForBaseline))
             {
-                if (request.State == ScrState.Draft) { request.SubmitForReview(request.AuthorId, [new ApproverSelection("release.reviewer", "Release Reviewer")], now); await db.SaveChangesAsync(); }
-                while (request.State == ScrState.InReview) { request.ApproveActiveStage(request.ActiveReviewCycle!.Steps.Single(x => x.State == ApprovalStepState.Active).ApproverId, now); await db.SaveChangesAsync(); }
+                if (request.State == ChangeRequestState.Draft) { request.SubmitForReview(request.AuthorId, [new ApproverSelection("release.reviewer", "Release Reviewer")], now); await db.SaveChangesAsync(); }
+                while (request.State == ChangeRequestState.InReview) { request.ApproveActiveStage(request.ActiveReviewCycle!.Steps.Single(x => x.State == ApprovalStepState.Active).ApproverId, now); await db.SaveChangesAsync(); }
                 baseline.Select(request, "cm.test", now); await db.SaveChangesAsync();
             }
             baseline.Freeze("cm.test", now); await db.SaveChangesAsync();

@@ -18,7 +18,7 @@ type Gate = {
 };
 type Impact = {
   id: string;
-  scrId: string;
+  changeRequestId: string;
   scr: string;
   title: string;
   kind: string;
@@ -253,13 +253,13 @@ export default function ReleaseCampaignCenter({
     (detail?.impacts.filter((x) => x.state === "Pending") ?? []).reduce<
       Record<string, { scr: string; title: string; items: Impact[] }>
     >((groups, item) => {
-      const group = groups[item.scrId] ?? {
+      const group = groups[item.changeRequestId] ?? {
         scr: item.scr,
         title: item.title,
         items: [],
       };
       group.items.push(item);
-      groups[item.scrId] = group;
+      groups[item.changeRequestId] = group;
       return groups;
     }, {}),
   );
@@ -343,7 +343,7 @@ export default function ReleaseCampaignCenter({
   const renderImpact = (item: Impact) => (
     <article key={item.id}>
       <div>
-        <button className="impactScr" onClick={() => onOpenScr(item.scrId)}>
+        <button className="impactScr" onClick={() => onOpenScr(item.changeRequestId)}>
           {item.scr}
         </button>
         <i className={item.state.toLowerCase()}>{stateLabel(item.state)}</i>

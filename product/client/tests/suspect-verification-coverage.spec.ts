@@ -71,7 +71,7 @@ test('modified requirement coverage stays suspect until an exact approved proced
   const baseline = (await baselinesResponse.json())[0]
   expect(baseline, 'the in-work software build').toBeTruthy()
   for (const [path, data] of [
-    ['selections', { scrId: draft.id }],
+    ['selections', { changeRequestId: draft.id }],
     ['freeze', {}],
     ['materialize-requirements', {}],
   ] as const) {

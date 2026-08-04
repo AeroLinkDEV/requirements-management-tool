@@ -53,8 +53,8 @@ function lazyView<P>(load: () => Promise<{ default: ComponentType<P> }>) {
   return Object.assign(lazy(load), { warm: () => { void load(); } });
 }
 
-const ScrEditor = lazyView(() => import("./ScrEditor"));
-const ScrWorkspace = lazyView(() => import("./ScrWorkspace"));
+const ChangeRequestEditor = lazyView(() => import("./ChangeRequestEditor"));
+const ChangeRequestWorkspace = lazyView(() => import("./ChangeRequestWorkspace"));
 const BaselineCenter = lazyView(() => import("./BaselineCenter"));
 const HistoryExplorer = lazyView(() => import("./HistoryExplorer"));
 const VerificationLanding = lazyView(() => import("./VerificationLanding"));
@@ -74,9 +74,9 @@ const ArtifactRecordPage = lazyView(() => import("./ArtifactRecordPage"));
 
 /** Which code a navigation target needs, so hovering the entry can start fetching it. */
 const viewCode: Partial<Record<View, { warm: () => void }>> = {
-  scr: ScrWorkspace,
-  createSystemScr: ScrEditor,
-  createSoftwareChange: ScrEditor,
+  scr: ChangeRequestWorkspace,
+  createSystemScr: ChangeRequestEditor,
+  createSoftwareChange: ChangeRequestEditor,
   baselines: BaselineCenter,
   history: HistoryExplorer,
   requirements: RequirementsWorkspace,
@@ -475,7 +475,7 @@ function App() {
   }
   if ((view === "createSystemScr" || view === "createSoftwareChange") && project && release)
     return inShell(
-      <ScrEditor
+      <ChangeRequestEditor
         api={API}
         projectId={project.project.id}
         releaseId={release.id}
@@ -485,22 +485,22 @@ function App() {
         user={user}
         sourceRequirementId={selectedArtifactId || undefined}
         onCancel={() => navigate("dashboard")}
-        onSaved={async (scrId, displayNumber) => {
+        onSaved={async (changeRequestId, displayNumber) => {
           await loadData();
           // Said out loud, because landing on a new page is not the same as being told the save worked —
           // it was asked for twice. The toast outlives this navigation because it is held up here.
-          const linked=await linkPendingAssessment(scrId)
+          const linked=await linkPendingAssessment(changeRequestId)
           if(linked)setToast(pendingAssessmentLink?`${displayNumber} saved and linked to the ${pendingAssessmentLink.sourceNumber} downstream assessment.`:`${displayNumber} saved as a Draft.`)
-          else{setPendingAssessmentLink(current=>current?{...current,changeRequestId:scrId}:current);setToast(`${displayNumber} saved, but its downstream assessment link needs attention.`)}
-          navigate("scr",view === "createSoftwareChange" ? "software" : "system",scrId);
+          else{setPendingAssessmentLink(current=>current?{...current,changeRequestId:changeRequestId}:current);setToast(`${displayNumber} saved, but its downstream assessment link needs attention.`)}
+          navigate("scr",view === "createSoftwareChange" ? "software" : "system",changeRequestId);
         }}
       />
     );
   if (view === "scr" && selectedScrId)
     return inShell(
-      <>{pendingAssessmentLink?.changeRequestId===selectedScrId&&<section className="assessmentLinkRecovery" role="alert"><div><b>Downstream assessment link needs attention</b><span>This Draft is saved. Retry its link to the {pendingAssessmentLink.sourceNumber} assessment.</span></div><button type="button" onClick={async()=>{if(await linkPendingAssessment(selectedScrId))setToast(`Draft linked to the ${pendingAssessmentLink.sourceNumber} downstream assessment.`);else setToast('The downstream assessment link still could not be recorded.')}}>Retry assessment link</button></section>}<ScrWorkspace
+      <>{pendingAssessmentLink?.changeRequestId===selectedScrId&&<section className="assessmentLinkRecovery" role="alert"><div><b>Downstream assessment link needs attention</b><span>This Draft is saved. Retry its link to the {pendingAssessmentLink.sourceNumber} assessment.</span></div><button type="button" onClick={async()=>{if(await linkPendingAssessment(selectedScrId))setToast(`Draft linked to the ${pendingAssessmentLink.sourceNumber} downstream assessment.`);else setToast('The downstream assessment link still could not be recorded.')}}>Retry assessment link</button></section>}<ChangeRequestWorkspace
         api={API}
-        scrId={selectedScrId}
+        changeRequestId={selectedScrId}
         user={user}
         onBack={() => navigate("history", discipline)}
         onChanged={loadData}

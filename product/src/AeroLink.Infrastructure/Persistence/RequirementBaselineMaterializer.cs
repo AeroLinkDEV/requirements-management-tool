@@ -39,7 +39,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
             foreach (var item in predecessorItems) current[item.ArtifactId] = predecessorRevisions[item.RevisionId];
         }
 
-        var scrIds = baseline.Selections.Select(x => x.ScrId).ToList();
+        var scrIds = baseline.Selections.Select(x => x.ChangeRequestId).ToList();
         var scrs = await db.SystemChangeRequests.AsNoTracking().Where(x => scrIds.Contains(x.Id)).Include(x => x.RequirementChanges).ToListAsync(ct);
         foreach (var change in scrs.SelectMany(x => x.RequirementChanges))
             RequirementAuthoringJson.EnsureCompleteImpactDispositions(change.ImpactDispositionJson, change.DisplayNumber);
@@ -178,9 +178,9 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         return int.TryParse(digits, out var value) ? value : Math.Abs(baseNumber.GetHashCode() % 100000);
     }
 
-    private static RequirementRevision CreateRevision(RequirementArtifact artifact, RequirementChange change, Guid scrId,
+    private static RequirementRevision CreateRevision(RequirementArtifact artifact, RequirementChange change, Guid changeRequestId,
         Guid baselineId, DateTimeOffset now, RequirementRevisionState state) =>
-        new(artifact.Id, change.Revision, change.Statement, change.Rationale, change.VerificationMethod, state, scrId, baselineId, now);
+        new(artifact.Id, change.Revision, change.Statement, change.Rationale, change.VerificationMethod, state, changeRequestId, baselineId, now);
 
     private static IReadOnlyList<Guid> ProposedParents(RequirementChange change)
     {

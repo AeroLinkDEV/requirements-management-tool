@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
-public sealed class ScrRepository(AeroLinkDbContext db) : IScrRepository
+public sealed class ChangeRequestRepository(AeroLinkDbContext db) : IChangeRequestRepository
 {
     public async Task<PagedResult<ScrListItem>> QueryAsync(ScrQuery query, CancellationToken cancellationToken)
     {
@@ -27,7 +27,7 @@ public sealed class ScrRepository(AeroLinkDbContext db) : IScrRepository
             var predecessors = db.Releases.Where(x => x.Id == query.TargetReleaseId)
                 .Select(x => x.PredecessorReleaseId);
             source = source.Where(x => x.TargetReleaseId == query.TargetReleaseId
-                || (x.State == ScrState.Deferred && predecessors.Contains(x.TargetReleaseId)));
+                || (x.State == ChangeRequestState.Deferred && predecessors.Contains(x.TargetReleaseId)));
         }
         if (!string.IsNullOrWhiteSpace(query.Search))
         {

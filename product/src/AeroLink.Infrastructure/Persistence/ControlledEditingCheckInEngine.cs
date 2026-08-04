@@ -691,7 +691,7 @@ public sealed class ReleasePlanningControlledEditingAdapter(AeroLinkDbContext db
     {
         item.Id, item.BaseNumber, item.Revision, item.Name, item.ReleaseId, item.PredecessorBaselineId,
         state = item.State.ToString(), item.ContentHash, item.RequirementsHash, version = versionOverride ?? item.Version,
-        selectedScrIds = item.Selections.OrderBy(x => x.ScrDisplayNumber).Select(x => x.ScrId)
+        selectedScrIds = item.Selections.OrderBy(x => x.ChangeRequestDisplayNumber).Select(x => x.ChangeRequestId)
     });
 
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
@@ -707,7 +707,7 @@ public sealed class ReleasePlanningControlledEditingAdapter(AeroLinkDbContext db
         if (draft.SelectedScrIds is null || draft.SelectedScrIds.Count != draft.SelectedScrIds.Distinct().Count())
             throw new DomainException("Release-planning selections must contain distinct SCR identifiers.");
         var requested = draft.SelectedScrIds.ToHashSet();
-        var existing = baseline.Selections.Select(x => x.ScrId).ToHashSet();
+        var existing = baseline.Selections.Select(x => x.ChangeRequestId).ToHashSet();
         var allIds = requested.Union(existing).ToList();
         var scrs = await db.SystemChangeRequests.Where(x => allIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
         if (scrs.Count != allIds.Count) throw new DomainException("Every selected release-planning SCR must exist.");

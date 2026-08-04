@@ -7,15 +7,15 @@ namespace AeroLink.Domain.Baselines;
 
 public enum CandidateBaselineState { Draft, Frozen, Released }
 
-public sealed class BaselineScrSelection
+public sealed class BaselineChangeRequestSelection
 {
-    private BaselineScrSelection() { }
-    internal BaselineScrSelection(Guid baselineId, Guid scrId, string scrDisplayNumber)
-    { Id = Guid.NewGuid(); BaselineId = baselineId; ScrId = scrId; ScrDisplayNumber = scrDisplayNumber; }
+    private BaselineChangeRequestSelection() { }
+    internal BaselineChangeRequestSelection(Guid baselineId, Guid changeRequestId, string scrDisplayNumber)
+    { Id = Guid.NewGuid(); BaselineId = baselineId; ChangeRequestId = changeRequestId; ChangeRequestDisplayNumber = scrDisplayNumber; }
     public Guid Id { get; private set; }
     public Guid BaselineId { get; private set; }
-    public Guid ScrId { get; private set; }
-    public string ScrDisplayNumber { get; private set; } = string.Empty;
+    public Guid ChangeRequestId { get; private set; }
+    public string ChangeRequestDisplayNumber { get; private set; } = string.Empty;
 }
 
 public sealed class BaselineEvent
@@ -33,7 +33,7 @@ public sealed class BaselineEvent
 
 public sealed class CandidateBaseline
 {
-    private readonly List<BaselineScrSelection> _selections = [];
+    private readonly List<BaselineChangeRequestSelection> _selections = [];
     private readonly List<BaselineEvent> _events = [];
     private CandidateBaseline() { }
 
@@ -63,7 +63,7 @@ public sealed class CandidateBaseline
     public DateTimeOffset? FrozenAt { get; private set; }
     public DateTimeOffset? RequirementsMaterializedAt { get; private set; }
     public string? RequirementsHash { get; private set; }
-    public IReadOnlyCollection<BaselineScrSelection> Selections => _selections.AsReadOnly();
+    public IReadOnlyCollection<BaselineChangeRequestSelection> Selections => _selections.AsReadOnly();
     public IReadOnlyCollection<BaselineEvent> Events => _events.AsReadOnly();
 
     public void UpdateDraft(string name, string actorId, DateTimeOffset now)
@@ -77,11 +77,11 @@ public sealed class CandidateBaseline
     public void Select(SystemChangeRequest scr, string actorId, DateTimeOffset now)
     {
         EnsureDraft();
-        if (scr.State != ScrState.Approved) throw new DomainException("Only approved SCRs can be selected.");
+        if (scr.State != ChangeRequestState.Approved) throw new DomainException("Only approved SCRs can be selected.");
         if (scr.ProjectId != ProjectId || scr.TargetReleaseId != ReleaseId)
             throw new DomainException("The SCR does not belong to this project and target release.");
-        if (_selections.Any(x => x.ScrId == scr.Id)) throw new DomainException("The SCR is already selected.");
-        _selections.Add(new BaselineScrSelection(Id, scr.Id, scr.DisplayNumber));
+        if (_selections.Any(x => x.ChangeRequestId == scr.Id)) throw new DomainException("The SCR is already selected.");
+        _selections.Add(new BaselineChangeRequestSelection(Id, scr.Id, scr.DisplayNumber));
         UpdatedAt = now;
         scr.MarkSelectedForBaseline(actorId, now);
         Event("ScrSelected", actorId, $"Selected {scr.DisplayNumber}.", now);
@@ -90,7 +90,7 @@ public sealed class CandidateBaseline
     public void Remove(SystemChangeRequest scr, string actorId, DateTimeOffset now)
     {
         EnsureDraft();
-        var selection = _selections.SingleOrDefault(x => x.ScrId == scr.Id)
+        var selection = _selections.SingleOrDefault(x => x.ChangeRequestId == scr.Id)
             ?? throw new DomainException("The SCR is not selected in this baseline.");
         _selections.Remove(selection);
         UpdatedAt = now;
@@ -103,7 +103,7 @@ public sealed class CandidateBaseline
         EnsureDraft();
         if (_selections.Count == 0) throw new DomainException("At least one approved SCR must be selected before freezing a baseline.");
         var manifest = string.Join("|", DisplayNumber, ProjectId, ReleaseId,
-            string.Join(";", _selections.OrderBy(x => x.ScrDisplayNumber).Select(x => $"{x.ScrId}:{x.ScrDisplayNumber}")));
+            string.Join(";", _selections.OrderBy(x => x.ChangeRequestDisplayNumber).Select(x => $"{x.ChangeRequestId}:{x.ChangeRequestDisplayNumber}")));
         ContentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
         State = CandidateBaselineState.Frozen;
         FrozenAt = now;

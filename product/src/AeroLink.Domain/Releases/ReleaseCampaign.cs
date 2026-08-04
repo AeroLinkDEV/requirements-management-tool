@@ -100,9 +100,9 @@ public sealed class ReleaseCampaignEvent
 public sealed class ChangeImpactDisposition
 {
     private ChangeImpactDisposition() { }
-    public ChangeImpactDisposition(Guid campaignId, Guid scrId, ImpactKind kind, string artifactReference, string description)
-    { Id = Guid.NewGuid(); CampaignId = campaignId; ScrId = scrId; Kind = kind; ArtifactReference = artifactReference.Trim(); Description = description.Trim(); State = ImpactDispositionState.Pending; }
-    public Guid Id { get; private set; } public Guid CampaignId { get; private set; } public Guid ScrId { get; private set; }
+    public ChangeImpactDisposition(Guid campaignId, Guid changeRequestId, ImpactKind kind, string artifactReference, string description)
+    { Id = Guid.NewGuid(); CampaignId = campaignId; ChangeRequestId = changeRequestId; Kind = kind; ArtifactReference = artifactReference.Trim(); Description = description.Trim(); State = ImpactDispositionState.Pending; }
+    public Guid Id { get; private set; } public Guid CampaignId { get; private set; } public Guid ChangeRequestId { get; private set; }
     public ImpactKind Kind { get; private set; } public string ArtifactReference { get; private set; } = string.Empty; public string Description { get; private set; } = string.Empty;
     public ImpactDispositionState State { get; private set; } public string Rationale { get; private set; } = string.Empty; public string? DispositionedBy { get; private set; } public DateTimeOffset? DispositionedAt { get; private set; }
     public void Disposition(ImpactDispositionState state, string rationale, string actorId, DateTimeOffset now)

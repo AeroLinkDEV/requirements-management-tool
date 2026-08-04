@@ -12,14 +12,14 @@ import type {
 import PersonPicker from "./PersonPicker";
 import { demoPerson } from "./PeopleRegistry";
 import ControlledAttachments from "./ControlledAttachments";
-import ScrJiraLink from "./ScrJiraLink";
+import ChangeRequestJiraLink from "./ChangeRequestJiraLink";
 import { PersonName } from "./People";
 import { personLabel } from "./PeopleRegistry";
 import { RichCaseField, RichContentView } from "./RichContent";
 import { useDebouncedSave } from "./autosave";
 import { emptyRichContent, fromPlainText, toPlainText } from "./richContentModel";
 import ProblemReportPicker from "./ProblemReportPicker";
-import "./ScrWorkspace.css";
+import "./ChangeRequestWorkspace.css";
 import "./ReviewMode.css";
 
 type Requirement = {
@@ -116,7 +116,7 @@ type Audit = {
   /** 0 for events written before evidence was separated from the narrative. */
   schemaVersion?: number;
 };
-type ScrDetail = {
+type ChangeRequestDetail = {
   id: string;
   baseNumber: string;
   revision: number;
@@ -184,7 +184,7 @@ type AuthoringContext = {
 };
 type Props = {
   api: string;
-  scrId: string;
+  changeRequestId: string;
   user: AuthUser;
   onBack: () => void;
   onChanged: () => Promise<void>;
@@ -387,9 +387,9 @@ function ExactUpstreamReferences({api,projectId,releaseId,childLevel,revisionIds
   return <span className="artifactReferenceCloud">{references.map(reference=><button type="button" key={reference.revisionId} onClick={()=>onOpen(reference.artifactId,reference.level)}>{reference.displayNumber}</button>)}{references.length<revisionIds.length&&<i>Unavailable controlled revision</i>}</span>
 }
 
-export default function ScrWorkspace({
+export default function ChangeRequestWorkspace({
   api,
-  scrId,
+  changeRequestId,
   user,
   onBack,
   onChanged,
@@ -399,7 +399,7 @@ export default function ScrWorkspace({
   onDisciplineResolved,
   releases,
 }: Props) {
-  const [scr, setScr] = useState<ScrDetail>();
+  const [scr, setScr] = useState<ChangeRequestDetail>();
   const [drivingProblemReports, setDrivingProblemReports] = useState<ProblemReportSummary[]>([]);
   const [context, setContext] = useState<AuthoringContext>();
   const [mode, setMode] = useState<"view" | "edit" | "approvers">("view");
@@ -435,14 +435,14 @@ export default function ScrWorkspace({
   );
 
   const loadStatus = useCallback(async () => {
-    const response = await fetch(`${api}/api/controlled-editing/status?artifactType=ChangeRequest&artifactId=${scrId}`);
+    const response = await fetch(`${api}/api/controlled-editing/status?artifactType=ChangeRequest&artifactId=${changeRequestId}`);
     if (response.ok) setLockStatus((await response.json()) as LockStatus);
-  }, [api, scrId]);
+  }, [api, changeRequestId]);
 
   const load = useCallback(async () => {
     setLoadFailure("");
     try {
-      const response = await fetch(`${api}/api/change-requests/${scrId}`);
+      const response = await fetch(`${api}/api/change-requests/${changeRequestId}`);
       if (!response.ok) {
         setLoadFailure(response.status === 404
           ? "No originating change request is available for this requirement."
@@ -450,7 +450,7 @@ export default function ScrWorkspace({
         return;
       }
       {
-      const detail = (await response.json()) as ScrDetail;
+      const detail = (await response.json()) as ChangeRequestDetail;
       onDisciplineResolved(detail.type === "Software" ? "software" : "system");
       setScr(detail);
       let reports: ProblemReportSummary[] = [];
@@ -482,7 +482,7 @@ export default function ScrWorkspace({
       setLoadFailure("The originating change request could not be loaded. Check the AeroLink service and try again.");
     }
     await loadStatus();
-  }, [api, loadStatus, mode, onDisciplineResolved, scrId]);
+  }, [api, loadStatus, mode, onDisciplineResolved, changeRequestId]);
 
   useEffect(() => {
     void load();
@@ -546,7 +546,7 @@ export default function ScrWorkspace({
         fetch(`${api}/api/controlled-editing/checkout`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ artifactType: "ChangeRequest", artifactId: scrId, leaseMinutes: 15 }),
+          body: JSON.stringify({ artifactType: "ChangeRequest", artifactId: changeRequestId, leaseMinutes: 15 }),
         }),
       "This Draft could not be checked out.",
     );
@@ -715,7 +715,7 @@ export default function ScrWorkspace({
 
   const call = async (path: string, body: unknown) => {
     const outcome = await withBusy(async () => {
-      const response = await fetch(`${api}/api/change-requests/${scrId}/${path}`, {
+      const response = await fetch(`${api}/api/change-requests/${changeRequestId}/${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1263,7 +1263,7 @@ export default function ScrWorkspace({
               </section>
             )}
 
-            <ScrJiraLink api={api} scrId={scr.id} displayNumber={scr.displayNumber} />
+            <ChangeRequestJiraLink api={api} changeRequestId={scr.id} displayNumber={scr.displayNumber} />
 
             <section className="workspaceCard">
               <div className="workspaceTitle">

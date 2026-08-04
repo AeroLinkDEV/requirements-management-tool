@@ -25,7 +25,7 @@ public static class DependencyInjection
             if (isPostgres) options.UseNpgsql(connection);
             else options.UseSqlite(connection);
         });
-        services.AddScoped<IScrRepository, ScrRepository>();
+        services.AddScoped<IChangeRequestRepository, ChangeRequestRepository>();
         services.AddScoped<IProgramRepository, ProgramRepository>();
         services.AddScoped<IBaselineRepository, BaselineRepository>();
         services.AddScoped<RequirementBaselineMaterializer>();

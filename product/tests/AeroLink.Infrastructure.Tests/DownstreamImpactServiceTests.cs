@@ -92,7 +92,7 @@ public sealed class DownstreamImpactServiceTests
                 seed.AddRange(program, project, release, request);
                 await seed.SaveChangesAsync();
                 await seed.Database.ExecuteSqlRawAsync(
-                    "UPDATE requirement_changes SET Level = 'HighLevel' WHERE ScrId = {0}", requestId);
+                    "UPDATE requirement_changes SET Level = 'HighLevel' WHERE ChangeRequestId = {0}", requestId);
             }
 
             await using var db = new AeroLinkDbContext(options);
@@ -128,7 +128,7 @@ public sealed class DownstreamImpactServiceTests
                 seed.AddRange(program, project, release, legacy, invalidAssessment);
                 await seed.SaveChangesAsync();
                 await seed.Database.ExecuteSqlRawAsync(
-                    "UPDATE requirement_changes SET Level = 'HighLevel' WHERE ScrId = {0}", legacy.Id);
+                    "UPDATE requirement_changes SET Level = 'HighLevel' WHERE ChangeRequestId = {0}", legacy.Id);
             }
 
             await using var db = new AeroLinkDbContext(options);

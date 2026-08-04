@@ -5,7 +5,7 @@ using AeroLink.Domain.Common;
 
 namespace AeroLink.Domain.ChangeControl;
 
-public enum ScrState { Draft, InReview, Approved, Deferred, SelectedForBaseline }
+public enum ChangeRequestState { Draft, InReview, Approved, Deferred, SelectedForBaseline }
 public enum ChangeRequestType { System, Software }
 
 /// <summary>
@@ -67,7 +67,7 @@ public sealed class SystemChangeRequest
             && !BaseNumber.StartsWith(expected + "-", StringComparison.Ordinal))
             throw new DomainException($"A {(type == ChangeRequestType.System ? "System" : expected == ChangeRequestNumbering.HighLevelPrefix ? "HLR" : "LLR")} change request must be numbered {expected}-.");
         SoftwareLevel = softwareLevel;
-        State = ScrState.Draft;
+        State = ChangeRequestState.Draft;
         CreatedAt = now;
         UpdatedAt = now;
         Audit("ScrCreated", authorId, $"Created {DisplayNumber}.", now);
@@ -83,11 +83,11 @@ public sealed class SystemChangeRequest
     /// <summary>
     /// How far this change request had got when it was deferred, or null when it is not on the shelf.
     ///
-    /// State and allocation are two different facts and `ScrState` was carrying both. "Which build is this going
+    /// State and allocation are two different facts and `ChangeRequestState` was carrying both. "Which build is this going
     /// into" and "how far has it got" are answered separately now: Deferred is where the work sits, and this is
     /// how far it got before it went there.
     /// </summary>
-    public ScrState? DeferredFromState { get; private set; }
+    public ChangeRequestState? DeferredFromState { get; private set; }
     public string Problem { get; private set; } = string.Empty;
     public string Analysis { get; private set; } = string.Empty;
     public string Solution { get; private set; } = string.Empty;
@@ -107,7 +107,7 @@ public sealed class SystemChangeRequest
     /// of making it disappear from both engineering work lists.
     /// </summary>
     public RequirementLevel? SoftwareLevel { get; private set; }
-    public ScrState State { get; private set; }
+    public ChangeRequestState State { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; } = 1;
@@ -181,7 +181,7 @@ public sealed class SystemChangeRequest
         ValidateReadyForReview();
         var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(), approvers, now, mode, workflow);
         _reviewCycles.Add(cycle);
-        State = ScrState.InReview;
+        State = ChangeRequestState.InReview;
         UpdatedAt = now;
         Audit("ReviewStarted", actorId,
             $"Started {cycle.Mode.ToString().ToLowerInvariant()} review cycle {cycle.Sequence} with {approvers.Count} approvers" +
@@ -197,7 +197,7 @@ public sealed class SystemChangeRequest
         Audit("ApprovalRecorded", actorId, $"Approved review cycle {cycle.Sequence} stage.", now);
         if (fullyApproved)
         {
-            State = ScrState.Approved;
+            State = ChangeRequestState.Approved;
             Audit("ScrApproved", actorId, $"Unanimously approved {DisplayNumber}.", now);
         }
         UpdatedAt = now;
@@ -211,7 +211,7 @@ public sealed class SystemChangeRequest
         if (active is null)
             throw new DomainException("Only the active approver can request changes.");
         cycle.RequestChanges(reason, now);
-        State = ScrState.Draft;
+        State = ChangeRequestState.Draft;
         UpdatedAt = now;
         Audit("ChangesRequested", actorId, $"Returned {DisplayNumber} to Draft at the same revision: {reason}", now);
     }
@@ -239,7 +239,7 @@ public sealed class SystemChangeRequest
         if (string.IsNullOrWhiteSpace(actorId)) throw new DomainException("A cancelling actor is required.");
         if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("Say why this review is being cancelled.");
         ActiveReviewCycle!.Cancel(reason, now);
-        State = ScrState.Draft;
+        State = ChangeRequestState.Draft;
         UpdatedAt = now;
         Audit("ReviewCancelled", actorId, $"Cancelled the review of {DisplayNumber} and returned it to Draft at the same revision: {reason.Trim()}", now);
     }
@@ -294,7 +294,7 @@ public sealed class SystemChangeRequest
         bool administratorAuthority = false)
     {
         EnsureAuthor(actorId, administratorAuthority);
-        if (State is not (ScrState.Approved or ScrState.SelectedForBaseline))
+        if (State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline))
             throw new DomainException("Only an approved SCR can advance to its next revision.");
         if (targetReleaseIsReleased)
             throw new DomainException(
@@ -310,8 +310,8 @@ public sealed class SystemChangeRequest
 
     public void MarkSelectedForBaseline(string actorId, DateTimeOffset now)
     {
-        if (State != ScrState.Approved) throw new DomainException("Only an approved SCR can be selected for a baseline.");
-        State = ScrState.SelectedForBaseline;
+        if (State != ChangeRequestState.Approved) throw new DomainException("Only an approved SCR can be selected for a baseline.");
+        State = ChangeRequestState.SelectedForBaseline;
         UpdatedAt = now;
         // Says what happened to the change, not what happened to the baseline. Selection into a candidate
         // baseline is the mechanism; being allocated to a build is the fact a reader opened the history for.
@@ -322,8 +322,8 @@ public sealed class SystemChangeRequest
 
     public void UnmarkSelectedForBaseline(string actorId, DateTimeOffset now)
     {
-        if (State != ScrState.SelectedForBaseline) throw new DomainException("The SCR is not selected for a baseline.");
-        State = ScrState.Approved;
+        if (State != ChangeRequestState.SelectedForBaseline) throw new DomainException("The SCR is not selected for a baseline.");
+        State = ChangeRequestState.Approved;
         UpdatedAt = now;
         Audit("RemovedFromCandidateBaseline", actorId, $"Returned {DisplayNumber} to Approved eligibility.", now);
     }
@@ -348,17 +348,17 @@ public sealed class SystemChangeRequest
     public void Defer(string actorId, string reason, DateTimeOffset now, bool administratorAuthority = false)
     {
         EnsureAuthor(actorId, administratorAuthority);
-        if (State == ScrState.Deferred) throw new DomainException("The change request is already deferred.");
-        if (State == ScrState.SelectedForBaseline)
+        if (State == ChangeRequestState.Deferred) throw new DomainException("The change request is already deferred.");
+        if (State == ChangeRequestState.SelectedForBaseline)
             throw new DomainException("Remove the change request from its candidate baseline before deferring it.");
         if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A deferral reason is required.");
-        if (State == ScrState.InReview) ActiveReviewCycle?.Cancel(reason.Trim(), now);
+        if (State == ChangeRequestState.InReview) ActiveReviewCycle?.Cancel(reason.Trim(), now);
         // Remembered, because deferring changes where the work sits and not how far it got. A change request put
         // away while approved is still approved work; one put away as a Draft still needs writing. Storing only
         // "Deferred" loses that, and a shelf that cannot tell a signed-off change from an unwritten one is a
         // shelf nobody can plan from. Reinstate puts it back exactly where it was.
         DeferredFromState = State;
-        State = ScrState.Deferred; UpdatedAt = now; Audit("ChangeRequestDeferred", actorId, reason.Trim(), now);
+        State = ChangeRequestState.Deferred; UpdatedAt = now; Audit("ChangeRequestDeferred", actorId, reason.Trim(), now);
     }
 
     /// <summary>
@@ -372,13 +372,13 @@ public sealed class SystemChangeRequest
     public void Reinstate(string actorId, DateTimeOffset now, bool administratorAuthority = false)
     {
         EnsureAuthor(actorId, administratorAuthority);
-        if (State != ScrState.Deferred) throw new DomainException("Only a deferred change request can be reinstated.");
+        if (State != ChangeRequestState.Deferred) throw new DomainException("Only a deferred change request can be reinstated.");
         var restored = DeferredFromState switch
         {
-            ScrState.InReview => ScrState.Draft,
+            ChangeRequestState.InReview => ChangeRequestState.Draft,
             // Deferred rows that predate the state being remembered come back as Drafts. That is the safe
             // direction: an author can resubmit a Draft, where claiming approval nobody gave cannot be undone.
-            null => ScrState.Draft,
+            null => ChangeRequestState.Draft,
             var value => value.Value,
         };
         State = restored;
@@ -391,7 +391,7 @@ public sealed class SystemChangeRequest
         bool administratorAuthority = false)
     {
         EnsureAuthor(actorId, administratorAuthority);
-        if (State is not (ScrState.Draft or ScrState.Approved or ScrState.Deferred))
+        if (State is not (ChangeRequestState.Draft or ChangeRequestState.Approved or ChangeRequestState.Deferred))
             throw new DomainException("Only a Draft, Approved, or Deferred change request can move to another release.");
         if (targetReleaseId == Guid.Empty || targetReleaseId == TargetReleaseId)
             throw new DomainException("Choose a different target release.");
@@ -463,6 +463,6 @@ public sealed class SystemChangeRequest
         if (!administratorAuthority && !string.Equals(AuthorId, actorId, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("Only the SCR author can perform this action.");
     }
-    private void EnsureDraft() { if (State != ScrState.Draft) throw new DomainException("The SCR must be in Draft."); }
-    private void EnsureInReview() { if (State != ScrState.InReview || ActiveReviewCycle is null) throw new DomainException("The SCR is not in active review."); }
+    private void EnsureDraft() { if (State != ChangeRequestState.Draft) throw new DomainException("The SCR must be in Draft."); }
+    private void EnsureInReview() { if (State != ChangeRequestState.InReview || ActiveReviewCycle is null) throw new DomainException("The SCR is not in active review."); }
 }

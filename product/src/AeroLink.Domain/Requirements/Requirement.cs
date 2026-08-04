@@ -26,7 +26,7 @@ public sealed class RequirementRevision
 {
     private RequirementRevision() { }
     public RequirementRevision(Guid artifactId, int revision, string statement, string rationale,
-        string verificationMethod, RequirementRevisionState state, Guid sourceScrId, Guid effectiveBaselineId,
+        string verificationMethod, RequirementRevisionState state, Guid sourceChangeRequestId, Guid effectiveBaselineId,
         DateTimeOffset createdAt)
     {
         if (revision < 0) throw new DomainException("Requirement revision cannot be negative.");
@@ -34,7 +34,7 @@ public sealed class RequirementRevision
             throw new DomainException("An active requirement revision needs a statement.");
         Id = Guid.NewGuid(); ArtifactId = artifactId; Revision = revision; Statement = statement.Trim();
         Rationale = rationale.Trim(); VerificationMethod = verificationMethod.Trim(); State = state;
-        SourceScrId = sourceScrId; EffectiveBaselineId = effectiveBaselineId; CreatedAt = createdAt;
+        SourceChangeRequestId = sourceChangeRequestId; EffectiveBaselineId = effectiveBaselineId; CreatedAt = createdAt;
     }
     public Guid Id { get; private set; }
     public Guid ArtifactId { get; private set; }
@@ -43,7 +43,7 @@ public sealed class RequirementRevision
     public string Rationale { get; private set; } = string.Empty;
     public string VerificationMethod { get; private set; } = string.Empty;
     public RequirementRevisionState State { get; private set; }
-    public Guid SourceScrId { get; private set; }
+    public Guid SourceChangeRequestId { get; private set; }
     public Guid EffectiveBaselineId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 }

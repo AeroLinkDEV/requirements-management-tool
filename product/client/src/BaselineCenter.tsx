@@ -539,7 +539,7 @@ export default function BaselineCenter({
                               disabled={busy}
                               onClick={() =>
                                 action("selections", "POST", {
-                                  scrId: scr.id,
+                                  changeRequestId: scr.id,
                                 })
                               }
                             >
