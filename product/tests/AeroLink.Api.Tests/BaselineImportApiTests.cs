@@ -324,7 +324,11 @@ public sealed class BaselineImportApiTests
         ]))).StatusCode);
 
         var records = await client.GetFromJsonAsync<JsonElement>($"/api/baseline-imports/{id}/source-records");
-        var record = Assert.Single(records.EnumerateArray());
+        // The total is reported alongside the page: a capped list that does not say so reads as the whole
+        // set, which on this endpoint means reading a partial import as a complete one.
+        Assert.Equal(1, records.GetProperty("total").GetInt32());
+        Assert.Equal(1, records.GetProperty("returned").GetInt32());
+        var record = Assert.Single(records.GetProperty("records").EnumerateArray());
         var history = record.GetProperty("sourceHistory").EnumerateArray().ToList();
         Assert.Equal(2, history.Count);
         // A source that recorded no author, date or statement is described as it was found. Nothing
@@ -481,7 +485,8 @@ public sealed class BaselineImportApiTests
         // Somebody holding a drawing that cites a retired identifier gets an answer, not an empty result.
         var retiredHit = await client.GetFromJsonAsync<JsonElement>(
             $"/api/source-identities?projectId={projectId}&search=SYS-01233");
-        var row = Assert.Single(retiredHit.EnumerateArray());
+        Assert.Equal(1, retiredHit.GetProperty("total").GetInt32());
+        var row = Assert.Single(retiredHit.GetProperty("matches").EnumerateArray());
         Assert.Equal("SYS-01233", row.GetProperty("sourceIdentifier").GetString());
         // It joins nothing: history is narrative, not nodes, so it can never be a dangling reference.
         Assert.False(row.GetProperty("inImportedBaseline").GetBoolean());
@@ -489,7 +494,7 @@ public sealed class BaselineImportApiTests
 
         var currentHit = await client.GetFromJsonAsync<JsonElement>(
             $"/api/source-identities?projectId={projectId}&search=SYS-01234");
-        var live = Assert.Single(currentHit.EnumerateArray());
+        var live = Assert.Single(currentHit.GetProperty("matches").EnumerateArray());
         Assert.True(live.GetProperty("inImportedBaseline").GetBoolean());
         // Source history is reported as found, attributed to the source system, and claimed by nobody here.
         var history = Assert.Single(live.GetProperty("sourceHistory").EnumerateArray());
