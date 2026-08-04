@@ -1382,6 +1382,18 @@ Future entries use:
   - **Source history is searchable.** Somebody holding a drawing that cites a source identifier retired two
     baselines ago should get an answer — "`SYS-01233` appears in the source history of `SYS-01234`, retired
     at V0.9" — rather than an empty result they read as the tool having lost it.
+  - **Porting a program in takes Program authority, not engineering authority.** Every import gate is
+    restricted to the configuration manager, program manager and administrator — the same set that
+    establishes a Project — while reading an import and searching source identities is open to anyone with
+    Project access. An engineer has every right to work inside a Program; declaring that a whole baseline
+    arrived from elsewhere, already released, is Program setup rather than engineering work on a build.
+  - **An import is not a mutation of the active build, and is deliberately outside the released-build write
+    refusal.** That refusal exists to stop a released build being edited. An import creates a new build from
+    a source that is already released, so keying it off the same prefix list would block the one operation it
+    was never meant to describe.
+  - **Externally sourced is derived from the provenance, never stored as a flag on the build.** A build is
+    externally sourced exactly when an accepted import points at it. A duplicated boolean could drift away
+    from the record that justifies it, and the whole value of the marking is that it cannot be wrong.
 
 ## Working Assumptions
 
