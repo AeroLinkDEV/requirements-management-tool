@@ -167,12 +167,24 @@ authority; an assessment in review is returned rather than withdrawn behind its 
 
 Verification impact: approving a change request raises an item for every requirement it introduces or
 modifies, and for any procedure a retirement leaves covering nothing. A Test Lead distributes items;
-a Test Engineer resolves each one either by naming an approved procedure or by recording that no test is
-required — a requirement the author declared verifiable by analysis still needs that confirmation.
+a Test Engineer resolves each one by naming an approved procedure, by recording that no test is required — a
+requirement the author declared verifiable by analysis still needs that confirmation — or by recording that a
+procedure must be written and does not exist yet. That third answer is an answer and never verification: it
+settles the `verification_impact` gate, because somebody has looked and decided, and deliberately does not
+settle coverage, so the release keeps waiting until the procedure is approved. The procedure is authored from
+the decision, pre-linked to the exact requirement revision, and approving it advances the decision without the
+engineer returning to re-answer.
 Undecided items hold the `verification_impact` release-readiness gate, so they block release approval; they
 deliberately do **not** block the baseline freeze, because freezing and materializing is what creates the
 requirement revisions a procedure is written against. "Decided" means the procedures are authored and
 approved — it says nothing about whether they have been executed.
+
+A test change request opens as a workbench: the record itself is the disclosure, and it shows its source
+change requests, who holds it, its linked Problem Reports, and one decision per requirement carrying the
+coverage that requirement already has — covered with its procedures named, suspect with the procedure that
+must be reconfirmed or replaced named, none, or not yet knowable because the build has not materialised its
+requirements. Suspect is stated before "no procedure", because a reader who sees "covered" stops looking and
+that is the case most likely to be answered wrongly.
 
 Coverage is a question the requirements workspace can now answer. A **coverage-state filter** builds a worklist
 of what is Covered, Suspect or Uncovered, and every row carries its state; the suspect and uncovered ones are
