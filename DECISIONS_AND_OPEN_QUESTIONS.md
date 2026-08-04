@@ -1297,6 +1297,46 @@ Future entries use:
   no longer reproducible. **The frozen hashes were not recomputed** — doing so would make a signature attest to
   content its signer never approved.
 
+### DEC-093 - An Imported Baseline Is an Assertion, Not a Change
+
+- **Date:** 2026-08-04
+- **Status:** Accepted; to be implemented under issue #332
+- **Decision:** A program that already exists in another requirements tool is brought in as an **externally
+  sourced baseline**, created directly with its provenance. It never becomes a change request. The import
+  runs through five gates — Source, Analyse, Map, Reconcile, Accept — the last of which is signed by a named
+  person. The resulting baseline is permanently marked externally sourced wherever it appears, and carries a
+  provenance record holding the extract's SHA-256, the source system and version, the source baseline name
+  and date, the mapping used, and the reconciliation report.
+- **Rationale:** Both existing import paths commit into a Draft change request. That is right for proposing
+  requirements into a controlled program and wrong for porting one in: nobody at the customer approved those
+  requirements *in this tool*, so routing them through review and approval would produce a real signature
+  attesting to a fiction. An imported baseline must never be indistinguishable from one built through this
+  product's own controlled chain — the whole value of the chain is that it can be told apart from a claim.
+- **Consequences:**
+  - **Identifiers.** New controlled numbers are issued, and the source identifier is kept forever as a
+    searchable **external identity record** joined by a typed trace reading *`SYSR-000148.00` originates from
+    `SYS-0147`* — the controlled requirement is the subject, the source object is what it came from.
+    Discarding the source identifier was rejected because every drawing, CDRL and test procedure outside this
+    tool still names it. Preserving source identifiers verbatim was rejected because they fail
+    `ArtifactNumber.ValidateBase` and would leave two schemes coexisting forever. This is deliberately the
+    opposite of [DEC-092](#), where no record of the retired names was kept: there the old names were our own
+    naming mistake, here they are another organisation's system of record.
+  - **Traces gain a second recognised origin.** A trace created by an import records the import as its
+    origin, never a change request, so nothing suggests a build carried work it did not.
+  - **Source-system authorship is never imported as ours.** DOORS `Created By`, `Created On`,
+    `Last Modified By` and `Status` describe activity in DOORS. Writing them as AeroLink authorship would
+    attribute work here to people who never touched this tool — the same class of error as fabricating an
+    approval. They stay in the provenance record.
+  - **Nothing is dropped silently.** Every source object is accounted for at Reconcile. Duplicate source
+    identities block the import; dangling links are either accepted as recorded gaps or block it; every
+    attribute is mapped or explicitly excluded with a reason before the Map gate will close.
+  - **Mapping covers values, not only names.** An attribute mapping without a value mapping is incomplete —
+    DOORS `T/A/I/D` has to become Test, Analysis, Inspection, Demonstration.
+  - **Link mappings state direction explicitly**, because a reversed mapping produces a complete, plausible
+    and entirely wrong traceability tree.
+  - **Re-import is a delta**, keyed on source system, module and absolute number. Programs re-extract, and a
+    second import must not produce a duplicate set.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
@@ -1342,6 +1382,8 @@ choices are created as focused issues only when their trigger and acceptance bou
 | OQ-016 | Which specific decisions and recurring tasks must the accepted Manager and System Engineer dashboards support first? | Determines dashboard information priority and avoids generic views | Product owner and representative users before showcase build |
 | OQ-017 | What exact definitions, thresholds, applicability rules, and owners govern the initial dashboard measures? | Prevents misleading readiness and completeness indicators | Product/process owners before showcase validation |
 | OQ-018 | Which details in the accepted FMS Version 3.3 fictional story need correction or richer realism before the showcase build? | Keeps the reusable prototype data credible without using sensitive real program data | Product owner before showcase build |
+| OQ-019 | May an import bring in more than one historical source baseline, or only the source's current state? | Importing a chain means inventing revision records with authors and dates from a system that is not ours | Product owner before the import feature is built (DEC-093, issue #332) |
+| OQ-020 | May an externally sourced baseline act as predecessor to a normally built one? | It is the whole point of porting a program in, and it decides how release readiness gates treat a baseline nobody approved here | Product owner before the import feature is built (DEC-093, issue #332) |
 
 ## Open Questions for Later Phases
 
