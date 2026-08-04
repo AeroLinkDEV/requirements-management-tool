@@ -46,7 +46,7 @@ The separately proposed guided **Start Showcase** journey was deliberately exclu
 ### Change Requests
 
 - Replaced the mixed-purpose `Artifact & Build Explorer` title with scope-specific `System Change Requests` or `Software Change Requests` headings.
-- Kept SCR, requirement, and build history as clear tabs.
+- Kept SRCR, requirement, and build history as clear tabs.
 - Shows `Record Software Build` only when Software Builds is the active job.
 - Increased table headings, row content, states, timestamps, filters, and build-provenance content to readable sizes.
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AeroLink already implements the controlled requirements lifecycle that originally defined the product: system and software requirements, SCR/SWCR review and approval, immutable baselines, controlled documents, version-aware traceability, verification evidence, role-aware dashboards, collaboration, notifications, audit history, ReqIF exchange, APIs, webhooks, backup/restore, and performance qualification foundations.
+AeroLink already implements the controlled requirements lifecycle that originally defined the product: system and software requirements, change request review and approval, immutable baselines, controlled documents, version-aware traceability, verification evidence, role-aware dashboards, collaboration, notifications, audit history, ReqIF exchange, APIs, webhooks, backup/restore, and performance qualification foundations.
 
 AeroLink 3.0 completes the remaining enterprise lifecycle capabilities without introducing AI assistance. It must extend existing domain rules rather than duplicate or bypass them.
 
@@ -29,7 +29,7 @@ AeroLink 3.0 completes the remaining enterprise lifecycle capabilities without i
 The program builds on, and must not regress:
 
 - System, HLR, and LLR requirement records and revision history;
-- SCR/SWCR package authoring, review, approval, and next-revision creation;
+- change request package authoring, review, approval, and next-revision creation;
 - immutable baselines and release lineage;
 - typed traceability, suspect links, impact analysis, and completeness checks;
 - controlled SYSRD, SWRD, test, traceability, review, and release outputs;
@@ -48,7 +48,7 @@ The program builds on, and must not regress:
 The first AeroLink 3.0 implementation increment is now present on the program branch:
 
 - a single fail-closed controlled-artifact editing policy registry;
-- canonical artifact families and aliases, including SCR, SWCR, and PR;
+- canonical artifact families and aliases, including SRCR, software change request, and PR;
 - explicit editable lifecycle states for every family;
 - exclusive-editing policy for all nine AeroLink 3.0 draft families;
 - shared lease limits of two to 120 minutes with a fifteen-minute default; and
@@ -58,7 +58,7 @@ The existing API still needs to consume this registry and resolve each family to
 
 ## Workstream 1 — Universal controlled editing
 
-Extend the existing renewable exclusive checkout, autosave, immutable snapshot, recovery, check-in, discard, expiry, and forced-unlock contract beyond SCR/SWCR drafts.
+Extend the existing renewable exclusive checkout, autosave, immutable snapshot, recovery, check-in, discard, expiry, and forced-unlock contract beyond change request drafts.
 
 Controlled families:
 
@@ -93,7 +93,7 @@ Acceptance gate:
 - stale artifact and stale session conflict tests;
 - forced-unlock and expiry tests;
 - approved/frozen/released artifacts proven non-editable; and
-- no regression to existing SCR/SWCR behavior.
+- no regression to existing change request behavior.
 
 ## Workstream 2 — Full problem-report lifecycle
 
@@ -105,7 +105,7 @@ Capabilities:
 - classification, severity, priority, origin, affected configuration, and ownership;
 - investigation, root cause, effects, containment, corrective action, and disposition;
 - duplicate, cannot reproduce, no fault found, deferred, accepted risk, fixed, and rejected paths;
-- links to requirements, SCR/SWCRs, procedures, executions, evidence, builds, baselines, documents, and releases;
+- links to requirements, SRCR/software change requests, procedures, executions, evidence, builds, baselines, documents, and releases;
 - resolution verification and independent closure approval;
 - reopen while retaining prior closure history;
 - PR-driven impact analysis and suspect-link propagation;

@@ -46,7 +46,7 @@ public sealed class DraftDocumentApiTests(ShowcaseApiFixture showcase)
             modifiedNumber = members[0];
             retiredNumber = members[1];
 
-            var approved = new SystemChangeRequest("SCR-90001", 0, summary.ProjectId, releaseId,
+            var approved = new SystemChangeRequest("SRCR-90001", 0, summary.ProjectId, releaseId,
                 "Draft document coverage", "Problem", "Analysis", "Solution", "admin", DateTimeOffset.UtcNow);
             approved.AddRequirementChange("admin", introducedNumber, 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall do a newly introduced thing.", "New", "Test", DateTimeOffset.UtcNow);
@@ -58,7 +58,7 @@ public sealed class DraftDocumentApiTests(ShowcaseApiFixture showcase)
 
             // A second change request that is still a Draft. Nothing of it may reach the document — a draft
             // shows what has been agreed, not what somebody is currently typing.
-            var unapproved = new SystemChangeRequest("SCR-90002", 0, summary.ProjectId, releaseId,
+            var unapproved = new SystemChangeRequest("SRCR-90002", 0, summary.ProjectId, releaseId,
                 "Not agreed yet", "Problem", "Analysis", "Solution", "admin", DateTimeOffset.UtcNow);
             unapproved.AddRequirementChange("admin", "SYSR-900002", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall do an unapproved thing.", "Draft", "Test", DateTimeOffset.UtcNow);

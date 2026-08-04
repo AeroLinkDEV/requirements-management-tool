@@ -7,7 +7,7 @@
 
 ## Repeatable user-controlled release progression
 
-The seeded 1.5 baseline is the immutable starting product configuration. Version 1.6 is an editable target workspace, not a preordained release. Users must approve the intended SCR/SWCR revisions, select those exact revisions into a candidate inheriting the materialized 1.5 baseline, freeze and materialize it, close release evidence and impact gates, collect unanimous electronic release approval, and explicitly issue the release.
+The seeded 1.5 baseline is the immutable starting product configuration. Version 1.6 is an editable target workspace, not a preordained release. Users must approve the intended change request revisions, select those exact revisions into a candidate inheriting the materialized 1.5 baseline, freeze and materialize it, close release evidence and impact gates, collect unanimous electronic release approval, and explicitly issue the release.
 
 After 1.6 is released, the same product workflow can plan 1.7 from the released predecessor, then 1.8 and later versions. Creating a release creates only an empty in-work planning context; it never creates, approves, or releases a baseline automatically.
 
@@ -26,7 +26,7 @@ The campaign is deliberately incomplete at seed time. Managers and engineers can
 
 ## Campaign Lifecycle
 
-1. **Planning** — approved SCRs and SWCRs are selected, impacts are reviewed, and the candidate baseline is assembled.
+1. **Planning** — approved change requests are selected, impacts are reviewed, and the candidate baseline is assembled.
 2. **Verification** — the exact build is selected and requirement coverage, test outcomes, evidence, traceability, and controlled outputs are assessed.
 3. **In Review** — release approval starts only after every non-approval readiness gate is complete. Approvers act in the author-defined order.
 4. **Released** — unanimous approval permits one atomic release operation that marks the campaign, candidate baseline, software release, and build released with one deterministic manifest hash.
@@ -63,7 +63,7 @@ The database records remain authoritative. Downloaded files are controlled snaps
 
 The Release Campaign page provides one governed workbench for progressing the campaign rather than merely reporting blockers:
 
-- all target SCR/SWCR inputs show their exact state, inclusion status, and unresolved impact count;
+- all target change request inputs show their exact state, inclusion status, and unresolved impact count;
 - pending impacts may be dispositioned together for one exact change request with a required shared rationale;
 - the exact candidate baseline can be frozen and materialized only after change-control integration is complete;
 - trace and test-coverage links may be carried forward from the predecessor only when both requirement artifacts remain effective in the target baseline;

@@ -39,9 +39,9 @@ public sealed class TestChangeRequestExclusivityTests
         var release = new SoftwareRelease(project.Id, "1.0", false);
         SystemChangeRequest Change(string number, string title) =>
             new(number, 0, project.Id, release.Id, title, "Problem", "Analysis", "Solution", "change.author", now);
-        var first = Change("SCR-00031", "First origin");
-        var second = Change("SCR-00032", "Second origin");
-        var contested = Change("SCR-00040", "Contested");
+        var first = Change("SRCR-00031", "First origin");
+        var second = Change("SRCR-00032", "Second origin");
+        var contested = Change("SRCR-00040", "Contested");
         db.AddRange(program, project, release, first, second, contested);
         await db.SaveChangesAsync();
         return new(db, project.Id, release.Id, first.Id, second.Id, contested.Id);
@@ -49,7 +49,7 @@ public sealed class TestChangeRequestExclusivityTests
 
     private static TestChangeReview Package(Fixture fixture, Guid raisedFrom, string number) =>
         new(fixture.ProjectId, fixture.ReleaseId, raisedFrom, TestChangeReviewDiscipline.System,
-            "SCR-00031", DateTimeOffset.UtcNow, number);
+            "SRCR-00031", DateTimeOffset.UtcNow, number);
 
     [Fact]
     public async Task Two_packages_cannot_both_claim_the_same_change_request()
@@ -62,13 +62,13 @@ public sealed class TestChangeRequestExclusivityTests
         db.AddRange(first, second);
         await db.SaveChangesAsync();
 
-        first.IncludeChangeRequest("first.engineer", fixture.Contested, "SCR-00040", DateTimeOffset.UtcNow);
+        first.IncludeChangeRequest("first.engineer", fixture.Contested, "SRCR-00040", DateTimeOffset.UtcNow);
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         second = await db.TestChangeReviews.Include(x => x.AdditionalSources).SingleAsync(x => x.Id == second.Id);
 
         // The second engineer's aggregate has no way of knowing. The index does.
-        second.IncludeChangeRequest("second.engineer", fixture.Contested, "SCR-00040", DateTimeOffset.UtcNow);
+        second.IncludeChangeRequest("second.engineer", fixture.Contested, "SRCR-00040", DateTimeOffset.UtcNow);
         await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
     }
 
@@ -83,13 +83,13 @@ public sealed class TestChangeRequestExclusivityTests
         db.AddRange(first, second);
         await db.SaveChangesAsync();
 
-        first.IncludeChangeRequest("first.engineer", fixture.Contested, "SCR-00040", DateTimeOffset.UtcNow);
+        first.IncludeChangeRequest("first.engineer", fixture.Contested, "SRCR-00040", DateTimeOffset.UtcNow);
         await db.SaveChangesAsync();
         first.ExcludeChangeRequest(fixture.Contested, DateTimeOffset.UtcNow);
         await db.SaveChangesAsync();
 
         // Exclusivity would be a trap rather than a rule if a change could never be handed on.
-        second.IncludeChangeRequest("second.engineer", fixture.Contested, "SCR-00040", DateTimeOffset.UtcNow);
+        second.IncludeChangeRequest("second.engineer", fixture.Contested, "SRCR-00040", DateTimeOffset.UtcNow);
         await db.SaveChangesAsync();
 
         var claims = await db.TestChangeRequestClaims.AsNoTracking()
@@ -108,14 +108,14 @@ public sealed class TestChangeRequestExclusivityTests
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         package = await db.TestChangeReviews.Include(x => x.AdditionalSources).SingleAsync(x => x.Id == package.Id);
-        package.IncludeChangeRequest("test.engineer", fixture.Contested, "SCR-00040", DateTimeOffset.UtcNow);
+        package.IncludeChangeRequest("test.engineer", fixture.Contested, "SRCR-00040", DateTimeOffset.UtcNow);
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
         var read = await db.TestChangeReviews.Include(x => x.AdditionalSources).SingleAsync(x => x.Id == package.Id);
         Assert.Equal("HLRTCR-000007", read.BaseNumber);
         Assert.Equal("HLRTCR-000007.00", read.DisplayNumber);
-        Assert.Equal("SCR-00040", read.AdditionalSources.Single().ChangeRequestNumber);
+        Assert.Equal("SRCR-00040", read.AdditionalSources.Single().ChangeRequestNumber);
         Assert.Equal(2, read.CoveredChangeRequestIds.Count());
     }
 }

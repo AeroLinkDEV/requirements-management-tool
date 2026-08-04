@@ -24,7 +24,7 @@ test('a notification link resolves its own context and opens the exact record', 
   const project = fms.projects[0].project
 
   // Take a real change request the way an emitter would: by its id, with no context attached.
-  const found = await (await page.request.get(`${baseURL}/api/search?projectId=${project.id}&query=SCR-&limit=5`)).json()
+  const found = await (await page.request.get(`${baseURL}/api/search?projectId=${project.id}&query=SRCR-&limit=5`)).json()
   const scr = found.items.find((x: { kind: string }) => x.kind === 'change-request')
   expect(scr, 'the showcase must contain at least one change request').toBeTruthy()
 

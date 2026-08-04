@@ -11,7 +11,7 @@ Program
           -> exact Requirement Revisions and Trace Link Revisions
           -> approved SYSRD
 
-SCR
+SRCR
   -> proposed Requirement Changes
       -> Requirement Revisions
           -> verified by Test Procedure Revisions
@@ -25,7 +25,7 @@ PRs may motivate or be affected by changes across the chain.
 
 ## Artifact and Revision
 
-**Artifact**: A controlled object with a stable, never-reused identity. Examples include an SCR, requirement, test procedure, PR, or generated document definition.
+**Artifact**: A controlled object with a stable, never-reused identity. Examples include an SRCR, requirement, test procedure, PR, or generated document definition.
 
 **Artifact Revision**: A version-specific representation of an artifact. Revisions preserve what was proposed, reviewed, approved, or used at a particular time.
 
@@ -56,26 +56,29 @@ software build. It is not a separate product-level destination in the current UI
 
 ## Change Terms
 
-**System Change Request (SCR)**: A versioned, reviewable artifact that explains and proposes one or more system requirement introductions, modifications, or retirements. It includes problem, analysis, solution, target-release, affected-artifact, PR-reference, review, and approval information.
+**System Requirement Change Request (SRCR)**: A versioned, reviewable artifact that explains and proposes one or more system requirement introductions, modifications, or retirements. It includes problem, analysis, solution, target-release, affected-artifact, PR-reference, review, and approval information.
 
-**Software Change Request (SWCR)**: The software-level counterpart to an SCR. It governs HLR and LLR
-introductions, modifications, and retirements for one target build, including exact upward allocation or a
-justified derived exception. HLR and LLR work is scoped independently. Saving a Draft persists incomplete
-work; checking in applies the controlled working copy and closes its edit session.
+**HLR Change Request (HLRCR)** and **LLR Change Request (LLRCR)**: The software-level counterparts to an SRCR.
+Between them they govern HLR and LLR introductions, modifications, and retirements for one target build,
+including exact upward allocation or a justified derived exception. They are two artifacts rather than one
+because HLR and LLR change control is worked, reviewed and approved by different people: a change request
+declares its level before it exists, its identifier names that level, and it can never hold work from the
+other one. The two are numbered independently. Saving a Draft persists incomplete work; checking in applies
+the controlled working copy and closes its edit session.
 
-**Requirement Change Item**: One proposed introduction, modification, or retirement contained in an SCR. It identifies the affected requirement when applicable, the proposed content or disposition, and the rationale needed to review the change.
+**Requirement Change Item**: One proposed introduction, modification, or retirement contained in a change request. It identifies the affected requirement when applicable, the proposed content or disposition, and the rationale needed to review the change.
 
-**Retirement**: The controlled result previously described as requirement deletion. A retired requirement is excluded from later effective baselines but remains permanently available in historical baselines, revisions, SCRs, links, and audits.
+**Retirement**: The controlled result previously described as requirement deletion. A retired requirement is excluded from later effective baselines but remains permanently available in historical baselines, revisions, SRCRs, links, and audits.
 
-**Deferral**: A controlled decision to move an SCR or approved change out of an intended release. Deferral changes planning and selection; it does not erase approval or history.
+**Deferral**: A controlled decision to move an SRCR or approved change out of an intended release. Deferral changes planning and selection; it does not erase approval or history.
 
 **Downstream Change Assessment**: Build-scoped work raised when an approved upstream change reaches a consuming
 software discipline. System approval raises HLR assessment work; HLR approval raises LLR assessment work. The
-consuming engineer records a justified no-change decision or links one or more Draft SWCRs, then submits the
+consuming engineer records a justified no-change decision or links one or more Draft software change requests, then submits the
 assessment to a named independent approver. Superseded source work remains readable but cannot satisfy current
 readiness. `ChangeRequired` is an explicit intermediate outcome: it records that work is needed but cannot be
-submitted until a level-compatible SWCR is linked. The assessment detail retains a deep link to the source SCR,
-its Problem/Analysis/Solution case, changed requirements, current downward trace, and the linked SWCRs.
+submitted until a level-compatible software change request is linked. The assessment detail retains a deep link to the source SRCR,
+its Problem/Analysis/Solution case, changed requirements, current downward trace, and the linked software change requests.
 
 **Prospective Upward Allocation**: The exact current parent requirement revisions selected for a proposed HLR
 or LLR before review. HLR parents are System revisions; LLR parents are HLR revisions from the same Project and
@@ -85,7 +88,7 @@ target build. Selected IDs enter the review snapshot and materialize as immutabl
 
 **System Requirement**: A stable controlled requirement identity at system level. It may contain formatted text, attributes, rationale, verification method, derived status, applicability, and controlled images or figures.
 
-**System Requirement Revision**: The exact requirement content and metadata proposed within an SCR, authorized through approval of that SCR revision, or made effective through baseline inclusion. It does not have an independent review/approval workflow.
+**System Requirement Revision**: The exact requirement content and metadata proposed within an SRCR, authorized through approval of that SRCR revision, or made effective through baseline inclusion. It does not have an independent review/approval workflow.
 
 **High-Level Requirement (HLR)**: A software requirement that describes software behavior at a high level and normally traces upward to one or more system requirements unless justified as derived.
 
@@ -146,15 +149,15 @@ relationship. This distinction prevents a path from appearing complete when no c
 
 **Workflow State**: The current lifecycle state of a revision or controlled process. State transitions are constrained and audited.
 
-**Review**: A controlled evaluation of a submitted snapshot of a specific SCR, document, procedure, execution/result record, or candidate baseline revision by named reviewers. Requirement changes are reviewed as contents of the SCR rather than as independent review artifacts. An SCR review cycle contains its submitted snapshot, author-selected ordered approval sequence, comments, dispositions, outcomes, and timestamps. Multiple review cycles may occur for the same not-yet-approved SCR revision.
+**Review**: A controlled evaluation of a submitted snapshot of a specific SRCR, document, procedure, execution/result record, or candidate baseline revision by named reviewers. Requirement changes are reviewed as contents of the SRCR rather than as independent review artifacts. An SRCR review cycle contains its submitted snapshot, author-selected ordered approval sequence, comments, dispositions, outcomes, and timestamps. Multiple review cycles may occur for the same not-yet-approved SRCR revision.
 
 **Review Comment**: A versioned finding or question anchored to the reviewed revision. It must be dispositioned before approval when the workflow requires it.
 
-**Approval**: An attributable unanimous decision by every approver selected by the artifact author that a specific submitted snapshot of an SCR, document, procedure, execution/result record, or candidate baseline revision satisfies its defined approval criteria. Approval of an SCR authorizes its contained requirement changes but does not automatically include those revisions in a release baseline.
+**Approval**: An attributable unanimous decision by every approver selected by the artifact author that a specific submitted snapshot of an SRCR, document, procedure, execution/result record, or candidate baseline revision satisfies its defined approval criteria. Approval of an SRCR authorizes its contained requirement changes but does not automatically include those revisions in a release baseline.
 
-**Review Cycle**: One submission of an artifact revision to a selected ordered approval sequence. A requested change closes the current cycle and returns an unapproved SCR to Draft at the same revision number. Resubmission creates a new cycle with a new immutable submitted snapshot.
+**Review Cycle**: One submission of an artifact revision to a selected ordered approval sequence. A requested change closes the current cycle and returns an unapproved SRCR to Draft at the same revision number. Resubmission creates a new cycle with a new immutable submitted snapshot.
 
-**Approval Sequence**: The ordered list of approvers selected by the SCR author for a review cycle. Review advances one approver at a time. Future, not-yet-reached approvers may be replaced with audit history; completed or active stages cannot be substituted without cancelling and restarting the workflow.
+**Approval Sequence**: The ordered list of approvers selected by the SRCR author for a review cycle. Review advances one approver at a time. Future, not-yet-reached approvers may be replaced with audit history; completed or active stages cannot be substituted without cancelling and restarting the workflow.
 
 **Cancelled Review Cycle**: A historical review cycle whose decisions no longer count toward approval. Cancellation is required when a completed approval stage used the wrong approver. The corrected workflow restarts from its first stage.
 
@@ -177,7 +180,7 @@ session, authority, assignment, independence, and password confirmation succeed.
 **Problem Report (PR)**: A build-scoped controlled record of an identified product, lifecycle-data, or process
 problem. It progresses through Draft, Ready for SCCB, Open, Implementing, Verifying, Awaiting SQA Closure, and
 Closed. Raised-by/date are immutable; owner and target build may change with history. PRs drive change;
-requirements do not automatically create PRs. Any SCR, SWCR or TCR may cite one or more driving PRs. Approved
+requirements do not automatically create PRs. Any SRCR, software change request or TCR may cite one or more driving PRs. Approved
 changes appear as corrective actions and deliberately selected closure-supporting executions/results appear as
 test evidence.
 

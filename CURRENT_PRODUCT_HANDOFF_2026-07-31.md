@@ -69,11 +69,11 @@ of it. Roles are named for real jobs, and a precise role satisfies the general o
 - Working branch: `codex/downstream-change-assessments`.
 - Accepted product model is recorded in DEC-078 and DEC-079. System approval raises HLR assessment work; HLR
   approval raises LLR assessment work. Assessments support no-change, one-to-one, one-to-many, and consolidated
-  many-to-one SWCR mapping without prematurely consuming an SWCR number.
+  many-to-one change-request mapping without prematurely consuming a change-request number.
 - The data model, API, automatic raising service, supersession behavior, Software Change Requests queue, named
   procedure/TCR approvers, and EF migration are implemented on the branch. The original approved work stays
   readable when its source is revised, but is labelled out of date and excluded from active readiness.
-- The showcase seed defect that placed `HLR-000075.02` inside System `SCR-00032.01` is corrected at its source;
+- The showcase seed defect that placed `HLR-000075.02` inside System `SRCR-00032.01` is corrected at its source;
   all System showcase packages now contain System requirement changes.
 - GitHub: #209 tracks this delivered increment. #210 is the deliberately separate prospective upward-trace
   authoring/materialization increment; no unused placeholder schema was merged for work that is not enforced.

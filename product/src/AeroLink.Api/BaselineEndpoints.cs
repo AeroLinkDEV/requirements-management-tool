@@ -30,7 +30,7 @@ public static class BaselineEndpoints
         // each change request's newest revision. A programme's history is a list of change requests and not of
         // revisions — .00 superseded by .01 is one piece of work read twice, and showing both puts the stale copy
         // in the reader's way. Nothing is hidden: every collapsed row carries its revision count and expands.
-        app.MapGet("/api/history/scrs", async (Guid projectId, string? search, Guid? releaseId, Guid? baselineId, Guid? buildId, ChangeRequestType? type, RequirementLevel? level, string? state,
+        app.MapGet("/api/history/change-requests", async (Guid projectId, string? search, Guid? releaseId, Guid? baselineId, Guid? buildId, ChangeRequestType? type, RequirementLevel? level, string? state,
             string? baseNumber, int page, int pageSize, AeroLinkDbContext db, CancellationToken ct) =>
         {
             page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);

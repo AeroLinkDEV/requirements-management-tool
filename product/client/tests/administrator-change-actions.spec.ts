@@ -24,7 +24,7 @@ test('administrator actions work identically for another authors System and Soft
 
   for (const discipline of disciplines) {
     const create = async (title: string) => {
-      const response = await author.post(`${apiBase}/api/scr-drafts`, { data: {
+      const response = await author.post(`${apiBase}/api/change-request-drafts`, { data: {
         projectId: showcase.projectId,
         targetReleaseId: showcase.activeReleaseId,
         type: discipline.type,
@@ -49,13 +49,13 @@ test('administrator actions work identically for another authors System and Soft
 
     const draft = await create(`Administrator ${discipline.type} Draft`)
     const approved = await create(`Administrator ${discipline.type} revision`)
-    const submitted = await author.post(`${apiBase}/api/scrs/${approved.id}/submit`, { data: {
+    const submitted = await author.post(`${apiBase}/api/change-requests/${approved.id}/submit`, { data: {
       expectedVersion: approved.version,
       approvers: [{ userId: 'admin', name: 'Caller supplied name ignored' }],
       mode: 'Sequential',
     } })
     expect(submitted.ok(), await submitted.text()).toBeTruthy()
-    const approval = await request.post(`${apiBase}/api/scrs/${approved.id}/approve`, { data: {
+    const approval = await request.post(`${apiBase}/api/change-requests/${approved.id}/approve`, { data: {
       password: 'AeroLink!2026',
       meaning: 'Approved for administrator recovery journey coverage.',
     } })

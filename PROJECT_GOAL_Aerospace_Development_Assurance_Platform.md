@@ -8,13 +8,13 @@ The platform will become the authoritative source for versioned artifacts, contr
 
 Prove one complete system-level chain:
 
-> SCR -> system requirement revisions -> review and approval -> baseline -> SYSRD -> system test procedure -> externally produced results and evidence -> traceability
+> SRCR -> system requirement revisions -> review and approval -> baseline -> SYSRD -> system test procedure -> externally produced results and evidence -> traceability
 
 This slice must demonstrate that users can:
 
 1. create and revise system requirements without reusing identities or overwriting history;
-2. introduce, modify, or retire requirements through reviewed and approved SCRs;
-3. defer an SCR or select approved SCRs for a target release;
+2. introduce, modify, or retire requirements through reviewed and approved SRCRs;
+3. defer an SRCR or select approved SRCRs for a target release;
 4. construct and approve an immutable successor baseline from exact revisions;
 5. generate a draft-watermarked or approved SYSRD from a named baseline;
 6. create, revise, review, and approve reusable system test procedures;
@@ -27,7 +27,7 @@ This slice must demonstrate that users can:
 
 After the system-level model is proven, the platform may extend to:
 
-- HLRs, LLRs, derived requirements, SWCRs, SWRDs, and software verification;
+- HLRs, LLRs, derived requirements, software change requests, SWRDs, and software verification;
 - complete PR lifecycle and PR-driven impact analysis;
 - broader configuration, release, enterprise-identity, test, Git/build-reference, and external-system integrations; and
 - optional locally hosted AI suggestions under explicit qualified human control.

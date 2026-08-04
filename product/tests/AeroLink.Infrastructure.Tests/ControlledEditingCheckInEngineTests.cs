@@ -491,7 +491,7 @@ public sealed class ControlledEditingCheckInEngineTests
             var program = new ProgramRecord("Controlled Editing Program", $"CE{Guid.NewGuid():N}"[..12]);
             var project = new ProjectRecord(program.Id, "Controlled Product", "Flight Management System");
             var release = new SoftwareRelease(project.Id, "1.0", false);
-            var scr = new SystemChangeRequest("SCR-00001", 0, project.Id, release.Id, "Original title",
+            var scr = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id, "Original title",
                 "Original problem", "Original analysis", "Original solution", "engineer", now);
             db.AddRange(program, project, release, scr);
             await db.SaveChangesAsync();

@@ -93,7 +93,7 @@ public sealed class ProgramRoleAuthorityApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "precise.engineer");
 
-        using var response = await client.PostAsJsonAsync("/api/scr-drafts", Draft(fixture));
+        using var response = await client.PostAsJsonAsync("/api/change-request-drafts", Draft(fixture));
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
     }
@@ -109,11 +109,11 @@ public sealed class ProgramRoleAuthorityApiTests
         await LoginAsync(client, user);
 
         // Reads everything: membership alone is what grants that, and these roles are members.
-        using var read = await client.GetAsync($"/api/scrs?projectId={fixture.ProjectId}");
+        using var read = await client.GetAsync($"/api/change-requests?projectId={fixture.ProjectId}");
         Assert.True(read.IsSuccessStatusCode, $"{(int)read.StatusCode}: {await read.Content.ReadAsStringAsync()}");
 
         // And holds no authority over engineering content, which is the whole point of an oversight role.
-        using var write = await client.PostAsJsonAsync("/api/scr-drafts", Draft(fixture));
+        using var write = await client.PostAsJsonAsync("/api/change-request-drafts", Draft(fixture));
         Assert.Equal(HttpStatusCode.Forbidden, write.StatusCode);
     }
 }

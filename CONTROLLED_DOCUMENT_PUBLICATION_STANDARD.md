@@ -23,9 +23,9 @@ The platform never fabricates a signature, decision, person, or date. A person i
 
 ## Approval Basis
 
-### SCR and SWCR publications
+### change request publications
 
-The cover and approval register use the ordered approvers from the latest review cycle for the exact SCR/SWCR revision. Pending and active reviewers remain visibly identified by their actual state. The review snapshot SHA-256 is included in Document Control.
+The cover and approval register use the ordered approvers from the latest review cycle for the exact change request revision. Pending and active reviewers remain visibly identified by their actual state. The review snapshot SHA-256 is included in Document Control.
 
 ### Requirement and test-document publications
 
@@ -47,7 +47,7 @@ The authority-and-use notice states that database records and hashes remain auth
 
 ## Controlled Body Content
 
-### SCR and SWCR
+### change request
 
 The body includes the Problem-Analysis-Solution case, proposed requirement changes with rationale and verification method, and append-only audit history.
 

@@ -22,12 +22,12 @@ public sealed class CodeTraceabilityProjectionTests
         var project = new ProjectRecord(program.Id, "Operational FMS", "Flight Management System");
         var previousRelease = new SoftwareRelease(project.Id, "1.5", true);
         var release = new SoftwareRelease(project.Id, "1.6", false, previousRelease.Id);
-        var selectedChange = new SystemChangeRequest("SCR-900001", 0, project.Id, release.Id, "Package unchanged software", "A build package is required.", "No LLR change is needed.", "Select the exact current requirements.", "systems.author", now);
+        var selectedChange = new SystemChangeRequest("SRCR-900001", 0, project.Id, release.Id, "Package unchanged software", "A build package is required.", "No LLR change is needed.", "Select the exact current requirements.", "systems.author", now);
         selectedChange.AddRequirementChange("systems.author", "SYSR-900001", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
             "The system shall preserve the approved software behavior.", "Package-only system change.", "Review", now);
         selectedChange.SubmitForReview("systems.author", [new ApproverSelection("systems.reviewer", "Systems Reviewer")], now);
         selectedChange.ApproveActiveStage("systems.reviewer", now);
-        var historicalChange = new SystemChangeRequest("SWCR-900001", 0, project.Id, previousRelease.Id, "Historical LLR definition", "Define prior behavior.", "Prior analysis.", "Prior solution.", "software.author", now, ChangeRequestType.Software);
+        var historicalChange = new SystemChangeRequest("LLRCR-900001", 0, project.Id, previousRelease.Id, "Historical LLR definition", "Define prior behavior.", "Prior analysis.", "Prior solution.", "software.author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel);
         var baseline = new CandidateBaseline("SW-90.00", 0, project.Id, release.Id, null, "No LLR changes", "cm", now);
         baseline.Select(selectedChange, "cm", now);
         baseline.Freeze("cm", now);
@@ -64,8 +64,8 @@ public sealed class CodeTraceabilityProjectionTests
         var project = new ProjectRecord(program.Id, "FMS Product Development", "Flight Management System");
         var previousRelease = new SoftwareRelease(project.Id, "1.5", true);
         var release = new SoftwareRelease(project.Id, "1.6", false, previousRelease.Id);
-        var historicalChange = new SystemChangeRequest("SWCR-800001", 0, project.Id, previousRelease.Id, "Historical LLRs", "P", "A", "S", "software.author", now, ChangeRequestType.Software);
-        var buildChange = new SystemChangeRequest("SWCR-800002", 0, project.Id, release.Id, "Change one LLR in this build", "P", "A", "S", "software.author", now, ChangeRequestType.Software);
+        var historicalChange = new SystemChangeRequest("LLRCR-800001", 0, project.Id, previousRelease.Id, "Historical LLRs", "P", "A", "S", "software.author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel);
+        var buildChange = new SystemChangeRequest("LLRCR-800002", 0, project.Id, release.Id, "Change one LLR in this build", "P", "A", "S", "software.author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel);
         buildChange.AddRequirementChange("software.author", "LLR-000736", 0, RequirementLevel.LowLevel, RequirementChangeKind.Introduce,
             "The software shall apply the corrected oceanic sequencing.", "Introduced by this build.", "Test", now);
         buildChange.SubmitForReview("software.author", [new ApproverSelection("software.reviewer", "Software Reviewer")], now);

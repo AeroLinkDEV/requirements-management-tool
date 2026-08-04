@@ -17,16 +17,16 @@ separate, while Command Center summarizes System, Software and Verification. Req
 the primary grouped work areas; Code and Problem Reports are standalone build-scoped workspaces. Product Versions, Candidate Baselines and the old Change Request Software
 Builds view remain deliberately dormant even though underlying lifecycle implementation remains.
 
-The 2026-07-13 enterprise control increment adds durable URL routing and context restoration, a keyboard command palette, Program-aware universal artifact search, authoritative artifact detail links, SCR/SWCR exclusive checkout, renewable leases, server autosave snapshots, read-only observers, check-in/discard, forced-unlock auditing, authentication throttling, Program-scope enforcement, isolated browser-test infrastructure, and verified backup/restore operations.
+The 2026-07-13 enterprise control increment adds durable URL routing and context restoration, a keyboard command palette, Program-aware universal artifact search, authoritative artifact detail links, change request exclusive checkout, renewable leases, server autosave snapshots, read-only observers, check-in/discard, forced-unlock auditing, authentication throttling, Program-scope enforcement, isolated browser-test infrastructure, and verified backup/restore operations.
 
 - optional deterministic FMS live program with released `SW-01.50` and active `SW-01.60`
-- 150 system requirements, 400 HLRs, 700 LLRs, 105 historical SCR/SWCR records, 1,100 typed traces, 515 procedures, 520 executions, and generated requirements/test-procedure documents
+- 150 system requirements, 400 HLRs, 700 LLRs, 105 historical change request records, 1,100 typed traces, 515 procedures, 520 executions, and generated requirements/test-procedure documents
 - exact System/HLR/LLR procedure and coverage isolation, including controlled procedure-number deep links,
   refresh-safe history, and truthful Covered/Suspect/Uncovered states
 - governed downstream assessments from approved System changes to HLR work and from approved HLR changes to
   LLR work, with engineering-language state, source-case/downward-trace context, named independent approval,
-  no-change rationale, automatic/retryable correct-level Draft SWCR linking, and supersession behavior
-- searchable, durable Problem Report relationships from every SCR/SWCR/TCR type through corrective actions and
+  no-change rationale, automatic/retryable correct-level Draft software change request linking, and supersession behavior
+- searchable, durable Problem Report relationships from every change request/TCR type through corrective actions and
   applicable test evidence, without turning requirement changes into automatic PRs
 - the agreed Problem Report lifecycle and rich field set, progressive impact decisions, AND filters, internal
   History, SCCB opening, and independent SQA closure
@@ -40,24 +40,24 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 - current role, session, and delegation administration with individual revocation and retained history
 
 - clean Program, software Project, and initial Release onboarding; optional FMS demonstration data
-- SCR creation with proposed system or high-level software requirement changes
+- SRCR creation with proposed system or high-level software requirement changes
 - author-selected, ordered approval sequences
 - same-revision return to Draft before first approval and next-revision control after approval
 - append-only audit events and candidate-baseline eligibility rules
 - live manager/engineer dashboard backed by persisted data
-- guided SCR Draft authoring with Problem, Analysis, Solution, and one or more proposed requirement changes
-- SCR workspace with safe Draft editing, requirement replacement, control status, and append-only audit history
+- guided SRCR Draft authoring with Problem, Analysis, Solution, and one or more proposed requirement changes
+- SRCR workspace with safe Draft editing, requirement replacement, control status, and append-only audit history
 - author-configured ordered review sequences with frozen snapshot hashes
 - active-reviewer approval or change requests, same-revision Draft rework, resubmission, and unanimous approval
 - explicit record versions and stale-browser conflict protection on Draft and review actions
-- release-targeted candidate baseline creation with eligible Approved SCR discovery
-- exact SCR-revision selection and removal, derived requirement-impact manifest, persistent baseline events, and immutable SHA-256 freeze
-- searchable SCR history across every revision, state, target release, baseline, and software build
-- searchable software-requirement revision history with source-SCR provenance and lifecycle impact
-- immutable software-build records tied to one exact frozen baseline, with drill-down to included SCR and requirement revisions
+- release-targeted candidate baseline creation with eligible Approved SRCR discovery
+- exact SRCR-revision selection and removal, derived requirement-impact manifest, persistent baseline events, and immutable SHA-256 freeze
+- searchable SRCR history across every revision, state, target release, baseline, and software build
+- searchable software-requirement revision history with source-SRCR provenance and lifecycle impact
+- immutable software-build records tied to one exact frozen baseline, with drill-down to included SRCR and requirement revisions
 - stable requirement identities separated from immutable requirement revisions
 - deterministic baseline materialization that applies Introduce, Modify, and Retire changes over an exact predecessor baseline
-- generated SWRD views and effective-requirement SHA-256 manifests traceable to source SCRs and software builds
+- generated SWRD views and effective-requirement SHA-256 manifests traceable to source SRCRs and software builds
 - reusable, revision-controlled test procedures with many-to-many links to exact requirement revisions
 - externally executed Pass, Fail, and Blocked results with configuration, human determination, and evidence references
 - immutable retest chains and release/build-specific coverage and verified-status dashboards
@@ -69,22 +69,22 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 - retained release-execution workbench connecting change inputs, release impact disposition, baseline materialization, build control, outputs, verification, and approval; not all of this workbench is exposed in the current UI
 - predecessor-aware reconciliation that creates only target-baseline-valid versioned trace and coverage links while exposing genuinely new coverage gaps
 - exact JSON verification-manifest export and atomic bulk import of hundreds of build-specific results with shared checksum-protected campaign evidence
-- professional DOCX/PDF publication of SCRs, requirements, and test procedures with editorial covers, named approval provenance, document-control registers, revision history, and controlled-copy markings
+- professional DOCX/PDF publication of SRCRs, requirements, and test procedures with editorial covers, named approval provenance, document-control registers, revision history, and controlled-copy markings
 - controlled product-line libraries with immutable revisions, reference/synchronized/diverged reuse, retained accept/defer/reject decisions, exact variant configurations, and configuration-correct requirements, traces, tests, and metrics
 - approved organization template revisions, equivalent rich engineering content in the UI/DOCX/PDF, exact baseline redlines, resumable deterministic publication jobs, integrity verification, and manifest-backed release evidence packages
 - enterprise requirements workspace spanning the complete System/HLR/LLR repository, with high-density table and document modes, structured specifications, paging, filters, and revision inspection
 - Program-configurable artifact-schema records and structured specification/section placement while stable requirement identity remains independent of document position
 - attributable requirement discussions with mentions, resolution/disposition state, exact-revision context, saved personal/shared views, and visual revision redlines
 - governed bulk classification and specification placement through previewed, attributable jobs rather than silent direct edits
-- checksum-recorded CSV/XLSX onboarding with row validation and a controlled commit boundary that creates a Draft SCR/SWCR instead of bypassing approval
+- checksum-recorded CSV/XLSX onboarding with row validation and a controlled commit boundary that creates a Draft change request instead of bypassing approval
 - provider-compatible PostgreSQL/SQLite persistence, versioned migration, and deterministic workspace synchronization for existing Programs
-- direct “analyze impact and propose change” workflow from an approved requirement into its proposed next revision inside a Draft SCR/SWCR; no parallel requirement-approval path
+- direct “analyze impact and propose change” workflow from an approved requirement into its proposed next revision inside a Draft change request; no parallel requirement-approval path
 - controlled structured-text authoring with lists, tables, aerospace symbols, exact references, Program fields, safe preview, and read-only downstream trace context
 - schema-validated proposal attributes with server-owned derived state and durable authored section placement; downstream impact decisions belong to consuming engineers rather than the change author (DEC-071)
 - canonical System/Software change-request routes and frozen reviewer principal/authority fields shared by review, work queues, notifications, audit, Jira links, and signature evidence
 - relationship-aware impact intelligence spanning parent/child requirements, verification procedures, baselines, builds, documents, active change packages, comments, and assigned follow-up
 - requirement watchers, threaded notifications, accountable assignments, due/overdue work queues, completion concurrency, and a combined engineering operations center
-- advanced permission-scoped requirement filters for lifecycle state, owner, source SCR/SWCR, open discussions, verification, tag, specification, and deterministic sorting
+- advanced permission-scoped requirement filters for lifecycle state, owner, source change request, open discussions, verification, tag, specification, and deterministic sorting
 - reusable import-mapping records, persistent interchange-job history, and downloadable CSV error reports
 - versioned controlled attachment vault with exact-revision association, protected storage, SHA-256 integrity verification, provenance, retrieval, supersession, and immutable history
 - comprehensive visual redlines spanning statement, rationale, rich content, Program attributes, verification method, and exact-revision attachment changes

@@ -72,7 +72,7 @@ public sealed class ServerAuthorityContractTests
             releaseId = release.Id;
         }
 
-        using var response = await client.PostAsJsonAsync("/api/scrs", new
+        using var response = await client.PostAsJsonAsync("/api/change-requests", new
         {
             projectId,
             targetReleaseId = releaseId,

@@ -43,7 +43,7 @@ test('an author chooses the section a new requirement goes in', async ({ page })
   await page.getByLabel('Solution').fill('Carry the exact section through save and checkout.')
   await page.getByLabel('Requirement statement').fill('The FMS shall retain its authored specification section.')
   await page.getByRole('textbox', { name: 'Author', exact: true }).fill('systems.author')
-  await page.getByRole('button', { name: 'Save SCR Draft' }).click()
+  await page.getByRole('button', { name: 'Save SRCR Draft' }).click()
 
   await expect(page.getByRole('heading', { name: 'Persist an authored specification section' })).toBeVisible()
   await page.getByRole('button', { name: 'Check out & edit' }).click()

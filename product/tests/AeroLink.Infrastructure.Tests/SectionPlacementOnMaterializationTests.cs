@@ -32,7 +32,7 @@ public sealed class SectionPlacementOnMaterializationTests
             var now = DateTimeOffset.UtcNow;
             var (projectId, releaseId, navigation, performance) = await SeedAsync(db, now);
 
-            var scr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var scr = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The software shall sequence oceanic waypoints.", projectId, releaseId, now, navigation);
             var baseline = FrozenBaseline("SW-00.10", projectId, releaseId, null, scr, now);
             db.AddRange(scr, baseline);
@@ -64,7 +64,7 @@ public sealed class SectionPlacementOnMaterializationTests
             var now = DateTimeOffset.UtcNow;
             var (projectId, releaseId, navigation, performance) = await SeedAsync(db, now);
 
-            var introduce = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var introduce = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The software shall sequence oceanic waypoints.", projectId, releaseId, now, navigation);
             var first = FrozenBaseline("SW-00.10", projectId, releaseId, null, introduce, now);
             db.AddRange(introduce, first);
@@ -72,7 +72,7 @@ public sealed class SectionPlacementOnMaterializationTests
             await new RequirementBaselineMaterializer(db, new VerificationImpactService(db))
                 .MaterializeAsync(first.Id, "cm", now, default);
 
-            var modify = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
+            var modify = ApprovedScr("HLRCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
                 "The software shall sequence oceanic waypoints deterministically.", projectId, releaseId, now, performance);
             var second = FrozenBaseline("SW-00.20", projectId, releaseId, first.Id, modify, now);
             db.AddRange(modify, second);
@@ -106,7 +106,7 @@ public sealed class SectionPlacementOnMaterializationTests
             var now = DateTimeOffset.UtcNow;
             var (projectId, releaseId, _, _) = await SeedAsync(db, now);
 
-            var scr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var scr = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The software shall sequence oceanic waypoints.", projectId, releaseId, now, targetSectionId: null);
             var baseline = FrozenBaseline("SW-00.10", projectId, releaseId, null, scr, now);
             db.AddRange(scr, baseline);
@@ -139,7 +139,7 @@ public sealed class SectionPlacementOnMaterializationTests
             var (projectId, releaseId, _, _) = await SeedAsync(db, now);
             var (_, _, foreignSection, _) = await SeedAsync(db, now, "Other", "OTH", "SWRD-000002");
 
-            var scr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var scr = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The software shall sequence oceanic waypoints.", projectId, releaseId, now, foreignSection);
             var baseline = FrozenBaseline("SW-00.10", projectId, releaseId, null, scr, now);
             db.AddRange(scr, baseline);
@@ -181,7 +181,7 @@ public sealed class SectionPlacementOnMaterializationTests
         RequirementChangeKind kind, string statement, Guid projectId, Guid releaseId, DateTimeOffset now,
         Guid? targetSectionId)
     {
-        var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software);
+        var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
         scr.AddRequirementChange("author", requirementNumber, revision, RequirementLevel.HighLevel, kind, statement,
             "Rationale", "Test", now, targetSectionId: targetSectionId);
         scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);

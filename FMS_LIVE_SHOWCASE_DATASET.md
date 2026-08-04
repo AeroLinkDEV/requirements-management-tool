@@ -29,8 +29,8 @@ or version. See DEC-070 and DEC-088.
 | High-level software requirements (HLRs) | 400 |
 | Low-level software requirements (LLRs) | 700 |
 | Effective requirement revisions | 1,250 |
-| Historical system SCRs | 30 |
-| Historical software SWCRs | 75 |
+| Historical system SRCRs | 30 |
+| Historical HLRCRs and LLRCRs | 75 |
 | HLR-to-system trace links | 400 |
 | LLR-to-HLR trace links | 700 |
 | Test procedures | 515 |
@@ -44,7 +44,7 @@ Requirement identities are stable and revisions are immutable. Requirements at r
 
 No **Uncovered** requirement is seeded, deliberately. Reaching one would mean either stripping coverage from a released requirement — a released baseline that failed its own coverage gate — or materializing the FMS 1.6 baseline, which would discard the `WaitingForPrerequisite` position DEC-066 exists to demonstrate. Uncovered appears as soon as somebody materializes 1.6, which is the honest way to show it. See DEC-068.
 
-The released build is `FMS-1.5.0-RELEASE`. It references the frozen and materialized FMS 1.5 baseline, whose SCR manifest and effective-requirement manifest have independent SHA-256 hashes.
+The released build is `FMS-1.5.0-RELEASE`. It references the frozen and materialized FMS 1.5 baseline, whose SRCR manifest and effective-requirement manifest have independent SHA-256 hashes.
 
 ## Allocation and verification
 
@@ -83,9 +83,9 @@ The seeded changes include a new system-level oceanic round-robin function and r
 
 ## Terminology
 
-- `SCR` identifies a system change request.
-- `SWCR` identifies a software change request.
-- An SWCR can affect HLRs, LLRs, or both.
+- `SRCR` identifies a system change request.
+- `HLRCR`, `LLRCR` identifies a software change request.
+- An software change request can affect HLRs, LLRs, or both.
 - System, High-Level, and Low-Level are formal requirement and test-procedure levels.
 
 ## Generation and validation

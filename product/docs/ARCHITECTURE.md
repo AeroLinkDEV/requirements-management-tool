@@ -18,8 +18,8 @@ These are implementation decisions, not changes to the authoritative product beh
 
 Lifecycle rules live in domain objects rather than controllers or UI code. The API requests an operation; the aggregate validates state, actor authority, revision behavior, and ordered review rules; persistence records the resulting state and audit events atomically.
 
-`SystemChangeRequest` is the shared System/Software change aggregate. Stable artifact identity (`SCR-00001` or
-`SWCR-00001`) is distinct from revision display (`SCR-00001.04`). Requirements referenced by a change request
+`SystemChangeRequest` is the shared System/Software change aggregate. Stable artifact identity (`SRCR-00001` or
+`HLRCR-00001`) is distinct from revision display (`SRCR-00001.04`). Requirements referenced by a change request
 retain stable identities and immutable revision identities.
 
 Downstream engineering work and upward allocation are separate controls. Approval raises build-scoped consuming-
@@ -60,15 +60,15 @@ Fresh installations contain no assumed program. The onboarding transaction creat
 
 Enterprise authoring extends the existing requirement aggregate instead of replacing it. Stable artifacts and immutable requirement revisions remain authoritative; revision profiles add schema-bound rich content and classifications, specification nodes add reusable document placement, and comments/views/jobs preserve collaboration and high-volume operations as separate attributable records. Existing Projects are synchronized idempotently so the new workspace can be introduced without rewriting approved history.
 
-CSV/XLSX interchange is a two-step preview/commit workflow. Files are size- and expansion-limited, hashed, parsed into persisted validation results, and cannot create approved requirements directly. A successful commit creates a Draft SCR/SWCR containing the proposed requirement changes, preserving the established review and baseline authority boundary.
+CSV/XLSX interchange is a two-step preview/commit workflow. Files are size- and expansion-limited, hashed, parsed into persisted validation results, and cannot create approved requirements directly. A successful commit creates a Draft change request containing the proposed requirement changes, preserving the established review and baseline authority boundary.
 
 ## Security boundary
 
-Identity now comes from a revocable authenticated server session. Passwords use salted PBKDF2 derivation, opaque session tokens are stored only as digests, material API actions derive the actor from the authenticated principal, Program memberships and roles constrain access, and SCR/release approvals require password-confirmed immutable electronic signatures. Production deployment still requires TLS, enterprise identity federation/provisioning, configurable policy enforcement, privileged-access governance, audit export, and independent security review as defined in [SECURITY_AND_IDENTITY_MODEL.md](../../SECURITY_AND_IDENTITY_MODEL.md).
+Identity now comes from a revocable authenticated server session. Passwords use salted PBKDF2 derivation, opaque session tokens are stored only as digests, material API actions derive the actor from the authenticated principal, Program memberships and roles constrain access, and SRCR/release approvals require password-confirmed immutable electronic signatures. Production deployment still requires TLS, enterprise identity federation/provisioning, configurable policy enforcement, privileged-access governance, audit export, and independent security review as defined in [SECURITY_AND_IDENTITY_MODEL.md](../../SECURITY_AND_IDENTITY_MODEL.md).
 
 ## Enterprise hardening boundary
 
-The enterprise-hardening release adds versioned controlled files, structured and attachment-aware redlines, saved structured queries with stable links, durable background processing, multi-session edit detection, three-way merge records, integrity checkpoints, and an operator-facing control dashboard. These are separate attributable records around the authoritative requirement/SCR/baseline aggregates; they do not create an alternate approval path or mutate approved history.
+The enterprise-hardening release adds versioned controlled files, structured and attachment-aware redlines, saved structured queries with stable links, durable background processing, multi-session edit detection, three-way merge records, integrity checkpoints, and an operator-facing control dashboard. These are separate attributable records around the authoritative requirement/SRCR/baseline aggregates; they do not create an alternate approval path or mutate approved history.
 
 Files are streamed to protected local content-addressed storage, SHA-256 hashed, permission-checked through their Project and artifact, and retained across superseding versions. Background operations have idempotency keys, attempts, progress, final outcomes, and downloadable controlled output. Edit sessions capture a base snapshot and numeric concurrency version; collisions persist base/local/remote content and require an explicit resolution.
 

@@ -18,7 +18,7 @@ also enforced server-side.
 ## Database and controlled records
 
 PostgreSQL is the one real-life database. EF Core migrations version its schema and are applied at startup.
-Stable artifacts (for example `SCR-00076` or `LLR-000008`) are separate from immutable revisions (`.00`, `.01`).
+Stable artifacts (for example `SRCR-00076` or `LLR-000008`) are separate from immutable revisions (`.00`, `.01`).
 A controlled requirement revision is never edited in place after approval; a change request proposes a new
 revision, ordered review/electronic signatures approve it, and baseline materialization selects exact revision
 IDs for a build.

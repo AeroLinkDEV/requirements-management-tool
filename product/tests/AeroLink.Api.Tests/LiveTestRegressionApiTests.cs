@@ -38,7 +38,7 @@ public sealed class LiveTestRegressionApiTests
             var program = new ProgramRecord("Revision Scope", "RVS");
             var project = new ProjectRecord(program.Id, "FMS", "Revision Scope FMS");
             var release = new SoftwareRelease(project.Id, "1.5", true);
-            var scr = new SystemChangeRequest("SCR-90001", 0, project.Id, release.Id, "Released source",
+            var scr = new SystemChangeRequest("SRCR-90001", 0, project.Id, release.Id, "Released source",
                 "Problem", "Analysis", "Solution", "author", now);
             var baseline = new CandidateBaseline("SW-01.50", 0, project.Id, release.Id, null,
                 "Released baseline", "cm", now);
@@ -104,7 +104,7 @@ public sealed class LiveTestRegressionApiTests
             var program = new ProgramRecord("Assessment Authority", "ASA");
             var project = new ProjectRecord(program.Id, "FMS", "Assessment FMS");
             var release = new SoftwareRelease(project.Id, "1.6", false);
-            var source = new SystemChangeRequest("SCR-90002", 0, project.Id, release.Id, "Upstream change",
+            var source = new SystemChangeRequest("SRCR-90002", 0, project.Id, release.Id, "Upstream change",
                 "Problem", "Analysis", "Solution", "author", now);
             var assessment = new DownstreamChangeAssessment(project.Id, release.Id, source.Id,
                 source.DisplayNumber, RequirementLevel.HighLevel, now);
@@ -172,7 +172,7 @@ public sealed class LiveTestRegressionApiTests
             var program = new ProgramRecord("Audit Format", "AUF");
             var project = new ProjectRecord(program.Id, "FMS", "Audit FMS");
             var release = new SoftwareRelease(project.Id, "1.6", false);
-            var scr = new SystemChangeRequest("SCR-90003", 0, project.Id, release.Id, "Audit formatting",
+            var scr = new SystemChangeRequest("SRCR-90003", 0, project.Id, release.Id, "Audit formatting",
                 "Problem", "Analysis", "Solution", "audit.reader", now);
             scr.AddRequirementChange("audit.reader", "SYSR-00000001", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "Statement", "Rationale", "Test", now);
@@ -185,7 +185,7 @@ public sealed class LiveTestRegressionApiTests
 
         using var client = factory.CreateClient();
         await LoginAsync(client, "audit.reader");
-        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/scrs/{scrId}");
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/change-requests/{scrId}");
         var added = detail.GetProperty("audit").EnumerateArray()
             .Single(x => x.GetProperty("eventType").GetString() == "RequirementChangeAdded");
         Assert.Contains("SYSR-000001.00", added.GetProperty("detail").GetString());

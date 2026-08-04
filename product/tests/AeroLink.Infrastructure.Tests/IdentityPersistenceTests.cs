@@ -40,7 +40,7 @@ public sealed class IdentityPersistenceTests
             var identity = new IdentityService(db); var login = await identity.LoginAsync("REVIEWER.ONE", "StrongPass!2026", "127.0.0.1", "test", now, default);
             Assert.NotNull(login); Assert.True(await identity.HasRoleAsync(login!.User, program.Id, ProgramRole.Approver, now, default));
             var resolved = await identity.ResolveAsync(login.Token, now.AddMinutes(1), default); Assert.Equal("reviewer.one", resolved!.UserName);
-            db.ElectronicSignatures.Add(new(user.Id, user.UserName, user.DisplayName, program.Id, "SCR", Guid.NewGuid(), "SCR-00001.00", "Approve", "Reviewed and approved.", new string('a',64), "127.0.0.1", now)); await db.SaveChangesAsync();
+            db.ElectronicSignatures.Add(new(user.Id, user.UserName, user.DisplayName, program.Id, "SCR", Guid.NewGuid(), "SRCR-00001.00", "Approve", "Reviewed and approved.", new string('a',64), "127.0.0.1", now)); await db.SaveChangesAsync();
             var signature = await db.ElectronicSignatures.AsNoTracking().SingleAsync(); Assert.Equal("Reviewer One", signature.DisplayName); Assert.Equal(64, signature.ContentHash.Length);
             await identity.LogoutAsync(login.Token, "127.0.0.1", now.AddMinutes(2), default); Assert.Null(await identity.ResolveAsync(login.Token, now.AddMinutes(3), default));
             Assert.Contains(await db.SecurityAuditEvents.AsNoTracking().ToListAsync(), x => x.EventType == "Login" && x.Outcome == "Success");

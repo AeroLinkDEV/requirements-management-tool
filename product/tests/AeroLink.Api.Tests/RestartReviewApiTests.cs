@@ -40,7 +40,7 @@ public sealed class RestartReviewApiTests
         }
         await db.SaveChangesAsync();
 
-        var scr = new SystemChangeRequest("SCR-00050", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", "author.user", now);
+        var scr = new SystemChangeRequest("SRCR-00050", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", "author.user", now);
         scr.AddRequirementChange("author.user", "SYSR-00000501", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
             "The FMS shall sequence oceanic waypoints.", "New capability", "Test", now);
         scr.SubmitForReview("author.user", [new("wrong.user", "Wrong Approver")], now);
@@ -64,7 +64,7 @@ public sealed class RestartReviewApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "author.user");
 
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{fixture.ScrId}/restart-review",
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
             new { reason = "Routed to the wrong discipline approver.", approvers = new[] { new { userId = "right.user" } } });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -94,7 +94,7 @@ public sealed class RestartReviewApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "wrong.user");
 
-        using var response = await client.PostAsJsonAsync($"/api/scrs/{fixture.ScrId}/restart-review",
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
             new { reason = "I would rather someone else reviewed this.", approvers = new[] { new { userId = "right.user" } } });
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
@@ -107,11 +107,11 @@ public sealed class RestartReviewApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "author.user");
 
-        using var noReason = await client.PostAsJsonAsync($"/api/scrs/{fixture.ScrId}/restart-review",
+        using var noReason = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
             new { reason = "  ", approvers = new[] { new { userId = "right.user" } } });
         Assert.Equal(HttpStatusCode.BadRequest, noReason.StatusCode);
 
-        using var unknownApprover = await client.PostAsJsonAsync($"/api/scrs/{fixture.ScrId}/restart-review",
+        using var unknownApprover = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ScrId}/restart-review",
             new { reason = "Routed to the wrong discipline approver.", approvers = new[] { new { userId = "nobody.here" } } });
         Assert.Equal(HttpStatusCode.BadRequest, unknownApprover.StatusCode);
     }

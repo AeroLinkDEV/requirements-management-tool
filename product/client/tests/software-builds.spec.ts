@@ -98,7 +98,7 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
   await expect(page.getByRole('dialog', { name: /History of SYSTP-000001/ })).toBeVisible()
 
   const refusal = await page.evaluate(async (base) => {
-    const response = await fetch(`${base}/api/scr-drafts`, {
+    const response = await fetch(`${base}/api/change-request-drafts`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -125,7 +125,7 @@ test('Build 1.6 keeps editing capability, scopes search, and labels predecessor 
   await login(page)
   await expect(page.getByLabel('Active build 1.6')).toContainText('In work')
   await expect(page.locator('.releaseSelector')).toHaveCount(0)
-  await expect(page.getByRole('link', { name: 'New System SCR' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'New System SRCR' })).toHaveCount(0)
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'System Change Requests' }).click()
   await expect(page.getByRole('button', { name: '+ New System Change Request' })).toBeVisible()

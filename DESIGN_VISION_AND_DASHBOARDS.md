@@ -28,11 +28,11 @@ The product should feel like calm mission control for controlled lifecycle data:
 
 ![AeroLink dashboard concept](design/mockups/dashboard-concept.png)
 
-This is the primary north-star dashboard. It combines release readiness, controlled-requirement status, open SCRs, traceability completeness, baseline readiness, recent activity, and items needing review.
+This is the primary north-star dashboard. It combines release readiness, controlled-requirement status, open SRCRs, traceability completeness, baseline readiness, recent activity, and items needing review.
 
-### SCR Review and Impact Analysis
+### SRCR Review and Impact Analysis
 
-![AeroLink SCR review concept](design/mockups/scr-review-concept.png)
+![AeroLink SRCR review concept](design/mockups/scr-review-concept.png)
 
 This screen demonstrates the intended relationship among revision comparison, review workflow, named reviewers, affected tests, suspect links, and approval actions.
 
@@ -122,7 +122,7 @@ These are candidate measures for product validation; their formulas are not yet 
 | Traceability completeness | Management, engineering, quality | Whether applicable artifacts have required typed links | Missing, invalid, and suspect links by artifact and rule |
 | Verification completeness | Management, verification | Whether applicable requirements have acceptable procedures and results | Requirements lacking procedures, acceptable executions, evidence, or review |
 | Review demand | Management, engineering | Work awaiting review, approval, comment disposition, or rework | Exact assignments, age, priority, owner, and workflow state |
-| Open SCRs | Management, engineering, CM | Change workload by target release and lifecycle state | SCRs, affected requirements, priority, age, owner, and blockers |
+| Open SRCRs | Management, engineering, CM | Change workload by target release and lifecycle state | SRCRs, affected requirements, priority, age, owner, and blockers |
 | Test outcome status | Management, verification, quality | Current evidence status without hiding prior failure history | All applicable executions, configurations, evidence, anomalies, and retests |
 | Suspect-link exposure | Engineering, quality | Relationships requiring reassessment after change | Triggering change, affected links, review owner, age, and disposition |
 | Document-generation status | CM, quality | State of draft and approved controlled output jobs | Source baseline, template, generator, job log, approval, and hash |
@@ -167,7 +167,7 @@ The showcase should:
 
 - use representative fictional aerospace data;
 - implement the visual system and navigation as a realistic desktop web experience;
-- let a presenter move through one coherent story: dashboard -> SCR -> requirement revision -> impact -> baseline -> test evidence -> traceability;
+- let a presenter move through one coherent story: dashboard -> SRCR -> requirement revision -> impact -> baseline -> test evidence -> traceability;
 - include management and engineering dashboard modes;
 - demonstrate filters, drill-downs, state transitions, review comments, and evidence views;
 - use simulated interactions and deterministic local data; and
@@ -189,7 +189,7 @@ The showcase should not yet include:
 A presenter can:
 
 1. open a manager dashboard and explain release readiness;
-2. drill into a blocking SCR and compare the proposed requirement revision;
+2. drill into a blocking SRCR and compare the proposed requirement revision;
 3. show affected tests and a suspect link;
 4. demonstrate review and approval states without claiming a real signature;
 5. inspect the candidate/released baseline context;

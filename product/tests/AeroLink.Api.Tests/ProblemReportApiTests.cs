@@ -79,7 +79,7 @@ public sealed class ProblemReportApiTests
         using var opened = await client.PostAsJsonAsync($"/api/problem-reports/{id}/sccb/open", new { expectedVersion = version });
         Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
 
-        using var change = await client.PostAsJsonAsync("/api/scrs", new { projectId, targetReleaseId = releaseId, type = "Software", softwareLevel = "HighLevel", title = "Keep disagreement alert active", problem = "P", analysis = "A", solution = "S", problemReportIds = new[] { id } });
+        using var change = await client.PostAsJsonAsync("/api/change-requests", new { projectId, targetReleaseId = releaseId, type = "Software", softwareLevel = "HighLevel", title = "Keep disagreement alert active", problem = "P", analysis = "A", solution = "S", problemReportIds = new[] { id } });
         Assert.Equal(HttpStatusCode.Created, change.StatusCode);
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
         Assert.Equal("Implementing", detail.GetProperty("state").GetString());
@@ -117,7 +117,7 @@ public sealed class ProblemReportApiTests
         var reportBody = await createdReport.Content.ReadFromJsonAsync<JsonElement>();
         var reportId = reportBody.GetProperty("id").GetGuid();
 
-        using var createdChange = await client.PostAsJsonAsync("/api/scrs", new
+        using var createdChange = await client.PostAsJsonAsync("/api/change-requests", new
         {
             projectId, targetReleaseId = releaseId, type = type.ToString(), title = "Correct source selection",
             problem = "P", analysis = "A", solution = "S", softwareLevel = type == ChangeRequestType.Software ? "HighLevel" : null, problemReportIds = new[] { reportId }

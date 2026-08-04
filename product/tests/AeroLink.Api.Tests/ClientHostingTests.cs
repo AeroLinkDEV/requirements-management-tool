@@ -73,7 +73,7 @@ public sealed class ClientHostingTests
 
     [Theory]
     [InlineData("/api", true)]
-    [InlineData("/api/scrs", true)]
+    [InlineData("/api/change-requests", true)]
     [InlineData("/health", true)]
     [InlineData("/health/ready", true)]
     [InlineData("/API/AUTH/LOGIN", true)]

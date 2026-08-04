@@ -21,7 +21,7 @@ test('verification actions follow authority in the selected Program',async({page
   const approvalWorkspace=await makeWorkspace('Approval Authority')
   const prepareExactRequirement=async(workspace:any,label:string)=>{
     const impacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
-    const draftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{
+    const draftResponse=await request.post(`${apiBase}/api/change-request-drafts`,{data:{
       projectId:workspace.project.id,targetReleaseId:workspace.release.id,type:'System',
       title:`${label} exact verification target`,problem:'A controlled target is required.',
       analysis:'Procedure authoring must bind to a materialized revision.',solution:'Introduce one exact revision.',
@@ -29,9 +29,9 @@ test('verification actions follow authority in the selected Program',async({page
     }})
     expect(draftResponse.ok(),await draftResponse.text()).toBeTruthy()
     const draft=await draftResponse.json()
-    const submitted=await request.post(`${apiBase}/api/scrs/${draft.id}/submit`,{data:{approvers:[{userId:'admin',name:'Ignored'}]}})
+    const submitted=await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`,{data:{approvers:[{userId:'admin',name:'Ignored'}]}})
     expect(submitted.ok(),await submitted.text()).toBeTruthy()
-    const approved=await request.post(`${apiBase}/api/scrs/${draft.id}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved for exact verification applicability.'}})
+    const approved=await request.post(`${apiBase}/api/change-requests/${draft.id}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved for exact verification applicability.'}})
     expect(approved.ok(),await approved.text()).toBeTruthy()
     const baselineResponse=await request.post(`${apiBase}/api/baselines`,{data:{baseNumber:`SW-99.${Date.now().toString().slice(-2)}`,revision:0,projectId:workspace.project.id,releaseId:workspace.release.id,name:`${label} materialized software build`}})
     expect(baselineResponse.ok(),await baselineResponse.text()).toBeTruthy()

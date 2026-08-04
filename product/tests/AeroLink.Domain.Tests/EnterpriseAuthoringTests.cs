@@ -28,7 +28,7 @@ public sealed class EnterpriseAuthoringTests
     [Fact]
     public void Controlled_requirement_proposals_freeze_rich_content_without_author_owned_impact_gates()
     {
-        var now=DateTimeOffset.UtcNow;var scr=new SystemChangeRequest("SWCR-00001",0,Guid.NewGuid(),Guid.NewGuid(),"Controlled proposal","Problem","Analysis","Solution","author",now,ChangeRequestType.Software);var pending="{\"trace\":\"Pending\",\"verification\":\"Affected\",\"documents\":\"Not Affected\",\"baseline\":\"Affected\",\"collaboration\":\"Not Affected\"}";
+        var now=DateTimeOffset.UtcNow;var scr=new SystemChangeRequest("HLRCR-00001",0,Guid.NewGuid(),Guid.NewGuid(),"Controlled proposal","Problem","Analysis","Solution","author",now,ChangeRequestType.Software,softwareLevel:RequirementLevel.HighLevel);var pending="{\"trace\":\"Pending\",\"verification\":\"Affected\",\"documents\":\"Not Affected\",\"baseline\":\"Affected\",\"collaboration\":\"Not Affected\"}";
         scr.AddRequirementChange("author","HLR-00000001",1,RequirementLevel.HighLevel,RequirementChangeKind.Modify,"The FMS software shall navigate.","Controlled rationale.","Test",now,"**The FMS software** shall navigate.","{\"criticality\":\"Safety Significant\"}",pending);
         // Supporting content that arrives as plain text is adopted as a single paragraph rather than
         // rejected, so nothing an author already wrote is lost to the storage format changing under them.
@@ -45,7 +45,7 @@ public sealed class EnterpriseAuthoringTests
     public void Review_ignores_legacy_author_impact_disposition_metadata(string dispositions)
     {
         var now=DateTimeOffset.UtcNow;
-        var scr=new SystemChangeRequest("SCR-00001",0,Guid.NewGuid(),Guid.NewGuid(),"Proposal","Problem","Analysis","Solution","author",now);
+        var scr=new SystemChangeRequest("SRCR-00001",0,Guid.NewGuid(),Guid.NewGuid(),"Proposal","Problem","Analysis","Solution","author",now);
         scr.AddRequirementChange("author","SYSR-00000001",0,RequirementLevel.System,RequirementChangeKind.Introduce,
             "The FMS shall navigate.","Rationale","Test",now,impactDispositionJson:dispositions);
         var cycle=scr.SubmitForReview("author",[new("reviewer","Reviewer")],now);

@@ -36,9 +36,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         db.AddRange(program, project, release15, release16); await db.SaveChangesAsync(ct);
 
         var historical = new List<SystemChangeRequest>();
-        for (var i = 1; i <= 30; i++) historical.Add(BuildHistoricalRequest($"SCR-{i:D5}", ChangeRequestType.System, RequirementLevel.System, 5, (i - 1) * 5, project.Id, release15.Id, start.AddDays(i), "system"));
-        for (var i = 1; i <= 30; i++) historical.Add(BuildHistoricalRequest($"SWCR-{i:D5}", ChangeRequestType.Software, RequirementLevel.HighLevel, i <= 10 ? 14 : 13, (i - 1) * 13 + Math.Min(i - 1, 10), project.Id, release15.Id, start.AddDays(40 + i), "HLR"));
-        for (var i = 1; i <= 45; i++) historical.Add(BuildHistoricalRequest($"SWCR-{i + 30:D5}", ChangeRequestType.Software, RequirementLevel.LowLevel, i <= 25 ? 16 : 15, (i - 1) * 15 + Math.Min(i - 1, 25), project.Id, release15.Id, start.AddDays(80 + i), "LLR"));
+        for (var i = 1; i <= 30; i++) historical.Add(BuildHistoricalRequest($"SRCR-{i:D5}", ChangeRequestType.System, RequirementLevel.System, 5, (i - 1) * 5, project.Id, release15.Id, start.AddDays(i), "system"));
+        for (var i = 1; i <= 30; i++) historical.Add(BuildHistoricalRequest($"HLRCR-{i:D5}", ChangeRequestType.Software, RequirementLevel.HighLevel, i <= 10 ? 14 : 13, (i - 1) * 13 + Math.Min(i - 1, 10), project.Id, release15.Id, start.AddDays(40 + i), "HLR"));
+        for (var i = 1; i <= 45; i++) historical.Add(BuildHistoricalRequest($"LLRCR-{i + 30:D5}", ChangeRequestType.Software, RequirementLevel.LowLevel, i <= 25 ? 16 : 15, (i - 1) * 15 + Math.Min(i - 1, 25), project.Id, release15.Id, start.AddDays(80 + i), "LLR"));
         db.SystemChangeRequests.AddRange(historical); await db.SaveChangesAsync(ct);
 
         var baseline15 = new CandidateBaseline("SW-01.50", 0, project.Id, release15.Id, null, "FMS 1.5 Released Software Build", "cm.fms", start.AddDays(150));
@@ -731,7 +731,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
 
     private static SystemChangeRequest BuildHistoricalRequest(string number, ChangeRequestType type, RequirementLevel level, int count, int offset, Guid projectId, Guid releaseId, DateTimeOffset now, string label)
     {
-        var request = new SystemChangeRequest(number, 0, projectId, releaseId, $"Establish FMS {label} requirement group {number[^2..]}", "The product baseline requires controlled FMS behavior.", "Operational and assurance needs were analyzed and allocated.", "Introduce the approved requirement set with verification criteria.", type == ChangeRequestType.System ? "systems.author" : "software.author", now, type);
+        var request = new SystemChangeRequest(number, 0, projectId, releaseId, $"Establish FMS {label} requirement group {number[^2..]}", "The product baseline requires controlled FMS behavior.", "Operational and assurance needs were analyzed and allocated.", "Introduce the approved requirement set with verification criteria.", type == ChangeRequestType.System ? "systems.author" : "software.author", now, type, softwareLevel: type == ChangeRequestType.Software ? level : null);
         for (var j = 1; j <= count; j++) { var index = offset + j; var prefix = level == RequirementLevel.System ? "SYSR" : level == RequirementLevel.HighLevel ? "HLR" : "LLR"; var revision = index % 11 == 0 ? 2 : index % 5 == 0 ? 1 : 0;
             request.AddRequirementChange(request.AuthorId, $"{prefix}-{index:D6}", revision, level, RequirementChangeKind.Introduce, CurrentStatement(level, index), $"Allocated {Topics[(index - 1) % Topics.Length]} capability for the FMS 1.5 baseline.", "Test", now); }
         request.SubmitForReview(request.AuthorId, [new("assurance.reviewer", "Development Assurance Reviewer")], now.AddHours(2)); request.ApproveActiveStage("assurance.reviewer", now.AddDays(1)); return request;
@@ -749,8 +749,13 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var result = new List<SystemChangeRequest>();
         for (var i = 1; i <= 8; i++)
         {
-            var system = i <= 2; var type = system ? ChangeRequestType.System : ChangeRequestType.Software; var number = system ? $"SCR-{30 + i:D5}" : $"SWCR-{75 + i - 2:D5}";
-            var request = new SystemChangeRequest(number, 0, projectId, releaseId, i == 1 ? "Introduce oceanic round-robin waypoint sequencing" : $"FMS 1.6 change package {i}", "Operational feedback or a product improvement requires controlled change.", "The impact to requirements, traces, and verification has been assessed.", "Update the applicable FMS behavior and verification assets.", type == ChangeRequestType.System ? "systems.author" : "software.author", now.AddDays(i), type);
+            // The number names the level, so it is derived from the same rule the application uses rather
+            // than written out by hand. i <= 4 is HLR work and the rest is LLR, matching the requirement
+            // changes each request goes on to carry.
+            var system = i <= 2; var type = system ? ChangeRequestType.System : ChangeRequestType.Software;
+            var packageLevel = system ? (RequirementLevel?)null : i <= 4 ? RequirementLevel.HighLevel : RequirementLevel.LowLevel;
+            var number = $"{ChangeRequestNumbering.Prefix(type, packageLevel)}-{(system ? 30 + i : 75 + i - 2):D5}";
+            var request = new SystemChangeRequest(number, 0, projectId, releaseId, i == 1 ? "Introduce oceanic round-robin waypoint sequencing" : $"FMS 1.6 change package {i}", "Operational feedback or a product improvement requires controlled change.", "The impact to requirements, traces, and verification has been assessed.", "Update the applicable FMS behavior and verification assets.", type == ChangeRequestType.System ? "systems.author" : "software.author", now.AddDays(i), type, softwareLevel: packageLevel);
             if (i == 1) request.AddRequirementChange(request.AuthorId, "SYSR-000151", 0, RequirementLevel.System, RequirementChangeKind.Introduce, "The FMS shall support configurable round-robin sequencing of eligible oceanic waypoints.", "New FMS 1.6 capability.", "Test", now);
             else { var level = system ? RequirementLevel.System : i <= 4 ? RequirementLevel.HighLevel : RequirementLevel.LowLevel; var prefix = level == RequirementLevel.System ? "SYSR" : level == RequirementLevel.HighLevel ? "HLR" : "LLR"; var max = level == RequirementLevel.System ? 150 : level == RequirementLevel.HighLevel ? 400 : 700; var idx = ((i * 37) % max) + 1; var row = current[$"{prefix}-{idx:D6}"]; request.AddRequirementChange(request.AuthorId, $"{prefix}-{idx:D6}", row.Revision.Revision + 1, level, RequirementChangeKind.Modify, CurrentStatement(level, idx) + " The behavior shall include the approved FMS 1.6 refinement.", "Product improvement or corrective action.", "Test", now); }
             if (i <= 2) { request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Maya Patel")], now.AddDays(i).AddHours(1)); request.ApproveActiveStage("lead.reviewer", now.AddDays(i).AddHours(2)); }

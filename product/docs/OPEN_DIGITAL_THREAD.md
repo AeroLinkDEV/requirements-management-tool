@@ -68,7 +68,7 @@ The **ReqIF Exchange Center** exports a `.reqifz` package containing the ReqIF d
 
 ReqIF 1.2 reuses the normative `20110401/reqif.xsd` schema, whose `REQ-IF-VERSION` element is fixed to `1.0`; AeroLink therefore identifies the product profile as ReqIF 1.2 while emitting the schema-required XML header value `1.0`.
 
-Inbound `.reqif` and `.reqifz` files pass a preview and reconciliation boundary before they can affect controlled work. The parser prohibits DTDs and external entities, limits package and expanded size, rejects unsafe archive paths, checks duplicate and existing identifiers, and retains the immutable source package. A successful commit creates a Draft SCR/SWCR; it never creates approved requirements or bypasses review and baseline controls.
+Inbound `.reqif` and `.reqifz` files pass a preview and reconciliation boundary before they can affect controlled work. The parser prohibits DTDs and external entities, limits package and expanded size, rejects unsafe archive paths, checks duplicate and existing identifiers, and retains the immutable source package. A successful commit creates a Draft change request; it never creates approved requirements or bypasses review and baseline controls.
 
 The round-trip guarantee applies to the documented AeroLink profile. Vendor-specific extensions outside that profile remain preserved in the immutable source package but require an explicit mapping decision before they become controlled AeroLink fields.
 

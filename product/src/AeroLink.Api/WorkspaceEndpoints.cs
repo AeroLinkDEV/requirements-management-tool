@@ -283,7 +283,7 @@ public static class WorkspaceEndpoints
                                         join cycle in db.ReviewCycles.AsNoTracking() on step.ReviewCycleId equals cycle.Id
                                         join scr in db.SystemChangeRequests.AsNoTracking() on cycle.ScrId equals scr.Id
                                         where (projectId == null || scr.ProjectId == projectId) && (releaseId == null || scr.TargetReleaseId == releaseId)
-                                        select new { id = scr.Id, type = "SCR approval", artifact = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, title = scr.Title, priority = "High", dueAt = cycle.StartedAt.AddDays(5), ageDays = (int)(now - cycle.StartedAt).TotalDays, route = "scr", discipline = scr.Type == ChangeRequestType.Software ? "software" : "system" }).ToListAsync(ct);
+                                        select new { id = scr.Id, type = "Change request approval", artifact = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision, title = scr.Title, priority = "High", dueAt = cycle.StartedAt.AddDays(5), ageDays = (int)(now - cycle.StartedAt).TotalDays, route = "scr", discipline = scr.Type == ChangeRequestType.Software ? "software" : "system" }).ToListAsync(ct);
             activeScrSteps = activeScrSteps.OrderBy(x => x.dueAt).ToList();
             var releaseSteps = await (from step in db.ReleaseApprovals.AsNoTracking().Where(x => x.ApproverId == actor.UserName && x.State == ReleaseApprovalState.Active)
                                       join campaign in db.ReleaseCampaigns.AsNoTracking() on step.CampaignId equals campaign.Id

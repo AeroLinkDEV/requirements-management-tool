@@ -7,7 +7,7 @@ This document defines the intended first product slice at behavior level. It is 
 ```text
 Current approved baseline
         +
-selected approved SCRs for a target release
+selected approved SRCRs for a target release
         -> candidate requirement revisions and retirements
         -> review and impact resolution
         -> candidate baseline
@@ -19,14 +19,14 @@ selected approved SCRs for a target release
         -> verification review and release evidence
 ```
 
-An SCR authorizes and explains proposed change. A baseline determines what is effective. A SYSRD presents the requirement contents of a baseline. These are related but distinct approvals.
+An SRCR authorizes and explains proposed change. A baseline determines what is effective. A SYSRD presents the requirement contents of a baseline. These are related but distinct approvals.
 
 ## 2. Roles
 
 The workflow assumes these conceptual roles; one person may hold multiple roles only where independence rules permit:
 
-- **Change Author:** drafts an SCR and its requirement change items.
-- **SCR Author:** prepares the Problem, Analysis, Solution, and all proposed requirement introductions, modifications, and retirements within the SCR package.
+- **Change Author:** drafts an SRCR and its requirement change items.
+- **SRCR Author:** prepares the Problem, Analysis, Solution, and all proposed requirement introductions, modifications, and retirements within the SRCR package.
 - **Reviewer:** evaluates a specified revision and records comments and a decision.
 - **Approver:** provides the final approval decision when workflow criteria are satisfied.
 - **Configuration Manager:** assembles and controls candidate baselines and document releases.
@@ -36,13 +36,13 @@ The workflow assumes these conceptual roles; one person may hold multiple roles 
 - **Program Administrator:** configures authorized users, roles, and program-level policy.
 - **System Administrator:** operates the platform without authority to erase controlled history.
 
-For the initial product behavior, the SCR author selects and orders the people required to approve the SCR. Review proceeds sequentially in that order; only the active approver can record the next decision. Approval is unanimous among the author-selected sequence: every selected approver must approve the same SCR revision and submitted content. Requirements contained in an SCR are not reviewed or approved independently. Any selected approver rejection or request for changes prevents approval. Independence rules and the approval-authentication ceremony remain to be defined.
+For the initial product behavior, the SRCR author selects and orders the people required to approve the SRCR. Review proceeds sequentially in that order; only the active approver can record the next decision. Approval is unanimous among the author-selected sequence: every selected approver must approve the same SRCR revision and submitted content. Requirements contained in an SRCR are not reviewed or approved independently. Any selected approver rejection or request for changes prevents approval. Independence rules and the approval-authentication ceremony remain to be defined.
 
-## 3. SCR Lifecycle
+## 3. SRCR Lifecycle
 
-### Required SCR Content
+### Required SRCR Content
 
-Each SCR has a globally unique, never-reused number and controlled revisions. At minimum it records:
+Each SRCR has a globally unique, never-reused number and controlled revisions. At minimum it records:
 
 - title and summary;
 - problem, analysis, and proposed solution;
@@ -65,35 +65,35 @@ Approved -> Deferred
 Selected -> Deferred (with controlled reason)
 ```
 
-- Draft SCRs may be revised by authorized users and may miss an intended release without losing history.
-- The SCR author decides when the complete package is technically ready to submit. Submission validation checks that required Problem, Analysis, Solution, requirement-change, reviewer, link, and impact information is present; it does not replace the author’s engineering judgment.
-- Submission creates an immutable review-cycle snapshot of the current SCR revision.
+- Draft SRCRs may be revised by authorized users and may miss an intended release without losing history.
+- The SRCR author decides when the complete package is technically ready to submit. Submission validation checks that required Problem, Analysis, Solution, requirement-change, reviewer, link, and impact information is present; it does not replace the author’s engineering judgment.
+- Submission creates an immutable review-cycle snapshot of the current SRCR revision.
 - The approval sequence advances one person at a time. Completed and active stages are locked against ordinary name substitution.
-- Before a future approver’s turn is reached, the SCR author may replace that person without cancelling approvals already completed. The change, reason, actor, time, old approver, new approver, and resulting sequence are audited.
-- If an approver who already approved was the wrong person, the approval workflow is cancelled. All decisions from that cycle become historical and non-counting, the corrected sequence is established, and review restarts from the first approver against the same submitted snapshot unless the SCR content also changes.
-- If the SCR has never been approved and an approver requests changes, the SCR returns to Draft **without increasing its revision number**. The review cycle, comments, decisions, and submitted snapshot remain historical; the author edits the same business revision and resubmits it for a new review cycle.
-- If an already approved SCR requires any content change, the approved revision remains immutable and the SCR advances to its next revision. The author selects the ordered approval sequence for the new revision, and every selected approver must approve again.
+- Before a future approver’s turn is reached, the SRCR author may replace that person without cancelling approvals already completed. The change, reason, actor, time, old approver, new approver, and resulting sequence are audited.
+- If an approver who already approved was the wrong person, the approval workflow is cancelled. All decisions from that cycle become historical and non-counting, the corrected sequence is established, and review restarts from the first approver against the same submitted snapshot unless the SRCR content also changes.
+- If the SRCR has never been approved and an approver requests changes, the SRCR returns to Draft **without increasing its revision number**. The review cycle, comments, decisions, and submitted snapshot remain historical; the author edits the same business revision and resubmits it for a new review cycle.
+- If an already approved SRCR requires any content change, the approved revision remains immutable and the SRCR advances to its next revision. The author selects the ordered approval sequence for the new revision, and every selected approver must approve again.
 - Every review comment requiring action must be dispositioned before approval.
-- Approval requires every author-selected approver to approve the same submitted revision and review-cycle snapshot. Approval decisions from an earlier review cycle do not carry into a resubmission after requested changes, even when the SCR revision number remains unchanged.
-- Rejection preserves the SCR and review history. A materially revised proposal proceeds as a new SCR revision or a replacement SCR according to policy.
+- Approval requires every author-selected approver to approve the same submitted revision and review-cycle snapshot. Approval decisions from an earlier review cycle do not carry into a resubmission after requested changes, even when the SRCR revision number remains unchanged.
+- Rejection preserves the SRCR and review history. A materially revised proposal proceeds as a new SRCR revision or a replacement SRCR according to policy.
 - Approval makes the proposed changes eligible for baseline selection; it does not itself change the effective baseline.
-- When an approved SCR is linked to one or more PRs, the approved change is presented as an attributable
+- When an approved SRCR is linked to one or more PRs, the approved change is presented as an attributable
   corrective action on those PRs; ordinary requirement changes never create a PR automatically.
-- Deferral records who deferred the SCR, when, why, and any new target release.
+- Deferral records who deferred the SRCR, when, why, and any new target release.
 
 ## 4. Requirement Change Behavior
 
 ### Introduce
 
-An SCR introduction allocates a new globally unique requirement identity. The proposed initial revision contains requirement content and required attributes, including verification method and derived status. It is reviewed as part of the SCR package, authorized when that exact SCR revision is unanimously approved, and becomes effective only through baseline inclusion.
+An SRCR introduction allocates a new globally unique requirement identity. The proposed initial revision contains requirement content and required attributes, including verification method and derived status. It is reviewed as part of the SRCR package, authorized when that exact SRCR revision is unanimously approved, and becomes effective only through baseline inclusion.
 
 ### Modify
 
-A modification identifies the currently effective requirement revision and proposes a successor revision inside the SCR. The platform shows the difference and preserves both. SCR approval never overwrites the earlier revision.
+A modification identifies the currently effective requirement revision and proposes a successor revision inside the SRCR. The platform shows the difference and preserves both. SRCR approval never overwrites the earlier revision.
 
 ### Retire
 
-A retirement identifies the effective requirement and gives rationale inside the SCR. Once the approved SCR is selected into an approved baseline, the successor SYSRD omits the retired requirement from its effective body. Historical baselines and records retain its prior content and complete change story.
+A retirement identifies the effective requirement and gives rationale inside the SRCR. Once the approved SRCR is selected into an approved baseline, the successor SYSRD omits the retired requirement from its effective body. Historical baselines and records retain its prior content and complete change story.
 
 ### Images and Figures
 
@@ -102,17 +102,17 @@ A requirement revision may contain controlled images or figures. Their content, 
 ## 5. Candidate Baseline and SYSRD Lifecycle
 
 1. A configuration manager chooses a current approved baseline as the predecessor.
-2. The manager selects approved SCR revisions targeted to the release.
+2. The manager selects approved SRCR revisions targeted to the release.
 3. The platform deterministically applies their approved introductions, modifications, and retirements to construct candidate requirement contents.
 4. The platform blocks contradictory selected changes to the same requirement until they are ordered or resolved through an approved decision.
 5. Automated checks identify missing approvals, unresolved comments, suspect links, missing required attributes, identifier conflicts, and incomplete impact analysis.
-6. A candidate baseline records its predecessor, target release, exact SCR revisions, exact requirement revisions, exact trace-link revisions, check results, and assembler.
+6. A candidate baseline records its predecessor, target release, exact SRCR revisions, exact requirement revisions, exact trace-link revisions, check results, and assembler.
 7. A draft SYSRD may be generated at any time from the candidate. It must be visibly marked `DRAFT`, identify its candidate source, and never appear approved.
 8. Reviewers assess the candidate baseline and generated draft. Rework produces a revised candidate; rejected candidates remain historical.
 9. Approval freezes the exact baseline contents. It does not mutate the predecessor baseline.
 10. The approved SYSRD is generated from the approved baseline and records the document identifier and revision, source baseline, template revision, generator version, generation time, approval reference, and file hash.
 
-If an error is discovered after baseline approval, users create a controlled corrective SCR and successor baseline. Administrative editing of the released baseline is prohibited.
+If an error is discovered after baseline approval, users create a controlled corrective SRCR and successor baseline. Administrative editing of the released baseline is prohibited.
 
 ## 6. Test Procedure Lifecycle
 
@@ -167,7 +167,7 @@ passing execution with evidence for the exact procedure revision.
 
 At minimum, the first slice supports controlled links for:
 
-- SCR **INTRODUCES**, **MODIFIES**, or **RETIRES** requirement revision;
+- SRCR **INTRODUCES**, **MODIFIES**, or **RETIRES** requirement revision;
 - requirement revision **INCLUDED IN** baseline;
 - requirement revision **VERIFIED BY** test procedure revision;
 - test execution **EXECUTES** procedure revision;
@@ -191,29 +191,29 @@ These scenarios are acceptance tests for the documentation baseline.
 
 ### Scenario 1: Introduce a Requirement
 
-- **Actor/Input:** Change author drafts an SCR with problem, analysis, solution, target release, and a new requirement change item.
-- **State change:** The complete SCR revision, including the proposed requirement introduction, passes unanimous review and approval, then is selected into a candidate baseline.
+- **Actor/Input:** Change author drafts an SRCR with problem, analysis, solution, target release, and a new requirement change item.
+- **State change:** The complete SRCR revision, including the proposed requirement introduction, passes unanimous review and approval, then is selected into a candidate baseline.
 - **Output:** Successor approved baseline and SYSRD contain the new requirement.
-- **History:** SCR revisions, comments, dispositions, approvals, selection, baseline membership, document metadata, and audit events remain linked.
+- **History:** SRCR revisions, comments, dispositions, approvals, selection, baseline membership, document metadata, and audit events remain linked.
 
 ### Scenario 2: Modify an Approved Requirement
 
-- **Actor/Input:** Author proposes a successor revision through an SCR against the currently effective revision.
+- **Actor/Input:** Author proposes a successor revision through an SRCR against the currently effective revision.
 - **State change:** Approved successor is selected; affected verification links become suspect until reviewed.
 - **Output:** New baseline contains the successor revision; prior baseline still contains the old revision.
 - **History:** Difference, rationale, approvals, link reassessments, and both revisions remain retrievable.
 
 ### Scenario 3: Retire a Requirement
 
-- **Actor/Input:** SCR identifies the effective requirement and retirement rationale.
+- **Actor/Input:** SRCR identifies the effective requirement and retirement rationale.
 - **State change:** Approved retirement is selected into a successor baseline.
 - **Output:** Requirement is not effective in the successor SYSRD according to the chosen retirement presentation policy.
-- **History:** Identity, previous revisions, SCR, approvals, prior baselines, links, and audits remain intact.
+- **History:** Identity, previous revisions, SRCR, approvals, prior baselines, links, and audits remain intact.
 
-### Scenario 4: Defer an SCR
+### Scenario 4: Defer an SRCR
 
-- **Actor/Input:** Authorized user defers a draft, approved, or selected SCR from the intended release with rationale.
-- **State change:** SCR is removed from candidate selection and optionally assigned a later target release.
+- **Actor/Input:** Authorized user defers a draft, approved, or selected SRCR from the intended release with rationale.
+- **State change:** SRCR is removed from candidate selection and optionally assigned a later target release.
 - **Output:** Current candidate baseline is recalculated without its changes.
 - **History:** Original target, deferral decision, actor, time, rationale, and any later selection remain visible.
 
@@ -226,7 +226,7 @@ These scenarios are acceptance tests for the documentation baseline.
 
 ### Scenario 6: Reuse a Test Procedure
 
-- **Actor/Input:** Verification author links one approved procedure revision to multiple requirement revisions authorized through approved SCRs and included in the applicable baseline.
+- **Actor/Input:** Verification author links one approved procedure revision to multiple requirement revisions authorized through approved SRCRs and included in the applicable baseline.
 - **State change:** Each typed link is reviewed and controlled independently.
 - **Output:** Trace views show the procedure under every applicable requirement and all requirements under the procedure.
 - **History:** Link authorship, revision applicability, rationale, approvals, and later suspect transitions remain visible.
@@ -242,13 +242,13 @@ These scenarios are acceptance tests for the documentation baseline.
 
 - **Actor/Input:** User selects a released requirement revision.
 - **State change:** None; this is a read-only trace and audit query.
-- **Output:** The platform shows predecessor/current revisions, originating SCR, reviews, approvals, baseline and SYSRD, procedures, executions, evidence, failures/retests, PR references, and release applicability.
+- **Output:** The platform shows predecessor/current revisions, originating SRCR, reviews, approvals, baseline and SYSRD, procedures, executions, evidence, failures/retests, PR references, and release applicability.
 - **History:** Results are derived from exact controlled records, not reconstructed from an uncontrolled document.
 
 ## 10. Baseline Correction and Recovery
 
 - Released baselines and generated approved documents are never edited in place.
-- A substantive content error uses an SCR and successor baseline.
+- A substantive content error uses an SRCR and successor baseline.
 - A document-rendering defect with unchanged source data uses a new generated-document record and corrected template or generator revision; the defective output remains recorded and may be marked withdrawn.
 - A mistaken execution entry uses a controlled amendment only for clerical correction; a changed test outcome requires a new execution.
 - Recovery from backup must not create competing silent histories. Restored state and any reconciliation action are operationally logged and auditable.

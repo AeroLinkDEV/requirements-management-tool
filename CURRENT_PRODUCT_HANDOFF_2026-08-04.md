@@ -44,7 +44,7 @@ Every queue row now carries one control, `Open assessment`, in every state. What
 the drawer from the assessment's state; both conclusions appear in exactly one state, claimed and undecided.
 Wherever a conclusion exists the drawer states it with its author, its rationale and, once approved, its
 approver. Correcting a wrong conclusion is `Reopen assessment`: a stated reason, back to undecided, linked
-Draft SWCRs detached without altering the SWCRs, and an immutable `downstream_assessment_reopenings` row
+Draft change requests detached without altering the change requests themselves, and an immutable `downstream_assessment_reopenings` row
 holding everything the withdrawn conclusion carried. An unapproved conclusion is the assignee's to withdraw;
 an approved one takes Approver authority; one in review is *returned*, never withdrawn behind its approver.
 
@@ -58,7 +58,7 @@ retired. Each check-in writes `DetailsCheckedIn` into the report's own history.
 
 ### The source authority names its own record (#312, PR #317)
 
-The requirement inspector always read `Open SCR`, including on HLRs and LLRs whose authority is an SWCR. The
+The requirement inspector always read `Open SRCR`, including on HLRs and LLRs whose authority is a software change request. The
 label now follows the controlled identifier of the change request that authorised the revision, carried on the
 workspace projection. Deriving it from the requirement's level was rejected: the database still holds a System
 change request carrying an HLR change, and a label computed from the rule would confidently mislabel it.

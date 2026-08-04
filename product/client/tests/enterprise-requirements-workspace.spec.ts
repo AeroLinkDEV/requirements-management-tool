@@ -46,7 +46,7 @@ test("requirements stay read-only while controlled proposals and imports move in
   await expect(page.getByRole("heading", { name: "Create System Change Request" })).toBeVisible();
   await expect(page.getByText("Started from Requirements Explorer")).toBeVisible();
   await expect(page.locator('input[value*="SYSR-000150"]').first()).toBeVisible();
-  await page.getByRole("button", { name: "Import into Draft SCR" }).click();
+  await page.getByRole("button", { name: "Import into Draft SRCR" }).click();
   await page
     .getByLabel("Requirements import file")
     .setInputFiles({

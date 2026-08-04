@@ -8,7 +8,7 @@ public sealed class TestChangeReviewTests
     private static readonly DateTimeOffset Now = new(2026, 7, 29, 12, 0, 0, TimeSpan.Zero);
 
     private static TestChangeReview Create(TestChangeReviewDiscipline discipline = TestChangeReviewDiscipline.System) =>
-        new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), discipline, "SCR-00039.00", Now);
+        new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), discipline, "SRCR-00039.00", Now);
 
     [Fact]
     public void Approved_change_creates_an_open_discipline_specific_review()
@@ -17,7 +17,7 @@ public sealed class TestChangeReviewTests
 
         Assert.Equal(TestChangeReviewState.Open, review.State);
         Assert.Equal(TestChangeReviewDiscipline.HighLevelSoftware, review.Discipline);
-        Assert.Equal("SCR-00039.00", review.SourceChangeRequestNumber);
+        Assert.Equal("SRCR-00039.00", review.SourceChangeRequestNumber);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class TestChangeReviewTests
     {
         var review = Create(TestChangeReviewDiscipline.HighLevelSoftware);
 
-        Assert.Equal("SCR-00039.00", review.DisplayNumber);
+        Assert.Equal("SRCR-00039.00", review.DisplayNumber);
         Assert.Throws<DomainException>(() => review.AssignControlledNumber("LLRTCR-000001", Now.AddMinutes(1)));
         review.AssignControlledNumber("HLRTCR-000014", Now.AddMinutes(2));
         review.AssignControlledNumber("HLRTCR-999999", Now.AddMinutes(3));

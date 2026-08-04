@@ -43,7 +43,7 @@ variation is intentional.
 ## Client boundaries
 
 - The client never decides authority; the API derives the actor and enforces Program/build/role rules.
-- Requirements Explorer is read-only. Controlled changes begin in SCR/SWCR workflows.
+- Requirements Explorer is read-only. Controlled changes begin in change request workflows.
 - Build 1.5 is released/read-only; Build 1.6 is active development.
 - System, Software HLR, and Software LLR verification inventories are isolated.
 - The client has no external runtime dependency and must remain usable on restricted on-premises networks.

@@ -27,9 +27,9 @@ public sealed class ProblemReportLinkServiceTests
             var otherRelease = new SoftwareRelease(project.Id, "1.7", false);
             var report = new ProblemReport(project.Id, "PR-00001", "Position disagreement",
                 "Sources disagree during approach.", "", "quality.engineer", now);
-            var scr = new SystemChangeRequest("SWCR-00001", 0, project.Id, release.Id,
+            var scr = new SystemChangeRequest("LLRCR-00001", 0, project.Id, release.Id,
                 "Correct source selection", "P", "A", "S", "software.engineer", now,
-                ChangeRequestType.Software);
+                ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel);
             scr.AddRequirementChange("software.engineer", "LLR-000001", 1, RequirementLevel.LowLevel,
                 RequirementChangeKind.Modify, "The software shall reject a stale position source.",
                 "Correct the reported disagreement.", "Test", now);

@@ -65,7 +65,7 @@ record CreateSavedViewRequest(Guid ProjectId,string Name,string QueryJson,string
 record UpdateSavedViewRequest(string? Name,string? QueryJson,string? ColumnsJson,bool? IsShared);
 record BulkRequirementRequest(Guid ProjectId,List<Guid> ArtifactIds,string Tag,Guid? SpecificationId,Guid? SectionId);
 record BulkJobPayload(List<Guid> ArtifactIds,string Tag,Guid? SpecificationId,Guid? SectionId);
-record CommitImportRequest(Guid TargetReleaseId,string BaseNumber,string Title,string Problem,string Analysis,string Solution,ChangeRequestType Type=ChangeRequestType.Software);
+record CommitImportRequest(Guid TargetReleaseId,string BaseNumber,string Title,string Problem,string Analysis,string Solution,ChangeRequestType Type=ChangeRequestType.Software,RequirementLevel? SoftwareLevel=null);
 record ProposeRequirementChangeRequest(Guid TargetReleaseId,RequirementChangeKind Kind,string? Title,Guid? ExistingScrId);
 record CreateAssignmentRequest(string AssignedTo,string Title,string Description,DateTimeOffset? DueAt,Guid? CommentId);
 record CompleteAssignmentRequest(long ExpectedVersion);

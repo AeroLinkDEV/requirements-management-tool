@@ -157,6 +157,23 @@ const documentTypeLabels: Record<DocumentTypeName, string> = {
 export const documentTypeLabel = (type: string) =>
   documentTypeLabels[type as DocumentTypeName] ?? stateLabel(type)
 
+/**
+ * What a change request is called at a given requirement level.
+ *
+ * The prefix names the level of requirement the change request may carry, so a screen that knows its level
+ * should never spell the prefix out itself. `HLR` and `LLR` arrive from the workspace level switch;
+ * `HighLevel` and `LowLevel` arrive from the server's requirement level.
+ */
+export const changeRequestAcronym = (level?: string) => {
+  switch ((level ?? '').replace(/[-_\s]/g, '').toLowerCase()) {
+    case 'hlr':
+    case 'highlevel': return 'HLRCR'
+    case 'llr':
+    case 'lowlevel': return 'LLRCR'
+    default: return 'SRCR'
+  }
+}
+
 /** The controlled prefix printed at the start of a numbered artifact. */
 export const artifactAcronym = (identifier?: string, kind?: string) => {
   const prefix = identifier?.trim().toUpperCase().match(/^([A-Z]+(?:-[A-Z]+)*)-/)?.[1]
@@ -177,7 +194,8 @@ export const artifactAcronym = (identifier?: string, kind?: string) => {
 export const artifactTypeLabel = (kind: string, identifier?: string) => {
   const acronym = artifactAcronym(identifier, kind)
   const labels: Record<string, string> = {
-    SCR: 'System Change Request (SCR)', SWCR: 'Software Change Request (SWCR)',
+    SRCR: 'System Requirement Change Request (SRCR)',
+    HLRCR: 'HLR Change Request (HLRCR)', LLRCR: 'LLR Change Request (LLRCR)',
     SYSR: 'System Requirement (SYSR)', HLR: 'High-Level Software Requirement (HLR)',
     LLR: 'Low-Level Software Requirement (LLR)',
     SYSTCR: 'System Test Change Request (SYSTCR)', HLRTCR: 'HLR Test Change Request (HLRTCR)',

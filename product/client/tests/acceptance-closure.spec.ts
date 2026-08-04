@@ -21,34 +21,34 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(released.isReleased).toBeTruthy()
  expect(active.isReleased).toBeFalsy()
 
- const systemDraftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Introduce authenticated system acceptance requirement',problem:'Acceptance authority must be explicit',analysis:'A controlled System requirement is needed',solution:'Introduce the requirement through an SCR',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:sysSection,statement:'The FMS shall retain authenticated acceptance authority.',rationale:'Supports controlled acceptance.',verificationMethod:'Inspection'}]}})
+ const systemDraftResponse=await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Introduce authenticated system acceptance requirement',problem:'Acceptance authority must be explicit',analysis:'A controlled System requirement is needed',solution:'Introduce the requirement through an SRCR',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:sysSection,statement:'The FMS shall retain authenticated acceptance authority.',rationale:'Supports controlled acceptance.',verificationMethod:'Inspection'}]}})
  expect(systemDraftResponse.status(),await systemDraftResponse.text()).toBe(201)
  const systemDraft=await systemDraftResponse.json()
- expect(systemDraft.baseNumber).toMatch(/^SCR-\d{5}$/)
+ expect(systemDraft.baseNumber).toMatch(/^SRCR-\d{5}$/)
  expect(systemDraft.authorId).toBe('admin')
  expect(systemDraft.requirementChanges[0].displayNumber).toMatch(/^SYSR-\d{6}\.00$/)
  const partialLookup=await request.get(`${apiBase}/api/authoring/requirements?projectId=${project.id}&scope=System&search=0150&limit=8`)
  expect(partialLookup.ok(),await partialLookup.text()).toBeTruthy()
  const existingSystem=(await partialLookup.json())[0]
  expect(existingSystem.baseNumber).toContain('0150')
- const modifiedSystem=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Modify a requirement found by identifier suffix',problem:'The selected behavior needs clarification',analysis:'Suffix lookup resolved the authoritative requirement',solution:'Propose the next exact revision',requirementChanges:[{baseNumber:existingSystem.baseNumber,level:'System',kind:'Modify',statement:existingSystem.statement+' The behavior shall remain deterministic.',rationale:'Clarifies deterministic behavior.',verificationMethod:existingSystem.verificationMethod}]}})
+ const modifiedSystem=await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Modify a requirement found by identifier suffix',problem:'The selected behavior needs clarification',analysis:'Suffix lookup resolved the authoritative requirement',solution:'Propose the next exact revision',requirementChanges:[{baseNumber:existingSystem.baseNumber,level:'System',kind:'Modify',statement:existingSystem.statement+' The behavior shall remain deterministic.',rationale:'Clarifies deterministic behavior.',verificationMethod:existingSystem.verificationMethod}]}})
  expect(modifiedSystem.status(),await modifiedSystem.text()).toBe(201)
  expect((await modifiedSystem.json()).requirementChanges[0].displayNumber).toBe(`${existingSystem.baseNumber}.${String(existingSystem.nextRevision).padStart(2,'0')}`)
  const systemCandidates=await (await request.get(`${apiBase}/api/authoring/requirements?projectId=${project.id}&scope=System&search=SYSR-&limit=3`)).json()
- const publicationDraft=await (await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Publication category acceptance',problem:'All change categories need an explicit publication',analysis:'Introduced, old/new modified, and retired records must remain reviewable',solution:'Render each category in the exact SCR',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:sysSection,statement:'The FMS shall publish every controlled change category.',rationale:'Publication completeness.',verificationMethod:'Inspection'},{baseNumber:systemCandidates[0].baseNumber,level:'System',kind:'Modify',statement:systemCandidates[0].statement+' The published wording shall show this proposed revision.',rationale:'Old and new comparison.',verificationMethod:systemCandidates[0].verificationMethod},{baseNumber:systemCandidates[1].baseNumber,level:'System',kind:'Retire',statement:'',rationale:'The obsolete behavior is retired while history remains.',verificationMethod:systemCandidates[1].verificationMethod}]}})).json()
- const publicationPdf=await request.get(`${apiBase}/api/scrs/${publicationDraft.id}/download?format=pdf`)
+ const publicationDraft=await (await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Publication category acceptance',problem:'All change categories need an explicit publication',analysis:'Introduced, old/new modified, and retired records must remain reviewable',solution:'Render each category in the exact SRCR',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:sysSection,statement:'The FMS shall publish every controlled change category.',rationale:'Publication completeness.',verificationMethod:'Inspection'},{baseNumber:systemCandidates[0].baseNumber,level:'System',kind:'Modify',statement:systemCandidates[0].statement+' The published wording shall show this proposed revision.',rationale:'Old and new comparison.',verificationMethod:systemCandidates[0].verificationMethod},{baseNumber:systemCandidates[1].baseNumber,level:'System',kind:'Retire',statement:'',rationale:'The obsolete behavior is retired while history remains.',verificationMethod:systemCandidates[1].verificationMethod}]}})).json()
+ const publicationPdf=await request.get(`${apiBase}/api/change-requests/${publicationDraft.id}/download?format=pdf`)
  expect(publicationPdf.ok(),await publicationPdf.text()).toBeTruthy()
  const publicationText=(await publicationPdf.body()).toString('latin1')
  expect(publicationText).toContain('NEW REQUIREMENTS')
  expect(publicationText).toContain('MODIFIED REQUIREMENTS - OLD AND NEW')
  expect(publicationText).toContain('RETIRED REQUIREMENTS')
- const mixedSoftware=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Allocate HLR and LLR changes together',problem:'Both software levels require coordinated change',analysis:'The allocation crosses high and low level software requirements',solution:'Review both exact proposals in one SWCR',requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall coordinate acceptance state.',rationale:'High-level architecture-derived coordination.',verificationMethod:'Test',isDerived:true},{level:'LowLevel',kind:'Introduce',targetSectionId:llrSection,statement:'The acceptance component shall persist the coordinated state.',rationale:'Low-level architecture-derived implementation.',verificationMethod:'Test',isDerived:true}]}})
+ const mixedSoftware=await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Allocate HLR and LLR changes together',problem:'Both software levels require coordinated change',analysis:'The allocation crosses high and low level software requirements',solution:'Review both exact proposals in one HLRCR',requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall coordinate acceptance state.',rationale:'High-level architecture-derived coordination.',verificationMethod:'Test',isDerived:true},{level:'LowLevel',kind:'Introduce',targetSectionId:llrSection,statement:'The acceptance component shall persist the coordinated state.',rationale:'Low-level architecture-derived implementation.',verificationMethod:'Test',isDerived:true}]}})
  expect(mixedSoftware.status()).toBe(400)
  expect(await mixedSoftware.text()).toContain('cannot mix both levels')
 
- const reviewDraftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Sequential activation acceptance',problem:'Ordered authority must be proven',analysis:'Only the current reviewer may act',solution:'Exercise two controlled stages',requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall activate one sequential reviewer at a time.',rationale:'Architecture-derived control prevents out-of-order approval.',verificationMethod:'Test',impactDispositionJson:completeImpacts,isDerived:true}]}})
+ const reviewDraftResponse=await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Sequential activation acceptance',problem:'Ordered authority must be proven',analysis:'Only the current reviewer may act',solution:'Exercise two controlled stages',requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall activate one sequential reviewer at a time.',rationale:'Architecture-derived control prevents out-of-order approval.',verificationMethod:'Test',impactDispositionJson:completeImpacts,isDerived:true}]}})
  const reviewDraft=await reviewDraftResponse.json()
- const sequentialResponse=await request.post(`${apiBase}/api/scrs/${reviewDraft.id}/submit`,{data:{expectedVersion:reviewDraft.version,mode:'Sequential',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
+ const sequentialResponse=await request.post(`${apiBase}/api/change-requests/${reviewDraft.id}/submit`,{data:{expectedVersion:reviewDraft.version,mode:'Sequential',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
  expect(sequentialResponse.ok(),await sequentialResponse.text()).toBeTruthy()
  const sequential=await sequentialResponse.json()
  expect(sequential.reviewCycles.at(-1).steps.map((x:any)=>x.state)).toEqual(['Active','Pending'])
@@ -58,20 +58,20 @@ test('acceptance closure proves governed revisioning, direct review work, public
  const r2QueueBefore=await (await r2.get(`${apiBase}/api/enterprise-requirements/work-queue?projectId=${project.id}`)).json()
  expect(r1Queue.notifications.some((x:any)=>x.artifactId===reviewDraft.id)).toBeTruthy()
  expect(r2QueueBefore.notifications.some((x:any)=>x.artifactId===reviewDraft.id)).toBeFalsy()
- const stageOne=await r1.post(`${apiBase}/api/scrs/${reviewDraft.id}/approve`,{data:{password:'AeroLink!2026',meaning:'Approve stage one.',expectedVersion:sequential.version}})
+ const stageOne=await r1.post(`${apiBase}/api/change-requests/${reviewDraft.id}/approve`,{data:{password:'AeroLink!2026',meaning:'Approve stage one.',expectedVersion:sequential.version}})
  expect(stageOne.ok(),await stageOne.text()).toBeTruthy()
  const afterStageOne=await stageOne.json()
  expect(afterStageOne.reviewCycles.at(-1).steps.map((x:any)=>x.state)).toEqual(['Approved','Active'])
  const r2QueueAfter=await (await r2.get(`${apiBase}/api/enterprise-requirements/work-queue?projectId=${project.id}`)).json()
  expect(r2QueueAfter.notifications.some((x:any)=>x.artifactId===reviewDraft.id)).toBeTruthy()
- const returned=await r2.post(`${apiBase}/api/scrs/${reviewDraft.id}/request-changes`,{data:{reason:'Clarify the activation timing.',expectedVersion:afterStageOne.version}})
+ const returned=await r2.post(`${apiBase}/api/change-requests/${reviewDraft.id}/request-changes`,{data:{reason:'Clarify the activation timing.',expectedVersion:afterStageOne.version}})
  expect(returned.ok(),await returned.text()).toBeTruthy()
  const returnedDraft=await returned.json()
  expect(returnedDraft.state).toBe('Draft')
  expect(returnedDraft.revision).toBe(reviewDraft.revision)
 
- const parallelDraft=await (await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Parallel unanimity acceptance',problem:'Independent reviews must run concurrently',analysis:'Both signatures remain mandatory',solution:'Activate all parallel reviewers',requirementChanges:[{level:'LowLevel',kind:'Introduce',targetSectionId:llrSection,statement:'The component shall require unanimous parallel review.',rationale:'Architecture-derived independent assurance.',verificationMethod:'Inspection',impactDispositionJson:completeImpacts,isDerived:true}]}})).json()
- const parallelResponse=await request.post(`${apiBase}/api/scrs/${parallelDraft.id}/submit`,{data:{expectedVersion:parallelDraft.version,mode:'Parallel',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
+ const parallelDraft=await (await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Parallel unanimity acceptance',problem:'Independent reviews must run concurrently',analysis:'Both signatures remain mandatory',solution:'Activate all parallel reviewers',requirementChanges:[{level:'LowLevel',kind:'Introduce',targetSectionId:llrSection,statement:'The component shall require unanimous parallel review.',rationale:'Architecture-derived independent assurance.',verificationMethod:'Inspection',impactDispositionJson:completeImpacts,isDerived:true}]}})).json()
+ const parallelResponse=await request.post(`${apiBase}/api/change-requests/${parallelDraft.id}/submit`,{data:{expectedVersion:parallelDraft.version,mode:'Parallel',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
  expect(parallelResponse.ok(),await parallelResponse.text()).toBeTruthy()
  expect((await parallelResponse.json()).reviewCycles.at(-1).steps.map((x:any)=>x.state)).toEqual(['Active','Active'])
  const [parallelQueue1,parallelQueue2]=await Promise.all([r1.get(`${apiBase}/api/enterprise-requirements/work-queue?projectId=${project.id}`).then(x=>x.json()),r2.get(`${apiBase}/api/enterprise-requirements/work-queue?projectId=${project.id}`).then(x=>x.json())])
@@ -79,7 +79,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(parallelQueue2.notifications.some((x:any)=>x.artifactId===parallelDraft.id)).toBeTruthy()
  await r1.dispose();await r2.dispose()
 
- const invalidDerived=await request.post(`${apiBase}/api/scr-drafts`,{data:{
+ const invalidDerived=await request.post(`${apiBase}/api/change-request-drafts`,{data:{
   projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Invalid derived proposal',problem:'Rationale omitted',analysis:'Derived classification needs justification',solution:'Reject incomplete proposal',
   requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall reject incomplete derived proposals.',rationale:'',verificationMethod:'Test',isDerived:true}]
  }})
@@ -87,21 +87,21 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(await invalidDerived.text()).toContain('explicit engineering rationale')
 
  const suffix=Date.now().toString().slice(-6)
- const draftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{
+ const draftResponse=await request.post(`${apiBase}/api/change-request-drafts`,{data:{
   projectId:project.id,targetReleaseId:active.id,type:'Software',title:`Derived guidance continuity ${suffix}`,problem:'Guidance continuity needs an internal safety monitor',analysis:'The behavior is derived from software architecture rather than a direct system allocation',solution:'Introduce a derived HLR with explicit rationale',
   requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall monitor derived guidance continuity.',rationale:'Architecture safety analysis requires an independent continuity monitor.',verificationMethod:'Test',isDerived:true,impactDispositionJson:completeImpacts}]
  }})
  expect(draftResponse.status(),await draftResponse.text()).toBe(201)
  const draft=await draftResponse.json()
- expect(draft.baseNumber).toMatch(/^SWCR-\d{5}$/)
+ expect(draft.baseNumber).toMatch(/^HLRCR-\d{5}$/)
  expect(draft.authorId).toBe('admin')
  expect(draft.requirementChanges[0].displayNumber).toMatch(/^HLR-\d{6}\.00$/)
 
- const submitted=await request.post(`${apiBase}/api/scrs/${draft.id}/submit`,{data:{expectedVersion:draft.version,mode:'Sequential',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'}]}})
+ const submitted=await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`,{data:{expectedVersion:draft.version,mode:'Sequential',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'}]}})
  expect(submitted.ok(),await submitted.text()).toBeTruthy()
  const inReview=await submitted.json()
  expect(inReview.state).toBe('InReview')
- const crPdf=await request.get(`${apiBase}/api/scrs/${draft.id}/download?format=pdf`)
+ const crPdf=await request.get(`${apiBase}/api/change-requests/${draft.id}/download?format=pdf`)
  expect(crPdf.ok(),await crPdf.text()).toBeTruthy()
  expect((await crPdf.body()).subarray(0,4).toString()).toBe('%PDF')
 
@@ -113,13 +113,13 @@ test('acceptance closure proves governed revisioning, direct review work, public
  const queue=await queueResponse.json()
  const notification=queue.notifications.find((x:any)=>x.artifactId===draft.id)
  expect(notification).toMatchObject({route:`swcr:${draft.id}`,type:'ReviewActivated'})
- const approvedResponse=await reviewer.post(`${apiBase}/api/scrs/${draft.id}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved as the exact reviewed software change snapshot.',expectedVersion:inReview.version}})
+ const approvedResponse=await reviewer.post(`${apiBase}/api/change-requests/${draft.id}/approve`,{data:{password:'AeroLink!2026',meaning:'Approved as the exact reviewed software change snapshot.',expectedVersion:inReview.version}})
  expect(approvedResponse.ok(),await approvedResponse.text()).toBeTruthy()
  expect((await approvedResponse.json()).state).toBe('Approved')
  await reviewer.dispose()
 
- const current=await (await request.get(`${apiBase}/api/scrs/${draft.id}`)).json()
- const nextResponse=await request.post(`${apiBase}/api/scrs/${draft.id}/next-revision`,{data:{actorId:'admin',expectedVersion:current.version}})
+ const current=await (await request.get(`${apiBase}/api/change-requests/${draft.id}`)).json()
+ const nextResponse=await request.post(`${apiBase}/api/change-requests/${draft.id}/next-revision`,{data:{actorId:'admin',expectedVersion:current.version}})
  expect(nextResponse.status(),await nextResponse.text()).toBe(201)
  const next=await nextResponse.json()
  expect(next.baseNumber).toBe(draft.baseNumber)
@@ -162,7 +162,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
  }
 
  const searchKinds=new Set<string>()
- for(const query of ['SCR','SWCR','SYSR','SW-01','SYSRD','1.5','FMS-1.5.0','SYSTP-000001','evidence/fms-1.5']){
+ for(const query of ['SRCR','HLRCR','SYSR','SW-01','SYSRD','1.5','FMS-1.5.0','SYSTP-000001','evidence/fms-1.5']){
   const response=await request.get(`${apiBase}/api/search?projectId=${project.id}&query=${encodeURIComponent(query)}&limit=50`)
   expect(response.ok(),await response.text()).toBeTruthy()
   for(const item of (await response.json()).items)searchKinds.add(item.kind)

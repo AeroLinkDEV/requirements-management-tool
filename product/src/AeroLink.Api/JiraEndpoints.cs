@@ -72,7 +72,7 @@ public static class JiraEndpoints
             return Results.Ok(new { result.Reachable, result.Detail });
         });
 
-        app.MapPost("/api/scrs/{id:guid}/jira", async (Guid id, HttpContext http, IScrRepository repository,
+        app.MapPost("/api/change-requests/{id:guid}/jira", async (Guid id, HttpContext http, IScrRepository repository,
             AeroLinkDbContext db, JiraConnectorService connector, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct);
@@ -90,7 +90,7 @@ public static class JiraEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapGet("/api/scrs/{id:guid}/jira", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/change-requests/{id:guid}/jira", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var projectId = await db.SystemChangeRequests.Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
             if (projectId is null) return Results.NotFound();

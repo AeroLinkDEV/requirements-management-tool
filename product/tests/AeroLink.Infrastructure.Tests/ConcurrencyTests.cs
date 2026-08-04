@@ -21,8 +21,8 @@ public sealed class ConcurrencyTests
                 var program = new ProgramRecord("Concurrency Program", "CON");
                 var project = new ProjectRecord(program.Id, "Software", "Concurrent Software");
                 var release = new SoftwareRelease(project.Id, "1.0", false);
-                var scr = new SystemChangeRequest("SWCR-00001", 0, project.Id, release.Id, "Concurrent change",
-                    "Problem", "Analysis", "Solution", "author", DateTimeOffset.UtcNow, ChangeRequestType.Software);
+                var scr = new SystemChangeRequest("HLRCR-00001", 0, project.Id, release.Id, "Concurrent change",
+                    "Problem", "Analysis", "Solution", "author", DateTimeOffset.UtcNow, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
                 setup.AddRange(program, project, release, scr);
                 await setup.SaveChangesAsync();
                 scrId = scr.Id;

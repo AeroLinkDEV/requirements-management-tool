@@ -12,7 +12,7 @@ test('software change control keeps HLR and LLR context through links, refresh, 
   await expect(page.getByRole('button',{name:'+ New LLR Change Request'})).toHaveCount(0)
   await expect(page.locator('.historyContext')).toContainText('HLR area')
 
-  const llrHistory=page.waitForResponse(response=>response.url().includes('/api/history/scrs?')&&response.url().includes('level=LowLevel'))
+  const llrHistory=page.waitForResponse(response=>response.url().includes('/api/history/change-requests?')&&response.url().includes('level=LowLevel'))
   const llrAssessments=page.waitForResponse(response=>response.url().includes('/api/downstream-assessments?')&&response.url().includes('targetLevel=LowLevel'))
   await page.getByRole('button',{name:/^LLR Low-level requirements$/}).click()
   await Promise.all([llrHistory,llrAssessments])

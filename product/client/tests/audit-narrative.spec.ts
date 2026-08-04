@@ -16,7 +16,7 @@ test("a checked-in change reads as a narrative and keeps its technical evidence 
   await apiLogin(request);
   const showcase = await showcaseSeed(request);
 
-  const created = await request.post(`${apiBase}/api/scr-drafts`, {
+  const created = await request.post(`${apiBase}/api/change-request-drafts`, {
     data: {
       baseNumber: "CLIENT-IGNORED", projectId: showcase.projectId, targetReleaseId: showcase.activeReleaseId,
       title: `Audit narrative probe ${Date.now()}`, problem: "Problem", analysis: "Analysis", solution: "Solution",
@@ -31,7 +31,7 @@ test("a checked-in change reads as a narrative and keeps its technical evidence 
   const scr = await created.json();
 
   const checkout = await request.post(`${apiBase}/api/controlled-editing/checkout`,
-    { data: { artifactType: "SCR", artifactId: scr.id, leaseMinutes: 15 } });
+    { data: { artifactType: "ChangeRequest", artifactId: scr.id, leaseMinutes: 15 } });
   expect(checkout.ok(), await checkout.text()).toBe(true);
   const lock = await checkout.json();
 

@@ -70,8 +70,8 @@ public sealed class ClosedReleaseAuthoringTests
     };
 
     [Theory]
-    [InlineData("/api/scr-drafts")]
-    [InlineData("/api/scrs")]
+    [InlineData("/api/change-request-drafts")]
+    [InlineData("/api/change-requests")]
     public async Task A_released_build_refuses_a_new_change_request(string endpoint)
     {
         using var factory = new AeroLinkApiFactory();
@@ -91,8 +91,8 @@ public sealed class ClosedReleaseAuthoringTests
 
     /// <summary>The same request against the in-work build, to prove the guard refuses the build and not the payload.</summary>
     [Theory]
-    [InlineData("/api/scr-drafts")]
-    [InlineData("/api/scrs")]
+    [InlineData("/api/change-request-drafts")]
+    [InlineData("/api/change-requests")]
     public async Task The_in_work_build_accepts_the_same_change_request(string endpoint)
     {
         using var factory = new AeroLinkApiFactory();

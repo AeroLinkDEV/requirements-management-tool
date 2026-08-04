@@ -40,7 +40,7 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
 - PR-00001.00 through PR-00010.00 are visible in the Build 1.6 Problem Report queue. The final qualification
   population deliberately spans Draft, Ready for SCCB, Open, Implementing, and Verifying rather than forcing
   every report to closure.
-- SWCR-00127.00 through SWCR-00134.00 are independently approved, level-scoped software changes linked to
+- HLRCR-00127.00 through HLRCR-00134.00 are independently approved, level-scoped software changes linked to
   their originating Problem Reports. They modify controlled HLR or LLR revisions and retain their current
   upstream allocations.
 - The current verification population contains at least five HLR assessments, five LLR assessments, and five
@@ -51,7 +51,7 @@ delivery record. [PROJECT_STATE.md](PROJECT_STATE.md) is the canonical product d
   remains blocked rather than implying Build 1.6 is complete.
 - The legacy HLR verification package has a controlled HLRTCR identity and is Superseded; the correct
   HLRTCR-000002.00 remains current.
-- Existing approved and in-work SCRs, SWCRs, assessments, procedures, results, evidence, documents, and code
+- Existing approved and in-work SRCRs, software change requests, assessments, procedures, results, evidence, documents, and code
   mappings were retained. Build 1.5 remains historical and read-only.
 
 ## Qualification checkpoint

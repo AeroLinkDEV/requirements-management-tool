@@ -19,7 +19,7 @@ The story is representative and fictional. It must not contain customer, proprie
 - **Current released software baseline:** FMS Software Version 3.2
 - **Target release:** FMS Software Version 3.3
 - **Primary showcase users:** System Engineer and Manager
-- **Change package:** Two SCRs selected for the Version 3.3 candidate baseline
+- **Change package:** Two SRCRs selected for the Version 3.3 candidate baseline
 
 The showcase hierarchy is:
 
@@ -33,20 +33,20 @@ Program Atlas
 
 ## Release Story
 
-FMS Software Version 3.3 is created by applying two approved SCRs to the Version 3.2 baseline.
+FMS Software Version 3.3 is created by applying two approved SRCRs to the Version 3.2 baseline.
 
-### SCR-0001049: Introduce Round Robin Function
+### SRCR-0001049: Introduce Round Robin Function
 
 **Purpose:** Add a new “Round Robin” FMS function.
 
-The showcase will demonstrate that this SCR:
+The showcase will demonstrate that this SRCR:
 
 - contains the problem/opportunity, analysis, and proposed solution;
 - introduces several new controlled requirements;
 - affects existing interface or navigation behavior where appropriate;
 - creates or revises verification procedures;
-- has its ordered approval sequence selected by the SCR author;
-- becomes approved only when every selected approver approves the same submitted SCR snapshot in sequence;
+- has its ordered approval sequence selected by the SRCR author;
+- becomes approved only when every selected approver approves the same submitted SRCR snapshot in sequence;
 - is explicitly selected for the Version 3.3 candidate baseline; and
 - contributes its exact approved artifact revisions to the released Version 3.3 baseline.
 
@@ -60,7 +60,7 @@ Proposed fictional system requirements and their allocated software HLRs:
 | `SYSR-00002378.01` | `HLR-00003147.01` | Display current Round Robin state and selected waypoint to the crew | Functional test |
 | `SYSR-00002379.01` | `HLR-00003148.01`, `HLR-00003149.01` | Preserve or restore defined sequence state across applicable mode transitions | Functional and recovery test |
 
-The showcase demonstrates both levels: the system requirement expresses the externally meaningful FMS behavior, while linked HLRs allocate and refine that behavior for the software implementation. Both sets of proposed revisions are contained in and reviewed through the SCR; neither requirement type has an independent approval workflow.
+The showcase demonstrates both levels: the system requirement expresses the externally meaningful FMS behavior, while linked HLRs allocate and refine that behavior for the software implementation. Both sets of proposed revisions are contained in and reviewed through the SRCR; neither requirement type has an independent approval workflow.
 
 Proposed fictional verification artifacts:
 
@@ -69,13 +69,13 @@ Proposed fictional verification artifacts:
 - `TP-00004503` — Mode transition and state recovery test
 - `TP-00004504` — Display and crew-feedback test
 
-During SCR review, a revision to `SYSR-00002376.01` and its allocated `HLR-00003144.01` makes one verification link suspect. The System Engineer resolves the impact by updating and reapproving the affected test procedure before baseline readiness becomes complete.
+During SRCR review, a revision to `SYSR-00002376.01` and its allocated `HLR-00003144.01` makes one verification link suspect. The System Engineer resolves the impact by updating and reapproving the affected test procedure before baseline readiness becomes complete.
 
-### SCR-0001050: Resolve Four FMS Problem Reports
+### SRCR-0001050: Resolve Four FMS Problem Reports
 
 **Purpose:** Incorporate four approved bug fixes into Version 3.3.
 
-The showcase assumes the user’s reference to a “second PR” meant a **second SCR linked to four PRs**. This assumption remains visible until confirmed.
+The showcase assumes the user’s reference to a “second PR” meant a **second SRCR linked to four PRs**. This assumption remains visible until confirmed.
 
 The fictional linked PRs are:
 
@@ -94,8 +94,8 @@ The fictional linked PRs are:
 
 At the beginning of the showcase, the Version 3.3 dashboard shows:
 
-- two SCRs targeted to the release;
-- one SCR approved and one still in review;
+- two SRCRs targeted to the release;
+- one SRCR approved and one still in review;
 - incomplete baseline readiness;
 - one suspect link;
 - one verification-coverage gap;
@@ -108,7 +108,7 @@ As the presenter resolves the simulated story, the dashboard updates to show tha
 
 The System Engineer dashboard prioritizes:
 
-- assigned SCR reviews and the requirement changes contained within them;
+- assigned SRCR reviews and the requirement changes contained within them;
 - the Round Robin requirement revision requiring review;
 - the suspect link and affected procedure;
 - the uncovered requirement associated with `PR-00002844`;
@@ -118,16 +118,16 @@ The System Engineer dashboard prioritizes:
 ## Showcase Walkthrough
 
 1. Open the manager dashboard scoped to FMS Version 3.3.
-2. Explain the two-SCR release package and visible blocking items.
-3. Open `SCR-0001049.01`, compare the contained system-requirement and HLR revisions, and inspect the author-selected approval order and review-cycle history of the complete SCR package.
+2. Explain the two-SRCR release package and visible blocking items.
+3. Open `SRCR-0001049.01`, compare the contained system-requirement and HLR revisions, and inspect the author-selected approval order and review-cycle history of the complete SRCR package.
 4. Show the affected procedures and suspect link caused by the revision.
 5. Switch to the System Engineer dashboard and open the assigned impact-review action.
 6. Resolve the simulated link/procedure review and show the dashboard status update.
-7. Open `SCR-0001050` and its four linked PRs.
+7. Open `SRCR-0001050` and its four linked PRs.
 8. Drill into `PR-00002844`, the uncovered requirement, and the new test procedure.
 9. Show the Blocked execution, corrected procedure revision, new execution, evidence, and human-approved Pass result.
 10. Inspect the Version 3.3 candidate baseline and exact included revisions.
-11. Navigate the complete trace from SCR and PR through requirement, test, execution, result, and release.
+11. Navigate the complete trace from SRCR and PR through requirement, test, execution, result, and release.
 12. Return to the manager dashboard and show the release as ready for its unanimous baseline/document approval workflow.
 
 ## Showcase Success Criteria

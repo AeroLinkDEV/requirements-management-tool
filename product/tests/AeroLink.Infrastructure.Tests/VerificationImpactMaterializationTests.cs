@@ -38,7 +38,7 @@ public sealed class VerificationImpactMaterializationTests
         RequirementChangeKind kind, string statement, Guid projectId, Guid releaseId, DateTimeOffset now,
         string verificationMethod = "Test")
     {
-        var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software);
+        var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
         scr.AddRequirementChange("author", requirementNumber, revision, RequirementLevel.HighLevel, kind,
             statement, "Rationale", verificationMethod, now);
         scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
@@ -67,7 +67,7 @@ public sealed class VerificationImpactMaterializationTests
         {
             var now = DateTimeOffset.UtcNow;
             await using var db = new AeroLinkDbContext(seed.Options);
-            var scr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var scr = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
             var baseline = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, scr, now);
             db.AddRange(scr, baseline);
@@ -95,7 +95,7 @@ public sealed class VerificationImpactMaterializationTests
         {
             var now = DateTimeOffset.UtcNow;
             await using var db = new AeroLinkDbContext(seed.Options);
-            var scr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var scr = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
             var baseline = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, scr, now);
             var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", now);
@@ -137,7 +137,7 @@ public sealed class VerificationImpactMaterializationTests
             var now = DateTimeOffset.UtcNow;
             await using var db = new AeroLinkDbContext(seed.Options);
 
-            var introduce = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var introduce = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
             var first = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, introduce, now);
             db.AddRange(introduce, first);
@@ -155,7 +155,7 @@ public sealed class VerificationImpactMaterializationTests
             await db.SaveChangesAsync();
 
             // The requirement is then modified underneath it.
-            var modify = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
+            var modify = ApprovedScr("HLRCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
                 "The FMS shall sequence oceanic waypoints within two seconds.", seed.ProjectId, seed.ReleaseId, now);
             var second = FrozenBaseline("SW-00.20", seed.ProjectId, seed.ReleaseId, first.Id, modify, now);
             db.AddRange(modify, second);
@@ -191,7 +191,7 @@ public sealed class VerificationImpactMaterializationTests
             var now = DateTimeOffset.UtcNow;
             await using var db = new AeroLinkDbContext(seed.Options);
 
-            var introduce = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var introduce = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
             var first = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, introduce, now);
             db.AddRange(introduce, first);
@@ -207,7 +207,7 @@ public sealed class VerificationImpactMaterializationTests
             db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
             await db.SaveChangesAsync();
 
-            var modify = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
+            var modify = ApprovedScr("HLRCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
                 "The FMS shall sequence oceanic waypoints within two seconds.", seed.ProjectId, seed.ReleaseId, now);
             var second = FrozenBaseline("SW-00.20", seed.ProjectId, seed.ReleaseId, first.Id, modify, now);
             db.AddRange(modify, second);
@@ -244,7 +244,7 @@ public sealed class VerificationImpactMaterializationTests
             var now = DateTimeOffset.UtcNow;
             await using var db = new AeroLinkDbContext(seed.Options);
 
-            var introduce = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var introduce = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
             var first = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, introduce, now);
             db.AddRange(introduce, first);
@@ -260,7 +260,7 @@ public sealed class VerificationImpactMaterializationTests
             db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
             await db.SaveChangesAsync();
 
-            var modify = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
+            var modify = ApprovedScr("HLRCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify,
                 "The FMS shall sequence oceanic waypoints within two seconds.", seed.ProjectId, seed.ReleaseId, now);
             var second = FrozenBaseline("SW-00.20", seed.ProjectId, seed.ReleaseId, first.Id, modify, now);
             db.AddRange(modify, second);
@@ -299,7 +299,7 @@ public sealed class VerificationImpactMaterializationTests
             var now = DateTimeOffset.UtcNow;
             await using var db = new AeroLinkDbContext(seed.Options);
 
-            var introduce = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+            var introduce = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
             var first = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, introduce, now);
             db.AddRange(introduce, first);
@@ -315,7 +315,7 @@ public sealed class VerificationImpactMaterializationTests
             db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
             await db.SaveChangesAsync();
 
-            var retire = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Retire,
+            var retire = ApprovedScr("HLRCR-00002", "SWR-00002375", 1, RequirementChangeKind.Retire,
                 "", seed.ProjectId, seed.ReleaseId, now);
             var second = FrozenBaseline("SW-00.20", seed.ProjectId, seed.ReleaseId, first.Id, retire, now);
             db.AddRange(retire, second);
@@ -346,8 +346,8 @@ public sealed class VerificationImpactMaterializationTests
             await using var db = new AeroLinkDbContext(seed.Options);
 
             // Two requirements, one procedure covering both.
-            var introduce = new SystemChangeRequest("SWCR-00001", 0, seed.ProjectId, seed.ReleaseId,
-                "Introduce", "P", "A", "S", "author", now, ChangeRequestType.Software);
+            var introduce = new SystemChangeRequest("HLRCR-00001", 0, seed.ProjectId, seed.ReleaseId,
+                "Introduce", "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
             introduce.AddRequirementChange("author", "SWR-00002375", 0, RequirementLevel.HighLevel,
                 RequirementChangeKind.Introduce, "The FMS shall sequence oceanic waypoints.", "R", "Test", now);
             introduce.AddRequirementChange("author", "SWR-00002376", 0, RequirementLevel.HighLevel,
@@ -369,7 +369,7 @@ public sealed class VerificationImpactMaterializationTests
             await db.SaveChangesAsync();
 
             // Retire only one of them.
-            var retire = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Retire,
+            var retire = ApprovedScr("HLRCR-00002", "SWR-00002375", 1, RequirementChangeKind.Retire,
                 "", seed.ProjectId, seed.ReleaseId, now);
             var second = FrozenBaseline("SW-00.20", seed.ProjectId, seed.ReleaseId, first.Id, retire, now);
             db.AddRange(retire, second);

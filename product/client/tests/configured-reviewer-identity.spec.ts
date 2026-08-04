@@ -15,7 +15,7 @@ test('configured reviewer identity remains canonical from assignment through sig
   const showcase = await showcaseSeed(request)
 
   await apiLogin(request, 'systems.author')
-  const draftResponse = await request.post(`${apiBase}/api/scr-drafts`, { data: {
+  const draftResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: showcase.projectId,
     targetReleaseId: showcase.activeReleaseId,
     type: 'System',
@@ -35,7 +35,7 @@ test('configured reviewer identity remains canonical from assignment through sig
   } })
   expect(draftResponse.ok(), await draftResponse.text()).toBeTruthy()
   const draft = await draftResponse.json()
-  const submitResponse = await request.post(`${apiBase}/api/scrs/${draft.id}/submit`, { data: {
+  const submitResponse = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
     expectedVersion: draft.version,
     mode: 'Sequential',
     approvers: [{ userId: 'systems.reviewer', name: 'Caller supplied name is ignored' }],
@@ -67,7 +67,7 @@ test('configured reviewer identity remains canonical from assignment through sig
   await login(page, 'systems.reviewer')
   await page.getByRole('link', { name: 'My Work' }).click()
   const assigned = page.locator('.workQueue article').filter({ hasText: draft.displayNumber })
-  await expect(assigned).toContainText('SCR approval')
+  await expect(assigned).toContainText('Change request approval')
   await assigned.click()
   await expect(page).toHaveURL(new RegExp(`/systems/change-requests/${draft.id}$`))
 

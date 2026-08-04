@@ -23,10 +23,10 @@ public sealed class BuildScopedWorkspaceApiTests
         var project = new ProjectRecord(program.Id, "FMS Product Development", "Flight Management System");
         var released = new SoftwareRelease(project.Id, "1.5", true);
         var inWork = new SoftwareRelease(project.Id, "1.6", false, released.Id);
-        var releasedScr = new SystemChangeRequest("SCR-15001", 0, project.Id, released.Id,
+        var releasedScr = new SystemChangeRequest("SRCR-15001", 0, project.Id, released.Id,
             "BUILD-ONE-FIVE-ONLY stability evidence", "P", "A", "S", "build.user", now,
             ChangeRequestType.System);
-        var inWorkScr = new SystemChangeRequest("SCR-16001", 0, project.Id, inWork.Id,
+        var inWorkScr = new SystemChangeRequest("SRCR-16001", 0, project.Id, inWork.Id,
             "BUILD-ONE-SIX-ONLY development work", "P", "A", "S", "build.user", now,
             ChangeRequestType.System);
         var user = new UserAccount("build.user", "Build User", "build.user@example.test",
@@ -60,13 +60,13 @@ public sealed class BuildScopedWorkspaceApiTests
         Assert.DoesNotContain("BUILD-ONE-SIX-ONLY", releasedBody);
 
         using var conflictingQuery = await client.GetAsync(
-            $"/api/scrs?projectId={seeded.ProjectId}&releaseId={seeded.InWorkId}");
+            $"/api/change-requests?projectId={seeded.ProjectId}&releaseId={seeded.InWorkId}");
         Assert.Equal(HttpStatusCode.Conflict, conflictingQuery.StatusCode);
         Assert.Contains("build_context_mismatch", await conflictingQuery.Content.ReadAsStringAsync());
 
         client.DefaultRequestHeaders.Remove("X-AeroLink-Build-Context");
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", seeded.InWorkId.ToString());
-        using var crossBuildRecord = await client.GetAsync($"/api/scrs/{seeded.ReleasedScrId}");
+        using var crossBuildRecord = await client.GetAsync($"/api/change-requests/{seeded.ReleasedScrId}");
         Assert.Equal(HttpStatusCode.Conflict, crossBuildRecord.StatusCode);
         Assert.Contains("cross_build_resource", await crossBuildRecord.Content.ReadAsStringAsync());
     }
@@ -80,13 +80,13 @@ public sealed class BuildScopedWorkspaceApiTests
         await SignInAsync(client);
 
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", seeded.ReleasedId.ToString());
-        using var released = await client.PostAsJsonAsync("/api/scr-drafts", new { });
+        using var released = await client.PostAsJsonAsync("/api/change-request-drafts", new { });
         Assert.Equal(HttpStatusCode.Conflict, released.StatusCode);
         Assert.Contains("released_build_read_only", await released.Content.ReadAsStringAsync());
 
         client.DefaultRequestHeaders.Remove("X-AeroLink-Build-Context");
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", seeded.InWorkId.ToString());
-        using var inWork = await client.PostAsJsonAsync("/api/scr-drafts", new { });
+        using var inWork = await client.PostAsJsonAsync("/api/change-request-drafts", new { });
         Assert.NotEqual(HttpStatusCode.Conflict, inWork.StatusCode);
     }
 
@@ -100,7 +100,7 @@ public sealed class BuildScopedWorkspaceApiTests
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            db.SystemChangeRequests.Add(new SystemChangeRequest("SCR-16002", 0, seeded.ProjectId,
+            db.SystemChangeRequests.Add(new SystemChangeRequest("SRCR-16002", 0, seeded.ProjectId,
                 seeded.InWorkId, "Earlier due Draft", "P", "A", "S", "build.user",
                 DateTimeOffset.UtcNow.AddDays(-30), ChangeRequestType.System));
             await db.SaveChangesAsync();

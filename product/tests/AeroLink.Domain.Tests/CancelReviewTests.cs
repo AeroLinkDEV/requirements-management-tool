@@ -15,7 +15,7 @@ public sealed class CancelReviewTests
     private static SystemChangeRequest InReview()
     {
         var now = DateTimeOffset.UtcNow;
-        var scr = new SystemChangeRequest("SCR-00001", 0, Guid.NewGuid(), Guid.NewGuid(), "Governed change",
+        var scr = new SystemChangeRequest("SRCR-00001", 0, Guid.NewGuid(), Guid.NewGuid(), "Governed change",
             "Problem", "Analysis", "Solution", "change.author", now);
         scr.AddRequirementChange("change.author", "SYSR-00000001", 0, RequirementLevel.System,
             RequirementChangeKind.Introduce, "The FMS shall hold its course.", "Rationale.", "Test", now,
@@ -87,7 +87,7 @@ public sealed class CancelReviewTests
     public void Only_a_change_request_in_review_has_a_review_to_cancel()
     {
         var now = DateTimeOffset.UtcNow;
-        var draft = new SystemChangeRequest("SCR-00002", 0, Guid.NewGuid(), Guid.NewGuid(), "Draft change",
+        var draft = new SystemChangeRequest("SRCR-00002", 0, Guid.NewGuid(), Guid.NewGuid(), "Draft change",
             "Problem", "Analysis", "Solution", "change.author", now);
 
         Assert.Throws<DomainException>(() => draft.CancelReview("change.author", "No longer needed.", now));

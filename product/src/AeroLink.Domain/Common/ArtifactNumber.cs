@@ -10,15 +10,32 @@ public static partial class ArtifactNumber
     // repository passes 99,999 change requests it hands out a six-digit number; requiring exactly five made
     // every create past that point fail validation permanently. Wider numbers are accepted only without
     // leading zeros, which keeps retired eight-digit identifiers like SCR-00000001 rejected.
-    [GeneratedRegex("^(?:SCR|SWCR)-(?:[0-9]{5}|[1-9][0-9]{5,})$")]
+    [GeneratedRegex("^(?:SRCR|HLRCR|LLRCR)-(?:[0-9]{5}|[1-9][0-9]{5,})$")]
     private static partial Regex ChangeRequestPattern();
+
+    /// <summary>
+    /// The change-request prefixes, which name the level of requirement a change request may carry.
+    ///
+    /// A System change request is an SRCR. A software one is an HLRCR or an LLRCR — never a single software
+    /// prefix — because HLR and LLR change control are worked, reviewed and approved separately, and a
+    /// reader who sees the identifier should already know which of the two they are looking at.
+    /// </summary>
+    private static readonly string[] ChangeRequestPrefixes = ["SRCR-", "HLRCR-", "LLRCR-"];
+
+    /// <summary>
+    /// Prefixes this product used to issue and no longer recognises. They are rejected outright rather than
+    /// merely unused: the generic pattern would otherwise accept them as some other kind of artifact, and
+    /// an identifier that reads like a retired change request is worse than one that is refused.
+    /// </summary>
+    private static readonly string[] RetiredPrefixes = ["SCR-", "SWCR-"];
 
     public static string ValidateBase(string value)
     {
         var normalized = value.Trim().ToUpperInvariant();
+        if (RetiredPrefixes.Any(prefix => normalized.StartsWith(prefix, StringComparison.Ordinal)))
+            throw new DomainException("SCR and SWCR are retired. System change requests are SRCR; software change requests are HLRCR or LLRCR.");
         if (!BasePattern().IsMatch(normalized)
-            || ((normalized.StartsWith("SCR-", StringComparison.Ordinal)
-                    || normalized.StartsWith("SWCR-", StringComparison.Ordinal))
+            || (ChangeRequestPrefixes.Any(prefix => normalized.StartsWith(prefix, StringComparison.Ordinal))
                 && !ChangeRequestPattern().IsMatch(normalized)))
         {
             throw new DomainException("Artifact identifiers must use PREFIX-00001 format, or SW-01.60 for a software build.");

@@ -33,7 +33,7 @@ public sealed class VerificationImpactReadinessGateTests
         var baseline = new CandidateBaseline("BL-00000001", 0, project.Id, release.Id, null, "Gate baseline", "cm", Now);
         var campaign = new ReleaseCampaign(project.Id, release.Id, baseline.Id, "1.6", "program.manager", Now);
         // Impact items carry a real foreign key to the change request that raised them.
-        var scr = new SystemChangeRequest("SCR-00010", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", "author", Now);
+        var scr = new SystemChangeRequest("SRCR-00010", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", "author", Now);
         scr.AddRequirementChange("author", "SYSR-00000101", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
             "The FMS shall sequence oceanic waypoints.", "New capability", "Test", Now);
         setup.AddRange(program, project, release, baseline, campaign, scr);
@@ -54,7 +54,7 @@ public sealed class VerificationImpactReadinessGateTests
         string subject, string method)
     {
         var review = new TestChangeReview(seed.ProjectId, seed.ReleaseId, seed.ScrId,
-            TestChangeReviewDiscipline.System, "SCR-10.00", Now);
+            TestChangeReviewDiscipline.System, "SRCR-10.00", Now);
         var item = VerificationImpactItem.ForIntroducedRequirement(
             seed.ProjectId, seed.ReleaseId, seed.ScrId, review.Id, Guid.NewGuid(), subject, method, Now);
         db.AddRange(review, item);

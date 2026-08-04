@@ -47,14 +47,14 @@ This concept develops the implemented Precision Workbench into a calm,
 authoritative Requirements Explorer: a resizable specification outline, a
 spacious read-only document surface, and contextual trace, verification,
 history, discussion, and active-change awareness. All content mutations move
-to the dedicated Changes workspace and remain governed by Draft SCR/SWCR
+to the dedicated Changes workspace and remain governed by Draft change request
 authority.
 
 Key proposal decisions:
 
 - keep structure, authoritative content, and selected-requirement context visible together;
 - make trace, verification, history, and active changes understandable without editing;
-- hand “Propose controlled change” into a dedicated pre-populated SCR/SWCR route;
+- hand “Propose controlled change” into a dedicated pre-populated change request route;
 - keep the Explorer visibly read-only and remove bulk/import mutation entry points; and
 - provide no AI-facing controls, scores, suggestions, or branding.
 

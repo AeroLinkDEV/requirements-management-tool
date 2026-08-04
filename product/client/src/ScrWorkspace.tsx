@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { changeRequestAllocation, changeRequestState, stateLabel } from './presentation'
+import { artifactAcronym, changeRequestAllocation, changeRequestState, stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
@@ -77,7 +77,10 @@ const auditEventTitle = (eventType: string, buildVersion: string) => {
   if (eventType === "SelectedForBaseline") return buildVersion ? `Allocated to Build ${buildVersion}` : "Allocated to a build";
   return eventType
     .replace(/([A-Z])/g, " $1").trim().split(/\s+/)
-    .map((word) => (word === "Scr" ? "SCR" : word === "Swcr" ? "SWCR" : word))
+    // "Scr" is the internal name of the aggregate, not a statement about this record's prefix. Rendering it
+    // as SRCR would have labelled an HLRCR's own history "SRCR approved", which is exactly backwards: the
+    // identifier at the top of the page already says which kind of change request this is.
+    .map((word) => (word === "Scr" || word === "Swcr" ? "Change request" : word))
     .map((word, index) => (index === 0 || word === word.toUpperCase() ? word : word.toLowerCase()))
     .join(" ");
 };
@@ -121,6 +124,7 @@ type ScrDetail = {
   projectId: string;
   targetReleaseId: string;
   type: "System" | "Software";
+  softwareLevel?: "HighLevel" | "LowLevel";
   title: string;
   problem: string;
   analysis: string;
@@ -431,14 +435,14 @@ export default function ScrWorkspace({
   );
 
   const loadStatus = useCallback(async () => {
-    const response = await fetch(`${api}/api/controlled-editing/status?artifactType=SCR&artifactId=${scrId}`);
+    const response = await fetch(`${api}/api/controlled-editing/status?artifactType=ChangeRequest&artifactId=${scrId}`);
     if (response.ok) setLockStatus((await response.json()) as LockStatus);
   }, [api, scrId]);
 
   const load = useCallback(async () => {
     setLoadFailure("");
     try {
-      const response = await fetch(`${api}/api/scrs/${scrId}`);
+      const response = await fetch(`${api}/api/change-requests/${scrId}`);
       if (!response.ok) {
         setLoadFailure(response.status === 404
           ? "No originating change request is available for this requirement."
@@ -487,7 +491,7 @@ export default function ScrWorkspace({
   useEffect(() => {
     if (!scr) return;
     let cancelled = false;
-    fetch(`${api}/api/authoring/context?projectId=${scr.projectId}&type=${scr.type}`)
+    fetch(`${api}/api/authoring/context?projectId=${scr.projectId}&type=${scr.type}${scr.type === "System" ? "" : `&softwareLevel=${scr.softwareLevel ?? "HighLevel"}`}`)
       .then(async (response) => {
         if (!response.ok) throw new Error("Authoring context unavailable.");
         return response.json() as Promise<AuthoringContext>;
@@ -542,7 +546,7 @@ export default function ScrWorkspace({
         fetch(`${api}/api/controlled-editing/checkout`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ artifactType: "SCR", artifactId: scrId, leaseMinutes: 15 }),
+          body: JSON.stringify({ artifactType: "ChangeRequest", artifactId: scrId, leaseMinutes: 15 }),
         }),
       "This Draft could not be checked out.",
     );
@@ -711,7 +715,7 @@ export default function ScrWorkspace({
 
   const call = async (path: string, body: unknown) => {
     const outcome = await withBusy(async () => {
-      const response = await fetch(`${api}/api/scrs/${scrId}/${path}`, {
+      const response = await fetch(`${api}/api/change-requests/${scrId}/${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -742,7 +746,7 @@ export default function ScrWorkspace({
     if (reason === null) return;
     if (!reason.trim()) { setError("A deferral reason is required."); return; }
     await withBusy(async () => {
-      const response = await fetch(`${api}/api/scrs/${scr.id}/defer`, {
+      const response = await fetch(`${api}/api/change-requests/${scr.id}/defer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason }),
@@ -772,7 +776,7 @@ export default function ScrWorkspace({
     if (reason === null) return;
     if (!reason.trim()) { setError("Say why this review is being cancelled."); return; }
     await withBusy(async () => {
-      const response = await fetch(`${api}/api/scrs/${scr.id}/cancel-review`, {
+      const response = await fetch(`${api}/api/change-requests/${scr.id}/cancel-review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason, expectedVersion: scr.version }),
@@ -790,7 +794,7 @@ export default function ScrWorkspace({
   const reinstate = async () => {
     if (!scr) return;
     await withBusy(async () => {
-      const response = await fetch(`${api}/api/scrs/${scr.id}/reinstate`, { method: "POST" });
+      const response = await fetch(`${api}/api/change-requests/${scr.id}/reinstate`, { method: "POST" });
       if (!response.ok) {
         setError(((await response.json()) as { error?: string }).error || "The change request could not be reinstated.");
         return;
@@ -804,7 +808,7 @@ export default function ScrWorkspace({
   const revise = async () => {
     if (!scr) return;
     const next = await withBusy(async () => {
-      const response = await fetch(`${api}/api/scrs/${scr.id}/next-revision`, {
+      const response = await fetch(`${api}/api/change-requests/${scr.id}/next-revision`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expectedVersion: scr.version }),
@@ -1008,8 +1012,8 @@ export default function ScrWorkspace({
               on every change request the buttons covered them. Nothing about them needs to float. */}
           <div className="scrPublicationTools">
             <span>Professional controlled publication</span>
-            <a href={`${api}/api/scrs/${scr.id}/download?format=docx`}>Download DOCX</a>
-            <a href={`${api}/api/scrs/${scr.id}/download?format=pdf`}>Download PDF</a>
+            <a href={`${api}/api/change-requests/${scr.id}/download?format=docx`}>Download DOCX</a>
+            <a href={`${api}/api/change-requests/${scr.id}/download?format=pdf`}>Download PDF</a>
           </div>
         </div>
       </header>
@@ -1061,7 +1065,7 @@ export default function ScrWorkspace({
             </div>
             <ProblemReportPicker api={api} projectId={scr.projectId} releaseId={scr.targetReleaseId}
               selected={problemReportIds} onChange={setProblemReportIds}
-              legend={`PRs driving this ${scr.type === "Software" ? "SWCR" : "SCR"} (optional)`} />
+              legend={`PRs driving this ${artifactAcronym(scr.displayNumber, "changeRequest")} (optional)`} />
           </section>
 
           <section className="workspaceCard authoringCard" id="checked-requirements">
@@ -1199,7 +1203,7 @@ export default function ScrWorkspace({
                     on the page and its label says which of the two applies. A Draft is checked out and
                     edited in place. An approved revision is immutable and cannot be — it is superseded, and
                     the action that does that is Revise. It was previously buried in the rail below a
-                    definition list and labelled "Create SCR-31.01 Draft", which describes the
+                    definition list and labelled "Create SRCR-31.01 Draft", which describes the
                     mechanism rather than the intent, and nobody found it. */}
                 {scr.state === "Draft" && isAuthor && (
                   <button className="outline" type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>
@@ -1375,7 +1379,7 @@ export default function ScrWorkspace({
       {signing && (
         <SignatureDialog
           title={`Approve ${scr.displayNumber}`}
-          meaning="I approve this exact SCR revision and its proposed requirement changes as suitable for controlled progression."
+          meaning="I approve this exact change request revision and its proposed requirement changes as suitable for controlled progression."
           onCancel={() => setSigning(false)}
           onSign={async (password, meaning) => {
             const ok = await call("approve", { password, meaning, expectedVersion: scr.version });
