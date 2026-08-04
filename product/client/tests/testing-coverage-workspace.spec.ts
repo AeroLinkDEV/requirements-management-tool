@@ -59,10 +59,21 @@ test('a package opens onto its decisions, and each one is an explicit judgement'
   const displayNumber = (await claimable.locator('b').first().textContent())!.trim()
   await claimable.getByRole('button', { name: 'Take it on' }).click()
   const first = page.locator('.coverageRow').filter({ hasText: displayNumber }).first()
-  await first.getByRole('button', { name: 'Decisions' }).click()
+  // Claiming a package opens what was claimed. There is no "Decisions" button any more: the package row is
+  // the disclosure, so the record expands rather than a control beside it toggling a panel.
+  await expect(first.getByRole('button', { name: 'Decisions' })).toHaveCount(0)
+  await expect(first.locator('.packageDisclosure')).toHaveAttribute('aria-expanded', 'true')
   await expect(first.getByText('Source change requests', { exact: true })).toBeVisible()
   await expect(first.getByText('Responsibility', { exact: true })).toBeVisible()
   await expect(first.getByText('Linked Problem Reports', { exact: true })).toBeVisible()
+  // And what already tests each requirement, which is the question the decision is an answer to.
+  await expect(first.locator('.decisionList .existingCoverage').first()).toBeVisible({ timeout: 30_000 })
+
+  // Pressing the row again collapses it, so the disclosure is a disclosure and not a one-way door.
+  await first.locator('.packageDisclosure').click()
+  await expect(first.locator('.decisionList')).toHaveCount(0)
+  await first.locator('.packageDisclosure').click()
+  await expect(first.locator('.packageDisclosure')).toHaveAttribute('aria-expanded', 'true')
 
   const undecided = first.locator('.decisionList li').filter({ has: page.getByRole('button', { name: 'Decide' }) })
   await expect(undecided.first()).toBeVisible({ timeout: 30_000 })
@@ -360,8 +371,8 @@ test('a decision can ask for a procedure that does not exist, and author it from
   await claimable.getByRole('button', { name: 'Take it on' }).click()
 
   const packageRow = page.locator('.coverageRow').filter({ hasText: packageNumber }).first()
-  await expect(packageRow.getByRole('button', { name: 'Decisions' })).toBeVisible({ timeout: 30_000 })
-  await packageRow.getByRole('button', { name: 'Decisions' }).click()
+  // Claiming the package opens it; the decisions are what was claimed.
+  await expect(packageRow.locator('.decisionList')).toBeVisible({ timeout: 30_000 })
   const undecided = packageRow.locator('.decisionList li').filter({ has: page.getByRole('button', { name: 'Decide' }) }).first()
   await expect(undecided).toBeVisible({ timeout: 30_000 })
   await undecided.getByRole('button', { name: 'Decide' }).click()
@@ -381,4 +392,53 @@ test('a decision can ask for a procedure that does not exist, and author it from
   // so the decision stands and the page says why the authoring cannot start yet, rather than the action
   // being silently absent. Where an exact revision exists, this is the 'Author the procedure' button.
   await expect(decided).toContainText('once this build materializes its requirements')
+})
+
+/**
+ * A test change request opens as a workbench, not as a numbered row with a panel behind a button.
+ *
+ * The record already had source change requests, requirement changes and one decision per requirement, and
+ * none of it was visible: everything sat behind a control labelled "Decisions" styled as a peer of the real
+ * actions, which is why the product owner read a TCR as "just a numbered artifact". Worse, the coverage each
+ * requirement already had — the question the decision is an answer to — was not shown at all, so an engineer
+ * deciding whether a procedure must be written had to leave the page to find out.
+ */
+test('a test change request opens onto its source changes, its requirements and the coverage they already have', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
+
+  const row = page.locator('.coverageRow').filter({ hasText: /SYSTCR-/ }).first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+
+  // The row is the record's summary and the record's disclosure. There is no button called "Decisions",
+  // and nothing that looks like an action opens a panel.
+  await expect(page.getByRole('button', { name: 'Decisions' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Hide decisions' })).toHaveCount(0)
+  const disclosure = row.locator('.packageDisclosure')
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+  await disclosure.click()
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+
+  // What an engineer needs in order to decide, on open: where the work came from, who holds it, and every
+  // requirement it created with the coverage that requirement already has.
+  await expect(row.getByText('Source change requests', { exact: true })).toBeVisible()
+  await expect(row.getByText('Responsibility', { exact: true })).toBeVisible()
+  await expect(row.locator('.testPackageContext')).toContainText(/SCR-\d{5}/)
+
+  const decisions = row.locator('.decisionList li')
+  await expect(decisions.first()).toBeVisible({ timeout: 30_000 })
+  const count = await decisions.count()
+  expect(count).toBeGreaterThan(0)
+  // Every requirement-driven decision states its coverage. None is left for the reader to go and look up.
+  for (let index = 0; index < count; index++) {
+    const decision = decisions.nth(index)
+    await expect(decision.locator('.existingCoverage')).toHaveCount(1)
+    // One of the three honest answers — covered, suspect, none, or not yet materializable — never silence.
+    await expect(decision.locator('.existingCoverage')).toContainText(
+      /Covered by|written against earlier wording|No approved procedure covers this requirement yet|once this build materializes its requirements/)
+  }
 })

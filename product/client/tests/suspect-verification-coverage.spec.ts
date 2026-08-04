@@ -126,10 +126,13 @@ test('modified requirement coverage stays suspect until an exact approved proced
 
   // The decision itself is made inside the package that raised it, which is where the work is queued.
   const decisionRow = page.locator('.decisionList li').filter({ hasText: subject })
+  // The package row is itself the disclosure — there is no separate "Decisions" control — so opening each
+  // collapsed package in turn is how the decision for this requirement is found.
   const openPackage = async () => {
     if (await decisionRow.count() > 0 && await decisionRow.first().isVisible()) return
-    for (const button of await page.locator('.coverageRow').getByRole('button', { name: /decision/i }).all()) {
-      await button.click()
+    for (const disclosure of await page.locator('.coverageRow .packageDisclosure').all()) {
+      if (await disclosure.getAttribute('aria-expanded') === 'true') continue
+      await disclosure.click()
       if (await decisionRow.count() > 0 && await decisionRow.first().isVisible()) return
     }
   }
