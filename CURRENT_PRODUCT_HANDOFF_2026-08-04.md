@@ -29,8 +29,14 @@ does not settle `coverage`, so the release keeps waiting until the requested pro
 that procedure auto-settles the item. Where a build has not materialised its requirements there is no exact
 revision to bind a procedure to, and the page says so rather than hiding the action.
 
-Not delivered, and worth its own issue: the TCR workbench half — raising the requested procedure as work
-inside the test change request rather than authoring it from the decision.
+The issue's sixth acceptance criterion — that a TCR shows its source change requests, requirement changes and
+existing coverage on open — was **not** delivered by PR #321, and the issue was closed anyway. It was
+reopened and finished under PR #325. The package row is now the disclosure rather than a `Decisions` button
+styled as a peer of the real actions, and every requirement-driven decision states the coverage its
+requirement already has: covered with the procedures named, suspect with the procedure that must be
+reconfirmed or replaced named, none, or not yet knowable because the build has not materialised its
+requirements. Suspect is deliberately read before "no procedure", because a reader who sees "covered" stops
+looking and that is the case most likely to be answered wrongly.
 
 ### The downstream assessment drawer follows the assessment's state (#313, PR #322, DEC-090)
 
@@ -63,6 +69,12 @@ change request carrying an HLR change, and a label computed from the rule would 
   open, and `main` still had the bug the issue described. Squash merges make this invisible to
   `git log main..branch`, which shows commits ahead for merged and unmerged branches alike. Verify with
   `gh pr list --state all` and `gh issue list --state open` before claiming anything is done.
+- **A closed issue is not a met issue. Read the acceptance criteria back, one by one, before closing.** #316
+  was closed with its sixth criterion unmet, and the gap was written up in PR #321 as "not in this change"
+  — which reframed an acceptance criterion as optional scope. Nothing in the tests caught it, because the
+  tests covered what was built rather than what was asked for. A pull request that closes an issue should
+  state each criterion and where it is satisfied; anything that cannot be pointed at is not delivered, and
+  the issue stays open.
 - **A conflicting pull request runs no checks at all, and that looks exactly like a slow queue.** PR #323 sat
   for an hour reporting "no checks reported" because `main` had moved underneath it. Waiting produces
   nothing; `gh pr view <n> --json mergeable` is the check that actually answers the question. Rebase, push,
@@ -87,7 +99,7 @@ change request carrying an HLR change, and a label computed from the rule would 
 ## Where things stand
 
 - `main` carries every issue listed above. Issues #312, #313, #314 and #316 are closed through pull requests
-  #317, #321, #322 and #323. There are no open issues and no open pull requests.
+  #317, #321, #322, #323 and #325. There are no open issues and no open pull requests.
 - Backend suite on `main` at the end of this session: **589 passed, 0 failed** — 221 domain, 177
   infrastructure, 191 API. Browser journeys, production-build journeys and the PostgreSQL migration gate all
   passed on the final merge.
