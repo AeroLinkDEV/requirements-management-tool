@@ -26,6 +26,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<RequirementChange> RequirementChanges => Set<RequirementChange>();
     public DbSet<DownstreamChangeAssessment> DownstreamChangeAssessments => Set<DownstreamChangeAssessment>();
     public DbSet<DownstreamAssessmentChangeRequestLink> DownstreamAssessmentChangeRequestLinks => Set<DownstreamAssessmentChangeRequestLink>();
+    public DbSet<DownstreamAssessmentReopening> DownstreamAssessmentReopenings => Set<DownstreamAssessmentReopening>();
     public DbSet<ReviewCycle> ReviewCycles => Set<ReviewCycle>();
     public DbSet<ApprovalStep> ApprovalSteps => Set<ApprovalStep>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
@@ -257,6 +258,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.AssignedEngineerId).HasMaxLength(100);
             b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.DecidedBy).HasMaxLength(100);
             b.Property(x => x.SubmittedBy).HasMaxLength(100);
             b.Property(x => x.SelectedApproverId).HasMaxLength(100);
             b.Property(x => x.ApprovedBy).HasMaxLength(100);
@@ -279,6 +281,21 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // Not unique on ChangeRequestId: one SWCR may deliberately answer several upstream assessments.
             b.HasIndex(x => x.ChangeRequestId);
             b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<DownstreamAssessmentReopening>(b =>
+        {
+            b.ToTable("downstream_assessment_reopenings"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.Property(x => x.PreviousState).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.PreviousOutcome).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.PreviousRationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.PreviousDecidedBy).HasMaxLength(100);
+            b.Property(x => x.PreviousApprovedBy).HasMaxLength(100);
+            b.Property(x => x.DetachedChangeRequestNumbers).HasMaxLength(2000).IsRequired();
+            b.Property(x => x.Reason).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.ActorId).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => x.AssessmentId);
+            b.HasOne<DownstreamChangeAssessment>().WithMany().HasForeignKey(x => x.AssessmentId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<ReviewCycle>(b =>
         {

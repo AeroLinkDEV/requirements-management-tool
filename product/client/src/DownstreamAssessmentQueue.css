@@ -17,3 +17,15 @@
 .downstreamDrawer{display:flex;flex-direction:column}
 .downstreamDecisionWorkbench{order:1}
 .drawerChanges li.linkedDraft{border-left:3px solid #3178c6;background:#f2f7ff}
+
+/* One entry control in every state: an action, not a status. */
+.openAssessment{width:max-content}
+.recordedConclusion{margin-bottom:.75rem;padding:.85rem;border:1px solid #cbd7e6;border-left:3px solid #1f7a4c;border-radius:8px;background:#f4faf6}
+.recordedConclusion[data-outcome="ChangeRequired"]{border-left-color:#b06f16;background:#fffaf2}
+.recordedConclusion[data-outcome="ChangeRequestsLinked"]{border-left-color:#3178c6;background:#f2f7ff}
+.recordedConclusion b{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#52647a}
+.recordedConclusion p{margin:.3rem 0 0;color:#17314f;font-weight:600}
+.recordedConclusion .conclusionAuthor{display:block;margin-top:.35rem;color:#52647a;font-size:.85rem}
+.recordedConclusion .conclusionRationale{margin-top:.5rem;font-weight:400;color:#3d4d61;white-space:pre-wrap}
+.reopenAssessment{margin-top:.35rem;color:#8a3d12;border-color:#e0b48f}
+.withdrawnConclusions .drawerChanges li{border-left:3px solid #a2a9b4;background:#fafbfc}
