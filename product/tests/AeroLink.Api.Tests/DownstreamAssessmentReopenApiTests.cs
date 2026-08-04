@@ -226,6 +226,9 @@ public sealed class DownstreamAssessmentReopenApiTests
         using var refused = await engineer.PostAsJsonAsync(
             $"/api/downstream-assessments/{fixture.AssessmentId}/reopen", new { reason = "Reassessing." });
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
-        Assert.False((await RowAsync(engineer, fixture)).GetProperty("capabilities").GetProperty("canReopen").GetBoolean());
+        var row = await RowAsync(engineer, fixture);
+        Assert.False(row.GetProperty("capabilities").GetProperty("canReopen").GetBoolean());
+        // Said outright, so the drawer explains the closed build rather than blaming the reader's authority.
+        Assert.True(row.GetProperty("buildReleased").GetBoolean());
     }
 }

@@ -1,6 +1,6 @@
 # Project State — Start Here
 
-**Last updated: 2026-08-03.**
+**Last updated: 2026-08-04.**
 
 This is the orientation record for anyone — human or model — picking up AeroLink. It answers *what
 exists, what is true today, what is deliberately not being built, and where to start*. Every other
@@ -155,6 +155,15 @@ superseded, always labelled HLR or LLR. A deep-linked assessment drawer shows th
 change case, changed requirements, and the current downward trace. An engineer may record no impact, link a
 level-compatible Draft SWCR, or create the correct HLR/LLR Draft directly; the new Draft is linked automatically,
 and a failed link remains visible and retryable without losing the saved Draft.
+
+Each queue row carries one control, "Open assessment", whatever state the assessment is in; the drawer offers
+only the actions that state permits. Both conclusions appear in exactly one state — claimed and undecided.
+Wherever a conclusion exists it is stated with its author, its rationale and, once approved, its approver.
+Correcting a wrong conclusion is its own act: **Reopen assessment** takes a stated reason, returns the
+assessment to undecided, detaches any linked Draft SWCR without changing the SWCRs, and keeps the withdrawn
+conclusion — outcome, author, rationale, approver and detached numbers — in the drawer's withdrawn-conclusions
+record. An unapproved conclusion is the assigned engineer's to withdraw; an approved one takes Approver
+authority; an assessment in review is returned rather than withdrawn behind its approver (DEC-090).
 
 Verification impact: approving a change request raises an item for every requirement it introduces or
 modifies, and for any procedure a retirement leaves covering nothing. A Test Lead distributes items;

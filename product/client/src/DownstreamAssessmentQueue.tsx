@@ -8,7 +8,7 @@ import './DownstreamAssessmentQueue.css'
 type Level='HighLevel'|'LowLevel'
 type SourceChange={id:string;displayNumber:string;level:string;kind:string;statement:string}
 type Reopening={id:string;previousState:string;previousOutcome:string;previousRationale:string;previousDecidedBy?:string;previousDecidedAt?:string;previousApprovedBy?:string;previousApprovedAt?:string;detachedChangeRequestNumbers:string;reason:string;actorId:string;occurredAt:string}
-type Assessment={id:string;sourceChangeRequestId:string;sourceChangeRequestNumber:string;sourceTitle:string;sourceProblem:string;sourceAnalysis:string;sourceSolution:string;sourceChanges:SourceChange[];targetLevel:Level;state:'Open'|'InReview'|'Approved'|'Superseded';outcome:'Pending'|'ChangeRequired'|'NoChangeRequired'|'ChangeRequestsLinked';assignedEngineerId?:string;selectedApproverId?:string;rationale:string;decidedBy?:string;decidedAt?:string;approvedBy?:string;approvedAt?:string;supersededReason:string;linkedChangeRequests:{changeRequestId:string;changeRequestNumber:string;title:string;state:string}[];reopenings:Reopening[];capabilities:{canAssign:boolean;canEdit:boolean;canSubmit:boolean;canApprove:boolean;canReturn:boolean;canReopen:boolean}}
+type Assessment={id:string;sourceChangeRequestId:string;sourceChangeRequestNumber:string;sourceTitle:string;sourceProblem:string;sourceAnalysis:string;sourceSolution:string;sourceChanges:SourceChange[];targetLevel:Level;state:'Open'|'InReview'|'Approved'|'Superseded';outcome:'Pending'|'ChangeRequired'|'NoChangeRequired'|'ChangeRequestsLinked';assignedEngineerId?:string;selectedApproverId?:string;rationale:string;decidedBy?:string;decidedAt?:string;approvedBy?:string;approvedAt?:string;supersededReason:string;buildReleased:boolean;linkedChangeRequests:{changeRequestId:string;changeRequestNumber:string;title:string;state:string}[];reopenings:Reopening[];capabilities:{canAssign:boolean;canEdit:boolean;canSubmit:boolean;canApprove:boolean;canReturn:boolean;canReopen:boolean}}
 type Draft={id:string;displayNumber:string;title:string;requirementCount:number}
 type RationaleDecision={assessmentId:string;sourceNumber:string;kind:'no-change'|'return'|'reopen'}
 type Impact={baseNumber:string;known:boolean;derivedRequirements:{id:string;displayNumber:string;level:string;statement:string;linkType:string}[]}
@@ -81,7 +81,7 @@ export default function DownstreamAssessmentQueue({api,projectId,releaseId,targe
       {/* One control, one word, in every state. What can be done about the assessment is decided inside it. */}
       <div className="downstreamActions"><button type="button" className="openAssessment" onClick={()=>openAssessment(row.id)}>Open assessment</button></div>
     </article>)}<p className="downstreamHelp">One Draft may answer several assessments, and one assessment may link several Drafts.</p>
-    {selected&&(()=>{const mode=drawerMode(selected);return <div className="downstreamDrawerBackdrop" role="presentation"><aside className="downstreamDrawer" role="dialog" aria-modal="true" aria-labelledby="downstream-context-title" data-mode={mode}><header><div><p className="eyebrow">{levelName(selected.targetLevel)} ENGINEERING DECISION</p><h2 id="downstream-context-title">{selected.sourceChangeRequestNumber} downstream impact</h2></div><button type="button" className="quiet" onClick={closeAssessment} aria-label="Close downstream assessment">Close</button></header>
+    {selected&&(()=>{const mode=drawerMode(selected);return <div className="downstreamDrawerBackdrop" role="presentation"><aside className="downstreamDrawer" role="dialog" aria-modal="true" aria-labelledby="downstream-context-title" data-mode={mode}><header><div><p className="eyebrow">{levelName(selected.targetLevel)} ENGINEERING DECISION</p><h2 id="downstream-context-title">{selected.sourceChangeRequestNumber} downstream impact</h2><strong>{engineeringStatus(selected)}</strong></div><button type="button" className="quiet" onClick={closeAssessment} aria-label="Close downstream assessment">Close</button></header>
       <section className="downstreamDecisionWorkbench"><h3>Engineering conclusion</h3>
         {/* The conclusion is stated outright wherever one exists, so a reader never has to work out whether
             the question was answered from which buttons happen to be enabled. */}
@@ -94,7 +94,9 @@ export default function DownstreamAssessmentQueue({api,projectId,releaseId,targe
         {mode==='superseded'&&<p className="drawerEmpty">{selected.supersededReason||'A newer assessment replaced this one. Work that assessment instead.'}</p>}
         {mode==='unclaimed'&&(selected.capabilities.canAssign
           ?<button type="button" disabled={busy===selected.id} onClick={()=>void act(selected.id,'assign',{engineerId:user.userName})}>Take it on</button>
-          :<p className="drawerEmpty">Software engineering authority is required to claim this assessment.</p>)}
+          :<p className="drawerEmpty">{selected.buildReleased
+            ?'This software build is released. Its downstream assessments are read-only.'
+            :'Software engineering authority is required to claim this assessment.'}</p>)}
         {/* The only state in which both conclusions are offered: nobody has answered yet. */}
         {mode==='undecided'&&(selected.capabilities.canEdit
           ?<><button type="button" className="quiet" disabled={busy===selected.id} onClick={()=>openDecision(selected,'no-change')}>No change required</button><button type="button" disabled={busy===selected.id} onClick={()=>void act(selected.id,'change-required')}>Change required</button></>

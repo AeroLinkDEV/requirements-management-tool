@@ -61,6 +61,9 @@ public static class DownstreamAssessmentEndpoints
                     x.SubmittedBy, x.SelectedApproverId, x.SubmittedAt,
                     x.ApprovedBy, x.ApprovedAt, x.SupersededByAssessmentId, x.SupersededReason,
                     x.CreatedAt, x.UpdatedAt, x.Version,
+                    // Every capability is false on a released build, and the drawer would otherwise explain
+                    // that absence as missing authority when the real reason is that the build is closed.
+                    buildReleased = released.Value,
                     sourceTitle = request?.Title ?? "Approved upstream change",
                     sourceProblem = request?.Problem ?? "",
                     sourceAnalysis = request?.Analysis ?? "",

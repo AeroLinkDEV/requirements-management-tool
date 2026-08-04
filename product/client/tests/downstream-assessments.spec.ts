@@ -14,8 +14,12 @@ test('downstream assessment actions follow authority and submit without a form-n
   await openNavigationGroup(unauthorized,'SOFTWARE ENGINEERING')
   await unauthorized.getByRole('link',{name:'Software Change Requests'}).click()
   const unauthorizedQueue=unauthorized.locator('.downstreamQueue')
+  // Every row offers the same one control whoever is reading. What the reader may do is decided inside.
   await expect(unauthorizedQueue.getByRole('button',{name:'Take it on'})).toHaveCount(0)
-  await expect(unauthorizedQueue).toContainText('Software engineering authority is required')
+  await unauthorizedQueue.locator('.downstreamAssessment').first().getByRole('button',{name:'Open assessment'}).click()
+  const unauthorizedDrawer=unauthorized.getByRole('dialog',{name:/downstream impact/})
+  await expect(unauthorizedDrawer).toContainText('Software engineering authority is required')
+  await expect(unauthorizedDrawer.getByRole('button',{name:'Take it on'})).toHaveCount(0)
   await unauthorizedContext.close()
 
   await login(page)
@@ -26,14 +30,17 @@ test('downstream assessment actions follow authority and submit without a form-n
   const queue=page.locator('.downstreamQueue')
   await expect(queue.getByText('SCR-00031.00')).toBeVisible()
   await expect(queue.getByText('HLR assessment').first()).toBeVisible()
-  await expect(queue.getByRole('button',{name:'Take it on'}).first()).toBeVisible()
   await expect(queue).toContainText('One Draft may answer several assessments')
   await expect(page.getByRole('heading',{name:'Software Change Requests'})).toBeVisible()
+  // One entry control, worded identically on every row whatever state the assessment is in.
+  const entryControls=await queue.locator('.downstreamActions button').allTextContents()
+  expect(entryControls.length).toBeGreaterThan(0)
+  expect([...new Set(entryControls)]).toEqual(['Open assessment'])
 
   const assessment=queue.locator('.downstreamAssessment').filter({hasText:'SCR-00031.00'}).first()
-  await assessment.getByRole('button',{name:'Take it on'}).click()
   await assessment.getByRole('button',{name:/Open HLR assessment/}).click()
   const workbench=page.getByRole('dialog',{name:'SCR-00031.00 downstream impact'})
+  await workbench.getByRole('button',{name:'Take it on'}).click()
   await expect(workbench.getByRole('button',{name:'No change required'})).toBeVisible()
   await workbench.getByRole('button',{name:'No change required'}).click()
   const noChangeDialog=page.getByRole('dialog',{name:'Record no-change conclusion for SCR-00031.00'})
@@ -80,7 +87,10 @@ test('an assessment deep link explains impact and a required change creates and 
   const response=await request.get(`${process.env.AEROLINK_E2E_API_BASE}/api/downstream-assessments?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}&targetLevel=HighLevel`)
   expect(response.ok(),await response.text()).toBeTruthy()
   const rows=await response.json()
-  const candidates=rows.filter((row:{state:string;capabilities:{canAssign:boolean;canEdit:boolean}})=>row.state==='Open'&&(row.capabilities.canAssign||row.capabilities.canEdit))
+  // Undecided, not merely open: the drawer offers a first conclusion only where none has been recorded, so
+  // an assessment another journey already answered is not a candidate for recording one.
+  const candidates=rows.filter((row:{state:string;outcome:string;capabilities:{canAssign:boolean;canEdit:boolean}})=>
+    row.state==='Open'&&row.outcome==='Pending'&&(row.capabilities.canAssign||row.capabilities.canEdit))
   expect(candidates.length,'An actionable HLR assessment').toBeGreaterThan(0)
   let candidate=candidates[0]
   for(const row of candidates){
@@ -108,9 +118,9 @@ test('an assessment deep link explains impact and a required change creates and 
   await expect(page).not.toHaveURL(/assessment=/)
 
   const assessment=page.locator('.downstreamAssessment').filter({hasText:candidate.sourceChangeRequestNumber}).first()
-  if(await assessment.getByRole('button',{name:'Take it on'}).count())await assessment.getByRole('button',{name:'Take it on'}).click()
   await assessment.getByRole('button',{name:/Open HLR assessment/}).click()
   const decisionWorkbench=page.getByRole('dialog',{name:`${candidate.sourceChangeRequestNumber} downstream impact`})
+  if(await decisionWorkbench.getByRole('button',{name:'Take it on'}).count())await decisionWorkbench.getByRole('button',{name:'Take it on'}).click()
   await decisionWorkbench.getByRole('button',{name:'Change required',exact:true}).click()
   await expect(decisionWorkbench).toContainText('Draft SWCR needed')
   await decisionWorkbench.getByRole('button',{name:'Create Draft HLR SWCR'}).click()
@@ -133,4 +143,92 @@ test('an assessment deep link explains impact and a required change creates and 
   expect(updated.outcome).toBe('ChangeRequestsLinked')
   const linked=updated.linkedChangeRequests.find((link:{changeRequestId:string})=>link.changeRequestId===createdId)
   expect(linked).toMatchObject({state:'Draft',title:`Implement ${candidate.sourceChangeRequestNumber} downstream impact`})
+})
+
+/**
+ * A concluded assessment states what was concluded, and offers only what is still open to do.
+ *
+ * The drawer used to render the same conclusion controls whatever state the assessment was in, so one already
+ * answered showed "No change required" and "Change required" both live and indistinguishable from a
+ * first-time answer. There was no way to say "that answer was wrong" other than pressing one of them, which
+ * left nothing behind to show the question had ever been answered differently. Reopening is that statement,
+ * made deliberately and kept.
+ *
+ * The subject is an assessment an earlier journey in this file already answered — which is the state under
+ * test, and means this journey does not compete for the showcase's finite supply of unanswered ones.
+ */
+test('a concluded assessment states its conclusion, and correcting it is an act of its own',async({page,request,browser})=>{
+  test.setTimeout(150_000)
+  const showcase=await showcaseSeed(request)
+  await apiLogin(request)
+  const rows=await (await request.get(`${process.env.AEROLINK_E2E_API_BASE}/api/downstream-assessments?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}&targetLevel=HighLevel`)).json()
+  const subject=rows.find((row:{outcome:string;capabilities:{canReopen:boolean}})=>row.capabilities.canReopen&&row.outcome!=='Pending')
+  expect(subject,'An assessment this engineer has already concluded').toBeTruthy()
+  const number:string=subject.sourceChangeRequestNumber
+
+  await login(page)
+  await page.goto(`/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/software/change-requests?level=HLR&assessment=${subject.id}`)
+  const drawer=page.getByRole('dialog',{name:`${number} downstream impact`})
+  await expect(drawer).toBeVisible({timeout:30_000})
+
+  // Answered: the conclusion is stated outright with its author, and neither answer is offered again.
+  const conclusion=drawer.locator('.recordedConclusion')
+  await expect(conclusion).toContainText(/HLR requirement change is required/)
+  await expect(conclusion).toContainText('Recorded by')
+  await expect(drawer.getByRole('button',{name:'No change required'})).toHaveCount(0)
+  await expect(drawer.getByRole('button',{name:'Change required',exact:true})).toHaveCount(0)
+
+  // Correcting it is a separate act, it needs a reason, and it keeps what it withdrew.
+  await drawer.getByRole('button',{name:'Reopen assessment'}).click()
+  const reopen=page.getByRole('dialog',{name:`Reopen the ${number} assessment`})
+  await expect(reopen.getByRole('button',{name:'Reopen assessment'})).toBeDisabled()
+  await reopen.getByLabel('Reason for withdrawing the conclusion').fill('A second reading shows the timing wording is not covered by any current HLR.')
+  await reopen.getByRole('button',{name:'Reopen assessment'}).click()
+  await expect(reopen).toBeHidden()
+
+  // Undecided again, and that is the one state offering both answers.
+  await expect(drawer.locator('.recordedConclusion')).toHaveCount(0)
+  await expect(drawer.getByRole('button',{name:'No change required'})).toBeVisible()
+  await expect(drawer.getByRole('button',{name:'Change required',exact:true})).toBeVisible()
+  const withdrawn=drawer.locator('.withdrawnConclusions')
+  await expect(withdrawn).toContainText('timing wording is not covered')
+  await expect(withdrawn).toContainText('Withdrawn by')
+
+  // It survives a reload, because it is a record rather than a screen state.
+  await page.reload()
+  const reloaded=page.getByRole('dialog',{name:`${number} downstream impact`})
+  await expect(reloaded.locator('.withdrawnConclusions')).toContainText('timing wording is not covered',{timeout:30_000})
+
+  await reloaded.getByRole('button',{name:'No change required'}).click()
+  const noChange=page.getByRole('dialog',{name:`Record no-change conclusion for ${number}`})
+  await noChange.getByLabel('Decision rationale').fill('The approved System wording is already satisfied by the current HLR set.')
+  await noChange.getByRole('button',{name:'Record no-change conclusion'}).click()
+  await expect(noChange).toBeHidden()
+  await expect(reloaded.locator('.recordedConclusion')).toContainText('already satisfied by the current HLR set')
+
+  const approver=reloaded.getByLabel(new RegExp(`Approver for ${number.replace('.','\\.')}`))
+  await expect(approver).toBeVisible({timeout:30_000})
+  await approver.fill('software.lead')
+  await reloaded.locator('.personSuggestions button[data-user-name="software.lead"]').click()
+  await reloaded.getByRole('button',{name:'Send for approval'}).click()
+  await expect(reloaded).toContainText('HLR assessment in review')
+  // With the approver holding it, the engineer can neither answer it again nor withdraw it behind them.
+  await expect(reloaded.getByRole('button',{name:'Reopen assessment'})).toHaveCount(0)
+  await expect(reloaded.getByRole('button',{name:'No change required'})).toHaveCount(0)
+
+  const approverContext=await browser.newContext()
+  const approverPage=await approverContext.newPage()
+  await login(approverPage,'software.lead')
+  await approverPage.goto(`/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/software/change-requests?level=HLR&assessment=${subject.id}`)
+  const approval=approverPage.getByRole('dialog',{name:`${number} downstream impact`})
+  await expect(approval).toBeVisible({timeout:30_000})
+  await approval.getByRole('button',{name:'Approve'}).click()
+  await expect(approval).toContainText('Assessment complete')
+  // Approved: the conclusion is stated with both hands that touched it, and the only act left is a
+  // deliberate withdrawal.
+  await expect(approval.locator('.recordedConclusion')).toContainText('Approved by')
+  await expect(approval.getByRole('button',{name:'No change required'})).toHaveCount(0)
+  await expect(approval.getByRole('button',{name:'Change required',exact:true})).toHaveCount(0)
+  await expect(approval.getByRole('button',{name:'Reopen assessment'})).toBeVisible()
+  await approverContext.close()
 })
