@@ -1347,8 +1347,21 @@ Future entries use:
     approval, one level down. (Resolves OQ-019.)
   - **An externally sourced baseline may be the predecessor of a normally built one.** Importing V1.0 and
     then building V1.1 in this product is the point of the feature, so the imported baseline takes its place
-    in the release lineage like any other predecessor. (Resolves OQ-020.) What the release readiness gates
-    do about requirements inherited unchanged from it is a separate and unsettled question — see OQ-021.
+    in the release lineage like any other predecessor. (Resolves OQ-020.)
+  - **An imported baseline arrives released, and therefore never runs readiness gates.** Gates evaluate a
+    build before it is released; an imported V1.0 is already past that. The prior decisions — review,
+    approval, verification — are credited to the source's own release rather than re-litigated here, and this
+    product never claims to have made them.
+  - **Inherited requirements count as settled coverage, and are always shown apart.** In a successor build
+    the coverage gate still counts every effective requirement revision, and one inherited from an imported
+    baseline is settled by the source's release. The gate's summary must always split the two — "4,900
+    confirmed here, 280 inherited from the DOORS import" — so a claim made elsewhere can never be read as one
+    this product verified. Where an import also carries verification data, that is recorded as the richer
+    evidence it is. (Resolves OQ-021.)
+  - **Modifying an inherited requirement expires its credit.** The source's assertion covers the wording it
+    released. As soon as a later build modifies an inherited requirement, its inherited coverage goes suspect
+    exactly as any other modified requirement's would, and must be answered here. Without this boundary,
+    crediting prior decisions would quietly become never verifying anything again.
 
 ## Working Assumptions
 
@@ -1395,7 +1408,6 @@ choices are created as focused issues only when their trigger and acceptance bou
 | OQ-016 | Which specific decisions and recurring tasks must the accepted Manager and System Engineer dashboards support first? | Determines dashboard information priority and avoids generic views | Product owner and representative users before showcase build |
 | OQ-017 | What exact definitions, thresholds, applicability rules, and owners govern the initial dashboard measures? | Prevents misleading readiness and completeness indicators | Product/process owners before showcase validation |
 | OQ-018 | Which details in the accepted FMS Version 3.3 fictional story need correction or richer realism before the showcase build? | Keeps the reusable prototype data credible without using sensitive real program data | Product owner before showcase build |
-| OQ-021 | What do the release readiness gates do about requirements inherited unchanged from an externally sourced baseline? | `ReleaseReadinessService` counts coverage over every effective requirement revision in the materialized baseline, not only the ones this build changed. A successor to an imported baseline therefore inherits thousands of requirements with no coverage recorded here, and cannot release until each is answered. Whatever is chosen decides what a passing gate means once any imported program exists. | Product owner before the import feature is built (DEC-093, issue #332) |
 
 ## Open Questions for Later Phases
 
