@@ -19,7 +19,10 @@ public static class ProblemReportEndpoints
         group.MapPost("/from-test-execution/{executionId:guid}", CreateFromFailureAsync);
         group.MapGet("/{id:guid}", DetailAsync);
         group.MapGet("/{id:guid}/corrective-action", CorrectiveActionAsync);
-        group.MapPost("/{id:guid}/details", UpdateDetailsAsync);
+        // Details are edited under the universal controlled-editing lease, not here. A second write path to
+        // the same fields was the whole defect: it let two people save over each other with nothing but an
+        // expected version between them, while every other controlled record took an exclusive lease.
+        // See /api/controlled-editing/checkout with artifactType=ProblemReport.
         group.MapPost("/{id:guid}/owner", ReassignAsync);
         group.MapPost("/{id:guid}/target-build", RetargetAsync);
         group.MapPost("/{id:guid}/ready-for-sccb", ReadyForSccbAsync);
@@ -157,11 +160,6 @@ public static class ProblemReportEndpoints
         return Results.Ok(Detail(report, await LinkViewsAsync(links, db, ct), revisions));
     }
 
-    private static Task<IResult> UpdateDetailsAsync(Guid id, UpdateDetailsRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
-        ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ProblemReportDetailsUpdated", (report, actor, now) => report.UpdateDetails(actor.UserName,
-            request.Title, request.Problem, request.ProblemRich ?? "", request.AdditionalInformation ?? "", request.AdditionalInformationRich ?? "",
-            request.Analysis ?? "", request.RootCause ?? "", request.CorrectiveAction ?? "", request.SystemAircraftImpact ?? "", request.ImpactAssessmentJson ?? "{}", request.Severity, request.Priority, now));
-
     private static async Task<IResult> ReassignAsync(Guid id, ReassignRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.UserName == request.ResponsibleEngineerId && x.State == AccountState.Active, ct);
@@ -280,7 +278,8 @@ public static class ProblemReportEndpoints
 
     private static void AddRevision(AeroLinkDbContext db, ProblemReport report, string eventType, string actor, DateTimeOffset now)
     {
-        var snapshot = JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision, report.DisplayNumber, report.Title, report.Problem, report.ProblemRich, report.AdditionalInformation, report.AdditionalInformationRich, report.Analysis, report.ReportedBy, report.ResponsibleEngineerId, report.TargetReleaseId, report.Classification, severity = report.Severity.ToString(), priority = report.Priority.ToString(), report.Origin, report.AffectedConfiguration, report.RootCause, report.Effects, report.CorrectiveAction, report.SystemAircraftImpact, report.ImpactAssessmentJson, disposition = report.Disposition?.ToString(), report.DispositionRationale, report.ResolutionVerificationExecutionId, report.ClosureApprovedByName, report.ClosureApprovedAt, report.IsReleaseBlocker, report.WaiverRationale, report.WaivedBy, state = report.State.ToString(), report.Version });
+        // One evidence shape for every change, whether it arrives here or through a controlled checkout.
+        var snapshot = ProblemReportControlledEditingAdapter.EvidenceSnapshot(report);
         db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, eventType, actor, report.CanonicalHash(), snapshot, now));
     }
 
@@ -497,7 +496,6 @@ public static class ProblemReportEndpoints
     private sealed record ReopenRequest(long? ExpectedVersion, string Rationale);
     private sealed record BlockerRequest(long? ExpectedVersion, bool IsReleaseBlocker, string? WaiverRationale);
     private sealed record LinkRequest(string ArtifactType, Guid ArtifactId, string Relationship);
-    private sealed record UpdateDetailsRequest(long? ExpectedVersion, string Title, string Problem, string? ProblemRich, string? AdditionalInformation, string? AdditionalInformationRich, string? Analysis, string? RootCause, string? CorrectiveAction, string? SystemAircraftImpact, string? ImpactAssessmentJson, ProblemReportSeverity Severity, ProblemReportPriority Priority);
     private sealed record ReassignRequest(long? ExpectedVersion, string ResponsibleEngineerId);
     private sealed record RetargetRequest(long? ExpectedVersion, Guid TargetReleaseId);
     private sealed record VersionRequest(long? ExpectedVersion);

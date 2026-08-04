@@ -65,15 +65,14 @@ public sealed class ProblemReportApiTests
         var id = report.GetProperty("id").GetGuid(); var version = report.GetProperty("version").GetInt64();
         Assert.Equal("Draft", report.GetProperty("state").GetString());
 
-        using var updated = await client.PostAsJsonAsync($"/api/problem-reports/{id}/details", new
+        // Details are edited under the universal controlled-editing lease, the same as every other
+        // controlled record, rather than through a second write path of the report's own.
+        version = await ProblemReportCheckoutApiTests.EditUnderCheckoutAsync(client, id, draft =>
         {
-            expectedVersion = version, title = "Intermittent position-source disagreement", problem = "The alert clears before the disagreement ends.",
-            problemRich = "{\"blocks\":[]}", additionalInformation = "Observed twice after data reload.", additionalInformationRich = "{\"blocks\":[]}",
-            analysis = "", rootCause = "", correctiveAction = "", systemAircraftImpact = "Flight crew may miss a persistent disagreement.",
-            impactAssessmentJson = "{\"SystemRequirements\":\"Yes\",\"Hlr\":\"Yes\",\"Llr\":\"Unknown\",\"Code\":\"Yes\",\"Tests\":\"Yes\",\"Documents\":\"No\",\"SystemAircraft\":\"Yes\",\"Safety\":\"Unknown\"}",
-            severity = "Major", priority = "Normal"
+            draft["title"] = "Intermittent position-source disagreement";
+            draft["additionalInformation"] = "Observed twice after data reload.";
+            draft["priority"] = "Normal";
         });
-        Assert.Equal(HttpStatusCode.OK, updated.StatusCode); version = (await updated.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
 
         using var ready = await client.PostAsJsonAsync($"/api/problem-reports/{id}/ready-for-sccb", new { expectedVersion = version });
         version = (await ready.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
@@ -208,7 +207,7 @@ public sealed class ProblemReportApiTests
         db.AddRange(program, project); await db.SaveChangesAsync(); return project.Id;
     }
 
-    private static async Task BootstrapAndLoginAsync(HttpClient client)
+    internal static async Task BootstrapAndLoginAsync(HttpClient client)
     {
         using var bootstrap = new HttpRequestMessage(HttpMethod.Post, "/api/setup/bootstrap") { Content = JsonContent.Create(new { displayName = "AeroLink Administrator", email = "admin@example.test", password = AeroLinkApiFactory.AdministratorPassword }) };
         bootstrap.Headers.Add("X-AeroLink-Bootstrap-Secret", AeroLinkApiFactory.BootstrapSecret); Assert.Equal(HttpStatusCode.Created, (await client.SendAsync(bootstrap)).StatusCode);

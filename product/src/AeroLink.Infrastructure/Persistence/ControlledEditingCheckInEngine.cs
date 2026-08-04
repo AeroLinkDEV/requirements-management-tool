@@ -750,17 +750,67 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
     public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
     {
         var item = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+        // No audit aggregate: AuditEvent.AggregateId is a foreign key to a change request. A Problem
+        // Report's controlled history is its own ProblemReportRevision chain, written on check-in below.
         return item is null ? null : new(item.ProjectId, item.State.ToString(), item, item.Version, null, null);
     }
     public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) => Snapshot((ProblemReport)artifact.Aggregate, versionOverride);
-    public static string Snapshot(ProblemReport item, long? versionOverride = null) => JsonSerializer.Serialize(new { item.Id, item.ProjectId, item.ReportNumber, item.Revision, item.Title, item.Problem, item.Analysis, item.ReportedBy, item.Classification, severity = item.Severity.ToString(), priority = item.Priority.ToString(), item.Origin, item.AffectedConfiguration, item.RootCause, item.Effects, item.Containment, item.CorrectiveAction, disposition = item.Disposition?.ToString(), item.DispositionRationale, item.ResolutionVerificationExecutionId, item.IsReleaseBlocker, item.WaiverRationale, state = item.State.ToString(), version = versionOverride ?? item.Version });
+    /// <summary>
+    /// The working copy a checkout hands to the editor, and the shape a draft must come back in.
+    ///
+    /// Every field the editor may change is here, because a working copy that omits one silently reverts it
+    /// on check-in. The identity fields — report number, project and who raised it — are here to be checked,
+    /// not to be changed.
+    /// </summary>
+    // Every name is written out in camelCase rather than left to shorthand. The working copy is read by the
+    // browser editor, and a snapshot that mixed PascalCase shorthand with explicitly-named camelCase members
+    // handed the client a document where half the fields were invisible to it.
+    public static string Snapshot(ProblemReport item, long? versionOverride = null) => JsonSerializer.Serialize(new
+    {
+        id = item.Id, projectId = item.ProjectId, reportNumber = item.ReportNumber, revision = item.Revision,
+        title = item.Title, problem = item.Problem, problemRich = item.ProblemRich,
+        additionalInformation = item.AdditionalInformation, additionalInformationRich = item.AdditionalInformationRich,
+        analysis = item.Analysis, reportedBy = item.ReportedBy, responsibleEngineerId = item.ResponsibleEngineerId,
+        classification = item.Classification, severity = item.Severity.ToString(), priority = item.Priority.ToString(),
+        origin = item.Origin, affectedConfiguration = item.AffectedConfiguration, rootCause = item.RootCause,
+        effects = item.Effects, containment = item.Containment, correctiveAction = item.CorrectiveAction,
+        systemAircraftImpact = item.SystemAircraftImpact, impactAssessmentJson = item.ImpactAssessmentJson,
+        disposition = item.Disposition?.ToString(), dispositionRationale = item.DispositionRationale,
+        resolutionVerificationExecutionId = item.ResolutionVerificationExecutionId,
+        isReleaseBlocker = item.IsReleaseBlocker, waiverRationale = item.WaiverRationale,
+        state = item.State.ToString(), version = versionOverride ?? item.Version
+    });
+    /// <summary>
+    /// The immutable lifecycle evidence written for the report's History. Shared with the lifecycle
+    /// endpoints so a correction made under checkout is recorded exactly like every other change, rather
+    /// than in a shape of its own that a reader would have to interpret differently.
+    /// </summary>
+    public static string EvidenceSnapshot(ProblemReport report) => JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision, report.DisplayNumber, report.Title, report.Problem, report.ProblemRich, report.AdditionalInformation, report.AdditionalInformationRich, report.Analysis, report.ReportedBy, report.ResponsibleEngineerId, report.TargetReleaseId, report.Classification, severity = report.Severity.ToString(), priority = report.Priority.ToString(), report.Origin, report.AffectedConfiguration, report.RootCause, report.Effects, report.CorrectiveAction, report.SystemAircraftImpact, report.ImpactAssessmentJson, disposition = report.Disposition?.ToString(), report.DispositionRationale, report.ResolutionVerificationExecutionId, report.ClosureApprovedByName, report.ClosureApprovedAt, report.IsReleaseBlocker, report.WaiverRationale, report.WaivedBy, state = report.State.ToString(), report.Version });
     public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var item = (ProblemReport)artifact.Aggregate; var draft = JsonSerializer.Deserialize<ProblemDraft>(draftJson, Options) ?? throw new JsonException("The latest problem-report draft is empty.");
-        if (draft.Id != item.Id || draft.ProjectId != item.ProjectId || !string.Equals(draft.ReportNumber?.Trim(), item.ReportNumber, StringComparison.OrdinalIgnoreCase) || !string.Equals(draft.ReportedBy?.Trim(), item.ReportedBy, StringComparison.OrdinalIgnoreCase)) throw new DomainException("The controlled problem-report identity cannot change.");
-        item.UpdateDraft(draft.Title ?? "", draft.Problem ?? "", draft.Analysis ?? "", now); return Task.CompletedTask;
+        // Identity is checked, never applied. The report number, its project, who raised it and who is
+        // responsible for it are facts about the record, not fields on the form.
+        if (draft.Id != item.Id || draft.ProjectId != item.ProjectId
+            || !string.Equals(draft.ReportNumber?.Trim(), item.ReportNumber, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(draft.ReportedBy?.Trim(), item.ReportedBy, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(draft.ResponsibleEngineerId?.Trim() ?? item.ResponsibleEngineerId, item.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("The controlled problem-report identity cannot change.");
+        item.UpdateDetails(administratorAuthority ? item.ResponsibleEngineerId : actor,
+            draft.Title ?? "", draft.Problem ?? "", draft.ProblemRich ?? "",
+            draft.AdditionalInformation ?? "", draft.AdditionalInformationRich ?? "", draft.Analysis ?? "",
+            draft.RootCause ?? "", draft.CorrectiveAction ?? "", draft.SystemAircraftImpact ?? "",
+            draft.ImpactAssessmentJson ?? "", ParseEnum(draft.Severity, item.Severity), ParseEnum(draft.Priority, item.Priority), now);
+        db.ProblemReportRevisions.Add(new ProblemReportRevision(item.Id, item.Revision, "DetailsCheckedIn",
+            actor, item.CanonicalHash(), EvidenceSnapshot(item), now));
+        return Task.CompletedTask;
     }
-    private sealed record ProblemDraft(Guid Id, Guid ProjectId, string? ReportNumber, string? Title, string? Problem, string? Analysis, string? ReportedBy, string? State, long Version);
+    private static T ParseEnum<T>(string? value, T fallback) where T : struct, Enum =>
+        Enum.TryParse<T>(value, ignoreCase: true, out var parsed) ? parsed : fallback;
+    private sealed record ProblemDraft(Guid Id, Guid ProjectId, string? ReportNumber, string? Title, string? Problem,
+        string? ProblemRich, string? AdditionalInformation, string? AdditionalInformationRich, string? Analysis,
+        string? RootCause, string? CorrectiveAction, string? SystemAircraftImpact, string? ImpactAssessmentJson,
+        string? Severity, string? Priority, string? ReportedBy, string? ResponsibleEngineerId, string? State, long Version);
 }
 
 public sealed class ConfigurationChangeSetControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
