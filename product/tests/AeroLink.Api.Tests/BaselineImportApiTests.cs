@@ -54,6 +54,29 @@ public sealed class BaselineImportApiTests
         return (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
     }
 
+    private static object SourceRecord(int number, bool inImportedBaseline = true, object[]? history = null) => new
+    {
+        sourceModule = "FMS_System_Requirements",
+        sourceObjectKey = number.ToString(),
+        sourceIdentifier = $"SYS-{number:00000}",
+        inImportedBaseline,
+        history
+    };
+
+    private static Task<HttpResponseMessage> RecordSourceRecordsAsync(HttpClient client, Guid id, params object[] records) =>
+        client.PostAsJsonAsync($"/api/baseline-imports/{id}/source-records", new { records });
+
+    /// <summary>Walks an import to Reconciled, which now means it has really been told what the extract held.</summary>
+    private static async Task WalkToReconciledAsync(HttpClient client, Guid id, string mapping = "{}")
+    {
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/baseline-imports/{id}/analysis", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/baseline-imports/{id}/mapping",
+            new { mappingJson = mapping })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await RecordSourceRecordsAsync(client, id, SourceRecord(1234), SourceRecord(1235))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/baseline-imports/{id}/reconciliation",
+            new { reconciliationJson = """{"objectsIn":2,"requirementsOut":2}""" })).StatusCode);
+    }
+
     [Fact]
     public async Task An_import_walks_its_five_gates_and_becomes_a_released_build()
     {
@@ -70,11 +93,7 @@ public sealed class BaselineImportApiTests
         // The assertion is stated by the record itself rather than left for a reader to infer.
         Assert.Contains("were not", started.GetProperty("doesNotAssert").GetString());
 
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/baseline-imports/{id}/analysis", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/baseline-imports/{id}/mapping",
-            new { mappingJson = """{"modules":{"FMS_System_Requirements":"System"}}""" })).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/baseline-imports/{id}/reconciliation",
-            new { reconciliationJson = """{"objectsIn":5412,"requirementsOut":5180}""" })).StatusCode);
+        await WalkToReconciledAsync(client, id, """{"modules":{"FMS_System_Requirements":"System"}}""");
 
         using var accepted = await client.PostAsJsonAsync($"/api/baseline-imports/{id}/accept", new { version = "1.0" });
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
@@ -119,6 +138,13 @@ public sealed class BaselineImportApiTests
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(
             $"/api/baseline-imports/{id}/reconciliation", new { reconciliationJson = "{}" })).StatusCode);
 
+        await client.PostAsJsonAsync($"/api/baseline-imports/{id}/mapping", new { mappingJson = "{}" });
+        // Mapped, but the import has not been told what the extract held. Reconciling "every object is
+        // accounted for" against no objects is vacuously true, and would produce an empty build asserting a
+        // program was brought in from elsewhere.
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(
+            $"/api/baseline-imports/{id}/reconciliation", new { reconciliationJson = """{"objectsIn":0}""" })).StatusCode);
+
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         // Nothing partial was written along the way.
@@ -134,9 +160,7 @@ public sealed class BaselineImportApiTests
         var projectId = await SeedProjectAsync(factory, "MAP");
         var id = await StartAsync(client, projectId);
 
-        await client.PostAsync($"/api/baseline-imports/{id}/analysis", null);
-        await client.PostAsJsonAsync($"/api/baseline-imports/{id}/mapping", new { mappingJson = """{"v":1}""" });
-        await client.PostAsJsonAsync($"/api/baseline-imports/{id}/reconciliation", new { reconciliationJson = """{"in":10}""" });
+        await WalkToReconciledAsync(client, id, """{"v":1}""");
 
         // Remapping discards the reconciliation, because those counts described the old mapping. Accepting
         // against them would be accepting something other than what the import would now do.
@@ -197,9 +221,7 @@ public sealed class BaselineImportApiTests
         await ProblemReportApiTests.BootstrapAndLoginAsync(client);
         var projectId = await SeedProjectAsync(factory, "TWC");
         var id = await StartAsync(client, projectId);
-        await client.PostAsync($"/api/baseline-imports/{id}/analysis", null);
-        await client.PostAsJsonAsync($"/api/baseline-imports/{id}/mapping", new { mappingJson = "{}" });
-        await client.PostAsJsonAsync($"/api/baseline-imports/{id}/reconciliation", new { reconciliationJson = "{}" });
+        await WalkToReconciledAsync(client, id);
         Assert.Equal(HttpStatusCode.OK,
             (await client.PostAsJsonAsync($"/api/baseline-imports/{id}/accept", new { version = "1.0" })).StatusCode);
 
@@ -207,13 +229,138 @@ public sealed class BaselineImportApiTests
         Assert.Equal(HttpStatusCode.BadRequest,
             (await client.PostAsJsonAsync($"/api/baseline-imports/{id}/accept", new { version = "1.1" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync($"/api/baseline-imports/{id}/abandon", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await RecordSourceRecordsAsync(client, id, SourceRecord(1236))).StatusCode);
 
         var second = await StartAsync(client, projectId);
-        await client.PostAsync($"/api/baseline-imports/{second}/analysis", null);
-        await client.PostAsJsonAsync($"/api/baseline-imports/{second}/mapping", new { mappingJson = "{}" });
-        await client.PostAsJsonAsync($"/api/baseline-imports/{second}/reconciliation", new { reconciliationJson = "{}" });
+        await WalkToReconciledAsync(client, second);
         using var collision = await client.PostAsJsonAsync($"/api/baseline-imports/{second}/accept", new { version = "1.0" });
         Assert.Equal(HttpStatusCode.Conflict, collision.StatusCode);
+    }
+
+    [Fact]
+    public async Task An_import_records_what_the_extract_held_and_a_re_extract_is_a_delta()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory, "DLT");
+        var id = await StartAsync(client, projectId);
+        await client.PostAsync($"/api/baseline-imports/{id}/analysis", null);
+        await client.PostAsJsonAsync($"/api/baseline-imports/{id}/mapping", new { mappingJson = "{}" });
+
+        using var first = await RecordSourceRecordsAsync(client, id,
+            SourceRecord(1233, inImportedBaseline: false), SourceRecord(1234), SourceRecord(1235));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(3, firstBody.GetProperty("recorded").GetInt32());
+        Assert.Equal(0, firstBody.GetProperty("seenAgain").GetInt32());
+
+        // A later extract of the same program. The same objects, not a second set of them — that is what the
+        // source's own stable key is for, and it holds even when the identifier text was edited in between.
+        using var again = await RecordSourceRecordsAsync(client, id, SourceRecord(1234), SourceRecord(1235), SourceRecord(1236));
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        var againBody = await again.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, againBody.GetProperty("recorded").GetInt32());
+        Assert.Equal(2, againBody.GetProperty("seenAgain").GetInt32());
+        // Everything in the payload was accounted for, whether new here or already known — which is what the
+        // Reconcile gate needs. Counting rows this import created would have said one.
+        Assert.Equal(3, againBody.GetProperty("accountedFor").GetInt32());
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/baseline-imports/{id}");
+        Assert.Equal(3, detail.GetProperty("sourceRecordCount").GetInt32());
+        // Four identities exist: three in the baseline and one the source retired before it.
+        Assert.Equal(4, detail.GetProperty("sourceIdentityCount").GetInt32());
+        Assert.Equal(3, detail.GetProperty("sourceRecords").GetProperty("inImportedBaseline").GetInt32());
+        Assert.Equal(1, detail.GetProperty("sourceRecords").GetProperty("historyOnly").GetInt32());
+    }
+
+    [Fact]
+    public async Task Two_objects_claiming_the_same_source_identity_are_refused()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory, "DUP");
+        var id = await StartAsync(client, projectId);
+        await client.PostAsync($"/api/baseline-imports/{id}/analysis", null);
+        await client.PostAsJsonAsync($"/api/baseline-imports/{id}/mapping", new { mappingJson = "{}" });
+
+        // Refused outright rather than reported at Reconcile as a gap somebody could accept: there is no
+        // mapping decision that makes two objects with one key safe, because a later extract cannot tell
+        // them apart, and the delta rule would silently merge them.
+        using var refused = await RecordSourceRecordsAsync(client, id, SourceRecord(1234), SourceRecord(1234));
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("cannot be told apart", await refused.Content.ReadAsStringAsync());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        // Nothing was half-written: a refused payload leaves the import exactly as it was.
+        Assert.Empty(await db.SourceIdentities.AsNoTracking().Where(x => x.BaselineImportId == id).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Source_history_is_recorded_as_reported_and_never_becomes_a_revision()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory, "HST");
+        var id = await StartAsync(client, projectId);
+        await client.PostAsync($"/api/baseline-imports/{id}/analysis", null);
+        await client.PostAsJsonAsync($"/api/baseline-imports/{id}/mapping", new { mappingJson = "{}" });
+
+        Assert.Equal(HttpStatusCode.OK, (await RecordSourceRecordsAsync(client, id, SourceRecord(1234, history:
+        [
+            new { sourceBaselineName = "V0.8", statement = "", changedBy = "", changedAt = (DateTimeOffset?)null, sourceChangeReference = "" },
+            new
+            {
+                sourceBaselineName = "V0.9",
+                statement = "The FMS shall annunciate a navigation source disagreement.",
+                changedBy = "a.okafor",
+                changedAt = (DateTimeOffset?)new DateTimeOffset(2025, 1, 22, 0, 0, 0, TimeSpan.Zero),
+                sourceChangeReference = "DOORS CR-1402"
+            }
+        ]))).StatusCode);
+
+        var records = await client.GetFromJsonAsync<JsonElement>($"/api/baseline-imports/{id}/source-records");
+        var record = Assert.Single(records.EnumerateArray());
+        var history = record.GetProperty("sourceHistory").EnumerateArray().ToList();
+        Assert.Equal(2, history.Count);
+        // A source that recorded no author, date or statement is described as it was found. Nothing
+        // downstream reasons over any of it, which is exactly what makes recording it honestly safe.
+        Assert.Equal("V0.8", history[0].GetProperty("sourceBaselineName").GetString());
+        Assert.Equal("", history[0].GetProperty("changedBy").GetString());
+        Assert.Equal(JsonValueKind.Null, history[0].GetProperty("changedAt").ValueKind);
+        Assert.Equal("DOORS CR-1402", history[1].GetProperty("sourceChangeReference").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        // History is held against the source identity, never as requirement revisions. A revision here binds
+        // a change request and a materialized baseline; importing V0.8 as one would mean fabricating both.
+        Assert.Equal(2, await db.SourceHistoryEntries.AsNoTracking().CountAsync(x => x.BaselineImportId == id));
+        Assert.Empty(await db.RequirementRevisions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Recording_more_of_the_extract_makes_the_import_unacceptable_again()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory, "AGN");
+        var id = await StartAsync(client, projectId);
+        await WalkToReconciledAsync(client, id);
+
+        Assert.Equal(HttpStatusCode.OK, (await RecordSourceRecordsAsync(client, id, SourceRecord(9001))).StatusCode);
+
+        // The reconciliation described a different set of objects. Accepting against it would be accepting
+        // counts that no longer say what this import would do.
+        var afterMore = await client.GetFromJsonAsync<JsonElement>($"/api/baseline-imports/{id}");
+        Assert.Equal("Mapped", afterMore.GetProperty("state").GetString());
+        Assert.Equal("", afterMore.GetProperty("reconciliationJson").GetString());
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.PostAsJsonAsync($"/api/baseline-imports/{id}/accept", new { version = "1.0" })).StatusCode);
     }
 
     [Fact]
@@ -259,6 +406,7 @@ public sealed class BaselineImportApiTests
         // The same holds for every later gate, not only for starting one.
         await SignInAsync(client, "import.engineer");
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync($"/api/baseline-imports/{id}/analysis", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await RecordSourceRecordsAsync(client, id, SourceRecord(1234))).StatusCode);
         // Reading is not the same as asserting: anyone in the Program can see where a requirement came from.
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/baseline-imports/{id}")).StatusCode);
     }

@@ -72,6 +72,22 @@ public sealed class SourceIdentity
     /// <summary>Marks the identity as seen again by a later extract, without disturbing who first recorded it.</summary>
     public void SeenAgain(DateTimeOffset now) => LastSeenAt = now;
 
+    /// <summary>
+    /// Creates the provenance link from a controlled requirement revision to this source object.
+    ///
+    /// It lives on the identity rather than standing free because the rule that keeps source history
+    /// narrative rather than nodes — an object retired before the imported baseline joins nothing — can only
+    /// be enforced where the identity itself is in hand. Constructing the link directly would let a caller
+    /// hang a real trace off an object that was never in the baseline anybody signed for.
+    /// </summary>
+    public SourceIdentityLink LinkTo(Guid requirementRevisionId, DateTimeOffset now)
+    {
+        if (!InImportedBaseline)
+            throw new DomainException(
+                $"{SourceIdentifier} was not in the imported baseline. It is recorded so a reference to it can be answered, and nothing here originates from it.");
+        return new SourceIdentityLink(ProjectId, requirementRevisionId, Id, BaselineImportId, now);
+    }
+
     private static string Required(string value, string name) =>
         string.IsNullOrWhiteSpace(value) ? throw new DomainException($"A {name} is required.") : value.Trim();
 }

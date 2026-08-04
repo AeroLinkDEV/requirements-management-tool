@@ -103,10 +103,40 @@ public sealed class BaselineImport
         Touch(now);
     }
 
+    /// <summary>
+    /// Notes how many source objects this import has been told the extract held.
+    ///
+    /// Counted on the import rather than by counting the identities it created, because a re-extract is a
+    /// delta: an object already recorded by an earlier import is marked seen again and keeps the import that
+    /// first recorded it. Counting rows would report a second import of the same program as holding nothing.
+    ///
+    /// Any reconciliation already computed described the old set, so it goes — the same reason re-mapping
+    /// discards it. Accepting against counts that no longer describe what the import would do is the one
+    /// thing the Reconcile gate exists to prevent.
+    /// </summary>
+    public void NoteSourceRecordsAccountedFor(int accountedFor, DateTimeOffset now)
+    {
+        if (State is not (BaselineImportState.Analysed or BaselineImportState.Mapped or BaselineImportState.Reconciled))
+            throw new DomainException("An import must be analysed before source records can be recorded against it.");
+        if (accountedFor < 0) throw new DomainException("A source record count cannot be negative.");
+        SourceRecordCount = accountedFor;
+        ReconciliationJson = "";
+        if (State == BaselineImportState.Reconciled) State = BaselineImportState.Mapped;
+        Touch(now);
+    }
+
+    /// <summary>How many source objects this import accounted for, whether newly recorded or seen again.</summary>
+    public int SourceRecordCount { get; private set; }
+
     public void RecordReconciliation(string reconciliationJson, DateTimeOffset now)
     {
         if (State is not (BaselineImportState.Mapped or BaselineImportState.Reconciled))
             throw new DomainException("An import must be mapped before it can be reconciled.");
+        // Reconcile means every source object is accounted for. Against nothing that is vacuously true, and
+        // accepting it would create an empty baseline claiming to be a program brought in from elsewhere —
+        // which is the one outcome none of these gates would catch afterwards.
+        if (SourceRecordCount <= 0)
+            throw new DomainException("Nothing has been recorded from the extract, so there is nothing to reconcile.");
         ReconciliationJson = Required(reconciliationJson, "reconciliation");
         State = BaselineImportState.Reconciled;
         Touch(now);
