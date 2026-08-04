@@ -222,7 +222,7 @@ user may choose rather than one the workspace applies (DEC-089, superseding the 
 DEC-085 and DEC-087). They carry the agreed Draft-to-Closed
 lifecycle, progressive rich fields, immutable raised-by/date, auditable owner/target-build changes, structured
 impact decisions, AND filters, and an internal History tab. A report is corrected under the same exclusive
-server lease as every other controlled record — **Check out &amp; edit**, autosave, check in, discard, and a
+server lease as every other controlled record — **Check out & edit**, autosave, check in, discard, and a
 named holder while somebody else has it — in every state except Closed and the terminal dispositions, where
 reopening is the route back. Each check-in lands in the report's own History as `Details Checked In` with its
 actor and time (DEC-091). Their center supports durable detail links and
