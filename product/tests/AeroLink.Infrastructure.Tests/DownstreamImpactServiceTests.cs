@@ -22,8 +22,8 @@ public sealed class DownstreamImpactServiceTests
             var program = new ProgramRecord("Downstream Program", "DSP");
             var project = new ProjectRecord(program.Id, "FMS", "FMS");
             var release = new SoftwareRelease(project.Id, "1.6", false);
-            var system = Approved(project.Id, release.Id, "SCR-00031", RequirementLevel.System, "SYSR-000151");
-            var software = Approved(project.Id, release.Id, "SWCR-00076", RequirementLevel.HighLevel, "HLR-000401", ChangeRequestType.Software);
+            var system = Approved(project.Id, release.Id, "SRCR-00031", RequirementLevel.System, "SYSR-000151");
+            var software = Approved(project.Id, release.Id, "HLRCR-00076", RequirementLevel.HighLevel, "HLR-000401", ChangeRequestType.Software);
             db.AddRange(program, project, release, system, software); await db.SaveChangesAsync();
 
             var service = new DownstreamImpactService(db);
@@ -32,10 +32,16 @@ public sealed class DownstreamImpactServiceTests
             await db.SaveChangesAsync();
             Assert.Equal(0, await service.RaiseForApprovedChangeRequestAsync(system, Now, default));
 
-            var assessments = await db.DownstreamChangeAssessments.AsNoTracking().OrderBy(x => x.SourceChangeRequestNumber).ToListAsync();
-            Assert.Collection(assessments,
-                x => Assert.Equal(RequirementLevel.HighLevel, x.TargetLevel),
-                x => Assert.Equal(RequirementLevel.LowLevel, x.TargetLevel));
+            // Asserted as a mapping rather than as a sorted list. Ordering by identifier made the test
+            // depend on where the prefixes happen to fall alphabetically, which says nothing about which
+            // discipline consumes which change: a System change is assessed by HLR engineering, and an HLR
+            // change is assessed by LLR engineering.
+            var assessments = await db.DownstreamChangeAssessments.AsNoTracking().ToListAsync();
+            Assert.Equal(2, assessments.Count);
+            Assert.Equal(RequirementLevel.HighLevel,
+                Assert.Single(assessments, x => x.SourceChangeRequestNumber.StartsWith("SRCR-")).TargetLevel);
+            Assert.Equal(RequirementLevel.LowLevel,
+                Assert.Single(assessments, x => x.SourceChangeRequestNumber.StartsWith("HLRCR-")).TargetLevel);
         }
         finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
     }
@@ -50,11 +56,11 @@ public sealed class DownstreamImpactServiceTests
             await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync();
             var program = new ProgramRecord("Downstream Program", "DSR"); var project = new ProjectRecord(program.Id, "FMS", "FMS");
             var release = new SoftwareRelease(project.Id, "1.6", false);
-            var original = Approved(project.Id, release.Id, "SCR-00032", RequirementLevel.System, "SYSR-000075");
+            var original = Approved(project.Id, release.Id, "SRCR-00032", RequirementLevel.System, "SYSR-000075");
             db.AddRange(program, project, release, original); await db.SaveChangesAsync();
             var service = new DownstreamImpactService(db); await service.RaiseForApprovedChangeRequestAsync(original, Now, default); await db.SaveChangesAsync();
 
-            var replacement = Approved(project.Id, release.Id, "SCR-00032", RequirementLevel.System, "SYSR-000075", revision: 1);
+            var replacement = Approved(project.Id, release.Id, "SRCR-00032", RequirementLevel.System, "SYSR-000075", revision: 1);
             db.Add(replacement); await db.SaveChangesAsync();
             await service.RaiseForApprovedChangeRequestAsync(replacement, Now.AddHours(1), default); await db.SaveChangesAsync();
 
@@ -81,7 +87,7 @@ public sealed class DownstreamImpactServiceTests
                 var program = new ProgramRecord("Legacy Program", "DSL");
                 var project = new ProjectRecord(program.Id, "FMS", "FMS");
                 var release = new SoftwareRelease(project.Id, "1.6", false);
-                var request = Approved(project.Id, release.Id, "SCR-00032", RequirementLevel.System, "SYSR-000075");
+                var request = Approved(project.Id, release.Id, "SRCR-00032", RequirementLevel.System, "SYSR-000075");
                 requestId = request.Id;
                 seed.AddRange(program, project, release, request);
                 await seed.SaveChangesAsync();
@@ -114,7 +120,7 @@ public sealed class DownstreamImpactServiceTests
                 var program = new ProgramRecord("Legacy Program", "DSX");
                 var project = new ProjectRecord(program.Id, "FMS", "FMS");
                 var release = new SoftwareRelease(project.Id, "1.6", false);
-                var legacy = Approved(project.Id, release.Id, "SCR-00032", RequirementLevel.System, "HLR-000075", revision: 2);
+                var legacy = Approved(project.Id, release.Id, "SRCR-00032", RequirementLevel.System, "HLR-000075", revision: 2);
                 var invalidAssessment = new DownstreamChangeAssessment(project.Id, release.Id, legacy.Id,
                     legacy.DisplayNumber, RequirementLevel.LowLevel, Now);
                 projectId = project.Id;
@@ -126,7 +132,7 @@ public sealed class DownstreamImpactServiceTests
             }
 
             await using var db = new AeroLinkDbContext(options);
-            var replacement = Approved(projectId, releaseId, "SWCR-00104", RequirementLevel.HighLevel,
+            var replacement = Approved(projectId, releaseId, "HLRCR-00104", RequirementLevel.HighLevel,
                 "HLR-000075", ChangeRequestType.Software, revision: 2);
             db.Add(replacement);
             await db.SaveChangesAsync();
@@ -148,7 +154,7 @@ public sealed class DownstreamImpactServiceTests
     private static SystemChangeRequest Approved(Guid projectId, Guid releaseId, string number,
         RequirementLevel level, string requirement, ChangeRequestType type = ChangeRequestType.System, int revision = 0)
     {
-        var request = new SystemChangeRequest(number, revision, projectId, releaseId, "Approved change", "P", "A", "S", "author", Now, type);
+        var request = new SystemChangeRequest(number, revision, projectId, releaseId, "Approved change", "P", "A", "S", "author", Now, type, softwareLevel: type == ChangeRequestType.Software ? (level == RequirementLevel.LowLevel ? RequirementLevel.LowLevel : RequirementLevel.HighLevel) : null);
         request.AddRequirementChange("author", requirement, revision, level, RequirementChangeKind.Modify,
             "The requirement shall contain revised controlled behavior.", "Approved revision", "Test", Now);
         request.SubmitForReview("author", [new("reviewer", "Reviewer")], Now);

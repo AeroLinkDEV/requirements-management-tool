@@ -53,7 +53,7 @@ public sealed class CoverageStateFilterApiTests
         var otherProgram = new ProgramRecord("Foreign Program", "FGN");
         var otherProject = new ProjectRecord(otherProgram.Id, "Software", "Foreign Software");
         var release = new SoftwareRelease(project.Id, "1.6", false);
-        var scr = new SystemChangeRequest("SCR-00800", 0, project.Id, release.Id, "Coverage", "P", "A", "S", "author", now);
+        var scr = new SystemChangeRequest("SRCR-00800", 0, project.Id, release.Id, "Coverage", "P", "A", "S", "author", now);
         var baseline = new CandidateBaseline("SW-80.00", 0, project.Id, release.Id, null, "Candidate", "cm", now);
         db.AddRange(program, project, otherProgram, otherProject, release, scr, baseline);
 

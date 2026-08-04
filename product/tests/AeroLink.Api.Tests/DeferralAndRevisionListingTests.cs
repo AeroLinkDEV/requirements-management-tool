@@ -40,7 +40,7 @@ public sealed class DeferralAndRevisionListingTests
         }
         await db.SaveChangesAsync();
 
-        var scr = new SystemChangeRequest("SCR-00070", 0, project.Id, release.Id,
+        var scr = new SystemChangeRequest("SRCR-00070", 0, project.Id, release.Id,
             "Oceanic waypoint sequencing", "P", "A", "S", "shelf.author", now);
         scr.AddRequirementChange("shelf.author", "SYSR-00000701", 0, RequirementLevel.System,
             RequirementChangeKind.Introduce, "The FMS shall sequence oceanic waypoints.", "New", "Test", now);
@@ -119,16 +119,16 @@ public sealed class DeferralAndRevisionListingTests
         using var page = JsonDocument.Parse(await collapsed.Content.ReadAsStringAsync());
         var rows = page.RootElement.GetProperty("items").EnumerateArray().ToList();
         var row = Assert.Single(rows);
-        Assert.Equal("SCR-00070.01", row.GetProperty("displayNumber").GetString());
+        Assert.Equal("SRCR-00070.01", row.GetProperty("displayNumber").GetString());
         // The count is what lets the row offer its history without a request per row.
         Assert.Equal(2, row.GetProperty("revisionCount").GetInt32());
         Assert.Equal(1, page.RootElement.GetProperty("totalCount").GetInt32());
 
         using var expanded = await client.GetAsync(
-            $"/api/history/change-requests?projectId={projectId}&baseNumber=SCR-00070&page=1&pageSize=50");
+            $"/api/history/change-requests?projectId={projectId}&baseNumber=SRCR-00070&page=1&pageSize=50");
         using var all = JsonDocument.Parse(await expanded.Content.ReadAsStringAsync());
         var numbers = all.RootElement.GetProperty("items").EnumerateArray()
             .Select(x => x.GetProperty("displayNumber").GetString()).OrderBy(x => x).ToList();
-        Assert.Equal(["SCR-00070.00", "SCR-00070.01"], numbers);
+        Assert.Equal(["SRCR-00070.00", "SRCR-00070.01"], numbers);
     }
 }

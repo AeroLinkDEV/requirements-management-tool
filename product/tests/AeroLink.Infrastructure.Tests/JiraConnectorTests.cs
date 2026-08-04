@@ -66,7 +66,7 @@ public sealed class JiraConnectorTests
     }
 
     private static SystemChangeRequest Scr(Guid projectId) =>
-        new("SCR-00031", 0, projectId, Guid.NewGuid(), "Oceanic routing",
+        new("SRCR-00031", 0, projectId, Guid.NewGuid(), "Oceanic routing",
             "Sequencing drifts on long oceanic legs.", "The route mode was analyzed.",
             "Correct the sequencing rule.", "author", Now);
 
@@ -121,7 +121,7 @@ public sealed class JiraConnectorTests
             Assert.Equal("FMS-1", link.IssueKey);
             Assert.Equal("https://jira.example.test/browse/FMS-1", link.IssueUrl);
             var (summary, description) = Assert.Single(jira.Created);
-            Assert.Contains("SCR-00031.00", summary);
+            Assert.Contains("SRCR-00031.00", summary);
             // The point of the link is that somebody reading the tracker can reach the record that is
             // authoritative — and the tracker is never that record.
             Assert.Contains($"https://aerolink.example.test/open/scr/{scr.Id}", description);
@@ -323,7 +323,7 @@ public sealed class JiraConnectorTests
     [Fact]
     public void A_linked_artifact_cannot_be_pushed_again_by_resetting_its_link()
     {
-        var link = new JiraIssueLink(Guid.NewGuid(), Guid.NewGuid(), "ChangeRequest", Guid.NewGuid(), "SCR-00001.00", "engineer", Now);
+        var link = new JiraIssueLink(Guid.NewGuid(), Guid.NewGuid(), "ChangeRequest", Guid.NewGuid(), "SRCR-00001.00", "engineer", Now);
         link.RecordIssue("FMS-9", "https://jira.example.test/browse/FMS-9", Now);
         Assert.Throws<DomainException>(() => link.Retry(Now.AddMinutes(1)));
     }

@@ -34,7 +34,7 @@ public sealed class ProcedureRetargetCoverageTests
         var program = new ProgramRecord("Retarget Program", "RTG");
         var project = new ProjectRecord(program.Id, "Flight Software", "Retarget Software");
         var release = new SoftwareRelease(project.Id, "1.0", false);
-        var scr = new SystemChangeRequest("SCR-00050", 0, project.Id, release.Id, "Move", "P", "A", "S", "author", now);
+        var scr = new SystemChangeRequest("SRCR-00050", 0, project.Id, release.Id, "Move", "P", "A", "S", "author", now);
         var baseline = new CandidateBaseline("SW-50.00", 0, project.Id, release.Id, null, "Candidate", "cm", now);
         var artifact = new RequirementArtifact(project.Id, "SYSR-00000151", RequirementLevel.System, now);
         var revision = new RequirementRevision(artifact.Id, 0, "The FMS shall sequence oceanic waypoints.",

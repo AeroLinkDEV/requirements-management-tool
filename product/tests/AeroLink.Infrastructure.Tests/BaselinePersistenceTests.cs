@@ -22,7 +22,7 @@ public sealed class BaselinePersistenceTests
                 var program = new ProgramRecord("Baseline Program", "BLP");
                 var project = new ProjectRecord(program.Id, "Software", "Baseline Software");
                 var release = new SoftwareRelease(project.Id, "1.0", false);
-                var scr = new SystemChangeRequest("SWCR-00001", 0, project.Id, release.Id, "Approved input", "P", "A", "S", "author", DateTimeOffset.UtcNow, ChangeRequestType.Software);
+                var scr = new SystemChangeRequest("HLRCR-00001", 0, project.Id, release.Id, "Approved input", "P", "A", "S", "author", DateTimeOffset.UtcNow, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
                 scr.AddRequirementChange("author", "SWR-00000001", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "Statement", "Rationale", "Test", DateTimeOffset.UtcNow);
                 scr.SubmitForReview("author", [new("reviewer", "Reviewer")], DateTimeOffset.UtcNow);
                 scr.ApproveActiveStage("reviewer", DateTimeOffset.UtcNow);

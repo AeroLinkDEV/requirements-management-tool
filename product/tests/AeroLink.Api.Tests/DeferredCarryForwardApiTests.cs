@@ -33,10 +33,10 @@ public sealed class DeferredCarryForwardApiTests
         var current = new SoftwareRelease(project.Id, "1.6", false, released.Id);
         var successor = new SoftwareRelease(project.Id, "1.7", false, current.Id);
 
-        var deferred = new SystemChangeRequest("SCR-60001", 0, project.Id, current.Id,
+        var deferred = new SystemChangeRequest("SRCR-60001", 0, project.Id, current.Id,
             "SHELVED-IN-ONE-SIX oceanic sequencing", "P", "A", "S", "defer.user", now, ChangeRequestType.System);
         deferred.Defer("defer.user", "Shelved for a later build.", now, true);
-        var active = new SystemChangeRequest("SCR-60002", 0, project.Id, current.Id,
+        var active = new SystemChangeRequest("SRCR-60002", 0, project.Id, current.Id,
             "STILL-IN-ONE-SIX active work", "P", "A", "S", "defer.user", now, ChangeRequestType.System);
 
         var user = new UserAccount("defer.user", "Deferral User", "defer.user@example.test",

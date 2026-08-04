@@ -48,10 +48,10 @@ public sealed class ManualTestChangeRequestApiTests
             return scr;
         }
 
-        var first = Approved("SCR-00910", "SYSR-00000911", release.Id);
-        var second = Approved("SCR-00911", "SYSR-00000912", release.Id);
-        var autoRaised = Approved("SCR-00912", "SYSR-00000913", release.Id);
-        var elsewhere = Approved("SCR-00913", "SYSR-00000914", otherBuild.Id);
+        var first = Approved("SRCR-00910", "SYSR-00000911", release.Id);
+        var second = Approved("SRCR-00911", "SYSR-00000912", release.Id);
+        var autoRaised = Approved("SRCR-00912", "SYSR-00000913", release.Id);
+        var elsewhere = Approved("SRCR-00913", "SYSR-00000914", otherBuild.Id);
         var report = new ProblemReport(project.Id, "PR-00910", "Route sequencing disagreement",
             "The observed route differs from the approved plan.", "", "quality", now);
         var otherReport = new ProblemReport(project.Id, "PR-00911", "Future-build problem",
@@ -145,7 +145,7 @@ public sealed class ManualTestChangeRequestApiTests
             new { discipline = "System", changeRequestIds = new[] { fixture.AutoRaisedChangeId } });
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("SCR-00912", body);
+        Assert.Contains("SRCR-00912", body);
         Assert.Contains("SYSTCR-", body);
     }
 

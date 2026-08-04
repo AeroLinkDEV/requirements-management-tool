@@ -54,7 +54,7 @@ public sealed class CancelReviewAuthorityTests
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
         }
 
-        var scr = new SystemChangeRequest("SCR-00500", 0, project.Id, release.Id, "Governed change",
+        var scr = new SystemChangeRequest("SRCR-00500", 0, project.Id, release.Id, "Governed change",
             "Problem", "Analysis", "Solution", "cancel.author", now);
         scr.AddRequirementChange("cancel.author", "SYSR-00000500", 0, RequirementLevel.System,
             RequirementChangeKind.Introduce, "The FMS shall hold its course.", "Rationale.", "Test", now,

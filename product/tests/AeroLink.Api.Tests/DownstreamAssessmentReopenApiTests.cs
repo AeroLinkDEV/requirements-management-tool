@@ -39,9 +39,9 @@ public sealed class DownstreamAssessmentReopenApiTests
         var program = new ProgramRecord("Reopen Authority", "RPA");
         var project = new ProjectRecord(program.Id, "FMS", "Reopen FMS");
         var release = new SoftwareRelease(project.Id, "1.6", false);
-        var source = new SystemChangeRequest("SCR-91001", 0, project.Id, release.Id, "Upstream change",
+        var source = new SystemChangeRequest("SRCR-91001", 0, project.Id, release.Id, "Upstream change",
             "Problem", "Analysis", "Solution", "author", now);
-        var draft = new SystemChangeRequest("SWCR-91002", 0, project.Id, release.Id, "Downstream work",
+        var draft = new SystemChangeRequest("HLRCR-91002", 0, project.Id, release.Id, "Downstream work",
             "Problem", "Analysis", "Solution", "software.engineer", now, ChangeRequestType.Software,
             softwareLevel: RequirementLevel.HighLevel);
         var assessment = new DownstreamChangeAssessment(project.Id, release.Id, source.Id,
@@ -107,7 +107,7 @@ public sealed class DownstreamAssessmentReopenApiTests
 
         Assert.Equal(HttpStatusCode.OK, (await engineer.PostAsJsonAsync(
             $"/api/downstream-assessments/{fixture.AssessmentId}/reopen",
-            new { reason = "SWCR-91002 answers a different System change." })).StatusCode);
+            new { reason = "HLRCR-91002 answers a different System change." })).StatusCode);
 
         var reopened = await RowAsync(engineer, fixture);
         Assert.Equal("Pending", reopened.GetProperty("outcome").GetString());
@@ -120,7 +120,7 @@ public sealed class DownstreamAssessmentReopenApiTests
         var withdrawn = Assert.Single(reopened.GetProperty("reopenings").EnumerateArray());
         Assert.Equal("ChangeRequestsLinked", withdrawn.GetProperty("previousOutcome").GetString());
         Assert.Equal("software.engineer", withdrawn.GetProperty("previousDecidedBy").GetString());
-        Assert.Equal("SWCR-91002.00", withdrawn.GetProperty("detachedChangeRequestNumbers").GetString());
+        Assert.Equal("HLRCR-91002.00", withdrawn.GetProperty("detachedChangeRequestNumbers").GetString());
         Assert.Contains("different System change", withdrawn.GetProperty("reason").GetString());
 
         // The detached Draft SWCR itself is untouched — only the assessment's claim on it was withdrawn.

@@ -339,7 +339,7 @@ export default function ScrEditor({
     setSaving(true);
     setError("");
     try {
-      const created = await apiRequest<{ id: string; displayNumber: string }>(`${api}/api/scr-drafts`, {
+      const created = await apiRequest<{ id: string; displayNumber: string }>(`${api}/api/change-request-drafts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

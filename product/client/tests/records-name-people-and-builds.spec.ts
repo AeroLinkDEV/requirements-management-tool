@@ -35,7 +35,7 @@ test('a review cycle names the person waiting, their role, and whose turn it is'
 
   // Built here rather than found, so the queue wording is exercised against a review that is genuinely
   // mid-flight with somebody second in line.
-  const created = await request.post(`${apiBase}/api/scr-drafts`,
+  const created = await request.post(`${apiBase}/api/change-request-drafts`,
     { data: draftBody(showcase.projectId, showcase.activeReleaseId, `Review legibility ${Date.now()}`,
       await firstSectionId(request, showcase.projectId)) })
   expect(created.ok(), await created.text()).toBeTruthy()
@@ -70,7 +70,7 @@ test('audit history reads as events, in the product\'s own abbreviation', async 
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
-  const created = await request.post(`${apiBase}/api/scr-drafts`,
+  const created = await request.post(`${apiBase}/api/change-request-drafts`,
     { data: draftBody(showcase.projectId, showcase.activeReleaseId, `Audit legibility ${Date.now()}`) })
   expect(created.ok(), await created.text()).toBeTruthy()
   const draft = await created.json()
@@ -112,7 +112,7 @@ test('the approver search answers on the first letter and never shows an account
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
-  const created = await request.post(`${apiBase}/api/scr-drafts`,
+  const created = await request.post(`${apiBase}/api/change-request-drafts`,
     { data: draftBody(showcase.projectId, showcase.activeReleaseId, `Approver search ${Date.now()}`) })
   expect(created.ok(), await created.text()).toBeTruthy()
   const draft = await created.json()

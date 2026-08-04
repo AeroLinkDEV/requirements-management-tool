@@ -10,7 +10,7 @@ namespace AeroLink.Infrastructure.Tests;
 /// A change request may not hold a requirement level its type forbids, and a survivor must be reportable.
 ///
 /// The domain has refused the combination since #275, but enforcement only guards records being written. The
-/// persistent database kept `SCR-00032.00` carrying `HLR-000075.02` through the fix, a closed issue and a
+/// persistent database kept `SRCR-00032.00` carrying `HLR-000075.02` through the fix, a closed issue and a
 /// handoff claiming it was corrected — because the correction was made to the seeder, which never runs against
 /// an existing database. It was eventually noticed in a screenshot.
 ///
@@ -35,8 +35,8 @@ public sealed class ChangeRequestScopeAuditTests
         return (db, project.Id, release.Id);
     }
 
-    private static SystemChangeRequest Request(Guid projectId, Guid releaseId, string number, ChangeRequestType type) =>
-        new(number, 0, projectId, releaseId, $"{type} change", "P", "A", "S", "author", DateTimeOffset.UtcNow, type);
+    private static SystemChangeRequest Request(Guid projectId, Guid releaseId, string number, ChangeRequestType type, RequirementLevel? softwareLevel = null) =>
+        new(number, 0, projectId, releaseId, $"{type} change", "P", "A", "S", "author", DateTimeOffset.UtcNow, type, softwareLevel: type == ChangeRequestType.Software ? softwareLevel ?? RequirementLevel.HighLevel : null);
 
     [Fact]
     public async Task A_compliant_database_reports_no_violation()
@@ -45,10 +45,10 @@ public sealed class ChangeRequestScopeAuditTests
         await using var _ = db;
         var now = DateTimeOffset.UtcNow;
 
-        var system = Request(projectId, releaseId, "SCR-70001", ChangeRequestType.System);
+        var system = Request(projectId, releaseId, "SRCR-70001", ChangeRequestType.System);
         system.AddRequirementChange("author", "SYSR-000001", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
             "The system shall do the controlled thing.", "Because.", "Test", now);
-        var software = Request(projectId, releaseId, "SWCR-70001", ChangeRequestType.Software);
+        var software = Request(projectId, releaseId, "HLRCR-70001", ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
         software.AddRequirementChange("author", "HLR-000001", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce,
             "The software shall do the controlled thing.", "Because.", "Test", now);
         db.AddRange(system, software);
@@ -68,7 +68,7 @@ public sealed class ChangeRequestScopeAuditTests
         await using var _ = db;
         var now = DateTimeOffset.UtcNow;
 
-        var system = Request(projectId, releaseId, "SCR-00032", ChangeRequestType.System);
+        var system = Request(projectId, releaseId, "SRCR-00032", ChangeRequestType.System);
         db.Add(system);
         await db.SaveChangesAsync();
 
@@ -83,7 +83,7 @@ public sealed class ChangeRequestScopeAuditTests
         var violations = await ChangeRequestScopeAudit.ViolationsAsync(db);
 
         var violation = Assert.Single(violations);
-        Assert.Equal("SCR-00032", violation.ChangeRequestNumber);
+        Assert.Equal("SRCR-00032", violation.ChangeRequestNumber);
         Assert.Equal("System", violation.ChangeRequestType);
         Assert.Equal("HLR-000075", violation.RequirementNumber);
         Assert.Equal("HighLevel", violation.RequirementLevel);
@@ -95,7 +95,7 @@ public sealed class ChangeRequestScopeAuditTests
         var (db, projectId, releaseId) = await DatabaseAsync();
         await using var _ = db;
 
-        var software = Request(projectId, releaseId, "SWCR-70002", ChangeRequestType.Software);
+        var software = Request(projectId, releaseId, "HLRCR-70002", ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
         db.Add(software);
         await db.SaveChangesAsync();
 

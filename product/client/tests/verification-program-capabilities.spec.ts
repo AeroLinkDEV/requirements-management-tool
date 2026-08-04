@@ -21,7 +21,7 @@ test('verification actions follow authority in the selected Program',async({page
   const approvalWorkspace=await makeWorkspace('Approval Authority')
   const prepareExactRequirement=async(workspace:any,label:string)=>{
     const impacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
-    const draftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{
+    const draftResponse=await request.post(`${apiBase}/api/change-request-drafts`,{data:{
       projectId:workspace.project.id,targetReleaseId:workspace.release.id,type:'System',
       title:`${label} exact verification target`,problem:'A controlled target is required.',
       analysis:'Procedure authoring must bind to a materialized revision.',solution:'Introduce one exact revision.',

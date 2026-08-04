@@ -82,7 +82,7 @@ public sealed class AuthoredSectionTests
         var (projectId, releaseId, _) = await SeedAsync(factory);
         await SignInAsync(client);
 
-        using var response = await client.PostAsJsonAsync("/api/scr-drafts",
+        using var response = await client.PostAsJsonAsync("/api/change-request-drafts",
             Body(projectId, releaseId, "Introduce", null));
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
@@ -133,7 +133,7 @@ public sealed class AuthoredSectionTests
 
     private static async Task<DraftResponse> CreateDraftAsync(HttpClient client, object body)
     {
-        using var created = await client.PostAsJsonAsync("/api/scr-drafts", body);
+        using var created = await client.PostAsJsonAsync("/api/change-request-drafts", body);
         Assert.True(created.StatusCode == HttpStatusCode.Created,
             $"{(int)created.StatusCode}: {await created.Content.ReadAsStringAsync()}");
         return (await created.Content.ReadFromJsonAsync<DraftResponse>())!;

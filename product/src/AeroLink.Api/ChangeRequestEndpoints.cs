@@ -463,7 +463,7 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/scr-drafts", async (CreateScrDraftRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, EnterpriseRequirementsService enterpriseRequirements, ProblemReportLinkService problemReports, CancellationToken ct) =>
+        app.MapPost("/api/change-request-drafts", async (CreateScrDraftRequest request, HttpContext http, IScrRepository repository, AeroLinkDbContext db, IdentityService identity, EnterpriseRequirementsService enterpriseRequirements, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
             var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);

@@ -35,7 +35,7 @@ public sealed class PreReleaseEvidenceVisibilityTests
         var program = new ProgramRecord("Evidence Program", "EVP");
         var project = new ProjectRecord(program.Id, "Software", "Evidence Software");
         var release = new SoftwareRelease(project.Id, "1.6", false);
-        var scr = new SystemChangeRequest("SCR-00910", 0, project.Id, release.Id, "Oceanic", "P", "A", "S", "author", now);
+        var scr = new SystemChangeRequest("SRCR-00910", 0, project.Id, release.Id, "Oceanic", "P", "A", "S", "author", now);
         scr.AddRequirementChange("author", "SYSR-00000911", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
             "The FMS shall sequence oceanic waypoints.", "New capability", "Analysis", now);
         scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);

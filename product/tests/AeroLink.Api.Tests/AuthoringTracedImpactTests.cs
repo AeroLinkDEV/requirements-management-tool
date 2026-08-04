@@ -55,7 +55,7 @@ public sealed class AuthoringTracedImpactTests
 
         // A revision records the change request and baseline it came from, so those exist rather than being
         // faked with empty identifiers the foreign keys would reject.
-        var origin = new SystemChangeRequest("SCR-00500", 0, project.Id, release.Id, "Origin", "P", "A", "S", "traced.author", now);
+        var origin = new SystemChangeRequest("SRCR-00500", 0, project.Id, release.Id, "Origin", "P", "A", "S", "traced.author", now);
         var baseline = new CandidateBaseline("SW-50.00", 0, project.Id, release.Id, null, "Origin baseline", "cm", now);
         db.AddRange(origin, baseline);
 
@@ -271,7 +271,7 @@ public sealed class AuthoringTracedImpactTests
         await SignInAsync(client);
 
         var releaseId = await ReleaseIdAsync(factory, projectId);
-        using var created = await client.PostAsJsonAsync("/api/scr-drafts", new
+        using var created = await client.PostAsJsonAsync("/api/change-request-drafts", new
         {
             projectId,
             targetReleaseId = releaseId,

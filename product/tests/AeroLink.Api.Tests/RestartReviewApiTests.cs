@@ -40,7 +40,7 @@ public sealed class RestartReviewApiTests
         }
         await db.SaveChangesAsync();
 
-        var scr = new SystemChangeRequest("SCR-00050", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", "author.user", now);
+        var scr = new SystemChangeRequest("SRCR-00050", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", "author.user", now);
         scr.AddRequirementChange("author.user", "SYSR-00000501", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
             "The FMS shall sequence oceanic waypoints.", "New capability", "Test", now);
         scr.SubmitForReview("author.user", [new("wrong.user", "Wrong Approver")], now);

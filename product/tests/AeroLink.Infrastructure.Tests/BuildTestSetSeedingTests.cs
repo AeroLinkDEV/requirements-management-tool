@@ -29,13 +29,13 @@ public sealed class BuildTestSetSeedingTests
         var program = new ProgramRecord("Seed Program", "SED");
         var project = new ProjectRecord(program.Id, "Flight Software", "Seed Software");
         var release = new SoftwareRelease(project.Id, "1.6", false);
-        var scr = new SystemChangeRequest("SCR-00800", 0, project.Id, release.Id, "Oceanic", "P", "A", "S", "author", now);
+        var scr = new SystemChangeRequest("SRCR-00800", 0, project.Id, release.Id, "Oceanic", "P", "A", "S", "author", now);
         var procedure = new TestProcedure(project.Id, "SYSTP-000800", "Oceanic sequencing", "test.engineer", now,
             TestProcedureLevel.System);
         var revision = new TestProcedureRevision(procedure.Id, 0, "Objective", "Pre", "Steps", "Expected",
             TestProcedureState.Approved, "test.engineer", now);
         var review = new TestChangeReview(project.Id, release.Id, scr.Id, TestChangeReviewDiscipline.System,
-            "SCR-00800", now, "SYSTCR-000800");
+            "SRCR-00800", now, "SYSTCR-000800");
         db.AddRange(program, project, release, scr, procedure, revision, review);
         await db.SaveChangesAsync();
 

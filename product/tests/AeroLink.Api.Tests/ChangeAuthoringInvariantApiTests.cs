@@ -25,7 +25,7 @@ public sealed class ChangeAuthoringInvariantApiTests
         await SignInAsync(client);
         var complete = RequirementAuthoringJson.CompleteImpactDispositions;
 
-        using var systemResponse = await client.PostAsJsonAsync("/api/scr-drafts", new
+        using var systemResponse = await client.PostAsJsonAsync("/api/change-request-drafts", new
         {
             projectId = scenario.ProjectId, targetReleaseId = scenario.ReleaseId, type = "System",
             title = "Persist system metadata", problem = "P", analysis = "A", solution = "S",
@@ -54,7 +54,7 @@ public sealed class ChangeAuthoringInvariantApiTests
         Assert.Equal(scenario.SystemSectionId, recovery.RootElement.GetProperty("requirementChanges")[0]
             .GetProperty("targetSectionId").GetGuid());
 
-        using var softwareResponse = await client.PostAsJsonAsync("/api/scr-drafts", new
+        using var softwareResponse = await client.PostAsJsonAsync("/api/change-request-drafts", new
         {
             projectId = scenario.ProjectId, targetReleaseId = scenario.ReleaseId, type = "Software",
             title = "Persist software metadata", problem = "P", analysis = "A", solution = "S",
@@ -74,7 +74,7 @@ public sealed class ChangeAuthoringInvariantApiTests
         Assert.Equal("software.author", softwareAttributes.RootElement.GetProperty("owner").GetString());
         Assert.True(softwareAttributes.RootElement.GetProperty("derived").GetBoolean());
 
-        using var invalid = await client.PostAsJsonAsync("/api/scr-drafts", new
+        using var invalid = await client.PostAsJsonAsync("/api/change-request-drafts", new
         {
             projectId = scenario.ProjectId, targetReleaseId = scenario.ReleaseId, type = "System",
             title = "Reject unknown metadata", problem = "P", analysis = "A", solution = "S",
@@ -99,7 +99,7 @@ public sealed class ChangeAuthoringInvariantApiTests
         using (var seedScope = factory.Services.CreateScope())
         {
             var seedDb = seedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var scr = new SystemChangeRequest("SCR-00999", 0, scenario.ProjectId, scenario.ReleaseId,
+            var scr = new SystemChangeRequest("SRCR-00999", 0, scenario.ProjectId, scenario.ReleaseId,
                 "Legacy gap", "P", "A", "S", "invariant.author", DateTimeOffset.UtcNow);
             scr.AddRequirementChange("invariant.author", "SYSR-00000999", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall expose a legacy gap.", "R", "Test",
@@ -137,7 +137,7 @@ public sealed class ChangeAuthoringInvariantApiTests
         using var client = factory.CreateClient();
         var scenario = await SeedAsync(factory);
         await SignInAsync(client);
-        using var created = await client.PostAsJsonAsync("/api/scr-drafts", new
+        using var created = await client.PostAsJsonAsync("/api/change-request-drafts", new
         {
             projectId = scenario.ProjectId, targetReleaseId = scenario.ReleaseId, type = "System",
             title = "Incomplete impacts", problem = "P", analysis = "A", solution = "S",
@@ -159,7 +159,7 @@ public sealed class ChangeAuthoringInvariantApiTests
 
     [Theory]
     [InlineData("System", "HighLevel", "only System requirement changes")]
-    [InlineData("Software", "System", "only HLR and LLR changes")]
+    [InlineData("Software", "System", "must declare HLR or LLR scope")]
     public async Task Change_request_type_rejects_incompatible_requirement_level(
         string type, string level, string expectedGuidance)
     {
@@ -168,7 +168,7 @@ public sealed class ChangeAuthoringInvariantApiTests
         var scenario = await SeedAsync(factory);
         await SignInAsync(client);
 
-        using var response = await client.PostAsJsonAsync("/api/scr-drafts", new
+        using var response = await client.PostAsJsonAsync("/api/change-request-drafts", new
         {
             projectId = scenario.ProjectId, targetReleaseId = scenario.ReleaseId, type,
             title = "Reject incompatible level", problem = "P", analysis = "A", solution = "S",
@@ -199,7 +199,7 @@ public sealed class ChangeAuthoringInvariantApiTests
         {
             var db = seedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var now = DateTimeOffset.UtcNow;
-            var scr = new SystemChangeRequest("SCR-00888", 0, scenario.ProjectId, scenario.ReleaseId,
+            var scr = new SystemChangeRequest("SRCR-00888", 0, scenario.ProjectId, scenario.ReleaseId,
                 "Legacy invalid impacts", "P", "A", "S", "invariant.author", now);
             scr.AddRequirementChange("invariant.author", "SYSR-00000888", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall reject legacy invalid impacts.", "R", "Test", now);
@@ -208,7 +208,7 @@ public sealed class ChangeAuthoringInvariantApiTests
             var selected = new CandidateBaseline("SW-88.80", 0, scenario.ProjectId, scenario.ReleaseId,
                 null, "Selected legacy record", "invariant.author", now);
             selected.Select(scr, "invariant.author", now);
-            var selectionScr = new SystemChangeRequest("SCR-00889", 0, scenario.ProjectId, scenario.ReleaseId,
+            var selectionScr = new SystemChangeRequest("SRCR-00889", 0, scenario.ProjectId, scenario.ReleaseId,
                 "Second legacy invalid impact record", "P", "A", "S", "invariant.author", now);
             selectionScr.AddRequirementChange("invariant.author", "SYSR-00000889", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall allow downstream impact assessment.", "R", "Test", now);

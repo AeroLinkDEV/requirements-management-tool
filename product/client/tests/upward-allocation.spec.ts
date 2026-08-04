@@ -28,7 +28,7 @@ test('software proposals govern exact build-scoped upward allocations and derive
     rationale: 'The allocation is reviewed with the proposed software behavior.',
     verificationMethod: 'Test', impactDispositionJson: completeImpacts, ...overrides,
   })
-  const draft = (title: string, requirementChanges: unknown[]) => request.post(`${apiBase}/api/scr-drafts`, { data: {
+  const draft = (title: string, requirementChanges: unknown[]) => request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: showcase.projectId, targetReleaseId: showcase.activeReleaseId, type: 'Software', title,
     problem: 'Prospective allocation must be controlled.', analysis: 'Client-only filtering is not sufficient.',
     solution: 'Store and review exact upstream revision identities.', requirementChanges,

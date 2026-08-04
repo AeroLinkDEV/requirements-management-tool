@@ -36,7 +36,7 @@ public sealed class NewProcedureRequiredGateTests
         var program = new ProgramRecord("Gate Program", "GATE");
         var project = new ProjectRecord(program.Id, "Flight Software", "Gate Software");
         var release = new SoftwareRelease(project.Id, "1.6", false);
-        var change = new SystemChangeRequest("SCR-95001", 0, project.Id, release.Id,
+        var change = new SystemChangeRequest("SRCR-95001", 0, project.Id, release.Id,
             "Introduce oceanic sequencing", "P", "A", "S", "author", now);
         change.AddRequirementChange("author", "SYSR-950001", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
             "The system shall sequence oceanic waypoints.", "New capability.", "Test", now);

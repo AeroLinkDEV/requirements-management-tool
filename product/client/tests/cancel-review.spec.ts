@@ -13,7 +13,7 @@ test('an author stops a review they should not have started, and the history say
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
 
-  const created = await request.post(`${apiBase}/api/scr-drafts`, { data: {
+  const created = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: showcase.projectId,
     targetReleaseId: showcase.activeReleaseId,
     type: 'System',
@@ -74,7 +74,7 @@ test('somebody with no part in a review is not offered the control', async ({ pa
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
 
-  const created = await request.post(`${apiBase}/api/scr-drafts`, { data: {
+  const created = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: showcase.projectId,
     targetReleaseId: showcase.activeReleaseId,
     type: 'System',

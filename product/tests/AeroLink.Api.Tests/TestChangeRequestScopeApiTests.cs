@@ -47,9 +47,9 @@ public sealed class TestChangeRequestScopeApiTests
             return scr;
         }
 
-        var first = Approved("SCR-00900", "SYSR-00000901", release.Id);
-        var second = Approved("SCR-00901", "SYSR-00000902", release.Id);
-        var elsewhere = Approved("SCR-00902", "SYSR-00000903", otherBuild.Id);
+        var first = Approved("SRCR-00900", "SYSR-00000901", release.Id);
+        var second = Approved("SRCR-00901", "SYSR-00000902", release.Id);
+        var elsewhere = Approved("SRCR-00902", "SYSR-00000903", otherBuild.Id);
         db.AddRange(first, second, elsewhere);
 
         foreach (var (user, role) in new[]
@@ -148,7 +148,7 @@ public sealed class TestChangeRequestScopeApiTests
         Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
         var body = await second.Content.ReadAsStringAsync();
         // Named, so the engineer knows where the change went rather than being told to try again.
-        Assert.Contains("SCR-00901", body);
+        Assert.Contains("SRCR-00901", body);
         Assert.Contains("SYSTCR-", body);
     }
 

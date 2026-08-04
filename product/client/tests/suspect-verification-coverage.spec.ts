@@ -31,7 +31,7 @@ test('modified requirement coverage stays suspect until an exact approved proced
   const baseNumber = original.displayNumber.slice(0, separator)
   const revision = Number(original.displayNumber.slice(separator + 1)) + 1
 
-  const draftResponse = await request.post(`${apiBase}/api/scr-drafts`, { data: {
+  const draftResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: showcase.projectId,
     targetReleaseId: showcase.activeReleaseId,
     type: 'System',

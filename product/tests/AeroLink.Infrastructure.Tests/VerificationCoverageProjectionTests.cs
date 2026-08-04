@@ -26,7 +26,7 @@ public sealed class VerificationCoverageProjectionTests
             var program = new ProgramRecord("Coverage Program", "CVG");
             var project = new ProjectRecord(program.Id, "Software", "Coverage Software");
             var release = new SoftwareRelease(project.Id, "1.0", false);
-            var origin = new SystemChangeRequest("SCR-00001", 0, project.Id, release.Id,
+            var origin = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id,
                 "Origin", "P", "A", "S", "author", now);
             var baseline = new CandidateBaseline("SW-00.10", 0, project.Id, release.Id, null,
                 "Projection fixture", "cm", now);

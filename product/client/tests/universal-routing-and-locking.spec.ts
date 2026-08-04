@@ -6,7 +6,7 @@ test('deep links survive refresh, universal search resolves fragments, and check
  await apiLogin(request)
  const showcase=await showcaseSeed(request)
  await apiLogin(request,'software.author')
- const draftResponse=await request.post(`${apiBase}/api/scr-drafts`,{data:{projectId:showcase.projectId,targetReleaseId:showcase.activeReleaseId,type:'Software',title:`Universal routing lock ${Date.now()}`,problem:'Prove a deep-linked draft remains controlled.',analysis:'Exercise universal search and concurrent checkout visibility.',solution:'Create an isolated draft owned by this journey.',requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The FMS software shall preserve isolated deep-link checkout state.',rationale:'Architecture-derived routing and locking verification.',verificationMethod:'Test',isDerived:true}]}})
+ const draftResponse=await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:showcase.projectId,targetReleaseId:showcase.activeReleaseId,type:'Software',title:`Universal routing lock ${Date.now()}`,problem:'Prove a deep-linked draft remains controlled.',analysis:'Exercise universal search and concurrent checkout visibility.',solution:'Create an isolated draft owned by this journey.',requirementChanges:[{level:'HighLevel',kind:'Introduce',statement:'The FMS software shall preserve isolated deep-link checkout state.',rationale:'Architecture-derived routing and locking verification.',verificationMethod:'Test',isDerived:true}]}})
  expect(draftResponse.ok(),await draftResponse.text()).toBeTruthy();const draft=await draftResponse.json()
  await login(page,'software.author')
  await selectProgram(page,'Flight Management System Live Program')

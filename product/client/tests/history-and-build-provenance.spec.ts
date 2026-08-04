@@ -9,7 +9,7 @@ test('searches scoped change history while dormant build management stays unreac
   const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, { data: {
     programName, programCode: `HI${suffix}`, projectName: 'FMS Software', softwareProduct: 'Flight Management Software', initialRelease: '3.3', initialReleaseIsReleased: false,
   } }); expect(workspaceResponse.ok()).toBeTruthy(); const workspace = await workspaceResponse.json()
-  const scrResponse = await request.post(`${apiBase}/api/scr-drafts`, { data: {
+  const scrResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: workspace.project.id, targetReleaseId: workspace.release.id, type: 'Software', title: 'Introduce round robin routing', problem: 'Routing is unavailable', analysis: 'A new function is required', solution: 'Implement round robin routing',
     requirementChanges: [{ level: 'HighLevel', kind: 'Introduce', targetSectionId: await firstSectionId(request, workspace.project.id, 'HighLevel'), statement: 'The software shall provide round robin routing.', rationale: 'The new function is derived from the software architecture for this isolated lifecycle fixture.', verificationMethod: 'Test', impactDispositionJson:completeImpacts, isDerived:true }],
   } }); expect(scrResponse.ok()).toBeTruthy(); const scr = await scrResponse.json()

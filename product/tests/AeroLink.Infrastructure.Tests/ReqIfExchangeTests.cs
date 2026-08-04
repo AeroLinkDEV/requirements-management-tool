@@ -28,7 +28,7 @@ public sealed class ReqIfExchangeTests
             var options=new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={database};Pooling=False").Options;
             await using var db=new AeroLinkDbContext(options);await db.Database.EnsureCreatedAsync();var now=DateTimeOffset.UtcNow;
             var program=new ProgramRecord("Round Trip Program","RTP");var project=new ProjectRecord(program.Id,"Round Trip Project","Control Computer");var release=new SoftwareRelease(project.Id,"1.0",false);
-            var scr=new SystemChangeRequest("SCR-00001",0,project.Id,release.Id,"Seed requirements","Need","Analysis","Solution","author",now);scr.AddRequirementChange("author","SYSR-00000001",0,RequirementLevel.System,RequirementChangeKind.Introduce,"The controller shall retain state.","Safety continuity","Test",now);scr.SubmitForReview("author",[new("reviewer","Reviewer")],now);scr.ApproveActiveStage("reviewer",now);
+            var scr=new SystemChangeRequest("SRCR-00001",0,project.Id,release.Id,"Seed requirements","Need","Analysis","Solution","author",now);scr.AddRequirementChange("author","SYSR-00000001",0,RequirementLevel.System,RequirementChangeKind.Introduce,"The controller shall retain state.","Safety continuity","Test",now);scr.SubmitForReview("author",[new("reviewer","Reviewer")],now);scr.ApproveActiveStage("reviewer",now);
             var baseline=new CandidateBaseline("BL-00000001",0,project.Id,release.Id,null,"Round-trip baseline","cm",now);baseline.Select(scr,"cm",now);baseline.Freeze("cm",now);
             var first=new RequirementArtifact(project.Id,"SYSR-00000001",RequirementLevel.System,now);var second=new RequirementArtifact(project.Id,"SYSR-00000002",RequirementLevel.System,now);
             var firstRevision=new RequirementRevision(first.Id,0,"The controller shall retain state.","Safety continuity","Test",RequirementRevisionState.Active,scr.Id,baseline.Id,now);var secondRevision=new RequirementRevision(second.Id,0,"The controller shall restore state.","Recovery","Test",RequirementRevisionState.Active,scr.Id,baseline.Id,now);
@@ -45,7 +45,7 @@ public sealed class ReqIfExchangeTests
     public async Task Lifecycle_changes_create_transactional_events_in_the_same_save()
     {
         var options=new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;await using var db=new AeroLinkDbContext(options);await db.Database.OpenConnectionAsync();await db.Database.EnsureCreatedAsync();var now=DateTimeOffset.UtcNow;
-        var program=new ProgramRecord("Event Program","EVT");var project=new ProjectRecord(program.Id,"Event Project","Product");var release=new SoftwareRelease(project.Id,"1.0",false);var scr=new SystemChangeRequest("SCR-00001",0,project.Id,release.Id,"Evented change","P","A","S","author",now);
+        var program=new ProgramRecord("Event Program","EVT");var project=new ProjectRecord(program.Id,"Event Project","Product");var release=new SoftwareRelease(project.Id,"1.0",false);var scr=new SystemChangeRequest("SRCR-00001",0,project.Id,release.Id,"Evented change","P","A","S","author",now);
         db.AddRange(program,project,release,scr);await db.SaveChangesAsync();
         var integrationEvent=await db.IntegrationEvents.SingleAsync(x=>x.ProjectId==project.Id&&x.AggregateId==scr.Id);Assert.Equal("aerolink.change-request.changed",integrationEvent.EventType);Assert.Contains("Evented change",scr.Title);Assert.Contains("Draft",integrationEvent.PayloadJson);
     }

@@ -24,7 +24,7 @@ test('administrator actions work identically for another authors System and Soft
 
   for (const discipline of disciplines) {
     const create = async (title: string) => {
-      const response = await author.post(`${apiBase}/api/scr-drafts`, { data: {
+      const response = await author.post(`${apiBase}/api/change-request-drafts`, { data: {
         projectId: showcase.projectId,
         targetReleaseId: showcase.activeReleaseId,
         type: discipline.type,

@@ -98,7 +98,7 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
   await expect(page.getByRole('dialog', { name: /History of SYSTP-000001/ })).toBeVisible()
 
   const refusal = await page.evaluate(async (base) => {
-    const response = await fetch(`${base}/api/scr-drafts`, {
+    const response = await fetch(`${base}/api/change-request-drafts`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },

@@ -20,7 +20,7 @@ test('a change request goes on the shelf with its state remembered, and comes ba
   expect(created.ok(), await created.text()).toBeTruthy()
   const workspace = await created.json()
 
-  const scr = await (await request.post(`${apiBase}/api/scr-drafts`, { data: {
+  const scr = await (await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: workspace.project.id, targetReleaseId: workspace.release.id, type: 'System',
     title: 'Oceanic waypoint sequencing', problem: 'P', analysis: 'A', solution: 'S',
     requirementChanges: [{ level: 'System', kind: 'Introduce', targetSectionId: await firstSectionId(request, workspace.project.id), statement: 'The FMS shall sequence oceanic waypoints.', rationale: 'New', verificationMethod: 'Test', impactDispositionJson:completeImpacts }],
@@ -59,7 +59,7 @@ test('superseded revisions collapse under the newest one and expand on request',
   expect(created.ok(), await created.text()).toBeTruthy()
   const workspace = await created.json()
 
-  const scr = await (await request.post(`${apiBase}/api/scr-drafts`, { data: {
+  const scr = await (await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: workspace.project.id, targetReleaseId: workspace.release.id, type: 'System',
     title: 'Oceanic waypoint sequencing', problem: 'P', analysis: 'A', solution: 'S',
     requirementChanges: [{ level: 'System', kind: 'Introduce', targetSectionId: await firstSectionId(request, workspace.project.id), statement: 'The FMS shall sequence oceanic waypoints.', rationale: 'New', verificationMethod: 'Test', impactDispositionJson:completeImpacts }],

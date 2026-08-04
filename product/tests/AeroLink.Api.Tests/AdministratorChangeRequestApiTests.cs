@@ -187,7 +187,7 @@ public sealed class AdministratorChangeRequestApiTests
         db.AddRange(otherProgram, otherAccount,
             new ProgramMembership(otherAccount.Id, otherProgram.Id, ProgramRole.Engineer, "test.setup", now));
 
-        var prefix = type == ChangeRequestType.System ? "SCR" : "SWCR";
+        var prefix = ChangeRequestNumbering.Prefix(type, type == ChangeRequestType.System ? null : RequirementLevel.HighLevel);
         var requirement = type == ChangeRequestType.System ? "SYSR" : "HLR";
         var level = type == ChangeRequestType.System ? RequirementLevel.System : RequirementLevel.HighLevel;
         // A new requirement cannot be sent for review without a place in the document, so the scenario gives
@@ -203,7 +203,7 @@ public sealed class AdministratorChangeRequestApiTests
             [new ApproverSelection("change.reviewer", "change.reviewer")], now);
         approved.ApproveActiveStage("change.reviewer", now);
         var addRequirement = new SystemChangeRequest($"{prefix}-00902", 0, project.Id, release.Id,
-            "Draft readiness completion", "Problem", "Analysis", "Solution", "change.author", now, type);
+            "Draft readiness completion", "Problem", "Analysis", "Solution", "change.author", now, type, softwareLevel: level == RequirementLevel.System ? null : level);
         db.AddRange(ready, approved, addRequirement);
         await db.SaveChangesAsync();
         return new(project.Id, ready.Id, addRequirement.Id, approved.Id);
@@ -211,7 +211,7 @@ public sealed class AdministratorChangeRequestApiTests
         SystemChangeRequest Ready(string number, string requirementNumber, string title)
         {
             var item = new SystemChangeRequest(number, 0, project.Id, release.Id, title,
-                "Problem", "Analysis", "Solution", "change.author", now, type);
+                "Problem", "Analysis", "Solution", "change.author", now, type, softwareLevel: level == RequirementLevel.System ? null : level);
             item.AddRequirementChange("change.author", requirementNumber, 0, level,
                 RequirementChangeKind.Introduce, "The product shall preserve governed state.",
                 "Controlled rationale.", "Test", now,

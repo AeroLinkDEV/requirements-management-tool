@@ -27,25 +27,28 @@ public sealed class IdentifierAllocationTests
         await BootstrapAndLoginAsync(client);
         var projectId = await SeedProjectAsync(factory);
 
-        async Task<JsonElement> Preview(string type) =>
-            await client.GetFromJsonAsync<JsonElement>($"/api/authoring/context?projectId={projectId}&type={type}");
+        // A software preview names its level: HLRCR and LLRCR are numbered apart, so the server cannot
+        // answer for "Software" alone.
+        async Task<JsonElement> Preview(string type, string? level = null) =>
+            await client.GetFromJsonAsync<JsonElement>(
+                $"/api/authoring/context?projectId={projectId}&type={type}{(level is null ? "" : $"&softwareLevel={level}")}");
 
         var firstSystem = await Preview("System");
         var secondSystem = await Preview("System");
-        var firstSoftware = await Preview("Software");
-        var secondSoftware = await Preview("Software");
+        var firstSoftware = await Preview("Software", "HighLevel");
+        var secondSoftware = await Preview("Software", "HighLevel");
 
-        Assert.Equal("SCR-00001", firstSystem.GetProperty("changeRequestNumber").GetString());
+        Assert.Equal("SRCR-00001", firstSystem.GetProperty("changeRequestNumber").GetString());
         Assert.Equal(firstSystem.GetRawText(), secondSystem.GetRawText());
-        Assert.Equal("SWCR-00001", firstSoftware.GetProperty("changeRequestNumber").GetString());
+        Assert.Equal("HLRCR-00001", firstSoftware.GetProperty("changeRequestNumber").GetString());
         Assert.Equal(firstSoftware.GetRawText(), secondSoftware.GetRawText());
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        var previewedScopes = new[] { "SCR", "SWCR", "SYSR", "HLR", "LLR" };
+        var previewedScopes = new[] { "SRCR", "HLRCR", "SYSR", "HLR", "LLR" };
         Assert.Empty(await db.IdentifierSequences.AsNoTracking().Where(x => previewedScopes.Contains(x.Scope)).ToListAsync());
 
-        Assert.Equal("SCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, default));
+        Assert.Equal("SRCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, null, default));
         Assert.Equal("SYSR-000001", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", default));
     }
 
@@ -77,16 +80,16 @@ public sealed class IdentifierAllocationTests
         Assert.Equal("SYSR-000001", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", default));
         Assert.Equal("HLR-000001", await IdentifierAllocator.NextRequirementAsync(db, "HLR", default));
         Assert.Equal("SYSR-000002", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", default));
-        Assert.Equal("SCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, default));
-        Assert.Equal("SWCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.Software, default));
-        Assert.Equal("SCR-00002", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, default));
+        Assert.Equal("SRCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, null, default));
+        Assert.Equal("HLRCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.Software, RequirementLevel.HighLevel, default));
+        Assert.Equal("SRCR-00002", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, null, default));
         Assert.Equal("SYSTP-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.System, default));
         Assert.Equal("HLRTP-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.HighLevel, default));
 
         // A sequence belongs to its prefix, not to a Project — two Projects share one SYSR run, which is what
         // the repository-wide unique index on the base number has always required.
         var sequences = await db.IdentifierSequences.AsNoTracking().OrderBy(x => x.Scope).ToListAsync();
-        Assert.Equal(new[] { "HLR", "HLRTP", "SCR", "SWCR", "SYSR", "SYSTP" }, sequences.Select(x => x.Scope));
+        Assert.Equal(new[] { "HLR", "HLRCR", "HLRTP", "SRCR", "SYSR", "SYSTP" }, sequences.Select(x => x.Scope));
     }
 
     [Fact]

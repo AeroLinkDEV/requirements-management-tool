@@ -22,15 +22,15 @@ public sealed class RequirementMaterializationTests
             var program = new ProgramRecord("FMS", "FMSR"); var project = new ProjectRecord(program.Id, "Software", "FMS Software"); var release = new SoftwareRelease(project.Id, "3.3", false);
             db.AddRange(program, project, release); await db.SaveChangesAsync();
 
-            var firstScr = ApprovedScr("SCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce, "Initial round robin requirement", project.Id, release.Id, now);
+            var firstScr = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce, "Initial round robin requirement", project.Id, release.Id, now);
             var first = FrozenBaseline("SW-00.10", project.Id, release.Id, null, firstScr, now); db.AddRange(firstScr, first); await db.SaveChangesAsync();
             await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(first.Id, "cm", now, default);
 
-            var modifyScr = ApprovedScr("SCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify, "Clarified round robin requirement", project.Id, release.Id, now);
+            var modifyScr = ApprovedScr("HLRCR-00002", "SWR-00002375", 1, RequirementChangeKind.Modify, "Clarified round robin requirement", project.Id, release.Id, now);
             var second = FrozenBaseline("SW-00.20", project.Id, release.Id, first.Id, modifyScr, now); db.AddRange(modifyScr, second); await db.SaveChangesAsync();
             await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(second.Id, "cm", now, default);
 
-            var retireScr = ApprovedScr("SCR-00003", "SWR-00002375", 2, RequirementChangeKind.Retire, "", project.Id, release.Id, now);
+            var retireScr = ApprovedScr("HLRCR-00003", "SWR-00002375", 2, RequirementChangeKind.Retire, "", project.Id, release.Id, now);
             var third = FrozenBaseline("SW-00.30", project.Id, release.Id, second.Id, retireScr, now); db.AddRange(retireScr, third); await db.SaveChangesAsync();
             await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(third.Id, "cm", now, default);
 
@@ -54,7 +54,7 @@ public sealed class RequirementMaterializationTests
             var program = new ProgramRecord("FMS", "FMST"); var project = new ProjectRecord(program.Id, "Software", "FMS Software"); var release = new SoftwareRelease(project.Id, "1.6", false);
             db.AddRange(program, project, release); await db.SaveChangesAsync();
 
-            var system = new SystemChangeRequest("SCR-00001", 0, project.Id, release.Id, "System parents", "P", "A", "S", "author", now);
+            var system = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id, "System parents", "P", "A", "S", "author", now);
             system.AddRequirementChange("author", "SYSR-000001", 0, RequirementLevel.System, RequirementChangeKind.Introduce, "The system shall navigate.", "Parent one.", "Test", now);
             system.AddRequirementChange("author", "SYSR-000002", 0, RequirementLevel.System, RequirementChangeKind.Introduce, "The system shall monitor position.", "Parent two.", "Test", now);
             system.SubmitForReview("author", [new("reviewer", "Reviewer")], now); system.ApproveActiveStage("reviewer", now);
@@ -64,7 +64,7 @@ public sealed class RequirementMaterializationTests
                                  join revision in db.RequirementRevisions on artifact.Id equals revision.ArtifactId
                                  orderby artifact.BaseNumber select revision.Id).ToListAsync();
 
-            var software = new SystemChangeRequest("SWCR-00001", 0, project.Id, release.Id, "Software allocations", "P", "A", "S", "author", now, ChangeRequestType.Software);
+            var software = new SystemChangeRequest("HLRCR-00001", 0, project.Id, release.Id, "Software allocations", "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
             software.AddRequirementChange("author", "HLR-000001", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "The software shall navigate.", "One-to-one allocation.", "Test", now,
                 proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(new[] { parents[0] }));
             software.AddRequirementChange("author", "HLR-000002", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "The software shall monitor navigation integrity.", "Many-to-one allocation.", "Test", now,
@@ -81,7 +81,7 @@ public sealed class RequirementMaterializationTests
                                           select revision).SingleAsync();
             Assert.Contains(links, x => x.SourceRevisionId == firstHlrRevision.Id && x.TargetRevisionId == parents[0]);
 
-            var revise = new SystemChangeRequest("SWCR-00002", 0, project.Id, release.Id, "Supersede allocated HLR", "P", "A", "S", "author", now, ChangeRequestType.Software);
+            var revise = new SystemChangeRequest("HLRCR-00002", 0, project.Id, release.Id, "Supersede allocated HLR", "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
             revise.AddRequirementChange("author", "HLR-000001", 1, RequirementLevel.HighLevel, RequirementChangeKind.Modify, "The software shall navigate with integrity monitoring.", "Reassessed allocation.", "Test", now,
                 proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(new[] { parents[0] }));
             revise.SubmitForReview("author", [new("reviewer", "Reviewer")], now); revise.ApproveActiveStage("reviewer", now);
@@ -98,7 +98,7 @@ public sealed class RequirementMaterializationTests
 
     private static SystemChangeRequest ApprovedScr(string scrNumber, string requirementNumber, int revision, RequirementChangeKind kind, string statement, Guid projectId, Guid releaseId, DateTimeOffset now)
     {
-        var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software);
+        var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
         scr.AddRequirementChange("author", requirementNumber, revision, RequirementLevel.HighLevel, kind, statement, "Rationale", "Test", now);
         scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now); scr.ApproveActiveStage("reviewer", now); return scr;
     }

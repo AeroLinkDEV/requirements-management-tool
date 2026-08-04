@@ -15,7 +15,7 @@ test('configured reviewer identity remains canonical from assignment through sig
   const showcase = await showcaseSeed(request)
 
   await apiLogin(request, 'systems.author')
-  const draftResponse = await request.post(`${apiBase}/api/scr-drafts`, { data: {
+  const draftResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: showcase.projectId,
     targetReleaseId: showcase.activeReleaseId,
     type: 'System',
