@@ -1463,6 +1463,14 @@ choices are created as focused issues only when their trigger and acceptance bou
 
 ## Open Questions for Later Phases
 
+- **OQ-022: What happens when a source identifier is renamed between two extracts?** A re-import is keyed on
+  the source's own stable object number, so an object renamed in DOORS from `SYS-01234` to `SYS-99999` is
+  correctly recognised as the same object. The recorded `SourceIdentifier` is currently left as it was, so a
+  search for the new name finds nothing. Overwriting it would be worse: the old name is exactly what every
+  external drawing and CDRL still cites, and losing it defeats the purpose of keeping source identifiers at
+  all. The likely answer is to keep both, which means a source identifier gains a history of its own — a
+  design worth settling against a real extract rather than inventing now. Reached while building Phase 4
+  (#332); blocks nothing until a program is actually re-imported.
 - What program-defined feedback workflow applies to derived HLRs and LLRs?
 - Which additional GitLab metadata or automated synchronization is useful after the exact LLR-to-merge MVP is
   proven, without expanding AeroLink into code management?

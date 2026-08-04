@@ -68,13 +68,23 @@ public static class BaselineImportEndpoints
             var import = await db.BaselineImports.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (import is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, import.ProjectId, ct)) return Results.Forbid();
-            var identities = await db.SourceIdentities.AsNoTracking()
-                .Where(x => x.BaselineImportId == id).OrderBy(x => x.SourceModule).ThenBy(x => x.SourceIdentifier)
-                .Take(2000).ToListAsync(ct);
+            const int page = 2000;
+            var matching = db.SourceIdentities.AsNoTracking().Where(x => x.BaselineImportId == id);
+            // A real extract runs to thousands of objects, so this page is reached in ordinary use. The total
+            // is reported alongside it: a capped list that does not say it was capped reads as the whole set,
+            // which on this endpoint means reading a partial import as a complete one.
+            var total = await matching.CountAsync(ct);
+            var identities = await matching
+                .OrderBy(x => x.SourceModule).ThenBy(x => x.SourceIdentifier)
+                .Take(page).ToListAsync(ct);
             var ids = identities.Select(x => x.Id).ToList();
             var history = await db.SourceHistoryEntries.AsNoTracking()
                 .Where(x => ids.Contains(x.SourceIdentityId)).ToListAsync(ct);
-            return Results.Ok(identities.Select(x => new
+            return Results.Ok(new
+            {
+                total,
+                returned = identities.Count,
+                records = identities.Select(x => new
             {
                 x.Id, x.SourceModule, x.SourceObjectKey, x.SourceIdentifier, x.InImportedBaseline,
                 x.FirstSeenAt, x.LastSeenAt,
@@ -85,7 +95,8 @@ public static class BaselineImportEndpoints
                         entry.SourceBaselineName, entry.Statement, entry.ChangedBy, entry.ChangedAt,
                         entry.SourceChangeReference
                     })
-            }));
+                })
+            });
         });
 
         // Gate 1. The extract is accepted and hashed; nothing is parsed yet.
@@ -142,12 +153,13 @@ public static class BaselineImportEndpoints
             // Two objects claiming the same source identity means neither can be keyed reliably, so a
             // re-extract could not tell them apart. Refused here rather than reported at Reconcile, because
             // there is no mapping decision that makes it safe.
-            var duplicate = records.GroupBy(x => (Module: x.SourceModule?.Trim() ?? "", Key: x.SourceObjectKey?.Trim() ?? ""))
+            var duplicate = records
+                .GroupBy(x => (Module: x.SourceModule?.Trim() ?? "", ObjectKey: x.SourceObjectKey?.Trim() ?? ""))
                 .FirstOrDefault(group => group.Count() > 1);
             if (duplicate is not null)
                 return Results.BadRequest(new
                 {
-                    error = $"'{duplicate.Key.Key}' appears {duplicate.Count()} times in {duplicate.Key.Module}. "
+                    error = $"'{duplicate.Key.ObjectKey}' appears {duplicate.Count()} times in {duplicate.Key.Module}. "
                         + "Two objects claiming the same source identity cannot be told apart by a later extract."
                 });
 
@@ -258,13 +270,21 @@ public static class BaselineImportEndpoints
                 var term = search.Trim();
                 source = source.Where(x => EF.Functions.Like(x.SourceIdentifier, $"%{term}%"));
             }
+            // Reported rather than left implicit. On this endpoint above all others, a list that was quietly
+            // cut short is read as the answer — and the answer people come here for is whether a source
+            // identifier is still known at all.
+            var total = await source.CountAsync(ct);
             var identities = await source.OrderBy(x => x.SourceIdentifier).Take(200).ToListAsync(ct);
             var ids = identities.Select(x => x.Id).ToList();
             var links = await db.SourceIdentityLinks.AsNoTracking()
                 .Where(x => ids.Contains(x.SourceIdentityId)).ToListAsync(ct);
             var history = await db.SourceHistoryEntries.AsNoTracking()
                 .Where(x => ids.Contains(x.SourceIdentityId)).ToListAsync(ct);
-            return Results.Ok(identities.Select(x => new
+            return Results.Ok(new
+            {
+                total,
+                returned = identities.Count,
+                matches = identities.Select(x => new
             {
                 x.Id, x.SourceSystem, x.SourceModule, x.SourceObjectKey, x.SourceIdentifier,
                 // False means the object was in the source's history but not the baseline that was imported.
@@ -278,7 +298,8 @@ public static class BaselineImportEndpoints
                         entry.SourceBaselineName, entry.Statement, entry.ChangedBy, entry.ChangedAt,
                         entry.SourceChangeReference
                     })
-            }));
+                })
+            });
         });
 
         async Task<IResult> MutateAsync(Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity,
