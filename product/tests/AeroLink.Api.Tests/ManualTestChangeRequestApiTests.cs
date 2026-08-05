@@ -145,8 +145,11 @@ public sealed class ManualTestChangeRequestApiTests
             new { discipline = "System", changeRequestIds = new[] { fixture.AutoRaisedChangeId } });
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
+        // Named, so the engineer knows where the change went. This one already has an assessment of its own
+        // rather than being folded into somebody else's package, and the refusal says which it is — saying
+        // it was "covered by" its own number would name the change after itself.
         Assert.Contains("SRCR-00912", body);
-        Assert.Contains("SYSTCR-", body);
+        Assert.Contains("already has a System test assessment", body);
     }
 
     [Fact]
@@ -195,6 +198,9 @@ public sealed class ManualTestChangeRequestApiTests
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var review = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.AutoTcrId);
+            // Automatically raised packages arrive unassessed now, and there is nothing to send for review
+            // until somebody has said whether test work is required at all.
+            review.RecordTestChangeRequired("manual.engineer", DateTimeOffset.UtcNow);
             review.Submit("manual.engineer", "independent.reviewer", true, DateTimeOffset.UtcNow);
             await db.SaveChangesAsync();
         }

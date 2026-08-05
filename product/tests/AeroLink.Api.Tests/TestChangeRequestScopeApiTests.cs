@@ -87,7 +87,7 @@ public sealed class TestChangeRequestScopeApiTests
     }
 
     [Fact]
-    public async Task A_package_is_raised_with_a_controlled_number_of_its_own()
+    public async Task An_approved_change_is_raised_to_be_assessed_and_numbered_only_once_it_needs_test_work()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -97,11 +97,48 @@ public sealed class TestChangeRequestScopeApiTests
         using var response = await client.GetAsync($"/api/releases/{fixture.ReleaseId}/test-change-reviews");
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
-        var reviews = JsonSerializer.Deserialize<JsonElement>(body);
-        var numbers = reviews.EnumerateArray().Select(x => x.GetProperty("displayNumber").GetString()).ToList();
-        // Numbered per discipline, following the SYSTP/HLRTP/LLRTP pattern the procedures already use.
-        Assert.All(numbers, number => Assert.Matches(@"^SYSTCR-\d{6}\.\d{2}$", number!));
-        Assert.Equal(numbers.Count, numbers.Distinct().Count());
+        var raised = JsonSerializer.Deserialize<JsonElement>(body).EnumerateArray().ToList();
+
+        // Raised as questions, not as controlled records. Each one shows the change it is asking about until
+        // somebody answers, exactly as a downstream requirement assessment does.
+        Assert.All(raised, review => Assert.Equal("Pending", review.GetProperty("outcome").GetString()));
+        Assert.All(raised, review => Assert.Matches(@"^SRCR-\d{5}\.\d{2}$", review.GetProperty("displayNumber").GetString()!));
+
+        var first = raised[0].GetProperty("id").GetGuid();
+        using var concluded = await client.PostAsJsonAsync($"/api/test-change-reviews/{first}/conclusion",
+            new { testChangeRequired = true });
+        Assert.True(concluded.IsSuccessStatusCode, await concluded.Content.ReadAsStringAsync());
+
+        // Answering that test work is required is what brings the SYSTCR into being.
+        var detail = await concluded.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ChangeRequired", detail.GetProperty("outcome").GetString());
+        Assert.Matches(@"^SYSTCR-\d{6}\.\d{2}$", detail.GetProperty("displayNumber").GetString()!);
+    }
+
+    [Fact]
+    public async Task Concluding_that_no_test_work_is_needed_raises_no_test_change_request()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "scope.engineer");
+
+        var raised = JsonSerializer.Deserialize<JsonElement>(
+            await client.GetStringAsync($"/api/releases/{fixture.ReleaseId}/test-change-reviews"))
+            .EnumerateArray().First().GetProperty("id").GetGuid();
+
+        using var refused = await client.PostAsJsonAsync($"/api/test-change-reviews/{raised}/conclusion",
+            new { testChangeRequired = false, rationale = "" });
+        // The conclusion that produces nothing is the one that has to say why.
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+
+        using var concluded = await client.PostAsJsonAsync($"/api/test-change-reviews/{raised}/conclusion",
+            new { testChangeRequired = false, rationale = "The existing procedures already exercise this wording." });
+        Assert.True(concluded.IsSuccessStatusCode, await concluded.Content.ReadAsStringAsync());
+        var detail = await concluded.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("NoChangeRequired", detail.GetProperty("outcome").GetString());
+        // No number, because no test change request exists — that is the content of the conclusion.
+        Assert.Equal("", detail.GetProperty("baseNumber").GetString());
     }
 
     [Fact]
@@ -138,6 +175,12 @@ public sealed class TestChangeRequestScopeApiTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "scope.engineer");
+
+        // Assessed first, so the package doing the covering is a controlled test change request and the
+        // refusal can name it as one.
+        using var assessed = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.FirstReviewId}/conclusion", new { testChangeRequired = true });
+        Assert.True(assessed.IsSuccessStatusCode, await assessed.Content.ReadAsStringAsync());
 
         using var first = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests", new { changeRequestId = fixture.SecondChangeId });

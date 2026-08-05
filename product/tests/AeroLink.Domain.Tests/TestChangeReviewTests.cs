@@ -7,8 +7,66 @@ public sealed class TestChangeReviewTests
 {
     private static readonly DateTimeOffset Now = new(2026, 7, 29, 12, 0, 0, TimeSpan.Zero);
 
-    private static TestChangeReview Create(TestChangeReviewDiscipline discipline = TestChangeReviewDiscipline.System) =>
+    /// <summary>
+    /// A review that has been assessed and found to need test work — which is what makes it a test change
+    /// request at all, and the state most of these tests are about.
+    /// </summary>
+    private static TestChangeReview Create(TestChangeReviewDiscipline discipline = TestChangeReviewDiscipline.System)
+    {
+        var review = Raised(discipline);
+        review.RecordTestChangeRequired("verification.engineer", Now);
+        return review;
+    }
+
+    /// <summary>As an approved change leaves it: unassessed, unnumbered, and not yet anything controlled.</summary>
+    private static TestChangeReview Raised(TestChangeReviewDiscipline discipline = TestChangeReviewDiscipline.System) =>
         new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), discipline, "SRCR-00039.00", Now);
+
+    [Fact]
+    public void An_approved_change_arrives_needing_assessment_and_carrying_no_controlled_number()
+    {
+        var raised = Raised();
+
+        // Numbering on arrival gave every approved change a SYSTCR before anybody had looked at whether it
+        // touched a single procedure. It is a question until it is answered.
+        Assert.Equal(TestChangeReviewOutcome.Pending, raised.Outcome);
+        Assert.Equal("", raised.BaseNumber);
+        Assert.Throws<DomainException>(() => raised.AssignControlledNumber("SYSTCR-000042", Now));
+        Assert.Throws<DomainException>(() => raised.Submit("verification.engineer", "test.lead", true, Now));
+
+        raised.RecordTestChangeRequired("verification.engineer", Now.AddMinutes(1));
+        raised.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(1));
+        Assert.Equal("SYSTCR-000042", raised.BaseNumber);
+        Assert.Equal("verification.engineer", raised.DecidedBy);
+    }
+
+    [Fact]
+    public void Concluding_that_no_test_work_is_required_states_why_and_raises_nothing()
+    {
+        var raised = Raised();
+
+        Assert.Throws<DomainException>(() => raised.RecordNoTestChangeRequired("verification.engineer", "", Now));
+
+        raised.RecordNoTestChangeRequired("verification.engineer",
+            "The approved change alters wording the existing procedures already exercise.", Now.AddMinutes(1));
+
+        Assert.Equal(TestChangeReviewOutcome.NoChangeRequired, raised.Outcome);
+        // No number, because there is no test change request — that is the whole content of the conclusion.
+        Assert.Equal("", raised.BaseNumber);
+        Assert.Throws<DomainException>(() => raised.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(2)));
+    }
+
+    [Fact]
+    public void A_controlled_test_change_request_cannot_later_claim_no_test_work_was_needed()
+    {
+        var review = Create();
+        review.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(1));
+
+        // Its procedure decisions exist under that number. Withdrawing the conclusion has to withdraw them
+        // too, rather than leaving a numbered record asserting that nothing was ever required.
+        Assert.Throws<DomainException>(() =>
+            review.RecordNoTestChangeRequired("verification.engineer", "Reconsidered.", Now.AddMinutes(2)));
+    }
 
     [Fact]
     public void Approved_change_creates_an_open_discipline_specific_review()

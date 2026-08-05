@@ -17,6 +17,8 @@ public sealed record CreateTestChangeRequestRequest(TestChangeReviewDiscipline D
     Guid[]? ProblemReportIds = null);
 public sealed record LinkProblemReportsRequest(Guid[] ProblemReportIds);
 public sealed record SubmitTestChangeReviewRequest(string ApproverId);
+/// <param name="Rationale">Why no test work is needed. Required only when concluding that none is.</param>
+public sealed record TestAssessmentConclusionRequest(bool TestChangeRequired, string? Rationale);
 public sealed record ApproveTestChangeReviewRequest(string Rationale);
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
 
@@ -84,6 +86,10 @@ public static class VerificationImpactEndpoints
                     .Concat(review.AdditionalSources.OrderBy(x => x.ChangeRequestNumber)
                         .Select(x => new { id = x.ChangeRequestId, number = x.ChangeRequestNumber, title = changeRequests.GetValueOrDefault(x.ChangeRequestId) ?? "Source change request", originating = false })),
                 review.AssignedEngineerId,
+                outcome = review.Outcome.ToString(),
+                review.NoChangeRationale,
+                review.DecidedBy,
+                review.DecidedAt,
                 review.SubmittedBy,
                 review.SelectedApproverId,
                 review.SubmittedAt,
@@ -132,6 +138,48 @@ public static class VerificationImpactEndpoints
                 http.UserAccount().UserName, DateTimeOffset.UtcNow, ct);
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { review.Id, linkedProblemReports = request.ProblemReportIds.Distinct() });
+        });
+
+        /// <summary>
+        /// The test assessment's conclusion, and the point at which a test change request comes into being.
+        ///
+        /// Mirrors the requirements-side downstream assessment exactly, because it is the same question asked
+        /// of the verification discipline: does this approved change need work here or not. Concluding that
+        /// it does allocates the controlled SYSTCR, HLRTCR or LLRTCR number; concluding that it does not
+        /// produces nothing, and so is the conclusion that goes for approval.
+        /// </summary>
+        app.MapPost("/api/test-change-reviews/{id:guid}/conclusion", async (Guid id, TestAssessmentConclusionRequest request,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build test change requests are read-only." });
+            var actor = http.UserAccount().UserName;
+            if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
+                return Results.Forbid();
+            if (review.AssignedEngineerId is not null
+                && !string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)
+                && !await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestLead))
+                return Results.Forbid();
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                if (request.TestChangeRequired)
+                {
+                    review.RecordTestChangeRequired(actor, now);
+                    review.AssignControlledNumber(
+                        await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct), now);
+                }
+                else review.RecordNoTestChangeRequired(actor, request.Rationale ?? "", now);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new
+                {
+                    review.Id, outcome = review.Outcome.ToString(), review.BaseNumber, review.DisplayNumber,
+                    review.NoChangeRationale, review.DecidedBy, review.DecidedAt, state = review.State.ToString()
+                });
+            }
+            catch (DomainException problem) { return Results.BadRequest(new { error = problem.Message }); }
         });
 
         app.MapPost("/api/test-change-reviews/{id:guid}/assign", async (Guid id, AssignVerificationImpactRequest request,
@@ -314,14 +362,19 @@ public static class VerificationImpactEndpoints
             {
                 var origin = await db.TestChangeReviews.AsNoTracking()
                     .Where(x => x.ChangeRequestId == change.Id && x.Discipline == request.Discipline)
-                    .Select(x => x.BaseNumber).FirstOrDefaultAsync(ct);
+                    .Select(x => x.DisplayNumber).FirstOrDefaultAsync(ct);
                 var claimed = await db.TestChangeRequestClaims.AsNoTracking()
                     .Where(x => x.ChangeRequestId == change.Id)
-                    .Join(db.TestChangeReviews.AsNoTracking(), claim => claim.TestChangeReviewId, review => review.Id, (_, review) => review.BaseNumber)
+                    .Join(db.TestChangeReviews.AsNoTracking(), claim => claim.TestChangeReviewId, review => review.Id, (_, review) => review.DisplayNumber)
                     .FirstOrDefaultAsync(ct);
-                var holder = origin ?? claimed;
-                if (holder is not null)
-                    return Results.Conflict(new { error = $"{change.DisplayNumber} is already covered by {holder}." });
+                // Two different situations, and one sentence could not tell them apart once an unassessed
+                // package took its name from the change it was raised from: being covered by somebody else's
+                // package is not the same as already having an assessment of your own, and the second read
+                // as "X is already covered by X".
+                if (!string.IsNullOrEmpty(origin))
+                    return Results.Conflict(new { error = $"{change.DisplayNumber} already has a {request.Discipline} test assessment." });
+                if (!string.IsNullOrEmpty(claimed))
+                    return Results.Conflict(new { error = $"{change.DisplayNumber} is already covered by {claimed}." });
             }
 
             try
@@ -329,8 +382,12 @@ public static class VerificationImpactEndpoints
                 var now = DateTimeOffset.UtcNow;
                 var actor = http.UserAccount().UserName;
                 var first = changes[0];
+                // Raising one by hand is itself the conclusion that test work is required, so it is numbered
+                // immediately rather than waiting to be assessed by the person who just decided it.
                 var review = new TestChangeReview(release.ProjectId, releaseId, first.Id, request.Discipline,
-                    first.DisplayNumber, now, await IdentifierAllocator.NextTestChangeRequestAsync(db, request.Discipline, ct));
+                    first.DisplayNumber, now);
+                review.RecordTestChangeRequired(actor, now);
+                review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, request.Discipline, ct), now);
                 foreach (var extra in changes.Skip(1))
                     review.IncludeChangeRequest(actor, extra.Id, extra.DisplayNumber, now);
                 db.TestChangeReviews.Add(review);
@@ -379,7 +436,7 @@ public static class VerificationImpactEndpoints
             if (claimedBy != Guid.Empty && claimedBy != id)
             {
                 var holder = await db.TestChangeReviews.AsNoTracking().Where(x => x.Id == claimedBy)
-                    .Select(x => x.BaseNumber).SingleOrDefaultAsync(ct);
+                    .Select(x => x.DisplayNumber).SingleOrDefaultAsync(ct);
                 return Results.Conflict(new { error = $"{change.DisplayNumber} is already covered by {holder}." });
             }
 

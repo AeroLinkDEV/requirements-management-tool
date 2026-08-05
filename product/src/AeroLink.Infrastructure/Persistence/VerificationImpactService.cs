@@ -73,9 +73,11 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
             var discipline = Discipline(change.Level);
             if (!reviews.TryGetValue(discipline, out var review))
             {
+                // Raised unnumbered: an approved change needs assessing, and only an assessment that finds
+                // test-procedure work turns this into a controlled test change request. Numbering here gave
+                // every approved change a SYSTCR before anybody had looked at whether it touched a procedure.
                 review = new TestChangeReview(request.ProjectId, request.TargetReleaseId, request.Id,
-                    discipline, request.DisplayNumber, now,
-                    await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct));
+                    discipline, request.DisplayNumber, now);
                 db.TestChangeReviews.Add(review);
                 await (problemReports ?? new ProblemReportLinkService(db)).PropagateToTestChangeRequestAsync(
                     request.Id, review.Id, actionActor ?? request.AuthorId, now, ct);
@@ -364,8 +366,12 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
             };
             if (!reviews.TryGetValue(discipline, out var review))
             {
-                review = new TestChangeReview(projectId, releaseId, changeRequestId, discipline, sourceNumber, now,
-                    await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct));
+                // An orphaned procedure is itself the finding: the change left a procedure without a
+                // requirement, so test work is required and this is a controlled test change request from
+                // the moment it exists.
+                review = new TestChangeReview(projectId, releaseId, changeRequestId, discipline, sourceNumber, now);
+                review.RecordTestChangeRequired("system.verification", now);
+                review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct), now);
                 db.TestChangeReviews.Add(review);
                 reviews.Add(discipline, review);
             }

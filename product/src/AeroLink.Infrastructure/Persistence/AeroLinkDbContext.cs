@@ -537,6 +537,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("test_change_reviews"); b.HasKey(x => x.Id);
             b.Property(x => x.Discipline).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.SourceChangeRequestNumber).HasMaxLength(40).IsRequired();
             b.Property(x => x.BaseNumber).HasMaxLength(40).IsRequired();
             b.Property(x => x.SelectedApproverId).HasMaxLength(100);

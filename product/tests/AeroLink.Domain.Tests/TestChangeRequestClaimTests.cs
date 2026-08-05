@@ -11,8 +11,14 @@ namespace AeroLink.Domain.Tests;
 /// </summary>
 public sealed class TestChangeRequestClaimTests
 {
-    private static TestChangeReview Package(string number = "SYSTCR-000001") =>
-        new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), TestChangeReviewDiscipline.System, "SRCR-00031", DateTimeOffset.UtcNow, number);
+    /// <summary>A package that has been assessed as needing test work, which is what gives it its number.</summary>
+    private static TestChangeReview Package(string number = "SYSTCR-000001")
+    {
+        var package = new TestChangeReview(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            TestChangeReviewDiscipline.System, "SRCR-00031", DateTimeOffset.UtcNow, number);
+        package.RecordTestChangeRequired("verification.engineer", DateTimeOffset.UtcNow);
+        return package;
+    }
 
     [Fact]
     public void A_package_carries_a_controlled_number_and_a_revision()
