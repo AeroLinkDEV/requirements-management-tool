@@ -38,7 +38,7 @@ test('downstream assessment actions follow authority and submit without a form-n
   expect([...new Set(entryControls)]).toEqual(['Open assessment'])
 
   const assessment=queue.locator('.downstreamAssessment').filter({hasText:'SRCR-00031.00'}).first()
-  await assessment.getByRole('button',{name:/Open HLR assessment/}).click()
+  await assessment.getByRole('button',{name:'Open assessment'}).click()
   const workbench=page.getByRole('dialog',{name:'SRCR-00031.00 downstream impact'})
   await workbench.getByRole('button',{name:'Take it on'}).click()
   await expect(workbench.getByRole('button',{name:'No change required'})).toBeVisible()
@@ -53,10 +53,15 @@ test('downstream assessment actions follow authority and submit without a form-n
   await approver.fill('software.lead')
   await workbench.locator('.personSuggestions button[data-user-name="software.lead"]').click()
   await workbench.getByRole('button',{name:'Send for approval'}).click()
-  await expect(workbench).toContainText('HLR assessment in review')
+  // The queue's answer reads the same before and after sending — a decided no-change conclusion is pending
+  // approval either way — so what proves the submission landed is the drawer handing the assessment over:
+  // the approver picker goes, and the approver it is now with is named.
+  await expect(workbench.locator('.personName[title="software.lead"]')).toBeVisible()
+  await expect(workbench.getByRole('button',{name:'Send for approval'})).toBeHidden()
+  await expect(workbench).toContainText('HLR Assessment Complete – No HLRCR Required Pending Approval')
   await page.reload()
   const persisted=page.locator('.downstreamAssessment').filter({hasText:'SRCR-00031.00'}).first()
-  await expect(persisted).toContainText('HLR assessment in review')
+  await expect(persisted).toContainText('HLR Assessment Complete – No HLRCR Required Pending Approval')
   const persistedWorkbench=page.getByRole('dialog',{name:'SRCR-00031.00 downstream impact'})
   await expect(persistedWorkbench.locator('.personName[title="software.lead"]')).toBeVisible()
 
@@ -66,7 +71,7 @@ test('downstream assessment actions follow authority and submit without a form-n
   await openNavigationGroup(approverPage,'SOFTWARE ENGINEERING')
   await approverPage.getByRole('link',{name:'Software Change Requests'}).click()
   const approvalAssessment=approverPage.locator('.downstreamAssessment').filter({hasText:'SRCR-00031.00'}).first()
-  await approvalAssessment.getByRole('button',{name:/Open HLR assessment/}).click()
+  await approvalAssessment.getByRole('button',{name:'Open assessment'}).click()
   const approvalWorkbench=approverPage.getByRole('dialog',{name:'SRCR-00031.00 downstream impact'})
   await approvalWorkbench.getByRole('button',{name:'Return'}).click()
   const returnDialog=approverPage.getByRole('dialog',{name:'Return SRCR-00031.00 assessment'})
@@ -75,7 +80,9 @@ test('downstream assessment actions follow authority and submit without a form-n
   await returnDialog.getByLabel('Decision rationale').fill('Clarify the software-level allocation before approval.')
   await returnDialog.getByRole('button',{name:'Return assessment'}).click()
   await expect(returnDialog).toBeHidden()
-  await expect(approvalWorkbench).toContainText('HLR no downstream change — ready for review')
+  // Returned to its engineer, so it is decided and unapproved — which is what the label says. The reviewer's
+  // reason for sending it back is stated inside the drawer rather than in the queue's one-line answer.
+  await expect(approvalWorkbench).toContainText('HLR Assessment Complete – No HLRCR Required Pending Approval')
   await expect(approvalWorkbench).toContainText('Clarify the software-level allocation before approval.')
   await approverContext.close()
 })
@@ -118,11 +125,11 @@ test('an assessment deep link explains impact and a required change creates and 
   await expect(page).not.toHaveURL(/assessment=/)
 
   const assessment=page.locator('.downstreamAssessment').filter({hasText:candidate.sourceChangeRequestNumber}).first()
-  await assessment.getByRole('button',{name:/Open HLR assessment/}).click()
+  await assessment.getByRole('button',{name:'Open assessment'}).click()
   const decisionWorkbench=page.getByRole('dialog',{name:`${candidate.sourceChangeRequestNumber} downstream impact`})
   if(await decisionWorkbench.getByRole('button',{name:'Take it on'}).count())await decisionWorkbench.getByRole('button',{name:'Take it on'}).click()
   await decisionWorkbench.getByRole('button',{name:'Change required',exact:true}).click()
-  await expect(decisionWorkbench).toContainText('Draft HLRCR needed')
+  await expect(decisionWorkbench).toContainText('HLR Assessment Complete – Draft HLRCR Required')
   await decisionWorkbench.getByRole('button',{name:'Create Draft HLRCR'}).click()
   await expect(page.getByRole('heading',{name:'Create HLR Change Request'})).toBeVisible()
   await page.getByLabel('Title').fill(`Implement ${candidate.sourceChangeRequestNumber} downstream impact`)
@@ -211,7 +218,7 @@ test('a concluded assessment states its conclusion, and correcting it is an act 
   await approver.fill('software.lead')
   await reloaded.locator('.personSuggestions button[data-user-name="software.lead"]').click()
   await reloaded.getByRole('button',{name:'Send for approval'}).click()
-  await expect(reloaded).toContainText('HLR assessment in review')
+  await expect(reloaded).toContainText('HLR Assessment Complete – No HLRCR Required Pending Approval')
   // With the approver holding it, the engineer can neither answer it again nor withdraw it behind them.
   await expect(reloaded.getByRole('button',{name:'Reopen assessment'})).toHaveCount(0)
   await expect(reloaded.getByRole('button',{name:'No change required'})).toHaveCount(0)
@@ -223,7 +230,7 @@ test('a concluded assessment states its conclusion, and correcting it is an act 
   const approval=approverPage.getByRole('dialog',{name:`${number} downstream impact`})
   await expect(approval).toBeVisible({timeout:30_000})
   await approval.getByRole('button',{name:'Approve'}).click()
-  await expect(approval).toContainText('Assessment complete')
+  await expect(approval).toContainText('HLR Assessment Complete – No HLRCR Required')
   // Approved: the conclusion is stated with both hands that touched it, and the only act left is a
   // deliberate withdrawal.
   await expect(approval.locator('.recordedConclusion')).toContainText('Approved by')

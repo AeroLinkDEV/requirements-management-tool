@@ -27,26 +27,67 @@ public sealed class DownstreamChangeAssessmentTests
     {
         var assessment = Create();
         assessment.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
-        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00077.00", Now.AddMinutes(2));
-        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00078.00", Now.AddMinutes(3));
+        assessment.RecordChangeRequired("software.engineer", Now.AddMinutes(2));
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00077.00", Now.AddMinutes(3));
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00078.00", Now.AddMinutes(4));
 
         Assert.Equal(2, assessment.ChangeRequestLinks.Count);
         Assert.Equal(DownstreamAssessmentOutcome.ChangeRequestsLinked, assessment.Outcome);
     }
 
     [Fact]
-    public void Change_required_is_honest_pending_work_and_cannot_be_submitted_without_an_SWCR()
+    public void A_conclusion_that_calls_for_a_change_is_complete_when_it_is_recorded()
     {
         var assessment = Create();
         assessment.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
         assessment.RecordChangeRequired("software.engineer", Now.AddMinutes(2));
 
         Assert.Equal(DownstreamAssessmentOutcome.ChangeRequired, assessment.Outcome);
+        // Nobody approves it. The change request this calls for is reviewed on its own terms, so a second
+        // approval here would review the same judgement twice and delay the work that carries it.
         Assert.Throws<DomainException>(() => assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(3)));
 
         assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00079.00", Now.AddMinutes(4));
-        assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(5));
+        Assert.Equal(DownstreamAssessmentOutcome.ChangeRequestsLinked, assessment.Outcome);
+        // Still nothing to send. Linking the change request records which one carries the change; it does
+        // not turn a finished conclusion into one awaiting an answer.
+        Assert.Throws<DomainException>(() => assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(5)));
+        Assert.Equal(DownstreamAssessmentState.Open, assessment.State);
+    }
+
+    [Fact]
+    public void A_change_request_cannot_be_linked_before_the_assessment_calls_for_one()
+    {
+        var assessment = Create();
+        assessment.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
+
+        // Otherwise the queue reports controlled downstream work while the assessment behind it has still
+        // concluded nothing — which is how a change request comes to exist that nobody decided was needed.
+        Assert.Throws<DomainException>(() =>
+            assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00079.00", Now.AddMinutes(2)));
+
+        assessment.RecordNoChange("software.engineer", "The HLR set already covers this behaviour.", Now.AddMinutes(3));
+        Assert.Throws<DomainException>(() =>
+            assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00079.00", Now.AddMinutes(4)));
+
+        assessment.RecordChangeRequired("software.engineer", Now.AddMinutes(5));
+        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00079.00", Now.AddMinutes(6));
+        Assert.Equal(DownstreamAssessmentOutcome.ChangeRequestsLinked, assessment.Outcome);
+    }
+
+    [Fact]
+    public void Only_a_no_change_conclusion_is_sent_for_approval()
+    {
+        var assessment = Create();
+        assessment.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
+        assessment.RecordNoChange("software.engineer", "The HLR set already covers this behaviour.", Now.AddMinutes(2));
+
+        // It produces no change request, so this is the one conclusion in the chain that nothing downstream
+        // would ever check. It is the reason the approval step still exists at all.
+        assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(3));
         Assert.Equal(DownstreamAssessmentState.InReview, assessment.State);
+        assessment.Approve("assurance.reviewer", Now.AddMinutes(4));
+        Assert.Equal(DownstreamAssessmentState.Approved, assessment.State);
     }
 
     [Fact]
@@ -75,19 +116,26 @@ public sealed class DownstreamChangeAssessmentTests
     }
 
     [Fact]
-    public void Returned_review_rationale_survives_linking_additional_change_work()
+    public void A_returned_assessment_keeps_the_reviewer_reason_until_it_is_answered_again()
     {
+        // Only a no-change conclusion is ever in review, so it is the only one that can be sent back.
         var assessment = Create();
         assessment.Assign("software.lead", "software.engineer", Now.AddMinutes(1));
-        assessment.RecordChangeRequired("software.engineer", Now.AddMinutes(2));
-        assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00079.00", Now.AddMinutes(3));
-        assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(4));
-        assessment.ReturnToWork("assurance.reviewer", "Clarify the allocation before approval.", Now.AddMinutes(5));
+        assessment.RecordNoChange("software.engineer", "The HLR set already covers this behaviour.", Now.AddMinutes(2));
+        assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(3));
+        assessment.ReturnToWork("assurance.reviewer", "Clarify the allocation before approval.", Now.AddMinutes(4));
 
+        Assert.Equal(DownstreamAssessmentState.Open, assessment.State);
+        Assert.Equal("Clarify the allocation before approval.", assessment.Rationale);
+
+        // Answering again the other way replaces the reasoning it withdrew, and needs nobody: a conclusion
+        // that calls for a change is complete when it is recorded.
+        assessment.RecordChangeRequired("software.engineer", Now.AddMinutes(5));
         assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00080.00", Now.AddMinutes(6));
 
-        Assert.Equal("Clarify the allocation before approval.", assessment.Rationale);
-        Assert.Equal(2, assessment.ChangeRequestLinks.Count);
+        Assert.Equal("", assessment.Rationale);
+        Assert.Equal(DownstreamAssessmentState.Open, assessment.State);
+        Assert.Single(assessment.ChangeRequestLinks);
     }
 
     [Fact]
@@ -187,10 +235,11 @@ public sealed class DownstreamChangeAssessmentTests
 
         assessment.RecordChangeRequired("software.engineer", Now.AddMinutes(6));
         assessment.LinkChangeRequest("software.engineer", Guid.NewGuid(), "HLRCR-00081.00", Now.AddMinutes(7));
-        assessment.Submit("software.engineer", "assurance.reviewer", Now.AddMinutes(8));
-        assessment.Approve("assurance.reviewer", Now.AddMinutes(9));
 
-        Assert.Equal(DownstreamAssessmentState.Approved, assessment.State);
+        // The withdrawn approval does not have to be replaced by another one. The second answer calls for a
+        // change, and that answer is complete on the engineer's word.
+        Assert.Equal(DownstreamAssessmentState.Open, assessment.State);
         Assert.Equal(DownstreamAssessmentOutcome.ChangeRequestsLinked, assessment.Outcome);
+        Assert.Null(assessment.ApprovedBy);
     }
 }

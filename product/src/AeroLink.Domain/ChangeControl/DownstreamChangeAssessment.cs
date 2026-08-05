@@ -97,10 +97,19 @@ public sealed class DownstreamChangeAssessment
         Decide(actorId, now);
     }
 
+    /// <summary>
+    /// Attaches the downstream change request the assessment called for.
+    ///
+    /// Only once the assessment has concluded that one is required. A change request linked to an assessment
+    /// that never reached that conclusion would be a downstream change nobody decided was needed — and the
+    /// queue would report it as controlled work while the assessment behind it still said nothing.
+    /// </summary>
     public void LinkChangeRequest(string actorId, Guid changeRequestId, string displayNumber, DateTimeOffset now)
     {
         EnsureOpen();
         EnsureAssignee(actorId);
+        if (Outcome is not (DownstreamAssessmentOutcome.ChangeRequired or DownstreamAssessmentOutcome.ChangeRequestsLinked))
+            throw new DomainException("Record that a downstream change is required before linking the change request that carries it.");
         if (changeRequestId == Guid.Empty) throw new DomainException("A downstream change request is required.");
         if (_changeRequestLinks.Any(x => x.ChangeRequestId == changeRequestId)) return;
         _changeRequestLinks.Add(new(Id, changeRequestId, Required(displayNumber, "downstream change request number"), actorId, now));
@@ -108,12 +117,22 @@ public sealed class DownstreamChangeAssessment
         Decide(actorId, now);
     }
 
+    /// <summary>
+    /// Sends a "no downstream change is required" conclusion for independent approval.
+    ///
+    /// Only that conclusion is reviewed. One that calls for a change produces a change request, and that
+    /// change request is reviewed on its own terms — so the assessment behind it is complete on the
+    /// engineer's word. A conclusion that nothing is needed produces nothing, and would otherwise be the one
+    /// answer in the chain that nobody ever checks.
+    /// </summary>
     public void Submit(string actorId, string approverId, DateTimeOffset now)
     {
         EnsureOpen();
         EnsureAssignee(actorId);
-        if (Outcome is DownstreamAssessmentOutcome.Pending or DownstreamAssessmentOutcome.ChangeRequired)
-            throw new DomainException("Record the downstream conclusion and link required SWCR work before submitting the assessment.");
+        if (Outcome != DownstreamAssessmentOutcome.NoChangeRequired)
+            throw new DomainException(Outcome == DownstreamAssessmentOutcome.Pending
+                ? "Record the downstream conclusion before submitting the assessment."
+                : "An assessment that calls for a downstream change is complete when it is recorded. Only a no-change conclusion is approved.");
         var approver = Required(approverId, "selected approver");
         if (string.Equals(approver, actorId, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("The downstream assessment approver must be independent from its submitting engineer.");

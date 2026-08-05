@@ -93,8 +93,11 @@ public static class DownstreamAssessmentEndpoints
                         canAssign = canEngineer && x.State == DownstreamAssessmentState.Open && x.AssignedEngineerId == null,
                         canEdit = canEngineer && x.State == DownstreamAssessmentState.Open
                             && string.Equals(x.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
+                        // Only a no-change conclusion is approved. One that calls for a downstream change is
+                        // complete when it is recorded, because the change request it produces is reviewed
+                        // on its own terms — so there is nothing here to send anybody.
                         canSubmit = canEngineer && x.State == DownstreamAssessmentState.Open
-                            && x.Outcome is DownstreamAssessmentOutcome.NoChangeRequired or DownstreamAssessmentOutcome.ChangeRequestsLinked
+                            && x.Outcome == DownstreamAssessmentOutcome.NoChangeRequired
                             && string.Equals(x.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
                         canApprove = canApprove && x.State == DownstreamAssessmentState.InReview
                             && string.Equals(x.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase),
