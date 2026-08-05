@@ -82,7 +82,12 @@ test.describe('imported baselines', () => {
   test('a source identifier the source retired is answerable, and says it joins nothing', async ({ page, request }) => {
     await apiLogin(request)
     const workspaces = await (await request.get(`${apiBase}/api/workspaces`)).json()
-    const projectId = workspaces[0].projects[0].project.id
+    // Named, not indexed. Two Programs exist now, and their order is not promised — seeding into whichever
+    // came back first would put the records in one Project while the page below shows another.
+    const projectId = workspaces
+      .flatMap((workspace: { projects: { project: { id: string, name: string } }[] }) => workspace.projects)
+      .find((entry: { project: { name: string } }) => entry.project.name === 'FMS Product Development')
+      .project.id
 
     const created = await request.post(`${apiBase}/api/baseline-imports`, {
       data: {
@@ -144,7 +149,9 @@ test.describe('imported baselines', () => {
 
     // The import itself shows what it holds, with the two kinds of record kept apart.
     await page.getByRole('button', { name: /FMS Sys Req v4.2/ }).click()
-    await expect(page.getByText('In the imported baseline')).toBeVisible()
+    // Exact, because the search result above says "In the imported baseline." and the tile says it without
+    // the stop — a substring match claims both and cannot tell which one it proved.
+    await expect(page.getByText('In the imported baseline', { exact: true })).toBeVisible()
     await expect(page.getByText('Retired before this baseline')).toBeVisible()
     await expect(page.getByText(/does .*not.* assert|were not/)).toBeVisible()
   })
