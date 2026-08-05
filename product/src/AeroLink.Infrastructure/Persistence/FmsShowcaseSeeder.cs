@@ -197,7 +197,11 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             .ToDictionaryAsync(x => x.Id, ct);
         var items = await db.VerificationImpactItems.Where(x => x.ProjectId == projectId).ToListAsync(ct);
         var numbered = 0;
-        foreach (var review in reviews.Where(x => string.IsNullOrEmpty(x.BaseNumber)))
+        // Only rows that have concluded test work is required. An unnumbered row used to mean "raised before
+        // controlled numbering existed"; it now also means "raised and not yet assessed", and numbering one
+        // of those would answer the assessment on the engineer's behalf.
+        foreach (var review in reviews.Where(x => string.IsNullOrEmpty(x.BaseNumber)
+            && x.Outcome == TestChangeReviewOutcome.ChangeRequired))
         {
             review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct), DateTimeOffset.UtcNow);
             numbered++;
@@ -358,9 +362,12 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
                 };
                 if (!reviewsByRequestAndDiscipline.TryGetValue((request.Id, discipline), out var review))
                 {
+                    // The showcase's packages exist precisely because they carry procedure decisions, so they
+                    // are seeded as already assessed rather than as questions nobody in the demo will answer.
                     review = new TestChangeReview(projectId, request.TargetReleaseId, request.Id,
-                        discipline, request.DisplayNumber, now,
-                        await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct));
+                        discipline, request.DisplayNumber, now);
+                    review.RecordTestChangeRequired("verification.engineer", now);
+                    review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct), now);
                     db.TestChangeReviews.Add(review);
                     reviewsByRequestAndDiscipline.Add((request.Id, discipline), review);
                 }
@@ -468,6 +475,25 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         db.ChangeTracker.AutoDetectChangesEnabled = automaticChangeDetection;
         await db.SaveChangesAsync(ct);
 
+        // An assessment carrying procedure decisions plainly concluded that test work was required, so it is
+        // recorded as having done so and given the controlled number that conclusion earns. Assessments with
+        // nothing attached are left unanswered on purpose: the showcase should show both a queue with work
+        // waiting to be judged and the test change requests that judging it produced.
+        var reviewsWithWork = (await db.VerificationImpactItems
+                .Where(x => x.ProjectId == projectId).Select(x => x.TestChangeReviewId).Distinct().ToListAsync(ct))
+            .ToHashSet();
+        foreach (var review in await db.TestChangeReviews
+                     .Where(x => x.ProjectId == projectId && x.Outcome == TestChangeReviewOutcome.Pending)
+                     .ToListAsync(ct))
+        {
+            if (!reviewsWithWork.Contains(review.Id)) continue;
+            review.RecordTestChangeRequired("verification.engineer", now);
+            if (string.IsNullOrEmpty(review.BaseNumber))
+                review.AssignControlledNumber(
+                    await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct), now);
+        }
+        await db.SaveChangesAsync(ct);
+
         var releasedReviews = await db.TestChangeReviews
             .Where(x => x.ReleaseId == released.Id && x.State == TestChangeReviewState.Open).ToListAsync(ct);
         var incompleteReviewIds = (await db.VerificationImpactItems
@@ -476,6 +502,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             .ToHashSet();
         foreach (var review in releasedReviews)
         {
+            // These carry the released build's procedure decisions, so the assessment behind them concluded
+            // test work was required. Older showcase databases predate the outcome and are brought forward.
+            if (review.Outcome == TestChangeReviewOutcome.Pending)
+                review.RecordTestChangeRequired("verification.engineer", now);
             review.Submit("verification.engineer", "assurance.reviewer", !incompleteReviewIds.Contains(review.Id), now);
             review.Approve("assurance.reviewer",
                 "Historical procedure changes and exact coverage were approved for released software build SW-01.50.", now);

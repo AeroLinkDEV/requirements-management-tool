@@ -19,7 +19,8 @@ test('coverage opens on the work the build created, then the inventory behind it
   await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
 
   // The queue first: the packages this build's approved changes created.
-  await expect(page.getByRole('heading', { name: 'Test change requests' })).toBeVisible()
+  // Named for the question the page asks, matching the requirements-side queue word for word.
+  await expect(page.getByRole('heading', { name: 'Downstream test assessments' })).toBeVisible()
   // Numbered as controlled records rather than borrowing the number of the change that raised them. The
   // showcase raises one System package for the in-work build, so this is a fact about the page.
   const packages = page.locator('.coverageRow').filter({ hasText: /TCR-/ })
@@ -366,8 +367,10 @@ test('a decision can ask for a procedure that does not exist, and author it from
   // land on somebody else's package, whose items offer no Decide button at all.
   const claimable = page.locator('.coverageRow').filter({ has: page.getByRole('button', { name: 'Take it on' }) }).first()
   await expect(claimable).toBeVisible({ timeout: 30_000 })
+  // A row leads with the change it is assessing, not with a test change request number it may not have yet:
+  // the number is what an assessment produces once it concludes test work is required.
   const packageNumber = ((await claimable.locator('b').first().textContent()) ?? '').trim()
-  expect(packageNumber).toMatch(/^SYSTCR-/)
+  expect(packageNumber).toMatch(/^SRCR-/)
   await claimable.getByRole('button', { name: 'Take it on' }).click()
 
   const packageRow = page.locator('.coverageRow').filter({ hasText: packageNumber }).first()

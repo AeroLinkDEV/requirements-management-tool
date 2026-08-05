@@ -30,7 +30,7 @@ test('verification offers the two pages by name, and both open on real work', as
   // The queue is above the inventory, because a reader arriving to do work needs what nobody has picked up
   // before they need the wall of everything. Asserted rather than assumed: a check that passes by finding
   // nothing to look at is worse than no check, and this suite has already produced one of those.
-  await expect(page.getByRole('heading', { name: 'Test change requests' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Downstream test assessments' })).toBeVisible()
   // Waited for rather than counted: count() does not retry, so reading it the moment the heading paints
   // reports zero packages on a build that has them — which is indistinguishable from a genuinely empty queue.
   const packages = page.locator('.coverageRow').filter({ hasText: /TCR-/ })

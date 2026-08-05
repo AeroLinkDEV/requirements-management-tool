@@ -7,6 +7,15 @@ public enum TestChangeReviewDiscipline { System, HighLevelSoftware, LowLevelSoft
 public enum TestChangeReviewState { Open, InReview, Approved, Superseded }
 
 /// <summary>
+/// What the test assessment of an approved change concluded.
+///
+/// The same three answers the requirements disciplines give, because it is the same question asked of a
+/// different discipline: an approved change either needs test-procedure work or it does not, and until
+/// somebody says which, it needs assessing.
+/// </summary>
+public enum TestChangeReviewOutcome { Pending, ChangeRequired, NoChangeRequired }
+
+/// <summary>
 /// A controlled package of test-procedure decisions raised from one approved change request.
 ///
 /// Software HLR and LLR work is deliberately separated. A software change touching both levels therefore
@@ -65,6 +74,12 @@ public sealed class TestChangeReview
     /// </summary>
     public IReadOnlyCollection<TestChangeRequestClaim> AdditionalSources => _additionalSources.AsReadOnly();
     public TestChangeReviewState State { get; private set; }
+    /// <summary>Whether the assessment has been performed, and what it found.</summary>
+    public TestChangeReviewOutcome Outcome { get; private set; }
+    /// <summary>Why no test-procedure work is required. Recorded only with that conclusion.</summary>
+    public string NoChangeRationale { get; private set; } = "";
+    public string? DecidedBy { get; private set; }
+    public DateTimeOffset? DecidedAt { get; private set; }
     public string? AssignedEngineerId { get; private set; }
     public string? SubmittedBy { get; private set; }
     public string? SelectedApproverId { get; private set; }
@@ -78,9 +93,47 @@ public sealed class TestChangeReview
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; } = 1;
 
+    /// <summary>
+    /// Records that the change needs test-procedure work — and only then is there a test change request.
+    ///
+    /// The number is what makes this a controlled SYSTCR, HLRTCR or LLRTCR, so it is not allocated until an
+    /// assessment says one is needed. Numbering at the moment the change was approved produced a controlled
+    /// record for every change before anybody had looked at whether it touched a single procedure.
+    /// </summary>
+    public void RecordTestChangeRequired(string actorId, DateTimeOffset now)
+    {
+        EnsureOpen();
+        Outcome = TestChangeReviewOutcome.ChangeRequired;
+        NoChangeRationale = "";
+        DecidedBy = Required(actorId, "assessing verification engineer");
+        DecidedAt = now;
+        Touch(now);
+    }
+
+    /// <summary>
+    /// Records that the change needs no test-procedure work.
+    ///
+    /// This conclusion produces nothing, so nothing downstream would ever examine it — which is why it is the
+    /// one that goes for approval. Its counterpart becomes a test change request whose procedure decisions
+    /// are reviewed on their own terms.
+    /// </summary>
+    public void RecordNoTestChangeRequired(string actorId, string rationale, DateTimeOffset now)
+    {
+        EnsureOpen();
+        if (!string.IsNullOrEmpty(BaseNumber))
+            throw new DomainException("This is already a controlled test change request. Withdraw its decisions before concluding that no test work is required.");
+        Outcome = TestChangeReviewOutcome.NoChangeRequired;
+        NoChangeRationale = Required(rationale, "no-change rationale");
+        DecidedBy = Required(actorId, "assessing verification engineer");
+        DecidedAt = now;
+        Touch(now);
+    }
+
     public void AssignControlledNumber(string baseNumber, DateTimeOffset now)
     {
         if (!string.IsNullOrEmpty(BaseNumber)) return;
+        if (Outcome != TestChangeReviewOutcome.ChangeRequired)
+            throw new DomainException("Record that test-procedure work is required before raising the test change request that carries it.");
         var number = Required(baseNumber, "controlled test change request number");
         var expectedPrefix = Discipline switch
         {
@@ -105,6 +158,8 @@ public sealed class TestChangeReview
     public void Submit(string actorId, string approverId, bool everyItemResolved, DateTimeOffset now)
     {
         EnsureOpen();
+        if (Outcome == TestChangeReviewOutcome.Pending)
+            throw new DomainException("Assess the change before sending it for review.");
         if (!everyItemResolved)
             throw new DomainException("Every test-procedure decision must be completed before review.");
         SubmittedBy = Required(actorId, "submitting verification engineer");

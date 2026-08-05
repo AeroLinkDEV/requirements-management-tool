@@ -27,6 +27,9 @@ type TestChangeRequest = {
   state: string
   assignedEngineerId?: string
   selectedApproverId?: string
+  outcome: 'Pending' | 'ChangeRequired' | 'NoChangeRequired'
+  noChangeRationale?: string
+  decidedBy?: string
   totalItems: number
   resolvedItems: number
   coveredChangeRequests: ChangeRequestCover[]
@@ -70,6 +73,36 @@ type CreatedProcedure = { id: string; revisionId: string; displayNumber: string;
 
 const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'Software HLR' : 'Software LLR'
+
+/// What the assessment is called, and what a test change request raised from it is called.
+const assessmentName = (discipline: TestDiscipline) =>
+  discipline === 'System' ? 'System Test' : discipline === 'HighLevelSoftware' ? 'HLR Test' : 'LLR Test'
+const tcrAcronym = (discipline: TestDiscipline) =>
+  discipline === 'System' ? 'SYSTCR' : discipline === 'HighLevelSoftware' ? 'HLRTCR' : 'LLRTCR'
+
+/**
+ * Whether the test assessment has been done, and what it concluded.
+ *
+ * Word for word the answer the requirements disciplines give, because it is the same question asked of
+ * verification: an approved change either needs work here or it does not. The two pages showed the same
+ * stage of the same workflow in two unrelated vocabularies, so a reader could not carry what they had
+ * learned from one to the other.
+ */
+const testAssessmentStatus = (request: TestChangeRequest, discipline: TestDiscipline) => {
+  const name = assessmentName(discipline)
+  const acronym = tcrAcronym(discipline)
+  if (request.state === 'Superseded') return `${name} Assessment Superseded`
+  if (request.outcome === 'Pending') return `${name} Assessment Required`
+  if (request.outcome === 'NoChangeRequired')
+    return request.state === 'Approved'
+      ? `${name} Assessment Complete – No ${acronym} Required`
+      : `${name} Assessment Complete – No ${acronym} Required Pending Approval`
+  // The controlled number is what makes it a test change request, so having one is what distinguishes
+  // "one is needed" from "one exists" — exactly as a linked HLRCR does on the requirements side.
+  return request.displayNumber.startsWith(acronym)
+    ? `${name} Assessment Complete – ${acronym} Created`
+    : `${name} Assessment Complete – Draft ${acronym} Required`
+}
 
 /**
  * The coverage a requirement already has, shown beside the decision about it.
@@ -150,6 +183,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [linkingProblemReports, setLinkingProblemReports] = useState<TestChangeRequest>()
   const [problemReportIds, setProblemReportIds] = useState<string[]>([])
   const [submitting, setSubmitting] = useState<TestChangeRequest>()
+  /// The assessment being concluded as needing no test work, which has to say why.
+  const [decliningTest, setDecliningTest] = useState<TestChangeRequest>()
+  const [declineRationale, setDeclineRationale] = useState('')
   const [reviewApprover, setReviewApprover] = useState({ userId: '', name: '' })
   const [procedureApprover, setProcedureApprover] = useState({ userId: '', name: '' })
   const [showAll, setShowAll] = useState(false)
@@ -292,7 +328,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   }, [api, projectId, releaseId, scope, query, procedureState, procedureOutcome, procedurePage, revision])
 
   const mine = requests.filter(x => x.discipline === discipline)
-  const unstarted = mine.filter(x => x.state === 'Open' && !x.assignedEngineerId)
   const uncovered = coverage?.items.filter(x => x.disposition === 'Uncovered') ?? []
   const suspect = coverage?.items.filter(x => x.disposition === 'Suspect') ?? []
 
@@ -309,6 +344,22 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
 
   // Taking a package on assigns every decision in it. A package half-assigned has no owner anybody can name,
   // which is the state this queue exists to make impossible.
+  /**
+   * Answering the assessment, which is what may raise the test change request.
+   *
+   * Concluding that work is required allocates the controlled number; concluding that none is required
+   * produces nothing and therefore goes for approval. Same shape as the requirements side, same reason.
+   */
+  const conclude = (request: TestChangeRequest, testChangeRequired: boolean, rationale?: string) => act(async () => {
+    const result = await apiRequest<{ displayNumber: string }>(`${api}/api/test-change-reviews/${request.id}/conclusion`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ testChangeRequired, rationale: rationale ?? '' }),
+    })
+    setSaved(testChangeRequired
+      ? `${result.displayNumber} raised for ${request.coveredChangeRequests.map(x => x.number).join(', ')}.`
+      : `No ${tcrAcronym(discipline)} required for ${request.coveredChangeRequests.map(x => x.number).join(', ')}.`)
+  }, 'The test assessment could not be recorded.')
+
   const takeOn = (request: TestChangeRequest) => act(async () => {
     const items = impact.filter(x => x.testChangeReviewId === request.id && x.state === 'Open')
     await apiRequest(`${api}/api/test-change-reviews/${request.id}/assign`, {
@@ -474,13 +525,15 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           build's changes have made their problem — a wall of green coverage says nothing about that. */}
       <section className="coverageCard">
         <div className="cardTitle">
-          <h2>Test change requests</h2>
-          <p>Raised when a change request is approved. {unstarted.length ? `${unstarted.length} not yet picked up.` : 'All picked up.'}</p>
+          {/* Named for the question, not for the artefact one answer to it produces. Approved changes arrive
+              here to be assessed; a test change request is what an assessment raises when it finds work. */}
+          <h2>Downstream test assessments</h2>
+          <p>Approved upstream changes waiting for an explicit {assessmentName(discipline)} conclusion.</p>
         </div>
         {!mine.length && (
           <div className="coverageEmpty">
-            <b>No {disciplineLabel(discipline)} test change requests for this build</b>
-            <span>Nothing approved so far has created {disciplineLabel(discipline)} test work.</span>
+            <b>No {disciplineLabel(discipline)} test assessments for this build</b>
+            <span>Nothing has been approved into this build that {disciplineLabel(discipline)} verification must answer for.</span>
           </div>
         )}
         {mine.map(request => (
@@ -492,11 +545,17 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <button type="button" className="packageDisclosure" aria-expanded={opened === request.id}
               aria-label={`${opened === request.id ? 'Collapse' : 'Open'} ${request.displayNumber}`}
               onClick={() => setOpened(current => current === request.id ? '' : request.id)}>
-              <span className="packageHead"><b>{request.displayNumber}</b><i>{request.state === 'InReview' ? 'In review' : request.state}</i></span>
-              <span className="packageCovers">Covers {request.coveredChangeRequests.map(x => x.number).join(', ')}</span>
+              {/* The change being assessed, then what the assessment concluded — the same two things in the
+                  same order as the requirements queue. An unassessed row is identified by the change it is
+                  asking about, because it has no number of its own until one is needed. */}
+              <span className="packageHead"><b>{request.coveredChangeRequests.map(x => x.number).join(', ')}</b><i>{assessmentName(discipline)} assessment</i></span>
+              <span className="packageCovers">{testAssessmentStatus(request, discipline)}</span>
               <small>
-                {request.resolvedItems} of {request.totalItems} decisions recorded
-                {request.assignedEngineerId ? <> · <PersonName userName={request.assignedEngineerId} /></> : ' · nobody has picked this up'}
+                {request.outcome === 'ChangeRequired' && request.displayNumber.startsWith(tcrAcronym(discipline))
+                  ? <>{request.displayNumber} · {request.state === 'InReview' ? 'In review' : request.state} · {request.resolvedItems} of {request.totalItems} decisions recorded</>
+                  : request.outcome === 'NoChangeRequired' ? request.noChangeRationale
+                  : 'Nobody has answered this yet'}
+                {request.assignedEngineerId ? <> · <PersonName userName={request.assignedEngineerId} /></> : ''}
               </small>
             </button>
             <div className="coverageRowActions">
@@ -506,6 +565,18 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               }}>Link PRs{request.problemReports?.length ? ` · ${request.problemReports.length}` : ''}</button>}
               {request.capabilities.canAssign && (
                 <button type="button" className="quiet" disabled={busy} onClick={() => void takeOn(request)}>Take it on</button>
+              )}
+              {/* The assessment itself, offered only while it is unanswered. Concluding that work is required
+                  is what raises the test change request; the alternative raises nothing and states why. */}
+              {request.outcome === 'Pending' && request.capabilities.canDecide && (
+                <>
+                  <button type="button" disabled={busy} onClick={() => void conclude(request, true)}>
+                    {tcrAcronym(discipline)} required
+                  </button>
+                  <button type="button" className="quiet" disabled={busy} onClick={() => setDecliningTest(request)}>
+                    No {tcrAcronym(discipline)} required
+                  </button>
+                </>
               )}
               {/* Submission is offered only once every decision is recorded. The server refuses otherwise, and
                   offering an action that will be refused is a worse answer than not offering it. */}
@@ -812,6 +883,36 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <div className="decisionActions">
               <button type="submit" disabled={busy || !reviewApprover.userId}>Send for approval</button>
               <button type="button" className="quiet" onClick={() => setSubmitting(undefined)}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {decliningTest && (
+        <div className="decisionModal" role="dialog"
+          aria-label={`Record no test change for ${decliningTest.coveredChangeRequests.map(x => x.number).join(', ')}`}>
+          <form onSubmit={event => {
+            event.preventDefault()
+            if (declineRationale.trim()) {
+              void conclude(decliningTest, false, declineRationale.trim())
+              setDecliningTest(undefined); setDeclineRationale('')
+            }
+          }}>
+            <p className="eyebrow">{assessmentName(discipline).toUpperCase()} ASSESSMENT</p>
+            <h2>No {tcrAcronym(discipline)} required</h2>
+            {/* This conclusion raises nothing, so nothing downstream will ever examine it. The reasoning is
+                the only record of the judgement, which is why it cannot be skipped. */}
+            <p>
+              Recording this raises no test change request for
+              {' '}{decliningTest.coveredChangeRequests.map(x => x.number).join(', ')}. It goes to a test lead
+              for approval, because nothing else downstream will examine it.
+            </p>
+            <label>Why no test-procedure work is required
+              <textarea value={declineRationale} onChange={event => setDeclineRationale(event.target.value)} rows={4} />
+            </label>
+            <div className="decisionActions">
+              <button type="submit" disabled={busy || !declineRationale.trim()}>Record the conclusion</button>
+              <button type="button" className="quiet" onClick={() => { setDecliningTest(undefined); setDeclineRationale('') }}>Cancel</button>
             </div>
           </form>
         </div>
