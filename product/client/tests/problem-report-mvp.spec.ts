@@ -24,7 +24,7 @@ test('an engineer creates a structured Draft PR and advances it through the SCCB
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
   await expect(page.locator('.prState')).toHaveText('Draft')
   await expect(page.getByText('RAISED BY', { exact: true })).toBeVisible()
-  await expect(page.getByText('RESPONSIBLE OWNER', { exact: true })).toBeVisible()
+  await expect(page.getByText('ASSIGNED USER', { exact: true })).toBeVisible()
   await expect(page.getByText('TARGET BUILD', { exact: true })).toBeVisible()
   await expect(page.locator('.prImpactGrid').getByText('System requirements')).toBeVisible()
   await expect(page.locator('.prImpactGrid').getByText('Yes', { exact: true })).toHaveCount(3)

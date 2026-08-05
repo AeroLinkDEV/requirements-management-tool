@@ -35,6 +35,8 @@ type Editable = {
   rootCause: string
   correctiveAction: string
   systemAircraftImpact: string
+  workaround: string
+  type: string
   severity: string
   priority: string
   impacts: Record<string, string>
@@ -95,6 +97,8 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
     rootCause: value.rootCause,
     correctiveAction: value.correctiveAction,
     systemAircraftImpact: value.systemAircraftImpact,
+    workaround: value.workaround,
+    type: value.type,
     impactAssessmentJson: JSON.stringify(value.impacts),
     severity: value.severity,
     priority: value.priority,
@@ -120,6 +124,8 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
           rootCause: String(recovered.rootCause ?? ''),
           correctiveAction: String(recovered.correctiveAction ?? ''),
           systemAircraftImpact: String(recovered.systemAircraftImpact ?? ''),
+          workaround: String(recovered.workaround ?? ''),
+          type: String(recovered.type ?? 'Other'),
           severity: String(recovered.severity ?? 'Major'),
           priority: String(recovered.priority ?? 'High'),
           impacts: impactsFrom(recovered.impactAssessmentJson, impactFields),
@@ -231,7 +237,12 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
           <label>Priority<select value={draft.priority} onChange={event => set('priority', event.target.value)}>{['Urgent', 'High', 'Normal', 'Low'].map(x => <option key={x}>{x}</option>)}</select></label>
         </div>
         <label>Analysis<textarea value={draft.analysis} onChange={event => set('analysis', event.target.value)} /></label>
+        <label>Type<select value={draft.type} onChange={event => set('type', event.target.value)}>
+          {['Documentation', 'Code', 'Test', 'Other'].map(value => <option key={value}>{value}</option>)}
+        </select></label>
         <label>Root cause<textarea value={draft.rootCause} onChange={event => set('rootCause', event.target.value)} /></label>
+        {/* What can be done in the meantime. Empty is a real answer — it means none has been found. */}
+        <label>Workaround<textarea value={draft.workaround} onChange={event => set('workaround', event.target.value)} /></label>
         <label>Corrective-action narrative<textarea value={draft.correctiveAction} onChange={event => set('correctiveAction', event.target.value)} /></label>
         <label>System / aircraft impact<textarea value={draft.systemAircraftImpact} onChange={event => set('systemAircraftImpact', event.target.value)} /></label>
         <fieldset className="prImpactEditor"><legend>Impact matrix</legend>{impactFields.map(([key, label]) =>

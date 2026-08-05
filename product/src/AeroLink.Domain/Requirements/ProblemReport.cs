@@ -13,6 +13,15 @@ public enum ProblemReportState
 }
 
 public enum ProblemReportSeverity { Critical, High, Major, Minor, Trivial }
+
+/// <summary>
+/// What kind of thing is wrong, so a queue can be filtered down to the work one discipline owns.
+///
+/// Stored by name, so adding a kind later is a code change and not a data migration. <c>Other</c> exists
+/// because every report predating this field is genuinely unclassified, and because a report that fits none
+/// of the named kinds has to go somewhere other than the nearest wrong answer.
+/// </summary>
+public enum ProblemReportType { Documentation, Code, Test, Other }
 public enum ProblemReportPriority { Urgent, High, Normal, Low }
 public enum ProblemReportDisposition { Fixed, Duplicate, CannotReproduce, NoFaultFound, Deferred, AcceptedRisk, Rejected }
 
@@ -94,6 +103,10 @@ public sealed class ProblemReport
     public string AdditionalInformation { get; private set; } = "";
     public string AdditionalInformationRich { get; private set; } = "";
     public string SystemAircraftImpact { get; private set; } = "";
+    /// <summary>Which discipline's problem this is, for filtering the queue.</summary>
+    public ProblemReportType Type { get; private set; } = ProblemReportType.Other;
+    /// <summary>What can be done in the meantime, if anything. Empty means none has been recorded.</summary>
+    public string Workaround { get; private set; } = "";
     public string ImpactAssessmentJson { get; private set; } = "{}";
     public string Classification { get; private set; } = "";
     public ProblemReportSeverity Severity { get; private set; }
@@ -128,9 +141,12 @@ public sealed class ProblemReport
     public void UpdateDetails(string actor, string title, string problem, string problemRich,
         string additionalInformation, string additionalInformationRich, string analysis, string rootCause,
         string correctiveAction, string systemAircraftImpact, string impactAssessmentJson,
-        ProblemReportSeverity severity, ProblemReportPriority priority, DateTimeOffset now)
+        ProblemReportSeverity severity, ProblemReportPriority priority, DateTimeOffset now,
+        ProblemReportType? type = null, string? workaround = null)
     {
         EnsureResponsible(actor); EnsureEditable();
+        if (type is not null) Type = type.Value;
+        if (workaround is not null) Workaround = workaround.Trim();
         Title = Required(title, "A problem-report title is required."); Problem = Required(problem, "A problem statement is required.");
         ProblemRich = problemRich?.Trim() ?? ""; AdditionalInformation = additionalInformation?.Trim() ?? "";
         AdditionalInformationRich = additionalInformationRich?.Trim() ?? ""; Analysis = analysis?.Trim() ?? "";
@@ -268,14 +284,18 @@ public sealed class ProblemReport
         {
             using var document = System.Text.Json.JsonDocument.Parse(candidate);
             if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) throw new Exception();
-            var allowed = new[] { "SystemRequirements", "Hlr", "Llr", "Code", "Tests", "Documents", "SystemAircraft", "Safety" };
+            var allowed = new[] { "SystemRequirements", "Hlr", "Llr", "Code", "Tests", "Documents", "SystemAircraft", "Airworthiness" };
             var normalized = allowed.ToDictionary(key => key, key => "Unknown");
             foreach (var property in document.RootElement.EnumerateObject())
             {
-                if (!normalized.ContainsKey(property.Name)) throw new Exception();
+                // "Safety" is what this area was called before it was named for what is actually being
+                // judged. Records written under the old name keep their answer rather than losing it, and a
+                // client that has not been reloaded yet is still understood.
+                var area = property.Name == "Safety" ? "Airworthiness" : property.Name;
+                if (!normalized.ContainsKey(area)) throw new Exception();
                 var assessment = property.Value.GetString();
                 if (assessment is not ("Unknown" or "No" or "Yes")) throw new Exception();
-                normalized[property.Name] = assessment;
+                normalized[area] = assessment;
             }
             return System.Text.Json.JsonSerializer.Serialize(normalized);
         }

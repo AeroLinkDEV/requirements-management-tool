@@ -103,6 +103,39 @@ public sealed class ProblemReportTests
         Assert.Throws<DomainException>(() => report.SetReleaseBlocker("verification.engineer", true, "", Now));
     }
 
+    [Fact]
+    public void A_report_is_unclassified_until_somebody_says_what_kind_of_problem_it_is()
+    {
+        var report = NewReport();
+
+        // Every report raised before the field existed is genuinely unclassified, so that is what it says
+        // rather than guessing at the nearest kind.
+        Assert.Equal(ProblemReportType.Other, report.Type);
+        Assert.Equal("", report.Workaround);
+
+        report.UpdateDetails("verification.engineer", report.Title, report.Problem, "", "", "", "", "", "", "", "{}",
+            report.Severity, report.Priority, Now.AddMinutes(1),
+            ProblemReportType.Documentation, "Fly the approach manually until the database is reissued.");
+
+        Assert.Equal(ProblemReportType.Documentation, report.Type);
+        Assert.Equal("Fly the approach manually until the database is reissued.", report.Workaround);
+    }
+
+    [Fact]
+    public void An_impact_recorded_against_Safety_is_kept_under_Airworthiness()
+    {
+        var report = NewReport();
+
+        // The area was renamed for what is actually being judged. A record written under the old name — or a
+        // client that has not been reloaded — keeps its answer instead of losing it to a key nothing reads.
+        report.UpdateDetails("verification.engineer", report.Title, report.Problem, "", "", "", "", "", "", "",
+            """{"Safety":"Yes","Code":"No"}""", report.Severity, report.Priority, Now.AddMinutes(1));
+
+        Assert.Contains("\"Airworthiness\":\"Yes\"", report.ImpactAssessmentJson);
+        Assert.DoesNotContain("\"Safety\"", report.ImpactAssessmentJson);
+        Assert.Contains("\"Code\":\"No\"", report.ImpactAssessmentJson);
+    }
+
     private static ProblemReport NewReport() => new(ProjectId, "PR-00001", "Unexpected navigation reset", "Unit reset while airborne.", "", "verification.engineer", Now, "Verification failure", ProblemReportSeverity.High, ProblemReportPriority.Urgent, "Test execution", "Build 1.6.0");
     private static ProblemReport ReadyForClosure()
     {
