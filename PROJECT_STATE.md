@@ -208,6 +208,17 @@ raises its own item. **Suspect coverage is not coverage**: the `coverage` readin
 confirmed links, so a requirement cannot reach release on the strength of a procedure written against its
 previous wording.
 
+**Bringing in a program that already exists elsewhere** is a separate act from proposing a change (DEC-093).
+An import creates an **externally sourced baseline** directly, released on arrival, carrying the provenance
+that lets it be told apart from a baseline this product built: source system and version, source baseline
+name and date, extract file name, size and SHA-256, who took the extract and when. Five gates run in order
+and none can be skipped — Source, Analyse, Map, Reconcile, Accept — and a named person accepts. The page
+states what that signature asserts beside what it never asserts: that these requirements were reviewed or
+approved here. Every source identifier survives as a searchable record joined to its controlled requirement
+by a provenance link, and an object the source retired before the imported baseline is recorded so a
+reference to it can be answered while joining nothing. Reading the file itself is not built: the gates are
+driven by structured input, which is what makes them exercisable before a parser exists.
+
 Presentation: one design system across every surface — a 12px readability floor, four radii, one type
 scale, one focus treatment — with **comfortable and compact information density** expressed as spacing
 tokens applied through the workspace shell, and **WCAG 2.2 AA as a commitment**: 4.5:1 body contrast,
@@ -343,6 +354,11 @@ Understating these is a product-integrity failure, not a marketing choice.
   security review remain organization-specific work. See
   [SECURITY_AND_IDENTITY_MODEL.md](SECURITY_AND_IDENTITY_MODEL.md).
 - **Demonstration credentials are non-production** and must be replaced before any operational use.
+- **An imported baseline cannot yet be read from a file.** The five import gates are exercisable and
+  enforced, but nothing parses a DOORS or ReqIF extract: the objects, their attributes and any source history
+  are supplied as structured input, and the extract's hash and size are recorded from whoever took it rather
+  than computed from an upload. Say the workflow is built and the reader is not. It is deliberately waiting
+  on a representative extract rather than on a design.
 The client has **no external runtime dependency**: it makes no network request outside its own origin,
 and has been verified to start with all external requests blocked. Keep it that way — a CDN reference
 in the client contradicts the on-premises posture and, as the resolved case below showed, can block
@@ -452,6 +468,19 @@ reason the document set can be trusted.
   `dotnet ef migrations add <Name> --project src/AeroLink.Infrastructure --startup-project src/AeroLink.Api --output-dir Persistence/Migrations`.
   Entities must also be mapped in `AeroLinkDbContext`, because the non-PostgreSQL path builds its
   schema from the model rather than from migrations.
+- **Generated is not the same as correct — read every migration before running it.** EF scaffolds a new
+  non-nullable string column with `defaultValue: ""`. Where that column holds an enum converted with
+  `HasConversion<string>()`, `""` is not a member name and *every existing row fails to materialize* — a
+  total outage of that entity from a migration that looks routine. It was caught twice in one day. The same
+  habit catches a table rename scaffolded as `DropTable` plus `CreateTable`, which silently deletes the data.
+- **Test a performance hypothesis before shipping the fix for it.** A plausible explanation for CI sign-in
+  timeouts — that Entity Framework builds its model on the first query, after the readiness probe has already
+  reported ready — was implemented and then measured at 167 ms against 170 ms. Identity seeding had already
+  warmed the model. The change was deleted rather than shipped with a rationale that had just been disproven.
+- **A green test suite is not a look at the page.** Four defects in one day passed every assertion and were
+  found only by rendering the page and reading it: provenance dates shifted a day for anyone west of UTC, a
+  CSS specificity collision stacked every checkbox above its label, two cards wore the same icon, and a grid
+  showed a block of divider colour where its last row wrapped short. Screenshot a changed surface.
 - **Prefer deferring honestly over building speculatively.** Workstream 4's remainder was deferred
   because nothing in it had a real user yet. Recording that is better than a silent backlog.
 - **A test can pass by racing past the thing it checks.** The readability journey asserted that no text
