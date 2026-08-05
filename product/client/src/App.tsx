@@ -4,7 +4,7 @@ import CommandPalette from "./CommandPalette";
 import { officialBuildName } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
-import { readRoute, routePath } from "./routing";
+import { projectAreaPath, projectSlugOf, readRoute, routePath } from "./routing";
 import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
 import { usePasswordVisibilityControls } from "./PasswordVisibility";
 import {
@@ -262,9 +262,17 @@ function App() {
       const routedProject=initialRoute.projectId?routedProgram?.projects.find(x=>x.project.id===initialRoute.projectId):undefined;
       const routedRelease=initialRoute.releaseId?routedProject?.releases.find(x=>x.id===initialRoute.releaseId):undefined;
       if((initialRoute.programId||initialRoute.projectId||initialRoute.releaseId)&&(!routedProgram||!routedProject||!routedRelease))setView("notFound");
-      const program=routedProgram??next[0],project=routedProject??program?.projects[0],release=routedRelease??[...(project?.releases??[])].reverse().find(x=>!x.isReleased)??project?.releases.at(-1);
-      setActiveId((current) => next.some(x=>x.program.id===current)?current:program?.program.id||"");
-      setSelectedProjectId((current)=>program?.projects.some(x=>x.project.id===current)?current:project?.project.id||"");
+      // A Project named in the path wins over the first one that happens to exist. The two pages above a
+      // build carry no program or release in their URL, so without this a reload of one of them keeps the
+      // path while quietly showing a different Project's records.
+      const namedProgram=initialRoute.projectSlug
+        ? next.find(x=>x.projects.some(y=>projectSlugOf(y.project.name)===initialRoute.projectSlug))
+        : undefined;
+      const namedProject=namedProgram?.projects.find(x=>projectSlugOf(x.project.name)===initialRoute.projectSlug);
+      if(initialRoute.projectSlug&&!namedProject)setView("notFound");
+      const program=routedProgram??namedProgram??next[0],project=routedProject??namedProject??program?.projects[0],release=routedRelease??[...(project?.releases??[])].reverse().find(x=>!x.isReleased)??project?.releases.at(-1);
+      setActiveId((current) => namedProgram?.program.id ?? (next.some(x=>x.program.id===current)?current:program?.program.id||""));
+      setSelectedProjectId((current)=>namedProject?.project.id ?? (program?.projects.some(x=>x.project.id===current)?current:project?.project.id||""));
       setSelectedReleaseId((current)=>project?.releases.some(x=>x.id===current)?current:release?.id||"");
       setConnected(true);
     } catch {
@@ -431,13 +439,23 @@ function App() {
   const buildsPath=routePath(context??{programId:"",projectId:"",releaseId:""},"builds");
   const showProjects=()=>{setView("projects");history.pushState({},"","/projects")};
   const exitBuild=()=>{setPaletteOpen(false);setDisplayOpen(false);setView("builds");setSelectedArtifactId("");setSelectedArtifactKind("");setSelectedScrId("");history.pushState({},"",buildsPath)};
-  if(view==="projects")return <ProjectsLanding user={user} workspaceHref={buildsPath} onOpenWorkspace={()=>{setView("builds");history.pushState({},"",buildsPath)}} onSignOut={signOut}/>;
-  const importsPath=routePath(context??{programId:"",projectId:"",releaseId:""},"baselineImports");
+  const practice=workspaces.flatMap(x=>x.projects).find(x=>x.project.name==="DOORS Import Practice");
+  const practicePath=projectAreaPath(projectSlugOf(practice?.project.name??"DOORS Import Practice"),"baselineImports");
+  const openPractice=()=>{
+    if(practice){setActiveId(workspaces.find(x=>x.projects.includes(practice))?.program.id??activeId);setSelectedProjectId(practice.project.id)}
+    setView("baselineImports");history.pushState({},"",practicePath);
+  };
+  if(view==="projects")return <ProjectsLanding user={user} workspaceHref={buildsPath} importPracticeHref={practicePath} onOpenWorkspace={()=>{setView("builds");history.pushState({},"",buildsPath)}} onOpenImportPractice={openPractice} onSignOut={signOut}/>;
+  // Derived from the Project actually open, so these two pages stay on it. Sending the practice Project's
+  // import page back to the showcase Project's builds would silently switch which Project you were in.
+  const openProjectSlug=projectSlugOf(project?.project.name??"");
+  const importsPath=projectAreaPath(openProjectSlug,"baselineImports");
+  const openProjectBuildsPath=projectAreaPath(openProjectSlug,"builds");
   const showImports=()=>{setView("baselineImports");history.pushState({},"",importsPath)};
   if(view==="builds")return <SoftwareBuildsLanding user={user} releases={project?.releases??[]} onProjectOverview={showProjects} onImportedBaselines={showImports} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;setSelectedReleaseId(selected.id);setView("dashboard");history.pushState({},"",routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
   // Rendered beside Software Builds rather than inside a build workspace, because an import does not belong
   // to a build — it creates one. There is no build to have entered when this page is what you need.
-  if(view==="baselineImports"&&project)return <BaselineImportCenter user={user} api={API} projectId={project.project.id} onBackToBuilds={()=>{setView("builds");history.pushState({},"",buildsPath)}} onSignOut={signOut}/>;
+  if(view==="baselineImports"&&project)return <BaselineImportCenter user={user} api={API} projectId={project.project.id} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onSignOut={signOut}/>;
   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} density={density} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
   const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Testing Coverage",testResults:"Test Results",documents:"Documents",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];

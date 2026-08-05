@@ -42,6 +42,8 @@ export type AppRoute = {
   discipline: Discipline;
   programId?: string;
   projectId?: string;
+  /// A Project addressed by name, on the two pages that sit above any build.
+  projectSlug?: string;
   releaseId?: string;
   artifactId?: string;
   artifactKind?: string;
@@ -62,12 +64,15 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   const query = new URLSearchParams(search);
   if (!parts.length || (parts.length === 1 && parts[0] === "projects"))
     return { view: "projects", discipline: "system" };
-  if (parts.length === 3 && parts[0] === "projects" && parts[1] === "fms-product-development" && parts[2] === "builds")
-    return { view: "builds", discipline: "system" };
+  // Addressed by the Project's own name rather than a fixed one. These two pages sit above a build — you
+  // reach them without having entered one — so they carry no release, and a second Project needs its own
+  // slug rather than the single hardcoded one these used to assume.
+  if (parts.length === 3 && parts[0] === "projects" && parts[2] === "builds")
+    return { view: "builds", discipline: "system", projectSlug: decoded(parts[1]) };
   // Alongside Software Builds rather than inside a build, because an import does not belong to a build — it
   // creates one. There is no build to have entered when this page is the thing you need.
-  if (parts.length === 3 && parts[0] === "projects" && parts[1] === "fms-product-development" && parts[2] === "imported-baselines")
-    return { view: "baselineImports", discipline: "system" };
+  if (parts.length === 3 && parts[0] === "projects" && parts[2] === "imported-baselines")
+    return { view: "baselineImports", discipline: "system", projectSlug: decoded(parts[1]) };
   if (parts[0] !== "programs" || parts[2] !== "projects" || parts[4] !== "releases")
     return { view: "notFound", discipline: "system" };
 
@@ -147,6 +152,15 @@ export function readRoute(): AppRoute {
 
 export type RouteContext = { programId: string; projectId: string; releaseId: string };
 
+/// A Project's name as a URL segment. The two pages above a build address Projects by name, so this is what
+/// makes "fms-product-development" a consequence of the Project being called FMS Product Development rather
+/// than a constant that happened to match it.
+export const projectSlugOf = (name: string) =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+export const projectAreaPath = (slug: string, area: "builds" | "baselineImports") =>
+  `/projects/${slug}/${area === "builds" ? "builds" : "imported-baselines"}`;
+
 export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
   const historyPath = (scope: "systems" | "software") => {
@@ -160,8 +174,10 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
   };
   switch (view) {
     case "projects": return "/projects";
-    case "builds": return "/projects/fms-product-development/builds";
-    case "baselineImports": return "/projects/fms-product-development/imported-baselines";
+    // Both are reached through projectAreaPath, which knows the Project's name. These remain so a stray
+    // routePath call still lands somewhere real rather than on Not Found.
+    case "builds": return projectAreaPath("fms-product-development", "builds");
+    case "baselineImports": return projectAreaPath("fms-product-development", "baselineImports");
     case "dashboard": return `${root}/command-center`;
     case "mywork": return `${root}/my-work`;
     case "createSystemScr": return `${root}/systems/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;

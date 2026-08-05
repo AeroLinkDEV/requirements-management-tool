@@ -13,6 +13,7 @@ type ProjectIconName =
   | "sensors"
   | "map"
   | "display"
+  | "import"
   | "create";
 
 type ProjectCardDefinition = {
@@ -23,7 +24,7 @@ type ProjectCardDefinition = {
   status: "active" | "mock" | "disabled";
   statusLabel?: string;
   active: boolean;
-  destination?: "current-workspace";
+  destination?: "current-workspace" | "import-practice";
   footer?: string;
   cardType: "project" | "create-project";
 };
@@ -141,6 +142,21 @@ const projectCards: readonly ProjectCardDefinition[] = [
     cardType: "project",
   },
   {
+    // Where bringing a program in from another tool is rehearsed, so no Program anybody works in collects
+    // the abandoned attempts it takes to get a mapping right. Temporary by intent: once the workflow is
+    // proven against a real extract, the import belongs wherever a new Project is started from.
+    id: "doors-import-practice",
+    name: "DOORS Import Practice",
+    description: "Rehearse bringing a program in from another requirements tool.",
+    icon: "import",
+    status: "active",
+    statusLabel: "Practice",
+    active: true,
+    destination: "import-practice",
+    footer: "No builds yet",
+    cardType: "project",
+  },
+  {
     id: "create-project",
     name: "Create New Project",
     description: "Start a new requirements workspace for your team.",
@@ -170,6 +186,9 @@ export function ProjectIcon({ name }: { name: ProjectIconName }) {
     sensors: <><circle cx="17" cy="17" r="4"/><circle cx="17" cy="17" r="9"/><path d="M17 3v3m0 22v3M3 17h3m22 0h3M7 7l3 3m14 14 3 3m0-20-3 3M10 24l-3 3"/><path d="m25 25 5 5m0-5-5 5"/></>,
     map: <><path d="m4 7 8-3 10 3 8-3v24l-8 3-10-3-8 3zM12 4v24M22 7v24"/><path d="M17 14c0-3 5-3 5 0 0 2-2.5 5-2.5 5S17 16 17 14z"/></>,
     display: <><rect x="3" y="5" width="28" height="23" rx="3"/><path d="M8 22V11h18M10 19l4-4 4 2 5-6M12 32h10m-5-4v4"/></>,
+    // Arriving from outside and landing here, which is the one thing this card is about. Every other icon
+    // on the page is already spoken for, and two cards wearing the same mark read as a mistake.
+    import: <><path d="M17 4v16m0 0-6-6m6 6 6-6"/><path d="M5 23v4a3 3 0 0 0 3 3h18a3 3 0 0 0 3-3v-4"/></>,
     create: <><circle cx="17" cy="17" r="14"/><path d="M17 10v14m-7-7h14"/></>,
   };
   return <svg viewBox="0 0 34 34" aria-hidden="true" focusable="false" {...shared}>{paths[name]}</svg>;
@@ -237,12 +256,16 @@ function ProjectCard({
 export default function ProjectsLanding({
   user,
   workspaceHref,
+  importPracticeHref,
   onOpenWorkspace,
+  onOpenImportPractice,
   onSignOut,
 }: {
   user: AuthUser;
   workspaceHref?: string;
+  importPracticeHref?: string;
   onOpenWorkspace: () => void;
+  onOpenImportPractice: () => void;
   onSignOut: () => void;
 }) {
   return (
@@ -257,14 +280,17 @@ export default function ProjectsLanding({
           </div>
         </header>
         <section className="projectsGrid" aria-label="Available projects">
-          {projectCards.map((project) => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              workspaceHref={project.destination ? workspaceHref : undefined}
-              onOpenWorkspace={onOpenWorkspace}
-            />
-          ))}
+          {projectCards.map((project) => {
+            const practice = project.destination === "import-practice";
+            return (
+              <ProjectCard
+                key={project.id}
+                project={project}
+                workspaceHref={practice ? importPracticeHref : project.destination ? workspaceHref : undefined}
+                onOpenWorkspace={practice ? onOpenImportPractice : onOpenWorkspace}
+              />
+            );
+          })}
         </section>
       </main>
     </div>
