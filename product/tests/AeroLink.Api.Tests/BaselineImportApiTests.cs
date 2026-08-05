@@ -368,6 +368,55 @@ public sealed class BaselineImportApiTests
     }
 
     [Fact]
+    public async Task Abandoning_an_import_leaves_nothing_behind_for_the_next_attempt()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory, "RTY");
+
+        // Getting a program in usually takes more than one attempt: import, find the mapping wrong, abandon,
+        // re-extract, try again. Only the last one is ever accepted.
+        var first = await StartAsync(client, projectId);
+        await client.PostAsync($"/api/baseline-imports/{first}/analysis", null);
+        await client.PostAsJsonAsync($"/api/baseline-imports/{first}/mapping", new { mappingJson = """{"wrong":true}""" });
+        Assert.Equal(HttpStatusCode.OK, (await RecordSourceRecordsAsync(client, first,
+            SourceRecord(1234, history: [new { sourceBaselineName = "V0.9", statement = "", changedBy = "", changedAt = (DateTimeOffset?)null, sourceChangeReference = "" }]),
+            SourceRecord(1235))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/baseline-imports/{first}/abandon", null)).StatusCode);
+
+        var second = await StartAsync(client, projectId);
+        await client.PostAsync($"/api/baseline-imports/{second}/analysis", null);
+        await client.PostAsJsonAsync($"/api/baseline-imports/{second}/mapping", new { mappingJson = """{"right":true}""" });
+        using var again = await RecordSourceRecordsAsync(client, second, SourceRecord(1234), SourceRecord(1235));
+        var body = await again.Content.ReadFromJsonAsync<JsonElement>();
+
+        // An abandoned import committed nothing, so the retry records these objects rather than finding them
+        // already taken. Otherwise the accepted import would own no source records at all, and every count
+        // and listing on its page would describe the attempt that was thrown away.
+        Assert.Equal(2, body.GetProperty("recorded").GetInt32());
+        Assert.Equal(0, body.GetProperty("seenAgain").GetInt32());
+
+        await client.PostAsJsonAsync($"/api/baseline-imports/{second}/reconciliation",
+            new { reconciliationJson = """{"objectsIn":2}""" });
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.PostAsJsonAsync($"/api/baseline-imports/{second}/accept", new { version = "1.0" })).StatusCode);
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/baseline-imports/{second}");
+        Assert.Equal(2, detail.GetProperty("sourceIdentityCount").GetInt32());
+        Assert.Equal(2, detail.GetProperty("sourceRecords").GetProperty("inImportedBaseline").GetInt32());
+
+        var records = await client.GetFromJsonAsync<JsonElement>($"/api/baseline-imports/{second}/source-records");
+        Assert.Equal(2, records.GetProperty("total").GetInt32());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        // The abandoned attempt's history went with it. It described an extract nobody accepted.
+        Assert.Empty(await db.SourceIdentities.AsNoTracking().Where(x => x.BaselineImportId == first).ToListAsync());
+        Assert.Empty(await db.SourceHistoryEntries.AsNoTracking().Where(x => x.BaselineImportId == first).ToListAsync());
+    }
+
+    [Fact]
     public async Task A_released_build_in_the_workspace_does_not_refuse_an_import()
     {
         using var factory = new AeroLinkApiFactory();

@@ -1409,6 +1409,19 @@ Future entries use:
     Other reconciliation findings are outcomes of a mapping somebody can accept. This one is not: a later
     extract cannot tell the two apart, so the delta rule would silently merge them. There is no mapping
     decision that makes it safe, so it is refused outright.
+  - **An import is a one-way move, not an ongoing synchronisation.** (Resolves OQ-022.) A program is
+    extracted from its old tool once, at the point of leaving it, and DOORS is not kept in step afterwards.
+    So an identifier renamed between two extracts — the case OQ-022 raised — cannot arise: there is no second
+    extract of a program still being worked on elsewhere. A source identifier therefore needs no history of
+    its own, and the recorded name is simply the name the source used when it was left behind, which is what
+    every external drawing and CDRL cites. The delta keys stay as they are: they cost nothing, and they are
+    what make the retry below safe.
+  - **Getting one accepted import usually takes several attempts, and an abandoned one leaves nothing.**
+    Import, find the mapping wrong, abandon, re-extract, try again — only the last attempt is accepted. An
+    abandoned attempt committed nothing, so the source identities and history it recorded are discarded with
+    it, and only rows that attempt owned are removed. Left in place they would make the retry find every
+    object already taken: the accepted import would own no source records at all, while its page reported
+    counts belonging to the attempt that was thrown away.
   - **An object retired before the imported baseline cannot have anything originate from it, and the identity
     itself enforces that.** The provenance link is created through the source identity rather than
     constructed directly, because the rule that keeps source history narrative rather than nodes can only be
@@ -1463,14 +1476,6 @@ choices are created as focused issues only when their trigger and acceptance bou
 
 ## Open Questions for Later Phases
 
-- **OQ-022: What happens when a source identifier is renamed between two extracts?** A re-import is keyed on
-  the source's own stable object number, so an object renamed in DOORS from `SYS-01234` to `SYS-99999` is
-  correctly recognised as the same object. The recorded `SourceIdentifier` is currently left as it was, so a
-  search for the new name finds nothing. Overwriting it would be worse: the old name is exactly what every
-  external drawing and CDRL still cites, and losing it defeats the purpose of keeping source identifiers at
-  all. The likely answer is to keep both, which means a source identifier gains a history of its own — a
-  design worth settling against a real extract rather than inventing now. Reached while building Phase 4
-  (#332); blocks nothing until a program is actually re-imported.
 - What program-defined feedback workflow applies to derived HLRs and LLRs?
 - Which additional GitLab metadata or automated synchronization is useful after the exact LLR-to-merge MVP is
   proven, without expanding AeroLink into code management?
