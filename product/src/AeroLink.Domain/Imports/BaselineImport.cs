@@ -161,10 +161,22 @@ public sealed class BaselineImport
         Touch(now);
     }
 
+    /// <summary>
+    /// Walking away from an attempt that was never accepted.
+    ///
+    /// Getting a program in usually takes more than one attempt — import, find the mapping wrong, abandon,
+    /// re-extract, try again — and only the last is accepted. An abandoned attempt committed nothing, so it
+    /// must leave nothing: what it recorded from the extract is discarded with it, and the caller is
+    /// responsible for removing the source identities and history that belonged to it. Left in place, the
+    /// next attempt would find every object already taken, and the accepted import would own no source
+    /// records at all while its page reported counts from the attempt that was thrown away.
+    /// </summary>
     public void Abandon(DateTimeOffset now)
     {
         if (State == BaselineImportState.Accepted)
             throw new DomainException("An accepted import is immutable. Its baseline exists.");
+        SourceRecordCount = 0;
+        ReconciliationJson = "";
         State = BaselineImportState.Abandoned;
         Touch(now);
     }

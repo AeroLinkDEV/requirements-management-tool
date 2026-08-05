@@ -223,9 +223,16 @@ public static class BaselineImportEndpoints
             HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
             MutateAsync(id, http, db, identity, ct, (import, now) => import.RecordReconciliation(request.ReconciliationJson, now)));
 
+        // Abandoning takes what the attempt recorded with it. Only rows this import owns are removed, so an
+        // object first recorded by an earlier accepted import is never touched by a later attempt failing.
         app.MapPost("/api/baseline-imports/{id:guid}/abandon", (Guid id, HttpContext http, AeroLinkDbContext db,
             IdentityService identity, CancellationToken ct) =>
-            MutateAsync(id, http, db, identity, ct, (import, now) => import.Abandon(now)));
+            MutateAsync(id, http, db, identity, ct, (import, now) => import.Abandon(now), async () =>
+            {
+                await db.SourceHistoryEntries.Where(x => x.BaselineImportId == id).ExecuteDeleteAsync(ct);
+                await db.SourceIdentityLinks.Where(x => x.BaselineImportId == id).ExecuteDeleteAsync(ct);
+                await db.SourceIdentities.Where(x => x.BaselineImportId == id).ExecuteDeleteAsync(ct);
+            }));
 
         // Gate 5. A named person accepts it, and the build exists from here.
         app.MapPost("/api/baseline-imports/{id:guid}/accept", async (Guid id, AcceptBaselineImportRequest request,
@@ -302,8 +309,11 @@ public static class BaselineImportEndpoints
             });
         });
 
+        /// <param name="after">
+        /// Rows to remove once the aggregate has agreed to the change, so a refused gate deletes nothing.
+        /// </param>
         async Task<IResult> MutateAsync(Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity,
-            CancellationToken ct, Action<BaselineImport, DateTimeOffset> act)
+            CancellationToken ct, Action<BaselineImport, DateTimeOffset> act, Func<Task>? after = null)
         {
             var import = await db.BaselineImports.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (import is null) return Results.NotFound();
@@ -313,6 +323,7 @@ public static class BaselineImportEndpoints
             {
                 act(import, DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct);
+                if (after is not null) await after();
                 return Results.Ok(Detail(import, await TallyAsync(db, id, ct)));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
