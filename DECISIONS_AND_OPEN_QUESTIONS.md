@@ -1241,6 +1241,9 @@ Future entries use:
   as the reason rather than blaming the reader's authority. Existing conclusions were backfilled with their
   deciding engineer, which the aggregate has always constrained to be the assignee; the deciding instant was
   never recorded and is deliberately left empty rather than invented.
+- **Narrowed by [DEC-094](#dec-094---an-assessment-says-whether-it-was-done-and-what-it-found):** only a
+  no-change conclusion now reaches the in-review state at all, so the in-review and approved surfaces
+  described above apply to that conclusion alone. Everything else here stands.
 
 ### DEC-091 - A Problem Report Is Edited Under the Universal Controlled-Editing Lease
 
@@ -1427,6 +1430,146 @@ Future entries use:
     constructed directly, because the rule that keeps source history narrative rather than nodes can only be
     enforced where the identity is in hand. Constructing a link freely would let a real lineage claim hang
     off an object nobody imported.
+
+### DEC-094 - An Assessment Says Whether It Was Done, and What It Found
+
+- **Date:** 2026-08-05
+- **Status:** Accepted; delivered by PR #343
+- **Decision:** A downstream assessment answers exactly one question in exactly one sentence — has it been
+  performed, and what did it conclude:
+
+  | Situation | Label |
+  | --- | --- |
+  | Not decided, picked up or not | `HLR Assessment Required` |
+  | Change required, no change request yet | `HLR Assessment Complete – Draft HLRCR Required` |
+  | Change request linked, whatever its own state | `HLR Assessment Complete – HLRCR Created`, with the change request and its state beneath |
+  | No change required, awaiting the discipline lead | `HLR Assessment Complete – No HLRCR Required Pending Approval` |
+  | No change required, approved | `HLR Assessment Complete – No HLRCR Required` |
+  | Superseded | `HLR Assessment Superseded – Refer to <the assessment that replaced it>` |
+
+  Two rules follow. **A change request cannot be linked until the assessment has concluded that one is
+  required.** And **only a no-change conclusion is approved**: a conclusion calling for a change is complete
+  when the engineer records it.
+- **Rationale:** The queue answered with nine phrasings that mixed how far along the workflow was with what
+  the engineering conclusion had been, so the same stage read differently depending on which branch reached
+  it. There is deliberately no wording for an assessment somebody has picked up but not answered — it has
+  either been performed or it has not, and an interim state reports an intention rather than a fact. The
+  approval asymmetry is the substantive half: a conclusion that calls for a change produces a change request
+  which is reviewed on its own terms, so approving the assessment as well reviews one judgement twice and
+  delays the work carrying it. A conclusion that nothing is needed produces nothing, and was the single
+  answer in the chain that nobody would ever examine.
+- **Consequences:**
+  - Linking previously worked from an undecided assessment, so a Draft could hang off a conclusion that said
+    nothing while the queue reported controlled downstream work. That is now refused.
+  - Because the queue reads the same before and after a no-change conclusion is sent for approval — it is
+    pending approval either way — the hand-off is visible only in the drawer, where the approver picker is
+    replaced by the named approver. A returned assessment also reads as pending approval; the reviewer's
+    reason for returning it is in the drawer.
+  - The row offers one control. The number, title and level chip were a second button opening the same
+    drawer, so a row carried two ways to do one thing and neither announced itself as the way.
+
+### DEC-095 - A Test Change Request Is What a Test Assessment Raises, Not What an Approval Raises
+
+- **Date:** 2026-08-05
+- **Status:** Accepted; delivered by PR #345
+- **Decision:** An approved change raises a **test assessment** for each affected verification discipline,
+  unnumbered and carrying no controlled identity. The SYSTCR, HLRTCR or LLRTCR number is allocated only when
+  that assessment concludes test-procedure work is required. Concluding that none is required raises nothing,
+  states why, and goes to a test lead for approval. The wording is [DEC-094](#dec-094---an-assessment-says-whether-it-was-done-and-what-it-found)'s,
+  with the discipline's own nouns — `System Test Assessment Complete – SYSTCR Created`, and so on.
+- **Rationale:** `TestChangeReview` and the test change request are the same record, and it was numbered the
+  moment a change request was approved. Every approved change therefore produced a controlled test change
+  request before anybody had looked at whether it touched a single procedure, and the page described them
+  accordingly — "raised when a change request is approved" — which is why it read nothing like the
+  requirements queue beside it. The two pages were showing the same stage of the same workflow in two
+  unrelated vocabularies, so what a reader learned on one told them nothing about the other.
+- **Consequences:**
+  - Raising a test change request **by hand** is itself the conclusion that work is required, so it is
+    numbered immediately. An orphaned procedure is likewise its own finding.
+  - An unassessed package is identified by the change it is assessing, because it has no number yet. A
+    coverage refusal that named the holder by its number consequently trailed off into nothing, and now names
+    what the package is currently called — distinguishing *covered by another package* from *already has an
+    assessment of its own*, which otherwise read as "X is already covered by X".
+  - The showcase answers the assessments that carry procedure decisions and leaves the rest open, so the
+    demonstration shows both a queue with work waiting to be judged and the test change requests that judging
+    it produced.
+  - What is **not** converged: the requirements queue opens a drawer while the coverage page expands inline,
+    and a test row still carries several controls because a test change request has more to do. Unifying
+    those two interaction patterns remains open.
+
+### DEC-096 - A Problem Report Names Its Kind, Its Workaround, and Who Holds It
+
+- **Date:** 2026-08-05
+- **Status:** Accepted; delivered by PR #344
+- **Decision:** A Problem Report carries a **Type** (Documentation, Code, Test, Other) so a queue can be
+  narrowed to the work one discipline owns, and a **Workaround** where empty means none has been found. The
+  impact assessment's `Safety` area is renamed **Airworthiness**, which names what is actually being judged.
+  `Responsible owner` is called **Assigned user** throughout. No separate state field was added: the report
+  already has a lifecycle state and the queue already filters on it.
+- **Rationale:** Type is stored by name so adding a kind later is a code change rather than a data migration.
+  `Other` exists because every report raised before the field did was genuinely unclassified, and a report
+  fitting none of the named kinds needs somewhere to go that is not the nearest wrong answer.
+- **Consequences:**
+  - Both new enum columns had to override EF's scaffolded `defaultValue: ""`. A value stored by name cannot
+    be an empty string, and every existing record would have failed to materialize. See
+    [LES-004](#les-004---an-enum-stored-by-name-cannot-default-to-an-empty-string).
+  - Renaming the impact area moves the recorded answers with it: the migration rewrites the stored JSON key,
+    and the domain still accepts `Safety` on input so a client that has not been reloaded is understood
+    rather than rejected.
+  - The queue's search box filters as it is typed into, a moment after typing stops, and the `Refresh` button
+    is gone. The dropdowns keep `Apply filters`, because changing three of them should ask once.
+  - The editable-state policy is unchanged. Six states still block editing — Closed, Rejected, Duplicate,
+    Cannot Reproduce, No Fault Found and Accepted Risk — and whether the last four should is deliberately
+    left open.
+
+## Lessons Learned
+
+Findings that cost real time, recorded so they cost it once. These are about how the work is done rather than
+what the product does.
+
+### LES-001 - A New API Route Inherits Middleware Guards by Prefix Match
+
+`primaryMutationPrefixes` in `Program.cs` matches with `StartsWith`, and its entries are deliberately loose —
+`/api/baseline` is written that way to catch `/api/baselines`. It therefore also caught `/api/baseline-imports`,
+and every import gate was refused with "Build 1.5 is released and read-only", about a build the import does
+not touch. Tightening the prefixes to a segment boundary would break the routes they were written for, so an
+exemption is named explicitly instead. **Check every new `/api` route against three places in `Program.cs`:**
+the mutation prefix list, the Project-scope resolution switch, and the build-owned resource switch.
+
+### LES-002 - Test a Performance Hypothesis Before Shipping the Fix
+
+Browser journeys intermittently time out after fifteen seconds waiting for sign-in, with the page still
+showing "Authenticating…". A plausible cause was that Entity Framework builds its model on the first query,
+so a readiness probe that only opens a connection reports ready while the cost still lands on the first real
+request. The fix was written, then measured: **167 ms with the warm-up against 170 ms without.** Identity
+seeding already issues queries at startup, so the model was warm long before the probe. The change was
+deleted rather than shipped with a rationale that had just been disproven. The cause remains unknown;
+password-hashing cost under parallel-shard CPU contention is the next candidate, and it should be measured
+the same way.
+
+### LES-003 - Green Tests Are Not a Look at the Page
+
+Four defects in one day passed every assertion and were caught only by rendering the page and reading it:
+dates shifted a day for anyone west of UTC because provenance facts were formatted in local time; a cascade
+collision where `.importStart label` outranked `.importCheck` and dropped every checkbox onto its own line;
+two project cards wearing the same icon; and a block of divider colour where a grid's last row wrapped short.
+**Screenshot a changed page and look at it before calling the change done.**
+
+### LES-004 - An Enum Stored by Name Cannot Default to an Empty String
+
+EF Core scaffolds a new non-nullable string column with `defaultValue: ""`. Where that column holds an enum
+converted with `HasConversion<string>()`, `""` is not a member name and **every existing row fails to
+materialize** — a total outage of that entity, from a migration that looks routine. It happened twice in one
+day, on `problem_reports.Type` and `test_change_reviews.Outcome`. Always replace the scaffolded default with
+a real member, and backfill the rows that deserve a different one.
+
+### LES-005 - Prefer the Editor Over Scripted Multi-File Edits
+
+A `perl -pi -e` substitution intended to change one card's icon silently stripped the field from **two**,
+leaving an unrelated card without one. This repeats an earlier finding that scripted edits misfire in this
+repository — `${number}` shell-expanding to nothing, `===` breaking the parser, CRLF causing silent no-ops.
+Use the editing tools for anything structural; reserve scripted substitution for changes whose every match is
+verified afterwards.
 
 ## Working Assumptions
 
