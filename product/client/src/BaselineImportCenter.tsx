@@ -60,6 +60,7 @@ export default function BaselineImportCenter({user,api,projectId,onBackToBuilds,
   const [found,setFound]=useState<SearchResult>()
   const [error,setError]=useState('')
   const [busy,setBusy]=useState('')
+  const [starting,setStarting]=useState(false)
 
   const loadList=useCallback(async()=>{
     try{setRows(await apiRequest<Summary[]>(`${api}/api/baseline-imports?projectId=${projectId}`))}
@@ -81,6 +82,17 @@ export default function BaselineImportCenter({user,api,projectId,onBackToBuilds,
     try{
       setFound(await apiRequest(`${api}/api/source-identities?projectId=${projectId}&search=${encodeURIComponent(search)}`))
     }catch(problem){setError(operationError(problem,'That source identifier could not be looked up.'))}
+  }
+
+  const startImport=async(body:unknown)=>{
+    setBusy('source');setError('')
+    try{
+      const created=await apiRequest<Detail>(`${api}/api/baseline-imports`,{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...(body as object),projectId}),
+      })
+      setStarting(false);await loadList();setOpenId(created.id)
+    }catch(problem){setError(operationError(problem,'That import could not be started.'))}
+    finally{setBusy('')}
   }
 
   const advance=async(id:string,gate:string,body?:unknown)=>{
@@ -166,9 +178,17 @@ export default function BaselineImportCenter({user,api,projectId,onBackToBuilds,
         </section>
 
         <section aria-labelledby="imports-heading">
-          <h2 id="imports-heading">Imports</h2>
-          {rows.length===0
+          <div className="importSectionHead">
+            <h2 id="imports-heading">Imports</h2>
+            {/* Offered to everyone who can read this page. Whether somebody may actually start an import is
+                the API's answer, and it holds the authority to give it — hiding the control on a guess about
+                a role this page does not know would hide it from the configuration managers it is for. */}
+            {!starting&&<button type="button" className="importPrimary" onClick={()=>setStarting(true)}>Import a baseline</button>}
+          </div>
+          {starting&&<StartImportForm busy={!!busy} onCancel={()=>setStarting(false)} onStart={startImport}/>}
+          {rows.length===0&&!starting
             ?<p className="importEmpty">No program has been brought in from another tool yet.</p>
+            :rows.length===0?null
             :<ul className="importList">
               {rows.map(row=>(
                 <li key={row.id}>
@@ -288,6 +308,82 @@ export default function BaselineImportCenter({user,api,projectId,onBackToBuilds,
         )}
       </main>
     </div>
+  )
+}
+
+/**
+ * The Source gate: what the extract is, and where it came from.
+ *
+ * Every field here is provenance recorded permanently against the baseline the import creates, which is why
+ * it is asked for before anything is read. The hash and size are typed rather than computed, because until
+ * an extract can be uploaded there is no file on this side to compute them from — so the form says where to
+ * get them rather than leaving somebody to guess at a 64-character field.
+ */
+function StartImportForm({busy,onCancel,onStart}:{
+  busy:boolean
+  onCancel:()=>void
+  onStart:(body:unknown)=>void
+}){
+  const [form,setForm]=useState({
+    sourceSystem:'IBM Rational DOORS',sourceSystemVersion:'',sourceBaselineName:'',sourceBaselineDate:'',
+    extractFileName:'',extractSha256:'',extractSizeBytes:'',extractedBy:'',extractedAt:'',
+  })
+  const [carries,setCarries]=useState({Requirements:true,TestProcedures:false})
+  const set=(key:keyof typeof form)=>(event:{target:{value:string}})=>setForm({...form,[key]:event.target.value})
+  const kinds=Object.entries(carries).filter(([,on])=>on).map(([kind])=>kind)
+
+  return (
+    <form className="importCard importStart" onSubmit={event=>{
+      event.preventDefault()
+      onStart({
+        ...form,
+        // Dates are entered as days and recorded as instants in UTC, so the day stays the day it was.
+        sourceBaselineDate:new Date(`${form.sourceBaselineDate}T00:00:00Z`).toISOString(),
+        extractedAt:new Date(`${form.extractedAt}T00:00:00Z`).toISOString(),
+        extractSizeBytes:Number(form.extractSizeBytes),
+        carries:kinds,
+      })
+    }}>
+      <header><div>
+        <h3>Import a baseline</h3>
+        <p>Recorded permanently against the baseline this creates. Nothing is read from the extract yet.</p>
+      </div></header>
+
+      <div className="importFields">
+        <label>Source system<input required value={form.sourceSystem} onChange={set('sourceSystem')} placeholder="IBM Rational DOORS"/></label>
+        <label>Source system version<input required value={form.sourceSystemVersion} onChange={set('sourceSystemVersion')} placeholder="9.6.1.13"/></label>
+        <label>Source baseline name<input required value={form.sourceBaselineName} onChange={set('sourceBaselineName')} placeholder="FMS Sys Req v4.2"/></label>
+        <label>Source baseline date<input required type="date" value={form.sourceBaselineDate} onChange={set('sourceBaselineDate')}/></label>
+        <label>Extract file name<input required value={form.extractFileName} onChange={set('extractFileName')} placeholder="FMS_SYSTEM_REQUIREMENTS.reqifz"/></label>
+        <label>Extract size in bytes<input required type="number" min={1} value={form.extractSizeBytes} onChange={set('extractSizeBytes')} placeholder="43842112"/></label>
+        <label>Taken from the source by<input required value={form.extractedBy} onChange={set('extractedBy')} placeholder="m.chen"/></label>
+        <label>Taken on<input required type="date" value={form.extractedAt} onChange={set('extractedAt')}/></label>
+      </div>
+
+      <label className="importWide">
+        Extract SHA-256
+        <input required pattern="[0-9a-fA-F]{64}" value={form.extractSha256} onChange={set('extractSha256')}
+          placeholder="64 hexadecimal characters"/>
+        {/* What makes "this is a true copy" checkable years later, so it is worth the trouble of getting it. */}
+        <small>In PowerShell: <code>Get-FileHash -Algorithm SHA256 &lt;file&gt;</code></small>
+      </label>
+
+      <fieldset className="importWide">
+        <legend>What this extract carries</legend>
+        <label className="importCheck"><input type="checkbox" checked={carries.Requirements}
+          onChange={event=>setCarries({...carries,Requirements:event.target.checked})}/>Requirements</label>
+        <label className="importCheck"><input type="checkbox" checked={carries.TestProcedures}
+          onChange={event=>setCarries({...carries,TestProcedures:event.target.checked})}/>Test procedures</label>
+        {/* Declared now so requirements arriving from one system and test procedures from another stays open
+            later. An import that carries nothing is not an import. */}
+        {kinds.length===0&&<small>An import has to carry at least one kind of record.</small>}
+      </fieldset>
+
+      <div className="importActions">
+        <button type="submit" className="importPrimary" disabled={busy||kinds.length===0}>Start the import</button>
+        <button type="button" onClick={onCancel} disabled={busy}>Cancel</button>
+      </div>
+    </form>
   )
 }
 

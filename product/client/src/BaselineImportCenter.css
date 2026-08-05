@@ -29,6 +29,23 @@
 .importHistory span{color:#3d4d61;font-size:.9rem}
 .importHistory small{color:#6b7889;font-size:.78rem}
 
+.importSectionHead{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
+.importSectionHead .importPrimary{padding:.55rem 1rem;border:1px solid #16766f;border-radius:8px;background:#16766f;color:#fff;font:inherit;font-weight:650;cursor:pointer}
+.importSectionHead .importPrimary:hover{filter:brightness(1.08)}
+
+.importStart{margin-top:.9rem}
+.importFields{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:.85rem}
+.importStart label,.importStart legend{display:block;font-size:.8rem;font-weight:700;color:#43516a}
+.importStart input:not([type="checkbox"]){display:block;width:100%;margin-top:.3rem;padding:.55rem .7rem;border:1px solid #cbd7e6;border-radius:8px;font:inherit}
+.importStart .importWide{display:block;margin-top:.85rem}
+.importStart small{display:block;margin-top:.3rem;color:#5c6878;font-size:.8rem;font-weight:400}
+.importStart code{padding:.05rem .3rem;border-radius:4px;background:#f0f4f9;font-family:ui-monospace,'Cascadia Mono',Menlo,monospace}
+.importStart fieldset{margin:.85rem 0 0;padding:.75rem .9rem;border:1px solid #d9e2ec;border-radius:10px}
+/* Scoped to beat ".importStart label", which sets display:block and would otherwise drop each box onto its
+   own line above its text. */
+.importStart .importCheck{display:flex;align-items:center;gap:.45rem;margin-top:.4rem;font-weight:400;color:#3d4d61}
+.importStart .importCheck input{width:auto;margin:0}
+
 .importList{display:grid;gap:.6rem;margin:.75rem 0 0;padding:0;list-style:none}
 .importList button{display:grid;grid-template-columns:minmax(200px,1.3fr) minmax(200px,1.6fr) max-content;align-items:center;gap:1rem;width:100%;padding:.9rem 1rem;border:1px solid #d9e2ec;border-radius:12px;background:#fff;font:inherit;text-align:left;color:inherit;cursor:pointer}
 .importList button:hover{border-color:#a8bcd4}
