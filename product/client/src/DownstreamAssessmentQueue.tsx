@@ -8,7 +8,7 @@ import './DownstreamAssessmentQueue.css'
 type Level='HighLevel'|'LowLevel'
 type SourceChange={id:string;displayNumber:string;level:string;kind:string;statement:string}
 type Reopening={id:string;previousState:string;previousOutcome:string;previousRationale:string;previousDecidedBy?:string;previousDecidedAt?:string;previousApprovedBy?:string;previousApprovedAt?:string;detachedChangeRequestNumbers:string;reason:string;actorId:string;occurredAt:string}
-type Assessment={id:string;sourceChangeRequestId:string;sourceChangeRequestNumber:string;sourceTitle:string;sourceProblem:string;sourceAnalysis:string;sourceSolution:string;sourceChanges:SourceChange[];targetLevel:Level;state:'Open'|'InReview'|'Approved'|'Superseded';outcome:'Pending'|'ChangeRequired'|'NoChangeRequired'|'ChangeRequestsLinked';assignedEngineerId?:string;selectedApproverId?:string;rationale:string;decidedBy?:string;decidedAt?:string;approvedBy?:string;approvedAt?:string;supersededReason:string;buildReleased:boolean;linkedChangeRequests:{changeRequestId:string;changeRequestNumber:string;title:string;state:string}[];reopenings:Reopening[];capabilities:{canAssign:boolean;canEdit:boolean;canSubmit:boolean;canApprove:boolean;canReturn:boolean;canReopen:boolean}}
+type Assessment={id:string;sourceChangeRequestId:string;sourceChangeRequestNumber:string;sourceTitle:string;sourceProblem:string;sourceAnalysis:string;sourceSolution:string;sourceChanges:SourceChange[];targetLevel:Level;state:'Open'|'InReview'|'Approved'|'Superseded';outcome:'Pending'|'ChangeRequired'|'NoChangeRequired'|'ChangeRequestsLinked';assignedEngineerId?:string;selectedApproverId?:string;rationale:string;decidedBy?:string;decidedAt?:string;approvedBy?:string;approvedAt?:string;supersededByAssessmentId?:string;supersededReason:string;buildReleased:boolean;linkedChangeRequests:{changeRequestId:string;changeRequestNumber:string;title:string;state:string}[];reopenings:Reopening[];capabilities:{canAssign:boolean;canEdit:boolean;canSubmit:boolean;canApprove:boolean;canReturn:boolean;canReopen:boolean}}
 type Draft={id:string;displayNumber:string;title:string;requirementCount:number}
 type RationaleDecision={assessmentId:string;sourceNumber:string;kind:'no-change'|'return'|'reopen'}
 type Impact={baseNumber:string;known:boolean;derivedRequirements:{id:string;displayNumber:string;level:string;statement:string;linkType:string}[]}
@@ -39,17 +39,28 @@ const outcomeWords=(outcome:string)=>outcome==='NoChangeRequired'?'no change req
   :outcome==='ChangeRequired'?'change required'
     :outcome==='ChangeRequestsLinked'?'change required, change request linked':'undecided'
 const when=(value?:string)=>value?new Date(value).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):''
+/**
+ * Whether the assessment has been done, and what it concluded. Nothing else.
+ *
+ * There is deliberately no wording for an assessment somebody has picked up but not yet answered: it has
+ * either been performed or it has not, and an interim "in progress" only tells a reader that somebody
+ * intends to do it. Nor is there an "in review" — a conclusion that calls for a downstream change is
+ * complete when it is recorded, because the change request it produces carries its own review, so the only
+ * conclusion waiting on anybody is one that says nothing is needed.
+ */
 const engineeringStatus=(row:Assessment)=>{
   const level=levelName(row.targetLevel)
-  if(row.state==='Superseded')return `${level} assessment superseded`
-  if(row.state==='InReview')return `${level} assessment in review`
-  if(row.state==='Approved'&&row.outcome==='NoChangeRequired')return `Assessment complete — no ${level} change required`
-  if(row.state==='Approved')return `Assessment complete — ${level} change required`
-  if(!row.assignedEngineerId)return `${level} impact pending`
-  if(row.outcome==='Pending')return `${level} assessment in progress`
-  if(row.outcome==='ChangeRequired')return `Draft ${level}CR needed`
-  if(row.outcome==='ChangeRequestsLinked')return `Draft linked — ready for review`
-  return `${level} no downstream change — ready for review`
+  if(row.state==='Superseded')return `${level} Assessment Superseded`
+  if(row.outcome==='Pending')return `${level} Assessment Required`
+  if(row.outcome==='NoChangeRequired')
+    return row.state==='Approved'
+      ? `${level} Assessment Complete – No ${level}CR Required`
+      : `${level} Assessment Complete – No ${level}CR Required Pending Approval`
+  // Both remaining outcomes are complete. The distinction is only whether the change request that carries
+  // the change exists yet, and it reads the same whether that change request is Draft or Approved.
+  return row.outcome==='ChangeRequestsLinked'
+    ? `${level} Assessment Complete – ${level}CR Created`
+    : `${level} Assessment Complete – Draft ${level}CR Required`
 }
 
 export default function DownstreamAssessmentQueue({api,projectId,releaseId,targetLevel,user,onOpenScr,onOpenRequirement,onCreateScr,initialAssessmentId,onAssessmentSelected}:{api:string;projectId:string;releaseId:string;targetLevel:Level;user:AuthUser;onOpenScr:(id:string)=>void;onOpenRequirement:(id:string,level:string)=>void;onCreateScr:(level:Level,assessmentId:string,sourceNumber:string)=>void;initialAssessmentId?:string;onAssessmentSelected:(id?:string)=>void}){
@@ -76,8 +87,19 @@ export default function DownstreamAssessmentQueue({api,projectId,releaseId,targe
   return <section className="downstreamQueue" aria-labelledby="downstream-title">
     <header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>Approved upstream changes waiting for an explicit HLR or LLR engineering conclusion.</p></div></header>{error&&<div className="workspaceError" role="alert">{error}</div>}
     {rows.map(row=><article className={`downstreamAssessment ${row.state.toLowerCase()}`} data-state={row.state} key={row.id}>
-      <button type="button" className="downstreamSource" onClick={()=>openAssessment(row.id)} aria-label={`Open ${levelName(row.targetLevel)} assessment for ${row.sourceChangeRequestNumber}`}><b>{row.sourceChangeRequestNumber}</b><span>{row.sourceTitle}</span><i>{levelName(row.targetLevel)} assessment</i></button>
-      <div className="downstreamConclusion"><strong>{engineeringStatus(row)}</strong>{row.state==='Superseded'&&<p>{row.supersededReason}</p>}{row.linkedChangeRequests.map(link=><button type="button" className="linkedScr" key={link.changeRequestId} onClick={()=>onOpenScr(link.changeRequestId)}>{link.changeRequestNumber} · {link.state}</button>)}</div>
+      {/* Identifying text, not a control. The number, the title and the level chip used to be one large
+          button opening the same drawer as the button on the right, so a row carried two ways to do one
+          thing and neither announced itself as the way. */}
+      <div className="downstreamSource"><b>{row.sourceChangeRequestNumber}</b><span>{row.sourceTitle}</span><i>{levelName(row.targetLevel)} assessment</i></div>
+      <div className="downstreamConclusion">
+        <strong>{engineeringStatus(row)}</strong>
+        {/* A superseded assessment sends the reader to the one that replaced it rather than leaving them
+            holding a dead end. The successor sits in this same queue, so it is named and reachable. */}
+        {row.state==='Superseded'&&(()=>{const successor=rows.find(x=>x.id===row.supersededByAssessmentId);return successor
+          ?<p>Refer to <button type="button" className="linkedScr" onClick={()=>openAssessment(successor.id)}>{successor.sourceChangeRequestNumber}</button></p>
+          :<p>{row.supersededReason}</p>})()}
+        {row.linkedChangeRequests.map(link=><button type="button" className="linkedScr" key={link.changeRequestId} onClick={()=>onOpenScr(link.changeRequestId)}>{link.changeRequestNumber} · {link.state}</button>)}
+      </div>
       {/* One control, one word, in every state. What can be done about the assessment is decided inside it. */}
       <div className="downstreamActions"><button type="button" className="openAssessment" onClick={()=>openAssessment(row.id)}>Open assessment</button></div>
     </article>)}<p className="downstreamHelp">One Draft may answer several assessments, and one assessment may link several Drafts.</p>
