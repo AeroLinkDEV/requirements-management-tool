@@ -134,6 +134,11 @@ type Metrics = {
   verification: { system: VerificationMetrics; hlr: VerificationMetrics; llr: VerificationMetrics };
 };
 type Release = { id: string; version: string; isReleased: boolean };
+/// The two Projects the Projects landing offers by name. Both cards address their Project explicitly, so
+/// neither depends on the order workspaces happen to come back in.
+const showcaseProjectName = "FMS Product Development";
+const practiceProjectName = "DOORS Import Practice";
+
 type Workspace = {
   program: { id: string; name: string; code: string };
   projects: {
@@ -270,7 +275,10 @@ function App() {
         : undefined;
       const namedProject=namedProgram?.projects.find(x=>projectSlugOf(x.project.name)===initialRoute.projectSlug);
       if(initialRoute.projectSlug&&!namedProject)setView("notFound");
-      const program=routedProgram??namedProgram??next[0],project=routedProject??namedProject??program?.projects[0],release=routedRelease??[...(project?.releases??[])].reverse().find(x=>!x.isReleased)??project?.releases.at(-1);
+      // Falling back to a workspace that has a build rather than to whichever came back first. A Program
+      // with no builds — the import practice one — would otherwise become the default the moment it sorted
+      // ahead, and every page that reads the selected Project would quietly describe an empty Program.
+      const program=routedProgram??namedProgram??next.find(x=>x.projects.some(y=>y.releases.length))??next[0],project=routedProject??namedProject??program?.projects[0],release=routedRelease??[...(project?.releases??[])].reverse().find(x=>!x.isReleased)??project?.releases.at(-1);
       setActiveId((current) => namedProgram?.program.id ?? (next.some(x=>x.program.id===current)?current:program?.program.id||""));
       setSelectedProjectId((current)=>namedProject?.project.id ?? (program?.projects.some(x=>x.project.id===current)?current:project?.project.id||""));
       setSelectedReleaseId((current)=>project?.releases.some(x=>x.id===current)?current:release?.id||"");
@@ -439,13 +447,25 @@ function App() {
   const buildsPath=routePath(context??{programId:"",projectId:"",releaseId:""},"builds");
   const showProjects=()=>{setView("projects");history.pushState({},"","/projects")};
   const exitBuild=()=>{setPaletteOpen(false);setDisplayOpen(false);setView("builds");setSelectedArtifactId("");setSelectedArtifactKind("");setSelectedScrId("");history.pushState({},"",buildsPath)};
-  const practice=workspaces.flatMap(x=>x.projects).find(x=>x.project.name==="DOORS Import Practice");
-  const practicePath=projectAreaPath(projectSlugOf(practice?.project.name??"DOORS Import Practice"),"baselineImports");
-  const openPractice=()=>{
-    if(practice){setActiveId(workspaces.find(x=>x.projects.includes(practice))?.program.id??activeId);setSelectedProjectId(practice.project.id)}
-    setView("baselineImports");history.pushState({},"",practicePath);
+  /**
+   * Opening a Project card names the Project it opens.
+   *
+   * Every card used to lean on whichever workspace came back first, which held only while there was one.
+   * A second Program can arrive first and silently make its Project the default, so the showcase card would
+   * open a builds page belonging to a Project with no builds.
+   */
+  const projectNamed=(name:string)=>workspaces.flatMap(x=>x.projects).find(x=>x.project.name===name);
+  const openProjectPage=(name:string,area:"builds"|"baselineImports")=>{
+    const entry=projectNamed(name);
+    if(entry){setActiveId(workspaces.find(x=>x.projects.includes(entry))?.program.id??activeId);setSelectedProjectId(entry.project.id)}
+    setView(area);history.pushState({},"",projectAreaPath(projectSlugOf(name),area));
   };
-  if(view==="projects")return <ProjectsLanding user={user} workspaceHref={buildsPath} importPracticeHref={practicePath} onOpenWorkspace={()=>{setView("builds");history.pushState({},"",buildsPath)}} onOpenImportPractice={openPractice} onSignOut={signOut}/>;
+  if(view==="projects")return <ProjectsLanding user={user}
+    workspaceHref={projectAreaPath(projectSlugOf(showcaseProjectName),"builds")}
+    importPracticeHref={projectAreaPath(projectSlugOf(practiceProjectName),"baselineImports")}
+    onOpenWorkspace={()=>openProjectPage(showcaseProjectName,"builds")}
+    onOpenImportPractice={()=>openProjectPage(practiceProjectName,"baselineImports")}
+    onSignOut={signOut}/>;
   // Derived from the Project actually open, so these two pages stay on it. Sending the practice Project's
   // import page back to the showcase Project's builds would silently switch which Project you were in.
   const openProjectSlug=projectSlugOf(project?.project.name??"");
