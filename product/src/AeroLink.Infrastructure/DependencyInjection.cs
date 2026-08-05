@@ -30,6 +30,7 @@ public static class DependencyInjection
         services.AddScoped<IBaselineRepository, BaselineRepository>();
         services.AddScoped<RequirementBaselineMaterializer>();
         services.AddScoped<FmsShowcaseSeeder>();
+        services.AddScoped<ImportPracticeSeeder>();
         services.AddScoped<NotificationOutbox>();
         services.AddScoped<NotificationLinkBuilder>();
         services.AddSingleton<UnsubscribeTokenService>();

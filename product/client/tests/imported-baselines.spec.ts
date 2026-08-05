@@ -23,6 +23,24 @@ test.describe('imported baselines', () => {
     await expect(page.getByRole('heading', { name: 'Imported baselines' })).toBeVisible()
   }
 
+  test('the practice project opens its own import page, and stays on it', async ({ page }) => {
+    await login(page, 'admin', { openProject: false })
+
+    // A Program of its own, so the abandoned attempts it takes to get a mapping right never land in a
+    // Program somebody is working in.
+    await page.getByRole('link', { name: 'Open DOORS Import Practice' }).click()
+    await expect(page.getByRole('heading', { name: 'Imported baselines' })).toBeVisible()
+    expect(new URL(page.url()).pathname).toBe('/projects/doors-import-practice/imported-baselines')
+
+    // Reloading a pasted link lands on the Project the URL names, not on whichever comes first.
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'Imported baselines' })).toBeVisible()
+
+    // Its own Project has no builds. Going back must not silently switch which Project you are in.
+    await page.getByRole('button', { name: '← Software Builds' }).click()
+    expect(new URL(page.url()).pathname).toBe('/projects/doors-import-practice/builds')
+  })
+
   test('the page states what an import is, and what it never claims', async ({ page }) => {
     await openImports(page)
 

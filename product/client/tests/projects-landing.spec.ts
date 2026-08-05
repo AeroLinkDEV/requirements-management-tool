@@ -10,7 +10,8 @@ test('successful login opens the accessible Projects selector before the current
   await expect(page.getByText('Select a project to continue.')).toBeVisible()
 
   const cards = page.locator('[data-project-card]')
-  await expect(cards).toHaveCount(11)
+  // Ten mock projects, the showcase one, the import practice one, and the create-project card.
+  await expect(cards).toHaveCount(12)
   const cardLayout = await cards.evaluateAll(items => items.map(item => ({
     top: Math.round(item.getBoundingClientRect().top),
     height: Math.round(item.getBoundingClientRect().height),
@@ -50,7 +51,7 @@ test('the project grid collapses cleanly without horizontal scrolling', async ({
   await page.setViewportSize({ width: 390, height: 844 })
   await login(page, 'admin', { openProject: false })
 
-  await expect(page.locator('[data-project-card]')).toHaveCount(11)
+  await expect(page.locator('[data-project-card]')).toHaveCount(12)
   const dimensions = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: document.documentElement.clientWidth,
