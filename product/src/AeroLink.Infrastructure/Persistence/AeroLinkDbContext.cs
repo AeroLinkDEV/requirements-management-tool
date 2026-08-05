@@ -880,6 +880,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.RootCause).HasMaxLength(8000); b.Property(x => x.Effects).HasMaxLength(8000); b.Property(x => x.Containment).HasMaxLength(8000); b.Property(x => x.CorrectiveAction).HasMaxLength(8000); b.Property(x => x.SystemAircraftImpact).HasMaxLength(8000); b.Property(x => x.ImpactAssessmentJson).HasMaxLength(4000); b.Property(x => x.DispositionRationale).HasMaxLength(8000);
             b.Property(x => x.WaiverRationale).HasMaxLength(8000); b.Property(x => x.WaivedBy).HasMaxLength(100); b.Property(x => x.ClosureApprovedByName).HasMaxLength(100);
             b.Property(x => x.Severity).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Priority).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Disposition).HasConversion<string>().HasMaxLength(30); b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
+            // By name, so adding a kind later costs nothing in the database.
+            b.Property(x => x.Type).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ReportNumber }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.State, x.Severity }); b.HasIndex(x => new { x.ProjectId, x.IsReleaseBlocker });
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });

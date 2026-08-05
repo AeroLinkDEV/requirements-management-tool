@@ -775,6 +775,7 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
         origin = item.Origin, affectedConfiguration = item.AffectedConfiguration, rootCause = item.RootCause,
         effects = item.Effects, containment = item.Containment, correctiveAction = item.CorrectiveAction,
         systemAircraftImpact = item.SystemAircraftImpact, impactAssessmentJson = item.ImpactAssessmentJson,
+        type = item.Type.ToString(), workaround = item.Workaround,
         disposition = item.Disposition?.ToString(), dispositionRationale = item.DispositionRationale,
         resolutionVerificationExecutionId = item.ResolutionVerificationExecutionId,
         isReleaseBlocker = item.IsReleaseBlocker, waiverRationale = item.WaiverRationale,
@@ -800,7 +801,8 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
             draft.Title ?? "", draft.Problem ?? "", draft.ProblemRich ?? "",
             draft.AdditionalInformation ?? "", draft.AdditionalInformationRich ?? "", draft.Analysis ?? "",
             draft.RootCause ?? "", draft.CorrectiveAction ?? "", draft.SystemAircraftImpact ?? "",
-            draft.ImpactAssessmentJson ?? "", ParseEnum(draft.Severity, item.Severity), ParseEnum(draft.Priority, item.Priority), now);
+            draft.ImpactAssessmentJson ?? "", ParseEnum(draft.Severity, item.Severity), ParseEnum(draft.Priority, item.Priority), now,
+            ParseEnum(draft.Type, item.Type), draft.Workaround);
         db.ProblemReportRevisions.Add(new ProblemReportRevision(item.Id, item.Revision, "DetailsCheckedIn",
             actor, item.CanonicalHash(), EvidenceSnapshot(item), now));
         return Task.CompletedTask;
@@ -810,7 +812,8 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
     private sealed record ProblemDraft(Guid Id, Guid ProjectId, string? ReportNumber, string? Title, string? Problem,
         string? ProblemRich, string? AdditionalInformation, string? AdditionalInformationRich, string? Analysis,
         string? RootCause, string? CorrectiveAction, string? SystemAircraftImpact, string? ImpactAssessmentJson,
-        string? Severity, string? Priority, string? ReportedBy, string? ResponsibleEngineerId, string? State, long Version);
+        string? Severity, string? Priority, string? ReportedBy, string? ResponsibleEngineerId, string? State, long Version,
+        string? Type = null, string? Workaround = null);
 }
 
 public sealed class ConfigurationChangeSetControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
