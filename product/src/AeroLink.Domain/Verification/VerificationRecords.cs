@@ -14,7 +14,34 @@ public sealed class TestProcedure
     {
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A test procedure title is required.");
         Id = Guid.NewGuid(); ProjectId = projectId; BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
+        EnsurePrefixMatchesLevel(BaseNumber, level);
         Title = title.Trim(); OwnerId = ownerId.Trim(); CreatedAt = now; UpdatedAt = now; Level = level;
+    }
+
+    /// <summary>
+    /// A procedure's number and its level are one fact, so they are not allowed to disagree.
+    ///
+    /// The allocator picks SYSTP, HLRTP or LLRTP <em>from</em> the level, so a SYSTP numbered procedure that
+    /// says it is HighLevel did not come from there — it came from a caller that left the level to its default.
+    /// That is not a cosmetic mislabelling: the level decides which requirements the procedure may verify and
+    /// which discipline answers for it when a retirement strands it, so a wrong one puts real work in the wrong
+    /// team's queue. Checked here because this is the only place a procedure comes into existence.
+    /// </summary>
+    private static void EnsurePrefixMatchesLevel(string baseNumber, TestProcedureLevel level)
+    {
+        var expected = level switch
+        {
+            TestProcedureLevel.System => "SYSTP-",
+            TestProcedureLevel.HighLevel => "HLRTP-",
+            _ => "LLRTP-",
+        };
+        if (baseNumber.StartsWith(expected, StringComparison.OrdinalIgnoreCase)) return;
+        // Only a number claiming to be a test procedure is judged. A project numbering its procedures some
+        // other way is not making this mistake, and is not this rule's business.
+        var known = new[] { "SYSTP-", "HLRTP-", "LLRTP-" };
+        if (!known.Any(x => baseNumber.StartsWith(x, StringComparison.OrdinalIgnoreCase))) return;
+        throw new DomainException(
+            $"{baseNumber} is numbered for a different level than {level}. A test procedure's number and its level have to agree.");
     }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }

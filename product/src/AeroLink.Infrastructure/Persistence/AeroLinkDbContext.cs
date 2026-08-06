@@ -1038,10 +1038,71 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             if (entry.State == EntityState.Added) entry.Property(x => x.Version).CurrentValue = 1;
             if (entry.State == EntityState.Modified) entry.Property(x => x.Version).CurrentValue = entry.Property(x => x.Version).OriginalValue + 1;
         }
+        await RefuseCrossLevelCoverageAsync(cancellationToken);
         await AddLifecycleEventsAsync(cancellationToken);
         await QueueNotificationDeliveriesAsync(cancellationToken);
         return await base.SaveChangesAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Refuses a coverage link between a procedure and a requirement at a different level.
+    ///
+    /// An HLR test procedure exists because it verifies one or more HLRs. Linking one to a System requirement
+    /// is not a thing a verification engineer means to do, and the product allowed it — which is how a System
+    /// change request came to raise work in the HLR queue: retiring the System requirement stranded the HLR
+    /// procedure, and the orphan was routed by the procedure's level onto a System change request. Forbidding
+    /// the link removes that whole class of problem rather than routing around it, because a retirement can
+    /// then only ever strand procedures of its own level.
+    ///
+    /// Enforced here rather than in the constructor because this is the one place every write passes through.
+    /// The rule was already true of all 1,251 links in the demo database, so this fixes nothing retroactively —
+    /// it stops the next one, including from code not yet written.
+    /// </summary>
+    private async Task RefuseCrossLevelCoverageAsync(CancellationToken ct)
+    {
+        var added = ChangeTracker.Entries<TestRequirementCoverage>()
+            .Where(x => x.State == EntityState.Added)
+            .Select(x => x.Entity)
+            .ToList();
+        if (added.Count == 0) return;
+
+        var procedureRevisionIds = added.Select(x => x.ProcedureRevisionId).Distinct().ToList();
+        var requirementRevisionIds = added.Select(x => x.RequirementRevisionId).Distinct().ToList();
+
+        var procedureLevels = await (from revision in TestProcedureRevisions.AsNoTracking()
+                                     join procedure in TestProcedures.AsNoTracking()
+                                         on revision.ProcedureId equals procedure.Id
+                                     where procedureRevisionIds.Contains(revision.Id)
+                                     select new { revision.Id, procedure.Level, procedure.BaseNumber })
+            .ToDictionaryAsync(x => x.Id, ct);
+        var requirementLevels = await (from revision in RequirementRevisions.AsNoTracking()
+                                       join artifact in Requirements.AsNoTracking()
+                                           on revision.ArtifactId equals artifact.Id
+                                       where requirementRevisionIds.Contains(revision.Id)
+                                       select new { revision.Id, artifact.Level, artifact.BaseNumber })
+            .ToDictionaryAsync(x => x.Id, ct);
+
+        foreach (var link in added)
+        {
+            // A revision not yet in the database is one being written in this same unit of work. Its level is
+            // not knowable here, and refusing on that basis would block legitimate writes; the authoring paths
+            // check before proposing.
+            if (!procedureLevels.TryGetValue(link.ProcedureRevisionId, out var procedure)) continue;
+            if (!requirementLevels.TryGetValue(link.RequirementRevisionId, out var requirement)) continue;
+            if (SameLevel(procedure.Level, requirement.Level)) continue;
+            throw new DomainException(
+                $"{procedure.BaseNumber} is a {procedure.Level} test procedure and cannot verify {requirement.BaseNumber}, which is a {requirement.Level} requirement. A test procedure covers requirements at its own level.");
+        }
+    }
+
+    /// <summary>The one true correspondence between a procedure's level and a requirement's.</summary>
+    private static bool SameLevel(TestProcedureLevel procedure, RequirementLevel requirement) => (procedure, requirement) switch
+    {
+        (TestProcedureLevel.System, RequirementLevel.System) => true,
+        (TestProcedureLevel.HighLevel, RequirementLevel.HighLevel) => true,
+        (TestProcedureLevel.LowLevel, RequirementLevel.LowLevel) => true,
+        _ => false,
+    };
 
     /// <summary>
     /// Queues an outbound delivery for every notification being written, in the same unit of work.
