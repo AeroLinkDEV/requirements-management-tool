@@ -4,6 +4,7 @@ using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace AeroLink.Api;
 
@@ -20,6 +21,14 @@ public sealed record SubmitTestChangeReviewRequest(string ApproverId);
 /// <param name="Rationale">Why no test work is needed. Required only when concluding that none is.</param>
 public sealed record TestAssessmentConclusionRequest(bool TestChangeRequired, string? Rationale);
 public sealed record ApproveTestChangeReviewRequest(string Rationale);
+/// <summary>
+/// One proposed change to one procedure. <paramref name="BaseNumber"/> is omitted when introducing — the
+/// number is allocated here so two engineers cannot pick the same one — and required otherwise, because a
+/// modification or retirement has to name the procedure it acts on.
+/// </summary>
+public sealed record ProposeProcedureChangeRequest(TestProcedureChangeKind Kind, string? BaseNumber, int Revision,
+    string Title, string Objective, string Preconditions, string Steps, string ExpectedResult, string Rationale,
+    Guid[]? DrivingRequirementRevisionIds);
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
 
 public static class VerificationImpactEndpoints
@@ -177,6 +186,108 @@ public static class VerificationImpactEndpoints
                 {
                     review.Id, outcome = review.Outcome.ToString(), review.BaseNumber, review.DisplayNumber,
                     review.NoChangeRationale, review.DecidedBy, review.DecidedAt, state = review.State.ToString()
+                });
+            }
+            catch (DomainException problem) { return Results.BadRequest(new { error = problem.Message }); }
+        });
+
+        // The procedure decisions a test change request carries — what the workspace reads and writes, and the
+        // test-side counterpart of the requirement changes a change request carries.
+        app.MapGet("/api/test-change-reviews/{id:guid}/procedure-changes", async (Guid id,
+            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.AsNoTracking().Include(x => x.ProcedureChanges)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
+            return Results.Ok(new
+            {
+                review.Id, review.DisplayNumber, review.BaseNumber, review.Revision,
+                discipline = review.Discipline.ToString(), state = review.State.ToString(),
+                outcome = review.Outcome.ToString(), procedureLevel = review.ProcedureLevel().ToString(),
+                review.SourceChangeRequestNumber, review.AssignedEngineerId,
+                procedureChanges = review.ProcedureChanges
+                    .OrderBy(x => x.BaseNumber)
+                    .Select(x => new
+                    {
+                        x.Id, x.DisplayNumber, x.BaseNumber, x.Revision, kind = x.Kind.ToString(),
+                        level = x.Level.ToString(), x.Title, x.Objective, x.Preconditions, x.Steps,
+                        x.ExpectedResult, x.Rationale,
+                        drivingRequirementRevisionIds = DrivingRequirements(x.DrivingRequirementRevisionIdsJson)
+                    }).ToList()
+            });
+        });
+
+        app.MapPost("/api/test-change-reviews/{id:guid}/procedure-changes", async (Guid id,
+            ProposeProcedureChangeRequest request, HttpContext http, AeroLinkDbContext db,
+            IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            var refusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
+            if (refusal is not null) return refusal;
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                // Introducing allocates; modifying or retiring names what already exists. Letting the caller
+                // choose a number for a new procedure would let two engineers pick the same one.
+                var baseNumber = request.Kind == TestProcedureChangeKind.Introduce
+                    ? await IdentifierAllocator.NextTestProcedureAsync(db, review.ProcedureLevel(), ct)
+                    : (request.BaseNumber ?? "").Trim();
+                if (request.Kind != TestProcedureChangeKind.Introduce && baseNumber.Length == 0)
+                    return Results.BadRequest(new { error = "A modification or retirement must name the procedure it acts on." });
+                var change = review.AddProcedureChange(http.UserAccount().UserName, new TestProcedureChangeDraft(
+                    baseNumber, request.Revision, review.ProcedureLevel(), request.Kind, request.Title ?? "",
+                    request.Objective ?? "", request.Preconditions ?? "", request.Steps ?? "",
+                    request.ExpectedResult ?? "", request.Rationale ?? "",
+                    JsonSerializer.Serialize(request.DrivingRequirementRevisionIds ?? [])), now);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new
+                {
+                    change.Id, change.DisplayNumber, change.BaseNumber, change.Revision,
+                    kind = change.Kind.ToString(), level = change.Level.ToString(), change.Title
+                });
+            }
+            catch (DomainException problem) { return Results.BadRequest(new { error = problem.Message }); }
+        });
+
+        app.MapDelete("/api/test-change-reviews/{id:guid}/procedure-changes/{changeId:guid}", async (Guid id,
+            Guid changeId, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            var refusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
+            if (refusal is not null) return refusal;
+            try
+            {
+                review.RemoveProcedureChange(changeId, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { review.Id, remaining = review.ProcedureChanges.Count });
+            }
+            catch (DomainException problem) { return Results.BadRequest(new { error = problem.Message }); }
+        });
+
+        // Reopening approved test work to correct it, exactly as a change request advances to its next revision.
+        app.MapPost("/api/test-change-reviews/{id:guid}/revise", async (Guid id, HttpContext http,
+            AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
+                return Results.Forbid();
+            try
+            {
+                var released = await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct);
+                var next = review.StartNextRevision(http.UserAccount().UserName, DateTimeOffset.UtcNow, released);
+                db.TestChangeReviews.Add(next);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new
+                {
+                    next.Id, next.DisplayNumber, next.Revision, state = next.State.ToString(),
+                    outcome = next.Outcome.ToString(), procedureChanges = next.ProcedureChanges.Count
                 });
             }
             catch (DomainException problem) { return Results.BadRequest(new { error = problem.Message }); }
@@ -718,6 +829,34 @@ public static class VerificationImpactEndpoints
             }).ToListAsync(ct);
         return rows.Select(x => new ProcedureRow(x.ProcedureId, x.RevisionId, x.Revision, x.BaseNumber,
             x.Title, x.Level.ToString(), x.State)).ToList();
+    }
+
+    /// <summary>
+    /// The gate every write to a test change request's procedure decisions passes.
+    ///
+    /// Extracted rather than repeated because the three rules travel together and are easy to get partly
+    /// right: a released build is read-only, the actor holds test authority, and an assigned package is the
+    /// assignee's to edit unless a lead is doing it.
+    /// </summary>
+    private static async Task<IResult?> RefuseUnlessAuthoredBy(TestChangeReview review, HttpContext http,
+        AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+    {
+        if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
+            return Results.Conflict(new { error = "Released software-build test change requests are read-only." });
+        if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
+            return Results.Forbid();
+        var actor = http.UserAccount().UserName;
+        if (review.AssignedEngineerId is not null
+            && !string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)
+            && !await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestLead))
+            return Results.Forbid();
+        return null;
+    }
+
+    private static IReadOnlyList<Guid> DrivingRequirements(string json)
+    {
+        try { return JsonSerializer.Deserialize<List<Guid>>(json) ?? []; }
+        catch (JsonException) { return []; }
     }
 
     private static ApprovedProcedureSelection ToSelection(ProcedureRow row) =>

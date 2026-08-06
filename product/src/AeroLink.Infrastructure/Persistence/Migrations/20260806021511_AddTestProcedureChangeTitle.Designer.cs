@@ -3,6 +3,7 @@ using System;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    partial class AeroLinkDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260806021511_AddTestProcedureChangeTitle")]
+    partial class AddTestProcedureChangeTitle
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -84,6 +87,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("AeroLink.Domain.Baselines.BaselineTestChangeRequestSelection", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("BaselineId")
@@ -5598,7 +5602,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("SupersededByTestChangeRequestId");
 
-                    b.HasIndex("ChangeRequestId", "Discipline", "Revision")
+                    b.HasIndex("ChangeRequestId", "Discipline")
                         .IsUnique();
 
                     b.HasIndex("ReleaseId", "State", "Discipline");

@@ -155,7 +155,7 @@ public sealed class TestChangeReview
         if (_procedureChanges.Any(x => x.BaseNumber == draft.BaseNumber))
             throw new DomainException($"{draft.BaseNumber} already has a proposed change in this test change request.");
         var change = new TestProcedureChange(Id, draft.BaseNumber, draft.Revision, draft.Level, draft.Kind,
-            draft.Objective, draft.Preconditions, draft.Steps, draft.ExpectedResult, draft.Rationale,
+            draft.Title, draft.Objective, draft.Preconditions, draft.Steps, draft.ExpectedResult, draft.Rationale,
             draft.DrivingRequirementRevisionIdsJson);
         _procedureChanges.Add(change);
         Touch(now);
@@ -323,7 +323,7 @@ public sealed class TestChangeReview
         next.RecordTestChangeRequired(actorId, now);
         foreach (var change in _procedureChanges)
             next.AddProcedureChange(actorId, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
-                change.Level, change.Kind, change.Objective, change.Preconditions, change.Steps,
+                change.Level, change.Kind, change.Title, change.Objective, change.Preconditions, change.Steps,
                 change.ExpectedResult, change.Rationale, change.DrivingRequirementRevisionIdsJson), now);
         return next;
     }

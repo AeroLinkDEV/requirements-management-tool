@@ -181,7 +181,7 @@ public sealed class TestProcedureBaselineTests
         tcr.RecordTestChangeRequired("verification.engineer", Now);
         tcr.AssignControlledNumber("SYSTCR-000042", Now);
         tcr.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000123", 0,
-            TestProcedureLevel.System, TestProcedureChangeKind.Introduce,
+            TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Oceanic waypoint sequencing",
             "Verify oceanic waypoints are sequenced in the order the active flight plan holds.",
             "The aircraft is in cruise with an active oceanic flight plan.",
             "1. Load the plan. 2. Advance past the first waypoint. 3. Read the sequencer.",
