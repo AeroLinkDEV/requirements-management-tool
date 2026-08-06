@@ -335,12 +335,6 @@ correct, and had no route to it.
 
 Understating these is a product-integrity failure, not a marketing choice.
 
-- **The testing queue is not yet the requirements queue.** Test procedures are now authored, revised and
-  baselined exactly as requirements are (DEC-097), and the test change request has a workspace built from the
-  requirements drawer's own stylesheet. The *queue rows* are still the coverage page's dense list, not the
-  requirements card. The approved mock-up also removes Take it on, Link PRs, submit and approve from the row so
-  one `Open assessment` control remains in every state — a behaviour change across nine journeys, not a
-  restyling. Say the workspace matches and the queue does not yet.
 - **No build carries a procedure manifest yet.** The mechanism is complete and reachable, but every existing
   build predates it, so `baseline_test_procedures` is empty in the demonstration data. `MarkReleased`
   deliberately does not require one; gating on it would make already-released builds retrospectively invalid.

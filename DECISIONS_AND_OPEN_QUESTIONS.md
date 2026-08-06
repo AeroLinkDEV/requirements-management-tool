@@ -1493,11 +1493,33 @@ Future entries use:
   - The showcase answers the assessments that carry procedure decisions and leaves the rest open, so the
     demonstration shows both a queue with work waiting to be judged and the test change requests that judging
     it produced.
-  - What is **not** converged: the requirements queue opens a drawer while the coverage page expands inline,
-    and a test row still carries several controls because a test change request has more to do. The drawer now
-    exists on the test side (DEC-097), so what remains is the row itself — the approved mock-up removes Take it
-    on, Link PRs, submit and approve from the row and leaves one `Open assessment` control, which is a
-    behaviour change across nine journeys rather than a restyling.
+  - Convergence completed in DEC-099: the row, the single control and the drawer are now the requirements
+    queue's, from its own stylesheet.
+
+### DEC-099 - The Testing Queue Is the Requirements Queue, Not Something Like It
+
+- **Date:** 2026-08-06
+- **Status:** Accepted; delivered by PRs #357 and #359
+- **Decision:** A test assessment row is the requirements card — change number, title, discipline chip, then the
+  conclusion, then **one** `Open assessment` control in every state. Take it on, Link PRs, conclude, send for
+  approval, approve and return all moved inside, along with the inline expanding workbench. The amber
+  "attention" row colour is gone. Both drawers import `DownstreamAssessmentQueue.css` rather than copying it.
+- **Rationale:** The two pages showed the same stage of the same workflow in two unrelated shapes. A second
+  stylesheet that merely resembled the first would drift the first time either was touched, so the testing
+  surface uses the requirements one literally. The amber was carrying "nobody has picked this up", which the
+  conclusion column already says in words.
+- **Consequences:**
+  - **Two drawers, not one.** `Open assessment` holds the assessment; the SYSTCR opens in its own workspace, as
+    an HLRCR opens from the requirements drawer. A package is a record of its own, not a panel inside another.
+  - **The per-requirement decisions live with the assessment**, and this is the one place the mirror has nothing
+    to copy: a requirement change is *read* on the requirements side, while a test change must be *answered*
+    requirement by requirement. They cannot live in the package, because they exist even when the conclusion is
+    that no package is needed — and would then be unreachable for exactly those assessments.
+  - Ten journeys reached the page through the old markup, not the nine first counted; the tenth was found by
+    running the suite rather than by reading. Six needed changing.
+  - The row deliberately no longer says who holds a package, matching the requirements row. Journeys that had
+    filtered on the presence of "Take it on" to find an *unclaimed* one silently became "the first row" — see
+    [LES-007](#les-007---a-selector-that-stops-selecting-still-passes).
 
 ### DEC-097 - A Test Procedure Is Built and Handled Exactly as a Requirement Is
 
@@ -1645,6 +1667,18 @@ the feature exists in the codebase and not in the product.
 Its counterpart from the same session: building the screen found three defects — two controls whose names read
 almost identically, a dialog taller than the viewport whose submit button could never be reached, and a journey
 that starved the shared fixture pool. None was reachable by a backend test.
+
+### LES-007 - A Selector That Stops Selecting Still Passes
+
+Several journeys found an *unclaimed* test change request by filtering rows for the presence of a "Take it on"
+button. When that button moved into the drawer, the filter matched nothing and `.first()` quietly became "the
+first row on the page" — which could be a package somebody else held, offering no decisions at all. The tests
+did not fail at the filter. They failed several steps later, looking for a button that was never going to be
+there, and the message pointed at the wrong thing.
+
+A locator that narrows by the presence of something is a silent assertion. When that something moves, the
+locator does not break — it widens. Where a filter is load-bearing, assert what it found before acting on it,
+or select by a property the redesign cannot remove.
 
 ## Working Assumptions
 
