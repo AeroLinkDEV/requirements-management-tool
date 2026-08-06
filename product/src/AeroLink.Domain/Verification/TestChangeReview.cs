@@ -215,6 +215,73 @@ public sealed class TestChangeReview
         }
     }
 
+    /// <summary>The cycle currently deciding this package, if one is.</summary>
+    public ChangeControl.ReviewCycle? ActiveReviewCycle =>
+        _reviewCycles.LastOrDefault(x => x.State == ChangeControl.ReviewCycleState.Active);
+
+    /// <summary>
+    /// Sends the package to its review board, running the same staged review a change request runs.
+    ///
+    /// The single named approver this used to take is a review board of one that nobody could configure. Now
+    /// the stages come from the project's recorded procedure for this discipline, so a program can require
+    /// three signatures on a requirement change and one on the test work that follows it — and either way the
+    /// review is snapshot-hashed, ordered and signed by the same code.
+    /// </summary>
+    public ChangeControl.ReviewCycle SubmitForReview(string actorId,
+        IReadOnlyList<ChangeControl.ApproverSelection> approvers, bool everyItemResolved, DateTimeOffset now,
+        ChangeControl.ReviewMode mode = ChangeControl.ReviewMode.Sequential,
+        ChangeControl.ReviewWorkflowSpecification? workflow = null)
+    {
+        EnsureOpen();
+        if (Outcome == TestChangeReviewOutcome.Pending)
+            throw new DomainException("Assess the change before sending it for review.");
+        if (!everyItemResolved)
+            throw new DomainException("Every test-procedure decision must be completed before review.");
+        if (approvers.Any(x => string.Equals(x.UserId, actorId, StringComparison.OrdinalIgnoreCase)))
+            throw new DomainException("The test change request approver must be independent from its submitting engineer.");
+        var cycle = ChangeControl.ReviewCycle.ForTestChangeRequest(Id, _reviewCycles.Count + 1,
+            ComputeSnapshotHash(), approvers, now, mode, workflow);
+        _reviewCycles.Add(cycle);
+        SubmittedBy = Required(actorId, "submitting verification engineer");
+        SelectedApproverId = approvers[0].UserId;
+        SubmittedAt = now;
+        State = TestChangeReviewState.InReview;
+        Touch(now);
+        return cycle;
+    }
+
+    /// <summary>Records one stage's approval. The package is approved when the last stage is.</summary>
+    public void ApproveActiveStage(string actorId, string rationale, DateTimeOffset now)
+    {
+        if (State != TestChangeReviewState.InReview)
+            throw new DomainException("Only a submitted test change request can be approved.");
+        var cycle = ActiveReviewCycle ?? throw new DomainException("This test change request has no active review.");
+        if (cycle.Approve(actorId, now))
+        {
+            ApprovedBy = Required(actorId, "approving reviewer");
+            ApprovalRationale = Required(rationale, "approval rationale");
+            ApprovedAt = now;
+            State = TestChangeReviewState.Approved;
+        }
+        Touch(now);
+    }
+
+    /// <summary>
+    /// What the review is of, fixed at submission.
+    ///
+    /// The same purpose the change request's own snapshot serves: an approval has to be provably of an exact
+    /// set of decisions, so that editing the package afterwards cannot quietly reuse the signature.
+    /// </summary>
+    private string ComputeSnapshotHash()
+    {
+        var manifest = string.Join("|", DisplayNumber, Title, Problem, Analysis, Solution,
+            string.Join(";", _procedureChanges.OrderBy(x => x.BaseNumber)
+                .Select(x => $"{x.DisplayNumber}:{x.Kind}:{x.Title}:{x.Objective}:{x.Steps}:{x.ExpectedResult}")));
+        return Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(manifest)))
+            .ToLowerInvariant();
+    }
+
     public void RemoveProcedureChange(Guid changeId, DateTimeOffset now)
     {
         EnsureOpen();
@@ -258,20 +325,19 @@ public sealed class TestChangeReview
         Touch(now);
     }
 
+    /// <summary>
+    /// Sends the package to a single named approver.
+    ///
+    /// Delegates rather than duplicating: this is <see cref="SubmitForReview"/> with a review board of one and
+    /// no recorded procedure, which is what every submission was before boards could be configured. Two
+    /// implementations of "submit" would be two things to keep in step, and the reason this one still exists is
+    /// that it reads better at the call sites that genuinely have one approver and no workflow.
+    /// </summary>
     public void Submit(string actorId, string approverId, bool everyItemResolved, DateTimeOffset now)
     {
-        EnsureOpen();
-        if (Outcome == TestChangeReviewOutcome.Pending)
-            throw new DomainException("Assess the change before sending it for review.");
-        if (!everyItemResolved)
-            throw new DomainException("Every test-procedure decision must be completed before review.");
-        SubmittedBy = Required(actorId, "submitting verification engineer");
-        SelectedApproverId = Required(approverId, "selected test change request approver");
-        if (string.Equals(SelectedApproverId, SubmittedBy, StringComparison.OrdinalIgnoreCase))
-            throw new DomainException("The test change request approver must be independent from its submitting engineer.");
-        SubmittedAt = now;
-        State = TestChangeReviewState.InReview;
-        Touch(now);
+        Required(approverId, "selected test change request approver");
+        SubmitForReview(actorId, [new ChangeControl.ApproverSelection(approverId, approverId)],
+            everyItemResolved, now);
     }
 
     public void Approve(string actorId, string rationale, DateTimeOffset now)
