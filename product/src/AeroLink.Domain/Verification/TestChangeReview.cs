@@ -24,6 +24,7 @@ public enum TestChangeReviewOutcome { Pending, ChangeRequired, NoChangeRequired 
 public sealed class TestChangeReview
 {
     private readonly List<TestChangeRequestClaim> _additionalSources = [];
+    private readonly List<TestProcedureChange> _procedureChanges = [];
 
     private TestChangeReview() { }
 
@@ -128,6 +129,54 @@ public sealed class TestChangeReview
         DecidedAt = now;
         Touch(now);
     }
+
+    /// <summary>
+    /// What this test change request proposes to do to the procedures, as a requirement change request
+    /// proposes changes to requirements.
+    /// </summary>
+    public IReadOnlyCollection<TestProcedureChange> ProcedureChanges => _procedureChanges.AsReadOnly();
+
+    /// <summary>
+    /// Adds a proposed procedure change.
+    ///
+    /// Only while the package is open and only once it is a controlled test change request — an assessment
+    /// that has not concluded test work is required has nothing to propose, and an in-review package must not
+    /// grow underneath the person approving it. Both rules are the requirement side's, unchanged.
+    /// </summary>
+    public TestProcedureChange AddProcedureChange(string actorId, TestProcedureChangeDraft draft, DateTimeOffset now)
+    {
+        EnsureOpen();
+        Required(actorId, "authoring verification engineer");
+        if (Outcome != TestChangeReviewOutcome.ChangeRequired)
+            throw new DomainException("Record that test-procedure work is required before proposing changes to procedures.");
+        if (draft.Level != ProcedureLevel())
+            throw new DomainException($"A {Discipline} test change request can contain {ProcedureLevel()} procedures only.");
+        if (_procedureChanges.Any(x => x.BaseNumber == draft.BaseNumber))
+            throw new DomainException($"{draft.BaseNumber} already has a proposed change in this test change request.");
+        var change = new TestProcedureChange(Id, draft.BaseNumber, draft.Revision, draft.Level, draft.Kind,
+            draft.Objective, draft.Preconditions, draft.Steps, draft.ExpectedResult, draft.Rationale,
+            draft.DrivingRequirementRevisionIdsJson);
+        _procedureChanges.Add(change);
+        Touch(now);
+        return change;
+    }
+
+    public void RemoveProcedureChange(Guid changeId, DateTimeOffset now)
+    {
+        EnsureOpen();
+        var change = _procedureChanges.SingleOrDefault(x => x.Id == changeId)
+            ?? throw new DomainException("That procedure change is not part of this test change request.");
+        _procedureChanges.Remove(change);
+        Touch(now);
+    }
+
+    /// <summary>The procedure level this discipline governs. The discipline and the level are one fact.</summary>
+    public TestProcedureLevel ProcedureLevel() => Discipline switch
+    {
+        TestChangeReviewDiscipline.System => TestProcedureLevel.System,
+        TestChangeReviewDiscipline.HighLevelSoftware => TestProcedureLevel.HighLevel,
+        _ => TestProcedureLevel.LowLevel,
+    };
 
     public void AssignControlledNumber(string baseNumber, DateTimeOffset now)
     {

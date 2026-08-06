@@ -40,6 +40,102 @@ public sealed class TestChangeReviewTests
         Assert.Equal("verification.engineer", raised.DecidedBy);
     }
 
+    private static TestProcedureChangeDraft ProcedureDraft(string baseNumber = "SYSTP-000123",
+        TestProcedureChangeKind kind = TestProcedureChangeKind.Introduce,
+        TestProcedureLevel level = TestProcedureLevel.System) =>
+        new(baseNumber, 0, level, kind,
+            "Verify oceanic waypoints are sequenced in the order the active flight plan holds.",
+            "The aircraft is in cruise with an active oceanic flight plan.",
+            "1. Load the plan. 2. Advance past the first waypoint. 3. Read the sequencer.",
+            "The next eligible oceanic waypoint is sequenced.",
+            "No procedure exercises oceanic sequencing after the approved change.");
+
+    [Fact]
+    public void A_test_change_request_carries_procedure_changes_the_way_a_change_request_carries_requirements()
+    {
+        var review = Create();
+        review.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(1));
+
+        var change = review.AddProcedureChange("verification.engineer", ProcedureDraft(), Now.AddMinutes(2));
+
+        Assert.Equal("SYSTP-000123.00", change.DisplayNumber);
+        Assert.Equal(TestProcedureChangeKind.Introduce, change.Kind);
+        Assert.Single(review.ProcedureChanges);
+
+        // One proposed change per procedure, as one requirement gets one change in a change request:
+        // two proposals for the same procedure would leave "what is being done to it?" with two answers.
+        Assert.Throws<DomainException>(() =>
+            review.AddProcedureChange("verification.engineer", ProcedureDraft(), Now.AddMinutes(3)));
+
+        review.RemoveProcedureChange(change.Id, Now.AddMinutes(4));
+        Assert.Empty(review.ProcedureChanges);
+    }
+
+    [Fact]
+    public void Nothing_can_be_proposed_until_the_assessment_has_called_for_test_work()
+    {
+        var raised = Raised();
+
+        // The mirror of the requirements rule: a change request cannot be linked to an assessment that
+        // concluded nothing, and procedure work cannot be proposed by an assessment that has not asked for it.
+        Assert.Throws<DomainException>(() =>
+            raised.AddProcedureChange("verification.engineer", ProcedureDraft(), Now.AddMinutes(1)));
+
+        raised.RecordTestChangeRequired("verification.engineer", Now.AddMinutes(2));
+        raised.AddProcedureChange("verification.engineer", ProcedureDraft(), Now.AddMinutes(3));
+        Assert.Single(raised.ProcedureChanges);
+    }
+
+    [Fact]
+    public void A_test_change_request_contains_only_its_own_disciplines_procedures()
+    {
+        var system = Create(TestChangeReviewDiscipline.System);
+        var hlr = Create(TestChangeReviewDiscipline.HighLevelSoftware);
+
+        Assert.Equal(TestProcedureLevel.System, system.ProcedureLevel());
+        Assert.Equal(TestProcedureLevel.HighLevel, hlr.ProcedureLevel());
+
+        // A System package holding an HLR procedure is the test-world twin of a System change request holding
+        // an HLR requirement — which is exactly the legacy data that put a System change request in the HLR
+        // coverage queue. The rule exists here so it cannot happen again on this side.
+        Assert.Throws<DomainException>(() => system.AddProcedureChange("verification.engineer",
+            ProcedureDraft("HLRTP-000001", level: TestProcedureLevel.HighLevel), Now.AddMinutes(1)));
+    }
+
+    [Fact]
+    public void A_retirement_needs_no_body_but_everything_else_does()
+    {
+        var review = Create();
+
+        // A retired procedure is being removed, not restated — the same exemption a retired requirement gets.
+        var retire = review.AddProcedureChange("verification.engineer",
+            new TestProcedureChangeDraft("SYSTP-000009", 1, TestProcedureLevel.System,
+                TestProcedureChangeKind.Retire, "", "", "", "", "Its requirement was retired."),
+            Now.AddMinutes(1));
+        Assert.Equal(TestProcedureChangeKind.Retire, retire.Kind);
+
+        Assert.Throws<DomainException>(() => review.AddProcedureChange("verification.engineer",
+            new TestProcedureChangeDraft("SYSTP-000010", 0, TestProcedureLevel.System,
+                TestProcedureChangeKind.Introduce, "", "", "steps", "", "why"), Now.AddMinutes(2)));
+        Assert.Throws<DomainException>(() => review.AddProcedureChange("verification.engineer",
+            new TestProcedureChangeDraft("SYSTP-000011", 0, TestProcedureLevel.System,
+                TestProcedureChangeKind.Introduce, "objective", "", "", "", "why"), Now.AddMinutes(3)));
+    }
+
+    [Fact]
+    public void A_submitted_package_cannot_grow_underneath_its_approver()
+    {
+        var review = Create();
+        review.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(1));
+        review.AddProcedureChange("verification.engineer", ProcedureDraft(), Now.AddMinutes(2));
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        // The reviewer is judging a fixed set of procedure changes. Quietly widening what they are approving
+        // is the one thing an approval must not allow — the same rule the folded-in change requests follow.
+        Assert.Throws<DomainException>(() => review.AddProcedureChange("verification.engineer",
+            ProcedureDraft("SYSTP-000124"), Now.AddMinutes(4)));
+    }
+
     [Fact]
     public void Concluding_that_no_test_work_is_required_states_why_and_raises_nothing()
     {

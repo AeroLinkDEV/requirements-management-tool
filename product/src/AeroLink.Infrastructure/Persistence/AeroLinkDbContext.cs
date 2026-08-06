@@ -514,6 +514,18 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<TestProcedureChange>(b =>
+        {
+            b.ToTable("test_procedure_changes"); b.HasKey(x => x.Id);
+            // Same reason as the claim below: the identifier is set in the constructor, so without this EF
+            // reads a change added to an already-tracked test change request as an existing row to update.
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.Property(x => x.BaseNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Level).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(30);
+            b.HasIndex(x => new { x.TestChangeReviewId, x.BaseNumber }).IsUnique();
+            b.Ignore(x => x.DisplayNumber);
+        });
         modelBuilder.Entity<TestChangeRequestClaim>(b =>
         {
             b.ToTable("test_change_request_claims"); b.HasKey(x => x.Id);
@@ -538,6 +550,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("test_change_reviews"); b.HasKey(x => x.Id);
             b.Property(x => x.Discipline).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(30);
+            // Owned the way a change request owns its requirement changes: a proposed procedure change has
+            // no life outside the test change request proposing it.
+            b.HasMany(x => x.ProcedureChanges).WithOne().HasForeignKey(x => x.TestChangeReviewId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.Navigation(x => x.ProcedureChanges).UsePropertyAccessMode(PropertyAccessMode.Field);
             b.Property(x => x.SourceChangeRequestNumber).HasMaxLength(40).IsRequired();
             b.Property(x => x.BaseNumber).HasMaxLength(40).IsRequired();
             b.Property(x => x.SelectedApproverId).HasMaxLength(100);
