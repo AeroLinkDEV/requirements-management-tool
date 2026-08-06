@@ -234,8 +234,10 @@ public sealed class VerificationImpactApiTests
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             requirementRevisionId = await db.RequirementRevisions.Select(x => x.Id).SingleAsync();
             var now = DateTimeOffset.UtcNow;
+            // Stated rather than defaulted: a SYSTP number is a System procedure, and it covers the System
+            // requirement below. Left to the default it was a HighLevel procedure wearing a System number.
             var procedure = new TestProcedure(fixture.ProjectId, "SYSTP-00000999",
-                "Exact retained decision evidence", "procedure.author", now);
+                "Exact retained decision evidence", "procedure.author", now, TestProcedureLevel.System);
             var revision = new TestProcedureRevision(procedure.Id, 2, "Objective", "Configuration",
                 "Steps", "Expected", TestProcedureState.Approved, "procedure.author", now);
             db.AddRange(procedure, revision);
