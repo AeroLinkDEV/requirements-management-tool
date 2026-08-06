@@ -17,6 +17,12 @@ AeroLink decisions must be attributable to authenticated people, not browser-sup
   other active sessions without revoking the session performing the action.
 - Material API routes require an authenticated session. Actor names supplied by clients are ignored; the server derives the actor from the session.
 
+The Documentation Center desktop connector never receives a reusable browser session. AeroLink issues a
+short-lived one-use launch token scoped to one document revision and mode. After redemption, the connector keeps
+its scoped access token only in memory, renews the exclusive lease while Word is open, and cannot use that token
+to browse another Project or artifact. Remote origins require HTTPS; loopback HTTP remains available for local
+demonstration. Stale-source check-ins fail without overwriting another user's work.
+
 ## Program authority
 
 Authority is scoped to a Program through additive role assignments:

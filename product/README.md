@@ -6,7 +6,7 @@ comes from the actual API and persistence layer. The former `showcase/` prototyp
 [DESIGN_VISION_AND_DASHBOARDS.md](../DESIGN_VISION_AND_DASHBOARDS.md).
 
 For project-wide orientation, start at [PROJECT_STATE.md](../PROJECT_STATE.md), then read the
-[current product handoff](../CURRENT_PRODUCT_HANDOFF_2026-08-02.md).
+[current product handoff](../CURRENT_PRODUCT_HANDOFF_2026-08-06.md).
 
 ## Current vertical slice
 
@@ -14,7 +14,7 @@ The current entry path is login → Projects → FMS Product Development → Sof
 build-scoped workspace. `SW-01.50` (informally Build 1.5) is released/read-only; `SW-01.60` (informally Build
 1.6) is in work. A baseline and software build are one product concept. System and Software remain
 separate, while Command Center summarizes System, Software and Verification. Requirements and Verification are
-the primary grouped work areas; Code and Problem Reports are standalone build-scoped workspaces. Product Versions, Candidate Baselines and the old Change Request Software
+the primary grouped work areas; Code, Documentation Center, and Problem Reports are standalone build-scoped workspaces. Product Versions, Candidate Baselines and the old Change Request Software
 Builds view remain deliberately dormant even though underlying lifecycle implementation remains.
 
 The 2026-07-13 enterprise control increment adds durable URL routing and context restoration, a keyboard command palette, Program-aware universal artifact search, authoritative artifact detail links, change request exclusive checkout, renewable leases, server autosave snapshots, read-only observers, check-in/discard, forced-unlock auditing, authentication throttling, Program-scope enforcement, isolated browser-test infrastructure, and verified backup/restore operations.
@@ -32,6 +32,9 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
   History, SCCB opening, and independent SQA closure
 - exact approved LLR-revision-to-GitLab MR/merge SHA evidence or justified no-code decisions, with GitLab kept as
   source of truth and released-build mappings read-only
+- Word-authored lifecycle documents with stable numbers, formal revisions, retained working versions, build
+  selection, exclusive desktop checkout, independent review, signatures, Draft watermarks, and immutable
+  released DOCX/PDF pairs
 - a complete SYSR-to-HLR-to-LLR-to-procedure-to-result-to-evidence-to-build Digital Thread path
 - prospective build-scoped upward allocation: HLR proposals select current System revisions, LLR proposals
   select current HLR revisions, and justified derived requirements are the explicit exception

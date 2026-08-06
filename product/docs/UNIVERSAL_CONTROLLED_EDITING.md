@@ -31,6 +31,11 @@ This increment resolves and snapshots the controlled families that already have 
 - problem reports; and
 - configuration change sets.
 
+Word-authored managed documents use the same exclusive-session principles through the Windows desktop connector,
+but retain a dedicated file-transfer contract because Word edits binary DOCX packages rather than JSON
+autosave snapshots. The connector uses short-lived scoped grants, heartbeat/expiry, stale-snapshot rejection,
+check-in comments, discard, and audited force unlock.
+
 ## Universal check-in engine
 
 `POST /api/controlled-editing/sessions/{sessionId}/check-in` executes one fail-closed pipeline:

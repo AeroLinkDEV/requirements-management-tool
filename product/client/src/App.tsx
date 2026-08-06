@@ -60,6 +60,7 @@ const BaselineCenter = lazyView(() => import("./BaselineCenter"));
 const HistoryExplorer = lazyView(() => import("./HistoryExplorer"));
 const VerificationLanding = lazyView(() => import("./VerificationLanding"));
 const DocumentCenter = lazyView(() => import("./DocumentCenter"));
+const ManagedDocumentationCenter = lazyView(() => import("./ManagedDocumentationCenter"));
 const ProblemReportCenter = lazyView(() => import("./ProblemReportCenter"));
 const CodeTraceabilityCenter = lazyView(() => import("./CodeTraceabilityCenter"));
 const LifecycleExplorer = lazyView(() => import("./LifecycleExplorer"));
@@ -85,6 +86,7 @@ const viewCode: Partial<Record<View, { warm: () => void }>> = {
   testResults: TestResultsWorkspace,
   testingCoverage: TestingCoverageWorkspace,
   documents: DocumentCenter,
+  managedDocuments: ManagedDocumentationCenter,
   problemReports: ProblemReportCenter,
   code: CodeTraceabilityCenter,
   lifecycle: LifecycleExplorer,
@@ -206,11 +208,12 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       </div>
       <nav className="primaryNavigation" aria-label="Primary navigation">
         <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
-        <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{item("Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Software Requirements Documents":"System Requirements Documents")}{item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>
+        <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{item("Generated Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}{item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>
         <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}><summary>VERIFICATION</summary><div className="navScopeSwitch" role="group" aria-label="Verification scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{verificationScope==="softwareTest"
           ? <>{item("HLR Testing Coverage","testingCoverage","◫","softwareTest","Software HLR Testing Coverage","HighLevel")}{item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}{item("LLR Testing Coverage","testingCoverage","◫","softwareTest","Software LLR Testing Coverage","LowLevel")}{item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}</>
-          : <>{item("Testing Coverage","testingCoverage","◫","systemTest","System Testing Coverage")}{item("Test Results","testResults","▦","systemTest","System Test Results")}</>}{item("Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Software Verification Documents":"System Verification Documents")}</details>
+          : <>{item("Testing Coverage","testingCoverage","◫","systemTest","System Testing Coverage")}{item("Test Results","testResults","▦","systemTest","System Test Results")}</>}{item("Generated Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Generated Software Verification Documents":"Generated System Verification Documents")}</details>
         <div className="navStandalone">{item("Code","code","{ }","software","Code traceability",undefined,true)}</div>
+        <div className="navStandalone">{item("Documentation Center","managedDocuments","▤","system","Documentation Center",undefined,true)}</div>
         <div className="navStandalone">{item("Problem Reports","problemReports","!","system","Problem Reports",undefined,true)}</div>
         <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("Review Workflows","reviewWorkflows","⇉","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","↗","system","Integration Command Center")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
@@ -477,7 +480,7 @@ function App() {
   // to a build — it creates one. There is no build to have entered when this page is what you need.
   if(view==="baselineImports"&&project)return <BaselineImportCenter user={user} api={API} projectId={project.project.id} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onSignOut={signOut}/>;
   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} density={density} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
-  const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Testing Coverage",testResults:"Test Results",documents:"Documents",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
+  const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Testing Coverage",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b><span>Build {release?.version}</span><b aria-hidden="true">›</b><strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
@@ -672,6 +675,20 @@ function App() {
           discipline === "systemTest" || discipline === "softwareTest" ? "verification" : "requirements",
           discipline,
         )}
+      />
+    );
+  if (view === "managedDocuments" && project && release)
+    return inShell(
+      <ManagedDocumentationCenter
+        api={API}
+        projectId={project.project.id}
+        releaseId={release.id}
+        releaseVersion={release.version}
+        readOnly={release.isReleased}
+        user={user}
+        initialDocumentId={selectedArtifactId || undefined}
+        onSelected={(id)=>navigate("managedDocuments","system",id,undefined,true)}
+        onBack={() => navigate("dashboard")}
       />
     );
   if (view === "problemReports" && project)

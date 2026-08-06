@@ -1,7 +1,7 @@
 import{expect,test}from'@playwright/test'
 import{apiBase,apiLogin,login,showcaseSeed}from'./auth'
 
-test('primary navigation separates requirements, verification, code and problem reporting without breaking historical routes',async({page,request})=>{
+test('primary navigation separates generated data, managed documents, code and problem reporting without breaking historical routes',async({page,request})=>{
   test.setTimeout(90_000)
   const showcase=await showcaseSeed(request)
   await login(page)
@@ -20,17 +20,19 @@ test('primary navigation separates requirements, verification, code and problem 
   await expect(verification.getByRole('link',{name:'Digital Thread'})).toHaveCount(0)
   const reports=nav.locator('.navStandalone').getByRole('link',{name:'Problem Reports'})
   const code=nav.locator('.navStandalone').getByRole('link',{name:'Code traceability'})
+  const documentation=nav.locator('.navStandalone').getByRole('link',{name:'Documentation Center'})
   await expect(code).toBeVisible()
+  await expect(documentation).toBeVisible()
   await expect(reports).toBeVisible()
   await expect(nav.locator('.navStandalone details')).toHaveCount(0)
   const standaloneNames=await nav.locator('.navStandalone a').evaluateAll(items=>items.map(item=>item.getAttribute('aria-label')))
-  expect(standaloneNames).toEqual(['Code traceability','Problem Reports'])
+  expect(standaloneNames).toEqual(['Code traceability','Documentation Center','Problem Reports'])
 
   await expect(verification.getByRole('link',{name:'System Testing Coverage'})).toBeVisible()
   await expect(verification.getByRole('link',{name:'System Test Results'})).toBeVisible()
-  await expect(verification.getByRole('link',{name:'System Verification Documents'})).toBeVisible()
+  await expect(verification.getByRole('link',{name:'Generated System Verification Documents'})).toBeVisible()
   await verification.getByRole('group',{name:'Verification scope'}).getByRole('button',{name:'Software'}).click()
-  for(const name of['Software HLR Testing Coverage','Software HLR Test Results','Software LLR Testing Coverage','Software LLR Test Results','Software Verification Documents'])await expect(verification.getByRole('link',{name})).toBeVisible()
+  for(const name of['Software HLR Testing Coverage','Software HLR Test Results','Software LLR Testing Coverage','Software LLR Test Results','Generated Software Verification Documents'])await expect(verification.getByRole('link',{name})).toBeVisible()
 
   await reports.click()
   await expect(page.getByRole('heading',{name:'Problem Reports'})).toBeVisible()

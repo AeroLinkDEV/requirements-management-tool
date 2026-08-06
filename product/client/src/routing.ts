@@ -1,6 +1,6 @@
 export type View =
   | "projects" | "builds" | "baselineImports" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "testingCoverage" | "testResults" | "documents" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
+  | "verification" | "testingCoverage" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
@@ -121,6 +121,8 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "system-verification") return { ...base, view: "verification", discipline: "systemTest" };
   if (path === "software-verification") return { ...base, view: "verification", discipline: "softwareTest" };
   if (path === "code") return { ...base, view: "code", discipline: "software" };
+  if (path === "documentation-center") return { ...base, view: "managedDocuments", discipline: "system" };
+  if (tail[0] === "documentation-center" && tail[1]) return { ...base, view: "managedDocuments", discipline: "system", artifactId: decoded(tail[1]) };
   if (path === "problem-reports") return { ...base, view: "problemReports", discipline: "system" };
   if (tail[0] === "problem-reports" && tail[1]) return { ...base, view: "problemReports", discipline: "system", artifactId: decoded(tail[1]) };
   if (path === "traceability") return { ...base, view: "lifecycle", discipline: "system" };
@@ -200,6 +202,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
       return `${root}/${discipline === "software" ? "software" : "systems"}/documents`;
     }
     case "problemReports": return `${root}/problem-reports${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
+    case "managedDocuments": return `${root}/documentation-center${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
     case "code": return `${root}/code`;
     case "lifecycle": return artifactId ? `${root}/traceability/${encodeURIComponent(artifactId)}` : `${root}/traceability`;
     case "planning": return `${root}/release-planning`;

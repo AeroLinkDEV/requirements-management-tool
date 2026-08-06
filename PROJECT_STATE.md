@@ -1,6 +1,6 @@
 # Project State — Start Here
 
-**Last updated: 2026-08-04.**
+**Last updated: 2026-08-06.**
 
 This is the orientation record for anyone — human or model — picking up AeroLink. It answers *what
 exists, what is true today, what is deliberately not being built, and where to start*. Every other
@@ -13,8 +13,8 @@ When work changes the state of the project, update this file in the same change.
 
 An on-premises aerospace development assurance platform: the authoritative record for controlled
 requirements and the evidence chain around them. It manages system requirements, software HLRs and
-LLRs, change requests (change request), review and approval workflows, immutable baselines, generated
-controlled documents, test procedures, externally produced results and evidence, typed traceability,
+LLRs, change requests, review and approval workflows, immutable baselines, generated controlled documents,
+Word-authored managed documents, test procedures, externally produced results and evidence, typed traceability,
 release campaigns, and a complete audit trail.
 
 It exists to answer questions that are normally scattered across documents, spreadsheets and people:
@@ -36,7 +36,8 @@ are recorded in [SCOPE_AND_BOUNDARIES.md](SCOPE_AND_BOUNDARIES.md).
 - **No AI.** This is a hard delivery rule of the current program, not an oversight. No suggestion,
   scoring, generative, or assistant capability ships. It may be reconsidered as an explicitly
   governed, human-controlled future capability; it is not in scope now.
-- **No plans or standards management.**
+- **No structured plans or standards content management.** AeroLink may control externally authored Word plans
+  as files, revisions, approvals, and released renditions; it does not replace Word or interpret their prose.
 - **No architecture, design, or source-code management, and not a Git host.**
 - **No automated test execution.** Tests run in external environments; AeroLink controls the
   procedures and captures or imports the results and evidence.
@@ -46,8 +47,10 @@ are recorded in [SCOPE_AND_BOUNDARIES.md](SCOPE_AND_BOUNDARIES.md).
   remove coverage from a requirement still in the build and record it as ordinary planning. The
   deferral that matters happens one level up, on the change request, and verification work already
   follows its change request. See [DEC-058](DECISIONS_AND_OPEN_QUESTIONS.md).
-- **Not a document editor.** Documents are generated outputs of controlled data. Uploaded files are
-  never the authoritative record.
+- **Not a document editor.** Requirements and verification publications remain generated outputs of controlled
+  data. For a Managed Document, the checked-in Word file is the controlled source and AeroLink is its storage,
+  revision, review, and release authority; Microsoft Word remains the editor and AeroLink does not interpret the
+  document prose as structured lifecycle data.
 
 ## Repository layout
 
@@ -273,7 +276,8 @@ than a workspace of their own.
 
 Primary navigation mirrors that work: **Requirements** owns change requests, requirements, requirements
 documents, and Digital Thread; **Verification** owns the direct coverage, results, and verification-document
-destinations; **Code** and **Problem Reports** are standalone destinations in that order. Code records exact
+destinations; **Code**, **Documentation Center**, and **Problem Reports** are standalone destinations in that
+order. Documentation Center controls Word-authored lifecycle documents without replacing Word. Code records exact
 LLR-revision-to-GitLab-merge pointers without hosting source, and released Build 1.5 is read-only. The older verification chooser URLs remain
 valid deep links, but no redundant generic Verification entry occupies the sidebar. Legitimate assurance role
 names and production-assurance terminology are unchanged.

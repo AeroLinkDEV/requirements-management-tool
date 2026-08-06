@@ -10,6 +10,7 @@ using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Notifications;
+using AeroLink.Domain.Documents;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -128,6 +129,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<QualityLifecycleObjective> QualityLifecycleObjectives => Set<QualityLifecycleObjective>();
     public DbSet<ReadinessWaiver> ReadinessWaivers => Set<ReadinessWaiver>();
     public DbSet<CertificationEvidenceIndexEntry> CertificationEvidenceIndex => Set<CertificationEvidenceIndexEntry>();
+    public DbSet<ManagedDocument> ManagedDocuments => Set<ManagedDocument>();
+    public DbSet<ManagedDocumentRevision> ManagedDocumentRevisions => Set<ManagedDocumentRevision>();
+    public DbSet<ManagedDocumentReviewStep> ManagedDocumentReviewSteps => Set<ManagedDocumentReviewStep>();
+    public DbSet<ManagedDocumentBuildSelection> ManagedDocumentBuildSelections => Set<ManagedDocumentBuildSelection>();
+    public DbSet<ManagedDocumentLink> ManagedDocumentLinks => Set<ManagedDocumentLink>();
+    public DbSet<ManagedDocumentEvent> ManagedDocumentEvents => Set<ManagedDocumentEvent>();
+    public DbSet<DocumentConnectorGrant> DocumentConnectorGrants => Set<DocumentConnectorGrant>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -994,6 +1002,69 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<ReqIfExchangeJob>(b =>
         {
             b.ToTable("reqif_exchange_jobs"); b.HasKey(x=>x.Id); b.Property(x=>x.Direction).HasConversion<string>().HasMaxLength(20); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.FileName).HasMaxLength(260).IsRequired(); b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired(); b.Property(x=>x.StorageKey).HasMaxLength(500).IsRequired(); b.Property(x=>x.ManifestJson).IsRequired();b.Property(x=>x.CheckpointJson).IsRequired();b.Property(x=>x.LastError).HasMaxLength(4000); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt}); b.HasIndex(x=>new{x.ProjectId,x.Direction,x.State}); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ManagedDocument>(b =>
+        {
+            b.ToTable("managed_documents"); b.HasKey(x => x.Id);
+            b.Property(x => x.DocumentNumber).HasMaxLength(40).IsRequired(); b.Property(x => x.Acronym).HasMaxLength(12).IsRequired();
+            b.Property(x => x.DocumentType).HasMaxLength(160).IsRequired(); b.Property(x => x.Title).HasMaxLength(300).IsRequired();
+            b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired(); b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasIndex(x => new { x.ProjectId, x.DocumentNumber }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.Acronym });
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ManagedDocumentRevision>(b =>
+        {
+            b.ToTable("managed_document_revisions"); b.HasKey(x => x.Id);
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired();
+            b.Property(x => x.ChangeSummary).HasMaxLength(4000).IsRequired(); b.Property(x => x.SnapshotHash).HasMaxLength(64).IsRequired();
+            b.Property(x => x.ReleaseManifestHash).HasMaxLength(64).IsRequired(); b.Property(x => x.ReturnReason).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.SubmittedBy).HasMaxLength(100); b.Property(x => x.ReleasedBy).HasMaxLength(100); b.Property(x => x.Version).IsConcurrencyToken();
+            b.Ignore(x => x.CurrentReviewCycle); b.HasIndex(x => new { x.DocumentId, x.Revision }).IsUnique();
+            b.HasIndex(x => new { x.TargetReleaseId, x.State });
+            b.HasOne<ManagedDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.TargetReleaseId).OnDelete(DeleteBehavior.Restrict);
+            b.HasMany(x => x.ReviewSteps).WithOne().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Cascade);
+            b.Navigation(x => x.ReviewSteps).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+        modelBuilder.Entity<ManagedDocumentReviewStep>(b =>
+        {
+            b.ToTable("managed_document_review_steps"); b.HasKey(x => x.Id);
+            b.Property(x => x.ApproverId).HasMaxLength(100).IsRequired(); b.Property(x => x.ApproverName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.StageName).HasMaxLength(120).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired(); b.HasIndex(x => new { x.RevisionId, x.Cycle, x.Position }).IsUnique();
+        });
+        modelBuilder.Entity<ManagedDocumentBuildSelection>(b =>
+        {
+            b.ToTable("managed_document_build_selections"); b.HasKey(x => x.Id); b.Property(x => x.SelectedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ReleaseId, x.DocumentId }).IsUnique(); b.HasIndex(x => x.RevisionId);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ManagedDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ManagedDocumentRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ManagedDocumentLink>(b =>
+        {
+            b.ToTable("managed_document_links"); b.HasKey(x => x.Id); b.Property(x => x.ArtifactType).HasMaxLength(60).IsRequired();
+            b.Property(x => x.DisplayNumber).HasMaxLength(80).IsRequired(); b.Property(x => x.Relationship).HasMaxLength(80).IsRequired();
+            b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.RevisionId, x.ArtifactType, x.ArtifactId, x.Relationship }).IsUnique();
+            b.HasIndex(x => new { x.ArtifactType, x.ArtifactId });
+            b.HasOne<ManagedDocumentRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ManagedDocumentEvent>(b =>
+        {
+            b.ToTable("managed_document_events"); b.HasKey(x => x.Id); b.Property(x => x.EventType).HasMaxLength(100).IsRequired();
+            b.Property(x => x.ActorId).HasMaxLength(100).IsRequired(); b.Property(x => x.Detail).HasMaxLength(2000).IsRequired();
+            b.HasIndex(x => new { x.DocumentId, x.OccurredAt }); b.HasOne<ManagedDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<DocumentConnectorGrant>(b =>
+        {
+            b.ToTable("document_connector_grants"); b.HasKey(x => x.Id); b.Property(x => x.UserName).HasMaxLength(100).IsRequired(); b.Property(x => x.Mode).HasMaxLength(16).IsRequired();
+            b.Property(x => x.LaunchTokenHash).HasMaxLength(64).IsRequired(); b.Property(x => x.AccessTokenHash).HasMaxLength(64);
+            b.HasIndex(x => x.LaunchTokenHash).IsUnique(); b.HasIndex(x => x.AccessTokenHash).IsUnique(); b.HasIndex(x => x.EditSessionId);
+            b.HasOne<ManagedDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ManagedDocumentRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ArtifactEditSession>().WithMany().HasForeignKey(x => x.EditSessionId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 
