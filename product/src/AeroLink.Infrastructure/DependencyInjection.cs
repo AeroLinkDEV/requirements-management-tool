@@ -38,6 +38,8 @@ public static class DependencyInjection
         services.AddScoped<IEmailSender, SmtpEmailSender>();
         services.AddHostedService<NotificationDispatchWorker>();
         services.AddSingleton<EvidenceFileStore>();
+        services.AddScoped<ManagedDocumentFileService>();
+        services.AddScoped<ManagedDocumentShowcaseSeeder>();
         services.AddHostedService<EnterpriseJobWorker>();
         services.AddDataProtection();
         services.AddHttpClient("AeroLinkWebhooks", client => client.Timeout = TimeSpan.FromSeconds(15));

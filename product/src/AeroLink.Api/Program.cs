@@ -97,6 +97,8 @@ await using (var scope = app.Services.CreateAsyncScope())
     }
     if (seedDemoAccounts)
         await scope.ServiceProvider.GetRequiredService<IdentitySeeder>().EnsureSeededAsync();
+    if (builder.Configuration.GetValue<bool>("DemoData:Enabled"))
+        await scope.ServiceProvider.GetRequiredService<ManagedDocumentShowcaseSeeder>().EnsureSeededAsync();
     await scope.ServiceProvider.GetRequiredService<EnterpriseWorkspaceSeeder>().EnsureAllAsync();
 }
 
@@ -143,6 +145,7 @@ app.Use(async (context, next) =>
         || path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/setup/status", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/setup/bootstrap", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith("/api/document-connector/", StringComparison.OrdinalIgnoreCase)
         // Reached from a mail client, where the reader is not authenticated. The link proves it was issued
         // by this deployment through an HMAC over the recipient, so anonymity here is the design.
         || path.Equals("/api/notifications/unsubscribe", StringComparison.OrdinalIgnoreCase);
@@ -184,7 +187,7 @@ app.Use(async (context, next) =>
         {context.Response.StatusCode=StatusCodes.Status409Conflict;await context.Response.WriteAsJsonAsync(new{error="The request addresses a different build than the active workspace.",code="build_context_mismatch"});return;}
         activeBuildId=selectedBuild.Id;
 
-        var primaryMutationPrefixes=new[]{"/api/change-request","/api/baseline","/api/build","/api/requirement","/api/enterprise-requirements","/api/test","/api/evidence","/api/release","/api/document","/api/trace","/api/problem-report","/api/downstream-assessment","/api/controlled-editing","/api/edit-sessions","/api/content/images","/api/reqif","/api/publication"};
+        var primaryMutationPrefixes=new[]{"/api/change-request","/api/baseline","/api/build","/api/requirement","/api/enterprise-requirements","/api/test","/api/evidence","/api/release","/api/document","/api/managed-document","/api/trace","/api/problem-report","/api/downstream-assessment","/api/controlled-editing","/api/edit-sessions","/api/content/images","/api/reqif","/api/publication"};
         // Bringing a program in from another tool is not a mutation of the active build: it creates a new
         // build from a source that is already released (DEC-093). It is named here rather than left to the
         // prefix list because "/api/baseline" is deliberately loose enough to catch "/api/baselines", and so
@@ -248,6 +251,7 @@ app.MapBaselineEndpoints();
 app.MapVerificationEndpoints();
 app.MapAeroLinkBuildTestSetEndpoints();
 app.MapReleaseCampaignEndpoints();
+app.MapManagedDocumentEndpoints();
 app.MapEditSessionEndpoints();
 app.MapAdministrationEndpoints();
 

@@ -18,6 +18,12 @@ These are implementation decisions, not changes to the authoritative product beh
 
 Lifecycle rules live in domain objects rather than controllers or UI code. The API requests an operation; the aggregate validates state, actor authority, revision behavior, and ordered review rules; persistence records the resulting state and audit events atomically.
 
+Managed lifecycle documents follow the same boundary. PostgreSQL owns identity, formal revisions, build
+selections, review steps, signatures, links, checkout sessions, hashes, and audit events. Binary DOCX/PDF
+versions use the controlled evidence store. A small Windows connector is the sole Word boundary: it redeems a
+one-use scoped grant, opens the exact source, maintains the exclusive lease, and returns a new immutable working
+version or release candidate.
+
 `SystemChangeRequest` is the shared System/Software change aggregate. Stable artifact identity (`SRCR-00001` or
 `HLRCR-00001`) is distinct from revision display (`SRCR-00001.04`). Requirements referenced by a change request
 retain stable identities and immutable revision identities.

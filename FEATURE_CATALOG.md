@@ -7,7 +7,7 @@ capability inventory, not the status record** — for current status read
 [PROJECT_STATE.md](PROJECT_STATE.md) and
 [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md). For the current supported routes,
 dormant UI and aligned issue backlog, read
-[CURRENT_PRODUCT_HANDOFF_2026-08-03.md](CURRENT_PRODUCT_HANDOFF_2026-08-03.md). A capability listed here may be
+[CURRENT_PRODUCT_HANDOFF_2026-08-06.md](CURRENT_PRODUCT_HANDOFF_2026-08-06.md). A capability listed here may be
 implemented but deliberately not exposed; the catalog is not authority to reconnect dormant modules. The paragraph below is a
 2026-07-18 snapshot retained for history and is not maintained.
 
@@ -125,6 +125,11 @@ Vendor-specific mappings and customer-specific connector contracts remain deploy
 | DOC-001 | Draft SYSRD generation | Review candidate contents before approval | Must | 2 | BL-001 | A deterministic draft SYSRD is generated with visible `DRAFT` marking and source metadata |
 | DOC-002 | Approved SYSRD generation | Produce a controlled requirements document | Must | 2 | BL-002, WF-002 | Approved output identifies exact inputs, revisions, approvals, and file hash |
 | DOC-003 | Reproducible controlled output records | Support long-term explanation and regeneration | Must | 2 | DOC-001, DOC-002 | Every output records baseline, template, generator version, time, state, and hash |
+| DOC-004 | Word-authored managed document register | Control lifecycle documents without replacing Word | Must | Delivered | PF-005-PF-008 | A standalone Documentation Center shows stable numbers, released and in-work formal revisions, owners, build applicability, exact older versions, links, and audit history |
+| DOC-005 | Desktop Word checkout and check-in | Let engineers use Microsoft Word while protecting the authoritative source | Must | Delivered | DOC-004, PF-002, PF-003 | A per-user connector opens the exact DOCX under an exclusive renewable lease, retains every commented check-in, rejects stale overwrites and macros, and supports discard/force unlock |
+| DOC-006 | Draft and released renditions | Make document state unambiguous | Must | Delivered | DOC-004, DOC-005 | Every Draft section retains a faint Draft watermark; final release accepts an exact watermark-free DOCX and valid PDF pair with hashes |
+| DOC-007 | Independent document review and signatures | Produce attributable approval evidence over exact files | Must | Delivered | DOC-004, WF-001, WF-002 | An author selects a different technical reviewer and final SQA/configuration approver; returns retain review evidence and final release records electronic signatures over exact hashes |
+| DOC-008 | Managed document lifecycle links | Connect documents to the engineering decisions they support | Should | Delivered | DOC-004, TR-001 | Users select same-Project change requests, Problem Reports, Test Change Requests, and builds, and the relationship is retained with the exact document revision |
 
 ## System Verification and Traceability
 

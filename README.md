@@ -32,6 +32,11 @@ Run [`SCHEDULE_AEROLINK_BACKUP.bat`](SCHEDULE_AEROLINK_BACKUP.bat) once to regis
 
 Operational shortcuts are also provided for [stopping AeroLink](STOP_AEROLINK.bat), [diagnostics](AEROLINK_DIAGNOSTICS.bat), [backup verification](VERIFY_AEROLINK_BACKUP.bat), and isolated [restore validation](RESTORE_AEROLINK.bat). The safety model and production recovery procedure are documented in [Operations and recovery](product/docs/OPERATIONS.md).
 
+Run [`INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat`](INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat) once per Windows user
+to connect Documentation Center checkouts to Microsoft Word. AeroLink then controls checkout, working-version
+history, review, signatures, and the released DOCX/PDF pair; Word remains the authoring application. See
+[Managed Documentation Center](product/docs/MANAGED_DOCUMENTATION_CENTER.md).
+
 ## First Product Slice
 
 The first usable vertical slice is system-level:
@@ -60,8 +65,8 @@ demonstrations use the `FMSLIVE` dataset described in
 | Document | Purpose |
 | --- | --- |
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
-| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-06.md) | **Current restart point.** The test change request build-out: procedures authored, revised and baselined exactly as requirements are, a procedure covering only its own level, the testing queue and drawer built from the requirements stylesheet, and approved procedure work reaching a build |
-| [Product handoff, 5 August](CURRENT_PRODUCT_HANDOFF_2026-08-05.md) | Historical. Bringing in a program from another requirements tool as an externally sourced baseline, assessments that say whether they were done and what they found, the test world on the same machine, Problem Report kind and workaround, and safe continuation |
+| [Current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-06.md) | **Current restart point.** Test procedures authored, revised and baselined like requirements, approved procedure work carried into builds, and Word-authored controlled documents checked out, reviewed, approved, and released as exact DOCX/PDF pairs |
+| [Product handoff, 5 August](CURRENT_PRODUCT_HANDOFF_2026-08-05.md) | Historical. Imported baselines, explicit assessment outcomes, local test-world integration, Problem Report refinements, and safe continuation |
 | [Product handoff, 4 August](CURRENT_PRODUCT_HANDOFF_2026-08-04.md) | Historical. State-aware downstream assessments with withdrawable conclusions, Problem Report editing under the universal lease, the "a procedure must be written" verification outcome, and source authority by change-request type |
 | [3 August handoff](CURRENT_PRODUCT_HANDOFF_2026-08-03.md) | Historical delivery record for truthful Build-scoped PR/TCR queues, persistent HLR/LLR Draft scope, evidence-first assessments, and Code/GitLab traceability |
 | [2 August handoff](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) | Historical delivery record for Draft software change request controls, downstream assessments, Problem Reports, Digital Thread, and Code/GitLab traceability |

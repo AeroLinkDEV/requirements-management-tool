@@ -26,6 +26,7 @@ const people: Record<string, DemoPerson> = {
   "cm.fms": { name: "Daniel Reyes", role: "Configuration Manager", portrait: danielReyes },
   "software.lead": { name: "Rina Shah", role: "Software Engineering Lead", portrait: "" },
   "software.author": { name: "Daniel Reyes", role: "Software Lead", portrait: danielReyes },
+  "quality.analyst": { name: "Marcus Hale", role: "Software Quality Analyst", portrait: "" },
 };
 
 export function demoPerson(userName: string, fallbackName?: string, fallbackRole = "Program member"): DemoPerson | undefined {

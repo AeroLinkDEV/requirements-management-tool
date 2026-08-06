@@ -33,6 +33,7 @@ The build boundary follows relationships that already exist:
 | Software build configuration (persisted as candidate/frozen baseline) | `CandidateBaseline.ReleaseId` |
 | Effective requirement snapshot | exact `BaselineRequirementSelection` rows for the resolved build baseline |
 | Generated controlled documents | `ControlledDocument.ReleaseId` and `BaselineId` |
+| Word-authored managed documents | exact `ManagedDocumentBuildSelection` plus any successor `ManagedDocumentRevision.TargetReleaseId` |
 | Immutable software builds | `SoftwareBuild.ReleaseId` and `BaselineId` |
 | Release campaigns and approvals | `ReleaseCampaign.ReleaseId` and `BaselineId` |
 | Test change reviews and procedure-impact decisions | `TestChangeReview.ReleaseId` and `VerificationImpact.ReleaseId` |

@@ -1,7 +1,7 @@
 # AeroLink Technical Overview
 
 **Audience:** Software, systems, verification, configuration-management, and IT colleagues
-**Status:** Current implementation brief, 2 August 2026
+**Status:** Current implementation brief, 6 August 2026
 
 ## System shape
 
@@ -23,8 +23,11 @@ A controlled requirement revision is never edited in place after approval; a cha
 revision, ordered review/electronic signatures approve it, and baseline materialization selects exact revision
 IDs for a build.
 
-The same pattern governs test procedures, executions/evidence, controlled documents, Problem Reports, and code
-traceability. Build 1.5 resolves to its released immutable baseline. Build 1.6 inherits that exact baseline until
+The same pattern governs test procedures, executions/evidence, generated documents, Word-authored managed
+documents, Problem Reports, and code traceability. Managed documents separate the stable register identity from
+formal `.00`/`.01` revisions and from retained working-file versions. PostgreSQL holds their lifecycle metadata;
+the controlled evidence store holds checksummed DOCX/PDF bytes. Exact build-selection rows determine which
+released revision applies to each build. Build 1.5 resolves to its released immutable baseline. Build 1.6 inherits that exact baseline until
 its own candidate is materialized, while its changes, assessments, tests, PRs, and code mappings remain a
 separate active layer. Foreign keys, unique constraints, concurrency tokens, immutable hashes, audit events, and
 server-side build guards protect these relationships.
@@ -36,6 +39,14 @@ work is delivered on focused `codex/*` branches through pull requests and CI, ne
 AeroLink artifact revisioning versions controlled engineering content. Candidate baselines select exact
 approved revisions into a build. Generated DOCX/PDF outputs and release packages record their source baseline,
 template revision, and content hashes.
+
+Documentation Center adds one more controlled boundary without attempting to recreate Word in a browser. A
+small per-user Windows connector redeems a one-use, short-lived grant for one document revision, downloads the
+exact current DOCX, opens Microsoft Word, maintains an exclusive lease, and returns a new immutable working
+version with a required comment. Draft DOCX files must retain the faint Draft watermark in every section. At the
+final review step, Word creates a watermark-free DOCX and matching PDF labeled Release Candidate; AeroLink
+rejects any candidate that still presents itself as Draft, then hashes the exact pair before the final
+electronic signature releases it. Stale-source check-ins fail without overwriting.
 
 Digital Thread follows exact baseline revisions across SYSR, HLR, LLR, procedure, execution/result, linked
 checksummed evidence, and software build. When several confirmed procedures cover the same exact requirement,

@@ -22,6 +22,18 @@ Use `STOP_AEROLINK.bat` for a controlled stop. The script only stops listeners w
 
 Logs are under `product/.local/logs`. The authoritative database is `aerolink`; controlled evidence is under `%LOCALAPPDATA%\AeroLink\evidence`.
 
+## Microsoft Word desktop connector
+
+Run `INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat` once for each Windows user who edits managed documents. It
+publishes the small connector under `%LOCALAPPDATA%\AeroLink\DocumentConnector` and registers the `aerolink://`
+protocol in `HKCU`, so administrator rights are not required. Microsoft Word is required for editing and final
+PDF conversion. Re-run the installer after upgrading AeroLink to update the connector.
+
+If **Open in Word** does nothing, confirm the connector is installed for the signed-in Windows account and that
+the browser is allowed to open the AeroLink protocol. An abandoned checkout expires automatically; a
+configuration manager or administrator may force-unlock it with a recorded reason. Connector working files are
+local conveniences, not authoritative storage; a completed check-in must appear in AeroLink's Versions tab.
+
 Liveness is available at `/health/live`. Deployment orchestrators should use `/health/ready`, which returns `503` until the database can be reached.
 
 ## Requirement proposal integrity reconciliation

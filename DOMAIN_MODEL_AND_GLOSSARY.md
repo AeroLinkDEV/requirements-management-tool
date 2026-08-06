@@ -32,6 +32,16 @@ PRs may motivate or be affected by changes across the chain.
 The stable identity and revision identity remain separate even when the display number combines them. For
 example, `SYSR-000001` is the stable requirement and `SYSR-000001.03` is its exact third controlled revision.
 
+**Managed Document**: A stable AeroLink record for a primarily Word-authored lifecycle document such as an SDP,
+SVP, or SAS. It owns formal revisions, build selections, relationships, and retained file/audit history.
+
+**Managed Document Revision**: A controlled `.00`, `.01`, and later revision. Draft, In Review, Returned, and
+Released are lifecycle states; Draft is not a separate acronym. Multiple checked-in Word working versions may
+exist within one formal revision.
+
+**Released Document Pair**: The exact immutable, watermark-free DOCX and matching PDF accepted at final approval,
+identified by individual SHA-256 hashes and a combined release manifest hash.
+
 ## Program and Delivery Terms
 
 **Program**: The primary organizational and access-control boundary for lifecycle data. Artifact numbers are globally unique even when artifacts belong to different programs.
