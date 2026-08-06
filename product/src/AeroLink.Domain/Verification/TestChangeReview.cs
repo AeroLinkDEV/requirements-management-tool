@@ -25,6 +25,7 @@ public sealed class TestChangeReview
 {
     private readonly List<TestChangeRequestClaim> _additionalSources = [];
     private readonly List<TestProcedureChange> _procedureChanges = [];
+    private readonly List<ChangeControl.ReviewCycle> _reviewCycles = [];
 
     private TestChangeReview() { }
 
@@ -75,6 +76,14 @@ public sealed class TestChangeReview
     /// would notice.
     /// </summary>
     public IReadOnlyCollection<TestChangeRequestClaim> AdditionalSources => _additionalSources.AsReadOnly();
+    /// <summary>
+    /// The reviews this package has been through, using the same mechanism a change request uses.
+    ///
+    /// Shared rather than mirrored: one implementation of snapshot hashing, staged approval, substitution and
+    /// signature, so a correction to how review works reaches both disciplines. What differs between them is
+    /// the workflow — how many stages, which authority signs each — and that is data, not code.
+    /// </summary>
+    public IReadOnlyCollection<ChangeControl.ReviewCycle> ReviewCycles => _reviewCycles.AsReadOnly();
     public TestChangeReviewState State { get; private set; }
     /// <summary>Whether the assessment has been performed, and what it found.</summary>
     public TestChangeReviewOutcome Outcome { get; private set; }

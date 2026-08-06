@@ -195,7 +195,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
     private async Task<List<PublicationApproval>> ApprovalBasis(Guid baselineId, Guid releaseId, DateTimeOffset generatedAt, CancellationToken ct)
     {
         var scrIds = await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == baselineId).Select(x => x.ChangeRequestId).ToListAsync(ct);
-        var cycles = (await db.ReviewCycles.AsNoTracking().Include(x => x.Steps).Where(x => scrIds.Contains(x.ChangeRequestId) && x.State == ReviewCycleState.Approved).ToListAsync(ct)).Where(x => x.CompletedAt <= generatedAt).ToList();
+        var cycles = (await db.ReviewCycles.AsNoTracking().Include(x => x.Steps).Where(x => x.ChangeRequestId != null && scrIds.Contains(x.ChangeRequestId.Value) && x.State == ReviewCycleState.Approved).ToListAsync(ct)).Where(x => x.CompletedAt <= generatedAt).ToList();
         var approvals = cycles.SelectMany(x => x.Steps.Where(s => s.State == ApprovalStepState.Approved && s.DecidedAt <= generatedAt).Select(s => new PublicationApproval("Change Authority", s.ApproverName, s.ApproverId, "Approved", s.DecidedAt))).ToList();
         var campaigns = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
         approvals.AddRange(campaigns.SelectMany(x => x.Approvals.Where(a => a.State == AeroLink.Domain.Releases.ReleaseApprovalState.Approved && a.ApprovedAt <= generatedAt).Select(a => new PublicationApproval("Release Authority", a.ApproverName, a.ApproverId, "Approved", a.ApprovedAt))));
