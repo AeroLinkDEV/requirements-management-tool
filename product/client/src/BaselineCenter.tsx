@@ -16,6 +16,8 @@ type BaselineSummary = {
   contentHash?: string;
   requirementsHash?: string;
   requirementsMaterializedAt?: string;
+  testProceduresHash?: string;
+  testProceduresMaterializedAt?: string;
   selectionCount: number;
   createdAt: string;
   frozenAt?: string;
@@ -405,6 +407,21 @@ export default function BaselineCenter({
                       {busy ? "Materializing…" : "Materialize SWRD"}
                     </button>
                   ) : <div className="frozenMark">Released build · read-only</div>}
+                  {/* The procedure manifest closes separately and later. Procedures are written against the
+                      requirements this baseline fixes, so they are finished after it is frozen — which is why
+                      this is a second act rather than part of materializing the SWRD. */}
+                  {detail.requirementsMaterializedAt && (
+                    detail.testProceduresMaterializedAt
+                      ? <div className="frozenMark">✓ Test procedures materialized</div>
+                      : !readOnly && (
+                        <button
+                          disabled={busy}
+                          onClick={() => action("materialize-test-procedures", "POST", {})}
+                        >
+                          {busy ? "Materializing…" : "Materialize test procedures"}
+                        </button>
+                      )
+                  )}
                 </div>
                 {detail.state === "Frozen" && (
                   <div className="hashPanel">
