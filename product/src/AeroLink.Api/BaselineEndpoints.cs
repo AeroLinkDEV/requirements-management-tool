@@ -211,10 +211,83 @@ public static class BaselineEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        // Freezing is deliberately not gated on verification decisions. Freezing then materializing is what
-        // creates the requirement revisions a test engineer needs in order to write a procedure at all, so
-        // blocking the freeze would withhold the test team's own inputs and deadlock the release. The gate the
-        // verification queue belongs to is release approval, where it appears as a named readiness gate.
+        // The procedure side of a baseline: which approved test change requests it carries, and fixing the
+        // exact procedure revisions that follow from them.
+        //
+        // Selecting is allowed after the freeze, unlike selecting a change request, because a procedure is
+        // written against a frozen requirement and so is finished later. What closes this manifest is
+        // materialization, not the freeze.
+        app.MapGet("/api/baselines/{id:guid}/test-change-requests", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var baseline = await db.CandidateBaselines.AsNoTracking().Include(x => x.TestChangeSelections)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (baseline is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, baseline.ProjectId, ct)) return Results.Forbid();
+            var selectedIds = baseline.TestChangeSelections.Select(x => x.TestChangeRequestId).ToList();
+            // Only approved packages that actually carry procedure work can be selected. One that concluded no
+            // test work was needed has nothing to contribute, and no controlled number to contribute it under.
+            var available = await db.TestChangeReviews.AsNoTracking()
+                .Where(x => x.ProjectId == baseline.ProjectId && x.ReleaseId == baseline.ReleaseId
+                    && x.State == TestChangeReviewState.Approved
+                    && x.Outcome == TestChangeReviewOutcome.ChangeRequired
+                    && !selectedIds.Contains(x.Id))
+                .Select(x => new { x.Id, x.DisplayNumber, discipline = x.Discipline.ToString(), x.SourceChangeRequestNumber })
+                .ToListAsync(ct);
+            return Results.Ok(new
+            {
+                baseline.Id, baseline.DisplayNumber, baseline.TestProceduresHash, baseline.TestProceduresMaterializedAt,
+                selected = baseline.TestChangeSelections.OrderBy(x => x.TestChangeRequestDisplayNumber)
+                    .Select(x => new { x.TestChangeRequestId, x.TestChangeRequestDisplayNumber }),
+                available = available.OrderBy(x => x.DisplayNumber),
+                procedureCount = await db.BaselineTestProcedures.CountAsync(x => x.BaselineId == id, ct)
+            });
+        });
+
+        app.MapPost("/api/baselines/{id:guid}/test-change-requests", async (Guid id, BaselineTestChangeSelectionRequest request,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var baseline = await db.CandidateBaselines.Include(x => x.TestChangeSelections).Include(x => x.Events)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (baseline is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+            var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == request.TestChangeRequestId, ct);
+            if (review is null) return Results.NotFound();
+            try
+            {
+                baseline.SelectTestChangeRequest(review, http.UserAccount().UserName, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { baseline.Id, selected = baseline.TestChangeSelections.Count });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapDelete("/api/baselines/{id:guid}/test-change-requests/{testChangeRequestId:guid}", async (Guid id,
+            Guid testChangeRequestId, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var baseline = await db.CandidateBaselines.Include(x => x.TestChangeSelections).Include(x => x.Events)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (baseline is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+            var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == testChangeRequestId, ct);
+            if (review is null) return Results.NotFound();
+            try
+            {
+                baseline.RemoveTestChangeRequest(review, http.UserAccount().UserName, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.NoContent();
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/baselines/{id:guid}/materialize-test-procedures", async (Guid id, EmptyMutationRequest request,
+            HttpContext http, TestProcedureBaselineMaterializer materializer, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var projectId = await db.CandidateBaselines.Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+            try { return Results.Ok(await materializer.MaterializeAsync(id, http.UserAccount().UserName, DateTimeOffset.UtcNow, ct)); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
 
         // Freezing is deliberately not gated on verification decisions. Freezing then materializing is what
         // creates the requirement revisions a test engineer needs in order to write a procedure at all, so
