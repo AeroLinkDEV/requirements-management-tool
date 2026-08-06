@@ -33,7 +33,7 @@ test('verification offers the two pages by name, and both open on real work', as
   await expect(page.getByRole('heading', { name: 'Downstream test assessments' })).toBeVisible()
   // Waited for rather than counted: count() does not retry, so reading it the moment the heading paints
   // reports zero packages on a build that has them — which is indistinguishable from a genuinely empty queue.
-  const packages = page.locator('.coverageRow').filter({ hasText: /TCR-/ })
+  const packages = page.locator('.downstreamAssessment').filter({ hasText: /TCR-/ })
   await expect(packages.first(), 'FMSLIVE should carry test change work for the in-work build').toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole('heading', { name: 'Test procedures' })).toBeVisible()
 
