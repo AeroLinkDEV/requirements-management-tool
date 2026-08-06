@@ -69,14 +69,18 @@ test('a test engineer proposes a new procedure inside the test change request th
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('link', { name: 'System Testing Coverage' }).click()
 
-  const row = page.locator('.coverageRow').filter({ hasText: sourceNumber }).first()
+  const row = page.locator('.downstreamAssessment').filter({ hasText: sourceNumber }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
-  await row.getByRole('button', { name: 'Take it on' }).click()
+  // Claiming and concluding happen inside the assessment; the row offers one control in every state.
+  await row.getByRole('button', { name: 'Open assessment' }).click()
+  const assessment = page.getByRole('dialog', { name: /test impact/ })
+  await assessment.getByRole('button', { name: 'Take it on' }).click()
   // Exact, because "SYSTCR required" is a substring of the button beside it that concludes the opposite.
-  await row.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(row).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
+  await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
 
-  await row.getByRole('button', { name: 'Open test change request' }).click()
+  // The package opens in its own workspace, as a change request does from the requirements drawer.
+  await assessment.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}$/ }).click()
   const drawer = page.getByRole('dialog', { name: /procedure decisions/ })
   await expect(drawer).toBeVisible()
   // A package that has concluded test work is required but names none is unfinished, and says so rather than
@@ -109,9 +113,10 @@ test('a test engineer proposes a new procedure inside the test change request th
 
   // It is a controlled record, not drawer state: it survives leaving the page and coming back.
   await page.reload()
-  const reopened = page.locator('.coverageRow').filter({ hasText: sourceNumber }).first()
+  const reopened = page.locator('.downstreamAssessment').filter({ hasText: sourceNumber }).first()
   await expect(reopened).toBeVisible({ timeout: 30_000 })
-  await reopened.getByRole('button', { name: 'Open test change request' }).click()
+  // Reachable straight from the queue row, without opening the assessment first.
+  await reopened.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2} · / }).click()
   const again = page.getByRole('dialog', { name: /procedure decisions/ })
   await expect(again.getByText(/SYSTP-\d{6}\.00 · New procedure/)).toBeVisible({ timeout: 30_000 })
 

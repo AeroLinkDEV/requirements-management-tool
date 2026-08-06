@@ -126,20 +126,22 @@ test('modified requirement coverage stays suspect until an exact approved proced
 
   // The decision itself is made inside the package that raised it, which is where the work is queued.
   const decisionRow = page.locator('.decisionList li').filter({ hasText: subject })
-  // The package row is itself the disclosure — there is no separate "Decisions" control — so opening each
-  // collapsed package in turn is how the decision for this requirement is found.
+  // Each assessment holds its own decisions, and only one is open at a time, so finding the decision for this
+  // requirement means opening assessments in turn until it appears.
+  const packageRow = page.getByRole('dialog', { name: /test impact/ })
   const openPackage = async () => {
     if (await decisionRow.count() > 0 && await decisionRow.first().isVisible()) return
-    for (const disclosure of await page.locator('.coverageRow .packageDisclosure').all()) {
-      if (await disclosure.getAttribute('aria-expanded') === 'true') continue
-      await disclosure.click()
+    for (const entry of await page.locator('.downstreamAssessment').all()) {
+      await entry.getByRole('button', { name: 'Open assessment' }).click()
+      await expect(packageRow).toBeVisible({ timeout: 30_000 })
       if (await decisionRow.count() > 0 && await decisionRow.first().isVisible()) return
+      await packageRow.getByRole('button', { name: 'Close test assessment' }).click()
     }
   }
   await openPackage()
   await expect(decisionRow.first()).toBeVisible({ timeout: 30_000 })
-  const packageRow = decisionRow.first().locator('xpath=ancestor::article[contains(@class,"coverageRow")]')
-  await packageRow.getByRole('button', { name: 'Take it on' }).click()
+  const claim = packageRow.getByRole('button', { name: 'Take it on' })
+  if (await claim.count()) await claim.click()
 
   const decide = async (rationale: string) => {
     await decisionRow.first().getByRole('button', { name: 'Decide' }).click()
