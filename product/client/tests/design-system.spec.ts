@@ -31,6 +31,9 @@ const surfaces = [
   // `input` rule. Neither was ever measured, because a hardcoded list does not grow when the product does.
   ['Review Procedures', '/review-workflows'],
   ['New Change Request', '/systems/change-requests/new'],
+  // Added the same way and for the same reason: this page shipped with an 11px eyebrow of its own, which the
+  // list could not have caught until the page was on it.
+  ['Test Procedure Explorer', '/system-verification/procedures'],
   // The post-login portal. These are not release-scoped, so they are addressed from the site root — and they
   // are in this list because the two surfaces added after it was last edited were the only ones never measured.
   ['Projects', '/projects'],

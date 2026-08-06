@@ -62,6 +62,8 @@ record CreateSchemaFieldRequest(string Key,string Label,SchemaFieldType Type,boo
 record CreateSpecificationRequest(Guid ProjectId,string DocumentNumber,string Title,string Level,string Description);
 record CreateSectionRequest(Guid? ParentId,int Position,string Heading);
 record CreateCommentRequest(Guid? RevisionId,Guid? ParentCommentId,string Body,List<string>? Mentions);
+/// <summary>A remark on a test procedure. No mention routing yet — the conversation exists first.</summary>
+record CreateProcedureCommentRequest(Guid? RevisionId, Guid? ParentCommentId, string Body, List<string>? Mentions);
 record ResolveCommentRequest(string? Disposition);
 record CreateSavedViewRequest(Guid ProjectId,string Name,string QueryJson,string ColumnsJson,bool IsShared);
 record UpdateSavedViewRequest(string? Name,string? QueryJson,string? ColumnsJson,bool? IsShared);
