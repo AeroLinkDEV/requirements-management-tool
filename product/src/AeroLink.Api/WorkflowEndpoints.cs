@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Verification;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Infrastructure.Persistence;
@@ -115,7 +116,11 @@ public static class WorkflowEndpoints
         });
 
         // What the author needs before choosing approvers: the stages they must fill, and who can fill each.
-        app.MapGet("/api/review-workflows/applicable", async (Guid projectId, ChangeRequestType type,
+        //
+        // The parameter keeps its name and widens its type. A caller asking for "System" or "Software" binds
+        // exactly as before, because those values kept their names when the subject widened to cover test
+        // change requests, so no existing client has to change to keep working.
+        app.MapGet("/api/review-workflows/applicable", async (Guid projectId, ReviewSubject type,
             HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
@@ -152,16 +157,31 @@ public static class WorkflowEndpoints
         });
     }
 
-    /// <summary>The active procedure for this kind of change request, or null when the project records none.</summary>
+    /// <summary>The active procedure for this kind of package, or null when the project records none.</summary>
     public static async Task<ReviewWorkflow?> ActiveAsync(AeroLinkDbContext db, Guid projectId,
-        ChangeRequestType type, CancellationToken ct) =>
+        ReviewSubject subject, CancellationToken ct) =>
         await db.ReviewWorkflows.AsNoTracking().Include(x => x.Stages)
-            .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.AppliesTo == type
+            .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.AppliesTo == subject
                                        && x.State == ReviewWorkflowState.Active, ct);
+
+    /// <summary>A change request names its subject by its type; a test change request by its discipline.</summary>
+    public static ReviewSubject SubjectOf(ChangeRequestType type) =>
+        type == ChangeRequestType.System ? ReviewSubject.System : ReviewSubject.Software;
+
+    public static ReviewSubject SubjectOf(TestChangeReviewDiscipline discipline) => discipline switch
+    {
+        TestChangeReviewDiscipline.System => ReviewSubject.SystemTest,
+        TestChangeReviewDiscipline.HighLevelSoftware => ReviewSubject.HighLevelSoftwareTest,
+        _ => ReviewSubject.LowLevelSoftwareTest,
+    };
 
     public static async Task<ReviewWorkflowSpecification?> ActiveSpecificationAsync(AeroLinkDbContext db,
         Guid projectId, ChangeRequestType type, CancellationToken ct) =>
-        (await ActiveAsync(db, projectId, type, ct))?.Specification();
+        (await ActiveAsync(db, projectId, SubjectOf(type), ct))?.Specification();
+
+    public static async Task<ReviewWorkflowSpecification?> ActiveSpecificationAsync(AeroLinkDbContext db,
+        Guid projectId, TestChangeReviewDiscipline discipline, CancellationToken ct) =>
+        (await ActiveAsync(db, projectId, SubjectOf(discipline), ct))?.Specification();
 
     /// <summary>
     /// The authority each user holds on the program owning this project.
@@ -214,6 +234,6 @@ public static class WorkflowEndpoints
 }
 
 public sealed record ReviewWorkflowStageRequest(string Name, ProgramRole RequiredRole);
-public sealed record CreateReviewWorkflowRequest(Guid ProjectId, string Name, ChangeRequestType AppliesTo,
+public sealed record CreateReviewWorkflowRequest(Guid ProjectId, string Name, ReviewSubject AppliesTo,
     ReviewMode Mode, List<ReviewWorkflowStageRequest> Stages);
 public sealed record ReviseReviewWorkflowRequest(string Name, ReviewMode Mode, List<ReviewWorkflowStageRequest> Stages);

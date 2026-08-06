@@ -6,6 +6,27 @@ namespace AeroLink.Domain.ChangeControl;
 public enum ReviewWorkflowState { Draft, Active, Retired }
 
 /// <summary>
+/// The kind of controlled package a review procedure governs.
+///
+/// Separate from <see cref="ChangeRequestType"/>, which decides an identifier prefix and what a change request
+/// may contain. This answers a different question — whose review board signs this — and test change requests
+/// need their own answer: a program may want three signatures on a system requirement change and one on the
+/// test work that follows it.
+///
+/// <c>System</c> and <c>Software</c> keep their names deliberately. The value is stored by name, so every
+/// workflow recorded before test disciplines existed still reads back as what it always was, and this widening
+/// needs no data migration.
+/// </summary>
+public enum ReviewSubject
+{
+    System,
+    Software,
+    SystemTest,
+    HighLevelSoftwareTest,
+    LowLevelSoftwareTest,
+}
+
+/// <summary>
 /// One stage of a team's review procedure: who has to sign, and in what authority.
 ///
 /// A stage names an authority rather than a person. "Verification lead" survives somebody changing jobs;
@@ -54,7 +75,7 @@ public sealed class ReviewWorkflow
     private readonly List<ReviewWorkflowStage> _stages = [];
     private ReviewWorkflow() { }
 
-    public ReviewWorkflow(Guid projectId, string name, ChangeRequestType appliesTo, ReviewMode mode,
+    public ReviewWorkflow(Guid projectId, string name, ReviewSubject appliesTo, ReviewMode mode,
         IReadOnlyList<ReviewWorkflowStageDraft> stages, string actorId, DateTimeOffset now, int version = 1,
         Guid? logicalId = null)
     {
@@ -83,7 +104,7 @@ public sealed class ReviewWorkflow
     public Guid LogicalId { get; private set; }
     public Guid ProjectId { get; private set; }
     public string Name { get; private set; } = "";
-    public ChangeRequestType AppliesTo { get; private set; }
+    public ReviewSubject AppliesTo { get; private set; }
     public ReviewMode Mode { get; private set; }
     public int Version { get; private set; }
     public ReviewWorkflowState State { get; private set; }

@@ -20,7 +20,7 @@ public sealed class ReviewWorkflowTests
 
     private static ReviewWorkflow Workflow(ReviewMode mode = ReviewMode.Sequential)
     {
-        var workflow = new ReviewWorkflow(Guid.NewGuid(), "System change board", ChangeRequestType.System,
+        var workflow = new ReviewWorkflow(Guid.NewGuid(), "System change board", ReviewSubject.System,
             mode, Board, "config.manager", Now);
         workflow.Activate("config.manager", Now);
         return workflow;
@@ -169,11 +169,11 @@ public sealed class ReviewWorkflowTests
     [InlineData("")]
     [InlineData("   ")]
     public void A_procedure_needs_a_name(string name) =>
-        Assert.Throws<DomainException>(() => new ReviewWorkflow(Guid.NewGuid(), name, ChangeRequestType.System,
+        Assert.Throws<DomainException>(() => new ReviewWorkflow(Guid.NewGuid(), name, ReviewSubject.System,
             ReviewMode.Sequential, Board, "config.manager", Now));
 
     [Fact]
     public void A_procedure_with_no_stages_says_nothing() =>
-        Assert.Throws<DomainException>(() => new ReviewWorkflow(Guid.NewGuid(), "Empty", ChangeRequestType.System,
+        Assert.Throws<DomainException>(() => new ReviewWorkflow(Guid.NewGuid(), "Empty", ReviewSubject.System,
             ReviewMode.Sequential, [], "config.manager", Now));
 }
