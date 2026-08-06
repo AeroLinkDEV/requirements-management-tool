@@ -429,6 +429,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<BaselineTestChangeRequestSelection>(b =>
         {
             b.ToTable("baseline_test_change_request_selections"); b.HasKey(x => x.Id);
+            // Unlike a change request, a test change request is selected after the baseline is already saved, so
+            // this collection grows on a tracked parent. The identifier is set in the constructor, and without
+            // this EF reads the new row as an existing one to update — which affects nothing and throws.
+            b.Property(x => x.Id).ValueGeneratedNever();
             b.Property(x => x.TestChangeRequestDisplayNumber).HasMaxLength(40).IsRequired();
             b.HasIndex(x => new { x.BaselineId, x.TestChangeRequestId }).IsUnique();
         });
@@ -538,6 +542,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // reads a change added to an already-tracked test change request as an existing row to update.
             b.Property(x => x.Id).ValueGeneratedNever();
             b.Property(x => x.BaseNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Title).HasMaxLength(300).IsRequired();
             b.Property(x => x.Level).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(30);
             b.HasIndex(x => new { x.TestChangeReviewId, x.BaseNumber }).IsUnique();
