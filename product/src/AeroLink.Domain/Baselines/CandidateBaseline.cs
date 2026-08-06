@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Verification;
 
 namespace AeroLink.Domain.Baselines;
 
@@ -16,6 +17,25 @@ public sealed class BaselineChangeRequestSelection
     public Guid BaselineId { get; private set; }
     public Guid ChangeRequestId { get; private set; }
     public string ChangeRequestDisplayNumber { get; private set; } = string.Empty;
+}
+
+/// <summary>
+/// An approved test change request whose procedure decisions this baseline carries.
+///
+/// Held separately from <see cref="BaselineChangeRequestSelection"/> rather than derived from it. A test change
+/// request is raised from a change request already selected here, but it is approved on its own schedule by its
+/// own discipline — which is the whole reason it is a separate package. Deriving membership would mean a build
+/// could not close its requirements until its test work was finished.
+/// </summary>
+public sealed class BaselineTestChangeRequestSelection
+{
+    private BaselineTestChangeRequestSelection() { }
+    internal BaselineTestChangeRequestSelection(Guid baselineId, Guid testChangeRequestId, string tcrDisplayNumber)
+    { Id = Guid.NewGuid(); BaselineId = baselineId; TestChangeRequestId = testChangeRequestId; TestChangeRequestDisplayNumber = tcrDisplayNumber; }
+    public Guid Id { get; private set; }
+    public Guid BaselineId { get; private set; }
+    public Guid TestChangeRequestId { get; private set; }
+    public string TestChangeRequestDisplayNumber { get; private set; } = string.Empty;
 }
 
 public sealed class BaselineEvent
@@ -34,6 +54,7 @@ public sealed class BaselineEvent
 public sealed class CandidateBaseline
 {
     private readonly List<BaselineChangeRequestSelection> _selections = [];
+    private readonly List<BaselineTestChangeRequestSelection> _testChangeSelections = [];
     private readonly List<BaselineEvent> _events = [];
     private CandidateBaseline() { }
 
@@ -63,7 +84,11 @@ public sealed class CandidateBaseline
     public DateTimeOffset? FrozenAt { get; private set; }
     public DateTimeOffset? RequirementsMaterializedAt { get; private set; }
     public string? RequirementsHash { get; private set; }
+    /// <summary>When this baseline's test procedures were fixed. Independent of the requirement manifest.</summary>
+    public DateTimeOffset? TestProceduresMaterializedAt { get; private set; }
+    public string? TestProceduresHash { get; private set; }
     public IReadOnlyCollection<BaselineChangeRequestSelection> Selections => _selections.AsReadOnly();
+    public IReadOnlyCollection<BaselineTestChangeRequestSelection> TestChangeSelections => _testChangeSelections.AsReadOnly();
     public IReadOnlyCollection<BaselineEvent> Events => _events.AsReadOnly();
 
     public void UpdateDraft(string name, string actorId, DateTimeOffset now)
@@ -98,6 +123,64 @@ public sealed class CandidateBaseline
         Event("ScrRemoved", actorId, $"Removed {scr.DisplayNumber}.", now);
     }
 
+    /// <summary>
+    /// Adds an approved test change request's procedure decisions to this baseline.
+    ///
+    /// Allowed after the freeze, unlike selecting a change request, and that difference is deliberate. Freezing
+    /// fixes which requirements the build contains; the procedures that verify them are written against those
+    /// requirements and so are finished later. Requiring both before the freeze would either hold the requirement
+    /// baseline open waiting for test work or force the test work to be guessed in advance. What closes here is
+    /// the procedure manifest, at <see cref="MarkTestProceduresMaterialized"/>.
+    /// </summary>
+    public void SelectTestChangeRequest(TestChangeReview tcr, string actorId, DateTimeOffset now)
+    {
+        EnsureTestProceduresOpen();
+        if (tcr.State != TestChangeReviewState.Approved)
+            throw new DomainException("Only an approved test change request can be selected into a baseline.");
+        if (tcr.Outcome != TestChangeReviewOutcome.ChangeRequired)
+            throw new DomainException("This assessment concluded that no test work was required, so it has no procedure decisions to carry.");
+        if (tcr.ProjectId != ProjectId || tcr.ReleaseId != ReleaseId)
+            throw new DomainException("The test change request does not belong to this project and target release.");
+        if (_testChangeSelections.Any(x => x.TestChangeRequestId == tcr.Id))
+            throw new DomainException("The test change request is already selected.");
+        _testChangeSelections.Add(new BaselineTestChangeRequestSelection(Id, tcr.Id, tcr.DisplayNumber));
+        UpdatedAt = now;
+        Event("TestChangeRequestSelected", actorId, $"Selected {tcr.DisplayNumber}.", now);
+    }
+
+    public void RemoveTestChangeRequest(TestChangeReview tcr, string actorId, DateTimeOffset now)
+    {
+        EnsureTestProceduresOpen();
+        var selection = _testChangeSelections.SingleOrDefault(x => x.TestChangeRequestId == tcr.Id)
+            ?? throw new DomainException("The test change request is not selected in this baseline.");
+        _testChangeSelections.Remove(selection);
+        UpdatedAt = now;
+        Event("TestChangeRequestRemoved", actorId, $"Removed {tcr.DisplayNumber}.", now);
+    }
+
+    /// <summary>
+    /// Fixes the exact set of procedure revisions this baseline carries, as its requirement counterpart does.
+    ///
+    /// Deliberately not a precondition of <see cref="MarkReleased"/>. Every build that exists today was released
+    /// without one, and retrofitting the gate would make those builds retrospectively invalid rather than simply
+    /// unmaterialized. Whether a future release should require it is a decision to take openly, not a side effect
+    /// of adding the capability.
+    /// </summary>
+    public void MarkTestProceduresMaterialized(string actorId, string proceduresHash, int activeCount, DateTimeOffset now)
+    {
+        if (State == CandidateBaselineState.Draft)
+            throw new DomainException("Freeze the baseline before materializing its test procedures.");
+        if (RequirementsMaterializedAt is null)
+            throw new DomainException("Materialize the requirement baseline before its test procedures — a procedure verifies a requirement that has to exist first.");
+        if (TestProceduresMaterializedAt is not null)
+            throw new DomainException("The test procedure baseline is already materialized and immutable.");
+        if (string.IsNullOrWhiteSpace(proceduresHash) || proceduresHash.Length != 64)
+            throw new DomainException("A valid test procedure manifest hash is required.");
+        TestProceduresHash = proceduresHash; TestProceduresMaterializedAt = now;
+        UpdatedAt = now;
+        Event("TestProceduresMaterialized", actorId, $"Materialized {activeCount} effective test procedure revisions with hash {proceduresHash}.", now);
+    }
+
     public void Freeze(string actorId, DateTimeOffset now)
     {
         EnsureDraft();
@@ -128,5 +211,7 @@ public sealed class CandidateBaseline
     }
 
     private void EnsureDraft() { if (State != CandidateBaselineState.Draft) throw new DomainException("A frozen baseline is immutable."); }
+    private void EnsureTestProceduresOpen()
+    { if (TestProceduresMaterializedAt is not null) throw new DomainException("The test procedure baseline is already materialized and immutable."); }
     private void Event(string type, string actorId, string detail, DateTimeOffset now) => _events.Add(new BaselineEvent(Id, type, actorId, detail, now));
 }
