@@ -4,9 +4,11 @@ import { SignatureDialog } from './IdentityCenter'
 import PersonPicker from './PersonPicker'
 import ProblemReportPicker, { type ProblemReportOption } from './ProblemReportPicker'
 import ControlledProcedureEditor from './ControlledProcedureEditor'
+import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
+import './DownstreamAssessmentQueue.css'
 import './TestingCoverageWorkspace.css'
 
 type CoverageItem = {
@@ -165,6 +167,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [history, setHistory] = useState<History>()
   const [impact, setImpact] = useState<ImpactItem[]>([])
   const [opened, setOpened] = useState('')
+  /** The test change request whose procedure decisions are open for authoring, if any. */
+  const [authoring, setAuthoring] = useState('')
   const [resolving, setResolving] = useState<ImpactItem>()
   const [reopening, setReopening] = useState<ImpactItem>()
   const [outcome, setOutcome] = useState('ProcedureCoverageConfirmed')
@@ -536,67 +540,110 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <span>Nothing has been approved into this build that {disciplineLabel(discipline)} verification must answer for.</span>
           </div>
         )}
+        {/* The requirements queue's row, from its own stylesheet. Identifying text on the left, what the
+            assessment concluded in the middle, and one control on the right in every state — what can be done
+            about an assessment is decided inside it, not chosen from a row of peers. */}
         {mine.map(request => (
-          <article className={`coverageRow ${request.state === 'Open' && !request.assignedEngineerId ? 'attention' : ''}`} key={request.id}>
-            {/* The package opens by pressing the package, not by pressing a button called "Decisions" that
-                sat among the real actions and read as a peer of them. A test change request is a controlled
-                record with source changes, requirements and a decision each; the row is a summary of it, so
-                the row is what expands. */}
-            <button type="button" className="packageDisclosure" aria-expanded={opened === request.id}
-              aria-label={`${opened === request.id ? 'Collapse' : 'Open'} ${request.displayNumber}`}
-              onClick={() => setOpened(current => current === request.id ? '' : request.id)}>
-              {/* The change being assessed, then what the assessment concluded — the same two things in the
-                  same order as the requirements queue. An unassessed row is identified by the change it is
-                  asking about, because it has no number of its own until one is needed. */}
-              <span className="packageHead"><b>{request.coveredChangeRequests.map(x => x.number).join(', ')}</b><i>{assessmentName(discipline)} assessment</i></span>
-              <span className="packageCovers">{testAssessmentStatus(request, discipline)}</span>
-              <small>
-                {request.outcome === 'ChangeRequired' && request.displayNumber.startsWith(tcrAcronym(discipline))
-                  ? <>{request.displayNumber} · {request.state === 'InReview' ? 'In review' : request.state} · {request.resolvedItems} of {request.totalItems} decisions recorded</>
-                  : request.outcome === 'NoChangeRequired' ? request.noChangeRationale
-                  : 'Nobody has answered this yet'}
-                {request.assignedEngineerId ? <> · <PersonName userName={request.assignedEngineerId} /></> : ''}
-              </small>
-            </button>
-            <div className="coverageRowActions">
-              {canTest && request.state === 'Open' && <button type="button" className="quiet" disabled={busy} onClick={() => {
-                setProblemReportIds((request.problemReports ?? []).map(report => report.id))
-                setLinkingProblemReports(request)
-              }}>Link PRs{request.problemReports?.length ? ` · ${request.problemReports.length}` : ''}</button>}
-              {request.capabilities.canAssign && (
-                <button type="button" className="quiet" disabled={busy} onClick={() => void takeOn(request)}>Take it on</button>
-              )}
-              {/* The assessment itself, offered only while it is unanswered. Concluding that work is required
-                  is what raises the test change request; the alternative raises nothing and states why. */}
-              {request.outcome === 'Pending' && request.capabilities.canDecide && (
-                <>
-                  <button type="button" disabled={busy} onClick={() => void conclude(request, true)}>
-                    {tcrAcronym(discipline)} required
-                  </button>
-                  <button type="button" className="quiet" disabled={busy} onClick={() => setDecliningTest(request)}>
-                    No {tcrAcronym(discipline)} required
-                  </button>
-                </>
-              )}
-              {/* Submission is offered only once every decision is recorded. The server refuses otherwise, and
-                  offering an action that will be refused is a worse answer than not offering it. */}
-              {request.capabilities.canSubmit && request.totalItems > 0 && request.resolvedItems === request.totalItems && (
-                <button type="button" disabled={busy} onClick={() => setSubmitting(request)}>Send for approval</button>
-              )}
-              {request.capabilities.canApprove && (
-                <>
-                  <button type="button" disabled={busy} onClick={() => setReviewDecision({ request, action: 'approve' })}>Approve</button>
-                  <button type="button" className="quiet" disabled={busy} onClick={() => setReviewDecision({ request, action: 'return' })}>Return</button>
-                </>
-              )}
+          <article className="downstreamAssessment" data-state={request.state} key={request.id}>
+            <div className="downstreamSource">
+              <b>{request.coveredChangeRequests.map(x => x.number).join(', ')}</b>
+              <span>{request.coveredChangeRequests[0]?.title ?? ''}</span>
+              <i>{assessmentName(discipline)} assessment</i>
             </div>
-            {opened === request.id && (
-              <div className="testPackageWorkbench">
-                <section className="testPackageContext" aria-label={`${request.displayNumber} context`}>
-                  <div><b>Source change requests</b>{request.coveredChangeRequests.map(change=><span key={change.id}><strong>{change.number}</strong> · {change.title}</span>)}</div>
-                  <div><b>Responsibility</b><span>{request.assignedEngineerId?<><PersonName userName={request.assignedEngineerId}/> owns this package</>:'Unassigned'}</span>{request.selectedApproverId&&<span><PersonName userName={request.selectedApproverId}/> is the independent approver</span>}</div>
-                  <div><b>Linked Problem Reports</b>{request.problemReports?.length?request.problemReports.map(report=><span key={report.id}><strong>{report.displayNumber}</strong> · {report.title}</span>):<span>None linked</span>}</div>
-                </section>
+            <div className="downstreamConclusion">
+              <strong>{testAssessmentStatus(request, discipline)}</strong>
+              {request.outcome === 'ChangeRequired' && request.displayNumber.startsWith(tcrAcronym(discipline)) && (
+                <button type="button" className="linkedScr" onClick={() => setAuthoring(request.id)}>
+                  {request.displayNumber} · {request.state === 'InReview' ? 'In review' : request.state}
+                </button>
+              )}
+              {request.outcome === 'NoChangeRequired' && request.noChangeRationale && <p>{request.noChangeRationale}</p>}
+            </div>
+            <div className="downstreamActions">
+              <button type="button" className="openAssessment" onClick={() => setOpened(request.id)}>Open assessment</button>
+            </div>
+          </article>
+        ))}
+        <p className="downstreamHelp">
+          One {tcrAcronym(discipline)} may answer several assessments, and an assessment records one decision
+          for every requirement the change touched.
+        </p>
+      </section>
+
+      {/* What Open assessment opens. Everything that used to sit on the row lives here, which is where the
+          requirements queue has always put it. */}
+      {opened && (() => {
+        const request = mine.find(x => x.id === opened)
+        if (!request) return null
+        return <div className="downstreamDrawerBackdrop" role="presentation">
+          <aside className="downstreamDrawer" role="dialog" aria-modal="true" aria-labelledby="test-assessment-title">
+            <header>
+              <div>
+                <p className="eyebrow">{assessmentName(discipline).toUpperCase()} ENGINEERING DECISION</p>
+                <h2 id="test-assessment-title">{request.coveredChangeRequests.map(x => x.number).join(', ')} test impact</h2>
+                <strong>{testAssessmentStatus(request, discipline)}</strong>
+              </div>
+              <button type="button" className="quiet" onClick={() => setOpened('')} aria-label="Close test assessment">Close</button>
+            </header>
+
+            <section className="downstreamDecisionWorkbench">
+              <h3>Engineering conclusion</h3>
+              {request.outcome !== 'Pending'
+                ? <div className="recordedConclusion" data-outcome={request.outcome}>
+                    <b>Recorded conclusion</b>
+                    <p>{request.outcome === 'NoChangeRequired'
+                      ? `No ${tcrAcronym(discipline)} is required.`
+                      : `${tcrAcronym(discipline)} work is required, and is controlled by the linked package.`}</p>
+                    {request.decidedBy && <span className="conclusionAuthor">Recorded by <PersonName userName={request.decidedBy} /></span>}
+                    {request.noChangeRationale && <p className="conclusionRationale">{request.noChangeRationale}</p>}
+                  </div>
+                : <p className="drawerEmpty">Nobody has answered this yet.</p>}
+              {request.outcome === 'ChangeRequired' && request.displayNumber.startsWith(tcrAcronym(discipline)) && (
+                <ul className="drawerChanges">
+                  <li className="linkedDraft">
+                    <button type="button" className="drawerArtifactLink" onClick={() => setAuthoring(request.id)}>{request.displayNumber}</button>
+                    <b>{request.state === 'InReview' ? 'In review' : request.state} · {request.resolvedItems} of {request.totalItems} decisions recorded</b>
+                    <span>Opens in its own workspace, as a change request does from the requirements drawer.</span>
+                  </li>
+                </ul>
+              )}
+              <div className="drawerDecisionActions">
+                {request.capabilities.canAssign && (
+                  <button type="button" disabled={busy} onClick={() => void takeOn(request)}>Take it on</button>
+                )}
+                {request.outcome === 'Pending' && request.capabilities.canDecide && (
+                  <>
+                    <button type="button" disabled={busy} onClick={() => void conclude(request, true)}>{tcrAcronym(discipline)} required</button>
+                    <button type="button" className="quiet" disabled={busy} onClick={() => setDecliningTest(request)}>No {tcrAcronym(discipline)} required</button>
+                  </>
+                )}
+                {canTest && request.state === 'Open' && (
+                  <button type="button" className="quiet" disabled={busy} onClick={() => {
+                    setProblemReportIds((request.problemReports ?? []).map(report => report.id))
+                    setLinkingProblemReports(request)
+                  }}>Link Problem Reports{request.problemReports?.length ? ` · ${request.problemReports.length}` : ''}</button>
+                )}
+                {/* Submission is offered only once every decision is recorded. The server refuses otherwise, and
+                    offering an action that will be refused is a worse answer than not offering it. */}
+                {request.capabilities.canSubmit && request.totalItems > 0 && request.resolvedItems === request.totalItems && (
+                  <button type="button" disabled={busy} onClick={() => setSubmitting(request)}>Send for approval</button>
+                )}
+                {request.capabilities.canApprove && (
+                  <>
+                    <button type="button" disabled={busy} onClick={() => setReviewDecision({ request, action: 'approve' })}>Approve</button>
+                    <button type="button" className="quiet" disabled={busy} onClick={() => setReviewDecision({ request, action: 'return' })}>Return</button>
+                  </>
+                )}
+                {!canTest && <p className="drawerEmpty">Test engineering authority is required to act on this assessment.</p>}
+              </div>
+            </section>
+
+            <section>
+              {/* No requirements-side counterpart: a requirement change is read there, but a test change has to
+                  be answered requirement by requirement. They live here rather than in the package because they
+                  exist even when the conclusion is that no package is needed. */}
+              <h3>What must be tested</h3>
+              <div className="testAssessmentDecisions">
               <ul className="decisionList">
                 {impact.filter(x => x.testChangeReviewId === request.id).map(item => (
                   <li key={item.id}>
@@ -659,13 +706,32 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     )}
                   </li>
                 ))}
-                {!impact.some(x => x.testChangeReviewId === request.id) && <li className="decisionNone">This package has no decisions recorded against it.</li>}
+                {!impact.some(x => x.testChangeReviewId === request.id) && <li className="decisionNone">Nothing this change touched needs a decision.</li>}
               </ul>
               </div>
-            )}
-          </article>
-        ))}
-      </section>
+            </section>
+
+            <section>
+              <h3>Source change requests</h3>
+              <ul className="drawerChanges">
+                {request.coveredChangeRequests.map(change => (
+                  <li key={change.id}><b>{change.number}</b><span>{change.title}</span></li>
+                ))}
+              </ul>
+              <dl className="sourceCase">
+                <div><dt>Responsibility</dt><dd>{request.assignedEngineerId
+                  ? <><PersonName userName={request.assignedEngineerId} /> owns this assessment</>
+                  : 'Unassigned'}</dd></div>
+                {request.selectedApproverId && <div><dt>Independent approver</dt>
+                  <dd><PersonName userName={request.selectedApproverId} /></dd></div>}
+                <div><dt>Linked Problem Reports</dt><dd>{request.problemReports?.length
+                  ? request.problemReports.map(report => `${report.displayNumber} · ${report.title}`).join('\n')
+                  : 'None linked'}</dd></div>
+              </dl>
+            </section>
+          </aside>
+        </div>
+      })()}
 
       <section className="coverageCard">
         <div className="cardTitle">
@@ -851,6 +917,19 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             </div>
           </form>
         </div>
+      )}
+
+      {/* The test change request itself: the room where procedures are created, modified and retired. It is
+          the same drawer the requirements queue uses, from the same stylesheet, because it is the same kind of
+          work asked of a different discipline. */}
+      {authoring && (
+        <TestChangeRequestWorkspace
+          api={api}
+          reviewId={authoring}
+          canAuthor={canTest}
+          onClose={() => setAuthoring('')}
+          onChanged={() => void load()}
+        />
       )}
 
       {linkingProblemReports && (

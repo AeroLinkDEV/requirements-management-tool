@@ -1493,9 +1493,91 @@ Future entries use:
   - The showcase answers the assessments that carry procedure decisions and leaves the rest open, so the
     demonstration shows both a queue with work waiting to be judged and the test change requests that judging
     it produced.
-  - What is **not** converged: the requirements queue opens a drawer while the coverage page expands inline,
-    and a test row still carries several controls because a test change request has more to do. Unifying
-    those two interaction patterns remains open.
+  - Convergence completed in DEC-099: the row, the single control and the drawer are now the requirements
+    queue's, from its own stylesheet.
+
+### DEC-099 - The Testing Queue Is the Requirements Queue, Not Something Like It
+
+- **Date:** 2026-08-06
+- **Status:** Accepted; delivered by PRs #357 and #359
+- **Decision:** A test assessment row is the requirements card — change number, title, discipline chip, then the
+  conclusion, then **one** `Open assessment` control in every state. Take it on, Link PRs, conclude, send for
+  approval, approve and return all moved inside, along with the inline expanding workbench. The amber
+  "attention" row colour is gone. Both drawers import `DownstreamAssessmentQueue.css` rather than copying it.
+- **Rationale:** The two pages showed the same stage of the same workflow in two unrelated shapes. A second
+  stylesheet that merely resembled the first would drift the first time either was touched, so the testing
+  surface uses the requirements one literally. The amber was carrying "nobody has picked this up", which the
+  conclusion column already says in words.
+- **Consequences:**
+  - **Two drawers, not one.** `Open assessment` holds the assessment; the SYSTCR opens in its own workspace, as
+    an HLRCR opens from the requirements drawer. A package is a record of its own, not a panel inside another.
+  - **The per-requirement decisions live with the assessment**, and this is the one place the mirror has nothing
+    to copy: a requirement change is *read* on the requirements side, while a test change must be *answered*
+    requirement by requirement. They cannot live in the package, because they exist even when the conclusion is
+    that no package is needed — and would then be unreachable for exactly those assessments.
+  - Ten journeys reached the page through the old markup, not the nine first counted; the tenth was found by
+    running the suite rather than by reading. Six needed changing.
+  - The row deliberately no longer says who holds a package, matching the requirements row. Journeys that had
+    filtered on the presence of "Take it on" to find an *unclaimed* one silently became "the first row" — see
+    [LES-007](#les-007---a-selector-that-stops-selecting-still-passes).
+
+### DEC-097 - A Test Procedure Is Built and Handled Exactly as a Requirement Is
+
+- **Date:** 2026-08-06
+- **Status:** Accepted; delivered by PRs #348, #350, #351, #353, #357, #358
+- **Decision:** The test-procedure world mirrors the requirement world rather than paralleling it. A test change
+  request carries `TestProcedureChange` records the way a change request carries `RequirementChange` records; it
+  advances to a next revision the same way; and a baseline fixes exactly which procedure revisions it holds:
+
+  | Requirements | Test procedures |
+  | --- | --- |
+  | `RequirementRevision.SourceChangeRequestId` | `TestProcedureRevision.SourceTestChangeRequestId` |
+  | `RequirementRevision.EffectiveBaselineId` | `TestProcedureRevision.EffectiveBaselineId` |
+  | `BaselineRequirementSelection` | `BaselineTestProcedureSelection` |
+  | `BaselineChangeRequestSelection` | `BaselineTestChangeRequestSelection` |
+  | `CandidateBaseline.RequirementsHash` | `CandidateBaseline.TestProceduresHash` |
+  | `RequirementBaselineMaterializer` | `TestProcedureBaselineMaterializer` |
+
+- **Rationale:** The two disciplines do the same job on different artifacts. A second mechanism that merely
+  resembled the first would drift the moment either was touched, and an engineer moving between them would have
+  to learn two vocabularies for one idea.
+- **Consequences:**
+  - **A test change request may be selected into a baseline after the freeze**, unlike a change request.
+    Freezing fixes the requirements; the procedures that verify them are written against those requirements and
+    so finish later. What closes the procedure manifest is materialization, not the freeze.
+  - **`MarkReleased` does not require a procedure manifest.** Every build released so far has none, and gating
+    on it would make those builds retrospectively invalid rather than simply unmaterialized. Whether a future
+    release should require one is deliberately left as an open decision, not taken as a side effect.
+  - Attribution columns are nullable. 518 procedure revisions predate controlled procedure change, and "nobody
+    knows which package approved this" is the true record for them.
+  - A proposal's driving requirement revisions become real `TestRequirementCoverage` only at materialization —
+    the same point a change request's proposed upstream allocation becomes a trace link.
+  - **Open:** when a test change request with other change requests folded into it revises, which package keeps
+    those claims. A change request belongs to at most one package, so the successor cannot hold what the
+    predecessor still holds. It throws with that reason stated rather than silently dropping coverage.
+
+### DEC-098 - A Test Procedure Covers Requirements at Its Own Level, and Nothing Else
+
+- **Date:** 2026-08-06
+- **Status:** Accepted; delivered by PR #356
+- **Decision:** A coverage link between a procedure and a requirement at a different level is refused. An HLR
+  test procedure exists because it verifies one or more HLRs. A procedure's number and its level must also
+  agree, because the allocator picks `SYSTP`/`HLRTP`/`LLRTP` *from* the level, so they are one fact.
+- **Rationale:** This is the root cause of a System change request raising work in the HLR queue. Retiring a
+  System requirement stranded an HLR procedure that should never have been linked to it, and the orphan was then
+  routed by the **procedure's** level onto a change request of a different discipline. Forbidding the link
+  removes the whole class of problem instead of routing around it: a retirement can now only strand procedures
+  of its own level, so the discipline the orphan reaches always matches the change request that caused it, and
+  the mis-disciplined record is no longer constructible.
+- **Consequences:**
+  - Enforced in `SaveChangesAsync`, the one place every write passes through, so code not yet written is covered.
+  - `TestProcedure`'s constructor defaults `level` to `HighLevel`. A caller that omitted it produced a HighLevel
+    procedure wearing a `SYSTP-` number — the same wrong fact one step earlier. Two existing tests were doing
+    exactly that.
+  - Verified against live data before changing anything: **0 of 1,251** coverage links crossed a level and
+    **0 of 516** procedures disagreed with their prefix. Prevention with nothing to migrate.
+  - Retargeting a stranded procedure survives, but is level-bounded: it may move to another requirement at its
+    own level, never across one.
 
 ### DEC-096 - A Problem Report Names Its Kind, Its Workaround, and Who Holds It
 
@@ -1570,6 +1652,33 @@ leaving an unrelated card without one. This repeats an earlier finding that scri
 repository — `${number}` shell-expanding to nothing, `===` breaking the parser, CRLF causing silent no-ops.
 Use the editing tools for anything structural; reserve scripted substitution for changes whose every match is
 verified afterwards.
+
+### LES-006 - A Capability With No Caller Is Not Delivered
+
+`TestProcedureBaselineMaterializer` was written, tested, registered in dependency injection, and merged across
+two pull requests — and **no endpoint ever called it**. The three tables it fills stayed empty, and the gap was
+found only by grepping the API project for the type's name, which matched nothing but compiled binaries. Every
+gate had been green throughout, because the tests exercised the class directly.
+
+Domain and infrastructure tests prove a mechanism works. They cannot prove anyone can reach it. Before calling
+a capability delivered, find the caller: a route, a UI control, a scheduled job. If the only callers are tests,
+the feature exists in the codebase and not in the product.
+
+Its counterpart from the same session: building the screen found three defects — two controls whose names read
+almost identically, a dialog taller than the viewport whose submit button could never be reached, and a journey
+that starved the shared fixture pool. None was reachable by a backend test.
+
+### LES-007 - A Selector That Stops Selecting Still Passes
+
+Several journeys found an *unclaimed* test change request by filtering rows for the presence of a "Take it on"
+button. When that button moved into the drawer, the filter matched nothing and `.first()` quietly became "the
+first row on the page" — which could be a package somebody else held, offering no decisions at all. The tests
+did not fail at the filter. They failed several steps later, looking for a button that was never going to be
+there, and the message pointed at the wrong thing.
+
+A locator that narrows by the presence of something is a silent assertion. When that something moves, the
+locator does not break — it widens. Where a filter is load-bearing, assert what it found before acting on it,
+or select by a property the redesign cannot remove.
 
 ## Working Assumptions
 

@@ -1,5 +1,26 @@
 import { expect, test } from '@playwright/test'
+import type { Page } from '@playwright/test'
 import { login, openNavigationGroup, selectProgram } from './auth'
+
+/**
+ * Opens an assessment this reader can actually decide, and claims it.
+ *
+ * The row deliberately no longer says who holds a package — the requirements queue does not either — so
+ * whether one is free is only knowable by opening it. A package somebody else holds offers no decisions, so
+ * picking the first row and hoping tests nothing.
+ */
+async function openClaimableAssessment(page: Page) {
+  const drawer = page.getByRole('dialog', { name: /test impact/ })
+  for (const row of await page.locator('.downstreamAssessment').all()) {
+    await row.getByRole('button', { name: 'Open assessment' }).click()
+    await expect(drawer).toBeVisible({ timeout: 30_000 })
+    const claim = drawer.getByRole('button', { name: 'Take it on' })
+    if (await claim.count()) { await claim.click(); return drawer }
+    if (await drawer.getByRole('button', { name: 'Decide' }).count()) return drawer
+    await drawer.getByRole('button', { name: 'Close test assessment' }).click()
+  }
+  throw new Error('No test assessment on this page is free to decide.')
+}
 
 /**
  * What a build's requirements are tested by, and what still has nobody looking at it.
@@ -23,7 +44,7 @@ test('coverage opens on the work the build created, then the inventory behind it
   await expect(page.getByRole('heading', { name: 'Downstream test assessments' })).toBeVisible()
   // Numbered as controlled records rather than borrowing the number of the change that raised them. The
   // showcase raises one System package for the in-work build, so this is a fact about the page.
-  const packages = page.locator('.coverageRow').filter({ hasText: /TCR-/ })
+  const packages = page.locator('.downstreamAssessment').filter({ hasText: /TCR-/ })
   await expect(packages.first()).toContainText(/SYSTCR-\d{6}\.\d{2}/, { timeout: 30_000 })
 
   // The counts a reader plans against.
@@ -54,29 +75,26 @@ test('a package opens onto its decisions, and each one is an explicit judgement'
   await page.getByRole('link', { name: 'System Testing Coverage' }).click()
   await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
 
-  const claimable = page.locator('.coverageRow').filter({ hasText: /SYSTCR-/ })
-    .filter({ has: page.getByRole('button', { name: 'Take it on' }) }).first()
+  // One control per row, in every state — the requirements queue's anatomy. Everything the assessment offers
+  // is inside it, so the row stays a summary and stops being a control panel.
+  const claimable = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
   await expect(claimable).toBeVisible({ timeout: 30_000 })
-  const displayNumber = (await claimable.locator('b').first().textContent())!.trim()
-  await claimable.getByRole('button', { name: 'Take it on' }).click()
-  const first = page.locator('.coverageRow').filter({ hasText: displayNumber }).first()
-  // Claiming a package opens what was claimed. There is no "Decisions" button any more: the package row is
-  // the disclosure, so the record expands rather than a control beside it toggling a panel.
+  await expect(claimable.getByRole('button', { name: 'Take it on' })).toHaveCount(0)
+  await expect(claimable.getByRole('button')).toHaveCount(2)  // Open assessment, and the link to the package
+  const first = await openClaimableAssessment(page)
   await expect(first.getByRole('button', { name: 'Decisions' })).toHaveCount(0)
-  await expect(first.locator('.packageDisclosure')).toHaveAttribute('aria-expanded', 'true')
   await expect(first.getByText('Source change requests', { exact: true })).toBeVisible()
   await expect(first.getByText('Responsibility', { exact: true })).toBeVisible()
   await expect(first.getByText('Linked Problem Reports', { exact: true })).toBeVisible()
   // And what already tests each requirement, which is the question the decision is an answer to.
   await expect(first.locator('.decisionList .existingCoverage').first()).toBeVisible({ timeout: 30_000 })
 
-  // Pressing the row again collapses it, so the disclosure is a disclosure and not a one-way door.
-  await first.locator('.packageDisclosure').click()
-  await expect(first.locator('.decisionList')).toHaveCount(0)
-  await first.locator('.packageDisclosure').click()
-  await expect(first.locator('.packageDisclosure')).toHaveAttribute('aria-expanded', 'true')
+  // Closing returns to the queue and leaves nothing behind, so the drawer is a drawer and not a one-way door.
+  await first.getByRole('button', { name: 'Close test assessment' }).click()
+  await expect(page.locator('.decisionList')).toHaveCount(0)
+  const reopened = await openClaimableAssessment(page)
 
-  const undecided = first.locator('.decisionList li').filter({ has: page.getByRole('button', { name: 'Decide' }) })
+  const undecided = reopened.locator('.decisionList li').filter({ has: page.getByRole('button', { name: 'Decide' }) })
   await expect(undecided.first()).toBeVisible({ timeout: 30_000 })
   await undecided.first().getByRole('button', { name: 'Decide' }).click()
 
@@ -145,7 +163,7 @@ test('software HLR and LLR each have their own coverage page', async ({ page }) 
   // failed: two loaders on the page shared one "only the newest reply may write the screen" counter, so the
   // procedure search cancelled the load that was fetching the packages. Asserting the package here is what
   // stops that returning as an empty queue nobody can distinguish from having no work.
-  await expect(page.locator('.coverageRow').filter({ hasText: /TCR-/ }).first())
+  await expect(page.locator('.downstreamAssessment').filter({ hasText: /TCR-/ }).first())
     .toContainText(/HLRTCR-\d{6}\.\d{2}/, { timeout: 30_000 })
 
   await page.getByRole('link', { name: 'Software LLR Testing Coverage' }).click()
@@ -361,20 +379,14 @@ test('a decision can ask for a procedure that does not exist, and author it from
   await page.getByRole('link', { name: 'System Testing Coverage' }).click()
   await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
 
-  // Any package with an undecided item will do; the point is the outcome, not which requirement it is on.
-  // Its number is read before it is claimed, because "Take it on" is what identifies the row and claiming it
-  // is exactly what makes that button disappear — reselecting by the same filter afterwards would silently
-  // land on somebody else's package, whose items offer no Decide button at all.
-  const claimable = page.locator('.coverageRow').filter({ has: page.getByRole('button', { name: 'Take it on' }) }).first()
-  await expect(claimable).toBeVisible({ timeout: 30_000 })
   // A row leads with the change it is assessing, not with a test change request number it may not have yet:
   // the number is what an assessment produces once it concludes test work is required.
-  const packageNumber = ((await claimable.locator('b').first().textContent()) ?? '').trim()
-  expect(packageNumber).toMatch(/^SRCR-/)
-  await claimable.getByRole('button', { name: 'Take it on' }).click()
+  const firstRow = page.locator('.downstreamAssessment').first()
+  await expect(firstRow).toBeVisible({ timeout: 30_000 })
+  expect(((await firstRow.locator('b').first().textContent()) ?? '').trim()).toMatch(/^SRCR-/)
 
-  const packageRow = page.locator('.coverageRow').filter({ hasText: packageNumber }).first()
-  // Claiming the package opens it; the decisions are what was claimed.
+  // Any package with an undecided item will do; the point is the outcome, not which requirement it is on.
+  const packageRow = await openClaimableAssessment(page)
   await expect(packageRow.locator('.decisionList')).toBeVisible({ timeout: 30_000 })
   const undecided = packageRow.locator('.decisionList li').filter({ has: page.getByRole('button', { name: 'Decide' }) }).first()
   await expect(undecided).toBeVisible({ timeout: 30_000 })
@@ -414,23 +426,23 @@ test('a test change request opens onto its source changes, its requirements and 
   await page.getByRole('link', { name: 'System Testing Coverage' }).click()
   await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
 
-  const row = page.locator('.coverageRow').filter({ hasText: /SYSTCR-/ }).first()
-  await expect(row).toBeVisible({ timeout: 30_000 })
+  const queueRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
+  await expect(queueRow).toBeVisible({ timeout: 30_000 })
 
-  // The row is the record's summary and the record's disclosure. There is no button called "Decisions",
-  // and nothing that looks like an action opens a panel.
+  // The row summarises; the assessment is where anything is done. There is no button called "Decisions", and
+  // nothing that looks like an action opens a panel in place.
   await expect(page.getByRole('button', { name: 'Decisions' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Hide decisions' })).toHaveCount(0)
-  const disclosure = row.locator('.packageDisclosure')
-  await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
-  await disclosure.click()
-  await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.locator('.packageDisclosure')).toHaveCount(0)
+  await queueRow.getByRole('button', { name: 'Open assessment' }).click()
 
   // What an engineer needs in order to decide, on open: where the work came from, who holds it, and every
   // requirement it created with the coverage that requirement already has.
+  const row = page.getByRole('dialog', { name: /test impact/ })
+  await expect(row).toBeVisible({ timeout: 30_000 })
   await expect(row.getByText('Source change requests', { exact: true })).toBeVisible()
   await expect(row.getByText('Responsibility', { exact: true })).toBeVisible()
-  await expect(row.locator('.testPackageContext')).toContainText(/SRCR-\d{5}/)
+  await expect(row).toContainText(/SRCR-\d{5}/)
 
   const decisions = row.locator('.decisionList li')
   await expect(decisions.first()).toBeVisible({ timeout: 30_000 })

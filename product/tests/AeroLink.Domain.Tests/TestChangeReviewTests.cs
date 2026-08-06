@@ -43,7 +43,7 @@ public sealed class TestChangeReviewTests
     private static TestProcedureChangeDraft ProcedureDraft(string baseNumber = "SYSTP-000123",
         TestProcedureChangeKind kind = TestProcedureChangeKind.Introduce,
         TestProcedureLevel level = TestProcedureLevel.System) =>
-        new(baseNumber, 0, level, kind,
+        new(baseNumber, 0, level, kind, "Oceanic waypoint sequencing",
             "Verify oceanic waypoints are sequenced in the order the active flight plan holds.",
             "The aircraft is in cruise with an active oceanic flight plan.",
             "1. Load the plan. 2. Advance past the first waypoint. 3. Read the sequencer.",
@@ -110,16 +110,20 @@ public sealed class TestChangeReviewTests
         // A retired procedure is being removed, not restated — the same exemption a retired requirement gets.
         var retire = review.AddProcedureChange("verification.engineer",
             new TestProcedureChangeDraft("SYSTP-000009", 1, TestProcedureLevel.System,
-                TestProcedureChangeKind.Retire, "", "", "", "", "Its requirement was retired."),
+                TestProcedureChangeKind.Retire, "", "", "", "", "", "Its requirement was retired."),
             Now.AddMinutes(1));
         Assert.Equal(TestProcedureChangeKind.Retire, retire.Kind);
 
         Assert.Throws<DomainException>(() => review.AddProcedureChange("verification.engineer",
             new TestProcedureChangeDraft("SYSTP-000010", 0, TestProcedureLevel.System,
-                TestProcedureChangeKind.Introduce, "", "", "steps", "", "why"), Now.AddMinutes(2)));
+                TestProcedureChangeKind.Introduce, "Title", "", "steps", "", "", "why"), Now.AddMinutes(2)));
         Assert.Throws<DomainException>(() => review.AddProcedureChange("verification.engineer",
             new TestProcedureChangeDraft("SYSTP-000011", 0, TestProcedureLevel.System,
-                TestProcedureChangeKind.Introduce, "objective", "", "", "", "why"), Now.AddMinutes(3)));
+                TestProcedureChangeKind.Introduce, "Title", "objective", "", "", "", "why"), Now.AddMinutes(3)));
+        // A procedure the build will carry has to be called something.
+        Assert.Throws<DomainException>(() => review.AddProcedureChange("verification.engineer",
+            new TestProcedureChangeDraft("SYSTP-000012", 0, TestProcedureLevel.System,
+                TestProcedureChangeKind.Introduce, "", "objective", "", "steps", "expected", "why"), Now.AddMinutes(4)));
     }
 
     [Fact]

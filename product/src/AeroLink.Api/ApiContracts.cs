@@ -42,6 +42,8 @@ record RequestChangesRequest(long? ExpectedVersion, string Reason);
 record CreateBaselineRequest(string BaseNumber, int Revision, Guid ProjectId, Guid ReleaseId, Guid? PredecessorBaselineId, string Name);
 record CreateReleaseCampaignRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, string Name);
 record BaselineSelectionRequest(Guid ChangeRequestId);
+/// <summary>An approved test change request whose procedure decisions a baseline is to carry.</summary>
+record BaselineTestChangeSelectionRequest(Guid TestChangeRequestId);
 record EmptyMutationRequest();
 record CreateBuildRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, string BuildNumber, string Description);
 record CreateTestProcedureRequest(Guid ProjectId, string BaseNumber, string Title, string Objective, string Preconditions, string Steps, string ExpectedResult, List<Guid> RequirementRevisionIds, string ApproverId, TestProcedureLevel Level = TestProcedureLevel.HighLevel);

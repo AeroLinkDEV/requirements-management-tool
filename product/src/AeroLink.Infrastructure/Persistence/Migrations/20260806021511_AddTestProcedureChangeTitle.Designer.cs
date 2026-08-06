@@ -3,6 +3,7 @@ using System;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    partial class AeroLinkDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260806021511_AddTestProcedureChangeTitle")]
+    partial class AddTestProcedureChangeTitle
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -84,6 +87,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("AeroLink.Domain.Baselines.BaselineTestChangeRequestSelection", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("BaselineId")
@@ -806,390 +810,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("identifier_sequences", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.DocumentConnectorGrant", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("AccessTokenHash")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("DocumentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("EditSessionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("LaunchTokenHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Mode")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("RedeemedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("RevisionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("RevokedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccessTokenHash")
-                        .IsUnique();
-
-                    b.HasIndex("DocumentId");
-
-                    b.HasIndex("EditSessionId");
-
-                    b.HasIndex("LaunchTokenHash")
-                        .IsUnique();
-
-                    b.HasIndex("RevisionId");
-
-                    b.ToTable("document_connector_grants", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocument", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Acronym")
-                        .IsRequired()
-                        .HasMaxLength(12)
-                        .HasColumnType("character varying(12)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DocumentNumber")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<string>("DocumentType")
-                        .IsRequired()
-                        .HasMaxLength(160)
-                        .HasColumnType("character varying(160)");
-
-                    b.Property<string>("OwnerId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("character varying(300)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("Version")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "Acronym");
-
-                    b.HasIndex("ProjectId", "DocumentNumber")
-                        .IsUnique();
-
-                    b.ToTable("managed_documents", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentBuildSelection", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("DocumentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ReleaseId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("RevisionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("SelectedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("SelectedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DocumentId");
-
-                    b.HasIndex("ProjectId");
-
-                    b.HasIndex("RevisionId");
-
-                    b.HasIndex("ReleaseId", "DocumentId")
-                        .IsUnique();
-
-                    b.ToTable("managed_document_build_selections", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentEvent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ActorId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Detail")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<Guid>("DocumentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("EventType")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTimeOffset>("OccurredAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DocumentId", "OccurredAt");
-
-                    b.ToTable("managed_document_events", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentLink", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ArtifactId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ArtifactType")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("character varying(60)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("DisplayNumber")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<string>("Relationship")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<Guid>("RevisionId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ArtifactType", "ArtifactId");
-
-                    b.HasIndex("RevisionId", "ArtifactType", "ArtifactId", "Relationship")
-                        .IsUnique();
-
-                    b.ToTable("managed_document_links", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentReviewStep", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ApproverId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("ApproverName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<int>("Cycle")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset?>("DecidedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("Position")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Rationale")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<Guid>("RevisionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("StageName")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RevisionId", "Cycle", "Position")
-                        .IsUnique();
-
-                    b.ToTable("managed_document_review_steps", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentRevision", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ChangeSummary")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("CurrentWorkingAttachmentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("DocumentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("OwnerId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid?>("ReleaseCandidateDocxAttachmentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("ReleaseCandidatePdfAttachmentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ReleaseManifestHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTimeOffset?>("ReleasedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ReleasedBy")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid?>("ReleasedDocxAttachmentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("ReleasedPdfAttachmentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ReturnReason")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<int>("Revision")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("SnapshotHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<DateTimeOffset?>("SubmittedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("SubmittedBy")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid>("TargetReleaseId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("Version")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DocumentId", "Revision")
-                        .IsUnique();
-
-                    b.HasIndex("TargetReleaseId", "State");
-
-                    b.ToTable("managed_document_revisions", (string)null);
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Identity.ElectronicSignature", b =>
@@ -5982,7 +5602,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("SupersededByTestChangeRequestId");
 
-                    b.HasIndex("ChangeRequestId", "Discipline", "Revision")
+                    b.HasIndex("ChangeRequestId", "Discipline")
                         .IsUnique();
 
                     b.HasIndex("ReleaseId", "State", "Discipline");
@@ -6552,105 +6172,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .WithMany("AuditEvents")
                         .HasForeignKey("AggregateId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.DocumentConnectorGrant", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Documents.ManagedDocument", null)
-                        .WithMany()
-                        .HasForeignKey("DocumentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("AeroLink.Domain.Requirements.ArtifactEditSession", null)
-                        .WithMany()
-                        .HasForeignKey("EditSessionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("AeroLink.Domain.Documents.ManagedDocumentRevision", null)
-                        .WithMany()
-                        .HasForeignKey("RevisionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocument", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Programs.ProjectRecord", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentBuildSelection", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Documents.ManagedDocument", null)
-                        .WithMany()
-                        .HasForeignKey("DocumentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("AeroLink.Domain.Programs.ProjectRecord", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("AeroLink.Domain.Programs.SoftwareRelease", null)
-                        .WithMany()
-                        .HasForeignKey("ReleaseId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("AeroLink.Domain.Documents.ManagedDocumentRevision", null)
-                        .WithMany()
-                        .HasForeignKey("RevisionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentEvent", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Documents.ManagedDocument", null)
-                        .WithMany()
-                        .HasForeignKey("DocumentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentLink", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Documents.ManagedDocumentRevision", null)
-                        .WithMany()
-                        .HasForeignKey("RevisionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentReviewStep", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Documents.ManagedDocumentRevision", null)
-                        .WithMany("ReviewSteps")
-                        .HasForeignKey("RevisionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentRevision", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Documents.ManagedDocument", null)
-                        .WithMany()
-                        .HasForeignKey("DocumentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("AeroLink.Domain.Programs.SoftwareRelease", null)
-                        .WithMany()
-                        .HasForeignKey("TargetReleaseId")
-                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
@@ -7614,11 +7135,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.Navigation("RequirementChanges");
 
                     b.Navigation("ReviewCycles");
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentRevision", b =>
-                {
-                    b.Navigation("ReviewSteps");
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Releases.ReleaseCampaign", b =>

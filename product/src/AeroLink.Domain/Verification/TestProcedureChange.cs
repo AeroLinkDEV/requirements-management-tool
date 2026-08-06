@@ -8,8 +8,8 @@ namespace AeroLink.Domain.Verification;
 public enum TestProcedureChangeKind { Introduce, Modify, Retire }
 
 public sealed record TestProcedureChangeDraft(string BaseNumber, int Revision, TestProcedureLevel Level,
-    TestProcedureChangeKind Kind, string Objective, string Preconditions, string Steps, string ExpectedResult,
-    string Rationale, string DrivingRequirementRevisionIdsJson = "[]");
+    TestProcedureChangeKind Kind, string Title, string Objective, string Preconditions, string Steps,
+    string ExpectedResult, string Rationale, string DrivingRequirementRevisionIdsJson = "[]");
 
 /// <summary>
 /// One proposed change to one test procedure, carried by a test change request.
@@ -30,8 +30,8 @@ public sealed class TestProcedureChange
     private TestProcedureChange() { }
 
     internal TestProcedureChange(Guid testChangeReviewId, string baseNumber, int revision,
-        TestProcedureLevel level, TestProcedureChangeKind kind, string objective, string preconditions,
-        string steps, string expectedResult, string rationale,
+        TestProcedureLevel level, TestProcedureChangeKind kind, string title, string objective,
+        string preconditions, string steps, string expectedResult, string rationale,
         string drivingRequirementRevisionIdsJson = "[]")
     {
         Id = Guid.NewGuid();
@@ -42,10 +42,13 @@ public sealed class TestProcedureChange
         Kind = kind;
         // A retirement removes a procedure rather than restating it, so it is the one kind that needs no
         // body — exactly as a retired requirement needs no statement.
+        if (kind != TestProcedureChangeKind.Retire && string.IsNullOrWhiteSpace(title))
+            throw new DomainException("A test procedure title is required.");
         if (kind != TestProcedureChangeKind.Retire && string.IsNullOrWhiteSpace(objective))
             throw new DomainException("A test procedure objective is required.");
         if (kind != TestProcedureChangeKind.Retire && string.IsNullOrWhiteSpace(steps))
             throw new DomainException("A test procedure must state its steps.");
+        Title = title?.Trim() ?? "";
         Objective = objective?.Trim() ?? "";
         Preconditions = preconditions?.Trim() ?? "";
         Steps = steps?.Trim() ?? "";
@@ -64,6 +67,8 @@ public sealed class TestProcedureChange
     public TestProcedureLevel Level { get; private set; }
     public TestProcedureChangeKind Kind { get; private set; }
 
+    /// <summary>What the procedure is called. Carried by the proposal because the procedure it creates needs one.</summary>
+    public string Title { get; private set; } = string.Empty;
     public string Objective { get; private set; } = string.Empty;
     public string Preconditions { get; private set; } = string.Empty;
     public string Steps { get; private set; } = string.Empty;

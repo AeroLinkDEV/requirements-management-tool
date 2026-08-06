@@ -51,10 +51,10 @@ public sealed class VerificationCoverageProjectionTests
                 confirmedOnly.Artifact, confirmedOnly.Revision,
                 mixed.Artifact, mixed.Revision);
 
-            var suspectProcedure = new TestProcedure(project.Id, "SYSTP-000001", "Carried procedure", "author", now);
+            var suspectProcedure = new TestProcedure(project.Id, "SYSTP-000001", "Carried procedure", "author", now, TestProcedureLevel.System);
             var suspectRevision = new TestProcedureRevision(suspectProcedure.Id, 0, "Objective", "Preconditions",
                 "Steps", "Expected", TestProcedureState.Approved, "author", now);
-            var confirmedProcedure = new TestProcedure(project.Id, "SYSTP-000002", "Confirmed procedure", "author", now);
+            var confirmedProcedure = new TestProcedure(project.Id, "SYSTP-000002", "Confirmed procedure", "author", now, TestProcedureLevel.System);
             var confirmedRevision = new TestProcedureRevision(confirmedProcedure.Id, 0, "Objective", "Preconditions",
                 "Steps", "Expected", TestProcedureState.Approved, "author", now);
             db.AddRange(suspectProcedure, suspectRevision, confirmedProcedure, confirmedRevision);

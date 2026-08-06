@@ -64,7 +64,10 @@ test('a PR drives a change request and can be added to a System TCR through the 
 
   await page.goto(new URL(`${root}/system-verification/coverage`, page.url()).toString(), { waitUntil: 'load' })
   await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
-  const linkButton = page.getByRole('button', { name: /^Link PRs/ }).first()
+  // Linking is done inside the assessment now; the queue row carries one control in every state.
+  await page.locator('.downstreamAssessment').first().getByRole('button', { name: 'Open assessment' }).click()
+  const assessment = page.getByRole('dialog', { name: /test impact/ })
+  const linkButton = assessment.getByRole('button', { name: /^Link Problem Reports/ })
   await expect(linkButton).toBeVisible()
   await linkButton.click()
   const dialog = page.getByRole('dialog', { name: /Link PRs to SYSTCR-/ })
@@ -72,7 +75,7 @@ test('a PR drives a change request and can be added to a System TCR through the 
   await dialog.getByRole('checkbox', { name: new RegExp(report.displayNumber.replace('.', '\\.')) }).check()
   await dialog.getByRole('button', { name: 'Save links' }).click()
   await expect(page.getByRole('status')).toContainText('PR links updated')
-  await expect(page.getByRole('button', { name: 'Link PRs · 1' }).first()).toBeVisible()
+  await expect(assessment.getByRole('button', { name: 'Link Problem Reports · 1' })).toBeVisible()
   const requests = await (await page.request.get(`${apiBase}/api/releases/${releaseId}/test-change-reviews`)).json()
   expect(requests.some((item: { problemReports?: { id: string }[] }) =>
     item.problemReports?.some(linked => linked.id === report.id))).toBeTruthy()
