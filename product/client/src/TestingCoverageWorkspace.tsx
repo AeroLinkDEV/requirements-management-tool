@@ -4,6 +4,7 @@ import { SignatureDialog } from './IdentityCenter'
 import PersonPicker from './PersonPicker'
 import ProblemReportPicker, { type ProblemReportOption } from './ProblemReportPicker'
 import ControlledProcedureEditor from './ControlledProcedureEditor'
+import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
@@ -165,6 +166,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [history, setHistory] = useState<History>()
   const [impact, setImpact] = useState<ImpactItem[]>([])
   const [opened, setOpened] = useState('')
+  /** The test change request whose procedure decisions are open for authoring, if any. */
+  const [authoring, setAuthoring] = useState('')
   const [resolving, setResolving] = useState<ImpactItem>()
   const [reopening, setReopening] = useState<ImpactItem>()
   const [outcome, setOutcome] = useState('ProcedureCoverageConfirmed')
@@ -589,6 +592,17 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                   <button type="button" className="quiet" disabled={busy} onClick={() => setReviewDecision({ request, action: 'return' })}>Return</button>
                 </>
               )}
+              {/* Where the procedure work actually happens. Offered only once the assessment has concluded
+                  that test work is required, because until then there is no controlled package to author
+                  into — which is the same reason the number does not exist yet either. */}
+              {/* Named for what it opens rather than by the acronym. The row's disclosure is already labelled
+                  "Open SYSTCR-000001.00", so an "Open SYSTCR" beside it gave one row two controls reading
+                  almost identically and leading to different places. */}
+              {request.outcome === 'ChangeRequired' && request.displayNumber.startsWith(tcrAcronym(discipline)) && (
+                <button type="button" className="openAssessment" onClick={() => setAuthoring(request.id)}>
+                  Open test change request
+                </button>
+              )}
             </div>
             {opened === request.id && (
               <div className="testPackageWorkbench">
@@ -851,6 +865,19 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             </div>
           </form>
         </div>
+      )}
+
+      {/* The test change request itself: the room where procedures are created, modified and retired. It is
+          the same drawer the requirements queue uses, from the same stylesheet, because it is the same kind of
+          work asked of a different discipline. */}
+      {authoring && (
+        <TestChangeRequestWorkspace
+          api={api}
+          reviewId={authoring}
+          canAuthor={canTest}
+          onClose={() => setAuthoring('')}
+          onChanged={() => void load()}
+        />
       )}
 
       {linkingProblemReports && (

@@ -5,7 +5,10 @@
 @media(max-width:900px){.downstreamAssessment{grid-template-columns:1fr}}
 .downstreamActions .personPicker{width:100%;max-width:260px;padding-bottom:1.25rem}
 .downstreamDialogBackdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:1rem;background:#071425a8;backdrop-filter:blur(4px)}
-.downstreamDecisionDialog{width:min(560px,100%);padding:2rem;border-radius:16px;background:#fff;box-shadow:0 30px 90px #0004}
+/* A dialog taller than the viewport scrolls rather than pushing its own actions off-screen. The requirements
+   dialog asks one question and never reaches this height, so it renders exactly as before; the procedure
+   dialog asks for a whole procedure body and does, and without this its submit button cannot be reached. */
+.downstreamDecisionDialog{width:min(560px,100%);max-height:calc(100vh - 2rem);overflow:auto;padding:2rem;border-radius:16px;background:#fff;box-shadow:0 30px 90px #0004}
 .downstreamDecisionDialog h2{margin:.25rem 0;font:700 23px Manrope}.downstreamDecisionDialog>p:not(.eyebrow){color:#5c6878;line-height:1.55}
 .downstreamDecisionDialog label{display:flex;flex-direction:column;gap:.5rem;margin:1rem 0;font-size:.8rem;font-weight:700;color:#43516a}.downstreamDecisionDialog textarea{min-height:120px;padding:.75rem;border:1px solid #cbd7e6;border-radius:8px;font:inherit;resize:vertical}
 .downstreamDialogActions{display:flex;justify-content:flex-end;gap:.75rem}.downstreamDialogActions button{min-width:140px}
