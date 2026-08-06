@@ -90,7 +90,7 @@ public sealed class DownstreamChangeAssessment
         EnsureOpen();
         EnsureAssignee(actorId);
         if (_changeRequestLinks.Count != 0)
-            throw new DomainException("The downstream change is already controlled by a linked SWCR.");
+            throw new DomainException("The downstream change is already controlled by a linked change request.");
         if (Outcome == DownstreamAssessmentOutcome.NoChangeRequired)
             Rationale = "";
         Outcome = DownstreamAssessmentOutcome.ChangeRequired;

@@ -506,9 +506,9 @@ public static class ChangeRequestEndpoints
                 foreach (var change in request.RequirementChanges)
                 {
                     if (request.Type == ChangeRequestType.System && change.Level != RequirementLevel.System)
-                        return Results.BadRequest(new { error = "A System SCR can contain only System requirement changes." });
+                        return Results.BadRequest(new { error = "A System change request can contain only System requirement changes." });
                     if (request.Type == ChangeRequestType.Software && change.Level == RequirementLevel.System)
-                        return Results.BadRequest(new { error = "A Software SWCR can contain only HLR and LLR changes." });
+                        return Results.BadRequest(new { error = "A Software change request can contain only HLR and LLR changes." });
                     if (change.IsDerived && string.IsNullOrWhiteSpace(change.Rationale))
                         return Results.BadRequest(new { error = "Every derived software requirement requires an explicit engineering rationale." });
                     var upstreamError = await UpstreamAllocationRefusalAsync(db, request.ProjectId,
@@ -574,7 +574,7 @@ public static class ChangeRequestEndpoints
         app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
-            if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before submitting.", code = "stale_version" });
+            if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This change request changed after it was opened. Refresh it before submitting.", code = "stale_version" });
             var now=DateTimeOffset.UtcNow;var editSessions=await db.ArtifactEditSessions.Where(x=>x.ArtifactId==id&&x.ArtifactType=="SCR"&&x.IsExclusive&&x.State==EditSessionState.Active).ToListAsync(ct);foreach(var expired in editSessions.Where(x=>x.ExpiresAt<=now))expired.Expire(now);if(db.ChangeTracker.HasChanges())await db.SaveChangesAsync(ct);var activeEdit=editSessions.FirstOrDefault(x=>x.State==EditSessionState.Active);if(activeEdit is not null)return Results.Conflict(new{error=$"Review cannot begin while {activeEdit.UserName} has the Draft checked out.",code="active_edit_session",activeEdit.ExpiresAt});
             try
             {
@@ -622,7 +622,7 @@ public static class ChangeRequestEndpoints
         app.MapPost("/api/change-requests/{id:guid}/restart-review", async (Guid id, RestartReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
-            if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This SCR changed after it was opened. Refresh it before restarting the review.", code = "stale_version" });
+            if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This change request changed after it was opened. Refresh it before restarting the review.", code = "stale_version" });
             try
             {
                 var actor = http.UserAccount();

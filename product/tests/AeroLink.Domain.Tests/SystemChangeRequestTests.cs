@@ -250,7 +250,7 @@ public sealed class SystemChangeRequestTests
             scr.StartNextRevision("author", Now.AddHours(1), targetReleaseIsReleased: true));
 
         Assert.Contains("released build", refused.Message);
-        Assert.Contains("new SCR", refused.Message);
+        Assert.Contains("Raise a new one against the in-work build", refused.Message);
     }
 
     [Fact]

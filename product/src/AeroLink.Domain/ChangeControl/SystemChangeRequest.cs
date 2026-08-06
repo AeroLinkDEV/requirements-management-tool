@@ -153,7 +153,7 @@ public sealed class SystemChangeRequest
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
-        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("An SCR title is required.");
+        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A change request title is required.");
         foreach (var item in changes) EnsureRequirementLevel(item.Level);
         Title = title.Trim();
         SetCase(problem, analysis, solution, problemRich, analysisRich, solutionRich);
@@ -295,10 +295,10 @@ public sealed class SystemChangeRequest
     {
         EnsureAuthor(actorId, administratorAuthority);
         if (State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline))
-            throw new DomainException("Only an approved SCR can advance to its next revision.");
+            throw new DomainException("Only an approved change request can advance to its next revision.");
         if (targetReleaseIsReleased)
             throw new DomainException(
-                "This SCR is incorporated in a released build and cannot be revised. Raise a new SCR against the in-work build.");
+                "This change request is incorporated in a released build and cannot be revised. Raise a new one against the in-work build.");
         var next = new SystemChangeRequest(BaseNumber, Revision + 1, ProjectId, TargetReleaseId,
             Title, Problem, Analysis, Solution, AuthorId, now, Type, ProblemRich, AnalysisRich, SolutionRich, SoftwareLevel);
         foreach (var item in _requirementChanges)
@@ -310,7 +310,7 @@ public sealed class SystemChangeRequest
 
     public void MarkSelectedForBaseline(string actorId, DateTimeOffset now)
     {
-        if (State != ChangeRequestState.Approved) throw new DomainException("Only an approved SCR can be selected for a baseline.");
+        if (State != ChangeRequestState.Approved) throw new DomainException("Only an approved change request can be selected for a baseline.");
         State = ChangeRequestState.SelectedForBaseline;
         UpdatedAt = now;
         // Says what happened to the change, not what happened to the baseline. Selection into a candidate
@@ -322,7 +322,7 @@ public sealed class SystemChangeRequest
 
     public void UnmarkSelectedForBaseline(string actorId, DateTimeOffset now)
     {
-        if (State != ChangeRequestState.SelectedForBaseline) throw new DomainException("The SCR is not selected for a baseline.");
+        if (State != ChangeRequestState.SelectedForBaseline) throw new DomainException("The change request is not selected for a baseline.");
         State = ChangeRequestState.Approved;
         UpdatedAt = now;
         Audit("RemovedFromCandidateBaseline", actorId, $"Returned {DisplayNumber} to Approved eligibility.", now);
@@ -415,8 +415,8 @@ public sealed class SystemChangeRequest
     {
         if (!AcceptsRequirementLevel(Type, level))
             throw new DomainException(Type == ChangeRequestType.System
-                ? "A System change request can contain System requirements only. Use an SWCR for HLR or LLR work."
-                : "A Software change request can contain HLR or LLR requirements only. Use an SCR for System work.");
+                ? "A System change request can contain System requirements only. Use an HLRCR or LLRCR for software work."
+                : "A Software change request can contain HLR or LLR requirements only. Use an SRCR for System work.");
         if (Type == ChangeRequestType.Software && SoftwareLevel is not null && level != SoftwareLevel)
             throw new DomainException($"This Software Draft belongs to the {(SoftwareLevel == RequirementLevel.HighLevel ? "HLR" : "LLR")} workspace and cannot contain {(level == RequirementLevel.HighLevel ? "HLR" : "LLR")} changes.");
     }
@@ -461,8 +461,8 @@ public sealed class SystemChangeRequest
     private void EnsureAuthor(string actorId, bool administratorAuthority)
     {
         if (!administratorAuthority && !string.Equals(AuthorId, actorId, StringComparison.OrdinalIgnoreCase))
-            throw new DomainException("Only the SCR author can perform this action.");
+            throw new DomainException("Only the change request author can perform this action.");
     }
-    private void EnsureDraft() { if (State != ChangeRequestState.Draft) throw new DomainException("The SCR must be in Draft."); }
-    private void EnsureInReview() { if (State != ChangeRequestState.InReview || ActiveReviewCycle is null) throw new DomainException("The SCR is not in active review."); }
+    private void EnsureDraft() { if (State != ChangeRequestState.Draft) throw new DomainException("The change request must be in Draft."); }
+    private void EnsureInReview() { if (State != ChangeRequestState.InReview || ActiveReviewCycle is null) throw new DomainException("The change request is not in active review."); }
 }

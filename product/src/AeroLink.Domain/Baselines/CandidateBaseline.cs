@@ -79,8 +79,8 @@ public sealed class CandidateBaseline
         EnsureDraft();
         if (scr.State != ChangeRequestState.Approved) throw new DomainException("Only approved SCRs can be selected.");
         if (scr.ProjectId != ProjectId || scr.TargetReleaseId != ReleaseId)
-            throw new DomainException("The SCR does not belong to this project and target release.");
-        if (_selections.Any(x => x.ChangeRequestId == scr.Id)) throw new DomainException("The SCR is already selected.");
+            throw new DomainException("The change request does not belong to this project and target release.");
+        if (_selections.Any(x => x.ChangeRequestId == scr.Id)) throw new DomainException("The change request is already selected.");
         _selections.Add(new BaselineChangeRequestSelection(Id, scr.Id, scr.DisplayNumber));
         UpdatedAt = now;
         scr.MarkSelectedForBaseline(actorId, now);
@@ -91,7 +91,7 @@ public sealed class CandidateBaseline
     {
         EnsureDraft();
         var selection = _selections.SingleOrDefault(x => x.ChangeRequestId == scr.Id)
-            ?? throw new DomainException("The SCR is not selected in this baseline.");
+            ?? throw new DomainException("The change request is not selected in this baseline.");
         _selections.Remove(selection);
         UpdatedAt = now;
         scr.UnmarkSelectedForBaseline(actorId, now);
@@ -101,14 +101,14 @@ public sealed class CandidateBaseline
     public void Freeze(string actorId, DateTimeOffset now)
     {
         EnsureDraft();
-        if (_selections.Count == 0) throw new DomainException("At least one approved SCR must be selected before freezing a baseline.");
+        if (_selections.Count == 0) throw new DomainException("At least one approved change request must be selected before freezing a baseline.");
         var manifest = string.Join("|", DisplayNumber, ProjectId, ReleaseId,
             string.Join(";", _selections.OrderBy(x => x.ChangeRequestDisplayNumber).Select(x => $"{x.ChangeRequestId}:{x.ChangeRequestDisplayNumber}")));
         ContentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
         State = CandidateBaselineState.Frozen;
         FrozenAt = now;
         UpdatedAt = now;
-        Event("CandidateBaselineFrozen", actorId, $"Frozen {DisplayNumber} with {_selections.Count} exact SCR revisions and hash {ContentHash}.", now);
+        Event("CandidateBaselineFrozen", actorId, $"Frozen {DisplayNumber} with {_selections.Count} exact change request revisions and hash {ContentHash}.", now);
     }
 
     public void MarkRequirementsMaterialized(string actorId, string requirementsHash, int activeCount, DateTimeOffset now)
