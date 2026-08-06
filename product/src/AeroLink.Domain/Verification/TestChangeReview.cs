@@ -30,8 +30,9 @@ public sealed class TestChangeReview
 
     public TestChangeReview(Guid projectId, Guid releaseId, Guid changeRequestId,
         TestChangeReviewDiscipline discipline, string sourceChangeRequestNumber, DateTimeOffset now,
-        string baseNumber = "")
+        string baseNumber = "", int revision = 0)
     {
+        Revision = revision;
         if (projectId == Guid.Empty) throw new DomainException("A test change review requires its Project.");
         if (releaseId == Guid.Empty) throw new DomainException("A test change review requires its software build.");
         if (changeRequestId == Guid.Empty) throw new DomainException("A test change review requires its originating change request.");
@@ -288,6 +289,44 @@ public sealed class TestChangeReview
     /// <summary>Every change request this package answers for, including the one it was raised from.</summary>
     public IEnumerable<Guid> CoveredChangeRequestIds =>
         new[] { ChangeRequestId }.Concat(_additionalSources.Select(x => x.ChangeRequestId));
+
+    /// <summary>
+    /// Advances an approved test change request to its next revision, as an approved change request advances
+    /// to its own.
+    ///
+    /// The successor is a new record at the same number and the next revision, carrying the same procedure
+    /// changes so the engineer corrects them rather than retyping them. It starts Open and already concluded
+    /// that test work is required — reopening approved procedure work to revise it is not a reason to ask
+    /// again whether any was needed.
+    ///
+    /// The predecessor is left for the caller to supersede, exactly as the requirements side leaves the
+    /// predecessor for its caller to persist: this method builds the successor and nothing else.
+    /// </summary>
+    public TestChangeReview StartNextRevision(string actorId, DateTimeOffset now, bool targetReleaseIsReleased)
+    {
+        Required(actorId, "engineer revising the test change request");
+        if (State != TestChangeReviewState.Approved)
+            throw new DomainException("Only an approved test change request can advance to its next revision.");
+        if (targetReleaseIsReleased)
+            throw new DomainException(
+                "This test change request is incorporated in a released build and cannot be revised. Raise a new one against the in-work build.");
+        // A change request is claimed by at most one package, enforced by a unique index, so a successor
+        // cannot hold what its predecessor still holds — and silently dropping the folded-in changes would
+        // make the new revision cover less than the old one without saying so. Which package owns a claim
+        // across a revision is a real question and it is not answered yet, so this refuses instead of
+        // guessing.
+        if (_additionalSources.Count != 0)
+            throw new DomainException(
+                "This test change request has other change requests folded into it. Revising one of those is not supported yet.");
+        var next = new TestChangeReview(ProjectId, ReleaseId, ChangeRequestId, Discipline,
+            SourceChangeRequestNumber, now, BaseNumber, Revision + 1);
+        next.RecordTestChangeRequired(actorId, now);
+        foreach (var change in _procedureChanges)
+            next.AddProcedureChange(actorId, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
+                change.Level, change.Kind, change.Objective, change.Preconditions, change.Steps,
+                change.ExpectedResult, change.Rationale, change.DrivingRequirementRevisionIdsJson), now);
+        return next;
+    }
 
     public void Retarget(Guid releaseId, DateTimeOffset now)
     {
