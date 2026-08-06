@@ -285,9 +285,9 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
         var state = (State)artifact.Aggregate;
         var item = state.Request;
         var draft = JsonSerializer.Deserialize<SystemChangeRequestDraft>(draftJson, DraftOptions)
-            ?? throw new JsonException("The latest autosaved SCR draft is empty.");
+            ?? throw new JsonException("The latest autosaved change request draft is empty.");
         if (draft.RequirementChanges is null)
-            throw new JsonException("The latest autosaved SCR draft does not contain requirement changes.");
+            throw new JsonException("The latest autosaved change request draft does not contain requirement changes.");
         var changes = await NormalizeAsync(item, draft.RequirementChanges, ct);
         item.UpdateDraft(actor, draft.Title ?? "", draft.Problem ?? "", draft.Analysis ?? "",
             draft.Solution ?? "", changes, now, draft.ProblemRich, draft.AnalysisRich, draft.SolutionRich,
@@ -314,9 +314,9 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
                 !Enum.TryParse<RequirementChangeKind>(raw.Kind, true, out var kind))
                 throw new DomainException("Every requirement change needs a valid level and change kind.");
             if (scr.Type == ChangeRequestType.System && level != RequirementLevel.System)
-                throw new DomainException("A System SCR can contain only System requirement changes.");
+                throw new DomainException("A System change request can contain only System requirement changes.");
             if (scr.Type == ChangeRequestType.Software && level == RequirementLevel.System)
-                throw new DomainException("A Software SWCR can contain only HLR and LLR changes.");
+                throw new DomainException("A Software change request can contain only HLR and LLR changes.");
             var isDerived = raw.IsDerived ?? RequirementAuthoringJson.IsDerived(raw.AttributesJson);
             if (isDerived && string.IsNullOrWhiteSpace(raw.Rationale))
                 throw new DomainException("Every derived software requirement requires an explicit engineering rationale.");
@@ -705,12 +705,12 @@ public sealed class ReleasePlanningControlledEditingAdapter(AeroLinkDbContext db
             !string.Equals(draft.BaseNumber?.Trim(), baseline.BaseNumber, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("The controlled release-planning identity cannot change.");
         if (draft.SelectedScrIds is null || draft.SelectedScrIds.Count != draft.SelectedScrIds.Distinct().Count())
-            throw new DomainException("Release-planning selections must contain distinct SCR identifiers.");
+            throw new DomainException("Release-planning selections must contain distinct change request identifiers.");
         var requested = draft.SelectedScrIds.ToHashSet();
         var existing = baseline.Selections.Select(x => x.ChangeRequestId).ToHashSet();
         var allIds = requested.Union(existing).ToList();
         var scrs = await db.SystemChangeRequests.Where(x => allIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
-        if (scrs.Count != allIds.Count) throw new DomainException("Every selected release-planning SCR must exist.");
+        if (scrs.Count != allIds.Count) throw new DomainException("Every selected release-planning change request must exist.");
         foreach (var id in existing.Except(requested).ToList()) baseline.Remove(scrs[id], actor, now);
         foreach (var id in requested.Except(existing).ToList()) baseline.Select(scrs[id], actor, now);
         baseline.UpdateDraft(draft.Name ?? string.Empty, actor, now);

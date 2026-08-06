@@ -234,7 +234,7 @@ public sealed class ControlledEditingCheckInEngineTests
         Assert.Equal(ControlledCheckInStatus.InvalidDraft, result.Status);
         Assert.Equal("aggregate_validation_failed", result.Code);
         await scenario.AssertUnchangedAndActiveAsync();
-        Assert.Contains("SCR title", (await scenario.Db.ControlledArtifactCheckInEvidence
+        Assert.Contains("change request title", (await scenario.Db.ControlledArtifactCheckInEvidence
             .SingleAsync(x => x.Id == result.EvidenceId)).Reason);
     }
 
