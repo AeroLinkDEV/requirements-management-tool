@@ -590,7 +590,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ApprovalRationale).HasMaxLength(4000).IsRequired();
             b.Property(x => x.SupersededReason).HasMaxLength(2000).IsRequired();
             b.Property(x => x.Version).IsConcurrencyToken();
-            b.HasIndex(x => new { x.ChangeRequestId, x.Discipline }).IsUnique();
+            // Revision belongs in the key for the same reason it does on a change request: .01 is a further
+            // revision of one package, not a second package claiming the same change. Without it the exclusivity
+            // rule and the revision chain contradict each other, and the revision simply cannot be stored.
+            b.HasIndex(x => new { x.ChangeRequestId, x.Discipline, x.Revision }).IsUnique();
             b.HasIndex(x => new { x.ReleaseId, x.State, x.Discipline });
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
