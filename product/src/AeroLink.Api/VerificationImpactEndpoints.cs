@@ -273,7 +273,10 @@ public static class VerificationImpactEndpoints
         app.MapPost("/api/test-change-reviews/{id:guid}/revise", async (Guid id, HttpContext http,
             AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
-            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+            // AdditionalSources as well as ProcedureChanges: the successor takes the folded-in claims with it,
+            // and an unloaded collection is an empty one. The claims would stay on the predecessor and the new
+            // revision would quietly cover less, which is the exact outcome moving them is meant to prevent.
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).Include(x => x.AdditionalSources)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
@@ -287,7 +290,8 @@ public static class VerificationImpactEndpoints
                 return Results.Ok(new
                 {
                     next.Id, next.DisplayNumber, next.Revision, state = next.State.ToString(),
-                    outcome = next.Outcome.ToString(), procedureChanges = next.ProcedureChanges.Count
+                    outcome = next.Outcome.ToString(), procedureChanges = next.ProcedureChanges.Count,
+                    coveredChangeRequests = next.CoveredChangeRequestIds.Count(),
                 });
             }
             catch (DomainException problem) { return Results.BadRequest(new { error = problem.Message }); }

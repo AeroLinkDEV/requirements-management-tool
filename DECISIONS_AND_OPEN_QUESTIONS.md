@@ -1552,9 +1552,8 @@ Future entries use:
     knows which package approved this" is the true record for them.
   - A proposal's driving requirement revisions become real `TestRequirementCoverage` only at materialization —
     the same point a change request's proposed upstream allocation becomes a trace link.
-  - **Open:** when a test change request with other change requests folded into it revises, which package keeps
-    those claims. A change request belongs to at most one package, so the successor cannot hold what the
-    predecessor still holds. It throws with that reason stated rather than silently dropping coverage.
+  - Settled by [DEC-101](#dec-101---a-revision-takes-its-folded-in-claims-with-it): when a test change request
+    with other change requests folded into it revises, the claims move to the successor.
 
 ### DEC-098 - A Test Procedure Covers Requirements at Its Own Level, and Nothing Else
 
@@ -1578,6 +1577,30 @@ Future entries use:
     **0 of 516** procedures disagreed with their prefix. Prevention with nothing to migrate.
   - Retargeting a stranded procedure survives, but is level-bounded: it may move to another requirement at its
     own level, never across one.
+
+### DEC-101 - A Revision Takes Its Folded-In Claims With It
+
+- **Date:** 2026-08-06
+- **Status:** Accepted; closes the open item left by
+  [DEC-097](#dec-097---a-test-procedure-is-built-and-handled-exactly-as-a-requirement-is)
+- **Decision:** When an approved test change request advances to its next revision, the change requests folded
+  into it move to the successor. `StartNextRevision` no longer refuses.
+- **Rationale:** A change request is claimed by at most one package, enforced by a unique index, so exactly one
+  of the two revisions may hold it. The successor is the package that will actually be approved and
+  materialised. Leaving the claim behind would mean a superseded package still answering for test work nobody
+  is doing; dropping it would make the new revision cover less than the old one without saying so.
+- **Consequences:**
+  - Each claim is **moved, not recreated** — same row, same identifier, same claimant and time. Who took a
+    change's test work on, and when, is not something a revision should rewrite.
+  - The claim's foreign key is required and cascades on delete, which is exactly the shape EF Core reads as
+    "this child was orphaned, delete it". It does not — it reparents with an UPDATE — but that was **verified
+    against a real store**, not reasoned about, because a deletion here would violate no index and report
+    nothing. The persistence test asserts the row, not the aggregate.
+  - The revise endpoint has to `Include(x => x.AdditionalSources)`. An unloaded collection is an empty one, so
+    a missing include would move nothing, strand the claim on the superseded revision, and return success.
+    The API test drives the real route and was confirmed to fail without the include.
+  - The endpoint now reports `coveredChangeRequests` on the successor, so the move is visible in the response
+    rather than only in the table.
 
 ### DEC-096 - A Problem Report Names Its Kind, Its Workaround, and Who Holds It
 
@@ -1652,6 +1675,12 @@ leaving an unrelated card without one. This repeats an earlier finding that scri
 repository — `${number}` shell-expanding to nothing, `===` breaking the parser, CRLF causing silent no-ops.
 Use the editing tools for anything structural; reserve scripted substitution for changes whose every match is
 verified afterwards.
+
+A second failure mode, found on 6 August while proving a test discriminated: the script rewrote the file
+within the same second as the previous build, so MSBuild's timestamp check skipped the rebuild and the run
+used a **stale assembly**. The test then failed for a reason present in no source anybody was reading, which
+led to an invented explanation and a workaround for a defect that did not exist. When a result contradicts the
+code in front of you, `dotnet clean` and rebuild before theorising about the framework.
 
 ### LES-006 - A Capability With No Caller Is Not Delivered
 

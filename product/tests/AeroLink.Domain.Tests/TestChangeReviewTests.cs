@@ -165,20 +165,32 @@ public sealed class TestChangeReviewTests
     }
 
     [Fact]
-    public void Revising_a_package_that_folded_in_other_changes_is_refused_rather_than_guessed_at()
+    public void Revising_a_package_hands_its_folded_in_claims_to_the_successor()
     {
         var review = Create();
+        var folded = Guid.NewGuid();
         review.AssignControlledNumber("SYSTCR-000044", Now.AddMinutes(1));
-        review.IncludeChangeRequest("verification.engineer", Guid.NewGuid(), "SRCR-00040.00", Now.AddMinutes(2));
+        review.IncludeChangeRequest("verification.engineer", folded, "SRCR-00040.00", Now.AddMinutes(2));
         review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
         review.Approve("test.lead", "Sound.", Now.AddMinutes(4));
+        var claimedAt = review.AdditionalSources.Single().ClaimedAt;
+        var claimId = review.AdditionalSources.Single().Id;
 
-        // A change request is claimed by at most one package, so the successor cannot hold what the
-        // predecessor still holds — and dropping the folded-in changes would quietly make the new revision
-        // cover less than the old one. Refusing is the honest answer until that is designed.
-        var refused = Assert.Throws<DomainException>(() =>
-            review.StartNextRevision("verification.engineer", Now.AddMinutes(5), targetReleaseIsReleased: false));
-        Assert.Contains("folded into it", refused.Message);
+        var next = review.StartNextRevision("verification.engineer", Now.AddMinutes(5), targetReleaseIsReleased: false);
+
+        // A change request is claimed by at most one package, so exactly one of the two revisions may hold it.
+        // The successor is the one that will be approved and materialised.
+        Assert.Empty(review.AdditionalSources);
+        var moved = Assert.Single(next.AdditionalSources);
+        Assert.Equal(folded, moved.ChangeRequestId);
+        Assert.Equal(next.Id, moved.TestChangeReviewId);
+        Assert.Contains(folded, next.CoveredChangeRequestIds);
+        Assert.DoesNotContain(folded, review.CoveredChangeRequestIds);
+
+        // Moved, not recreated. Who took this change's test work on, and when, is not a revision's to rewrite.
+        Assert.Equal(claimId, moved.Id);
+        Assert.Equal(claimedAt, moved.ClaimedAt);
+        Assert.Equal("verification.engineer", moved.ClaimedBy);
     }
 
     [Fact]
