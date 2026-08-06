@@ -123,6 +123,61 @@ public sealed class TestChangeReviewTests
     }
 
     [Fact]
+    public void An_approved_test_change_request_advances_to_its_next_revision_carrying_its_work()
+    {
+        var review = Create();
+        review.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(1));
+        review.AddProcedureChange("verification.engineer", ProcedureDraft(), Now.AddMinutes(2));
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+        review.Approve("test.lead", "Procedure decisions are sound.", Now.AddMinutes(4));
+
+        var next = review.StartNextRevision("verification.engineer", Now.AddMinutes(5), targetReleaseIsReleased: false);
+
+        Assert.Equal("SYSTCR-000042.01", next.DisplayNumber);
+        Assert.Equal(TestChangeReviewState.Open, next.State);
+        // Reopening approved procedure work to correct it is not a reason to ask again whether any was needed.
+        Assert.Equal(TestChangeReviewOutcome.ChangeRequired, next.Outcome);
+        // The work carries forward so it is corrected rather than retyped.
+        Assert.Single(next.ProcedureChanges);
+        Assert.Equal("SYSTP-000123.00", next.ProcedureChanges.Single().DisplayNumber);
+        // The predecessor is untouched; superseding it is the caller's act, as on the requirements side.
+        Assert.Equal(TestChangeReviewState.Approved, review.State);
+    }
+
+    [Fact]
+    public void Only_an_approved_test_change_request_revises_and_never_into_a_released_build()
+    {
+        var open = Create();
+        open.AssignControlledNumber("SYSTCR-000043", Now.AddMinutes(1));
+        Assert.Throws<DomainException>(() =>
+            open.StartNextRevision("verification.engineer", Now.AddMinutes(2), targetReleaseIsReleased: false));
+
+        open.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+        open.Approve("test.lead", "Sound.", Now.AddMinutes(4));
+
+        // A released build is closed to change, and a revision is a change like any other.
+        Assert.Throws<DomainException>(() =>
+            open.StartNextRevision("verification.engineer", Now.AddMinutes(5), targetReleaseIsReleased: true));
+    }
+
+    [Fact]
+    public void Revising_a_package_that_folded_in_other_changes_is_refused_rather_than_guessed_at()
+    {
+        var review = Create();
+        review.AssignControlledNumber("SYSTCR-000044", Now.AddMinutes(1));
+        review.IncludeChangeRequest("verification.engineer", Guid.NewGuid(), "SRCR-00040.00", Now.AddMinutes(2));
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+        review.Approve("test.lead", "Sound.", Now.AddMinutes(4));
+
+        // A change request is claimed by at most one package, so the successor cannot hold what the
+        // predecessor still holds — and dropping the folded-in changes would quietly make the new revision
+        // cover less than the old one. Refusing is the honest answer until that is designed.
+        var refused = Assert.Throws<DomainException>(() =>
+            review.StartNextRevision("verification.engineer", Now.AddMinutes(5), targetReleaseIsReleased: false));
+        Assert.Contains("folded into it", refused.Message);
+    }
+
+    [Fact]
     public void A_submitted_package_cannot_grow_underneath_its_approver()
     {
         var review = Create();
