@@ -165,6 +165,89 @@ public sealed class TestProcedureMaterializationTests
         finally { File.Delete(path); }
     }
 
+    [Fact]
+    public async Task A_decision_that_asked_for_a_procedure_settles_when_the_test_change_request_delivers_it()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-tp-settle-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var (project, release) = await SeedProjectAsync(db, "FMSS");
+
+            var requirementRevisionId = await MaterializeRequirementAsync(db, project.Id, release.Id, now);
+            var item = await AwaitingNewProcedureAsync(db, project.Id, release.Id, requirementRevisionId, now);
+
+            // Before: the engineer has decided a procedure must be written, and none exists.
+            Assert.True(item.AwaitsNewProcedure);
+
+            await MaterializeAsync(db, project.Id, release.Id, "SW-00.20", null, now,
+                Change("SYSTP-000001", 0, TestProcedureChangeKind.Introduce, "Oceanic sequencing",
+                    JsonSerializer.Serialize(new[] { requirementRevisionId })));
+
+            // The direct-authoring endpoint already settles these on approval. A procedure delivered by a test
+            // change request never passes through it, so without settling here the engineer would be asked the
+            // same question twice and the coverage gate would keep holding against work already done.
+            var settled = await db.VerificationImpactItems.SingleAsync(x => x.Id == item.Id);
+            Assert.False(settled.AwaitsNewProcedure);
+            Assert.Equal(VerificationImpactOutcome.ProcedureCoverageConfirmed, settled.Outcome);
+            Assert.Equal((await db.TestProcedureRevisions.SingleAsync()).Id, settled.ResolvedProcedureRevisionId);
+
+            var history = await db.VerificationImpactDecisionHistory
+                .SingleAsync(x => x.VerificationImpactItemId == item.Id);
+            Assert.Contains("SYSTP-000001.00", history.Rationale);
+            Assert.Contains("SYSTCR-", history.Rationale);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task A_procedure_for_a_different_requirement_settles_nothing()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-tp-nosettle-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var (project, release) = await SeedProjectAsync(db, "FMSN");
+
+            var requirementRevisionId = await MaterializeRequirementAsync(db, project.Id, release.Id, now);
+            var item = await AwaitingNewProcedureAsync(db, project.Id, release.Id, requirementRevisionId, now);
+
+            // Settling is as narrow as its counterpart: a procedure that drives some other requirement must not
+            // quietly close a decision it has nothing to do with.
+            await MaterializeAsync(db, project.Id, release.Id, "SW-00.20", null, now,
+                Change("SYSTP-000001", 0, TestProcedureChangeKind.Introduce, "Something else",
+                    JsonSerializer.Serialize(new[] { Guid.NewGuid() })));
+
+            var untouched = await db.VerificationImpactItems.SingleAsync(x => x.Id == item.Id);
+            Assert.True(untouched.AwaitsNewProcedure);
+            Assert.Empty(await db.VerificationImpactDecisionHistory.ToListAsync());
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>An item an engineer has answered with "a procedure must be written", which nothing satisfies yet.</summary>
+    private static async Task<VerificationImpactItem> AwaitingNewProcedureAsync(AeroLinkDbContext db,
+        Guid projectId, Guid releaseId, Guid requirementRevisionId, DateTimeOffset now)
+    {
+        var scr = ApprovedChangeRequest(projectId, releaseId, "SRCR-00777", now);
+        var review = new TestChangeReview(projectId, releaseId, scr.Id,
+            TestChangeReviewDiscipline.System, scr.DisplayNumber, now);
+        var item = VerificationImpactItem.ForIntroducedRequirement(projectId, releaseId, scr.Id,
+            review.Id, scr.RequirementChanges.First().Id, "SYSR-000001.00", "Test", now);
+        item.LinkRequirementRevision(requirementRevisionId, now);
+        item.Resolve("verification.engineer", VerificationImpactOutcome.NewProcedureRequired,
+            "No procedure exercises oceanic sequencing yet.", now);
+        db.AddRange(scr, review, item);
+        await db.SaveChangesAsync();
+        return item;
+    }
+
     private static async Task<(ProjectRecord, SoftwareRelease)> SeedProjectAsync(AeroLinkDbContext db, string prefix)
     {
         var program = new ProgramRecord("FMS", prefix);

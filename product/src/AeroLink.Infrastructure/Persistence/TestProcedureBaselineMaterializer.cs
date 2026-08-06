@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace AeroLink.Infrastructure.Persistence;
 
 public sealed record TestProcedureMaterializationResult(string ProceduresHash, int ActiveProcedureCount,
-    int CreatedRevisionCount, int CoverageLinkCount);
+    int CreatedRevisionCount, int CoverageLinkCount, int SettledDecisionCount);
 
 /// <summary>
 /// Turns the approved procedure decisions selected into a baseline into controlled procedure revisions.
@@ -51,7 +51,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
 
         var created = 0;
         // What each proposal became, so the requirement links it proposed can bind to a revision that exists.
-        var materialized = new List<(TestProcedureChange Change, Guid RevisionId)>();
+        var materialized = new List<(TestChangeReview Tcr, TestProcedureChange Change, Guid RevisionId)>();
         foreach (var pair in tcrs.SelectMany(tcr => tcr.ProcedureChanges.Select(change => new { tcr, change }))
                      .OrderBy(x => x.tcr.DisplayNumber).ThenBy(x => x.change.BaseNumber).ThenBy(x => x.change.Revision))
         {
@@ -68,7 +68,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
                 db.TestProcedureRevisions.Add(revision);
                 current[procedure.Id] = revision;
                 created++;
-                materialized.Add((change, revision.Id));
+                materialized.Add((pair.tcr, change, revision.Id));
                 continue;
             }
 
@@ -80,7 +80,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
             var next = CreateRevision(existing.Id, change, pair.tcr, baseline.Id, now, state);
             db.TestProcedureRevisions.Add(next);
             created++;
-            materialized.Add((change, next.Id));
+            materialized.Add((pair.tcr, change, next.Id));
             if (state == TestProcedureState.Retired)
             {
                 current.Remove(existing.Id);
@@ -91,6 +91,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
         }
 
         var coverageLinks = await LinkDrivingRequirementsAsync(materialized, ct);
+        var settled = await SettleAwaitingDecisionsAsync(baseline.ProjectId, materialized, procedureByBase, actorId, now, ct);
 
         var procedureById = procedureByBase.Values.ToDictionary(x => x.Id);
         foreach (var item in current.OrderBy(x => procedureById[x.Key].BaseNumber))
@@ -101,7 +102,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
         baseline.MarkTestProceduresMaterialized(actorId, hash, current.Count, now);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        return new TestProcedureMaterializationResult(hash, current.Count, created, coverageLinks);
+        return new TestProcedureMaterializationResult(hash, current.Count, created, coverageLinks, settled);
     }
 
     /// <summary>
@@ -139,7 +140,8 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
     /// This is the same point at which a requirement change's proposed upstream allocation becomes a trace link.
     /// </summary>
     private async Task<int> LinkDrivingRequirementsAsync(
-        IReadOnlyList<(TestProcedureChange Change, Guid RevisionId)> materialized, CancellationToken ct)
+        IReadOnlyList<(TestChangeReview Tcr, TestProcedureChange Change, Guid RevisionId)> materialized,
+        CancellationToken ct)
     {
         var wanted = materialized
             .Where(x => x.Change.Kind != TestProcedureChangeKind.Retire)
@@ -173,6 +175,61 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
     /// The revision as approved, credited to the engineer who authored the package rather than to whoever
     /// happened to run the materialization.
     /// </summary>
+    /// <summary>
+    /// Settles the decisions that asked for these procedures, now that the procedures exist.
+    ///
+    /// The direct-authoring endpoint already does this when an engineer approves a procedure by hand. A
+    /// procedure produced by a test change request never passes through that endpoint — it comes into existence
+    /// here, already approved — so without this an item that said "a new procedure is required" would sit
+    /// unsettled forever while the procedure it asked for sat in the build. The engineer would have to answer
+    /// the same question a second time, and the coverage gate would keep holding against work already done.
+    ///
+    /// Deliberately as narrow as its counterpart: only items awaiting a new procedure, and only for the exact
+    /// requirement revisions the new procedure actually covers.
+    /// </summary>
+    private async Task<int> SettleAwaitingDecisionsAsync(Guid projectId,
+        IReadOnlyList<(TestChangeReview Tcr, TestProcedureChange Change, Guid RevisionId)> materialized,
+        IReadOnlyDictionary<string, TestProcedure> procedureByBase, string actorId, DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var byRequirement = materialized
+            .Where(x => x.Change.Kind != TestProcedureChangeKind.Retire)
+            .SelectMany(x => DrivingRequirements(x.Change).Select(requirementRevisionId => new
+            {
+                requirementRevisionId,
+                x.Tcr,
+                x.Change,
+                x.RevisionId
+            }))
+            .ToList();
+        if (byRequirement.Count == 0) return 0;
+
+        var requirementRevisionIds = byRequirement.Select(x => x.requirementRevisionId).Distinct().ToList();
+        var awaiting = await db.VerificationImpactItems
+            .Where(x => x.ProjectId == projectId
+                && x.State == VerificationImpactState.Resolved
+                && x.Outcome == VerificationImpactOutcome.NewProcedureRequired
+                && x.RequirementRevisionId != null
+                && requirementRevisionIds.Contains(x.RequirementRevisionId.Value))
+            .ToListAsync(ct);
+
+        var settled = 0;
+        foreach (var item in awaiting)
+        {
+            var match = byRequirement.FirstOrDefault(x => x.requirementRevisionId == item.RequirementRevisionId!.Value);
+            if (match is null) continue;
+            var procedure = procedureByBase[match.Change.BaseNumber];
+            if (!item.SettleWithApprovedProcedure(procedure.Id, match.RevisionId, now)) continue;
+            db.VerificationImpactDecisionHistory.Add(new VerificationImpactDecisionHistory(
+                item.Id, VerificationImpactHistoryAction.Resolved,
+                VerificationImpactOutcome.ProcedureCoverageConfirmed, procedure.Id, match.RevisionId,
+                $"The requested procedure {match.Change.DisplayNumber} was approved in {match.Tcr.DisplayNumber} and now covers this requirement.",
+                actorId, now));
+            settled++;
+        }
+        return settled;
+    }
+
     private static TestProcedureRevision CreateRevision(Guid procedureId, TestProcedureChange change,
         TestChangeReview tcr, Guid baselineId, DateTimeOffset now, TestProcedureState state) =>
         new(procedureId, change.Revision, change.Objective, change.Preconditions, change.Steps,
