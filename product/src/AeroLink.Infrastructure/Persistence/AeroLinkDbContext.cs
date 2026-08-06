@@ -597,6 +597,16 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Navigation(x => x.ProcedureChanges).UsePropertyAccessMode(PropertyAccessMode.Field);
             b.Property(x => x.SourceChangeRequestNumber).HasMaxLength(40).IsRequired();
             b.Property(x => x.BaseNumber).HasMaxLength(40).IsRequired();
+            // The case the package argues, sized as a change request's own. Empty on packages raised before
+            // the fields existed and on those raised automatically, which nobody has written up yet.
+            b.Property(x => x.Title).HasMaxLength(300).IsRequired();
+            b.Property(x => x.Problem).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.Analysis).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.Solution).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.ProblemRich).IsRequired();
+            b.Property(x => x.AnalysisRich).IsRequired();
+            b.Property(x => x.SolutionRich).IsRequired();
+            b.Navigation(x => x.ReviewCycles).UsePropertyAccessMode(PropertyAccessMode.Field);
             b.Property(x => x.SelectedApproverId).HasMaxLength(100);
             b.Ignore(x => x.DisplayNumber);
             b.HasMany(x => x.AdditionalSources).WithOne().HasForeignKey(x => x.TestChangeReviewId).OnDelete(DeleteBehavior.Cascade);

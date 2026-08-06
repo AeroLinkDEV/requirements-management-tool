@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Content;
 
 namespace AeroLink.Domain.Verification;
 
@@ -85,6 +86,25 @@ public sealed class TestChangeReview
     /// </summary>
     public IReadOnlyCollection<ChangeControl.ReviewCycle> ReviewCycles => _reviewCycles.AsReadOnly();
     public TestChangeReviewState State { get; private set; }
+    /// <summary>
+    /// The case this package argues, in the same three parts a change request argues its own.
+    ///
+    /// A test change request is a controlled proposal, and a proposal that lists procedure edits without saying
+    /// why is a work order rather than a case for review. An approver signing one is answering the same
+    /// question their counterpart answers on the requirements side — is this the right change, for a reason
+    /// that holds — so it is asked in the same words.
+    ///
+    /// Empty on packages raised before the fields existed, and on those raised automatically by an approved
+    /// change request, which have not been written up by anybody yet.
+    /// </summary>
+    public string Title { get; private set; } = "";
+    public string Problem { get; private set; } = "";
+    public string Analysis { get; private set; } = "";
+    public string Solution { get; private set; } = "";
+    public string ProblemRich { get; private set; } = RichContent.Empty;
+    public string AnalysisRich { get; private set; } = RichContent.Empty;
+    public string SolutionRich { get; private set; } = RichContent.Empty;
+
     /// <summary>Whether the assessment has been performed, and what it found.</summary>
     public TestChangeReviewOutcome Outcome { get; private set; }
     /// <summary>Why no test-procedure work is required. Recorded only with that conclusion.</summary>
@@ -169,6 +189,30 @@ public sealed class TestChangeReview
         _procedureChanges.Add(change);
         Touch(now);
         return change;
+    }
+
+    /// <summary>
+    /// Writes the case this package argues. The counterpart of a change request's own draft edit, and open for
+    /// the same window: while the package is still being worked, and not once an approver is holding it.
+    /// </summary>
+    public void WriteCase(string actorId, string title, string problem, string analysis, string solution,
+        DateTimeOffset now, string? problemRich = null, string? analysisRich = null, string? solutionRich = null)
+    {
+        EnsureOpen();
+        Required(actorId, "authoring verification engineer");
+        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A test change request title is required.");
+        Title = title.Trim();
+        (Problem, ProblemRich) = Resolve(problem, problemRich);
+        (Analysis, AnalysisRich) = Resolve(analysis, analysisRich);
+        (Solution, SolutionRich) = Resolve(solution, solutionRich);
+        Touch(now);
+
+        static (string Plain, string Rich) Resolve(string plain, string? rich)
+        {
+            if (string.IsNullOrWhiteSpace(rich)) return (plain?.Trim() ?? "", RichContent.FromPlainText(plain ?? ""));
+            var canonical = RichContent.Canonicalize(rich);
+            return (RichContent.ToPlainText(canonical), canonical);
+        }
     }
 
     public void RemoveProcedureChange(Guid changeId, DateTimeOffset now)
