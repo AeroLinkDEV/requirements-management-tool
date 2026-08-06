@@ -39,14 +39,18 @@ public sealed class TestProcedureRevision
     private TestProcedureRevision() { }
     public TestProcedureRevision(Guid procedureId, int revision, string objective, string preconditions,
         string steps, string expectedResult, TestProcedureState state, string authorId, DateTimeOffset now,
-        string? selectedApproverId = null)
+        string? selectedApproverId = null, Guid? sourceTestChangeRequestId = null, Guid? effectiveBaselineId = null)
     {
         if (revision < 0) throw new DomainException("Test procedure revision cannot be negative.");
-        if (string.IsNullOrWhiteSpace(objective) || string.IsNullOrWhiteSpace(steps) || string.IsNullOrWhiteSpace(expectedResult))
+        // A retired procedure is being removed, not restated — the same exemption a retired requirement revision
+        // gets, so a retirement does not have to repeat the body of the thing it is withdrawing.
+        if (state != TestProcedureState.Retired
+            && (string.IsNullOrWhiteSpace(objective) || string.IsNullOrWhiteSpace(steps) || string.IsNullOrWhiteSpace(expectedResult)))
             throw new DomainException("Objective, steps, and expected result are required.");
         Id = Guid.NewGuid(); ProcedureId = procedureId; Revision = revision; Objective = objective.Trim();
         Preconditions = preconditions.Trim(); Steps = steps.Trim(); ExpectedResult = expectedResult.Trim();
         State = state; AuthorId = authorId.Trim(); SelectedApproverId = selectedApproverId?.Trim(); CreatedAt = now;
+        SourceTestChangeRequestId = sourceTestChangeRequestId; EffectiveBaselineId = effectiveBaselineId;
     }
     public Guid Id { get; private set; }
     public Guid ProcedureId { get; private set; }
@@ -58,6 +62,15 @@ public sealed class TestProcedureRevision
     public TestProcedureState State { get; private set; }
     public string AuthorId { get; private set; } = string.Empty;
     public string? SelectedApproverId { get; private set; }
+    /// <summary>
+    /// The test change request that produced this revision, as a requirement revision names its change request.
+    ///
+    /// Null for a revision authored before test-procedure change was controlled. Those revisions exist and are
+    /// real, so the honest record is "nobody knows which package approved this" rather than an invented one.
+    /// </summary>
+    public Guid? SourceTestChangeRequestId { get; private set; }
+    /// <summary>The baseline this revision first became effective in. Null for the same legacy reason.</summary>
+    public Guid? EffectiveBaselineId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     public void UpdateDraft(string objective, string preconditions, string steps, string expectedResult, string actor)
@@ -79,6 +92,24 @@ public sealed class TestProcedureRevision
             throw new DomainException("Only the explicitly selected procedure approver can approve this revision.");
         State = TestProcedureState.Approved;
     }
+}
+
+/// <summary>
+/// Exact active procedure-revision membership of one materialized baseline.
+///
+/// The test-procedure twin of <c>BaselineRequirementSelection</c>: which revision of which procedure a build
+/// carries. Without it a build could say precisely which requirements it holds and only approximately which
+/// procedures verify them.
+/// </summary>
+public sealed class BaselineTestProcedureSelection
+{
+    private BaselineTestProcedureSelection() { }
+    public BaselineTestProcedureSelection(Guid baselineId, Guid procedureId, Guid revisionId)
+    { Id = Guid.NewGuid(); BaselineId = baselineId; ProcedureId = procedureId; RevisionId = revisionId; }
+    public Guid Id { get; private set; }
+    public Guid BaselineId { get; private set; }
+    public Guid ProcedureId { get; private set; }
+    public Guid RevisionId { get; private set; }
 }
 
 /// <summary>

@@ -37,12 +37,14 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<CandidateBaseline> CandidateBaselines => Set<CandidateBaseline>();
     public DbSet<BaselineChangeRequestSelection> BaselineSelections => Set<BaselineChangeRequestSelection>();
+    public DbSet<BaselineTestChangeRequestSelection> BaselineTestChangeSelections => Set<BaselineTestChangeRequestSelection>();
     public DbSet<BaselineEvent> BaselineEvents => Set<BaselineEvent>();
     public DbSet<RequirementArtifact> Requirements => Set<RequirementArtifact>();
     public DbSet<RequirementRevision> RequirementRevisions => Set<RequirementRevision>();
     public DbSet<BaselineRequirementSelection> BaselineRequirements => Set<BaselineRequirementSelection>();
     public DbSet<TestProcedure> TestProcedures => Set<TestProcedure>();
     public DbSet<TestProcedureRevision> TestProcedureRevisions => Set<TestProcedureRevision>();
+    public DbSet<BaselineTestProcedureSelection> BaselineTestProcedures => Set<BaselineTestProcedureSelection>();
     public DbSet<TestRequirementCoverage> TestCoverage => Set<TestRequirementCoverage>();
     public DbSet<TestExecution> TestExecutions => Set<TestExecution>();
     public DbSet<TestChangeReview> TestChangeReviews => Set<TestChangeReview>();
@@ -409,11 +411,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.ContentHash).HasMaxLength(64);
             b.Property(x => x.RequirementsHash).HasMaxLength(64);
+            b.Property(x => x.TestProceduresHash).HasMaxLength(64);
             b.Property(x => x.Version).IsConcurrencyToken();
             b.Ignore(x => x.DisplayNumber);
             b.HasIndex(x => new { x.ProjectId, x.BaseNumber, x.Revision }).IsUnique();
             b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.State });
             b.HasMany(x => x.Selections).WithOne().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.TestChangeSelections).WithOne().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Events).WithOne().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<BaselineChangeRequestSelection>(b =>
@@ -421,6 +425,12 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("baseline_change_request_selections"); b.HasKey(x => x.Id);
             b.Property(x => x.ChangeRequestDisplayNumber).HasMaxLength(40).IsRequired();
             b.HasIndex(x => new { x.BaselineId, x.ChangeRequestId }).IsUnique();
+        });
+        modelBuilder.Entity<BaselineTestChangeRequestSelection>(b =>
+        {
+            b.ToTable("baseline_test_change_request_selections"); b.HasKey(x => x.Id);
+            b.Property(x => x.TestChangeRequestDisplayNumber).HasMaxLength(40).IsRequired();
+            b.HasIndex(x => new { x.BaselineId, x.TestChangeRequestId }).IsUnique();
         });
         modelBuilder.Entity<BaselineEvent>(b =>
         {
@@ -475,7 +485,14 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Preconditions).HasMaxLength(8000); b.Property(x => x.Steps).HasMaxLength(16000).IsRequired();
             b.Property(x => x.ExpectedResult).HasMaxLength(8000).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired(); b.Property(x => x.SelectedApproverId).HasMaxLength(100); b.HasIndex(x => new { x.ProcedureId, x.Revision }).IsUnique();
+            b.HasIndex(x => x.SourceTestChangeRequestId);
             b.HasOne<TestProcedure>().WithMany().HasForeignKey(x => x.ProcedureId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<BaselineTestProcedureSelection>(b =>
+        {
+            b.ToTable("baseline_test_procedures"); b.HasKey(x => x.Id);
+            b.HasIndex(x => new { x.BaselineId, x.ProcedureId }).IsUnique();
+            b.HasIndex(x => x.RevisionId);
         });
         modelBuilder.Entity<TestRequirementCoverage>(b =>
         {
