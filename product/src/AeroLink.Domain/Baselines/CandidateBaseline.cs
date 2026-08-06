@@ -139,6 +139,10 @@ public sealed class CandidateBaseline
             throw new DomainException("Only an approved test change request can be selected into a baseline.");
         if (tcr.Outcome != TestChangeReviewOutcome.ChangeRequired)
             throw new DomainException("This assessment concluded that no test work was required, so it has no procedure decisions to carry.");
+        // Packages approved before procedure decisions existed are legitimate history and stay readable, but a
+        // build cannot carry work that was never stated. Revising one is the route to adding it.
+        if (tcr.ProcedureChanges.Count == 0)
+            throw new DomainException($"{tcr.DisplayNumber} carries no procedure decisions, so there is nothing for this build to materialize. Revise it to add the procedure work it needs.");
         if (tcr.ProjectId != ProjectId || tcr.ReleaseId != ReleaseId)
             throw new DomainException("The test change request does not belong to this project and target release.");
         if (_testChangeSelections.Any(x => x.TestChangeRequestId == tcr.Id))

@@ -18,6 +18,22 @@ public sealed class TestChangeReviewTests
         return review;
     }
 
+    /// <summary>
+    /// A package with procedure work in it, which is the only kind that may be sent for review.
+    ///
+    /// A package concluding that work is required and then naming none asks an approver to approve nothing,
+    /// so most of these tests need one that says what it does before they can reach submission at all.
+    /// </summary>
+    private static TestChangeReview Submittable(TestChangeReviewDiscipline discipline = TestChangeReviewDiscipline.System)
+    {
+        var review = Create(discipline);
+        review.AddProcedureChange("verification.engineer",
+            ProcedureDraft(discipline == TestChangeReviewDiscipline.System ? "SYSTP-000500" : "HLRTP-000500",
+                level: discipline == TestChangeReviewDiscipline.System ? TestProcedureLevel.System : TestProcedureLevel.HighLevel),
+            Now);
+        return review;
+    }
+
     /// <summary>As an approved change leaves it: unassessed, unnumbered, and not yet anything controlled.</summary>
     private static TestChangeReview Raised(TestChangeReviewDiscipline discipline = TestChangeReviewDiscipline.System) =>
         new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), discipline, "SRCR-00039.00", Now);
@@ -151,7 +167,7 @@ public sealed class TestChangeReviewTests
     [Fact]
     public void Only_an_approved_test_change_request_revises_and_never_into_a_released_build()
     {
-        var open = Create();
+        var open = Submittable();
         open.AssignControlledNumber("SYSTCR-000043", Now.AddMinutes(1));
         Assert.Throws<DomainException>(() =>
             open.StartNextRevision("verification.engineer", Now.AddMinutes(2), targetReleaseIsReleased: false));
@@ -167,7 +183,7 @@ public sealed class TestChangeReviewTests
     [Fact]
     public void Revising_a_package_that_folded_in_other_changes_is_refused_rather_than_guessed_at()
     {
-        var review = Create();
+        var review = Submittable();
         review.AssignControlledNumber("SYSTCR-000044", Now.AddMinutes(1));
         review.IncludeChangeRequest("verification.engineer", Guid.NewGuid(), "SRCR-00040.00", Now.AddMinutes(2));
         review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
@@ -236,7 +252,7 @@ public sealed class TestChangeReviewTests
     [Fact]
     public void Review_cannot_be_submitted_until_every_procedure_decision_is_complete()
     {
-        var review = Create();
+        var review = Submittable();
 
         Assert.Throws<DomainException>(() => review.Submit("test.engineer", "test.approver", false, Now.AddMinutes(1)));
         review.Submit("test.engineer", "test.approver", true, Now.AddMinutes(2));
@@ -248,7 +264,7 @@ public sealed class TestChangeReviewTests
     [Fact]
     public void Independent_approval_records_rationale_and_closes_the_review()
     {
-        var review = Create();
+        var review = Submittable();
         review.Submit("test.engineer", "test.approver", true, Now.AddMinutes(1));
         review.Approve("test.approver", "Procedure decisions are complete and technically sound.", Now.AddMinutes(2));
 
@@ -261,7 +277,7 @@ public sealed class TestChangeReviewTests
     [Fact]
     public void The_engineer_who_submitted_a_review_cannot_approve_it()
     {
-        var review = Create();
+        var review = Submittable();
         review.Submit("test.lead", "test.approver", true, Now.AddMinutes(1));
 
         // Casing differs because an actor name reaching the domain is whatever the caller passed; the rule is
@@ -277,7 +293,7 @@ public sealed class TestChangeReviewTests
     [Fact]
     public void Reviewer_can_return_a_submitted_review_to_work()
     {
-        var review = Create();
+        var review = Submittable();
         review.Submit("test.engineer", "test.approver", true, Now.AddMinutes(1));
 
         review.ReturnToWork("test.approver", "Clarify the modified procedure.", Now.AddMinutes(2));

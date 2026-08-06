@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -20,7 +21,8 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class TestProcedureAuthoringApiTests
 {
-    private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid TcrId, Guid ReleasedTcrId);
+    private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid TcrId, Guid ReleasedTcrId,
+        Guid OtherProjectRequirementRevisionId);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -77,7 +79,18 @@ public sealed class TestProcedureAuthoringApiTests
 
         var tcrId = await db.TestChangeReviews.Where(x => x.ChangeRequestId == open.Id).Select(x => x.Id).SingleAsync();
         var releasedTcrId = await db.TestChangeReviews.Where(x => x.ChangeRequestId == shipped.Id).Select(x => x.Id).SingleAsync();
-        return new(project.Id, inWork.Id, tcrId, releasedTcrId);
+        // A requirement in a different project, so a cross-project link has something real to be refused for.
+        var elsewhereProgram = new ProgramRecord("Other Program", "OTH");
+        var elsewhereProject = new ProjectRecord(elsewhereProgram.Id, "Software", "Other Software");
+        var elsewhereRelease = new SoftwareRelease(elsewhereProject.Id, "1.0", false);
+        var elsewhereBaseline = new CandidateBaseline("SW-00.10", 0, elsewhereProject.Id, elsewhereRelease.Id, null, "Other", "cm", now);
+        var elsewhereArtifact = new RequirementArtifact(elsewhereProject.Id, "SYSR-00000940", RequirementLevel.System, now);
+        var elsewhereRevision = new RequirementRevision(elsewhereArtifact.Id, 0, "Another program shall do its own thing.",
+            "Elsewhere.", "Test", RequirementRevisionState.Active, shipped.Id, elsewhereBaseline.Id, now);
+        db.AddRange(elsewhereProgram, elsewhereProject, elsewhereRelease, elsewhereBaseline, elsewhereArtifact, elsewhereRevision);
+        await db.SaveChangesAsync();
+
+        return new(project.Id, inWork.Id, tcrId, releasedTcrId, elsewhereRevision.Id);
     }
 
     private static async Task LoginAsync(HttpClient client, string user)
@@ -192,6 +205,72 @@ public sealed class TestProcedureAuthoringApiTests
         var after = await client.GetFromJsonAsync<JsonElement>(
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes");
         Assert.Empty(after.GetProperty("procedureChanges").EnumerateArray());
+    }
+
+    /// <summary>
+    /// The four things the server now proves about what a decision may name, and the one it proves about
+    /// sending a package for review. All were previously accepted and failed later, or not at all.
+    /// </summary>
+    [Fact]
+    public async Task A_decision_can_only_name_this_project_and_this_level()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "procedure.engineer");
+        await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
+
+        async Task<(HttpStatusCode Status, string Body)> Propose(object body)
+        {
+            using var response = await client.PostAsJsonAsync(
+                $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes", body);
+            return (response.StatusCode, await response.Content.ReadAsStringAsync());
+        }
+
+        // A modification must name a procedure that exists and belongs here.
+        var unknown = await Propose(new { kind = "Modify", baseNumber = "SYSTP-999999", revision = 1,
+            title = "T", objective = "o", steps = "s", expectedResult = "e", rationale = "r" });
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.Status);
+        Assert.Contains("not a controlled test procedure", unknown.Body);
+
+        // A driving requirement must be this project's. A cross-project identifier would otherwise become
+        // controlled coverage at materialization and claim verification belonging to another program.
+        var foreign = await Propose(new { kind = "Introduce", revision = 0, title = "T", objective = "o",
+            steps = "s", expectedResult = "e", rationale = "r",
+            drivingRequirementRevisionIds = new[] { fixture.OtherProjectRequirementRevisionId } });
+        Assert.Equal(HttpStatusCode.BadRequest, foreign.Status);
+        Assert.Contains("another project", foreign.Body);
+
+        // And one that does not exist at all is refused rather than silently dropped at materialization.
+        var missing = await Propose(new { kind = "Introduce", revision = 0, title = "T", objective = "o",
+            steps = "s", expectedResult = "e", rationale = "r",
+            drivingRequirementRevisionIds = new[] { Guid.NewGuid() } });
+        Assert.Equal(HttpStatusCode.BadRequest, missing.Status);
+        Assert.Contains("does not exist", missing.Body);
+    }
+
+    [Fact]
+    public async Task A_package_naming_no_procedure_work_cannot_be_sent_for_review()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "procedure.engineer");
+        await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            foreach (var item in await db.VerificationImpactItems.Where(x => x.TestChangeReviewId == fixture.TcrId).ToListAsync())
+                item.Resolve("procedure.engineer", VerificationImpactOutcome.NoTestRequired, "Covered by analysis.", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        // It concluded work was required and named none. The workspace says as much; this is that enforced.
+        using var refused = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.TcrId}/submit",
+            new { approverId = "procedure.approver" });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("names none", await refused.Content.ReadAsStringAsync());
     }
 
     [Fact]

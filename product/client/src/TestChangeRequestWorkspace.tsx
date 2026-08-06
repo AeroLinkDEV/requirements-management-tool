@@ -8,7 +8,12 @@ import './DownstreamAssessmentQueue.css'
 
 type Kind='Introduce'|'Modify'|'Retire'
 type ProcedureChange={id:string;displayNumber:string;baseNumber:string;revision:number;kind:Kind;level:string;title:string;objective:string;preconditions:string;steps:string;expectedResult:string;rationale:string;drivingRequirementRevisionIds:string[]}
-type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;procedureChanges:ProcedureChange[]}
+/** A requirement this package's changes touched, which a procedure here may be written against. */
+type RequirementChoice={revisionId:string;displayNumber:string;statement:string}
+/** A controlled procedure a Modify or Retire may target, with the revision it actually sits at. */
+type ProcedureTarget={baseNumber:string;title:string;currentRevision:number}
+type Capabilities={canProposeProcedureChange:boolean;canWithdrawProcedureChange:boolean;canRevise:boolean}
+type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}
 
 const levelName=(discipline:string)=>discipline==='System'?'SYS':discipline==='HighLevelSoftware'?'HLR':'LLR'
 const procedureWord=(level:string)=>level==='System'?'SYSTP':level==='HighLevel'?'HLRTP':'LLRTP'
@@ -27,7 +32,7 @@ const packageStatus=(item:Package)=>{
 }
 const kindWords=(kind:Kind)=>kind==='Introduce'?'New procedure':kind==='Modify'?'Modified procedure':'Retired procedure'
 
-const emptyDraft={kind:'Introduce' as Kind,baseNumber:'',revision:0,title:'',objective:'',preconditions:'',steps:'',expectedResult:'',rationale:''}
+const emptyDraft={kind:'Introduce' as Kind,baseNumber:'',revision:0,title:'',objective:'',preconditions:'',steps:'',expectedResult:'',rationale:'',driving:[] as string[]}
 
 /**
  * The room where test procedures are actually created, modified and retired.
@@ -59,7 +64,9 @@ export default function TestChangeRequestWorkspace({api,reviewId,canAuthor,onClo
     const body={...draft,
       // Introducing allocates the number on the server, so the client does not send one and cannot pick one.
       baseNumber:draft.kind==='Introduce'?undefined:draft.baseNumber.trim(),
-      drivingRequirementRevisionIds:[]}
+      // The requirements this procedure is written against. Without them the procedure revision cannot be
+      // bound to what caused it, and the decision that asked for it never settles.
+      drivingRequirementRevisionIds:draft.driving}
     if(await act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/procedure-changes`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}))){
       setProposing(false);setDraft(emptyDraft)
     }
@@ -67,8 +74,10 @@ export default function TestChangeRequestWorkspace({api,reviewId,canAuthor,onClo
   const withdraw=(changeId:string)=>void act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/procedure-changes/${changeId}`,{method:'DELETE'}))
   const revise=()=>void act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}))
 
+  // Answered by the server, not inferred from a broad role here. The workspace was offering authoring to
+  // anyone with test authority while the endpoints refused anyone but the engineer holding the package.
   const open=item?.state==='Open'
-  const mayEdit=canAuthor&&open&&item?.outcome==='ChangeRequired'
+  const mayEdit=canAuthor&&(item?.capabilities?.canProposeProcedureChange??false)
   const retiring=draft.kind==='Retire'
 
   return <div className="downstreamDrawerBackdrop" role="presentation">
@@ -102,7 +111,7 @@ export default function TestChangeRequestWorkspace({api,reviewId,canAuthor,onClo
             {mayEdit&&<button type="button" disabled={busy} onClick={()=>{setDraft(emptyDraft);setProposing(true)}}>Propose a procedure change</button>}
             {/* Revising is the test-side twin of revising a change request: reopening approved work to correct
                 it, which carries the existing decisions into the next revision. */}
-            {canAuthor&&item.state==='Approved'&&<button type="button" className="quiet reopenAssessment" disabled={busy} onClick={revise}>Revise this test change request</button>}
+            {canAuthor&&(item.capabilities?.canRevise??false)&&<button type="button" className="quiet reopenAssessment" disabled={busy} onClick={revise}>Revise this test change request</button>}
             {!canAuthor&&<p className="drawerEmpty">{item.assignedEngineerId
               ? <><PersonName userName={item.assignedEngineerId}/> holds this test change request and records its procedure decisions.</>
               : 'Test engineering authority is required to propose procedure work.'}</p>}
@@ -141,12 +150,23 @@ export default function TestChangeRequestWorkspace({api,reviewId,canAuthor,onClo
             procedure it acts on, because allocating a fresh number for a modification would quietly make it a
             different procedure. */}
         {draft.kind!=='Introduce'&&<>
-          <label>Procedure number
-            <input value={draft.baseNumber} onChange={event=>setDraft(current=>({...current,baseNumber:event.target.value}))} placeholder={`${procedureWord(item?.procedureLevel??'System')}-000001`}/>
+          {/* Chosen from the controlled library, not typed. A number entered by hand could be a typo, another
+              project's, or the wrong level, and it survived approval to fail at materialization — which turns
+              an authoring mistake into a release-path problem. Selecting also fixes the revision, so the
+              engineer is not asked to know what the procedure currently sits at. */}
+          <label>Procedure
+            <select value={draft.baseNumber} onChange={event=>{
+              const target=(item?.procedureTargets??[]).find(x=>x.baseNumber===event.target.value)
+              setDraft(current=>({...current,baseNumber:event.target.value,revision:(target?.currentRevision??-1)+1}))
+            }}>
+              <option value="">Choose the procedure this acts on…</option>
+              {(item?.procedureTargets??[]).map(target=>
+                <option value={target.baseNumber} key={target.baseNumber}>
+                  {target.baseNumber}.{String(Math.max(target.currentRevision,0)).padStart(2,'0')} · {target.title}
+                </option>)}
+            </select>
           </label>
-          <label>New revision
-            <input type="number" min={1} value={draft.revision} onChange={event=>setDraft(current=>({...current,revision:Number(event.target.value)}))}/>
-          </label>
+          {draft.baseNumber&&<p className="drawerEmpty">This becomes revision {String(draft.revision).padStart(2,'0')}.</p>}
         </>}
         {!retiring&&<>
           <label>Title<input value={draft.title} onChange={event=>setDraft(current=>({...current,title:event.target.value}))}/></label>
@@ -155,6 +175,23 @@ export default function TestChangeRequestWorkspace({api,reviewId,canAuthor,onClo
           <label>Steps<textarea value={draft.steps} onChange={event=>setDraft(current=>({...current,steps:event.target.value}))}/></label>
           <label>Expected result<textarea value={draft.expectedResult} onChange={event=>setDraft(current=>({...current,expectedResult:event.target.value}))}/></label>
         </>}
+        {/* What this procedure is written against. Only the requirements this package's own changes touched
+            are offered — a procedure verifies what its change request altered, not anything in the project —
+            and the link is what lets the decision that asked for the procedure settle when it arrives. */}
+        {!retiring&&<fieldset className="drivingRequirements">
+          <legend>Requirements this procedure verifies</legend>
+          {(item?.drivingRequirementChoices??[]).length
+            ?(item?.drivingRequirementChoices??[]).map(choice=>
+              <label key={choice.revisionId} className="drivingChoice">
+                <input type="checkbox" checked={draft.driving.includes(choice.revisionId)}
+                  onChange={event=>setDraft(current=>({...current,
+                    driving:event.target.checked
+                      ?[...current.driving,choice.revisionId]
+                      :current.driving.filter(id=>id!==choice.revisionId)}))}/>
+                <span><b>{choice.displayNumber}</b> {choice.statement}</span>
+              </label>)
+            :<p className="drawerEmpty">This build has not materialized its requirements yet, so there is no exact revision to write against. The procedure can still be proposed and linked once it has.</p>}
+        </fieldset>}
         <label>Why this procedure work is required<textarea value={draft.rationale} onChange={event=>setDraft(current=>({...current,rationale:event.target.value}))}/></label>
         <div className="downstreamDialogActions">
           <button type="button" className="quiet" disabled={busy} onClick={()=>{setProposing(false);setError('')}}>Cancel</button>

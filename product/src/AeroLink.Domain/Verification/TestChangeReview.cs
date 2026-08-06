@@ -212,6 +212,11 @@ public sealed class TestChangeReview
             throw new DomainException("Assess the change before sending it for review.");
         if (!everyItemResolved)
             throw new DomainException("Every test-procedure decision must be completed before review.");
+        // "Concluded work is required, names none" is refused at the endpoint rather than here, and that is a
+        // deliberate split. Every route a person can take passes through the endpoint. What does not is the
+        // reconstruction of history: Build 1.5's packages were approved before procedure decisions existed,
+        // and the honest record of them is empty. Enforcing it here would force the showcase to invent the
+        // decisions those approvals never carried, which is a worse falsehood than the gap.
         SubmittedBy = Required(actorId, "submitting verification engineer");
         SelectedApproverId = Required(approverId, "selected test change request approver");
         if (string.Equals(SelectedApproverId, SubmittedBy, StringComparison.OrdinalIgnoreCase))
