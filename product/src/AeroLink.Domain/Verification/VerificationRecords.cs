@@ -109,16 +109,10 @@ public sealed class TestProcedureRevision
         Objective = objective.Trim(); Preconditions = preconditions.Trim(); Steps = steps.Trim(); ExpectedResult = expectedResult.Trim();
     }
 
-    public void Approve(string approverId)
-    {
-        if (State != TestProcedureState.Draft) throw new DomainException("Only a Draft test procedure revision can be approved.");
-        if (string.Equals(AuthorId, approverId?.Trim(), StringComparison.OrdinalIgnoreCase))
-            throw new DomainException("A test procedure author cannot approve their own revision.");
-        if (!string.IsNullOrWhiteSpace(SelectedApproverId)
-            && !string.Equals(SelectedApproverId, approverId?.Trim(), StringComparison.OrdinalIgnoreCase))
-            throw new DomainException("Only the explicitly selected procedure approver can approve this revision.");
-        State = TestProcedureState.Approved;
-    }
+    // No Approve here. A procedure revision is approved by the test change request that carries it, and
+    // materialisation writes it as Approved on that authority — signing the revision separately would be a
+    // second approval of the same work. The method that did it had one caller, a route now deleted, and a
+    // capability nothing calls is not a capability.
 }
 
 /// <summary>

@@ -256,12 +256,15 @@ public sealed class VerificationImpactReadinessGateTests
             Assert.Equal(0, inFlight.Completed);
             Assert.False(inFlight.Complete);
 
-            // Approving the new revision settles it again.
+            // The revision becoming Approved settles it again. In the product that happens at materialisation,
+            // on the authority of the test change request that carried the change — there is no separate
+            // signature on the revision — so the fixture states the outcome rather than performing a step
+            // that no longer exists. What this test is about is the gate, not how the state was reached.
             await using (var approve = new AeroLinkDbContext(seed.Options))
             {
-                var draft = await approve.TestProcedureRevisions.SingleAsync(x => x.ProcedureId == procedureId && x.Revision == 1);
-                draft.Approve("test.lead");
-                await approve.SaveChangesAsync();
+                await approve.TestProcedureRevisions
+                    .Where(x => x.ProcedureId == procedureId && x.Revision == 1)
+                    .ExecuteUpdateAsync(update => update.SetProperty(x => x.State, TestProcedureState.Approved));
             }
 
             var reapproved = await CoverageGateAsync(seed.Options, seed.CampaignId);

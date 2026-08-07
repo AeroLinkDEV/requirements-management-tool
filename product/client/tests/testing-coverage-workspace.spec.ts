@@ -229,53 +229,6 @@ test('released Build 1.5 procedures remain readable without create or edit actio
 })
 
 /**
- * The approval, given by somebody other than the author.
- *
- * A Draft procedure cannot be run, and the signature that lifts it is what makes the coverage it claims worth
- * anything. It is recorded here rather than in a separate workspace, because the person who sees the gap is
- * the person who closes it.
- */
-test('a Draft procedure is approved here by a second person, and only then counts as coverage', async ({ page, browser }) => {
-  test.setTimeout(180_000)
-  await login(page, 'admin', { openProject: false })
-  await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
-  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
-
-  // Found, not created. Nothing writes a procedure outside a package any more, so the Draft this approval
-  // acts on is one the build already carries — which is closer to the real case anyway: the person who sees
-  // an unapproved procedure in the library is rarely the person who proposed it.
-  const draftRow = page.locator(`.procedureLibrary .coverageRow`)
-    .filter({ has: page.getByRole(`button`, { name: `Review & approve` }) }).first()
-  await expect(draftRow).toBeVisible({ timeout: 30_000 })
-  const title = (await draftRow.locator(`b`).first().textContent())!.trim()
-
-  // The author cannot sign for their own work, so the approval is taken by somebody else — in their own
-  // browser context rather than by signing out of this one. Signing out and straight back in raced the
-  // session cookie on CI: the sign-in page had not replaced the workspace by the time the next journey step
-  // looked for the username field, and the journey sat there until it timed out.
-  const second = await browser.newContext()
-  const approver = await second.newPage()
-  await login(approver, 'systems.lead', { openProject: false })
-  await selectProgram(approver, 'Flight Management System Live Program')
-  await openNavigationGroup(approver, 'ASSURANCE')
-  await approver.getByRole('link', { name: 'System Testing Coverage' }).click()
-  await approver.getByLabel('Find a procedure').fill(title)
-  const row = approver.locator('.procedureLibrary .coverageRow').filter({ hasText: title }).first()
-  await expect(row).toBeVisible({ timeout: 30_000 })
-  await row.getByRole('button', { name: 'Review & approve' }).click()
-
-  const signature = approver.locator('.signatureModal')
-  await signature.getByLabel('Re-enter your password').fill('AeroLink!2026')
-  await signature.getByRole('button', { name: 'Sign & approve' }).click()
-  await expect(signature).toHaveCount(0, { timeout: 30_000 })
-  await expect(row).toContainText('Approved')
-  await expect(row.getByRole('button', { name: 'Review & approve' })).toHaveCount(0)
-  await second.close()
-})
-
-/**
  * The whole inventory, on request.
  *
  * The page opens on what is not covered, because that is the work. The full list is still needed to answer

@@ -44,9 +44,9 @@ public sealed class PreReleaseEvidenceVisibilityTests
 
         var procedure = new TestProcedure(project.Id, "SYSTP-000900", "Oceanic sequencing", "evidence.engineer", now,
             TestProcedureLevel.System);
+        // Approved as materialisation writes it, on the authority of the package that carried the change.
         var revision = new TestProcedureRevision(procedure.Id, 0, "Objective", "Preconditions",
-            "Steps", "Expected", TestProcedureState.Draft, "evidence.engineer", now);
-        revision.Approve("evidence.lead");
+            "Steps", "Expected", TestProcedureState.Approved, "evidence.engineer", now);
         db.AddRange(procedure, revision);
 
         foreach (var (user, role) in new[]

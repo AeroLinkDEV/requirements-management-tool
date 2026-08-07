@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PersonName } from './People'
-import { SignatureDialog } from './IdentityCenter'
 import PersonPicker from './PersonPicker'
 import ProblemReportPicker, { type ProblemReportOption } from './ProblemReportPicker'
 import ControlledProcedureEditor from './ControlledProcedureEditor'
@@ -38,7 +37,7 @@ type TestChangeRequest = {
   problemReports?: ProblemReportOption[]
   capabilities: { canAssign: boolean; canDecide: boolean; canSubmit: boolean; canApprove: boolean; canReturn: boolean }
 }
-type Procedure = { id: string; revisionId: string; displayNumber: string; title: string; state: string; requirementCount: number; ownerId: string; selectedApproverId?: string }
+type Procedure = { id: string; revisionId: string; displayNumber: string; title: string; state: string; requirementCount: number; ownerId: string }
 type ImpactItem = {
   id: string
   testChangeReviewId: string
@@ -157,7 +156,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   // somebody a control that will refuse them — an approval they cannot give is worse than no button at all.
   const roles = user.programs.find(program => program.programId === programId)?.roles ?? []
   const canTest = !readOnly && (user.isAdministrator || roles.includes('TestEngineer'))
-  const canApprove = !readOnly && (user.isAdministrator || roles.includes('Approver'))
+  // No procedure-level approval authority is read here. Approving a procedure is approving the test change
+  // request that carries it, and that authority arrives per request in its own capabilities.
   const [coverage, setCoverage] = useState<Coverage>()
   const [requests, setRequests] = useState<TestChangeRequest[]>([])
   const [procedures, setProcedures] = useState<Procedure[]>([])
@@ -185,7 +185,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [createError, setCreateError] = useState('')
   const [procedureView, setProcedureView] = useState<'record' | 'history'>('record')
   const [editing, setEditing] = useState<Procedure>()
-  const [approving, setApproving] = useState<Procedure>()
   const [reviewDecision, setReviewDecision] = useState<{ request: TestChangeRequest; action: 'approve' | 'return' }>()
   const [linkingProblemReports, setLinkingProblemReports] = useState<TestChangeRequest>()
   const [problemReportIds, setProblemReportIds] = useState<string[]>([])
@@ -340,9 +339,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const act = async (work: () => Promise<void>, failure: string) => {
     if (busy) return
     setBusy(true); setError(''); setSaved('')
-    // Both lists are re-read, not just coverage. Creating and approving a procedure change the inventory,
-    // and refreshing only the coverage side left the row that was just approved still reading "Awaiting
-    // approval" until the reader happened to type in the search box.
+    // Both lists are re-read, not just coverage. Proposing procedure work changes the package and the
+    // inventory it will produce, and refreshing only the coverage side left the other list stale until the
+    // reader happened to type in the search box.
     try { await work(); await load(); setRevision(current => current + 1) }
     catch (problem) { recordClientOperationFailure('verification.coverage.change', problem); setError(operationError(problem, failure)) }
     finally { setBusy(false) }
@@ -452,17 +451,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       setCreateError(operationError(problem, 'The procedure change could not be proposed.'))
     } finally { setBusy(false) }
   }
-
-  // Approval is a signature, and it is somebody else's. A procedure approved by its own author is a
-  // formality rather than an independent judgement, which the server refuses and this does not offer.
-  const approveProcedure = (procedure: Procedure, password: string, meaning: string) => act(async () => {
-    await apiRequest(`${api}/api/test-procedures/${procedure.revisionId}/approve`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, meaning }),
-    })
-    setApproving(undefined)
-    setSaved(`${procedure.displayNumber} approved and available to run.`)
-  }, 'The approval could not be recorded.')
 
   const openProcedure = useCallback(async (procedureId: string, procedureRevisionId?: string,
     view: 'record' | 'history' = 'record', updateAddress = true) => {
@@ -664,10 +652,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     {/* A decision can be wrong, and a decision nobody can revisit is a decision people work
                         around. Reopening keeps what was decided in immutable history, returns the item to the
                         release gate, and puts any coverage it claimed back to suspect. */}
-                    {/* Authoring the procedure the decision asked for, from the decision itself.
-                        Pressing "New test procedure" in the library writes a procedure with no memory of why
-                        it exists; starting here keeps the chain — change request, requirement, decision,
-                        procedure — and the decision settles itself when that procedure is approved. */}
+                    {/* Authoring the procedure the decision asked for, from the decision itself. This is the
+                        only way in: the library used to offer a control that wrote a procedure with no memory
+                        of why it existed, and it is gone. Starting here keeps the chain — change request,
+                        requirement, decision, proposal — and the decision settles itself when the package is
+                        approved and its procedure is materialised into the build. */}
                     {canTest && item.outcome === 'NewProcedureRequired' && (item.requirementRevisionId
                       ? (
                         <button type="button" disabled={busy} onClick={() => {
@@ -844,19 +833,15 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         {procedures.map(procedure => (
           <article className="coverageRow" key={procedure.id}>
             <div><button type="button" className="procedureRecordLink" aria-label={`Open procedure ${procedure.displayNumber}`}
-              onClick={() => void openProcedure(procedure.id, procedure.revisionId)}><b>{procedure.displayNumber}</b></button><i>{procedure.state === 'Draft' ? 'Awaiting approval' : procedure.state}</i></div>
+              onClick={() => void openProcedure(procedure.id, procedure.revisionId)}><b>{procedure.displayNumber}</b></button><i>{procedure.state}</i></div>
             <p><button type="button" className="procedureTitleLink" aria-label={`Open procedure ${procedure.title}`}
               onClick={() => void openProcedure(procedure.id, procedure.revisionId)}>{procedure.title}</button></p>
             <small>{procedure.requirementCount} exact requirement link{procedure.requirementCount === 1 ? '' : 's'} · authored by <PersonName userName={procedure.ownerId} /></small>
             <div className="coverageRowActions">
-              {/* A Draft cannot be run, so approving it is the action that matters here. The server refuses
-                  an author approving their own, which is what makes the approval independent rather than a
-                  formality — so this is offered and may still be declined. */}
-              {!readOnly && procedure.state === 'Draft' && (
-                canApprove && procedure.ownerId !== user.userName && procedure.selectedApproverId === user.userName
-                  ? <button type="button" disabled={busy} onClick={() => setApproving(procedure)}>Review &amp; approve</button>
-                  : <span className="procedureHold">{procedure.ownerId === user.userName ? 'Independent approval is required before execution.' : procedure.selectedApproverId ? <>Awaiting <PersonName userName={procedure.selectedApproverId} />.</> : 'A named approver is required.'}</span>
-              )}
+              {/* No approval offered on a procedure. The test change request that introduces or changes one
+                  is what gets approved, and a revision materialised from an approved package arrives already
+                  Approved — so a signature here would be a second approval of the same work. A Draft that
+                  predates controlled test change is shown as what it is and left alone. */}
               {!readOnly && procedure.state === 'Draft' && canTest && (user.isAdministrator || procedure.ownerId === user.userName) &&
                 <button type="button" className="quiet" onClick={() => setEditing(procedure)}>Edit</button>}
               <button type="button" className="quiet" onClick={() => void openProcedure(procedure.id, undefined, 'history')}>History</button>
@@ -991,15 +976,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             </div>
           </form>
         </div>
-      )}
-
-      {approving && (
-        <SignatureDialog
-          title={`Approve ${approving.displayNumber}`}
-          meaning="I approve this exact test procedure revision for controlled verification use."
-          onCancel={() => setApproving(undefined)}
-          onSign={(password, meaning) => approveProcedure(approving, password, meaning)}
-        />
       )}
 
       {editing && <ControlledProcedureEditor api={api} procedure={editing} onClose={() => setEditing(undefined)}

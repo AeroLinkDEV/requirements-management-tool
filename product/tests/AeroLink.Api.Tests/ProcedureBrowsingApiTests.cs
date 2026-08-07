@@ -36,10 +36,10 @@ public sealed class ProcedureBrowsingApiTests
             var owner = index % 2 == 0 ? "test.author" : "other.author";
             var procedure = new TestProcedure(project.Id, $"SYSTP-{index:D8}", $"Verify behaviour {index:D3}", owner, now,
                 TestProcedureLevel.System);
+            // Every third procedure is approved, so state filtering has something to separate. Approved at
+            // construction, as materialisation writes it — there is no separate signature on a revision.
             var revision = new TestProcedureRevision(procedure.Id, 1, "Objective", "Preconditions", "Steps", "Expected",
-                TestProcedureState.Draft, owner, now);
-            // Every third procedure is approved, so state filtering has something to separate.
-            if (index % 3 == 0) revision.Approve("test.approver");
+                index % 3 == 0 ? TestProcedureState.Approved : TestProcedureState.Draft, owner, now);
             db.AddRange(procedure, revision);
 
             // One procedure carries a Fail then a later Pass, so "latest outcome" and "any outcome" differ.
