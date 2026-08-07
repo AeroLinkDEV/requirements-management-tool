@@ -15,8 +15,13 @@ async function openClaimableAssessment(page: Page) {
     await row.getByRole('button', { name: 'Open assessment' }).click()
     await expect(drawer).toBeVisible({ timeout: 30_000 })
     const claim = drawer.getByRole('button', { name: 'Take it on' })
-    if (await claim.count()) { await claim.click(); return drawer }
-    if (await drawer.getByRole('button', { name: 'Decide' }).count()) return drawer
+    // Enabled, not merely present. A package somebody else holds still renders this button — disabled — so
+    // count() cannot tell "free to claim" from "held", and clicking a disabled one waits out the entire test
+    // timeout instead of moving to the next row. That is how this loop failed: not by running out of rows and
+    // saying so, but by hanging on the first held package for three minutes.
+    if (await claim.count() > 0 && await claim.first().isEnabled()) { await claim.click(); return drawer }
+    const decide = drawer.getByRole('button', { name: 'Decide' })
+    if (await decide.count() > 0 && await decide.first().isEnabled()) return drawer
     await drawer.getByRole('button', { name: 'Close test assessment' }).click()
   }
   throw new Error('No test assessment on this page is free to decide.')
