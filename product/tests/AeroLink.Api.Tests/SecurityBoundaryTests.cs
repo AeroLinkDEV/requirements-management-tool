@@ -306,7 +306,7 @@ public sealed class SecurityBoundaryTests
 }
 
 internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool allowDemoAccounts = false,
-    string? showcaseTemplate = null) : WebApplicationFactory<Program>
+    string? showcaseTemplate = null, string? staticFilesRoot = null) : WebApplicationFactory<Program>
 {
     public const string BootstrapSecret = "test-bootstrap-secret-0123456789-abcdef";
     public const string AdministratorPassword = "Bootstrap-Admin!2026";
@@ -334,7 +334,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     {
         builder.UseEnvironment("Production");
         builder.UseContentRoot(FindApiContentRoot());
-        builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        var settings = new Dictionary<string, string?>
         {
             ["Database:Provider"] = "Sqlite",
             ["ConnectionStrings:AeroLink"] = $"Data Source={_databasePath}",
@@ -347,7 +347,9 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
             ["Identity:LoginRateLimitPerMinute"] = "500",
             ["Logging:LogLevel:Default"] = "Warning",
             ["Logging:LogLevel:Microsoft.EntityFrameworkCore"] = "Warning"
-        }));
+        };
+        if (staticFilesRoot is not null) settings["Client:StaticFiles"] = staticFilesRoot;
+        builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings));
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<AeroLinkDbContext>();
