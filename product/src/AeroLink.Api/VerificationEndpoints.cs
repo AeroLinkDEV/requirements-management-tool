@@ -2,6 +2,7 @@ using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -280,9 +281,69 @@ public static class VerificationEndpoints
             });
         });
 
-        // The workspace rendered every procedure it was given — 440 cards on the software side — with no
-        // search, filter or page. This returns a bounded page and the total, and every predicate below runs
-        // in the database, because a page of twenty-five that costs a full table read is not paging.
+        // Discussion on a procedure, the same conversation a requirement carries.
+        //
+        // ArtifactComment was already generic — it keys on an artifact type and identifier — so only the route
+        // was requirement-shaped. These two store "TestProcedure" against the same table rather than adding a
+        // parallel comment record, which would have been a second thing to keep in step for no gain.
+        app.MapGet("/api/test-procedures/{id:guid}/comments", async (Guid id, HttpContext http,
+            AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var projectId = await db.TestProcedures.Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
+            var comments = await db.ArtifactComments.AsNoTracking()
+                .Where(x => x.ArtifactId == id && x.ArtifactType == "TestProcedure").ToListAsync(ct);
+            return Results.Ok(comments.OrderBy(x => x.CreatedAt).Select(x => new
+            {
+                x.Id, x.RevisionId, x.ParentCommentId, x.Body, x.MentionsJson, state = x.State.ToString(),
+                x.CreatedBy, x.CreatedAt, x.ResolvedBy, x.ResolvedAt, x.Disposition,
+            }));
+        });
+
+        app.MapPost("/api/test-procedures/{id:guid}/comments", async (Guid id, CreateProcedureCommentRequest request,
+            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var procedure = await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (procedure is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, procedure.ProjectId, ct)) return Results.Forbid();
+            if (request.RevisionId is not null
+                && !await db.TestProcedureRevisions.AnyAsync(x => x.Id == request.RevisionId && x.ProcedureId == id, ct))
+                return Results.BadRequest(new { error = "The comment revision is not part of this procedure." });
+            if (request.ParentCommentId is not null
+                && !await db.ArtifactComments.AnyAsync(x => x.Id == request.ParentCommentId && x.ArtifactId == id, ct))
+                return Results.BadRequest(new { error = "The parent comment is not part of this procedure." });
+            try
+            {
+                var actor = http.UserAccount().UserName;
+                var now = DateTimeOffset.UtcNow;
+                var mentions = request.Mentions ?? [];
+                var comment = new ArtifactComment(procedure.ProjectId, "TestProcedure", id, request.RevisionId,
+                    request.ParentCommentId, request.Body, JsonSerializer.Serialize(mentions), actor, now);
+                db.ArtifactComments.Add(comment);
+
+                // Mentioning somebody has to reach them, or the discussion is only identical to a requirement's
+                // in appearance. Procedures carry no watch list, so the audience is who was named plus whoever
+                // is being replied to.
+                var requested = mentions.Select(x => x.Trim().ToLowerInvariant()).ToHashSet();
+                if (request.ParentCommentId is not null)
+                    requested.Add((await db.ArtifactComments.Where(x => x.Id == request.ParentCommentId)
+                        .Select(x => x.CreatedBy).SingleAsync(ct)).ToLowerInvariant());
+                var recipients = await db.UserAccounts.AsNoTracking()
+                    .Where(x => requested.Contains(x.UserName) && x.UserName != actor)
+                    .Select(x => x.UserName).ToListAsync(ct);
+                foreach (var recipient in recipients)
+                    db.UserNotifications.Add(new(procedure.ProjectId, recipient, "TestProcedureComment",
+                        $"Discussion on {procedure.BaseNumber}", $"{actor}: {request.Body}",
+                        $"testProcedure:{id}", id, now));
+
+                await db.SaveChangesAsync(ct);
+                return Results.Created($"/api/test-procedures/{id}/comments/{comment.Id}",
+                    new { comment.Id, notified = recipients.Count });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         /// How a procedure came to say what it says.
         ///
         /// A procedure is read by somebody deciding whether to trust it, and "who wrote this, when, and what
@@ -370,6 +431,9 @@ public static class VerificationEndpoints
             });
         });
 
+        // The workspace rendered every procedure it was given — 440 cards on the software side — with no
+        // search, filter or page. This returns a bounded page and the total, and every predicate below runs
+        // in the database, because a page of twenty-five that costs a full table read is not paging.
         app.MapGet("/api/test-procedures", async (Guid projectId, Guid? releaseId, string? search, string? scope, string? state,
             string? owner, string? outcome, Guid? requirementRevisionId, string? sort, int? page, int? pageSize,
             HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>

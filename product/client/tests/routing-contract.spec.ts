@@ -75,10 +75,13 @@ test('legacy context-free change-request routes remain loadable until detail can
 test('each verification page round-trips, and a results route may carry a problem report', () => {
   const pages = [
     { view: 'testingCoverage', discipline: 'systemTest', kind: undefined, path: 'system-verification/coverage' },
+    { view: 'procedureExplorer', discipline: 'systemTest', kind: undefined, path: 'system-verification/procedures' },
     { view: 'testResults', discipline: 'systemTest', kind: undefined, path: 'system-verification/results' },
     { view: 'testingCoverage', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/coverage' },
+    { view: 'procedureExplorer', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/procedures' },
     { view: 'testResults', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/results' },
     { view: 'testingCoverage', discipline: 'softwareTest', kind: 'LowLevel', path: 'software-verification/llr/coverage' },
+    { view: 'procedureExplorer', discipline: 'softwareTest', kind: 'LowLevel', path: 'software-verification/llr/procedures' },
     { view: 'testResults', discipline: 'softwareTest', kind: 'LowLevel', path: 'software-verification/llr/results' },
   ] as const
 

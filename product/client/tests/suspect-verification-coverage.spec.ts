@@ -140,8 +140,6 @@ test('modified requirement coverage stays suspect until an exact approved proced
   }
   await openPackage()
   await expect(decisionRow.first()).toBeVisible({ timeout: 30_000 })
-  const claim = packageRow.getByRole('button', { name: 'Take it on' })
-  if (await claim.count()) await claim.click()
 
   const decide = async (rationale: string) => {
     await decisionRow.first().getByRole('button', { name: 'Decide' }).click()

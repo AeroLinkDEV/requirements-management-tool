@@ -1,0 +1,45 @@
+/* Layout only. Everything inside the inspector is RequirementsWorkspace.css, imported rather than restated,
+   because browsing a controlled artifact is the same job whichever discipline owns it. */
+.procedureExplorer{display:flex;flex-direction:column;gap:12px}
+.procedureExplorerHead h1{margin:2px 0;font-size:26px;font-weight:700}
+/* .eyebrow itself is App.css's — its size and colour were chosen to clear AA on this ground, and restating
+   them here would silently fork that decision. Only the margin is local. */
+.procedureExplorerHead p{margin:0;color:var(--muted,#52647a);font-size:14px}
+.procedureExplorerHead .eyebrow{margin:0;text-transform:uppercase}
+
+.procedureFind{display:flex;flex-direction:column;gap:.35rem;max-width:420px;font-size:.8rem;font-weight:700}
+.procedureFind input{padding:.5rem .65rem;border:1px solid var(--line,#cbd7e6);border-radius:8px;font:inherit}
+
+.procedureExplorerSplit{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;align-items:start}
+@media(max-width:960px){.procedureExplorerSplit{grid-template-columns:1fr}}
+
+.procedureList{display:flex;flex-direction:column;border:1px solid var(--line,#d9e2ec);border-radius:10px;
+  background:var(--card,#fff);overflow:hidden}
+.procedureRow{display:grid;grid-template-columns:minmax(140px,auto) minmax(0,1fr) auto;gap:10px;align-items:baseline;
+  padding:9px 12px;border:0;border-top:1px solid #eef2f7;background:transparent;text-align:left;
+  font:inherit;cursor:pointer}
+.procedureRow:first-child{border-top:0}
+.procedureRow:hover{background:#f5f9ff}
+.procedureRow.selected{background:#f2f7ff;box-shadow:inset 3px 0 0 #3178c6}
+.procedureRow b{color:#17314f;font-size:13.5px}
+.procedureRow span{color:#3d4d61;font-size:13.5px}
+.procedureRow small{color:#5c6878;font-size:12px;white-space:nowrap}
+.procedureEmpty{margin:0;padding:16px;color:#5c6878}
+
+/* Stacked rather than the inspector's label-left/value-right rows, because a procedure's objective and steps
+   are prose and a flex row would push a paragraph against the right edge. Sizes and colours are the
+   inspector's own, so only the axis differs. */
+.procedureCase{display:grid;gap:.3rem;margin:12px 0}
+.procedureCase dt{font-size:12px;font-weight:800;text-transform:uppercase;color:#6c7785;margin-top:.6rem}
+.procedureCase dd{margin:0;white-space:pre-wrap;color:#35465a;font-size:12px}
+
+.inspectorNote{margin:.3rem 0;color:#5c6878;font-size:13px}
+.inspectorNote.warn{color:#8a3d12}
+/* Discussion is deliberately absent here: the pane is RequirementsWorkspace.css's .discussionPane, and its
+   markup matches, so a change to how a requirement's conversation looks changes a procedure's too. */
+.revisionList{display:grid;gap:.5rem;margin:0;padding:0;list-style:none}
+.revisionList li{display:flex;flex-direction:column;gap:.15rem;padding:.55rem;
+  border:1px solid #e3eaf2;border-radius:8px}
+.revisionList b{color:#17314f;font-size:13px}
+.revisionList span{color:#5c6878;font-size:12.5px}
+.revisionDriver{color:#0868c9 !important}

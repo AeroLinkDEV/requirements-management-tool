@@ -21,6 +21,7 @@ const surfaces = [
   ['Release Readiness', '/release-readiness'],
   ['People & Authority', '/administration'],
   ['Enterprise Control', '/enterprise-control'],
+  ['Test Procedure Explorer', '/system-verification/procedures'],
   // The post-login portal, addressed from the site root rather than from inside a software build.
   ['Projects', '/projects'],
   ['Software Builds', '/projects/fms-product-development/builds'],

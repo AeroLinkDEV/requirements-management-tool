@@ -75,7 +75,11 @@ html[data-motion="reduced"] *::after { scroll-behavior: auto !important; transit
 @keyframes veilIn { from { opacity: 0; } }
 @keyframes drawerIn { from { opacity: .7; transform: translateX(28px); } }
 
-.experienceToast { position: fixed; right: 24px; bottom: 24px; z-index: 1300; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 11px 15px; border: 1px solid #2f5664; border-radius: 12px; background: #102a42; color: white; box-shadow: 0 15px 45px rgba(6,21,39,.28); animation: toastIn .24s ease both; }
+/* pointer-events: none because this is an announcement, not a control. Fixed at the bottom right on z-index
+   1300, it sits directly over the Save and Check in buttons of the authoring forms — and it was swallowing
+   their clicks for as long as it was on screen. It has no interactive children, so it has no business
+   receiving a pointer at all. */
+.experienceToast { position: fixed; right: 24px; bottom: 24px; z-index: 1300; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 11px 15px; border: 1px solid #2f5664; border-radius: 12px; background: #102a42; color: white; box-shadow: 0 15px 45px rgba(6,21,39,.28); animation: toastIn .24s ease both; pointer-events: none; }
 .experienceToast span { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: #2c8c79; font-weight: 800; }
 .experienceToast b { font-size: 13px; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } }

@@ -315,14 +315,6 @@ public sealed class TestChangeReview
         if (targetReleaseIsReleased)
             throw new DomainException(
                 "This test change request is incorporated in a released build and cannot be revised. Raise a new one against the in-work build.");
-        // A change request is claimed by at most one package, enforced by a unique index, so a successor
-        // cannot hold what its predecessor still holds — and silently dropping the folded-in changes would
-        // make the new revision cover less than the old one without saying so. Which package owns a claim
-        // across a revision is a real question and it is not answered yet, so this refuses instead of
-        // guessing.
-        if (_additionalSources.Count != 0)
-            throw new DomainException(
-                "This test change request has other change requests folded into it. Revising one of those is not supported yet.");
         var next = new TestChangeReview(ProjectId, ReleaseId, ChangeRequestId, Discipline,
             SourceChangeRequestNumber, now, BaseNumber, Revision + 1);
         next.RecordTestChangeRequired(actorId, now);
@@ -330,6 +322,19 @@ public sealed class TestChangeReview
             next.AddProcedureChange(actorId, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
                 change.Level, change.Kind, change.Title, change.Objective, change.Preconditions, change.Steps,
                 change.ExpectedResult, change.Rationale, change.DrivingRequirementRevisionIdsJson), now);
+
+        // Folded-in claims move to the successor rather than staying behind or being dropped. A change
+        // request is claimed by at most one package, enforced by a unique index, so the two revisions cannot
+        // both hold one — and the successor is the package that will actually be approved and materialised.
+        // Leaving the claim on the predecessor would mean a superseded package still answering for test work
+        // nobody is doing, and dropping it would make the new revision cover less than the old one without
+        // saying so.
+        //
+        // Each claim is moved rather than recreated: same row, same identifier, same claimant and time. Who
+        // took this change's test work on, and when, is not something a revision should rewrite.
+        foreach (var claim in _additionalSources) claim.MoveTo(next.Id);
+        next._additionalSources.AddRange(_additionalSources);
+        _additionalSources.Clear();
         return next;
     }
 
@@ -399,4 +404,11 @@ public sealed class TestChangeRequestClaim
     public string ChangeRequestNumber { get; private set; } = "";
     public string ClaimedBy { get; private set; } = "";
     public DateTimeOffset ClaimedAt { get; private set; }
+
+    /// <summary>
+    /// Hands this claim to the package's next revision. Only <see cref="TestChangeReview.StartNextRevision"/>
+    /// calls it, which is why it is internal: a claim moving for any other reason would be a change request
+    /// changing hands without anybody deciding to.
+    /// </summary>
+    internal void MoveTo(Guid testChangeReviewId) => TestChangeReviewId = testChangeReviewId;
 }

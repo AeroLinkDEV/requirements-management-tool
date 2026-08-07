@@ -74,7 +74,6 @@ test('a test engineer proposes a new procedure inside the test change request th
   // Claiming and concluding happen inside the assessment; the row offers one control in every state.
   await row.getByRole('button', { name: 'Open assessment' }).click()
   const assessment = page.getByRole('dialog', { name: /test impact/ })
-  await assessment.getByRole('button', { name: 'Take it on' }).click()
   // Exact, because "SYSTCR required" is a substring of the button beside it that concludes the opposite.
   await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
   await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
