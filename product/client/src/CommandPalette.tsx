@@ -18,11 +18,11 @@ const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:st
   // The pages themselves, not only the fork between them. Somebody who knows they want results should not
   // have to arrive at a chooser first, and the software pairs are separate destinations rather than one page
   // with a switch on it.
-  {label:'System Testing Coverage',view:'testingCoverage',discipline:'systemTest',detail:'What the requirements are tested by, and what nobody has picked up',icon:'◫'},
+  {label:'System Test Change Requests',view:'testingCoverage',discipline:'systemTest',detail:'The SYSTCRs controlling this build’s test procedures',icon:'◫'},
   {label:'System Test Results',view:'testResults',discipline:'systemTest',detail:'What this build runs, and the determinations recorded against it',icon:'▦'},
-  {label:'Software HLR Testing Coverage',view:'testingCoverage',discipline:'softwareTest',artifactKind:'HighLevel',detail:'High-level software requirement coverage and test change requests',icon:'◫'},
+  {label:'Software HLR Test Change Requests',view:'testingCoverage',discipline:'softwareTest',artifactKind:'HighLevel',detail:'The HLRTCRs controlling high-level software test procedures',icon:'◫'},
   {label:'Software HLR Test Results',view:'testResults',discipline:'softwareTest',artifactKind:'HighLevel',detail:'High-level software test set and recorded determinations',icon:'▦'},
-  {label:'Software LLR Testing Coverage',view:'testingCoverage',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Low-level software requirement coverage and test change requests',icon:'◫'},
+  {label:'Software LLR Test Change Requests',view:'testingCoverage',discipline:'softwareTest',artifactKind:'LowLevel',detail:'The LLRTCRs controlling low-level software test procedures',icon:'◫'},
   {label:'Software LLR Test Results',view:'testResults',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Low-level software test set and recorded determinations',icon:'▦'},
   {label:'Digital Thread',view:'lifecycle',discipline:'system',detail:'Traceability and outputs across the released evidence path',icon:'↗'},
   {label:'Lifecycle Decision Room',view:'release',discipline:'system',detail:'Release readiness, change impact, evidence, and authority',icon:'◆'},

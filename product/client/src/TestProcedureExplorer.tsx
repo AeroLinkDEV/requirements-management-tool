@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
 import { stateLabel } from './presentation'
+import { loadCoverage, type Coverage } from './verificationCoverage'
 import type { TestDiscipline } from './TestResultsWorkspace'
 // The requirements explorer's stylesheet, imported rather than copied. Browsing a controlled artifact is the
 // same job whichever discipline owns it, so the inspector is literally the same one.
 import './RequirementsWorkspace.css'
+// Coverage moved here from the test change request page, and its card and row styling came with it rather
+// than being restyled to look almost the same.
+import './TestingCoverageWorkspace.css'
 import './TestProcedureExplorer.css'
 
 type Procedure = {
@@ -34,6 +38,14 @@ type Comment = {
 }
 
 type Tab = 'details' | 'trace' | 'history' | 'discussion'
+/**
+ * The two questions this page answers, kept apart.
+ *
+ * "Which procedures does this build carry, and what happened to each" is browsing an inventory. "Is this
+ * build covered, and what is not" is a report about requirements. Both are about procedures as they stand,
+ * which is why they are on one page — but they are different questions and a reader is asking one of them.
+ */
+type PageTab = 'procedures' | 'coverage'
 
 const scopeOf = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'system' : discipline === 'HighLevelSoftware' ? 'highLevel' : 'lowLevel'
@@ -56,13 +68,22 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   released: boolean
 }) {
   const [data, setData] = useState<Page>()
-  const [query, setQuery] = useState('')
+  // Seeded from the address, so a link to one procedure opens on that procedure rather than on page one of
+  // everything. The number narrows the list to it; the identifier selects it once the list arrives. These are
+  // the parameter names the coverage page used before its library moved here, so links already in circulation
+  // — and the requirement trace's "Open test procedure" — keep working.
+  const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
+  const [query, setQuery] = useState(opening.get('procedure') ?? '')
   const [page, setPage] = useState(1)
-  const [selectedId, setSelectedId] = useState('')
+  const [selectedId, setSelectedId] = useState(opening.get('procedureId') ?? '')
   const [tab, setTab] = useState<Tab>('details')
   const [history, setHistory] = useState<History>()
   const [comments, setComments] = useState<Comment[]>([])
   const [error, setError] = useState('')
+  const [pageTab, setPageTab] = useState<PageTab>('procedures')
+  const [coverage, setCoverage] = useState<Coverage>()
+  const [coverageRead, setCoverageRead] = useState(false)
+  const [showAll, setShowAll] = useState(false)
 
   const scope = scopeOf(discipline)
   // A page at a time, at the requirements explorer's own default. A build holds hundreds of procedures, and
@@ -144,6 +165,25 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     } catch (problem) { setError(operationError(problem, 'The comment could not be resolved.')) }
   }
 
+  // Read when the coverage tab is first opened, not with the procedure list. Coverage is three requests and a
+  // whole-configuration computation, and a reader who came to find one procedure by number should not pay for
+  // a report they did not ask for. Read once and kept, because it does not change while the page is open.
+  useEffect(() => {
+    if (pageTab !== 'coverage' || coverageRead) return
+    let active = true
+    void (async () => {
+      const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, discipline)
+      if (!active) return
+      setCoverageRead(true)
+      if (next) setCoverage(next)
+      if (failed) setError('The requirement coverage for this build could not be read.')
+    })()
+    return () => { active = false }
+  }, [api, projectId, releaseId, discipline, pageTab, coverageRead])
+
+  const uncovered = coverage?.items.filter(x => x.disposition === 'Uncovered') ?? []
+  const suspect = coverage?.items.filter(x => x.disposition === 'Suspect') ?? []
+
   const open = (procedure: Procedure) => { setSelectedId(procedure.id); setTab('details'); setHistory(undefined) }
 
   // A workspace is its own <main>: the shell supplies the navigation and context bar, not the landmark.
@@ -152,11 +192,93 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       <div>
         <p className="eyebrow">VERIFICATION / {disciplineLabel(discipline).toUpperCase()}</p>
         <h1>Test Procedure Explorer</h1>
-        <p>Every controlled {disciplineLabel(discipline)} procedure {buildName} carries.</p>
+        <p>Every controlled {disciplineLabel(discipline)} procedure {buildName} carries, and what it covers.</p>
       </div>
     </header>
     {error && <div className="workspaceError" role="alert">{error}</div>}
 
+    <div className="explorerTabs" role="tablist" aria-label="Test procedure views">
+      <button type="button" role="tab" aria-selected={pageTab === 'procedures'}
+        className={pageTab === 'procedures' ? 'active' : ''}
+        onClick={() => setPageTab('procedures')}>Procedures</button>
+      <button type="button" role="tab" aria-selected={pageTab === 'coverage'}
+        className={pageTab === 'coverage' ? 'active' : ''}
+        onClick={() => setPageTab('coverage')}>Requirement coverage</button>
+    </div>
+
+    {pageTab === 'coverage' && (
+      <div className="explorerCoverage">
+        <section className="coverageSummary" aria-label="Coverage summary">
+          <article><b>{coverage?.total ?? 0}</b><span>Requirements</span></article>
+          <article><b>{coverage?.covered ?? 0}</b><span>With a procedure</span></article>
+          <article className={uncovered.length ? 'attention' : ''}><b>{uncovered.length}</b><span>With none</span></article>
+          <article className={suspect.length ? 'attention' : ''}><b>{suspect.length}</b><span>Suspect coverage</span></article>
+        </section>
+
+        {(uncovered.length > 0 || suspect.length > 0) && (
+          <section className="coverageCard">
+            <div className="cardTitle">
+              <h2>Requirements needing attention</h2>
+              <p>A requirement with no procedure cannot be verified, and coverage carried across a change nobody reconfirmed does not count.</p>
+            </div>
+            {uncovered.slice(0, 25).map(item => (
+              <article className="coverageRow attention" key={item.revisionId}>
+                <div><b>{item.displayNumber}</b><i>No procedure</i></div>
+                <p>{item.statement}</p>
+              </article>
+            ))}
+            {suspect.slice(0, 25).map(item => (
+              <article className="coverageRow attention" key={`suspect-${item.revisionId}`}>
+                <div><b>{item.displayNumber}</b><i>Suspect</i></div>
+                <p>{item.statement}</p>
+                <small>Covered by {item.coveredBy.map(x => x.displayNumber).join(', ')}, written against earlier wording.</small>
+              </article>
+            ))}
+          </section>
+        )}
+
+        <section className="coverageCard">
+          <div className="cardTitle">
+            <h2>Requirement coverage</h2>
+            <p>Every effective requirement in this build and the procedures that verify it.</p>
+          </div>
+          {/* Attention first, then everything. A reader arriving to do work needs the requirements that cannot
+              be verified as things stand; a reader answering "is this build covered" needs the whole set. The
+              second is much the longer list, so it is asked for rather than imposed. */}
+          <button type="button" className="quiet" onClick={() => setShowAll(current => !current)}>
+            {showAll ? 'Show only what needs attention' : `Show all ${coverage?.total ?? 0} requirements`}
+          </button>
+          {showAll && (
+            <div className="fullCoverage">
+              {(coverage?.items ?? []).map(item => (
+                <article className={`coverageRow ${item.covered ? '' : 'attention'}`} key={`all-${item.revisionId}`}>
+                  <div>
+                    <b>{item.displayNumber}</b>
+                    {/* Suspect is read before "no procedure". A requirement whose only procedure was written
+                        against an earlier revision is not covered — but saying nothing is testing it hides the
+                        procedure somebody has to reconfirm or replace, which is the actual work. */}
+                    <i>{item.verified ? 'Verified'
+                      : item.coveredBy.some(x => x.coverageState === 'Suspect') ? 'Suspect'
+                      : item.covered ? 'Covered'
+                      : 'No procedure'}</i>
+                  </div>
+                  <p>{item.statement}</p>
+                  {item.coveredBy.length > 0 && <small>{item.coveredBy.map(x => `${x.displayNumber} (${x.state})`).join(', ')}</small>}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {coverageRead && !coverage && (
+          <p className="coverageNone">
+            This build has not materialized its requirements, so there is nothing to report coverage against yet.
+          </p>
+        )}
+      </div>
+    )}
+
+    {pageTab === 'procedures' && <>
     <label className="procedureFind">Find a procedure
       <input value={query} onChange={event => { setQuery(event.target.value); setPage(1) }}
         placeholder="Number or title" />
@@ -285,5 +407,6 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         </aside>
       )}
     </div>
+    </>}
   </main>
 }

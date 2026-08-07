@@ -39,9 +39,9 @@ export default function VerificationLanding({ scope, buildName, onOpen }: {
           </div>
           <div className="landingCards">
             <button type="button" onClick={() => onOpen('testingCoverage', pair.level)}>
-              <b>Testing Coverage</b>
-              <span>What the requirements are tested by, and which test change requests nobody has picked up.</span>
-              <i>Open Testing Coverage →</i>
+              <b>Change Requests</b>
+              <span>The test change requests controlling this build's procedures, and the approved changes still waiting for one.</span>
+              <i>Open Change Requests →</i>
             </button>
             <button type="button" onClick={() => onOpen('testResults', pair.level)}>
               <b>Test Results</b>

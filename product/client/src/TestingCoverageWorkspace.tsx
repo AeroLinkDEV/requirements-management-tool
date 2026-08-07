@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { PersonName } from './People'
 import PersonPicker from './PersonPicker'
 import ProblemReportPicker, { type ProblemReportOption } from './ProblemReportPicker'
-import ControlledProcedureEditor from './ControlledProcedureEditor'
 import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
@@ -54,22 +53,6 @@ type ImpactItem = {
   holdsRelease?: boolean
   decisionHistory: { id: string; action: string; outcome?: string; rationale: string; actor: string; occurredAt: string }[]
 }
-type Revision = {
-  id: string
-  displayNumber: string
-  revision: number
-  state: string
-  authorId: string
-  createdAt: string
-  objective: string
-  preconditions: string
-  steps: string
-  expectedResult: string
-  selected: boolean
-  drivenBy: { changeRequest: string; package: string; subjectDisplayNumber: string; action: string }[]
-  covers: string[]
-}
-type History = { id: string; baseNumber: string; title: string; ownerId: string; createdAt: string; selectedRevisionId?: string; revisions: Revision[] }
 
 const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'Software HLR' : 'Software LLR'
@@ -160,10 +143,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   // request that carries it, and that authority arrives per request in its own capabilities.
   const [coverage, setCoverage] = useState<Coverage>()
   const [requests, setRequests] = useState<TestChangeRequest[]>([])
+  // Approved procedures only, and only so a decision can name the one that already covers a requirement.
+  // Browsing procedures is the Test Procedure Explorer's job; this page never lists them.
   const [procedures, setProcedures] = useState<Procedure[]>([])
-  const [total, setTotal] = useState(0)
-  const [query, setQuery] = useState(typeof location !== 'undefined' ? new URLSearchParams(location.search).get('procedure') ?? '' : '')
-  const [history, setHistory] = useState<History>()
   const [impact, setImpact] = useState<ImpactItem[]>([])
   const [opened, setOpened] = useState('')
   /** The test change request whose procedure decisions are open for authoring, if any. */
@@ -183,8 +165,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [authoringReviewId, setAuthoringReviewId] = useState("")
   const [authoringNumber, setAuthoringNumber] = useState("")
   const [createError, setCreateError] = useState('')
-  const [procedureView, setProcedureView] = useState<'record' | 'history'>('record')
-  const [editing, setEditing] = useState<Procedure>()
   const [reviewDecision, setReviewDecision] = useState<{ request: TestChangeRequest; action: 'approve' | 'return' }>()
   const [linkingProblemReports, setLinkingProblemReports] = useState<TestChangeRequest>()
   const [problemReportIds, setProblemReportIds] = useState<string[]>([])
@@ -193,17 +173,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [decliningTest, setDecliningTest] = useState<TestChangeRequest>()
   const [declineRationale, setDeclineRationale] = useState('')
   const [reviewApprover, setReviewApprover] = useState({ userId: '', name: '' })
-  const [showAll, setShowAll] = useState(false)
   const [revision, setRevision] = useState(0)
-  // Seeded from the address, so a shared or reloaded worklist opens on the list it names rather than on the
-  // unfiltered first page.
-  const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
-  const openingProcedureId = opening.get('procedureId') ?? ''
-  const openingProcedureRevisionId = opening.get('procedureRevisionId') ?? ''
-  const [procedureState, setProcedureState] = useState(opening.get('procedureState') ?? '')
-  const [procedureOutcome, setProcedureOutcome] = useState(opening.get('procedureOutcome') ?? '')
-  const [procedurePage, setProcedurePage] = useState(Number(opening.get('procedurePage') ?? '1') || 1)
-  const lastDiscreteState = useRef<string | null>(null)
+  // No procedure search, filter or page in the address any more. Those described a library this page no
+  // longer has; the Explorer keeps its own. A stale link carrying them is simply ignored rather than
+  // reopening a surface that moved.
   const [requirements, setRequirements] = useState<{ revisionId: string; displayNumber: string; statement: string }[]>([])
 
   // One ticket per loader, not one for the page.
@@ -276,65 +249,23 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
 
   useEffect(() => { void load() }, [load])
 
-  // The worklist is in the address, so it can be reloaded, shared and stepped back through.
-  useEffect(() => {
-    const params = new URLSearchParams(location.search)
-    const before = params.toString()
-    const apply = (key: string, value: string) => { if (value) params.set(key, value); else params.delete(key) }
-    apply('procedure', query)
-    apply('procedureState', procedureState)
-    apply('procedureOutcome', procedureOutcome)
-    apply('procedurePage', procedurePage > 1 ? String(procedurePage) : '')
-    // Seeded from what the address already says, so the reader's first change after a reload still earns a
-    // history entry rather than being mistaken for arrival.
-    const discrete = `${procedureState}|${procedureOutcome}|${procedurePage}`
-    if (lastDiscreteState.current === null) lastDiscreteState.current = discrete
-    if (params.toString() === before) return
-    const next = `${location.pathname}${params.toString() ? `?${params}` : ''}`
-    // Choosing a filter or a page is somewhere the reader went, so it earns a history entry and the back
-    // button returns to the previous list. Typing in the search box is not somewhere they went; pushing per
-    // keystroke would mean pressing back a dozen times to leave one search.
-    const push = discrete !== lastDiscreteState.current
-    lastDiscreteState.current = discrete
-    // window.history explicitly: this component has its own `history` — the revision history of a procedure —
-    // and the bare name resolves to that, which throws rather than navigating.
-    if (push) window.history.pushState({}, '', next); else window.history.replaceState({}, '', next)
-  }, [query, procedureState, procedureOutcome, procedurePage])
-
-  // The browser's own navigation must move the list, not just the address bar.
-  useEffect(() => {
-    const restore = () => {
-      const params = new URLSearchParams(location.search)
-      setQuery(params.get('procedure') ?? '')
-      setProcedureState(params.get('procedureState') ?? '')
-      setProcedureOutcome(params.get('procedureOutcome') ?? '')
-      setProcedurePage(Number(params.get('procedurePage') ?? '1') || 1)
-    }
-    addEventListener('popstate', restore)
-    return () => removeEventListener('popstate', restore)
-  }, [])
-
-  // Browsing, not just searching. The software side of the demonstration Program carries 440 procedures, so
-  // a list that could only be searched meant knowing the number of the thing you were looking for before you
-  // could look for it. State and latest result are how somebody actually narrows this: "the drafts", "what
-  // failed last time".
+  // The approved procedures a decision may name as already covering a requirement. Not a library: no search,
+  // no filters, no paging into the address, because nothing here browses procedures. One page of approved
+  // ones is what the selector offers, and the server refuses anything that is not approved and in this
+  // Project regardless of what the list happened to hold.
   useEffect(() => {
     const mine = ++procedureTicket.current
-    const timer = setTimeout(async () => {
-      const filters = `&state=${procedureState}&outcome=${procedureOutcome}&page=${procedurePage}&pageSize=25`
-      const response = await fetch(`${api}/api/test-procedures?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}&search=${encodeURIComponent(query)}${filters}`)
+    void (async () => {
+      const response = await fetch(`${api}/api/test-procedures?projectId=${projectId}&releaseId=${releaseId}` +
+        `&scope=${scope}&state=Approved&page=1&pageSize=200`)
       if (!response.ok) return
       const paged = await response.json()
       if (mine !== procedureTicket.current) return
       setProcedures(paged.items)
-      setTotal(paged.totalCount)
-    }, 200)
-    return () => clearTimeout(timer)
-  }, [api, projectId, releaseId, scope, query, procedureState, procedureOutcome, procedurePage, revision])
+    })()
+  }, [api, projectId, releaseId, scope, revision])
 
   const mine = requests.filter(x => x.discipline === discipline)
-  const uncovered = coverage?.items.filter(x => x.disposition === 'Uncovered') ?? []
-  const suspect = coverage?.items.filter(x => x.disposition === 'Suspect') ?? []
 
   const act = async (work: () => Promise<void>, failure: string) => {
     if (busy) return
@@ -452,62 +383,25 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     } finally { setBusy(false) }
   }
 
-  const openProcedure = useCallback(async (procedureId: string, procedureRevisionId?: string,
-    view: 'record' | 'history' = 'record', updateAddress = true) => {
-    setError('')
-    const params = new URLSearchParams({ releaseId })
-    if (procedureRevisionId) params.set('revisionId', procedureRevisionId)
-    const response = await fetch(`${api}/api/test-procedures/${procedureId}/history?${params}`)
-    if (!response.ok) { setError('That procedure’s history could not be read.'); return }
-    setHistory(await response.json())
-    setProcedureView(view)
-    if (updateAddress) {
-      const address = new URLSearchParams(location.search)
-      address.set('procedureId', procedureId)
-      if (procedureRevisionId) address.set('procedureRevisionId', procedureRevisionId)
-      else address.delete('procedureRevisionId')
-      address.set('procedureView', view)
-      window.history.pushState({}, '', `${location.pathname}?${address}`)
-    }
-  }, [api, releaseId])
-
-  const closeHistory = () => {
-    setHistory(undefined)
-    const params = new URLSearchParams(location.search)
-    params.delete('procedureId')
-    params.delete('procedureRevisionId')
-    params.delete('procedureView')
-    params.delete('procedure')
-    window.history.replaceState({}, '', `${location.pathname}${params.toString() ? `?${params}` : ''}`)
-    setQuery('')
-  }
-
-  useEffect(() => {
-    if (openingProcedureId) void openProcedure(openingProcedureId, openingProcedureRevisionId || undefined,
-      opening.get('procedureView') === 'history' ? 'history' : 'record', false)
-  }, [openProcedure, opening, openingProcedureId, openingProcedureRevisionId])
-
-  const selectedProcedureRevision = history?.revisions.find(item => item.id === history.selectedRevisionId)
-    ?? history?.revisions[0]
-
+  // No openProcedure, no history dialog, no controlled editor. Reading a procedure, its revisions and what
+  // drove each of them is the Test Procedure Explorer, and a second reader here reachable only by a stale
+  // link would be a second answer to "where do I read a procedure".
   return (
     <main className="testingCoveragePage">
       <header>
         <div>
           <p className="eyebrow">VERIFICATION / {disciplineLabel(discipline).toUpperCase()}</p>
-          <h1>Testing Coverage</h1>
-          <p>What {buildName} is tested by, and what still has nobody looking at it.</p>
+          <h1>Change Requests</h1>
+          <p>The {tcrAcronym(discipline)}s controlling {buildName}'s test procedures, and the approved changes waiting for one.</p>
         </div>
       </header>
       {error && <div className="workspaceError" role="alert" aria-live="assertive">{error}</div>}
       {saved && <div className="workspaceSaved" role="status">{saved}</div>}
 
-      <section className="coverageSummary" aria-label="Coverage summary">
-        <article><b>{coverage?.total ?? 0}</b><span>Requirements</span></article>
-        <article><b>{coverage?.covered ?? 0}</b><span>With a procedure</span></article>
-        <article className={uncovered.length ? 'attention' : ''}><b>{uncovered.length}</b><span>With none</span></article>
-        <article className={suspect.length ? 'attention' : ''}><b>{suspect.length}</b><span>Suspect coverage</span></article>
-      </section>
+      {/* Coverage is not summarised here any more. This page is about the change requests controlling test
+          work, exactly as the requirements-side Change Requests page is about the ones controlling
+          requirements; "is this build covered" is a question about procedures as they stand, and it is
+          answered in the Test Procedure Explorer beside the procedures it is about. */}
 
       {/* The queue, before the inventory. Somebody arriving to do verification work needs to know what this
           build's changes have made their problem — a wall of green coverage says nothing about that. */}
@@ -719,148 +613,13 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         </div>
       })()}
 
-      <section className="coverageCard">
-        <div className="cardTitle">
-          <h2>Requirement coverage</h2>
-          <p>Every effective requirement in this build and the procedures that verify it.</p>
-        </div>
-        {/* Attention first, then everything. A reader arriving to do work needs the requirements that cannot
-            be verified as things stand; a reader answering "is this build covered" needs the whole set. The
-            second is much the longer list, so it is asked for rather than imposed. */}
-        <button type="button" className="quiet" onClick={() => setShowAll(current => !current)}>
-          {showAll ? 'Show only what needs attention' : `Show all ${coverage?.total ?? 0} requirements`}
-        </button>
-        {showAll && (
-          <div className="fullCoverage">
-            {(coverage?.items ?? []).map(item => (
-              <article className={`coverageRow ${item.covered ? '' : 'attention'}`} key={`all-${item.revisionId}`}>
-                <div>
-                  <b>{item.displayNumber}</b>
-                  {/* Suspect is read before "no procedure". A requirement whose only procedure was written
-                      against an earlier revision is not covered — but saying nothing is testing it hides the
-                      procedure somebody has to reconfirm or replace, which is the actual work. */}
-                  <i>{item.verified ? 'Verified'
-                    : item.coveredBy.some(x => x.coverageState === 'Suspect') ? 'Suspect'
-                    : item.covered ? 'Covered'
-                    : 'No procedure'}</i>
-                </div>
-                <p>{item.statement}</p>
-                {item.coveredBy.length > 0 && <small>{item.coveredBy.map(x => `${x.displayNumber} (${x.state})`).join(', ')}</small>}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+      {/* Requirement coverage, and the requirements needing attention, moved to the Test Procedure
+          Explorer. They are a report about the procedures a build carries, so they belong beside the
+          procedures rather than on the page about the change requests that produce them.
 
-      {(uncovered.length > 0 || suspect.length > 0) && (
-        <section className="coverageCard">
-          <div className="cardTitle">
-            <h2>Requirements needing attention</h2>
-            <p>A requirement with no procedure cannot be verified, and coverage carried across a change nobody reconfirmed does not count.</p>
-          </div>
-          {uncovered.slice(0, 25).map(item => (
-            <article className="coverageRow attention" key={item.revisionId}>
-              <div><b>{item.displayNumber}</b><i>No procedure</i></div>
-              <p>{item.statement}</p>
-            </article>
-          ))}
-          {suspect.slice(0, 25).map(item => (
-            <article className="coverageRow attention" key={`suspect-${item.revisionId}`}>
-              <div><b>{item.displayNumber}</b><i>Suspect</i></div>
-              <p>{item.statement}</p>
-              <small>Covered by {item.coveredBy.map(x => x.displayNumber).join(', ')}, written against earlier wording.</small>
-            </article>
-          ))}
-        </section>
-      )}
-
-      {/* Its own class as well as the shared card: requirement rows and procedure rows both render as
-          .coverageRow, and a reader — or a test — looking for a procedure by number would otherwise match
-          the requirement that names it as its coverage. */}
-      <section className="coverageCard procedureLibrary">
-        <div className="cardTitle">
-          <h2>Test procedures</h2>
-          <p>{total} controlled {disciplineLabel(discipline).toLowerCase()} procedure{total === 1 ? '' : 's'}. Open one to see who wrote it and what changed it.</p>
-          {/* No control here writes a procedure. One is introduced, modified or retired by a test change
-              request, the way a requirement is only changed by a change request — so authoring starts from
-              the decision that asked for it, on the package that will carry it. */}
-        </div>
-
-        {/* A project with nothing materialized has no exact revisions to bind a procedure to. Said plainly,
-            because the alternative is a create form whose requirement list is empty for no stated reason —
-            which reads as a broken page rather than as work that has not happened yet. */}
-        {!requirements.length && (
-          <section className="materializationPrerequisite" role="status">
-            <div>
-              <b>Procedure authoring waits for governed requirement materialization</b>
-              <p>
-                This build has no immutable requirement revisions yet, so a new procedure cannot be bound to an
-                exact target. Existing inherited procedures remain visible against their predecessor revisions;
-                planned work for new or modified requirements stays in the test change requests above and
-                cannot count as confirmed coverage yet.
-              </p>
-            </div>
-            <div>
-              <span>Current limitation</span>
-              <b>Requirement materialization is not exposed in this workspace.</b>
-            </div>
-          </section>
-        )}
-        <div className="procedureFilters">
-          <label className="coverageSearch">
-            <span>Find a procedure</span>
-            <input value={query} onChange={event => { setQuery(event.target.value); setProcedurePage(1) }} placeholder="Procedure number or title" />
-          </label>
-          <label>
-            <span>Procedure state</span>
-            <select value={procedureState} onChange={event => { setProcedureState(event.target.value); setProcedurePage(1) }}>
-              <option value="">All states</option>
-              <option value="Draft">Draft</option>
-              <option value="InReview">In review</option>
-              <option value="Approved">Approved</option>
-            </select>
-          </label>
-          <label>
-            <span>Latest result</span>
-            <select value={procedureOutcome} onChange={event => { setProcedureOutcome(event.target.value); setProcedurePage(1) }}>
-              <option value="">All outcomes</option>
-              <option value="Pass">Pass</option>
-              <option value="Fail">Fail</option>
-              <option value="Blocked">Blocked</option>
-            </select>
-          </label>
-        </div>
-        {procedures.map(procedure => (
-          <article className="coverageRow" key={procedure.id}>
-            <div><button type="button" className="procedureRecordLink" aria-label={`Open procedure ${procedure.displayNumber}`}
-              onClick={() => void openProcedure(procedure.id, procedure.revisionId)}><b>{procedure.displayNumber}</b></button><i>{procedure.state}</i></div>
-            <p><button type="button" className="procedureTitleLink" aria-label={`Open procedure ${procedure.title}`}
-              onClick={() => void openProcedure(procedure.id, procedure.revisionId)}>{procedure.title}</button></p>
-            <small>{procedure.requirementCount} exact requirement link{procedure.requirementCount === 1 ? '' : 's'} · authored by <PersonName userName={procedure.ownerId} /></small>
-            <div className="coverageRowActions">
-              {/* No approval offered on a procedure. The test change request that introduces or changes one
-                  is what gets approved, and a revision materialised from an approved package arrives already
-                  Approved — so a signature here would be a second approval of the same work. A Draft that
-                  predates controlled test change is shown as what it is and left alone. */}
-              {!readOnly && procedure.state === 'Draft' && canTest && (user.isAdministrator || procedure.ownerId === user.userName) &&
-                <button type="button" className="quiet" onClick={() => setEditing(procedure)}>Edit</button>}
-              <button type="button" className="quiet" onClick={() => void openProcedure(procedure.id, undefined, 'history')}>History</button>
-            </div>
-          </article>
-        ))}
-        {!procedures.length && (
-          <p className="coverageNone">
-            {query || procedureState || procedureOutcome ? 'No procedure matches that. Clear the search or the filters to see the rest.' : 'This build has no controlled procedures yet.'}
-          </p>
-        )}
-        {total > 25 && (
-          <div className="procedurePager">
-            <button type="button" disabled={procedurePage <= 1} onClick={() => setProcedurePage(value => Math.max(1, value - 1))}>Previous</button>
-            <span>Page {procedurePage} of {Math.max(1, Math.ceil(total / 25))}</span>
-            <button type="button" disabled={procedurePage >= Math.ceil(total / 25)} onClick={() => setProcedurePage(value => value + 1)}>Next</button>
-          </div>
-        )}
-      </section>
+          The procedure library moved with them, and is not duplicated here. #369 built the Explorer as the
+          place a procedure is browsed, read and discussed; a second list on this page would be a second
+          answer to "where do I find a procedure", and the two would drift. */}
 
       {creating && (
         <div className="decisionModal" role="dialog" aria-label="Propose a test procedure">
@@ -978,9 +737,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         </div>
       )}
 
-      {editing && <ControlledProcedureEditor api={api} procedure={editing} onClose={() => setEditing(undefined)}
-        onCommitted={async () => { await load(); setRevision(current => current + 1) }} />}
-
       {reviewDecision && (
         <div className="decisionModal" role="dialog" aria-label={`${reviewDecision.action === 'approve' ? 'Approve' : 'Return'} ${reviewDecision.request.displayNumber}`}>
           <form onSubmit={event => {
@@ -1082,48 +838,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         </div>
       )}
 
-      {history && selectedProcedureRevision && (
-        <div className="procedureHistoryModal" role="dialog" aria-modal="true"
-          aria-label={procedureView === 'record' ? `Procedure ${selectedProcedureRevision.displayNumber}` : `History of ${history.baseNumber}`}>
-          <div>
-            <p className="eyebrow">CONTROLLED PROCEDURE</p>
-            <h2>{procedureView === 'record' ? selectedProcedureRevision.displayNumber : history.baseNumber}</h2>
-            <p>{history.title}</p>
-            <small>Created by <PersonName userName={history.ownerId} /> on {new Date(history.createdAt).toLocaleDateString()}</small>
-            {procedureView === 'record' ? (
-              <div className="procedureRecordContent">
-                <div className="procedureRecordMeta"><i>{selectedProcedureRevision.state}</i><span>Written by <PersonName userName={selectedProcedureRevision.authorId} /> on {new Date(selectedProcedureRevision.createdAt).toLocaleDateString()}</span></div>
-                <dl><dt>Objective</dt><dd>{selectedProcedureRevision.objective}</dd><dt>Preconditions</dt><dd>{selectedProcedureRevision.preconditions}</dd><dt>Steps</dt><dd>{selectedProcedureRevision.steps}</dd><dt>Expected result</dt><dd>{selectedProcedureRevision.expectedResult}</dd></dl>
-                {selectedProcedureRevision.drivenBy.length
-                  ? <span className="revisionDriver">Driven by {selectedProcedureRevision.drivenBy.map(x => `${x.changeRequest} (${x.package})`).join(', ')}</span>
-                  : <span className="revisionDriver quiet">No change request is recorded against this revision.</span>}
-                {selectedProcedureRevision.covers.length > 0 && <span className="revisionCovers">Covers {selectedProcedureRevision.covers.join(', ')}</span>}
-              </div>
-            ) : (
-              <ol className="revisionList">
-                {history.revisions.map(revision => (
-                  <li key={revision.id} className={revision.selected ? 'selectedRevision' : undefined}>
-                    <b>{revision.displayNumber}</b>
-                    <i>{revision.state}</i>
-                    {revision.selected && <strong>{history.revisions[0]?.id === revision.id ? 'Selected exact revision' : 'Selected historical build revision'}</strong>}
-                    <small>Written by <PersonName userName={revision.authorId} /> on {new Date(revision.createdAt).toLocaleDateString()}</small>
-                    <p>{revision.objective}</p>
-                    <details><summary>Controlled procedure content</summary><dl><dt>Preconditions</dt><dd>{revision.preconditions}</dd><dt>Steps</dt><dd>{revision.steps}</dd><dt>Expected result</dt><dd>{revision.expectedResult}</dd></dl></details>
-                    {revision.drivenBy.length
-                      ? <span className="revisionDriver">Driven by {revision.drivenBy.map(x => `${x.changeRequest} (${x.package})`).join(', ')}</span>
-                      : <span className="revisionDriver quiet">No change request is recorded against this revision.</span>}
-                    {revision.covers.length > 0 && <span className="revisionCovers">Covers {revision.covers.join(', ')}</span>}
-                  </li>
-                ))}
-              </ol>
-            )}
-            <div className="procedureRecordActions">
-              {procedureView === 'record' && <button type="button" className="quiet" onClick={() => void openProcedure(history.id, selectedProcedureRevision.id, 'history')}>History</button>}
-              <button type="button" onClick={closeHistory}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   )
 }
