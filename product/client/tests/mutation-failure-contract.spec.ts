@@ -105,8 +105,17 @@ test('a rejected approval preserves signature input and records no approval evid
   } })
   expect(submitResponse.ok(), await submitResponse.text()).toBeTruthy()
 
+  // Opened from My Work rather than by typing the address. A change request reached by a bare URL loads
+  // without a selected Program behind it, so the page cannot resolve who the reader is to this change and
+  // offers no approval — which is correct of it, and is what made an earlier version of this test wait three
+  // minutes for a control that was never going to appear.
   await login(page, 'systems.reviewer')
-  await page.goto(`/systems/change-requests/${draft.id}`)
+  await page.getByRole('link', { name: 'My Work' }).click()
+  const assigned = page.locator('.workQueue article').filter({ hasText: draft.displayNumber })
+  await expect(assigned).toBeVisible({ timeout: 30_000 })
+  await assigned.click()
+  await expect(page).toHaveURL(new RegExp(`/systems/change-requests/${draft.id}$`))
+
   await page.getByRole('button', { name: 'Review & electronically approve' }).click()
   const dialog = page.locator('.signatureModal')
   await expect(dialog).toBeVisible()
