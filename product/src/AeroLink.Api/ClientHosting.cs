@@ -120,18 +120,33 @@ public static class ClientHosting
             },
         });
 
-        app.MapFallback(async context =>
+        // A single-page application answers its own routes, so any path that matched no file and no endpoint
+        // is a client route and gets the entry document. An unmatched API path is a mistake and must say so:
+        // returning HTML with status 200 to a caller that asked for JSON turns a typo into a parse error
+        // somewhere far away from the cause.
+        //
+        // This is middleware rather than MapFallback deliberately. A fallback endpoint carries no HTTP-method
+        // constraint, so routing sends a wrong-method request to an existing API path — POST
+        // /api/test-procedures where only GET is registered (DEC-103) — to the fallback instead of producing
+        // the framework's automatic 405. The API test host always saw 405 because it never serves a client;
+        // the deployed shape saw 404. Running after the pipeline lets an endpoint, a static file, or the
+        // automatic 405 answer first, and leaves this to answer only when nothing else did.
+        app.Use(async (context, next) =>
         {
-            // A single-page application answers its own routes, so any path that matched no file and no
-            // endpoint is a client route and gets the entry document. An unmatched API path is a mistake and
-            // must say so: returning HTML with status 200 to a caller that asked for JSON turns a typo into a
-            // parse error somewhere far away from the cause.
+            await next();
+            // An endpoint answered (including the framework's automatic 405, which sets its status and Allow
+            // header without writing a body), or a static file / earlier middleware already started a
+            // response. Either way this fallback has nothing left to do.
+            if (context.GetEndpoint() is not null || context.Response.HasStarted) return;
             if (IsApiPath(context.Request.Path))
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
                 await context.Response.WriteAsJsonAsync(new { error = "No such endpoint.", code = "endpoint_not_found" });
                 return;
             }
+            // The endpoint execution middleware leaves a status of 404 behind when no endpoint matched, so the
+            // client entry document must claim its own 200 rather than inherit it.
+            context.Response.StatusCode = StatusCodes.Status200OK;
             context.Response.ContentType = "text/html; charset=utf-8";
             context.Response.Headers.CacheControl = "no-cache";
             await context.Response.SendFileAsync(Path.Combine(clientRoot, "index.html"));
