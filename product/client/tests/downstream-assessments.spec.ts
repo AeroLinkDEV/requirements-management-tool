@@ -15,11 +15,11 @@ test('downstream assessment actions follow authority and submit without a form-n
   await unauthorized.getByRole('link',{name:'Software Change Requests'}).click()
   const unauthorizedQueue=unauthorized.locator('.downstreamQueue')
   // Every row offers the same one control whoever is reading. What the reader may do is decided inside.
-  await expect(unauthorizedQueue.getByRole('button',{name:'Take it on'})).toHaveCount(0)
+  await expect(unauthorizedQueue.getByRole('button',{name:'Change required'})).toHaveCount(0)
   await unauthorizedQueue.locator('.downstreamAssessment').first().getByRole('button',{name:'Open assessment'}).click()
   const unauthorizedDrawer=unauthorized.getByRole('dialog',{name:/downstream impact/})
   await expect(unauthorizedDrawer).toContainText('Software engineering authority is required')
-  await expect(unauthorizedDrawer.getByRole('button',{name:'Take it on'})).toHaveCount(0)
+  await expect(unauthorizedDrawer.getByRole('button',{name:'Change required'})).toHaveCount(0)
   await unauthorizedContext.close()
 
   await login(page)
@@ -40,7 +40,7 @@ test('downstream assessment actions follow authority and submit without a form-n
   const assessment=queue.locator('.downstreamAssessment').filter({hasText:'SRCR-00031.00'}).first()
   await assessment.getByRole('button',{name:'Open assessment'}).click()
   const workbench=page.getByRole('dialog',{name:'SRCR-00031.00 downstream impact'})
-  await workbench.getByRole('button',{name:'Take it on'}).click()
+  // Straight to the conclusions. There is no claim to make first — answering is what takes it on.
   await expect(workbench.getByRole('button',{name:'No change required'})).toBeVisible()
   await workbench.getByRole('button',{name:'No change required'}).click()
   const noChangeDialog=page.getByRole('dialog',{name:'Record no-change conclusion for SRCR-00031.00'})
@@ -127,7 +127,6 @@ test('an assessment deep link explains impact and a required change creates and 
   const assessment=page.locator('.downstreamAssessment').filter({hasText:candidate.sourceChangeRequestNumber}).first()
   await assessment.getByRole('button',{name:'Open assessment'}).click()
   const decisionWorkbench=page.getByRole('dialog',{name:`${candidate.sourceChangeRequestNumber} downstream impact`})
-  if(await decisionWorkbench.getByRole('button',{name:'Take it on'}).count())await decisionWorkbench.getByRole('button',{name:'Take it on'}).click()
   await decisionWorkbench.getByRole('button',{name:'Change required',exact:true}).click()
   await expect(decisionWorkbench).toContainText('HLR Assessment Complete – Draft HLRCR Required')
   await decisionWorkbench.getByRole('button',{name:'Create Draft HLRCR'}).click()
