@@ -21,12 +21,11 @@ const levelName=(level:Level)=>level==='HighLevel'?'HLR':'LLR'
  * approved — which put the state in the place a reader looks for an action and then showed the same controls
  * underneath either way. State belongs here, where it decides what can actually be done.
  */
-type DrawerMode='superseded'|'inReview'|'approved'|'unclaimed'|'undecided'|'concluded'
+type DrawerMode='superseded'|'inReview'|'approved'|'undecided'|'concluded'
 const drawerMode=(row:Assessment):DrawerMode=>
   row.state==='Superseded'?'superseded'
     :row.state==='InReview'?'inReview'
     :row.state==='Approved'?'approved'
-    :!row.assignedEngineerId?'unclaimed'
     :row.outcome==='Pending'?'undecided':'concluded'
 const conclusionText=(row:Assessment)=>{
   const level=levelName(row.targetLevel)
@@ -114,15 +113,18 @@ export default function DownstreamAssessmentQueue({api,projectId,releaseId,targe
           :selected.rationale&&<div className="assessmentRationale"><b>Returned for rework</b><p>{selected.rationale}</p></div>}
         {selected.linkedChangeRequests.length>0&&<ul className="drawerChanges">{selected.linkedChangeRequests.map(link=><li className="linkedDraft" key={link.changeRequestId}><button type="button" className="drawerArtifactLink" onClick={()=>onOpenScr(link.changeRequestId)}>{link.changeRequestNumber}</button><b>{link.state}</b><span>{link.title}</span></li>)}</ul>}<div className="drawerDecisionActions">
         {mode==='superseded'&&<p className="drawerEmpty">{selected.supersededReason||'A newer assessment replaced this one. Work that assessment instead.'}</p>}
-        {mode==='unclaimed'&&(selected.capabilities.canAssign
-          ?<button type="button" disabled={busy===selected.id} onClick={()=>void act(selected.id,'assign',{engineerId:user.userName})}>Take it on</button>
-          :<p className="drawerEmpty">{selected.buildReleased
-            ?'This software build is released. Its downstream assessments are read-only.'
-            :'Software engineering authority is required to claim this assessment.'}</p>)}
-        {/* The only state in which both conclusions are offered: nobody has answered yet. */}
+        {/* The only state in which both conclusions are offered: nobody has answered yet. Unheld assessments
+            land here too — answering one is what takes it on, so there is no claim to make first. When the
+            reader may not answer, an unheld assessment has no holder to name: what is missing is their
+            authority, not somebody else's claim. Naming one anyway read as "engineering conclusion holds
+            this assessment". */}
         {mode==='undecided'&&(selected.capabilities.canEdit
           ?<><button type="button" className="quiet" disabled={busy===selected.id} onClick={()=>openDecision(selected,'no-change')}>No change required</button><button type="button" disabled={busy===selected.id} onClick={()=>void act(selected.id,'change-required')}>Change required</button></>
-          :<p className="drawerEmpty"><PersonName userName={selected.assignedEngineerId??''}/> holds this assessment and records its conclusion.</p>)}
+          :selected.assignedEngineerId
+            ?<p className="drawerEmpty"><PersonName userName={selected.assignedEngineerId}/> holds this assessment and records its conclusion.</p>
+            :<p className="drawerEmpty">{selected.buildReleased
+              ?'This software build is released. Its downstream assessments are read-only.'
+              :'Software engineering authority is required to answer this assessment.'}</p>)}
         {mode==='concluded'&&(selected.capabilities.canEdit
           ?<>{selected.outcome==='ChangeRequired'&&selected.linkedChangeRequests.length===0&&<button type="button" onClick={()=>onCreateScr(selected.targetLevel,selected.id,selected.sourceChangeRequestNumber)}>Create Draft {levelName(selected.targetLevel)}CR</button>}{(selected.outcome==='ChangeRequired'||selected.outcome==='ChangeRequestsLinked')&&<label>Link {selected.linkedChangeRequests.length?'another':'an existing'} Draft change request<select value="" onChange={event=>{if(event.target.value)void act(selected.id,'change-requests',{changeRequestId:event.target.value})}}><option value="">Choose…</option>{drafts.filter(d=>!selected.linkedChangeRequests.some(link=>link.changeRequestId===d.id)).map(d=><option value={d.id} key={d.id}>{d.displayNumber} · {d.title}</option>)}</select></label>}{selected.capabilities.canSubmit&&<><PersonPicker api={api} projectId={projectId} value={approvers[selected.id]?.userId??''} name={approvers[selected.id]?.name??''} index={9300} label={`Approver for ${selected.sourceChangeRequestNumber}`} excludeUserNames={[selected.assignedEngineerId??user.userName,user.userName]} onSelect={person=>setApprovers(current=>({...current,[selected.id]:person}))}/><button type="button" disabled={busy===selected.id||!approvers[selected.id]?.userId} onClick={()=>void act(selected.id,'submit',{approverId:approvers[selected.id].userId})}>Send for approval</button></>}</>
           :<p className="drawerEmpty"><PersonName userName={selected.assignedEngineerId??''}/> holds this assessment and carries it to review.</p>)}
