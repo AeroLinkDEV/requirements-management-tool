@@ -334,10 +334,17 @@ test('verification mutation failures retain the engineer input and only confirme
   await row.getByRole('button', { name: 'Runs' }).click()
   await expect(row.locator('.runList li').filter({ hasText: 'compiled client recorded' })).toBeVisible({ timeout: 30_000 })
 
+  // Exactly one result from this journey: the aborted attempt and the refused one recorded nothing, and the
+  // confirmed one recorded once. Matched on the evidence this journey supplies rather than on the procedure,
+  // because the procedure is one the build already carries and it already has runs behind it from an earlier
+  // build — counting those would be counting somebody else's work as this test's output.
   const executionsResponse = await request.get(`/api/test-executions?projectId=${showcase.projectId}`)
   expect(executionsResponse.ok(), await executionsResponse.text()).toBeTruthy()
   const executions = await executionsResponse.json()
-  expect(executions.filter((item: { procedureRevisionId: string }) => item.procedureRevisionId === procedure.revisionId)).toEqual([
+  const recorded = executions.filter((item: { procedureRevisionId: string; evidenceReference: string }) =>
+    item.procedureRevisionId === procedure.revisionId
+    && item.evidenceReference === 'evidence/production-mutation.json')
+  expect(recorded).toEqual([
     expect.objectContaining({
       determination: 'The compiled client recorded the protected result exactly once.',
       evidenceReference: 'evidence/production-mutation.json',
