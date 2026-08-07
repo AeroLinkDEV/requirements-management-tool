@@ -35,7 +35,9 @@ test('verification offers the two pages by name, and both open on real work', as
   // reports zero packages on a build that has them — which is indistinguishable from a genuinely empty queue.
   const packages = page.locator('.downstreamAssessment').filter({ hasText: /TCR-/ })
   await expect(packages.first(), 'FMSLIVE should carry test change work for the in-work build').toBeVisible({ timeout: 30_000 })
-  await expect(page.getByRole('heading', { name: 'Test procedures' })).toBeVisible()
+  // No procedure inventory underneath it. The page is the change requests controlling test work; the
+  // procedures they produce are browsed in the Test Procedure Explorer.
+  await expect(page.getByRole('heading', { name: 'Test procedures' })).toHaveCount(0)
 
   await page.goBack()
   await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })

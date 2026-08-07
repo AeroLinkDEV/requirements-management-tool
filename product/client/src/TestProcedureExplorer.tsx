@@ -99,7 +99,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const scope = scopeOf(discipline)
   // A page at a time, at the requirements explorer's own default. A build holds hundreds of procedures, and
   // the reader is looking for one of them.
+  // Only the newest request may write the list.
+  //
+  // Changing a filter starts a second request while the first is still in flight, and nothing ordered the
+  // replies. The unfiltered query is by far the slower one — it scans every procedure's coverage back to the
+  // effective baseline — so the narrow filtered reply routinely arrived first and was then buried by the broad
+  // reply behind it: the reader typed a search, saw the procedure they wanted, and watched the whole list they
+  // had just filtered away come back over the top of it, with their search term still in the box.
+  const listTicket = useRef(0)
   const load = useCallback(async () => {
+    const mine = ++listTicket.current
     setError('')
     try {
       const response = await fetch(
@@ -107,8 +116,13 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         `&search=${encodeURIComponent(query)}&state=${procedureState}&outcome=${procedureOutcome}` +
         `&page=${page}&pageSize=25`)
       if (!response.ok) throw new Error(String(response.status))
-      setData(await response.json())
-    } catch (problem) { setError(operationError(problem, 'The procedure library could not be loaded.')) }
+      const paged = await response.json()
+      if (mine !== listTicket.current) return
+      setData(paged)
+    } catch (problem) {
+      if (mine !== listTicket.current) return
+      setError(operationError(problem, 'The procedure library could not be loaded.'))
+    }
   }, [api, projectId, releaseId, scope, query, procedureState, procedureOutcome, page])
   useEffect(() => { void load() }, [load])
 

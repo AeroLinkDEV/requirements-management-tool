@@ -10,7 +10,9 @@ const completedImpacts = JSON.stringify({
 })
 
 test('modified requirement coverage stays suspect until an exact approved procedure is reconfirmed', async ({ page, request }) => {
-  test.setTimeout(120_000)
+  // Longer than it was: coverage and the decision about it now live on two pages, so this journey walks
+  // between them three times rather than reading both from one screen.
+  test.setTimeout(180_000)
   await apiLogin(request)
   const showcase = await showcaseSeed(request)
 
@@ -119,6 +121,13 @@ test('modified requirement coverage stays suspect until an exact approved proced
   // beside the procedures it is about, and the decision is made inside the test change request that raised
   // it. So this walks between them, which is what the engineer does.
   const readCoverage = async () => {
+    // The assessment drawer is modal, and its backdrop swallows a click on the navigation behind it. Leaving
+    // it open here cost a full test timeout that named the link, not the drawer over it.
+    const drawer = page.getByRole('dialog', { name: /test impact/ })
+    if (await drawer.count() > 0 && await drawer.first().isVisible()) {
+      await drawer.getByRole('button', { name: 'Close test assessment' }).click()
+      await expect(drawer).toHaveCount(0, { timeout: 30_000 })
+    }
     await openNavigationGroup(page, 'ASSURANCE')
     await page.getByRole('link', { name: 'System Test Procedure Explorer' }).click()
     await expect(page.getByRole('heading', { name: 'Test Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
@@ -133,6 +142,10 @@ test('modified requirement coverage stays suspect until an exact approved proced
     await openNavigationGroup(page, 'ASSURANCE')
     await page.getByRole('link', { name: 'System Test Change Requests' }).click()
     await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+    // Waited for, not assumed. The queue is fetched after the heading paints, and the helper below enumerates
+    // it with .all(), which does not retry — so arriving a moment early means looping over nothing and never
+    // finding the decision at all.
+    await expect(page.locator('.downstreamAssessment').first()).toBeVisible({ timeout: 30_000 })
   }
 
   await readCoverage()
@@ -191,6 +204,9 @@ test('modified requirement coverage stays suspect until an exact approved proced
   await decisionRow.first().getByText(/Decision history · 3/).click()
   await expect(decisionRow.first().getByText('Decision reopened')).toBeVisible()
 
+  // And the report agrees: reconfirmed coverage counts, and the procedure that carries it is no longer marked
+  // suspect against this requirement.
+  await readCoverage()
   await expect(coverageRow.getByText('Verified', { exact: true })).toBeVisible({ timeout: 30_000 })
   await expect(coverageRow.locator('small').filter({ hasText: approvedProcedure.displayNumber })).not.toContainText('Suspect')
 
