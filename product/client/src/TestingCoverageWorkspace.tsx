@@ -403,6 +403,28 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           requirements; "is this build covered" is a question about procedures as they stand, and it is
           answered in the Test Procedure Explorer beside the procedures it is about. */}
 
+      {/* A build with nothing materialized has no exact revisions to bind a procedure to. Said plainly, and
+          said here, because this is the page a decision asks for a procedure from — the alternative is an
+          authoring form whose requirement list is empty for no stated reason, which reads as a broken page
+          rather than as work that has not happened yet. */}
+      {!requirements.length && (
+        <section className="materializationPrerequisite" role="status">
+          <div>
+            <b>Procedure authoring waits for governed requirement materialization</b>
+            <p>
+              This build has no immutable requirement revisions yet, so a new procedure cannot be bound to an
+              exact target. Existing inherited procedures remain visible against their predecessor revisions;
+              planned work for new or modified requirements stays in the test change requests below and
+              cannot count as confirmed coverage yet.
+            </p>
+          </div>
+          <div>
+            <span>Current limitation</span>
+            <b>Requirement materialization is not exposed in this workspace.</b>
+          </div>
+        </section>
+      )}
+
       {/* The queue, before the inventory. Somebody arriving to do verification work needs to know what this
           build's changes have made their problem — a wall of green coverage says nothing about that. */}
       <section className="coverageCard">
