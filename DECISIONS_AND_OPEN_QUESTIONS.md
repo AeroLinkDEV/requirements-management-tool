@@ -1580,6 +1580,32 @@ Future entries use:
   - Retargeting a stranded procedure survives, but is level-bounded: it may move to another requirement at its
     own level, never across one.
 
+### DEC-100 - A Procedure Is Browsed Through the Requirements Inspector, Not a Copy of It
+
+- **Date:** 2026-08-06
+- **Status:** Accepted; the Test Procedure Explorer is delivered, the two pages behind it are not yet
+- **Decision:** Verification gets a third page per discipline, **Test Procedure Explorer**, listing every
+  controlled procedure in the build with a right-side inspector carrying the same four tabs a requirement's
+  does — Overview, Trace & impact, History, Discussion — rendered from `RequirementsWorkspace.css` and, for the
+  discussion, from the same `form` and `article` markup and the same `ArtifactComment` record.
+- **Rationale:** [DEC-097](#dec-097---a-test-procedure-is-built-and-handled-exactly-as-a-requirement-is) made
+  the procedure *model* mirror the requirement model. This is the same commitment one layer up: an engineer who
+  can read a requirement can read a procedure without being taught a second screen.
+- **Consequences:**
+  - **Trace runs the other way, and that is the one real difference.** A requirement's trace shows what derives
+    from it; a procedure's shows the requirements it exists to verify. A procedure verifying nothing says so,
+    because that is the stranded case [DEC-098](#dec-098---a-test-procedure-covers-requirements-at-its-own-level-and-nothing-else) governs.
+  - Resolving a procedure comment goes through the existing `/api/enterprise-requirements/comments/{id}/resolve`
+    route, which reads `ArtifactComments` by identifier alone and never mentioned requirements except in its
+    path. A second route would have been a second behaviour to keep in step.
+  - Mentioning somebody on a procedure notifies them, as it does on a requirement. Procedures carry no watch
+    list, so the audience is who was named plus whoever is being replied to.
+  - The page is **additive**. Procedures appear both here and in the Testing Coverage library until the
+    remaining stages rename that page to Change Requests and strip the library out of it. Visibly redundant for
+    a while, but never half-migrated.
+  - Discussion is read-only in a released build, matching the requirements pane exactly.
+  - The list pages 25 at a time behind the same `.pager` control, and the discussion loads on selection rather
+    than on opening the tab, because the tab wears the comment count.
 ### DEC-101 - A Revision Takes Its Folded-In Claims With It
 
 - **Date:** 2026-08-06
@@ -1733,6 +1759,21 @@ there, and the message pointed at the wrong thing.
 A locator that narrows by the presence of something is a silent assertion. When that something moves, the
 locator does not break — it widens. Where a filter is load-bearing, assert what it found before acting on it,
 or select by a property the redesign cannot remove.
+
+### LES-008 - A Test Timeout Names the Test, Not the Action That Hung
+
+The production design-contract sweep timed out at its full 600 seconds, twice, with the failure snapshot showing
+the Test Procedure Explorer rendered correctly. Both times the conclusion drawn was "the sweep has outgrown its
+budget, and the new page is simply the route it happened to reach" — and both times that was wrong. The trace
+told the truth immediately: one `page.locator('main').innerText()` call had consumed **562 of the 600 seconds**,
+because the new page rendered a `<div>` where every other workspace renders its own `<main>`. Playwright waited
+for a landmark that was never going to appear; `.catch(() => '')` could not fire, because the action had not
+failed yet.
+
+Two things follow. A missing landmark is a real accessibility defect, and it was found by a timeout rather than
+by the accessibility journeys, because those walk a hardcoded surface list that the new page was not on. And a
+timeout report names the *test*, never the action inside it — the unmatched `before` event in `trace.zip` names
+the action. Read the trace before theorising about budget.
 
 ## Working Assumptions
 
