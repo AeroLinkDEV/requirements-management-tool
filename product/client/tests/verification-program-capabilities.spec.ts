@@ -55,7 +55,7 @@ test('verification actions follow authority in the selected Program',async({page
       description:`${label} verification fixture`,
     }})
     expect(buildResponse.ok(),await buildResponse.text()).toBeTruthy()
-    return {requirementRevisionId,buildId:(await buildResponse.json()).id as string}
+    return {requirementRevisionId,baselineId:baseline.id as string,buildId:(await buildResponse.json()).id as string}
   }
   const testTarget=await prepareExactRequirement(testWorkspace,'Test authority')
   const approvalTarget=await prepareExactRequirement(approvalWorkspace,'Approval authority')
@@ -89,33 +89,69 @@ test('verification actions follow authority in the selected Program',async({page
   const reviewerRequest=await playwright.request.newContext()
   const reviewerLogin=await reviewerRequest.post(`${apiBase}/api/auth/login`,{data:{userName:'systems.reviewer',password:'AeroLink!2026'}})
   expect(reviewerLogin.ok(),await reviewerLogin.text()).toBeTruthy()
-  const createProcedure=async(projectId:string,requirementRevisionId:string,title:string,approve=true,approverId='systems.reviewer')=>{
-    const createdResponse=await request.post(`${apiBase}/api/test-procedures`,{data:{
-      projectId,
-      baseNumber:'SERVER-ALLOCATED',
+  /**
+   * A procedure, brought into existence the only way there is: proposed on the test change request the
+   * approved requirement change raised, carried through that package's review, and materialised into the
+   * build. There is no create route to shortcut this with, and adding a test-only one would mean this
+   * journey stopped exercising the path the product actually has.
+   *
+   * It arrives Approved because the package was approved. Nothing signs the revision separately.
+   */
+  const introduceApprovedProcedure=async(workspace:any,target:{requirementRevisionId:string;baselineId:string},title:string)=>{
+    const reviewsResponse=await request.get(`${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`)
+    expect(reviewsResponse.ok(),await reviewsResponse.text()).toBeTruthy()
+    const review=(await reviewsResponse.json()).find((x:{discipline:string})=>x.discipline==='System')
+    expect(review,'the approved requirement change raised no System test change request').toBeTruthy()
+
+    const concluded=await request.post(`${apiBase}/api/test-change-reviews/${review.id}/conclusion`,{data:{testChangeRequired:true}})
+    expect(concluded.ok(),await concluded.text()).toBeTruthy()
+
+    const impactResponse=await request.get(`${apiBase}/api/releases/${workspace.release.id}/verification-impact`)
+    expect(impactResponse.ok(),await impactResponse.text()).toBeTruthy()
+    for(const item of (await impactResponse.json()).filter((x:{testChangeReviewId:string})=>x.testChangeReviewId===review.id)){
+      const resolved=await request.post(`${apiBase}/api/verification-impact/${item.id}/resolve`,{data:{
+        outcome:'NewProcedureRequired',
+        rationale:'The procedure proposed on this package will cover it.',
+      }})
+      expect(resolved.ok(),await resolved.text()).toBeTruthy()
+    }
+
+    // Named, because submission refuses an introduced procedure that says nothing about what it verifies.
+    const proposed=await request.post(`${apiBase}/api/test-change-reviews/${review.id}/procedure-changes`,{data:{
+      kind:'Introduce',
+      revision:0,
       title,
       objective:'Verify Program-scoped frontend authority.',
       preconditions:'Controlled configuration available.',
       steps:'Exercise the approved behavior.',
       expectedResult:'The expected behavior is observed.',
-      requirementRevisionIds:[requirementRevisionId],
-      approverId,
-      level:'System',
+      rationale:'Nothing in this build covers the new requirement.',
+      drivingRequirementRevisionIds:[target.requirementRevisionId],
     }})
-    expect(createdResponse.ok(),await createdResponse.text()).toBeTruthy()
-    const created=await createdResponse.json()
-    if(approve){
-      const approved=await reviewerRequest.post(`${apiBase}/api/test-procedures/${created.revisionId}/approve`,{data:{
-        password:'AeroLink!2026',
-        meaning:'Approved independently for capability-surface validation.',
-      }})
-      expect(approved.ok(),await approved.text()).toBeTruthy()
-    }
-    return created
+    expect(proposed.ok(),await proposed.text()).toBeTruthy()
+
+    const submitted=await request.post(`${apiBase}/api/test-change-reviews/${review.id}/submit`,{data:{approverId:'systems.reviewer'}})
+    expect(submitted.ok(),await submitted.text()).toBeTruthy()
+    const approved=await reviewerRequest.post(`${apiBase}/api/test-change-reviews/${review.id}/approve`,{data:{
+      rationale:'Procedure decisions are complete and technically sound.',
+    }})
+    expect(approved.ok(),await approved.text()).toBeTruthy()
+
+    const selected=await request.post(`${apiBase}/api/baselines/${target.baselineId}/test-change-requests`,{data:{testChangeRequestId:review.id}})
+    expect(selected.ok(),await selected.text()).toBeTruthy()
+    const materialized=await request.post(`${apiBase}/api/baselines/${target.baselineId}/materialize-test-procedures`,{data:{}})
+    expect(materialized.ok(),await materialized.text()).toBeTruthy()
+
+    const proceduresResponse=await request.get(`${apiBase}/api/test-procedures?projectId=${workspace.project.id}&search=${encodeURIComponent(title)}&page=1&pageSize=1`)
+    expect(proceduresResponse.ok(),await proceduresResponse.text()).toBeTruthy()
+    const procedure=(await proceduresResponse.json()).items[0]
+    expect(procedure,'materialisation produced no procedure').toBeTruthy()
+    // Approved on the package's authority, with no second signature anywhere in the chain above.
+    expect(procedure.state).toBe('Approved')
+    return procedure
   }
-  const testProcedure=await createProcedure(testWorkspace.project.id,testTarget.requirementRevisionId,'Test-authority approved procedure')
-  const approvalProcedure=await createProcedure(approvalWorkspace.project.id,approvalTarget.requirementRevisionId,'Approval-only approved procedure')
-  await createProcedure(approvalWorkspace.project.id,approvalTarget.requirementRevisionId,'Approval-only draft procedure',false,userName)
+  const testProcedure=await introduceApprovedProcedure(testWorkspace,testTarget,'Test-authority approved procedure')
+  const approvalProcedure=await introduceApprovedProcedure(approvalWorkspace,approvalTarget,'Approval-only approved procedure')
   for(const [workspace,procedure,buildId] of [[testWorkspace,testProcedure,testTarget.buildId],[approvalWorkspace,approvalProcedure,approvalTarget.buildId]]){
     const recorded=await request.post(`${apiBase}/api/test-executions`,{data:{
       projectId:workspace.project.id,
@@ -157,12 +193,13 @@ test('verification actions follow authority in the selected Program',async({page
   await page.goto(`/programs/${testWorkspace.program.id}/projects/${testWorkspace.project.id}/releases/${testWorkspace.release.id}/command-center`)
   await expect(page.getByRole('heading',{name:/Command Center/})).toBeVisible()
 
-  // Test Engineer authority in this Program: procedures can be written, and results recorded against the
-  // build's test set.
+  // Test Engineer authority in this Program: results can be recorded against the build's test set. Writing a
+  // procedure is not an authority this page grants any more — one is introduced by a test change request —
+  // so what is checked here is that the page offers nobody a way to write one, whatever they may do.
   await openNavigationGroup(page,'ASSURANCE')
   await page.getByRole('link',{name:'System Testing Coverage'}).click()
   await expect(page.getByRole('heading',{name:'Testing Coverage'})).toBeVisible({timeout:30_000})
-  await expect(page.getByRole('button',{name:/New test procedure/})).toBeEnabled()
+  await expect(page.getByRole('button',{name:/New test procedure/})).toHaveCount(0)
 
   await page.getByRole('link',{name:'System Test Results'}).click()
   await expect(page.getByRole('heading',{name:'Test Results'})).toBeVisible({timeout:30_000})
@@ -175,12 +212,16 @@ test('verification actions follow authority in the selected Program',async({page
   await expect(page.getByLabel('Evidence reference')).not.toHaveAttribute('required','')
   await page.getByRole('button',{name:'Cancel'}).click()
 
-  // Approver authority without Test Engineer authority: a draft can be signed for, and nothing can be run.
+  // Approver authority without Test Engineer authority: nothing here can be written and nothing can be run.
+  // There is no procedure to approve either — approving a procedure is approving the test change request that
+  // carries it, which happens on that package, not in this library.
   await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification/coverage`)
   await expect(page.getByRole('heading',{name:'Testing Coverage'})).toBeVisible({timeout:30_000})
-  await expect(page.getByRole('button',{name:/New test procedure/})).toBeDisabled()
-  const draftRow=page.locator('.procedureLibrary .coverageRow').filter({hasText:'Approval-only draft procedure'})
-  await expect(draftRow.getByRole('button',{name:'Review & approve'})).toBeVisible({timeout:30_000})
+  await expect(page.getByRole('button',{name:/New test procedure/})).toHaveCount(0)
+  await expect(page.getByRole('button',{name:'Review & approve'})).toHaveCount(0)
+  // The procedure the package produced is readable here, which is what this page is for now.
+  const approvedRow=page.locator('.procedureLibrary .coverageRow').filter({hasText:'Approval-only approved procedure'})
+  await expect(approvedRow).toBeVisible({timeout:30_000})
 
   await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification/results`)
   await expect(page.getByRole('heading',{name:'Test Results'})).toBeVisible({timeout:30_000})

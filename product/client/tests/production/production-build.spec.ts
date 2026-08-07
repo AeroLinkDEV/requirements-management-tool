@@ -272,49 +272,33 @@ test('the production wrapper accepts relative and absolute unsafe request URLs f
   expect(methods).toEqual(['POST', 'PUT', 'PATCH', 'DELETE'])
 })
 
-test('verification mutation failures retain the engineer input and only confirmed success creates one immutable result', async ({ page, request, playwright, baseURL }) => {
+test('verification mutation failures retain the engineer input and only confirmed success creates one immutable result', async ({ page, request }) => {
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
-  const requirementsResponse = await request.get(`/api/requirements?projectId=${showcase.projectId}&baselineId=${showcase.releasedBaselineId}&scope=System&page=1&pageSize=1`)
-  expect(requirementsResponse.ok(), await requirementsResponse.text()).toBeTruthy()
-  const requirements = await requirementsResponse.json()
 
-  const engineer = await playwright.request.newContext({ baseURL })
-  const engineerLogin = await engineer.post('/api/auth/login', { data: { userName: 'test.engineer', password: 'AeroLink!2026' } })
-  expect(engineerLogin.ok(), await engineerLogin.text()).toBeTruthy()
-  const created = await engineer.post('/api/test-procedures', { data: {
-    projectId: showcase.projectId,
-    baseNumber: 'SERVER-ALLOCATED',
-    title: `Production result procedure ${Date.now()}`,
-    objective: 'Exercise the production mutation and failure contract.',
-    preconditions: 'Compiled single-origin client is running.',
-    steps: 'Record one externally determined result.',
-    expectedResult: 'Exactly one immutable result exists after server confirmation.',
-    requirementRevisionIds: [requirements.items[0].revisionId],
-    approverId: 'admin',
-    level: 'System',
-  } })
-  expect(created.ok(), await created.text()).toBeTruthy()
-  const procedure = await created.json()
-  const approved = await request.post(`/api/test-procedures/${procedure.revisionId}/approve`, { data: {
-    password: 'AeroLink!2026',
-    meaning: 'Approved for the compiled production mutation qualification.',
-  } })
-  expect(approved.ok(), await approved.text()).toBeTruthy()
-  await engineer.dispose()
-
+  // This journey is about the compiled client's mutation and failure contract, not about where procedures
+  // come from. It used to write one through the direct-create route and sign it; both are gone, because a
+  // procedure is introduced by a test change request and approved with that package. So it takes an approved
+  // procedure the build already carries — which the candidate list holds by definition, since that list is
+  // exactly the approved procedures not yet in the set.
   await login(page)
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('link', { name: 'System Test Results' }).click()
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
 
-  // A determination is recorded against a procedure the build is set to run, so the one created through the
-  // API is put in the set first. The candidate list is paged, so it is searched rather than scrolled to.
-  await page.getByLabel('Find an approved procedure').fill(procedure.displayNumber.replace(/\.\d{2}$/, ''))
-  const candidate = page.getByRole('checkbox', { name: new RegExp(procedure.displayNumber.replace('.', '\\.')) })
+  const candidate = page.getByRole('checkbox', { name: /SYSTP-\d{6}\.\d{2}/ }).first()
   await expect(candidate).toBeVisible({ timeout: 30_000 })
+  const displayNumber = (await candidate.getAttribute('aria-label') ?? await candidate.evaluate(node =>
+    (node.closest('label') ?? node.parentElement)?.textContent ?? ''))!.match(/SYSTP-\d{6}\.\d{2}/)![0]
+
+  const procedureResponse = await request.get(
+    `/api/test-procedures?projectId=${showcase.projectId}&search=${displayNumber.replace(/\.\d{2}$/, '')}&page=1&pageSize=1`)
+  expect(procedureResponse.ok(), await procedureResponse.text()).toBeTruthy()
+  const procedure = (await procedureResponse.json()).items[0]
+  expect(procedure.state).toBe('Approved')
+
   await candidate.check()
   await expect(candidate).toBeChecked()
   const addToSet = page.getByRole('button', { name: 'Add — covers a change' })
@@ -350,10 +334,17 @@ test('verification mutation failures retain the engineer input and only confirme
   await row.getByRole('button', { name: 'Runs' }).click()
   await expect(row.locator('.runList li').filter({ hasText: 'compiled client recorded' })).toBeVisible({ timeout: 30_000 })
 
+  // Exactly one result from this journey: the aborted attempt and the refused one recorded nothing, and the
+  // confirmed one recorded once. Matched on the evidence this journey supplies rather than on the procedure,
+  // because the procedure is one the build already carries and it already has runs behind it from an earlier
+  // build — counting those would be counting somebody else's work as this test's output.
   const executionsResponse = await request.get(`/api/test-executions?projectId=${showcase.projectId}`)
   expect(executionsResponse.ok(), await executionsResponse.text()).toBeTruthy()
   const executions = await executionsResponse.json()
-  expect(executions.filter((item: { procedureRevisionId: string }) => item.procedureRevisionId === procedure.revisionId)).toEqual([
+  const recorded = executions.filter((item: { procedureRevisionId: string; evidenceReference: string }) =>
+    item.procedureRevisionId === procedure.revisionId
+    && item.evidenceReference === 'evidence/production-mutation.json')
+  expect(recorded).toEqual([
     expect.objectContaining({
       determination: 'The compiled client recorded the protected result exactly once.',
       evidenceReference: 'evidence/production-mutation.json',

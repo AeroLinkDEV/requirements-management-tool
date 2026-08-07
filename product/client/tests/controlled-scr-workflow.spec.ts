@@ -31,11 +31,10 @@ test('author creates, edits, submits, and sequentially approves a change request
   await expect(page.getByText(/no immutable requirement revisions yet/)).toBeVisible()
   await expect(page.getByText(/Existing inherited procedures remain visible/)).toBeVisible()
   await expect(page.getByText(/Requirement materialization is not exposed/)).toBeVisible()
-  await expect(page.getByRole('button',{name:'+ New test procedure'})).toBeDisabled()
-  await expect(page.getByRole('button',{name:'+ New test procedure'})).toHaveAttribute(
-    'title',
-    'Materialize the software build requirements before creating a procedure.',
-  )
+  // No such control, disabled or otherwise. A procedure is introduced by a test change request, so the page
+  // that lists procedures offers no way to write one — the same way the requirements explorer offers no way
+  // to write a requirement.
+  await expect(page.getByRole('button',{name:'+ New test procedure'})).toHaveCount(0)
   await page.getByRole('link',{name:'Command Center'}).click()
 
   await openNewSoftwareChangeRequest(page,'HLR')

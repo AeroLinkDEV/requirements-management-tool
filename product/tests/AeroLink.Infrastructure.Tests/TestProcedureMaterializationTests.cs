@@ -259,7 +259,10 @@ public sealed class TestProcedureMaterializationTests
     }
 
     private static TestProcedureChangeDraft Change(string baseNumber, int revision, TestProcedureChangeKind kind,
-        string title, string drivingRequirementRevisionIdsJson = "[]") =>
+        // Defaulted to naming a requirement, because submission refuses an introduced procedure that names
+        // none. A fixed identifier rather than a fresh one: these tests assert on membership and history, so
+        // a value that changed per run would make a failure harder to read. Tests that care pass their own.
+        string title, string drivingRequirementRevisionIdsJson = "[\"5a1d1f92-6c2f-4a1e-9d33-0f5b2c7a4e10\"]") =>
         new(baseNumber, revision, TestProcedureLevel.System, kind, title,
             kind == TestProcedureChangeKind.Retire ? "" : "Verify oceanic waypoint sequencing.",
             kind == TestProcedureChangeKind.Retire ? "" : "The aircraft is in cruise on an oceanic plan.",

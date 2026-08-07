@@ -292,6 +292,11 @@ public static class VerificationImpactEndpoints
                     : (request.BaseNumber ?? "").Trim();
                 if (request.Kind != TestProcedureChangeKind.Introduce && baseNumber.Length == 0)
                     return Results.BadRequest(new { error = "A modification or retirement must name the procedure it acts on." });
+                // Deliberately no "must name a requirement revision" rule here, though the direct-create route
+                // that this replaced had one. That route wrote a controlled procedure immediately, so it
+                // needed its coverage at that moment; a package only proposes, and a proposal's driving
+                // revisions become real coverage at materialization. Whether a package may introduce a
+                // procedure that names nothing is a product question, not a gap to be closed by reflex.
                 // A modification or retirement names a controlled procedure, so the server proves it is one:
                 // that it exists, belongs to this project, sits at this discipline's level, and that the
                 // proposed revision advances the one it actually has. Left unchecked, a typo survived approval

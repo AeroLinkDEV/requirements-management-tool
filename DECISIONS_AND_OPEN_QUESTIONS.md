@@ -1629,6 +1629,55 @@ Future entries use:
     The API test drives the real route and was confirmed to fail without the include.
   - The endpoint now reports `coveredChangeRequests` on the successor, so the move is visible in the response
     rather than only in the table.
+### DEC-103 - A Procedure Is Only Introduced, Modified or Retired by a Test Change Request
+
+- **Date:** 2026-08-07
+- **Status:** Accepted
+- **Decision:** Nothing creates a test procedure outside a package. The `+ New test procedure` control and the
+  `POST /api/test-procedures` route are removed. A procedure comes into existence, changes, or is retired only
+  through a `TestProcedureChange` on a test change request, reviewed with that package and materialised into
+  the build — exactly as a requirement is only changed by a change request.
+- **Rationale:** There is no `+ New requirement` button, and there should never have been a procedure
+  equivalent. The product already knew: the code carried a comment saying the control *"writes a procedure
+  with no memory of why it exists"* and offered it anyway. Two ways in meant a procedure could exist with no
+  package, no rationale and no trace to the change that required it.
+- **Consequences:**
+  - **`Author the procedure`**, on a decision that asked for one, now proposes an `Introduce` change on the
+    package that asked — carrying the driving requirement revision — rather than writing a procedure. It picks
+    no approver: the package carries the proposal to its own review, and a second approver for the procedure
+    alone would be a second approval of the same work.
+  - Probing the collection with `POST` answers **405, not 404** — the collection is still there to be read,
+    and only the verb that wrote is gone. The test asserts that exact status, because a 404 would mean the
+    route had been renamed rather than retired, and the door would still be open somewhere else.
+  - **A rule was nearly lost and nearly mis-ported.** The removed route refused a procedure that named no
+    requirement revision. Moving that onto the package proposal broke three existing tests, correctly: that
+    route wrote a controlled procedure immediately and needed its coverage then, while a package only
+    proposes and driving revisions become coverage at materialisation. The rule was not ported — it was
+    reinstated deliberately, at a different moment, as the next two points record.
+  - **A procedure being introduced must name at least one requirement revision it verifies.** A procedure that
+    verifies nothing is not a controlled procedure, and an approver must never be asked to sign one.
+  - **That rule is enforced when the package is submitted for review, not while it is being drafted.** A draft
+    package is worked on incrementally, exactly as a change request is, so the gate belongs where an approver
+    is about to sign rather than where an engineer starts typing. `TestChangeReview.SubmitForReview` refuses a
+    package whose introduced procedures name nothing; the authoring endpoint deliberately does not, and says
+    so in a comment where the temptation to add it will next appear.
+  - **Procedure-level approval does not survive.** `POST /api/test-procedures/{revisionId}/approve`, the
+    `Review & approve` control, the client call path, the `selectedApproverId` projection that routed it, and
+    `TestProcedureRevision.Approve` are all removed. The last of those had exactly one caller — the deleted
+    route — and a capability nothing calls is not a capability
+    ([LES-006](#les-006---a-capability-with-no-caller-is-not-delivered)).
+  - **Approving the test change request is the authorisation for materialising its procedure revisions.** The
+    SYSTCR, HLRTCR or LLRTCR is what gets reviewed and signed. That signature covers the procedure work the
+    package carries, because that work is what the package *is*.
+  - **Materialised revisions are written directly as `Approved`**, on that authority, and there is no separate
+    signature on the procedure revision for the same change. Signing twice would not make the work more
+    controlled; it would only make it ambiguous which signature meant it.
+  - No controlled path now produces a `Draft` procedure revision. Drafts that predate controlled test change
+    still exist and are still shown as what they are; they are simply not approvable any more, because the
+    step that approved them was a second approval of work no package had ever carried.
+  - The rule that outlived the approval is that an unapproved revision cannot be executed. That is enforced at
+    `POST /api/test-executions` and is the reason a Draft still means something.
+
 ### DEC-102 - Answering an Assessment Is What Takes It On
 
 - **Date:** 2026-08-06
@@ -1774,6 +1823,30 @@ Two things follow. A missing landmark is a real accessibility defect, and it was
 by the accessibility journeys, because those walk a hardcoded surface list that the new page was not on. And a
 timeout report names the *test*, never the action inside it — the unmatched `before` event in `trace.zip` names
 the action. Read the trace before theorising about budget.
+
+### LES-009 - A Rule Moved Is Not the Same Rule, and Look-Alike Call Sites Are Not Alike
+
+Three defects in one day, all the same shape: several sites looked alike, one change was applied to all of
+them, and each time the difference that mattered was invisible in the text.
+
+A rule was carried from the deleted direct-create route onto the test change request's proposal — *a procedure
+must name what it verifies*. Three tests failed and were right to. The old route created a controlled
+procedure the instant it was called and needed its coverage then; a package only proposes, and driving
+revisions become coverage at materialisation. Identical words, different moment, different rule. The rule was
+later reinstated deliberately, at submission, by
+[DEC-103](#dec-103---a-procedure-is-only-introduced-modified-or-retired-by-a-test-change-request) — which is
+the point: it belonged somewhere, but not where it was first put.
+
+A `replace_all` across two identical proposal payloads broke a passing test. The break was the useful part: it
+revealed that the procedure-changes endpoint validates driving requirement revisions against real ones, which
+no amount of reading the diff would have shown.
+
+And scripted multi-line edits silently changed nothing three times, because the working tree is CRLF — see
+[LES-005](#les-005---prefer-the-editor-over-scripted-multi-file-edits).
+
+Treat "these all look the same" as a reason to open each one. Before moving a rule, ask what was true where it
+came from that may not be true where it is going. When a batch edit breaks something that was passing, read
+the breakage before undoing it — it is describing the system.
 
 ## Working Assumptions
 

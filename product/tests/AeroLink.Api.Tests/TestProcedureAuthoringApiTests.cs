@@ -22,7 +22,7 @@ namespace AeroLink.Api.Tests;
 public sealed class TestProcedureAuthoringApiTests
 {
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid TcrId, Guid ReleasedTcrId,
-        Guid OtherProjectRequirementRevisionId);
+        Guid RequirementRevisionId, Guid OtherProjectRequirementRevisionId);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -79,6 +79,17 @@ public sealed class TestProcedureAuthoringApiTests
 
         var tcrId = await db.TestChangeReviews.Where(x => x.ChangeRequestId == open.Id).Select(x => x.Id).SingleAsync();
         var releasedTcrId = await db.TestChangeReviews.Where(x => x.ChangeRequestId == shipped.Id).Select(x => x.Id).SingleAsync();
+        // The requirement revision SRCR-00920 introduced, in this project and at System level — the approved
+        // change whose impact raised this very package. A procedure introduced here verifies that, so the
+        // seed carries the real thing rather than an invented identifier: the server checks a driving
+        // revision exists, belongs to this project, and sits at the discipline's level, and refuses anything
+        // that does not. An invented Guid is refused as nonexistent, which is exactly right of it.
+        var baseline = new CandidateBaseline("SW-01.60", 0, project.Id, inWork.Id, null, "In work", "cm", now);
+        var artifact = new RequirementArtifact(project.Id, "SYSR-00000921", RequirementLevel.System, now);
+        var revision = new RequirementRevision(artifact.Id, 0, "The FMS shall sequence oceanic waypoints.",
+            "New capability.", "Test", RequirementRevisionState.Active, open.Id, baseline.Id, now);
+        db.AddRange(baseline, artifact, revision);
+
         // A requirement in a different project, so a cross-project link has something real to be refused for.
         var elsewhereProgram = new ProgramRecord("Other Program", "OTH");
         var elsewhereProject = new ProjectRecord(elsewhereProgram.Id, "Software", "Other Software");
@@ -90,7 +101,7 @@ public sealed class TestProcedureAuthoringApiTests
         db.AddRange(elsewhereProgram, elsewhereProject, elsewhereRelease, elsewhereBaseline, elsewhereArtifact, elsewhereRevision);
         await db.SaveChangesAsync();
 
-        return new(project.Id, inWork.Id, tcrId, releasedTcrId, elsewhereRevision.Id);
+        return new(project.Id, inWork.Id, tcrId, releasedTcrId, revision.Id, elsewhereRevision.Id);
     }
 
     private static async Task LoginAsync(HttpClient client, string user)
@@ -324,7 +335,10 @@ public sealed class TestProcedureAuthoringApiTests
             {
                 kind = "Introduce", revision = 0, title = "Oceanic waypoint sequencing",
                 objective = "Verify oceanic sequencing.", preconditions = "Cruise.",
-                steps = "1. Load. 2. Read.", expectedResult = "Sequenced.", rationale = "Nothing covers it."
+                steps = "1. Load. 2. Read.", expectedResult = "Sequenced.", rationale = "Nothing covers it.",
+                // Named, because this package is submitted below and submission refuses an introduced
+                // procedure that verifies nothing.
+                drivingRequirementRevisionIds = new[] { fixture.RequirementRevisionId }
             });
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
 

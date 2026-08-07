@@ -55,7 +55,8 @@ public sealed class ProcedureBaselineApiTests
                 review.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000931", 0,
                     TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Oceanic waypoint sequencing",
                     "Verify oceanic sequencing.", "Cruise.", "1. Load. 2. Read.", "Sequenced.",
-                    "Nothing covers oceanic sequencing."), now);
+                    // Names a requirement: submission refuses an introduced procedure that verifies nothing.
+                    "Nothing covers oceanic sequencing.", $"[\"{Guid.NewGuid()}\"]"), now);
             }
             else review.RecordNoTestChangeRequired("verification.engineer", "Existing procedures already exercise it.", now);
             review.Submit("verification.engineer", "test.lead", true, now);

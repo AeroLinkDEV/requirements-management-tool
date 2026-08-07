@@ -75,9 +75,9 @@ public sealed class CoverageStateFilterApiTests
             settledRevision, suspectRevision, bareRevision, unapprovedRevision);
 
         var approvedProcedure = new TestProcedure(project.Id, "TP-00000801", "Oceanic sequencing", "test.author", now);
+        // Approved as materialisation writes it, on the authority of the package that carried the change.
         var approvedRevision = new TestProcedureRevision(approvedProcedure.Id, 1, "Objective", "Preconditions",
-            "Steps", "Expected", TestProcedureState.Draft, "test.author", now);
-        approvedRevision.Approve("test.approver");
+            "Steps", "Expected", TestProcedureState.Approved, "test.author", now);
 
         var draftProcedure = new TestProcedure(project.Id, "TP-00000802", "Failure annunciation", "test.author", now);
         var draftRevision = new TestProcedureRevision(draftProcedure.Id, 1, "Objective", "Preconditions",

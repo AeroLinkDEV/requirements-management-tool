@@ -44,9 +44,9 @@ public sealed class CorrectiveActionRoutingApiTests
         Guid Raise(TestProcedureLevel level, string number, string procedureNumber)
         {
             var procedure = new TestProcedure(project.Id, procedureNumber, $"{level} behaviour", "test.author", now, level);
+            // Approved as materialisation writes it, on the authority of the package that carried the change.
             var revision = new TestProcedureRevision(procedure.Id, 1, "Objective", "Preconditions", "Steps", "Expected",
-                TestProcedureState.Draft, "test.author", now);
-            revision.Approve("test.approver");
+                TestProcedureState.Approved, "test.author", now);
             var execution = new TestExecution(project.Id, revision.Id, null, null, TestOutcome.Fail, "test.engineer",
                 "Rig", "Observed output did not satisfy the expected result.", "evidence/fail.json", now, now);
             var report = new ProblemReport(project.Id, number, $"{level} failure", "Problem", "Analysis", "reporter", now,

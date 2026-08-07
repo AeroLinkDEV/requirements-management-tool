@@ -128,64 +128,28 @@ public sealed class VerificationImpactApiTests
         }
     }
 
+    /// <summary>
+    /// A procedure is introduced by a package, and by nothing else.
+    ///
+    /// The direct-create route is gone: a procedure written straight into the library had no change request
+    /// behind it and no record of why it existed, which is not how a requirement is ever changed. Introducing
+    /// one is a package's proposal now, exercised in full by the workspace journeys; what this holds is that
+    /// no other door remains open, because a rule enforced in one place and bypassable in another is not a
+    /// rule.
+    /// </summary>
     [Fact]
-    public async Task Procedure_authoring_requires_an_exact_materialized_requirement_revision()
+    public async Task A_procedure_cannot_be_created_outside_a_package()
     {
         using var factory = new AeroLinkApiFactory();
-        var fixture = await SeedAsync(factory,
-            ("cm.user", ProgramRole.ConfigurationManager), ("eng.user", ProgramRole.TestEngineer),
-            ("approver.user", ProgramRole.Approver));
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory, ("eng.user", ProgramRole.TestEngineer));
+        await LoginAsync(client, "eng.user");
 
-        using (var engineer = factory.CreateClient())
-        {
-            await LoginAsync(engineer, "eng.user");
-            using var premature = await engineer.PostAsJsonAsync("/api/test-procedures", new
-            {
-                projectId = fixture.ProjectId,
-                title = "Premature procedure",
-                objective = "Must not bind before materialization.",
-                preconditions = "None",
-                steps = "Attempt authoring.",
-                expectedResult = "The prerequisite is explicit.",
-                requirementRevisionIds = Array.Empty<Guid>(),
-                level = "System"
-            });
-            Assert.Equal(HttpStatusCode.BadRequest, premature.StatusCode);
-            var refusal = await premature.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal("materialized_requirement_required", refusal.GetProperty("code").GetString());
-        }
-
-        using (var configurationManager = factory.CreateClient())
-        {
-            await LoginAsync(configurationManager, "cm.user");
-            using var freeze = await configurationManager.PostAsJsonAsync(
-                $"/api/baselines/{fixture.BaselineId}/freeze", new { });
-            Assert.Equal(HttpStatusCode.OK, freeze.StatusCode);
-            using var materialize = await configurationManager.PostAsJsonAsync(
-                $"/api/baselines/{fixture.BaselineId}/materialize-requirements", new { });
-            Assert.Equal(HttpStatusCode.OK, materialize.StatusCode);
-        }
-
-        using (var engineer = factory.CreateClient())
-        {
-            await LoginAsync(engineer, "eng.user");
-            var requirements = await engineer.GetFromJsonAsync<JsonElement>(
-                $"/api/requirements?projectId={fixture.ProjectId}&baselineId={fixture.BaselineId}&scope=System&includeRetired=false&page=1&pageSize=10");
-            var revisionId = requirements.GetProperty("items")[0].GetProperty("revisionId").GetGuid();
-            using var created = await engineer.PostAsJsonAsync("/api/test-procedures", new
-            {
-                projectId = fixture.ProjectId,
-                title = "Exact post-materialization procedure",
-                objective = "Verify the exact controlled requirement.",
-                preconditions = "Materialized configuration loaded.",
-                steps = "Exercise the requirement.",
-                expectedResult = "The required behavior is observed.",
-                requirementRevisionIds = new[] { revisionId },
-                approverId = "approver.user",
-                level = "System"
-            });
-            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        }
+        // Method not allowed rather than not found: the collection is still there to be read, and only the
+        // verb that wrote to it is gone. Asserting the exact status is the point — a 404 here would mean the
+        // route had been renamed rather than retired, and the door would still be open somewhere else.
+        using var direct = await client.PostAsJsonAsync("/api/test-procedures", new { projectId = fixture.ProjectId });
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, direct.StatusCode);
     }
 
     [Fact]

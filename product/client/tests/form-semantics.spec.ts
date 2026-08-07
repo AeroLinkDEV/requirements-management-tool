@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { apiLogin, layoutSettled, login, selectProgram, surfacePainted } from './auth'
+import { apiBase, apiLogin, firstSectionId, layoutSettled, login, selectProgram, surfacePainted } from './auth'
 
 /**
  * Every control on a controlled-authoring form is programmatically what it looks like.
@@ -271,16 +271,175 @@ test('verification, review and administration forms carry the same semantics', a
     }
   }
 
-  // The other half: authoring a procedure, which is a longer form and the only one on the coverage page.
+  // The coverage page offers no form of its own: a procedure is introduced by a test change request, so
+  // nothing on this page writes one.
   await page.goto(new URL(root + '/system-verification/coverage', page.url()).toString(), { waitUntil: 'load' })
   await surfacePainted(page)
   await layoutSettled(page)
-  await page.getByRole('button', { name: '+ New test procedure' }).click()
-  await expect(page.getByRole('dialog', { name: 'Create a test procedure' })).toBeVisible({ timeout: 30_000 })
-  await inspect(page, 'Create a test procedure', failures)
-  for (const label of ['Title', 'Objective', 'Expected result']) {
-    await labelActivatesControl(page, label, 'Create a test procedure', failures)
+  await expect(page.getByRole('button', { name: '+ New test procedure' })).toHaveCount(0)
+
+  // The procedure-authoring form is still audited, through the only door it has.
+  //
+  // It used to be reached by pressing a control in the library, and that control is gone. Reaching it now
+  // needs a decision that asked for a procedure, on a package, in a build whose requirements are materialised
+  // — because a procedure binds to an exact revision and there is nothing to bind to otherwise. So the state
+  // is built rather than hoped for, in a Program of its own: the showcase build has not materialised its
+  // requirements, and mutating shared showcase packages to make one form auditable would put this test in
+  // the way of every other journey reading the same page.
+  //
+  // What is emphatically not done here is adding a route, a flag or a shortcut that opens this dialog
+  // without a package behind it. A form reached by a door the product does not have is not the form.
+  const suffix = Date.now().toString().slice(-7)
+  const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, { data: {
+    programName: `Form Semantics ${suffix}`,
+    programCode: `FS${suffix}`,
+    projectName: 'Form Semantics Verification',
+    softwareProduct: 'Form Semantics Product',
+    initialRelease: '1.0',
+    initialReleaseIsReleased: false,
+  } })
+  expect(workspaceResponse.ok(), await workspaceResponse.text()).toBeTruthy()
+  const workspace = await workspaceResponse.json()
+
+  const impacts = JSON.stringify({
+    trace: 'Not Affected', verification: 'Not Affected', documents: 'Not Affected',
+    baseline: 'Not Affected', collaboration: 'Not Affected',
+  })
+  const draftResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
+    projectId: workspace.project.id,
+    targetReleaseId: workspace.release.id,
+    type: 'System',
+    title: 'Exact target for procedure authoring semantics',
+    problem: 'The authoring form needs a materialised revision to bind to.',
+    analysis: 'A procedure names the exact requirement revision it verifies.',
+    solution: 'Introduce one exact revision.',
+    requirementChanges: [{
+      level: 'System', kind: 'Introduce',
+      targetSectionId: await firstSectionId(request, workspace.project.id),
+      statement: 'The product shall expose an exact verification target.',
+      rationale: 'Form semantics qualification.',
+      verificationMethod: 'Test',
+      impactDispositionJson: impacts,
+    }],
+  } })
+  expect(draftResponse.ok(), await draftResponse.text()).toBeTruthy()
+  const changeRequest = await draftResponse.json()
+  for (const [path, data] of [
+    [`change-requests/${changeRequest.id}/submit`, { approvers: [{ userId: 'admin', name: 'Ignored' }] }],
+    [`change-requests/${changeRequest.id}/approve`, { password: 'AeroLink!2026', meaning: 'Approved for exact verification applicability.' }],
+  ] as const) {
+    const response = await request.post(`${apiBase}/api/${path}`, { data })
+    expect(response.ok(), await response.text()).toBeTruthy()
   }
+
+  const baselineResponse = await request.post(`${apiBase}/api/baselines`, { data: {
+    baseNumber: `SW-98.${suffix.slice(-2)}`, revision: 0,
+    projectId: workspace.project.id, releaseId: workspace.release.id,
+    name: 'Form semantics materialized software build',
+  } })
+  expect(baselineResponse.ok(), await baselineResponse.text()).toBeTruthy()
+  const baseline = await baselineResponse.json()
+  for (const [path, data] of [
+    ['selections', { changeRequestId: changeRequest.id }],
+    ['freeze', {}],
+    ['materialize-requirements', {}],
+  ] as const) {
+    const response = await request.post(`${apiBase}/api/baselines/${baseline.id}/${path}`, { data })
+    expect(response.ok(), await response.text()).toBeTruthy()
+  }
+
+  // The approved requirement change raised a package. It concludes that test work is required, and one of its
+  // decisions asks for a new procedure — which is exactly the state that offers "Author the procedure".
+  const reviewsResponse = await request.get(`${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`)
+  expect(reviewsResponse.ok(), await reviewsResponse.text()).toBeTruthy()
+  const review = (await reviewsResponse.json()).find((item: { discipline: string }) => item.discipline === 'System')
+  expect(review, 'the approved requirement change raised no System test change request').toBeTruthy()
+  const concluded = await request.post(`${apiBase}/api/test-change-reviews/${review.id}/conclusion`,
+    { data: { testChangeRequired: true } })
+  expect(concluded.ok(), await concluded.text()).toBeTruthy()
+
+  const impactResponse = await request.get(`${apiBase}/api/releases/${workspace.release.id}/verification-impact`)
+  expect(impactResponse.ok(), await impactResponse.text()).toBeTruthy()
+  const items = (await impactResponse.json())
+    .filter((item: { testChangeReviewId: string }) => item.testChangeReviewId === review.id)
+  expect(items.length, 'the package carries no decision to answer').toBeGreaterThan(0)
+  const resolved = await request.post(`${apiBase}/api/verification-impact/${items[0].id}/resolve`, { data: {
+    outcome: 'NewProcedureRequired',
+    rationale: 'No procedure exists for this behavior yet; one must be written.',
+  } })
+  expect(resolved.ok(), await resolved.text()).toBeTruthy()
+
+  await page.goto(
+    `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/system-verification/coverage`,
+    { waitUntil: 'load' })
+  await surfacePainted(page)
+  await layoutSettled(page)
+  const assessment = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
+  await expect(assessment).toBeVisible({ timeout: 30_000 })
+  await assessment.getByRole('button', { name: 'Open assessment' }).click()
+  const drawer = page.getByRole('dialog', { name: /test impact/ })
+  await expect(drawer).toBeVisible({ timeout: 30_000 })
+  await drawer.getByRole('button', { name: 'Author the procedure' }).first().click()
+
+  const authoring = page.getByRole('dialog', { name: 'Propose a test procedure' })
+  await expect(authoring).toBeVisible({ timeout: 30_000 })
+  await inspect(page, 'Propose a test procedure', failures)
+  for (const label of ['Title', 'Objective', 'Preconditions', 'Steps', 'Expected result',
+    'Requirements it verifies', 'Why it is needed']) {
+    await labelActivatesControl(page, label, 'Propose a test procedure', failures)
+  }
+  // The requirement selector is the one control whose name is not its own text, and the one most easily left
+  // nameless — it carries help text inside the same label.
+  await expect(authoring.getByLabel('Requirements it verifies')).toBeVisible()
+
+  // The requirement the decision named is already chosen, so the link is not left to memory. That is also why
+  // this form cannot be made to fail its own "say what you verify" guard by hand: the selector is `required`
+  // and arrives populated, so the browser refuses the submit before the guard is reached. A refusal that does
+  // happen is the server's, and what matters for semantics is that it is announced rather than only painted.
+  expect(await authoring.getByLabel('Requirements it verifies')
+    .evaluate(node => (node as HTMLSelectElement).selectedOptions.length),
+  'the decision named a requirement, so the selector must arrive with it chosen').toBeGreaterThan(0)
+  await authoring.getByLabel('Title').fill('Semantics probe')
+  await authoring.getByLabel('Objective').fill('Probe the authoring form semantics.')
+  await authoring.getByLabel('Preconditions').fill('None.')
+  await authoring.getByLabel('Steps').fill('Exercise the exact requirement.')
+  await authoring.getByLabel('Expected result').fill('The required behavior is observed.')
+  await authoring.getByLabel('Why it is needed').fill('Nothing in this build covers the new requirement.')
+
+  await page.route('**/procedure-changes', route => route.request().method() === 'POST'
+    ? route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'The selected exact requirement changed. Refresh and choose it again.' }),
+    })
+    : route.continue())
+  await authoring.getByRole('button', { name: 'Propose procedure' }).click()
+  const refusal = authoring.getByRole('alert')
+  await expect(refusal).toContainText('The selected exact requirement changed')
+  // Announced, not merely painted, and the engineer's input is still there to correct.
+  await expect(refusal).toHaveAttribute('aria-live', 'assertive')
+  await expect(authoring.getByLabel('Title')).toHaveValue('Semantics probe')
+  await inspect(page, 'Propose a test procedure refused', failures)
+  await page.unroute('**/procedure-changes')
+
+  // Closing and reopening the controlled workspace leaves the semantics as they were.
+  await authoring.getByRole('button', { name: 'Cancel' }).click()
+  await expect(authoring).toHaveCount(0)
+  await drawer.getByRole('button', { name: 'Author the procedure' }).first().click()
+  await expect(authoring).toBeVisible({ timeout: 30_000 })
+  await inspect(page, 'Propose a test procedure reopened', failures)
+  await labelActivatesControl(page, 'Title', 'Propose a test procedure reopened', failures)
+
+  // And it can be completed through the real workflow, which is the last thing a form has to do.
+  await authoring.getByLabel('Title').fill('Semantics probe')
+  await authoring.getByLabel('Objective').fill('Probe the authoring form semantics.')
+  await authoring.getByLabel('Preconditions').fill('None.')
+  await authoring.getByLabel('Steps').fill('Exercise the exact requirement.')
+  await authoring.getByLabel('Expected result').fill('The required behavior is observed.')
+  await authoring.getByLabel('Why it is needed').fill('Nothing in this build covers the new requirement.')
+  await authoring.getByRole('button', { name: 'Propose procedure' }).click()
+  await expect(authoring).toHaveCount(0, { timeout: 30_000 })
+  await expect(page.getByRole('status')).toContainText(/Proposed on SYSTCR-|Proposed on the test change request/)
 
   expect(failures, `Form semantics defects:\n  ${failures.join('\n  ')}`).toEqual([])
 })

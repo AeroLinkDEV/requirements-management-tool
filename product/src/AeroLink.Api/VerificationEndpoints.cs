@@ -533,100 +533,17 @@ public static class VerificationEndpoints
                     var lastRun = latest is null ? null : executions.Where(e => e.ProcedureRevisionId == latest.Id).OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).FirstOrDefault();
                 return new { x.Id, displayNumber = latest is null ? x.BaseNumber : x.BaseNumber + "." + latest.Revision.ToString("D2"), x.Title, x.OwnerId, level = x.Level.ToString(),
                     revisionId = latest?.Id, revision = latest?.Revision, state = latest?.State.ToString(), objective = latest?.Objective,
-                    selectedApproverId = latest?.SelectedApproverId,
+                    // No selectedApproverId. It existed to route a procedure-level signature, and that
+                    // signature is gone; the package's approver is the one who approved this work. The stored
+                    // value stays on legacy revisions as the honest record of who was once named.
                     requirementCount = latest is null ? 0 : coverage.Count(c => c.ProcedureRevisionId == latest.Id), lastOutcome = lastRun?.Outcome.ToString(), lastExecutedAt = lastRun?.ExecutedAt }; }) });
         });
 
-        app.MapPost("/api/test-procedures", async (CreateTestProcedureRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
-        {
-            if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.TestEngineer))return Results.Forbid();
-            if (request.RequirementRevisionIds.Count == 0)
-                return Results.BadRequest(new { error = "Select at least one exact requirement revision from a materialized baseline.", code = "materialized_requirement_required" });
-            if (string.IsNullOrWhiteSpace(request.ApproverId))
-                return Results.BadRequest(new { error = "Select an independent procedure approver." });
-            var selectedApprover = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x =>
-                x.UserName == request.ApproverId.Trim().ToLowerInvariant() && x.State == AccountState.Active, ct);
-            if (selectedApprover is null) return Results.BadRequest(new { error = "Select an active AeroLink procedure approver." });
-            var procedureProgramId = await db.Projects.Where(x => x.Id == request.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
-            if (!await identity.HasRoleAsync(selectedApprover.Id, procedureProgramId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
-                return Results.BadRequest(new { error = $"{selectedApprover.DisplayName} does not hold Approver authority for this Program." });
-            if (string.Equals(selectedApprover.UserName, http.UserAccount().UserName, StringComparison.OrdinalIgnoreCase))
-                return Results.BadRequest(new { error = "The procedure approver must be independent from its author." });
-            await using var transaction=await db.Database.BeginTransactionAsync(IsolationLevel.Serializable,ct);
-            var requirementIds = request.RequirementRevisionIds.Distinct().ToList();
-            if (requirementIds.Count == 0)
-                return Results.BadRequest(new { error = "Select at least one exact requirement revision from a materialized baseline.", code = "materialized_requirement_required" });
-            var validRequirementIds = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x=>requirementIds.Contains(x.Id))
-                                             join artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==request.ProjectId) on revision.ArtifactId equals artifact.Id
-                                             join member in db.BaselineRequirements.AsNoTracking() on revision.Id equals member.RevisionId
-                                             join baseline in db.CandidateBaselines.AsNoTracking().Where(x=>x.RequirementsMaterializedAt!=null) on member.BaselineId equals baseline.Id
-                                             select revision.Id).Distinct().CountAsync(ct);
-            if (validRequirementIds != requirementIds.Count) return Results.BadRequest(new { error = "Every coverage link must reference an authoritative requirement revision in this project." });
-            if (requirementIds.Count > 0 && await (from member in db.BaselineRequirements.AsNoTracking().Where(x => requirementIds.Contains(x.RevisionId))
-                                                   join campaign in db.ReleaseCampaigns.AsNoTracking().Where(x => x.ProjectId == request.ProjectId && x.State == ReleaseCampaignState.InReview) on member.BaselineId equals campaign.BaselineId
-                                                   select member.Id).AnyAsync(ct))
-                return Results.Conflict(new { error = "The release package is frozen while approval is in progress.", code = "release_package_frozen" });
-            try { var actor = http.UserAccount().UserName; var baseNumber=await IdentifierAllocator.NextTestProcedureAsync(db,request.Level,ct);var procedure = new TestProcedure(request.ProjectId, baseNumber, request.Title, actor, DateTimeOffset.UtcNow, request.Level);
-                var revision = new TestProcedureRevision(procedure.Id, 0, request.Objective, request.Preconditions, request.Steps, request.ExpectedResult, TestProcedureState.Draft, actor, DateTimeOffset.UtcNow, selectedApprover.UserName);
-                db.AddRange(procedure, revision); db.TestCoverage.AddRange(requirementIds.Select(id => new TestRequirementCoverage(revision.Id, id)));
-                db.UserNotifications.Add(new(request.ProjectId, selectedApprover.UserName, "ProcedureApprovalRequested",
-                    $"Review procedure {procedure.BaseNumber}.00", $"{http.UserAccount().DisplayName} selected you to approve this controlled test procedure revision.",
-                    "verification", procedure.Id, DateTimeOffset.UtcNow));
-                await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);
-                return Results.Created($"/api/test-procedures/{procedure.Id}", new { procedure.Id, revisionId = revision.Id, displayNumber = procedure.BaseNumber + ".00", state = revision.State.ToString(), revision.SelectedApproverId }); }
-            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
-            catch (DbUpdateException) { return Results.Conflict(new { error = "Another test procedure was created at the same instant. Submit again to receive the next server number." }); }
-        });
-
-        app.MapPost("/api/test-procedures/{revisionId:guid}/approve", async (Guid revisionId, SignatureRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
-        {
-            var revision = await db.TestProcedureRevisions.SingleOrDefaultAsync(x => x.Id == revisionId, ct); if (revision is null) return Results.NotFound();
-            var procedure = await db.TestProcedures.SingleAsync(x => x.Id == revision.ProcedureId, ct);
-            if (!await http.HasProjectRoleAsync(db, identity, procedure.ProjectId, ct, ProgramRole.Approver)) return Results.Forbid();
-            if (string.IsNullOrWhiteSpace(request.Meaning)) return Results.BadRequest(new { error = "An explicit electronic signature meaning is required." });
-            var actor = http.UserAccount(); if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
-            try
-            {
-                revision.Approve(actor.UserName);
-                var requirementRevisionIds = await db.TestCoverage.AsNoTracking().Where(x => x.ProcedureRevisionId == revision.Id).OrderBy(x => x.RequirementRevisionId).Select(x => x.RequirementRevisionId).ToListAsync(ct);
-                var snapshot = JsonSerializer.Serialize(new { procedureId = procedure.Id, procedure.ProjectId, procedure.BaseNumber, procedure.Title, procedure.Level, revisionId = revision.Id, revision.Revision, revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult, revision.AuthorId, requirementRevisionIds });
-                var contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(snapshot))).ToLowerInvariant();
-                var programId = await db.Projects.AsNoTracking().Where(x => x.Id == procedure.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
-                var now = DateTimeOffset.UtcNow;
-                db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "TestProcedureRevision", revision.Id, $"{procedure.BaseNumber}.{revision.Revision:D2}", "Approve", request.Meaning, contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
-                db.UserNotifications.Add(new(procedure.ProjectId, revision.AuthorId, "ProcedureApproved", $"Procedure {procedure.BaseNumber}.{revision.Revision:D2} approved", $"{actor.DisplayName} approved the controlled procedure revision for execution.", "verification", procedure.Id, now));
-
-                // A decision that asked for this procedure settles itself now that it exists and is approved.
-                //
-                // Otherwise the engineer answers the same item twice: once to say a procedure must be written,
-                // and again afterwards to say the procedure covers the requirement — a second answer carrying
-                // no judgement the first did not. Only items awaiting a new procedure for one of the exact
-                // requirement revisions this procedure covers are advanced, so nothing else is quietly turned
-                // into coverage.
-                if (requirementRevisionIds.Count > 0)
-                {
-                    var awaiting = await db.VerificationImpactItems
-                        .Where(x => x.ProjectId == procedure.ProjectId
-                            && x.State == VerificationImpactState.Resolved
-                            && x.Outcome == VerificationImpactOutcome.NewProcedureRequired
-                            && x.RequirementRevisionId != null
-                            && requirementRevisionIds.Contains(x.RequirementRevisionId.Value))
-                        .ToListAsync(ct);
-                    foreach (var item in awaiting)
-                    {
-                        if (!item.SettleWithApprovedProcedure(procedure.Id, revision.Id, now)) continue;
-                        db.VerificationImpactDecisionHistory.Add(new VerificationImpactDecisionHistory(
-                            item.Id, VerificationImpactHistoryAction.Resolved, VerificationImpactOutcome.ProcedureCoverageConfirmed,
-                            procedure.Id, revision.Id,
-                            $"The requested procedure {procedure.BaseNumber}.{revision.Revision:D2} was approved and now covers this requirement.",
-                            actor.UserName, now));
-                    }
-                }
-                await db.SaveChangesAsync(ct);
-                return Results.Ok(new { revision.Id, state = revision.State.ToString(), contentHash });
-            }
-            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        });
+        // No procedure-level approval route. The test change request carrying this procedure is what gets
+        // approved, and materialisation writes the revision as Approved on that authority — a separate
+        // signature on the procedure revision would be a second approval of the same controlled work. The
+        // decision that asked for the procedure is settled by the materialiser, which is where the approved
+        // revision now comes into existence.
 
         app.MapPost("/api/test-executions", async (RecordTestExecutionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
