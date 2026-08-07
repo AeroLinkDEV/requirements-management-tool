@@ -64,7 +64,10 @@ public sealed class TestChangeReviewTests
             "The aircraft is in cruise with an active oceanic flight plan.",
             "1. Load the plan. 2. Advance past the first waypoint. 3. Read the sequencer.",
             "The next eligible oceanic waypoint is sequenced.",
-            "No procedure exercises oceanic sequencing after the approved change.");
+            "No procedure exercises oceanic sequencing after the approved change.",
+            // A procedure being introduced names what it verifies, and submission refuses one that does not.
+            // Supplying it here keeps every test that submits a package on the path a real one takes.
+            $"[\"{Guid.NewGuid()}\"]");
 
     [Fact]
     public void A_test_change_request_carries_procedure_changes_the_way_a_change_request_carries_requirements()

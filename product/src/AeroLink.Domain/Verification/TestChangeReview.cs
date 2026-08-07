@@ -237,6 +237,15 @@ public sealed class TestChangeReview
             throw new DomainException("Assess the change before sending it for review.");
         if (!everyItemResolved)
             throw new DomainException("Every test-procedure decision must be completed before review.");
+        // A procedure being introduced has to say what it verifies, and submission is where that is checked —
+        // not when it is written. A draft package is worked on incrementally, exactly as a change request is,
+        // so the gate belongs at the point an approver is asked to sign rather than at the point an engineer
+        // starts typing. What must never happen is an approver signing a procedure that verifies nothing.
+        if (_procedureChanges.Any(x => x.Kind == TestProcedureChangeKind.Introduce
+                && (string.IsNullOrWhiteSpace(x.DrivingRequirementRevisionIdsJson)
+                    || x.DrivingRequirementRevisionIdsJson.Trim() is "[]" or "")))
+            throw new DomainException(
+                "Every procedure this package introduces must name the requirement revisions it verifies.");
         if (approvers.Any(x => string.Equals(x.UserId, actorId, StringComparison.OrdinalIgnoreCase)))
             throw new DomainException("The test change request approver must be independent from its submitting engineer.");
         // "Concluded work is required, names none" is refused at the endpoint rather than here, and that is a
