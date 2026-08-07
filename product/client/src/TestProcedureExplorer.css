@@ -54,3 +54,13 @@
 .explorerTabs button.active{color:#176f77;border-bottom-color:#1a8a85}
 .explorerTabs button:hover:not(.active){color:#35465a}
 .explorerCoverage{display:grid;gap:14px}
+
+/* The filters, on one row with the search. Ported from the procedure library the change request page used to
+   carry: state and latest result are how somebody narrows hundreds of procedures to the handful they mean,
+   and moving the library here without them would have made this the only place procedures can be browsed and
+   the least capable one. */
+.procedureFilters{display:flex;flex-wrap:wrap;gap:.75rem;align-items:end;margin:0 0 12px}
+.procedureFilters label{display:flex;flex-direction:column;gap:.35rem;font-size:.8rem;font-weight:700}
+.procedureFilters select{padding:.5rem .65rem;border:1px solid var(--line,#cbd7e6);border-radius:8px;font:inherit;
+  background:white;min-width:150px}
+.procedureFilters .procedureFind{margin:0}

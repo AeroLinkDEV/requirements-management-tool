@@ -20,11 +20,11 @@ test('verification offers the two pages by name, and both open on real work', as
 
   const cards = page.locator('.landingCards button')
   await expect(cards).toHaveCount(2)
-  await expect(cards.nth(0)).toContainText('Testing Coverage')
+  await expect(cards.nth(0)).toContainText('Change Requests')
   await expect(cards.nth(1)).toContainText('Test Results')
 
   await cards.nth(0).click()
-  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
   expect(page.url()).toContain('/system-verification/coverage')
 
   // The queue is above the inventory, because a reader arriving to do work needs what nobody has picked up

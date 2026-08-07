@@ -17,14 +17,20 @@ test("test procedure authorship names a person rather than the account that sign
   await login(page, 'admin', { openProject: false });
   await selectProgram(page, "Flight Management System Live Program");
   await openNavigationGroup(page, "ASSURANCE");
-  await page.getByRole("link", { name: "System Testing Coverage" }).click();
-  await expect(page.getByRole("heading", { name: "Testing Coverage" })).toBeVisible({ timeout: 30_000 });
+  // Asked of the Test Procedure Explorer, which is where a procedure is read. The change request page used to
+  // carry a procedure library and this was asked of that; the library moved rather than the question.
+  await page.getByRole("link", { name: "System Test Procedure Explorer" }).click();
+  await expect(page.getByRole("heading", { name: "Test Procedure Explorer" })).toBeVisible({ timeout: 30_000 });
 
-  const rows = page.locator(".procedureLibrary .coverageRow");
-  await expect(rows.first()).toBeVisible();
+  await page.getByLabel("Find a procedure").fill("SYSTP-000001");
+  const row = page.locator(".procedureRow").filter({ hasText: "SYSTP-000001" }).first();
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await row.click();
 
-  await expect(rows.first().getByText("Ethan Brooks")).toBeVisible();
+  const inspector = page.locator(".requirementInspector");
+  await expect(inspector).toBeVisible({ timeout: 30_000 });
+  await expect(inspector.getByText("Ethan Brooks")).toBeVisible();
   // The account stays reachable for anyone reconciling against the identity provider, just not as the label.
-  await expect(rows.first().locator(".personName")).toHaveAttribute("title", "test.author");
-  await expect(page.locator(".procedureLibrary .coverageRow", { hasText: "authored by test.author" })).toHaveCount(0);
+  await expect(inspector.locator(".personName").first()).toHaveAttribute("title", "test.author");
+  await expect(inspector).not.toContainText("test.author");
 });

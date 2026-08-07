@@ -28,11 +28,11 @@ test('primary navigation separates generated data, managed documents, code and p
   const standaloneNames=await nav.locator('.navStandalone a').evaluateAll(items=>items.map(item=>item.getAttribute('aria-label')))
   expect(standaloneNames).toEqual(['Code traceability','Documentation Center','Problem Reports'])
 
-  await expect(verification.getByRole('link',{name:'System Testing Coverage'})).toBeVisible()
+  await expect(verification.getByRole('link',{name:'System Test Change Requests'})).toBeVisible()
   await expect(verification.getByRole('link',{name:'System Test Results'})).toBeVisible()
   await expect(verification.getByRole('link',{name:'Generated System Verification Documents'})).toBeVisible()
   await verification.getByRole('group',{name:'Verification scope'}).getByRole('button',{name:'Software'}).click()
-  for(const name of['Software HLR Testing Coverage','Software HLR Test Results','Software LLR Testing Coverage','Software LLR Test Results','Generated Software Verification Documents'])await expect(verification.getByRole('link',{name})).toBeVisible()
+  for(const name of['Software HLR Test Change Requests','Software HLR Test Results','Software LLR Test Change Requests','Software LLR Test Results','Generated Software Verification Documents'])await expect(verification.getByRole('link',{name})).toBeVisible()
 
   await reports.click()
   await expect(page.getByRole('heading',{name:'Problem Reports'})).toBeVisible()

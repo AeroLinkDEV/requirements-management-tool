@@ -11,7 +11,7 @@ import { login, openNavigationGroup } from './auth'
 test('answering a test change request makes it yours, and it is in My Work after refresh', async ({ page }) => {
   await login(page, 'test.engineer')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
 
   // The row carries one control in every state, as the requirements queue does, so the queue is read and the
   // assessment is worked inside it.

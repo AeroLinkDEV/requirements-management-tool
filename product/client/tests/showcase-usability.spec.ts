@@ -73,7 +73,7 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   // arrives with decides which page they open, and both are named on the way in.
   await page.goto(page.url().replace(/\/traceability.*$/,'/system-verification'))
   await expect(page.getByRole('heading',{name:'Verification'})).toBeVisible()
-  await page.getByRole('button',{name:'Open Testing Coverage →'}).click()
+  await page.getByRole('button',{name:'Open Change Requests →'}).click()
   await expect(page.getByRole('heading',{name:'Downstream test assessments'})).toBeVisible()
   await expect(page.getByRole('heading',{name:'Test procedures'})).toBeVisible()
 

@@ -74,7 +74,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // — and the requirement trace's "Open test procedure" — keep working.
   const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
   const [query, setQuery] = useState(opening.get('procedure') ?? '')
-  const [page, setPage] = useState(1)
+  const [procedureState, setProcedureState] = useState(opening.get('procedureState') ?? '')
+  const [procedureOutcome, setProcedureOutcome] = useState(opening.get('procedureOutcome') ?? '')
+  const [page, setPage] = useState(Number(opening.get('procedurePage') ?? '1') || 1)
+  const lastDiscreteState = useRef<string | null>(null)
   const [selectedId, setSelectedId] = useState(opening.get('procedureId') ?? '')
   const [tab, setTab] = useState<Tab>('details')
   const [history, setHistory] = useState<History>()
@@ -93,12 +96,51 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     try {
       const response = await fetch(
         `${api}/api/test-procedures?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}` +
-        `&search=${encodeURIComponent(query)}&page=${page}&pageSize=25`)
+        `&search=${encodeURIComponent(query)}&state=${procedureState}&outcome=${procedureOutcome}` +
+        `&page=${page}&pageSize=25`)
       if (!response.ok) throw new Error(String(response.status))
       setData(await response.json())
     } catch (problem) { setError(operationError(problem, 'The procedure library could not be loaded.')) }
-  }, [api, projectId, releaseId, scope, query, page])
+  }, [api, projectId, releaseId, scope, query, procedureState, procedureOutcome, page])
   useEffect(() => { void load() }, [load])
+
+  // The worklist is in the address, so it can be reloaded, shared and stepped back through.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const before = params.toString()
+    const apply = (key: string, value: string) => { if (value) params.set(key, value); else params.delete(key) }
+    apply('procedure', query)
+    apply('procedureState', procedureState)
+    apply('procedureOutcome', procedureOutcome)
+    apply('procedurePage', page > 1 ? String(page) : '')
+    // Seeded from what the address already says, so the reader's first change after a reload still earns a
+    // history entry rather than being mistaken for arrival.
+    const discrete = `${procedureState}|${procedureOutcome}|${page}`
+    if (lastDiscreteState.current === null) lastDiscreteState.current = discrete
+    if (params.toString() === before) return
+    const next = `${location.pathname}${params.toString() ? `?${params}` : ''}`
+    // Choosing a filter or a page is somewhere the reader went, so it earns a history entry and the back
+    // button returns to the previous list. Typing in the search box is not somewhere they went; pushing per
+    // keystroke would mean pressing back a dozen times to leave one search.
+    const push = discrete !== lastDiscreteState.current
+    lastDiscreteState.current = discrete
+    // window.history explicitly: this component has its own `history` — the revision history of a procedure —
+    // and the bare name resolves to that, which throws rather than navigating.
+    if (push) window.history.pushState({}, '', next); else window.history.replaceState({}, '', next)
+  }, [query, procedureState, procedureOutcome, page])
+
+  // The browser's own navigation must move the list, not just the address bar.
+  useEffect(() => {
+    const restore = () => {
+      const params = new URLSearchParams(location.search)
+      setQuery(params.get('procedure') ?? '')
+      setProcedureState(params.get('procedureState') ?? '')
+      setProcedureOutcome(params.get('procedureOutcome') ?? '')
+      setPage(Number(params.get('procedurePage') ?? '1') || 1)
+    }
+    addEventListener('popstate', restore)
+    return () => removeEventListener('popstate', restore)
+  }, [])
 
   const procedures = data?.items ?? []
   // Keyed on the page rather than the derived array, so the identity stays stable between renders. The
@@ -279,15 +321,42 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     )}
 
     {pageTab === 'procedures' && <>
-    <label className="procedureFind">Find a procedure
-      <input value={query} onChange={event => { setQuery(event.target.value); setPage(1) }}
-        placeholder="Number or title" />
-    </label>
+    {/* Browsing, not just searching. The software side of the demonstration Program carries 440 procedures,
+        so a list that could only be searched meant knowing the number of the thing you were looking for
+        before you could look for it. State and latest result are how somebody actually narrows this: "the
+        drafts", "what failed last time". */}
+    <div className="procedureFilters">
+      <label className="procedureFind">
+        <span>Find a procedure</span>
+        <input value={query} onChange={event => { setQuery(event.target.value); setPage(1) }}
+          placeholder="Number or title" />
+      </label>
+      <label>
+        <span>Procedure state</span>
+        <select value={procedureState} onChange={event => { setProcedureState(event.target.value); setPage(1) }}>
+          <option value="">All states</option>
+          <option value="Draft">Draft</option>
+          <option value="InReview">In review</option>
+          <option value="Approved">Approved</option>
+        </select>
+      </label>
+      <label>
+        <span>Latest result</span>
+        <select value={procedureOutcome} onChange={event => { setProcedureOutcome(event.target.value); setPage(1) }}>
+          <option value="">All outcomes</option>
+          <option value="Pass">Pass</option>
+          <option value="Fail">Fail</option>
+          <option value="Blocked">Blocked</option>
+        </select>
+      </label>
+    </div>
 
     <div className="procedureExplorerSplit">
       <section className="procedureList" aria-label="Test procedures">
         {procedures.length === 0
-          ? <p className="procedureEmpty">No {disciplineLabel(discipline)} procedures match.</p>
+          ? <p className="procedureEmpty">{query || procedureState || procedureOutcome
+            ? 'No procedure matches that. Clear the search or the filters to see the rest.'
+            : `This build has no controlled ${disciplineLabel(discipline).toLowerCase()} procedures yet.`}</p>
           : procedures.map(procedure => (
             <button type="button" key={procedure.id}
               className={`procedureRow ${procedure.id === selectedId ? 'selected' : ''}`}

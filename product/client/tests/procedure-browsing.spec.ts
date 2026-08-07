@@ -22,54 +22,37 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
     `${apiBase}/api/test-procedures?projectId=${projectId}&scope=HighLevelSoftware&pageSize=1`)).json();
   expect(all.totalCount, "this only means something at showcase volume").toBeGreaterThanOrEqual(150);
 
-  // Reached through the command palette, which is how the software workspace is addressable.
+  // Asked of the Test Procedure Explorer. This browsing behaviour was built on the change request page, which
+  // used to carry a procedure library; the library moved here, and the filters came with it rather than being
+  // dropped — this is now the only place procedures are browsed, so it had to be the most capable one.
   await page.getByRole("button", { name: /Search & navigate/ }).click();
   const palette = page.getByRole("dialog", { name: "Quick navigation" });
-  await palette.getByPlaceholder(/Search pages/).fill("Software HLR Testing Coverage");
-  await palette.getByRole("link", { name: /Software HLR Testing Coverage/ }).click();
-  await expect(page.getByRole("heading", { name: "Testing Coverage" })).toBeVisible({ timeout: 30_000 });
+  await palette.getByPlaceholder(/Search pages/).fill("Software HLR Test Procedure Explorer");
+  await palette.getByRole("link", { name: /Software HLR Test Procedure Explorer/ }).click();
+  await expect(page.getByRole("heading", { name: "Test Procedure Explorer" })).toBeVisible({ timeout: 30_000 });
 
   // The whole point: hundreds of records, a bounded number of them on the page.
-  const rows = page.locator(".procedureLibrary .coverageRow");
+  const rows = page.locator(".procedureRow");
   await expect(rows.first()).toBeVisible({ timeout: 30_000 });
   const rendered = await rows.count();
   expect(rendered, `${rendered} of ${all.totalCount} procedures rendered at once`).toBeLessThanOrEqual(25);
-  await expect(page.getByText(`${all.totalCount} controlled software hlr procedures.`, { exact: false })).toBeVisible();
-
-  // A controlled dialog is viewport UI even when it is opened at the bottom of a long engineering queue.
-  // The workspace entrance animation used to leave a transform behind, making fixed dialogs relative to the
-  // whole scrolled workspace and placing their top thousands of pixels above the visible browser window.
-  await page.evaluate(() => {
-    document.documentElement.style.overflow = 'auto';
-    document.body.style.overflow = 'auto';
-    document.body.style.minHeight = '3000px';
-  });
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight)).toBeGreaterThan(2500);
-  await page.evaluate(() => { if (document.scrollingElement) document.scrollingElement.scrollTop = 1000; });
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-  await rows.first().getByRole('button', { name: /Open procedure HLRTP-/ }).evaluate((button: HTMLButtonElement) => button.click());
-  const procedureDialog = page.getByRole('dialog', { name: /Procedure HLRTP-/ });
-  await expect(procedureDialog).toBeVisible();
-  const dialogBox = await procedureDialog.boundingBox();
-  expect(dialogBox?.y ?? -1).toBeGreaterThanOrEqual(0);
-  expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(450);
-  await procedureDialog.getByRole('button', { name: 'Close' }).click();
+  await expect(page.locator(".pager")).toContainText(`of ${all.totalCount.toLocaleString()}`, { timeout: 30_000 });
 
   // Filtering narrows the set and the count, and is reflected in the address.
   await page.getByLabel("Procedure state").selectOption("Approved");
   await expect(page).toHaveURL(/procedureState=Approved/, { timeout: 30_000 });
   const approvedTotal = (await (await page.request.get(
     `${apiBase}/api/test-procedures?projectId=${projectId}&scope=HighLevelSoftware&state=Approved&pageSize=1`)).json()).totalCount;
-  await expect(page.getByText(`${approvedTotal} controlled software hlr procedures.`, { exact: false })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".pager")).toContainText(`of ${approvedTotal.toLocaleString()}`, { timeout: 30_000 });
 
   // A filtered worklist survives being reloaded, which is what makes it worth sharing.
   await page.reload({ waitUntil: "load" });
   await expect(page.getByLabel("Procedure state")).toHaveValue("Approved", { timeout: 30_000 });
-  await expect(page.getByText(`${approvedTotal} controlled software hlr procedures.`, { exact: false })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".pager")).toContainText(`of ${approvedTotal.toLocaleString()}`, { timeout: 30_000 });
 
   // Paging is reachable, moves the list, and is in the address.
   const firstNumber = await rows.first().locator("b").first().textContent();
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: /Next/ }).click();
   await expect(page).toHaveURL(/procedurePage=2/, { timeout: 30_000 });
   await expect(rows.first().locator("b").first()).not.toHaveText(firstNumber ?? "", { timeout: 30_000 });
 
@@ -115,11 +98,11 @@ test("a slow unfiltered reply cannot bury the search result that overtook it", a
 
   await page.getByRole("button", { name: /Search & navigate/ }).click();
   const palette = page.getByRole("dialog", { name: "Quick navigation" });
-  await palette.getByPlaceholder(/Search pages/).fill("System Testing Coverage");
-  await palette.getByRole("link", { name: /System Testing Coverage/ }).click();
+  await palette.getByPlaceholder(/Search pages/).fill("System Test Procedure Explorer");
+  await palette.getByRole("link", { name: /System Test Procedure Explorer/ }).click();
 
   await page.getByLabel("Find a procedure").fill("SYSTP-000001");
-  const rows = page.locator(".procedureLibrary .coverageRow");
+  const rows = page.locator(".procedureRow");
   await expect(rows).toHaveCount(1, { timeout: 30_000 });
 
   // The held reply is released by the assertion above having been satisfied; the list must not move.

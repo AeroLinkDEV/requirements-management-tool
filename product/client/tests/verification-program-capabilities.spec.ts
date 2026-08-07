@@ -197,8 +197,8 @@ test('verification actions follow authority in the selected Program',async({page
   // procedure is not an authority this page grants any more — one is introduced by a test change request —
   // so what is checked here is that the page offers nobody a way to write one, whatever they may do.
   await openNavigationGroup(page,'ASSURANCE')
-  await page.getByRole('link',{name:'System Testing Coverage'}).click()
-  await expect(page.getByRole('heading',{name:'Testing Coverage'})).toBeVisible({timeout:30_000})
+  await page.getByRole('link',{name:'System Test Change Requests'}).click()
+  await expect(page.getByRole('heading',{name:'Change Requests'})).toBeVisible({timeout:30_000})
   await expect(page.getByRole('button',{name:/New test procedure/})).toHaveCount(0)
 
   await page.getByRole('link',{name:'System Test Results'}).click()
@@ -214,14 +214,17 @@ test('verification actions follow authority in the selected Program',async({page
 
   // Approver authority without Test Engineer authority: nothing here can be written and nothing can be run.
   // There is no procedure to approve either — approving a procedure is approving the test change request that
-  // carries it, which happens on that package, not in this library.
+  // carries it, which happens on that package.
   await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification/coverage`)
-  await expect(page.getByRole('heading',{name:'Testing Coverage'})).toBeVisible({timeout:30_000})
+  await expect(page.getByRole('heading',{name:'Change Requests'})).toBeVisible({timeout:30_000})
   await expect(page.getByRole('button',{name:/New test procedure/})).toHaveCount(0)
   await expect(page.getByRole('button',{name:'Review & approve'})).toHaveCount(0)
-  // The procedure the package produced is readable here, which is what this page is for now.
-  const approvedRow=page.locator('.procedureLibrary .coverageRow').filter({hasText:'Approval-only approved procedure'})
-  await expect(approvedRow).toBeVisible({timeout:30_000})
+
+  // The procedure the package produced is readable in the Explorer, which is where procedures live.
+  await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification/procedures`)
+  await expect(page.getByRole('heading',{name:'Test Procedure Explorer'})).toBeVisible({timeout:30_000})
+  await expect(page.locator('.procedureRow').filter({hasText:'Approval-only approved procedure'})).toBeVisible({timeout:30_000})
+  await expect(page.getByRole('button',{name:/New test procedure/})).toHaveCount(0)
 
   await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification/results`)
   await expect(page.getByRole('heading',{name:'Test Results'})).toBeVisible({timeout:30_000})

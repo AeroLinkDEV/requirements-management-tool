@@ -63,7 +63,7 @@ test('a PR drives a change request and can be added to a System TCR through the 
   }
 
   await page.goto(new URL(`${root}/system-verification/coverage`, page.url()).toString(), { waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
   // Linking is done inside the assessment now; the queue row carries one control in every state.
   await page.locator('.downstreamAssessment').first().getByRole('button', { name: 'Open assessment' }).click()
   const assessment = page.getByRole('dialog', { name: /test impact/ })
