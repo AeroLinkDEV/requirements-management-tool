@@ -184,92 +184,32 @@ test('software HLR and LLR each have their own coverage page', async ({ page }) 
  * Draft and cannot be run until somebody other than its author has signed for it — the product refuses an
  * author approving their own, which is what makes the approval independent rather than a formality.
  */
-test('a procedure is created here as a Draft and needs somebody else to approve it', async ({ page }) => {
+/**
+ * A procedure cannot be written here, and the page says so by offering nothing.
+ *
+ * Two journeys used to live at this spot: one creating a procedure straight from the library, one checking
+ * that the create dialog kept the engineer`s input when the server refused. Both are gone with the control
+ * they exercised. A procedure is introduced, modified or retired by a test change request, exactly as a
+ * requirement is only changed by a change request, and the journey below authors one from the decision that
+ * asked for it.
+ */
+test(`the procedure library offers no way to write a procedure`, async ({ page }) => {
   test.setTimeout(180_000)
-  await login(page, 'admin', { openProject: false })
-  await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
-  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
+  await login(page, `admin`, { openProject: false })
+  await selectProgram(page, `Flight Management System Live Program`)
+  await openNavigationGroup(page, `ASSURANCE`)
+  await page.getByRole(`link`, { name: `System Testing Coverage` }).click()
+  await expect(page.getByRole(`heading`, { name: `Testing Coverage` })).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole('button', { name: '+ New test procedure' }).click()
-  const form = page.getByRole('dialog', { name: 'Create a test procedure' })
-  await expect(form).toBeVisible({ timeout: 30_000 })
-  const title = `Oceanic sequencing regression ${Date.now()}`
-  await form.getByLabel('Title').fill(title)
-  await form.getByLabel('Objective').fill('Prove sequencing holds across the oceanic transition.')
-  await form.getByLabel('Preconditions').fill('FMS rig 2 loaded with the current build.')
-  await form.getByLabel('Steps').fill('Enter the oceanic route, then force a transition.')
-  await form.getByLabel('Expected result').fill('No waypoint is dropped.')
-  // A procedure that verifies nothing is not a controlled procedure, so this is required rather than linked
-  // afterwards — an unlinked procedure never counts as coverage and would look like work already done.
-  await form.getByLabel('Requirements it verifies').selectOption({ index: 0 })
-  await form.getByLabel('Independent procedure approver').fill('systems.lead')
-  await form.locator('.personSuggestions button[data-user-name="systems.lead"]').click()
-  await form.getByRole('button', { name: 'Create procedure' }).click()
+  const library = page.locator(`.procedureLibrary`)
+  await expect(library).toBeVisible({ timeout: 30_000 })
+  await expect(library.getByRole(`button`, { name: /New test procedure/ })).toHaveCount(0)
+  await expect(page.getByRole(`dialog`, { name: `Create a test procedure` })).toHaveCount(0)
 
-  await expect(form).toHaveCount(0, { timeout: 30_000 })
-  const confirmation = page.getByRole('status')
-  await expect(confirmation).toContainText(/SYSTP-\d{6}\.00 created as a Draft/)
-  const issued = (await confirmation.textContent())!.match(/SYSTP-\d{6}\.00/)![0]
-
-  // It is findable by its own controlled number, in Draft, with the approval offered.
-  await expect(page.getByLabel('Find a procedure')).toHaveValue(issued)
-  const created = page.locator('.procedureLibrary .coverageRow').filter({ hasText: title }).first()
-  await expect(created).toBeVisible({ timeout: 30_000 })
-  await expect(created).toContainText('Awaiting approval')
-  // Offered to somebody else, not to the author. The product refuses an author signing for their own work, so
-  // the page says why the control is absent rather than presenting one the server would refuse.
-  await expect(created.getByRole('button', { name: 'Review & approve' })).toHaveCount(0)
-  await expect(created).toContainText('Awaiting')
-  await expect(created.getByRole('button', { name: 'Edit' })).toBeVisible()
-  await expect(created.getByRole('button', { name: 'History' })).toBeVisible()
-  await created.getByRole('button', { name: 'Edit' }).click()
-  const editor = page.getByRole('dialog', { name: `Edit ${issued}` })
-  await expect(editor).toBeVisible()
-  await expect(editor.getByLabel('Procedure title')).toHaveValue(title)
-  await editor.getByRole('button', { name: 'Close controlled editor' }).click()
-  await expect(editor).toHaveCount(0)
-
-  // The controlled number is the primary record link. Its exact revision survives refresh; History remains
-  // a separate action rather than being the only way to read the procedure.
-  await created.getByRole('button', { name: `Open procedure ${issued}` }).click()
-  const record = page.getByRole('dialog', { name: `Procedure ${issued}` })
-  await expect(record).toContainText('Prove sequencing holds across the oceanic transition.')
-  await expect(record).toContainText('Enter the oceanic route, then force a transition.')
-  await expect(page).toHaveURL(/procedureId=.*procedureRevisionId=.*procedureView=record/)
-  await page.reload()
-  await expect(page.getByRole('dialog', { name: `Procedure ${issued}` })).toBeVisible({ timeout: 30_000 })
-  await page.getByRole('dialog', { name: `Procedure ${issued}` }).getByRole('button', { name: 'History' }).click()
-  await expect(page.getByRole('dialog', { name: new RegExp(`History of ${issued.split('.')[0]}`) })).toBeVisible()
-})
-
-test('procedure creation failures stay in the dialog and preserve the engineering input', async ({ page }) => {
-  test.setTimeout(180_000)
-  await login(page, 'admin', { openProject: false })
-  await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
-  await page.getByRole('button', { name: '+ New test procedure' }).click()
-
-  const form = page.getByRole('dialog', { name: 'Create a test procedure' })
-  await form.getByLabel('Title').fill('Rejected navigation alert procedure')
-  await form.getByLabel('Objective').fill('Verify the rejected content remains editable.')
-  await form.getByLabel('Preconditions').fill('The active build is loaded.')
-  await form.getByLabel('Steps').fill('Stimulate the navigation alert.')
-  await form.getByLabel('Expected result').fill('The correct alert is shown.')
-  await form.getByLabel('Requirements it verifies').selectOption({ index: 0 })
-  await form.getByLabel('Independent procedure approver').fill('systems.lead')
-  await form.locator('.personSuggestions button[data-user-name="systems.lead"]').click()
-  await page.route('**/api/test-procedures', route => route.request().method() === 'POST'
-    ? route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'The selected exact requirement changed. Refresh and choose it again.' }) })
-    : route.continue())
-
-  await form.getByRole('button', { name: 'Create procedure' }).click()
-  await expect(form.getByRole('alert')).toContainText('The selected exact requirement changed')
-  await expect(form.getByLabel('Title')).toHaveValue('Rejected navigation alert procedure')
-  await expect(form.getByLabel('Steps')).toHaveValue('Stimulate the navigation alert.')
-  await expect(form.getByRole('button', { name: 'Create procedure' })).toBeEnabled()
+  // The library still reads, which is the point: procedures are browsable without being writable here.
+  await page.getByLabel(`Find a procedure`).fill(`SYSTP-000001`)
+  await expect(library.locator(`.coverageRow`).filter({ hasText: `SYSTP-000001` }).first())
+    .toBeVisible({ timeout: 30_000 })
 })
 
 test('released Build 1.5 procedures remain readable without create or edit actions', async ({ page }) => {
@@ -303,19 +243,13 @@ test('a Draft procedure is approved here by a second person, and only then count
   await page.getByRole('link', { name: 'System Testing Coverage' }).click()
   await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole('button', { name: '+ New test procedure' }).click()
-  const form = page.getByRole('dialog', { name: 'Create a test procedure' })
-  const title = `Transition hold regression ${Date.now()}`
-  await form.getByLabel('Title').fill(title)
-  await form.getByLabel('Objective').fill('Prove the transition hold is honoured.')
-  await form.getByLabel('Preconditions').fill('FMS rig 1 loaded with the current build.')
-  await form.getByLabel('Steps').fill('Arm the hold, then cross the transition.')
-  await form.getByLabel('Expected result').fill('The hold is honoured.')
-  await form.getByLabel('Requirements it verifies').selectOption({ index: 0 })
-  await form.getByLabel('Independent procedure approver').fill('systems.lead')
-  await form.locator('.personSuggestions button[data-user-name="systems.lead"]').click()
-  await form.getByRole('button', { name: 'Create procedure' }).click()
-  await expect(form).toHaveCount(0, { timeout: 30_000 })
+  // Found, not created. Nothing writes a procedure outside a package any more, so the Draft this approval
+  // acts on is one the build already carries — which is closer to the real case anyway: the person who sees
+  // an unapproved procedure in the library is rarely the person who proposed it.
+  const draftRow = page.locator(`.procedureLibrary .coverageRow`)
+    .filter({ has: page.getByRole(`button`, { name: `Review & approve` }) }).first()
+  await expect(draftRow).toBeVisible({ timeout: 30_000 })
+  const title = (await draftRow.locator(`b`).first().textContent())!.trim()
 
   // The author cannot sign for their own work, so the approval is taken by somebody else — in their own
   // browser context rather than by signing out of this one. Signing out and straight back in raced the

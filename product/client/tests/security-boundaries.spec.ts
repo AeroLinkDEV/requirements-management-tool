@@ -15,7 +15,11 @@ test('mutation authentication and Program-scoped discovery prevent direct-object
   ['build',await outsider.post(`${apiBase}/api/builds`,{data:{projectId:workspace.project.id,releaseId:workspace.release.id,baselineId:unknown,buildNumber:'OUTSIDER-BUILD',description:'Unauthorized',recordedBy:'outsider'}})],
   ['release',await outsider.post(`${apiBase}/api/releases`,{data:{projectId:workspace.project.id,version:'2.0',predecessorReleaseId:null}})],
   ['trace',await outsider.post(`${apiBase}/api/trace-links`,{data:{projectId:workspace.project.id,sourceRevisionId:unknown,targetRevisionId:randomUUID(),type:'DerivedFrom',rationale:'Unauthorized'}})],
-  ['procedure',await outsider.post(`${apiBase}/api/test-procedures`,{data:{projectId:workspace.project.id,baseNumber:'CLIENT-SUPPLIED',title:'Unauthorized',objective:'Unauthorized',preconditions:'None',steps:'None',expectedResult:'None',requirementRevisionIds:[],level:'System'}})],
+  // No procedure probe here any more. The direct-create route is gone — a procedure is introduced by a test
+  // change request — and the route that replaced it checks the package exists before it checks authority, so
+  // an outsider with no package to name is turned away with 404 and the authority rule is never reached.
+  // A probe that cannot reach the check it is probing tests nothing; TestProcedureAuthoringApiTests covers
+  // that authority against a real package instead.
   ['evidence',await outsider.post(`${apiBase}/api/evidence`,{multipart:{projectId:workspace.project.id,file:{name:'unauthorized.txt',mimeType:'text/plain',buffer:Buffer.from('unauthorized')}}})]
  ]
  for(const [name,response] of denied)expect(response.status(),`${name}: ${await response.text()}`).toBe(403)

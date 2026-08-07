@@ -1629,6 +1629,37 @@ Future entries use:
     The API test drives the real route and was confirmed to fail without the include.
   - The endpoint now reports `coveredChangeRequests` on the successor, so the move is visible in the response
     rather than only in the table.
+### DEC-103 - A Procedure Is Only Introduced, Modified or Retired by a Test Change Request
+
+- **Date:** 2026-08-07
+- **Status:** Accepted
+- **Decision:** Nothing creates a test procedure outside a package. The `+ New test procedure` control and the
+  `POST /api/test-procedures` route are removed. A procedure comes into existence, changes, or is retired only
+  through a `TestProcedureChange` on a test change request, reviewed with that package and materialised into
+  the build — exactly as a requirement is only changed by a change request.
+- **Rationale:** There is no `+ New requirement` button, and there should never have been a procedure
+  equivalent. The product already knew: the code carried a comment saying the control *"writes a procedure
+  with no memory of why it exists"* and offered it anyway. Two ways in meant a procedure could exist with no
+  package, no rationale and no trace to the change that required it.
+- **Consequences:**
+  - **`Author the procedure`**, on a decision that asked for one, now proposes an `Introduce` change on the
+    package that asked — carrying the driving requirement revision — rather than writing a procedure. It picks
+    no approver: the package carries the proposal to its own review, and a second approver for the procedure
+    alone would be a second approval of the same work.
+  - Probing the collection with `POST` answers **405, not 404** — the list and approve routes remain, and only
+    the verb that wrote is gone. The test asserts that exact status, because a 404 would mean the route had
+    been renamed rather than retired.
+  - **A rule was nearly lost and nearly mis-ported.** The removed route refused a procedure that named no
+    requirement revision. Moving that onto the package proposal broke three existing tests, correctly: that
+    route wrote a controlled procedure immediately and needed its coverage then, while a package only
+    proposes and driving revisions become coverage at materialisation. The rule was not ported.
+  - **Open:** whether a package may introduce a procedure that names no requirement revision at all. Left
+    unanswered rather than settled by reflex.
+  - **Open:** the materialiser writes procedure revisions as `Approved`, because the package's review already
+    approved them, so no controlled path now produces a `Draft`. The separate procedure-level signature and
+    its `Review & approve` control still exist and act only on seeded historical drafts. Whether that step
+    survives at all is a product question this raised and did not decide.
+
 ### DEC-102 - Answering an Assessment Is What Takes It On
 
 - **Date:** 2026-08-06

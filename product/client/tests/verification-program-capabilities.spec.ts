@@ -157,12 +157,13 @@ test('verification actions follow authority in the selected Program',async({page
   await page.goto(`/programs/${testWorkspace.program.id}/projects/${testWorkspace.project.id}/releases/${testWorkspace.release.id}/command-center`)
   await expect(page.getByRole('heading',{name:/Command Center/})).toBeVisible()
 
-  // Test Engineer authority in this Program: procedures can be written, and results recorded against the
-  // build's test set.
+  // Test Engineer authority in this Program: results can be recorded against the build's test set. Writing a
+  // procedure is not an authority this page grants any more — one is introduced by a test change request —
+  // so what is checked here is that the page offers nobody a way to write one, whatever they may do.
   await openNavigationGroup(page,'ASSURANCE')
   await page.getByRole('link',{name:'System Testing Coverage'}).click()
   await expect(page.getByRole('heading',{name:'Testing Coverage'})).toBeVisible({timeout:30_000})
-  await expect(page.getByRole('button',{name:/New test procedure/})).toBeEnabled()
+  await expect(page.getByRole('button',{name:/New test procedure/})).toHaveCount(0)
 
   await page.getByRole('link',{name:'System Test Results'}).click()
   await expect(page.getByRole('heading',{name:'Test Results'})).toBeVisible({timeout:30_000})
@@ -178,7 +179,7 @@ test('verification actions follow authority in the selected Program',async({page
   // Approver authority without Test Engineer authority: a draft can be signed for, and nothing can be run.
   await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification/coverage`)
   await expect(page.getByRole('heading',{name:'Testing Coverage'})).toBeVisible({timeout:30_000})
-  await expect(page.getByRole('button',{name:/New test procedure/})).toBeDisabled()
+  await expect(page.getByRole('button',{name:/New test procedure/})).toHaveCount(0)
   const draftRow=page.locator('.procedureLibrary .coverageRow').filter({hasText:'Approval-only draft procedure'})
   await expect(draftRow.getByRole('button',{name:'Review & approve'})).toBeVisible({timeout:30_000})
 
