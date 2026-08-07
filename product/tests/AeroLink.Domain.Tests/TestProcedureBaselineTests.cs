@@ -63,7 +63,8 @@ public sealed class TestProcedureBaselineTests
         elsewhere.AssignControlledNumber("SYSTCR-000043", Now);
         elsewhere.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000900", 0,
             TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Elsewhere", "Objective",
-            "Preconditions", "Steps", "Expected", "Raised against another build."), Now);
+            "Preconditions", "Steps", "Expected", "Raised against another build.",
+            $"[\"{Guid.NewGuid()}\"]"), Now);
         elsewhere.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(1));
         elsewhere.Approve("test.lead", "Reviewed.", Now.AddMinutes(2));
 
@@ -206,7 +207,8 @@ public sealed class TestProcedureBaselineTests
             "The aircraft is in cruise with an active oceanic flight plan.",
             "1. Load the plan. 2. Advance past the first waypoint. 3. Read the sequencer.",
             "The next eligible oceanic waypoint is sequenced.",
-            "No procedure exercises oceanic sequencing after the approved change."), Now);
+            "No procedure exercises oceanic sequencing after the approved change.",
+            $"[\"{Guid.NewGuid()}\"]"), Now);
         tcr.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(1));
         tcr.Approve("test.lead", "Procedure decisions are complete and technically sound.", Now.AddMinutes(2));
         return tcr;

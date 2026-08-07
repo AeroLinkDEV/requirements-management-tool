@@ -106,7 +106,7 @@ public sealed class TestChangeRequestClaimTests
         // A package is only submittable once it says what procedure work it carries.
         package.AddProcedureChange("test.engineer", new TestProcedureChangeDraft("SYSTP-000700", 0,
             TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Sequencing", "Objective",
-            "Preconditions", "Steps", "Expected", "Needed."), now);
+            "Preconditions", "Steps", "Expected", "Needed.", $"[\"{Guid.NewGuid()}\"]"), now);
         package.Submit("test.engineer", "test.approver", everyItemResolved: true, now);
 
         Assert.Throws<DomainException>(() =>
