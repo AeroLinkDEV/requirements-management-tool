@@ -22,7 +22,6 @@ public sealed class ServerAuthorityContractTests
         "BaselineSelectionRequest",
         "EmptyMutationRequest",
         "CreateBuildRequest",
-        "CreateTestProcedureRequest",
         "RecordTestExecutionRequest",
         "DispositionImpactRequest",
         "BulkDispositionImpactRequest",

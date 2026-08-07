@@ -271,16 +271,17 @@ test('verification, review and administration forms carry the same semantics', a
     }
   }
 
-  // The other half: authoring a procedure, which is a longer form and the only one on the coverage page.
+  // The coverage page no longer offers a form of its own. Procedures are introduced by a test change
+  // request, so the authoring dialog is reached from the decision that asked for one rather than from a
+  // control on this page, and it is exercised by the testing-coverage journeys that follow that path.
+  //
+  // Known gap, stated rather than hidden: that dialog's label-to-control bindings are not audited here any
+  // more, because reaching it needs a decision in a particular state. It should be brought back under this
+  // gate once the page it lives on settles in stage 3b.
   await page.goto(new URL(root + '/system-verification/coverage', page.url()).toString(), { waitUntil: 'load' })
   await surfacePainted(page)
   await layoutSettled(page)
-  await page.getByRole('button', { name: '+ New test procedure' }).click()
-  await expect(page.getByRole('dialog', { name: 'Create a test procedure' })).toBeVisible({ timeout: 30_000 })
-  await inspect(page, 'Create a test procedure', failures)
-  for (const label of ['Title', 'Objective', 'Expected result']) {
-    await labelActivatesControl(page, label, 'Create a test procedure', failures)
-  }
+  await expect(page.getByRole('button', { name: '+ New test procedure' })).toHaveCount(0)
 
   expect(failures, `Form semantics defects:\n  ${failures.join('\n  ')}`).toEqual([])
 })

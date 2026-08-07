@@ -71,7 +71,6 @@ type Revision = {
   covers: string[]
 }
 type History = { id: string; baseNumber: string; title: string; ownerId: string; createdAt: string; selectedRevisionId?: string; revisions: Revision[] }
-type CreatedProcedure = { id: string; revisionId: string; displayNumber: string; state: string; selectedApproverId: string }
 
 const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'Software HLR' : 'Software LLR'
@@ -179,6 +178,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   // The requirement a procedure is being authored for, when the author arrived from a decision that asked
   // for one. It preselects that requirement so the link is not left to memory.
   const [authoringFor, setAuthoringFor] = useState("")
+  // The package a proposal belongs to. A procedure change has to be carried by one, so authoring is only
+  // reachable from a decision that names it.
+  const [authoringReviewId, setAuthoringReviewId] = useState("")
+  const [authoringNumber, setAuthoringNumber] = useState("")
   const [createError, setCreateError] = useState('')
   const [procedureView, setProcedureView] = useState<'record' | 'history'>('record')
   const [editing, setEditing] = useState<Procedure>()
@@ -191,7 +194,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [decliningTest, setDecliningTest] = useState<TestChangeRequest>()
   const [declineRationale, setDeclineRationale] = useState('')
   const [reviewApprover, setReviewApprover] = useState({ userId: '', name: '' })
-  const [procedureApprover, setProcedureApprover] = useState({ userId: '', name: '' })
   const [showAll, setShowAll] = useState(false)
   const [revision, setRevision] = useState(0)
   // Seeded from the address, so a shared or reloaded worklist opens on the list it names rather than on the
@@ -409,39 +411,45 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     setSaved(`PR links updated for ${request.displayNumber}.`)
   }, 'The PR links could not be updated.')
 
-  const createProcedure = async (form: FormData) => {
+  /**
+   * Proposes introducing a procedure, on the package that asked for it.
+   *
+   * A procedure is not created here, or anywhere else a person can press. It is introduced, modified or
+   * retired by a test change request carrying the proposal through review and materialisation into the
+   * build — exactly as a requirement is only changed by a change request. The previous control wrote a
+   * procedure straight into the library with no package behind it and no record of why it existed.
+   */
+  const proposeProcedure = async (form: FormData) => {
     if (busy) return
     const requirementRevisionIds = form.getAll('requirement').map(String).filter(Boolean)
     if (!requirementRevisionIds.length) { setCreateError('A procedure has to say which requirements it verifies.'); return }
+    if (!authoringReviewId) { setCreateError('This proposal has no test change request to belong to.'); return }
     setBusy(true); setCreateError(''); setError(''); setSaved('')
     try {
-      const created = await apiRequest<CreatedProcedure>(`${api}/api/test-procedures`, {
+      await apiRequest(`${api}/api/test-change-reviews/${authoringReviewId}/procedure-changes`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          projectId,
-          // The server issues the controlled number. A client that chose one would be choosing it twice under
-          // concurrency, which is the whole reason identifiers are claimed from a sequence.
-          baseNumber: 'SERVER-ALLOCATED',
+          kind: 'Introduce',
+          // Omitted when introducing: the number is allocated by the server so two engineers cannot pick the
+          // same one, and it is not a controlled procedure until the package that proposes it is approved.
+          baseNumber: null,
+          revision: 0,
           title: form.get('title'),
           objective: form.get('objective'),
           preconditions: form.get('preconditions'),
           steps: form.get('steps'),
           expectedResult: form.get('expectedResult'),
-          requirementRevisionIds,
-          approverId: procedureApprover.userId,
-          level: discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel',
+          rationale: form.get('rationale'),
+          drivingRequirementRevisionIds: requirementRevisionIds,
         }),
       })
       setCreating(false)
-      setProcedureApprover({ userId: '', name: '' })
-      setQuery(created.displayNumber)
-      setProcedurePage(1)
-      setSaved(`${created.displayNumber} created as a Draft. It needs independent approval before it can be run.`)
+      setSaved(`Proposed on ${authoringNumber || 'the test change request'}. It becomes controlled when that package is approved.`)
       await load()
       setRevision(current => current + 1)
     } catch (problem) {
-      recordClientOperationFailure('verification.procedure.create', problem)
-      setCreateError(operationError(problem, 'The procedure could not be created.'))
+      recordClientOperationFailure('verification.procedure.propose', problem)
+      setCreateError(operationError(problem, 'The procedure change could not be proposed.'))
     } finally { setBusy(false) }
   }
 
@@ -664,6 +672,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                       ? (
                         <button type="button" disabled={busy} onClick={() => {
                           setAuthoringFor(item.requirementRevisionId!)
+                          setAuthoringReviewId(item.testChangeReviewId)
+                          setAuthoringNumber(request.displayNumber)
+                          setCreateError('')
                           setCreating(true)
                         }}>Author the procedure</button>
                       )
@@ -781,14 +792,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         <div className="cardTitle">
           <h2>Test procedures</h2>
           <p>{total} controlled {disciplineLabel(discipline).toLowerCase()} procedure{total === 1 ? '' : 's'}. Open one to see who wrote it and what changed it.</p>
-          {!readOnly && (
-            <button
-              type="button"
-              disabled={!canTest || !requirements.length}
-              title={requirements.length ? undefined : 'Materialize the software build requirements before creating a procedure.'}
-              onClick={() => { setCreateError(''); setCreating(true) }}
-            >+ New test procedure</button>
-          )}
+          {/* No control here writes a procedure. One is introduced, modified or retired by a test change
+              request, the way a requirement is only changed by a change request — so authoring starts from
+              the decision that asked for it, on the package that will carry it. */}
         </div>
 
         {/* A project with nothing materialized has no exact revisions to bind a procedure to. Said plainly,
@@ -872,11 +878,15 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       </section>
 
       {creating && (
-        <div className="decisionModal" role="dialog" aria-label="Create a test procedure">
-          <form onSubmit={event => { event.preventDefault(); void createProcedure(new FormData(event.currentTarget)) }}>
-            <p className="eyebrow">CONTROLLED PROCEDURE</p>
-            <h2>New {disciplineLabel(discipline)} test procedure</h2>
-            <p>The server issues the next controlled number. It is created as a Draft and needs independent approval before it can be run.</p>
+        <div className="decisionModal" role="dialog" aria-label="Propose a test procedure">
+          <form onSubmit={event => { event.preventDefault(); void proposeProcedure(new FormData(event.currentTarget)) }}>
+            <p className="eyebrow">PROPOSED PROCEDURE CHANGE</p>
+            <h2>Introduce a {disciplineLabel(discipline)} test procedure</h2>
+            <p>
+              This is proposed on {authoringNumber || 'this test change request'}, as a requirement change is
+              proposed on a change request. It becomes a controlled procedure when that package is approved and
+              carried into the build — nothing here writes one on its own.
+            </p>
             {createError && <div className="createProcedureError" role="alert" aria-live="assertive">{createError}</div>}
             <label>Title<input name="title" required /></label>
             <label>Objective<textarea name="objective" required /></label>
@@ -894,11 +904,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               </select>
               <small id="procedure-requirements-help">Choose one or more. Hold Ctrl to pick several.</small>
             </label>
-            <label>Independent approver</label>
-            <PersonPicker api={api} projectId={projectId} value={procedureApprover.userId} name={procedureApprover.name}
-              index={9101} label="Independent procedure approver" excludeUserNames={[user.userName]} onSelect={setProcedureApprover} />
+            {/* No approver picked here. The package carries this proposal to its own review, and choosing a
+                second approver for the procedure alone would be a second approval of the same work. */}
+            <label>Why it is needed<textarea name="rationale" required /></label>
             <div className="decisionActions">
-              <button type="submit" disabled={busy || !procedureApprover.userId}>{busy ? 'Creating procedureâ€¦' : 'Create procedure'}</button>
+              <button type="submit" disabled={busy}>{busy ? 'Proposing…' : 'Propose procedure'}</button>
               <button type="button" className="quiet" disabled={busy} onClick={() => { setCreating(false); setCreateError('') }}>Cancel</button>
             </div>
           </form>
