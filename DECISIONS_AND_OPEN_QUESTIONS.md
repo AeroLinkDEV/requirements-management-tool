@@ -1502,7 +1502,9 @@ Future entries use:
 - **Status:** Accepted; delivered by PRs #357 and #359
 - **Decision:** A test assessment row is the requirements card — change number, title, discipline chip, then the
   conclusion, then **one** `Open assessment` control in every state. Take it on, Link PRs, conclude, send for
-  approval, approve and return all moved inside, along with the inline expanding workbench. The amber
+  approval, approve and return all moved inside, along with the inline expanding workbench. (`Take it on` was
+  removed outright by [DEC-102](#dec-102---answering-an-assessment-is-what-takes-it-on); moving it inside the
+  drawer hid it without retiring it.) The amber
   "attention" row colour is gone. Both drawers import `DownstreamAssessmentQueue.css` rather than copying it.
 - **Rationale:** The two pages showed the same stage of the same workflow in two unrelated shapes. A second
   stylesheet that merely resembled the first would drift the first time either was touched, so the testing
@@ -1578,6 +1580,30 @@ Future entries use:
     **0 of 516** procedures disagreed with their prefix. Prevention with nothing to migrate.
   - Retargeting a stranded procedure survives, but is level-bounded: it may move to another requirement at its
     own level, never across one.
+
+### DEC-102 - Answering an Assessment Is What Takes It On
+
+- **Date:** 2026-08-06
+- **Status:** Accepted
+- **Decision:** The `Take it on` control is removed from both the requirements HLR/LLR downstream assessment
+  drawer and the test assessment drawer. An assessment nobody has answered is open to any engineer with the
+  authority for it; recording an answer is what makes it theirs.
+- **Rationale:** Claiming was a step that produced nothing. It did not record a judgement, it did not change
+  what the assessment said, and it did not stop anybody else working — it only announced an intention, and it
+  stood between the reader and the work. Requested repeatedly and not acted on, because
+  [DEC-099](#dec-099---the-testing-queue-is-the-requirements-queue-not-something-like-it) moved the control
+  inside the drawer rather than retiring it, which made it look gone from the queue while it still gated
+  every decision.
+- **Consequences:**
+  - **It was never only a button.** `canEdit`, `canDecide` and `canSubmit` all required
+    `AssignedEngineerId == actor` on both sides, so removing the control alone would have left an authorised
+    engineer looking at a drawer offering nothing. The rule is now "unheld, or held by this reader".
+  - **The holder is still recorded**, assigned implicitly by the answer. My Work and the submit/approve chain
+    both key on it, and the next reader needs to see that somebody is on it.
+  - Amending an answer before approval remains the holder's. Correcting a concluded assessment is already an
+    act of its own under [DEC-094](#dec-094---an-assessment-says-whether-it-was-done-and-what-it-found).
+  - Both sides changed together. They had the same control, the same server rule and the same drawer shape,
+    and the point of that convergence is that neither moves without the other.
 
 ### DEC-096 - A Problem Report Names Its Kind, Its Workaround, and Who Holds It
 
