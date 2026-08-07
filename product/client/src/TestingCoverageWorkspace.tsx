@@ -364,18 +364,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       : `No ${tcrAcronym(discipline)} required for ${request.coveredChangeRequests.map(x => x.number).join(', ')}.`)
   }, 'The test assessment could not be recorded.')
 
-  const takeOn = (request: TestChangeRequest) => act(async () => {
-    const items = impact.filter(x => x.testChangeReviewId === request.id && x.state === 'Open')
-    await apiRequest(`${api}/api/test-change-reviews/${request.id}/assign`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ engineerId: user.userName }),
-    })
-    setSaved(`${request.displayNumber} is yours — ${items.length} decision${items.length === 1 ? '' : 's'}.`)
-    // Claiming a package is claiming its decisions, so they are what opens next. Leaving the reader on a
-    // collapsed summary makes them press a second control to reach the work they just took on.
-    setOpened(request.id)
-  }, 'The package could not be assigned.')
-
   const resolve = (item: ImpactItem, form: FormData) => act(async () => {
     const chosen = String(form.get('outcome'))
     await apiRequest(`${api}/api/verification-impact/${item.id}/resolve`, {
@@ -608,9 +596,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                 </ul>
               )}
               <div className="drawerDecisionActions">
-                {request.capabilities.canAssign && (
-                  <button type="button" disabled={busy} onClick={() => void takeOn(request)}>Take it on</button>
-                )}
+                {/* No claim step. Answering an unheld package is what takes it on. */}
                 {request.outcome === 'Pending' && request.capabilities.canDecide && (
                   <>
                     <button type="button" disabled={busy} onClick={() => void conclude(request, true)}>{tcrAcronym(discipline)} required</button>

@@ -91,8 +91,12 @@ public static class DownstreamAssessmentEndpoints
                     capabilities = new
                     {
                         canAssign = canEngineer && x.State == DownstreamAssessmentState.Open && x.AssignedEngineerId == null,
+                        // Unheld or held by this reader. Taking an assessment on used to be a step of its own
+                        // before any of its work was offered; answering it is what takes it now, so an unheld
+                        // one is open to anybody with the authority and a held one stays with whoever answered.
                         canEdit = canEngineer && x.State == DownstreamAssessmentState.Open
-                            && string.Equals(x.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
+                            && (x.AssignedEngineerId == null
+                                || string.Equals(x.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)),
                         // Only a no-change conclusion is approved. One that calls for a downstream change is
                         // complete when it is recorded, because the change request it produces is reviewed
                         // on its own terms — so there is nothing here to send anybody.
@@ -144,7 +148,11 @@ public static class DownstreamAssessmentEndpoints
                 return Results.Forbid();
             try
             {
-                assessment.RecordNoChange(http.UserAccount().UserName, request.Rationale, DateTimeOffset.UtcNow);
+                // Answering an unheld assessment is what takes it on, now that claiming is not a step of its
+                // own. The holder still has to be recorded: the next reader needs to see somebody is on it.
+                var decider = http.UserAccount().UserName;
+                if (assessment.AssignedEngineerId is null) assessment.Assign(decider, decider, DateTimeOffset.UtcNow);
+                assessment.RecordNoChange(decider, request.Rationale, DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct); return Results.Ok(new { assessment.Id, outcome = assessment.Outcome.ToString(), assessment.Version });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -162,7 +170,9 @@ public static class DownstreamAssessmentEndpoints
                 return Results.Forbid();
             try
             {
-                assessment.RecordChangeRequired(http.UserAccount().UserName, DateTimeOffset.UtcNow);
+                var decider = http.UserAccount().UserName;
+                if (assessment.AssignedEngineerId is null) assessment.Assign(decider, decider, DateTimeOffset.UtcNow);
+                assessment.RecordChangeRequired(decider, DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct); return Results.Ok(new { assessment.Id, outcome = assessment.Outcome.ToString(), assessment.Version });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }

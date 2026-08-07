@@ -115,11 +115,16 @@ public static class VerificationImpactEndpoints
                     .DistinctBy(x => x!.Id)
                 ,capabilities = new
                 {
+                    // Unheld or held by this reader. Taking a package on used to be a step of its own before
+                    // any of its work was offered; answering it is what takes it now, so an unheld package is
+                    // open to anybody with the authority and a held one stays with whoever answered first.
                     canAssign = canTest && review.State == TestChangeReviewState.Open && review.AssignedEngineerId == null,
                     canDecide = canTest && review.State == TestChangeReviewState.Open
-                        && string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
+                        && (review.AssignedEngineerId == null
+                            || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)),
                     canSubmit = canTest && review.State == TestChangeReviewState.Open
-                        && string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
+                        && (review.AssignedEngineerId == null
+                            || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)),
                     canApprove = canApprove && review.State == TestChangeReviewState.InReview
                         && string.Equals(review.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase),
                     canReturn = canApprove && review.State == TestChangeReviewState.InReview
@@ -174,6 +179,10 @@ public static class VerificationImpactEndpoints
             try
             {
                 var now = DateTimeOffset.UtcNow;
+                // Answering an unheld package is what takes it on. The claim is no longer a step of its own,
+                // but the record of who holds it still has to be true — the next reader needs to see that
+                // somebody is on it, and submission and approval both key on the holder.
+                if (review.AssignedEngineerId is null) review.Assign(actor, actor, now);
                 if (request.TestChangeRequired)
                 {
                     review.RecordTestChangeRequired(actor, now);
@@ -273,7 +282,10 @@ public static class VerificationImpactEndpoints
         app.MapPost("/api/test-change-reviews/{id:guid}/revise", async (Guid id, HttpContext http,
             AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
-            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+            // AdditionalSources as well as ProcedureChanges: the successor takes the folded-in claims with it,
+            // and an unloaded collection is an empty one. The claims would stay on the predecessor and the new
+            // revision would quietly cover less, which is the exact outcome moving them is meant to prevent.
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).Include(x => x.AdditionalSources)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
@@ -287,7 +299,8 @@ public static class VerificationImpactEndpoints
                 return Results.Ok(new
                 {
                     next.Id, next.DisplayNumber, next.Revision, state = next.State.ToString(),
-                    outcome = next.Outcome.ToString(), procedureChanges = next.ProcedureChanges.Count
+                    outcome = next.Outcome.ToString(), procedureChanges = next.ProcedureChanges.Count,
+                    coveredChangeRequests = next.CoveredChangeRequestIds.Count(),
                 });
             }
             catch (DomainException problem) { return Results.BadRequest(new { error = problem.Message }); }
@@ -397,6 +410,12 @@ public static class VerificationImpactEndpoints
             {
                 var now = DateTimeOffset.UtcNow;
                 var actor = http.UserAccount().UserName;
+                // Answering a decision takes its package on, the same as concluding the assessment does. This
+                // is the path a package that already has a number is worked through — its conclusion was
+                // recorded when it was raised — so without this the commonest way of answering leaves the
+                // package unheld, missing from My Work and unsubmittable.
+                var package = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == item.TestChangeReviewId, ct);
+                if (package is not null && package.AssignedEngineerId is null) package.Assign(actor, actor, now);
                 item.Resolve(actor, request.Outcome, request.Rationale, now,
                     selectedProcedure?.ProcedureId, selectedProcedure?.RevisionId,
                     request.ProcedureChangeAction, request.PreReleaseEvidenceRequired,

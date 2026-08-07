@@ -14,9 +14,12 @@ async function openClaimableAssessment(page: Page) {
   for (const row of await page.locator('.downstreamAssessment').all()) {
     await row.getByRole('button', { name: 'Open assessment' }).click()
     await expect(drawer).toBeVisible({ timeout: 30_000 })
-    const claim = drawer.getByRole('button', { name: 'Take it on' })
-    if (await claim.count()) { await claim.click(); return drawer }
-    if (await drawer.getByRole('button', { name: 'Decide' }).count()) return drawer
+    // Decidable, not merely open. There is no claim step any more — answering an unheld package is what takes
+    // it on — so what makes a package usable to this reader is an enabled Decide, and a package somebody else
+    // already holds offers none. Testing for presence rather than for enabled is what made this hang for a
+    // full timeout on a held package instead of moving to the next row.
+    const decide = drawer.getByRole('button', { name: 'Decide' })
+    if (await decide.count() > 0 && await decide.first().isEnabled()) return drawer
     await drawer.getByRole('button', { name: 'Close test assessment' }).click()
   }
   throw new Error('No test assessment on this page is free to decide.')

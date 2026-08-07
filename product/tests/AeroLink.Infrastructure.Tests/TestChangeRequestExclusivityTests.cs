@@ -118,4 +118,60 @@ public sealed class TestChangeRequestExclusivityTests
         Assert.Equal("SRCR-00040", read.AdditionalSources.Single().ChangeRequestNumber);
         Assert.Equal(2, read.CoveredChangeRequestIds.Count());
     }
+
+    /// <summary>
+    /// A revision hands its folded-in claims on, and the store has to agree.
+    ///
+    /// This is not a formality. The claim's foreign key is required and configured to cascade on delete, so
+    /// taking a claim out of one package's collection and putting it into another's is exactly the shape EF
+    /// reads as "this child was orphaned, delete it". If it did, the successor would silently cover less than
+    /// its predecessor and the unique index would report nothing, because deleting a row never violates one.
+    ///
+    /// So the assertions are about the row, not the aggregate: still one claim for that change request, still
+    /// the same identifier, pointing at the successor.
+    /// </summary>
+    [Fact]
+    public async Task A_folded_in_claim_moves_to_the_next_revision_rather_than_being_deleted()
+    {
+        var fixture = await DatabaseAsync();
+        await using var db = fixture.Db;
+
+        var package = Package(fixture, fixture.FirstOrigin, "SYSTCR-000044");
+        db.Add(package);
+        await db.SaveChangesAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        package.RecordTestChangeRequired("verification.engineer", now);
+        package.IncludeChangeRequest("verification.engineer", fixture.Contested, "SRCR-00040", now);
+        package.Submit("verification.engineer", "test.lead", true, now.AddMinutes(1));
+        package.Approve("test.lead", "Sound.", now.AddMinutes(2));
+        await db.SaveChangesAsync();
+        var claimId = package.AdditionalSources.Single().Id;
+
+        // Reloaded rather than revised in place. A claim created a moment ago is tracked as Added and EF will
+        // insert it wherever it ends up; a claim read back from the store is Unchanged and reached through the
+        // predecessor's navigation, which is the case that silently wrote nothing. Revising the instance still
+        // in hand would pass either way and prove nothing about how the product actually does it.
+        db.ChangeTracker.Clear();
+        package = await db.TestChangeReviews.Include(x => x.AdditionalSources).SingleAsync(x => x.Id == package.Id);
+
+        var next = package.StartNextRevision("verification.engineer", now.AddMinutes(3), targetReleaseIsReleased: false);
+        db.Add(next);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var claims = await db.TestChangeRequestClaims.AsNoTracking()
+            .Where(x => x.ChangeRequestId == fixture.Contested).ToListAsync();
+        var moved = Assert.Single(claims);
+        Assert.Equal(claimId, moved.Id);
+        Assert.Equal(next.Id, moved.TestChangeReviewId);
+        Assert.Equal("verification.engineer", moved.ClaimedBy);
+
+        var predecessor = await db.TestChangeReviews.AsNoTracking()
+            .Include(x => x.AdditionalSources).SingleAsync(x => x.Id == package.Id);
+        Assert.Empty(predecessor.AdditionalSources);
+        var successor = await db.TestChangeReviews.AsNoTracking()
+            .Include(x => x.AdditionalSources).SingleAsync(x => x.Id == next.Id);
+        Assert.Equal(fixture.Contested, successor.AdditionalSources.Single().ChangeRequestId);
+    }
 }
