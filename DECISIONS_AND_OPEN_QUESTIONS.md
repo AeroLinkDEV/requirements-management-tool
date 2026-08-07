@@ -1646,19 +1646,37 @@ Future entries use:
     package that asked — carrying the driving requirement revision — rather than writing a procedure. It picks
     no approver: the package carries the proposal to its own review, and a second approver for the procedure
     alone would be a second approval of the same work.
-  - Probing the collection with `POST` answers **405, not 404** — the list and approve routes remain, and only
-    the verb that wrote is gone. The test asserts that exact status, because a 404 would mean the route had
-    been renamed rather than retired.
+  - Probing the collection with `POST` answers **405, not 404** — the collection is still there to be read,
+    and only the verb that wrote is gone. The test asserts that exact status, because a 404 would mean the
+    route had been renamed rather than retired, and the door would still be open somewhere else.
   - **A rule was nearly lost and nearly mis-ported.** The removed route refused a procedure that named no
     requirement revision. Moving that onto the package proposal broke three existing tests, correctly: that
     route wrote a controlled procedure immediately and needed its coverage then, while a package only
-    proposes and driving revisions become coverage at materialisation. The rule was not ported.
-  - **Open:** whether a package may introduce a procedure that names no requirement revision at all. Left
-    unanswered rather than settled by reflex.
-  - **Open:** the materialiser writes procedure revisions as `Approved`, because the package's review already
-    approved them, so no controlled path now produces a `Draft`. The separate procedure-level signature and
-    its `Review & approve` control still exist and act only on seeded historical drafts. Whether that step
-    survives at all is a product question this raised and did not decide.
+    proposes and driving revisions become coverage at materialisation. The rule was not ported — it was
+    reinstated deliberately, at a different moment, as the next two points record.
+  - **A procedure being introduced must name at least one requirement revision it verifies.** A procedure that
+    verifies nothing is not a controlled procedure, and an approver must never be asked to sign one.
+  - **That rule is enforced when the package is submitted for review, not while it is being drafted.** A draft
+    package is worked on incrementally, exactly as a change request is, so the gate belongs where an approver
+    is about to sign rather than where an engineer starts typing. `TestChangeReview.SubmitForReview` refuses a
+    package whose introduced procedures name nothing; the authoring endpoint deliberately does not, and says
+    so in a comment where the temptation to add it will next appear.
+  - **Procedure-level approval does not survive.** `POST /api/test-procedures/{revisionId}/approve`, the
+    `Review & approve` control, the client call path, the `selectedApproverId` projection that routed it, and
+    `TestProcedureRevision.Approve` are all removed. The last of those had exactly one caller — the deleted
+    route — and a capability nothing calls is not a capability
+    ([LES-006](#les-006---a-capability-with-no-caller-is-not-delivered)).
+  - **Approving the test change request is the authorisation for materialising its procedure revisions.** The
+    SYSTCR, HLRTCR or LLRTCR is what gets reviewed and signed. That signature covers the procedure work the
+    package carries, because that work is what the package *is*.
+  - **Materialised revisions are written directly as `Approved`**, on that authority, and there is no separate
+    signature on the procedure revision for the same change. Signing twice would not make the work more
+    controlled; it would only make it ambiguous which signature meant it.
+  - No controlled path now produces a `Draft` procedure revision. Drafts that predate controlled test change
+    still exist and are still shown as what they are; they are simply not approvable any more, because the
+    step that approved them was a second approval of work no package had ever carried.
+  - The rule that outlived the approval is that an unapproved revision cannot be executed. That is enforced at
+    `POST /api/test-executions` and is the reason a Draft still means something.
 
 ### DEC-102 - Answering an Assessment Is What Takes It On
 
