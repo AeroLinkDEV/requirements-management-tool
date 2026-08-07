@@ -1806,6 +1806,30 @@ by the accessibility journeys, because those walk a hardcoded surface list that 
 timeout report names the *test*, never the action inside it — the unmatched `before` event in `trace.zip` names
 the action. Read the trace before theorising about budget.
 
+### LES-009 - A Rule Moved Is Not the Same Rule, and Look-Alike Call Sites Are Not Alike
+
+Three defects in one day, all the same shape: several sites looked alike, one change was applied to all of
+them, and each time the difference that mattered was invisible in the text.
+
+A rule was carried from the deleted direct-create route onto the test change request's proposal — *a procedure
+must name what it verifies*. Three tests failed and were right to. The old route created a controlled
+procedure the instant it was called and needed its coverage then; a package only proposes, and driving
+revisions become coverage at materialisation. Identical words, different moment, different rule. The rule was
+later reinstated deliberately, at submission, by
+[DEC-103](#dec-103---a-procedure-is-only-introduced-modified-or-retired-by-a-test-change-request) — which is
+the point: it belonged somewhere, but not where it was first put.
+
+A `replace_all` across two identical proposal payloads broke a passing test. The break was the useful part: it
+revealed that the procedure-changes endpoint validates driving requirement revisions against real ones, which
+no amount of reading the diff would have shown.
+
+And scripted multi-line edits silently changed nothing three times, because the working tree is CRLF — see
+[LES-005](#les-005---prefer-the-editor-over-scripted-multi-file-edits).
+
+Treat "these all look the same" as a reason to open each one. Before moving a rule, ask what was true where it
+came from that may not be true where it is going. When a batch edit breaks something that was passing, read
+the breakage before undoing it — it is describing the system.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
