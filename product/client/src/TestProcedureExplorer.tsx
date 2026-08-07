@@ -47,8 +47,16 @@ type Tab = 'details' | 'trace' | 'history' | 'discussion'
  */
 type PageTab = 'procedures' | 'coverage'
 
-const scopeOf = (discipline: TestDiscipline) =>
-  discipline === 'System' ? 'system' : discipline === 'HighLevelSoftware' ? 'highLevel' : 'lowLevel'
+/**
+ * The scope the procedure list is asked for, which is the discipline's own name.
+ *
+ * This used to map to "system", "highLevel" and "lowLevel". The endpoint matches "System", "Software",
+ * "HighLevelSoftware" and "LowLevelSoftware", so none of those matched anything and no filter was applied:
+ * every discipline's Explorer listed all 515 procedures in the Project, System and HLR and LLR together. It
+ * went unnoticed because nothing asserted the count, and it matters now that this is the only place
+ * procedures are browsed — an HLR engineer confirming coverage could pick an LLR procedure off the list.
+ */
+const scopeOf = (discipline: TestDiscipline) => discipline
 const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'Software HLR' : 'Software LLR'
 
@@ -206,6 +214,17 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       await loadComments(selected.id)
     } catch (problem) { setError(operationError(problem, 'The comment could not be resolved.')) }
   }
+
+  // Switching discipline or build is a different page asking a different question, and this component stays
+  // mounted across that switch. Without this, moving from HLR to LLR kept the coverage already read — the LLR
+  // page would have shown HLR's numbers under an LLR heading, which is worse than showing nothing. The tab
+  // goes back to the procedures it is named for, too.
+  useEffect(() => {
+    setCoverage(undefined)
+    setCoverageRead(false)
+    setShowAll(false)
+    setPageTab('procedures')
+  }, [api, projectId, releaseId, discipline])
 
   // Read when the coverage tab is first opened, not with the procedure list. Coverage is three requests and a
   // whole-configuration computation, and a reader who came to find one procedure by number should not pay for
