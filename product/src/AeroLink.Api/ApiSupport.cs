@@ -97,6 +97,20 @@ static class ProblemReportIntegrationMap
 
 static class ApiMap
 {
+    /// <summary>
+    /// The requirement level a procedure at this level verifies. One fact, stated once.
+    ///
+    /// The same correspondence <c>AeroLinkDbContext</c> enforces on a coverage link — a procedure covers
+    /// requirements at its own level — expressed here so the authoring path can refuse a wrong-level
+    /// requirement before it is stored rather than at materialization.
+    /// </summary>
+    public static RequirementLevel RequirementLevelFor(TestProcedureLevel level) => level switch
+    {
+        TestProcedureLevel.System => RequirementLevel.System,
+        TestProcedureLevel.HighLevel => RequirementLevel.HighLevel,
+        _ => RequirementLevel.LowLevel,
+    };
+
     public static string ControlledDocumentTypeLabel(ControlledDocumentType type) => type switch
     {
         ControlledDocumentType.Sysrd => "System Requirements Document (SYSRD)",

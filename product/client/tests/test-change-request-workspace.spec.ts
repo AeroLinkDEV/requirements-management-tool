@@ -89,12 +89,15 @@ test('a test engineer proposes a new procedure inside the test change request th
   await drawer.getByRole('button', { name: 'Propose a procedure change' }).click()
   const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
 
+  // The requirements a procedure verifies are chosen here, not left empty — without them the procedure
+  // revision cannot be bound to what caused it.
+  await expect(dialog.getByRole('group', { name: 'Requirements this procedure verifies' })).toBeVisible()
   // Introducing allocates the number centrally, so there is deliberately nowhere to type one.
-  await expect(dialog.getByLabel('Procedure number')).toHaveCount(0)
+  await expect(dialog.getByRole('combobox', { name: 'Procedure' })).toHaveCount(0)
   await dialog.getByLabel('What is being done').selectOption('Retire')
   // A retirement withdraws a procedure rather than restating it, so no body is asked for — but which
   // procedure is being retired is not optional.
-  await expect(dialog.getByLabel('Procedure number')).toBeVisible()
+  await expect(dialog.getByRole('combobox', { name: 'Procedure' })).toBeVisible()
   await expect(dialog.getByLabel('Steps')).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: 'Propose decision' })).toBeDisabled()
   await dialog.getByLabel('What is being done').selectOption('Introduce')
