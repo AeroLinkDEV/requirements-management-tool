@@ -226,10 +226,13 @@ public static class BaselineEndpoints
             var selectedIds = baseline.TestChangeSelections.Select(x => x.TestChangeRequestId).ToList();
             // Only approved packages that actually carry procedure work can be selected. One that concluded no
             // test work was needed has nothing to contribute, and no controlled number to contribute it under.
+            // Nor does one approved before procedure decisions existed: it is real history, but a build cannot
+            // carry work that was never stated. Approved already excludes a superseded revision.
             var available = await db.TestChangeReviews.AsNoTracking()
                 .Where(x => x.ProjectId == baseline.ProjectId && x.ReleaseId == baseline.ReleaseId
                     && x.State == TestChangeReviewState.Approved
                     && x.Outcome == TestChangeReviewOutcome.ChangeRequired
+                    && x.ProcedureChanges.Any()
                     && !selectedIds.Contains(x.Id))
                 .Select(x => new { x.Id, x.DisplayNumber, discipline = x.Discipline.ToString(), x.SourceChangeRequestNumber })
                 .ToListAsync(ct);
@@ -250,7 +253,10 @@ public static class BaselineEndpoints
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
             if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-            var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == request.TestChangeRequestId, ct);
+            // Loaded with its procedure changes, because the aggregate refuses a package carrying none and an
+            // unloaded collection is indistinguishable from an empty one.
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+                .SingleOrDefaultAsync(x => x.Id == request.TestChangeRequestId, ct);
             if (review is null) return Results.NotFound();
             try
             {

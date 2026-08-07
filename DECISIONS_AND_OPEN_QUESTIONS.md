@@ -1502,7 +1502,9 @@ Future entries use:
 - **Status:** Accepted; delivered by PRs #357 and #359
 - **Decision:** A test assessment row is the requirements card — change number, title, discipline chip, then the
   conclusion, then **one** `Open assessment` control in every state. Take it on, Link PRs, conclude, send for
-  approval, approve and return all moved inside, along with the inline expanding workbench. The amber
+  approval, approve and return all moved inside, along with the inline expanding workbench. (`Take it on` was
+  removed outright by [DEC-102](#dec-102---answering-an-assessment-is-what-takes-it-on); moving it inside the
+  drawer hid it without retiring it.) The amber
   "attention" row colour is gone. Both drawers import `DownstreamAssessmentQueue.css` rather than copying it.
 - **Rationale:** The two pages showed the same stage of the same workflow in two unrelated shapes. A second
   stylesheet that merely resembled the first would drift the first time either was touched, so the testing
@@ -1552,9 +1554,8 @@ Future entries use:
     knows which package approved this" is the true record for them.
   - A proposal's driving requirement revisions become real `TestRequirementCoverage` only at materialization —
     the same point a change request's proposed upstream allocation becomes a trace link.
-  - **Open:** when a test change request with other change requests folded into it revises, which package keeps
-    those claims. A change request belongs to at most one package, so the successor cannot hold what the
-    predecessor still holds. It throws with that reason stated rather than silently dropping coverage.
+  - Settled by [DEC-101](#dec-101---a-revision-takes-its-folded-in-claims-with-it): when a test change request
+    with other change requests folded into it revises, the claims move to the successor.
 
 ### DEC-098 - A Test Procedure Covers Requirements at Its Own Level, and Nothing Else
 
@@ -1578,6 +1579,79 @@ Future entries use:
     **0 of 516** procedures disagreed with their prefix. Prevention with nothing to migrate.
   - Retargeting a stranded procedure survives, but is level-bounded: it may move to another requirement at its
     own level, never across one.
+
+### DEC-100 - A Procedure Is Browsed Through the Requirements Inspector, Not a Copy of It
+
+- **Date:** 2026-08-06
+- **Status:** Accepted; the Test Procedure Explorer is delivered, the two pages behind it are not yet
+- **Decision:** Verification gets a third page per discipline, **Test Procedure Explorer**, listing every
+  controlled procedure in the build with a right-side inspector carrying the same four tabs a requirement's
+  does — Overview, Trace & impact, History, Discussion — rendered from `RequirementsWorkspace.css` and, for the
+  discussion, from the same `form` and `article` markup and the same `ArtifactComment` record.
+- **Rationale:** [DEC-097](#dec-097---a-test-procedure-is-built-and-handled-exactly-as-a-requirement-is) made
+  the procedure *model* mirror the requirement model. This is the same commitment one layer up: an engineer who
+  can read a requirement can read a procedure without being taught a second screen.
+- **Consequences:**
+  - **Trace runs the other way, and that is the one real difference.** A requirement's trace shows what derives
+    from it; a procedure's shows the requirements it exists to verify. A procedure verifying nothing says so,
+    because that is the stranded case [DEC-098](#dec-098---a-test-procedure-covers-requirements-at-its-own-level-and-nothing-else) governs.
+  - Resolving a procedure comment goes through the existing `/api/enterprise-requirements/comments/{id}/resolve`
+    route, which reads `ArtifactComments` by identifier alone and never mentioned requirements except in its
+    path. A second route would have been a second behaviour to keep in step.
+  - Mentioning somebody on a procedure notifies them, as it does on a requirement. Procedures carry no watch
+    list, so the audience is who was named plus whoever is being replied to.
+  - The page is **additive**. Procedures appear both here and in the Testing Coverage library until the
+    remaining stages rename that page to Change Requests and strip the library out of it. Visibly redundant for
+    a while, but never half-migrated.
+  - Discussion is read-only in a released build, matching the requirements pane exactly.
+  - The list pages 25 at a time behind the same `.pager` control, and the discussion loads on selection rather
+    than on opening the tab, because the tab wears the comment count.
+### DEC-101 - A Revision Takes Its Folded-In Claims With It
+
+- **Date:** 2026-08-06
+- **Status:** Accepted; closes the open item left by
+  [DEC-097](#dec-097---a-test-procedure-is-built-and-handled-exactly-as-a-requirement-is)
+- **Decision:** When an approved test change request advances to its next revision, the change requests folded
+  into it move to the successor. `StartNextRevision` no longer refuses.
+- **Rationale:** A change request is claimed by at most one package, enforced by a unique index, so exactly one
+  of the two revisions may hold it. The successor is the package that will actually be approved and
+  materialised. Leaving the claim behind would mean a superseded package still answering for test work nobody
+  is doing; dropping it would make the new revision cover less than the old one without saying so.
+- **Consequences:**
+  - Each claim is **moved, not recreated** — same row, same identifier, same claimant and time. Who took a
+    change's test work on, and when, is not something a revision should rewrite.
+  - The claim's foreign key is required and cascades on delete, which is exactly the shape EF Core reads as
+    "this child was orphaned, delete it". It does not — it reparents with an UPDATE — but that was **verified
+    against a real store**, not reasoned about, because a deletion here would violate no index and report
+    nothing. The persistence test asserts the row, not the aggregate.
+  - The revise endpoint has to `Include(x => x.AdditionalSources)`. An unloaded collection is an empty one, so
+    a missing include would move nothing, strand the claim on the superseded revision, and return success.
+    The API test drives the real route and was confirmed to fail without the include.
+  - The endpoint now reports `coveredChangeRequests` on the successor, so the move is visible in the response
+    rather than only in the table.
+### DEC-102 - Answering an Assessment Is What Takes It On
+
+- **Date:** 2026-08-06
+- **Status:** Accepted
+- **Decision:** The `Take it on` control is removed from both the requirements HLR/LLR downstream assessment
+  drawer and the test assessment drawer. An assessment nobody has answered is open to any engineer with the
+  authority for it; recording an answer is what makes it theirs.
+- **Rationale:** Claiming was a step that produced nothing. It did not record a judgement, it did not change
+  what the assessment said, and it did not stop anybody else working — it only announced an intention, and it
+  stood between the reader and the work. Requested repeatedly and not acted on, because
+  [DEC-099](#dec-099---the-testing-queue-is-the-requirements-queue-not-something-like-it) moved the control
+  inside the drawer rather than retiring it, which made it look gone from the queue while it still gated
+  every decision.
+- **Consequences:**
+  - **It was never only a button.** `canEdit`, `canDecide` and `canSubmit` all required
+    `AssignedEngineerId == actor` on both sides, so removing the control alone would have left an authorised
+    engineer looking at a drawer offering nothing. The rule is now "unheld, or held by this reader".
+  - **The holder is still recorded**, assigned implicitly by the answer. My Work and the submit/approve chain
+    both key on it, and the next reader needs to see that somebody is on it.
+  - Amending an answer before approval remains the holder's. Correcting a concluded assessment is already an
+    act of its own under [DEC-094](#dec-094---an-assessment-says-whether-it-was-done-and-what-it-found).
+  - Both sides changed together. They had the same control, the same server rule and the same drawer shape,
+    and the point of that convergence is that neither moves without the other.
 
 ### DEC-096 - A Problem Report Names Its Kind, Its Workaround, and Who Holds It
 
@@ -1653,6 +1727,12 @@ repository — `${number}` shell-expanding to nothing, `===` breaking the parser
 Use the editing tools for anything structural; reserve scripted substitution for changes whose every match is
 verified afterwards.
 
+A second failure mode, found on 6 August while proving a test discriminated: the script rewrote the file
+within the same second as the previous build, so MSBuild's timestamp check skipped the rebuild and the run
+used a **stale assembly**. The test then failed for a reason present in no source anybody was reading, which
+led to an invented explanation and a workaround for a defect that did not exist. When a result contradicts the
+code in front of you, `dotnet clean` and rebuild before theorising about the framework.
+
 ### LES-006 - A Capability With No Caller Is Not Delivered
 
 `TestProcedureBaselineMaterializer` was written, tested, registered in dependency injection, and merged across
@@ -1679,6 +1759,21 @@ there, and the message pointed at the wrong thing.
 A locator that narrows by the presence of something is a silent assertion. When that something moves, the
 locator does not break — it widens. Where a filter is load-bearing, assert what it found before acting on it,
 or select by a property the redesign cannot remove.
+
+### LES-008 - A Test Timeout Names the Test, Not the Action That Hung
+
+The production design-contract sweep timed out at its full 600 seconds, twice, with the failure snapshot showing
+the Test Procedure Explorer rendered correctly. Both times the conclusion drawn was "the sweep has outgrown its
+budget, and the new page is simply the route it happened to reach" — and both times that was wrong. The trace
+told the truth immediately: one `page.locator('main').innerText()` call had consumed **562 of the 600 seconds**,
+because the new page rendered a `<div>` where every other workspace renders its own `<main>`. Playwright waited
+for a landmark that was never going to appear; `.catch(() => '')` could not fire, because the action had not
+failed yet.
+
+Two things follow. A missing landmark is a real accessibility defect, and it was found by a timeout rather than
+by the accessibility journeys, because those walk a hardcoded surface list that the new page was not on. And a
+timeout report names the *test*, never the action inside it — the unmatched `before` event in `trace.zip` names
+the action. Read the trace before theorising about budget.
 
 ## Working Assumptions
 

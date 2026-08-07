@@ -61,6 +61,9 @@ public sealed class TestProcedureBaselineTests
             TestChangeReviewDiscipline.System, "SRCR-00039.00", Now);
         elsewhere.RecordTestChangeRequired("verification.engineer", Now);
         elsewhere.AssignControlledNumber("SYSTCR-000043", Now);
+        elsewhere.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000900", 0,
+            TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Elsewhere", "Objective",
+            "Preconditions", "Steps", "Expected", "Raised against another build."), Now);
         elsewhere.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(1));
         elsewhere.Approve("test.lead", "Reviewed.", Now.AddMinutes(2));
 
@@ -142,6 +145,23 @@ public sealed class TestProcedureBaselineTests
 
         Assert.Throws<DomainException>(() => new TestProcedureRevision(procedureId, 3, "", "", "", "",
             TestProcedureState.Approved, "verification.engineer", Now));
+    }
+
+    [Fact]
+    public void A_package_that_states_no_procedure_work_cannot_be_carried_into_a_build()
+    {
+        var baseline = Frozen();
+        var empty = RaisedTestChangeRequest();
+        empty.RecordTestChangeRequired("verification.engineer", Now);
+        empty.AssignControlledNumber("SYSTCR-000044", Now);
+        empty.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(1));
+        empty.Approve("test.lead", "Approved before procedure decisions were captured.", Now.AddMinutes(2));
+
+        // Packages approved before procedure decisions existed are real history and stay readable. A build
+        // still cannot carry work that was never stated, so the route to fixing one is to revise it.
+        var error = Assert.Throws<DomainException>(() =>
+            baseline.SelectTestChangeRequest(empty, "verification.lead", Now.AddDays(1)));
+        Assert.Contains("carries no procedure decisions", error.Message);
     }
 
     private static CandidateBaseline Draft() =>

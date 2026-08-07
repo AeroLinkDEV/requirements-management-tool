@@ -357,6 +357,14 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         });
     }
 
+    /// <summary>
+    /// Tidying up, which must never be the reason a test is reported as failed.
+    ///
+    /// On Windows CI a handle to the throwaway database occasionally outlives the host that opened it, and
+    /// <c>File.Delete</c> then throws from inside <c>Dispose</c> — turning a test whose every assertion passed
+    /// into a red one, with a stack trace that says nothing about the product. The file lives in the system
+    /// temp directory; leaving one behind costs nothing, and losing the signal costs a great deal.
+    /// </summary>
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
@@ -364,10 +372,28 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         DeleteIfPresent(_databasePath);
         DeleteIfPresent(_databasePath + "-shm");
         DeleteIfPresent(_databasePath + "-wal");
-        if (Directory.Exists(_evidenceRoot)) Directory.Delete(_evidenceRoot, true);
+        try { if (Directory.Exists(_evidenceRoot)) Directory.Delete(_evidenceRoot, true); }
+        catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
-    private static void DeleteIfPresent(string path) { if (File.Exists(path)) File.Delete(path); }
+    // Retried briefly before being given up on, because the usual cause is a handle closing a moment late
+    // rather than one held for good.
+    private static void DeleteIfPresent(string path)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                if (File.Exists(path)) File.Delete(path);
+                return;
+            }
+            catch (Exception problem) when (problem is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == 4) return;
+                Thread.Sleep(100);
+            }
+        }
+    }
 
     private static string FindApiContentRoot()
     {

@@ -103,6 +103,10 @@ public sealed class TestChangeRequestClaimTests
     {
         var package = Package();
         var now = DateTimeOffset.UtcNow;
+        // A package is only submittable once it says what procedure work it carries.
+        package.AddProcedureChange("test.engineer", new TestProcedureChangeDraft("SYSTP-000700", 0,
+            TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Sequencing", "Objective",
+            "Preconditions", "Steps", "Expected", "Needed."), now);
         package.Submit("test.engineer", "test.approver", everyItemResolved: true, now);
 
         Assert.Throws<DomainException>(() =>

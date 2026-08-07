@@ -6,7 +6,8 @@ so the work can be picked up without re-deriving the reasoning.
 
 Items are numbered as they were in the analysis, so the numbering is not sequential here.
 
-> **Current-surface checkpoint — 2026-08-01.** Verification is now Testing Coverage and Test Results for each
+> **Current-surface checkpoint — 2026-08-06.** Verification is now Testing Coverage, Test Procedure Explorer
+> and Test Results for each
 > System/HLR/LLR discipline; controlled Test Change Requests, downstream assessments, identity lifecycle, and
 > prospective upward allocation are delivered. Non-authoritative Concurrency and count-only IntegrityScan
 > simulations are retired. Problem Reports are now active and build scoped under DEC-085; Product Versions and

@@ -116,11 +116,16 @@ public static class VerificationImpactEndpoints
                     .DistinctBy(x => x!.Id)
                 ,capabilities = new
                 {
+                    // Unheld or held by this reader. Taking a package on used to be a step of its own before
+                    // any of its work was offered; answering it is what takes it now, so an unheld package is
+                    // open to anybody with the authority and a held one stays with whoever answered first.
                     canAssign = canTest && review.State == TestChangeReviewState.Open && review.AssignedEngineerId == null,
                     canDecide = canTest && review.State == TestChangeReviewState.Open
-                        && string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
+                        && (review.AssignedEngineerId == null
+                            || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)),
                     canSubmit = canTest && review.State == TestChangeReviewState.Open
-                        && string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase),
+                        && (review.AssignedEngineerId == null
+                            || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)),
                     canApprove = canApprove && review.State == TestChangeReviewState.InReview
                         && string.Equals(review.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase),
                     canReturn = canApprove && review.State == TestChangeReviewState.InReview
@@ -175,6 +180,10 @@ public static class VerificationImpactEndpoints
             try
             {
                 var now = DateTimeOffset.UtcNow;
+                // Answering an unheld package is what takes it on. The claim is no longer a step of its own,
+                // but the record of who holds it still has to be true — the next reader needs to see that
+                // somebody is on it, and submission and approval both key on the holder.
+                if (review.AssignedEngineerId is null) review.Assign(actor, actor, now);
                 if (request.TestChangeRequired)
                 {
                     review.RecordTestChangeRequired(actor, now);
@@ -195,14 +204,59 @@ public static class VerificationImpactEndpoints
         // The procedure decisions a test change request carries — what the workspace reads and writes, and the
         // test-side counterpart of the requirement changes a change request carries.
         app.MapGet("/api/test-change-reviews/{id:guid}/procedure-changes", async (Guid id,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.AsNoTracking().Include(x => x.ProcedureChanges)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
+            // Derived here rather than inferred by the client from a broad role. The workspace was offering
+            // authoring controls to anyone with test authority while these same rules refused them, which is
+            // an invitation to an error message.
+            var actor = http.UserAccount().UserName;
+            var released = await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct);
+            var isTester = !released && await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead);
+            var isLead = !released && await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestLead);
+            var holdsIt = review.AssignedEngineerId is null
+                || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)
+                || isLead;
+            var mayAuthor = isTester && holdsIt;
+            // The requirements this discipline's procedures may be written against, so the authoring form can
+            // offer a choice instead of asking an engineer to know an identifier.
+            var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel());
+            var candidates = await (from item in db.VerificationImpactItems.AsNoTracking()
+                                    where item.TestChangeReviewId == review.Id && item.RequirementRevisionId != null
+                                    join revision in db.RequirementRevisions.AsNoTracking() on item.RequirementRevisionId equals revision.Id
+                                    join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                                    where artifact.ProjectId == review.ProjectId && artifact.Level == wanted
+                                    select new { revisionId = revision.Id, displayNumber = artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, revision.Statement })
+                .Distinct().ToListAsync(ct);
+            // The procedures a Modify or Retire may target, for the same reason.
+            var targets = await (from procedure in db.TestProcedures.AsNoTracking()
+                                 where procedure.ProjectId == review.ProjectId && procedure.Level == review.ProcedureLevel()
+                                 select new { procedure.Id, procedure.BaseNumber, procedure.Title })
+                .OrderBy(x => x.BaseNumber).Take(500).ToListAsync(ct);
+            var targetIds = targets.Select(x => x.Id).ToList();
+            var currentRevisions = await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => targetIds.Contains(x.ProcedureId))
+                .GroupBy(x => x.ProcedureId)
+                .Select(g => new { ProcedureId = g.Key, Revision = g.Max(x => x.Revision) })
+                .ToDictionaryAsync(x => x.ProcedureId, x => x.Revision, ct);
             return Results.Ok(new
             {
+                capabilities = new
+                {
+                    canProposeProcedureChange = mayAuthor && review.State == TestChangeReviewState.Open
+                        && review.Outcome == TestChangeReviewOutcome.ChangeRequired,
+                    canWithdrawProcedureChange = mayAuthor && review.State == TestChangeReviewState.Open,
+                    canRevise = mayAuthor && review.State == TestChangeReviewState.Approved,
+                },
+                drivingRequirementChoices = candidates,
+                procedureTargets = targets.Select(x => new
+                {
+                    x.BaseNumber, x.Title,
+                    currentRevision = currentRevisions.TryGetValue(x.Id, out var revision) ? revision : -1,
+                }),
                 review.Id, review.DisplayNumber, review.BaseNumber, review.Revision,
                 discipline = review.Discipline.ToString(), state = review.State.ToString(),
                 outcome = review.Outcome.ToString(), procedureLevel = review.ProcedureLevel().ToString(),
@@ -238,6 +292,50 @@ public static class VerificationImpactEndpoints
                     : (request.BaseNumber ?? "").Trim();
                 if (request.Kind != TestProcedureChangeKind.Introduce && baseNumber.Length == 0)
                     return Results.BadRequest(new { error = "A modification or retirement must name the procedure it acts on." });
+                // A modification or retirement names a controlled procedure, so the server proves it is one:
+                // that it exists, belongs to this project, sits at this discipline's level, and that the
+                // proposed revision advances the one it actually has. Left unchecked, a typo survived approval
+                // and failed at materialization, which puts an authoring mistake in the release path.
+                if (request.Kind != TestProcedureChangeKind.Introduce)
+                {
+                    var target = await db.TestProcedures.AsNoTracking()
+                        .Where(x => x.BaseNumber == baseNumber)
+                        .Select(x => new { x.Id, x.ProjectId, x.Level }).SingleOrDefaultAsync(ct);
+                    if (target is null)
+                        return Results.BadRequest(new { error = $"{baseNumber} is not a controlled test procedure." });
+                    if (target.ProjectId != review.ProjectId)
+                        return Results.BadRequest(new { error = $"{baseNumber} belongs to another project." });
+                    if (target.Level != review.ProcedureLevel())
+                        return Results.BadRequest(new { error = $"{baseNumber} is a {target.Level} procedure and cannot be changed by a {review.Discipline} test change request." });
+                    var current = await db.TestProcedureRevisions.AsNoTracking()
+                        .Where(x => x.ProcedureId == target.Id).Select(x => (int?)x.Revision)
+                        .OrderByDescending(x => x).FirstOrDefaultAsync(ct) ?? -1;
+                    if (request.Revision <= current)
+                        return Results.BadRequest(new { error = $"{baseNumber} is at revision {current:D2}. A change to it must propose revision {current + 1:D2} or later." });
+                }
+
+                // The requirements a procedure is written against have to be this project's, and at this
+                // discipline's level. A cross-project identifier would otherwise become controlled coverage at
+                // materialization and claim verification that belongs to another program.
+                var driving = request.DrivingRequirementRevisionIds ?? [];
+                if (driving.Length != 0)
+                {
+                    var known = await (from revision in db.RequirementRevisions.AsNoTracking()
+                                       join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                                       where driving.Contains(revision.Id)
+                                       select new { revision.Id, artifact.ProjectId, artifact.Level })
+                        .ToDictionaryAsync(x => x.Id, ct);
+                    var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel());
+                    foreach (var drivingId in driving.Distinct())
+                    {
+                        if (!known.TryGetValue(drivingId, out var requirement))
+                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} does not exist." });
+                        if (requirement.ProjectId != review.ProjectId)
+                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} belongs to another project." });
+                        if (requirement.Level != wanted)
+                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} is a {requirement.Level} requirement, which a {review.Discipline} procedure does not verify." });
+                    }
+                }
                 var change = review.AddProcedureChange(http.UserAccount().UserName, new TestProcedureChangeDraft(
                     baseNumber, request.Revision, review.ProcedureLevel(), request.Kind, request.Title ?? "",
                     request.Objective ?? "", request.Preconditions ?? "", request.Steps ?? "",
@@ -274,21 +372,37 @@ public static class VerificationImpactEndpoints
         app.MapPost("/api/test-change-reviews/{id:guid}/revise", async (Guid id, HttpContext http,
             AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
-            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+            // AdditionalSources as well as ProcedureChanges: the successor takes the folded-in claims with it,
+            // and an unloaded collection is an empty one. The claims would stay on the predecessor and the new
+            // revision would quietly cover less, which is the exact outcome moving them is meant to prevent.
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).Include(x => x.AdditionalSources)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
                 return Results.Forbid();
+            // Correcting approved work belongs to the engineer who holds it. A lead may still step in, which is
+            // supervision rather than a second author, but an unrelated engineer starting a successor revision
+            // would change the lineage of somebody else's controlled package without anyone deciding it should.
+            if (review.AssignedEngineerId is not null
+                && !string.Equals(review.AssignedEngineerId, http.UserAccount().UserName, StringComparison.OrdinalIgnoreCase)
+                && !await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct, ProgramRole.TestLead))
+                return Results.Forbid();
             try
             {
                 var released = await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct);
-                var next = review.StartNextRevision(http.UserAccount().UserName, DateTimeOffset.UtcNow, released);
+                var now = DateTimeOffset.UtcNow;
+                var next = review.StartNextRevision(http.UserAccount().UserName, now, released);
                 db.TestChangeReviews.Add(next);
+                // Superseded in the same unit of work as its successor is created. Two revisions both reading
+                // as current is worse than either state on its own: configuration management could carry the
+                // obsolete one into a build while an engineer is correcting it.
+                review.Supersede(next.Id, $"Superseded by controlled revision {next.DisplayNumber}.", now);
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new
                 {
                     next.Id, next.DisplayNumber, next.Revision, state = next.State.ToString(),
-                    outcome = next.Outcome.ToString(), procedureChanges = next.ProcedureChanges.Count
+                    outcome = next.Outcome.ToString(), procedureChanges = next.ProcedureChanges.Count,
+                    coveredChangeRequests = next.CoveredChangeRequestIds.Count(),
                 });
             }
             catch (DomainException problem) { return Results.BadRequest(new { error = problem.Message }); }
@@ -398,6 +512,12 @@ public static class VerificationImpactEndpoints
             {
                 var now = DateTimeOffset.UtcNow;
                 var actor = http.UserAccount().UserName;
+                // Answering a decision takes its package on, the same as concluding the assessment does. This
+                // is the path a package that already has a number is worked through — its conclusion was
+                // recorded when it was raised — so without this the commonest way of answering leaves the
+                // package unheld, missing from My Work and unsubmittable.
+                var package = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == item.TestChangeReviewId, ct);
+                if (package is not null && package.AssignedEngineerId is null) package.Assign(actor, actor, now);
                 item.Resolve(actor, request.Outcome, request.Rationale, now,
                     selectedProcedure?.ProcedureId, selectedProcedure?.RevisionId,
                     request.ProcedureChangeAction, request.PreReleaseEvidenceRequired,
@@ -582,7 +702,8 @@ public static class VerificationImpactEndpoints
         app.MapPost("/api/test-change-reviews/{id:guid}/submit", async (Guid id, SubmitTestChangeReviewRequest request,
             HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
-            var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == id, ct);
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
             if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
                 return Results.Conflict(new { error = "Released software-build test change reviews are read-only." });
@@ -592,6 +713,11 @@ public static class VerificationImpactEndpoints
             {
                 if (string.IsNullOrWhiteSpace(request.ApproverId))
                     return Results.BadRequest(new { error = "Select an independent test change request approver." });
+                // A package concluding that procedure work is required, and then naming none, asks an approver
+                // to approve nothing. The workspace already tells the engineer a package is unfinished until it
+                // says what the work is; this is that sentence enforced.
+                if (review.Outcome == TestChangeReviewOutcome.ChangeRequired && review.ProcedureChanges.Count == 0)
+                    return Results.BadRequest(new { error = $"{review.DisplayNumber} concluded that procedure work is required but names none. Add the procedure decisions it carries before sending it for review." });
                 var approver = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x =>
                     x.UserName == request.ApproverId.Trim().ToLowerInvariant() && x.State == AccountState.Active, ct);
                 if (approver is null)

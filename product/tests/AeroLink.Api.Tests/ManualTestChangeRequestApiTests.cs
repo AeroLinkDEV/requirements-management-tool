@@ -224,4 +224,62 @@ public sealed class ManualTestChangeRequestApiTests
             new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId } });
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
+
+    /// <summary>
+    /// Revising a package takes its folded-in claims with it, over the route rather than in the aggregate.
+    ///
+    /// The domain moves the claims, but only over what it was given. The endpoint loads the package to revise
+    /// it, and an unloaded collection is an empty one — so a missing Include would move nothing, leave the
+    /// claim on the superseded revision, and report success. Nothing in the aggregate can catch that, which
+    /// is why this drives the real route and then reads the claim row back.
+    /// </summary>
+    [Fact]
+    public async Task Revising_a_package_carries_its_folded_in_change_requests_onto_the_successor()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var package = await db.TestChangeReviews.Include(x => x.AdditionalSources)
+                .SingleAsync(x => x.Id == fixture.AutoTcrId);
+            package.RecordTestChangeRequired("manual.engineer", now);
+            package.IncludeChangeRequest("manual.engineer", fixture.FirstChangeId, "SRCR-00910.00", now);
+            package.Submit("manual.engineer", "test.lead", true, now.AddMinutes(1));
+            package.Approve("test.lead", "Sound.", now.AddMinutes(2));
+            await db.SaveChangesAsync();
+        }
+
+        // The precondition, asserted rather than assumed: without a stored claim the move under test would
+        // have nothing to move, and the failure would look identical to the endpoint losing it.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var before = await db.TestChangeRequestClaims.AsNoTracking()
+                .SingleAsync(x => x.ChangeRequestId == fixture.FirstChangeId);
+            Assert.Equal(fixture.AutoTcrId, before.TestChangeReviewId);
+        }
+
+        using var revised = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.AutoTcrId}/revise", new { });
+        var body = await revised.Content.ReadAsStringAsync();
+        Assert.True(revised.StatusCode == HttpStatusCode.OK, $"{(int)revised.StatusCode}: {body}");
+        var next = JsonSerializer.Deserialize<JsonElement>(body);
+        Assert.Equal(1, next.GetProperty("revision").GetInt32());
+        // The change it was raised from plus the one folded into it. One would mean the claim was left behind.
+        Assert.Equal(2, next.GetProperty("coveredChangeRequests").GetInt32());
+        var successorId = next.GetProperty("id").GetGuid();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var claims = await db.TestChangeRequestClaims.AsNoTracking()
+                .Where(x => x.ChangeRequestId == fixture.FirstChangeId).ToListAsync();
+            Assert.Equal(successorId, Assert.Single(claims).TestChangeReviewId);
+        }
+    }
 }

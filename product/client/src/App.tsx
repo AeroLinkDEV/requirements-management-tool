@@ -72,6 +72,7 @@ const IntegrationCommandCenter = lazyView(() => import("./IntegrationCommandCent
 const ReviewWorkflowCenter = lazyView(() => import("./ReviewWorkflowCenter"));
 const TestResultsWorkspace = lazyView(() => import("./TestResultsWorkspace"));
 const TestingCoverageWorkspace = lazyView(() => import("./TestingCoverageWorkspace"));
+const TestProcedureExplorer = lazyView(() => import("./TestProcedureExplorer"));
 const ArtifactRecordPage = lazyView(() => import("./ArtifactRecordPage"));
 
 /** Which code a navigation target needs, so hovering the entry can start fetching it. */
@@ -85,6 +86,7 @@ const viewCode: Partial<Record<View, { warm: () => void }>> = {
   verification: VerificationLanding,
   testResults: TestResultsWorkspace,
   testingCoverage: TestingCoverageWorkspace,
+  procedureExplorer: TestProcedureExplorer,
   documents: DocumentCenter,
   managedDocuments: ManagedDocumentationCenter,
   problemReports: ProblemReportCenter,
@@ -209,9 +211,9 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       <nav className="primaryNavigation" aria-label="Primary navigation">
         <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
         <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{item("Generated Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}{item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>
-        <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}><summary>VERIFICATION</summary><div className="navScopeSwitch" role="group" aria-label="Verification scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{verificationScope==="softwareTest"
-          ? <>{item("HLR Testing Coverage","testingCoverage","◫","softwareTest","Software HLR Testing Coverage","HighLevel")}{item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}{item("LLR Testing Coverage","testingCoverage","◫","softwareTest","Software LLR Testing Coverage","LowLevel")}{item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}</>
-          : <>{item("Testing Coverage","testingCoverage","◫","systemTest","System Testing Coverage")}{item("Test Results","testResults","▦","systemTest","System Test Results")}</>}{item("Generated Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Generated Software Verification Documents":"Generated System Verification Documents")}</details>
+        <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="procedureExplorer"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}><summary>VERIFICATION</summary><div className="navScopeSwitch" role="group" aria-label="Verification scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{verificationScope==="softwareTest"
+          ? <>{item("HLR Testing Coverage","testingCoverage","◫","softwareTest","Software HLR Testing Coverage","HighLevel")}{item("HLR Test Procedure Explorer","procedureExplorer","≡","softwareTest","Software HLR Test Procedure Explorer","HighLevel")}{item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}{item("LLR Testing Coverage","testingCoverage","◫","softwareTest","Software LLR Testing Coverage","LowLevel")}{item("LLR Test Procedure Explorer","procedureExplorer","≡","softwareTest","Software LLR Test Procedure Explorer","LowLevel")}{item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}</>
+          : <>{item("Testing Coverage","testingCoverage","◫","systemTest","System Testing Coverage")}{item("Test Procedure Explorer","procedureExplorer","≡","systemTest","System Test Procedure Explorer")}{item("Test Results","testResults","▦","systemTest","System Test Results")}</>}{item("Generated Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Generated Software Verification Documents":"Generated System Verification Documents")}</details>
         <div className="navStandalone">{item("Code","code","{ }","software","Code traceability",undefined,true)}</div>
         <div className="navStandalone">{item("Documentation Center","managedDocuments","▤","system","Documentation Center",undefined,true)}</div>
         <div className="navStandalone">{item("Problem Reports","problemReports","!","system","Problem Reports",undefined,true)}</div>
@@ -480,7 +482,7 @@ function App() {
   // to a build — it creates one. There is no build to have entered when this page is what you need.
   if(view==="baselineImports"&&project)return <BaselineImportCenter user={user} api={API} projectId={project.project.id} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onSignOut={signOut}/>;
   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} density={density} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
-  const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Testing Coverage",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
+  const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Testing Coverage",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b><span>Build {release?.version}</span><b aria-hidden="true">›</b><strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
@@ -618,6 +620,20 @@ function App() {
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
         onOpenTraceability={(artifactId) => navigate("lifecycle", discipline, artifactId, artifactId ? "requirement" : undefined)}
         onOpenVerification={openVerificationProcedure}
+      />
+    );
+  // Browsing the controlled procedure inventory, the verification twin of the requirements explorer.
+  if (view === "procedureExplorer" && project && release)
+    return inShell(
+      <TestProcedureExplorer
+        api={API}
+        projectId={project.project.id}
+        releaseId={release.id}
+        discipline={discipline === "softwareTest"
+          ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
+          : "System"}
+        buildName={`Build ${release.version}`}
+        released={release.isReleased}
       />
     );
   // The two paths a build.s verification work splits into.
