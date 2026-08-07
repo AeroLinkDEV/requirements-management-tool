@@ -1,3 +1,4 @@
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
@@ -728,7 +729,15 @@ public static class VerificationImpactEndpoints
                 var allResolved = await db.VerificationImpactItems
                     .Where(x => x.TestChangeReviewId == id)
                     .AllAsync(x => x.State == VerificationImpactState.Resolved, ct);
-                review.Submit(http.UserAccount().UserName, approver.UserName, allResolved, DateTimeOffset.UtcNow);
+                // The project's recorded procedure for this discipline decides the stages. Where none is
+                // recorded the chosen approver stands alone, exactly as before — a rule nobody has written
+                // down must not become a rule that blocks work.
+                var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, review.ProjectId, review.Discipline, ct);
+                var approverRole = await identity.HasRoleAsync(approver.Id, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct)
+                    ? ProgramRole.Approver : (ProgramRole?)null;
+                review.SubmitForReview(http.UserAccount().UserName,
+                    [new ApproverSelection(approver.UserName, approver.DisplayName, approverRole)],
+                    allResolved, DateTimeOffset.UtcNow, workflow?.Mode ?? ReviewMode.Sequential, workflow);
                 db.UserNotifications.Add(new(review.ProjectId, approver.UserName, "TestChangeRequestApprovalRequested",
                     $"Review {review.DisplayNumber}", $"{http.UserAccount().DisplayName} selected you to approve this test change request.",
                     "verification", review.Id, DateTimeOffset.UtcNow));

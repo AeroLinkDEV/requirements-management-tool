@@ -50,9 +50,26 @@ public sealed class ReviewCycle
     private readonly List<ApprovalStep> _steps = [];
     private ReviewCycle() { }
 
+    /// <summary>A review of a change request.</summary>
     internal ReviewCycle(Guid changeRequestId, int sequence, string snapshotHash, IReadOnlyList<ApproverSelection> approvers,
         DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null)
+        : this(changeRequestId, null, sequence, snapshotHash, approvers, now, mode, workflow) { }
+
+    /// <summary>A review of a test change request. Same mechanism, different subject.</summary>
+    internal static ReviewCycle ForTestChangeRequest(Guid testChangeReviewId, int sequence, string snapshotHash,
+        IReadOnlyList<ApproverSelection> approvers, DateTimeOffset now,
+        ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null) =>
+        new(null, testChangeReviewId, sequence, snapshotHash, approvers, now, mode, workflow);
+
+    private ReviewCycle(Guid? changeRequestId, Guid? testChangeReviewId, int sequence, string snapshotHash,
+        IReadOnlyList<ApproverSelection> approvers, DateTimeOffset now, ReviewMode mode,
+        ReviewWorkflowSpecification? workflow)
     {
+        // Exactly one owner. Both would make "what is this a review of" ambiguous; neither would make it
+        // unanswerable, and the cycle would outlive anything that could explain it.
+        if (changeRequestId is null == testChangeReviewId is null)
+            throw new DomainException("A review cycle belongs to exactly one package.");
+        TestChangeReviewId = testChangeReviewId;
         if (approvers.Count == 0) throw new DomainException("At least one approver is required.");
         if (approvers.Select(x => x.UserId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != approvers.Count)
             throw new DomainException("An approver cannot appear twice in one sequence.");
@@ -86,7 +103,19 @@ public sealed class ReviewCycle
     }
 
     public Guid Id { get; private set; }
-    public Guid ChangeRequestId { get; private set; }
+    /// <summary>
+    /// The change request this review is of, when it is of one.
+    ///
+    /// A review cycle belongs to exactly one package, but there are now two kinds it can belong to. Rather
+    /// than one loose owner column that could point anywhere, each kind keeps its own foreign key and the
+    /// database enforces that exactly one is set — so an orphaned cycle stays impossible, which a single
+    /// untyped identifier could not promise.
+    /// </summary>
+    public Guid? ChangeRequestId { get; private set; }
+    /// <summary>The test change request this review is of, when it is of one. Never set together with the above.</summary>
+    public Guid? TestChangeReviewId { get; private set; }
+    /// <summary>Whichever package this review belongs to, for the code that does not care which kind it is.</summary>
+    public Guid OwnerId => ChangeRequestId ?? TestChangeReviewId!.Value;
     public int Sequence { get; private set; }
     public string SnapshotHash { get; private set; } = string.Empty;
     public ReviewMode Mode { get; private set; }

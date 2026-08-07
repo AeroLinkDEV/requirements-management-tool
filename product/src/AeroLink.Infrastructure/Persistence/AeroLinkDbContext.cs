@@ -376,7 +376,17 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ClosureReason).HasMaxLength(2000);
             b.Property(x => x.WorkflowName).HasMaxLength(200);
             b.Ignore(x => x.ActivePosition);
+            b.Ignore(x => x.OwnerId);
             b.HasIndex(x => new { x.ChangeRequestId, x.Sequence }).IsUnique();
+            b.HasIndex(x => new { x.TestChangeReviewId, x.Sequence }).IsUnique();
+            // Both owners keep a real foreign key, and a check constraint enforces that exactly one is set.
+            // A single untyped owner column would have been simpler and would have given up the database's
+            // guarantee that a review cycle points at something that exists — which is not a trade this
+            // product should make, since its whole claim is that its records are provable.
+            b.HasOne<TestChangeReview>().WithMany(x => x.ReviewCycles).HasForeignKey(x => x.TestChangeReviewId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.ToTable(t => t.HasCheckConstraint("CK_review_cycles_one_owner",
+                "(\"ChangeRequestId\" IS NULL) <> (\"TestChangeReviewId\" IS NULL)"));
             b.HasMany(x => x.Steps).WithOne().HasForeignKey(x => x.ReviewCycleId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<ApprovalStep>(b =>
@@ -587,6 +597,16 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Navigation(x => x.ProcedureChanges).UsePropertyAccessMode(PropertyAccessMode.Field);
             b.Property(x => x.SourceChangeRequestNumber).HasMaxLength(40).IsRequired();
             b.Property(x => x.BaseNumber).HasMaxLength(40).IsRequired();
+            // The case the package argues, sized as a change request's own. Empty on packages raised before
+            // the fields existed and on those raised automatically, which nobody has written up yet.
+            b.Property(x => x.Title).HasMaxLength(300).IsRequired();
+            b.Property(x => x.Problem).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.Analysis).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.Solution).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.ProblemRich).IsRequired();
+            b.Property(x => x.AnalysisRich).IsRequired();
+            b.Property(x => x.SolutionRich).IsRequired();
+            b.Navigation(x => x.ReviewCycles).UsePropertyAccessMode(PropertyAccessMode.Field);
             b.Property(x => x.SelectedApproverId).HasMaxLength(100);
             b.Ignore(x => x.DisplayNumber);
             b.HasMany(x => x.AdditionalSources).WithOne().HasForeignKey(x => x.TestChangeReviewId).OnDelete(DeleteBehavior.Cascade);

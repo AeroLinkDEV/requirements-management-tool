@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Content;
 
 namespace AeroLink.Domain.Verification;
 
@@ -25,6 +26,7 @@ public sealed class TestChangeReview
 {
     private readonly List<TestChangeRequestClaim> _additionalSources = [];
     private readonly List<TestProcedureChange> _procedureChanges = [];
+    private readonly List<ChangeControl.ReviewCycle> _reviewCycles = [];
 
     private TestChangeReview() { }
 
@@ -75,7 +77,34 @@ public sealed class TestChangeReview
     /// would notice.
     /// </summary>
     public IReadOnlyCollection<TestChangeRequestClaim> AdditionalSources => _additionalSources.AsReadOnly();
+    /// <summary>
+    /// The reviews this package has been through, using the same mechanism a change request uses.
+    ///
+    /// Shared rather than mirrored: one implementation of snapshot hashing, staged approval, substitution and
+    /// signature, so a correction to how review works reaches both disciplines. What differs between them is
+    /// the workflow — how many stages, which authority signs each — and that is data, not code.
+    /// </summary>
+    public IReadOnlyCollection<ChangeControl.ReviewCycle> ReviewCycles => _reviewCycles.AsReadOnly();
     public TestChangeReviewState State { get; private set; }
+    /// <summary>
+    /// The case this package argues, in the same three parts a change request argues its own.
+    ///
+    /// A test change request is a controlled proposal, and a proposal that lists procedure edits without saying
+    /// why is a work order rather than a case for review. An approver signing one is answering the same
+    /// question their counterpart answers on the requirements side — is this the right change, for a reason
+    /// that holds — so it is asked in the same words.
+    ///
+    /// Empty on packages raised before the fields existed, and on those raised automatically by an approved
+    /// change request, which have not been written up by anybody yet.
+    /// </summary>
+    public string Title { get; private set; } = "";
+    public string Problem { get; private set; } = "";
+    public string Analysis { get; private set; } = "";
+    public string Solution { get; private set; } = "";
+    public string ProblemRich { get; private set; } = RichContent.Empty;
+    public string AnalysisRich { get; private set; } = RichContent.Empty;
+    public string SolutionRich { get; private set; } = RichContent.Empty;
+
     /// <summary>Whether the assessment has been performed, and what it found.</summary>
     public TestChangeReviewOutcome Outcome { get; private set; }
     /// <summary>Why no test-procedure work is required. Recorded only with that conclusion.</summary>
@@ -162,6 +191,102 @@ public sealed class TestChangeReview
         return change;
     }
 
+    /// <summary>
+    /// Writes the case this package argues. The counterpart of a change request's own draft edit, and open for
+    /// the same window: while the package is still being worked, and not once an approver is holding it.
+    /// </summary>
+    public void WriteCase(string actorId, string title, string problem, string analysis, string solution,
+        DateTimeOffset now, string? problemRich = null, string? analysisRich = null, string? solutionRich = null)
+    {
+        EnsureOpen();
+        Required(actorId, "authoring verification engineer");
+        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A test change request title is required.");
+        Title = title.Trim();
+        (Problem, ProblemRich) = Resolve(problem, problemRich);
+        (Analysis, AnalysisRich) = Resolve(analysis, analysisRich);
+        (Solution, SolutionRich) = Resolve(solution, solutionRich);
+        Touch(now);
+
+        static (string Plain, string Rich) Resolve(string plain, string? rich)
+        {
+            if (string.IsNullOrWhiteSpace(rich)) return (plain?.Trim() ?? "", RichContent.FromPlainText(plain ?? ""));
+            var canonical = RichContent.Canonicalize(rich);
+            return (RichContent.ToPlainText(canonical), canonical);
+        }
+    }
+
+    /// <summary>The cycle currently deciding this package, if one is.</summary>
+    public ChangeControl.ReviewCycle? ActiveReviewCycle =>
+        _reviewCycles.LastOrDefault(x => x.State == ChangeControl.ReviewCycleState.Active);
+
+    /// <summary>
+    /// Sends the package to its review board, running the same staged review a change request runs.
+    ///
+    /// The single named approver this used to take is a review board of one that nobody could configure. Now
+    /// the stages come from the project's recorded procedure for this discipline, so a program can require
+    /// three signatures on a requirement change and one on the test work that follows it — and either way the
+    /// review is snapshot-hashed, ordered and signed by the same code.
+    /// </summary>
+    public ChangeControl.ReviewCycle SubmitForReview(string actorId,
+        IReadOnlyList<ChangeControl.ApproverSelection> approvers, bool everyItemResolved, DateTimeOffset now,
+        ChangeControl.ReviewMode mode = ChangeControl.ReviewMode.Sequential,
+        ChangeControl.ReviewWorkflowSpecification? workflow = null)
+    {
+        EnsureOpen();
+        if (Outcome == TestChangeReviewOutcome.Pending)
+            throw new DomainException("Assess the change before sending it for review.");
+        if (!everyItemResolved)
+            throw new DomainException("Every test-procedure decision must be completed before review.");
+        if (approvers.Any(x => string.Equals(x.UserId, actorId, StringComparison.OrdinalIgnoreCase)))
+            throw new DomainException("The test change request approver must be independent from its submitting engineer.");
+        // "Concluded work is required, names none" is refused at the endpoint rather than here, and that is a
+        // deliberate split. Every route a person can take passes through the endpoint. What does not is the
+        // reconstruction of history: Build 1.5's packages were approved before procedure decisions existed,
+        // and the honest record of them is empty. Enforcing it here would force the showcase to invent the
+        // decisions those approvals never carried, which is a worse falsehood than the gap.
+        var cycle = ChangeControl.ReviewCycle.ForTestChangeRequest(Id, _reviewCycles.Count + 1,
+            ComputeSnapshotHash(), approvers, now, mode, workflow);
+        _reviewCycles.Add(cycle);
+        SubmittedBy = Required(actorId, "submitting verification engineer");
+        SelectedApproverId = approvers[0].UserId;
+        SubmittedAt = now;
+        State = TestChangeReviewState.InReview;
+        Touch(now);
+        return cycle;
+    }
+
+    /// <summary>Records one stage's approval. The package is approved when the last stage is.</summary>
+    public void ApproveActiveStage(string actorId, string rationale, DateTimeOffset now)
+    {
+        if (State != TestChangeReviewState.InReview)
+            throw new DomainException("Only a submitted test change request can be approved.");
+        var cycle = ActiveReviewCycle ?? throw new DomainException("This test change request has no active review.");
+        if (cycle.Approve(actorId, now))
+        {
+            ApprovedBy = Required(actorId, "approving reviewer");
+            ApprovalRationale = Required(rationale, "approval rationale");
+            ApprovedAt = now;
+            State = TestChangeReviewState.Approved;
+        }
+        Touch(now);
+    }
+
+    /// <summary>
+    /// What the review is of, fixed at submission.
+    ///
+    /// The same purpose the change request's own snapshot serves: an approval has to be provably of an exact
+    /// set of decisions, so that editing the package afterwards cannot quietly reuse the signature.
+    /// </summary>
+    private string ComputeSnapshotHash()
+    {
+        var manifest = string.Join("|", DisplayNumber, Title, Problem, Analysis, Solution,
+            string.Join(";", _procedureChanges.OrderBy(x => x.BaseNumber)
+                .Select(x => $"{x.DisplayNumber}:{x.Kind}:{x.Title}:{x.Objective}:{x.Steps}:{x.ExpectedResult}")));
+        return Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(manifest)))
+            .ToLowerInvariant();
+    }
+
     public void RemoveProcedureChange(Guid changeId, DateTimeOffset now)
     {
         EnsureOpen();
@@ -205,25 +330,19 @@ public sealed class TestChangeReview
         Touch(now);
     }
 
+    /// <summary>
+    /// Sends the package to a single named approver.
+    ///
+    /// Delegates rather than duplicating: this is <see cref="SubmitForReview"/> with a review board of one and
+    /// no recorded procedure, which is what every submission was before boards could be configured. Two
+    /// implementations of "submit" would be two things to keep in step, and the reason this one still exists is
+    /// that it reads better at the call sites that genuinely have one approver and no workflow.
+    /// </summary>
     public void Submit(string actorId, string approverId, bool everyItemResolved, DateTimeOffset now)
     {
-        EnsureOpen();
-        if (Outcome == TestChangeReviewOutcome.Pending)
-            throw new DomainException("Assess the change before sending it for review.");
-        if (!everyItemResolved)
-            throw new DomainException("Every test-procedure decision must be completed before review.");
-        // "Concluded work is required, names none" is refused at the endpoint rather than here, and that is a
-        // deliberate split. Every route a person can take passes through the endpoint. What does not is the
-        // reconstruction of history: Build 1.5's packages were approved before procedure decisions existed,
-        // and the honest record of them is empty. Enforcing it here would force the showcase to invent the
-        // decisions those approvals never carried, which is a worse falsehood than the gap.
-        SubmittedBy = Required(actorId, "submitting verification engineer");
-        SelectedApproverId = Required(approverId, "selected test change request approver");
-        if (string.Equals(SelectedApproverId, SubmittedBy, StringComparison.OrdinalIgnoreCase))
-            throw new DomainException("The test change request approver must be independent from its submitting engineer.");
-        SubmittedAt = now;
-        State = TestChangeReviewState.InReview;
-        Touch(now);
+        Required(approverId, "selected test change request approver");
+        SubmitForReview(actorId, [new ChangeControl.ApproverSelection(approverId, approverId)],
+            everyItemResolved, now);
     }
 
     public void Approve(string actorId, string rationale, DateTimeOffset now)
