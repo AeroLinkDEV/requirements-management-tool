@@ -233,6 +233,35 @@ public sealed class ChangeAuthoringInvariantApiTests
         using var freeze = await client.PostAsJsonAsync($"/api/baselines/{selectedBaselineId}/freeze",
             new { actorId = "invariant.author" });
         Assert.Equal(HttpStatusCode.OK, freeze.StatusCode);
+
+        // The lifecycle gate that matters: DEC-071 removed the former five impact dispositions from
+        // review submission, baseline selection/freeze/materialization and integrity checkpoints, and
+        // existing stored disposition data remains historical. A legacy "{}" value (what the introducing
+        // migration's default wrote into pre-existing rows) must therefore not block materialization.
+        using var materialized = await client.PostAsJsonAsync(
+            $"/api/baselines/{selectedBaselineId}/materialize-requirements", new { });
+        Assert.Equal(HttpStatusCode.OK, materialized.StatusCode);
+
+        var baselineAfter = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/baselines/{selectedBaselineId}");
+        Assert.NotEqual(JsonValueKind.Null, baselineAfter.GetProperty("requirementsHash").ValueKind);
+        Assert.NotEqual(JsonValueKind.Null, baselineAfter.GetProperty("requirementsMaterializedAt").ValueKind);
+
+        // The materialized requirement is the exact governed revision the legacy change introduced.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var materializedSelection = await db.BaselineRequirements.AsNoTracking()
+                .Where(x => x.BaselineId == selectedBaselineId)
+                .Select(x => new { x.ArtifactId, x.RevisionId }).SingleAsync();
+            var artifact = await db.Requirements.AsNoTracking()
+                .SingleAsync(x => x.Id == materializedSelection.ArtifactId);
+            var revision = await db.RequirementRevisions.AsNoTracking()
+                .SingleAsync(x => x.Id == materializedSelection.RevisionId);
+            Assert.Equal("SYSR-00000888", artifact.BaseNumber);
+            Assert.Equal("The FMS shall reject legacy invalid impacts.", revision.Statement);
+            Assert.Equal(RequirementRevisionState.Active, revision.State);
+        }
     }
 
     private static async Task<Scenario> SeedAsync(AeroLinkApiFactory factory)
