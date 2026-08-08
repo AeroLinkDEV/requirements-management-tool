@@ -64,6 +64,7 @@ public sealed class ManualTestChangeRequestApiTests
         foreach (var (user, role) in new[]
                  {
                      ("manual.engineer", ProgramRole.TestEngineer),
+                     ("manual.lead", ProgramRole.TestLead),
                      ("manual.outsider", ProgramRole.Engineer),
                  })
         {
@@ -311,6 +312,22 @@ public sealed class ManualTestChangeRequestApiTests
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId }, title = "Verification package" });
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_test_lead_can_raise_a_package_too()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.lead");
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Lead-raised verification package",
+                problem = "P", analysis = "A", solution = "S" });
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
     }
 
     /// <summary>

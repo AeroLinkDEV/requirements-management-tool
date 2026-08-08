@@ -606,6 +606,9 @@ public static class VerificationImpactEndpoints
                     error = "A test change request can only answer for approved change requests allocated to this build.",
                     code = "change_request_not_selectable"
                 });
+            // The first change the caller names is the package's base; the rest are folded in. The database
+            // row order is not the caller's order, so it is restored explicitly rather than trusted.
+            changes = request.ChangeRequestIds.Select(id => changes.Single(x => x.Id == id)).ToList();
             var problemReportError = await problemReports.ValidateSelectionAsync(release.ProjectId, releaseId,
                 request.ProblemReportIds, ct);
             if (problemReportError is not null) return Results.BadRequest(new { error = problemReportError });

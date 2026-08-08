@@ -142,7 +142,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   // Authority is per Program, and it is the server that enforces it. Reflecting it here is about not offering
   // somebody a control that will refuse them — an approval they cannot give is worse than no button at all.
   const roles = user.programs.find(program => program.programId === programId)?.roles ?? []
-  const canTest = !readOnly && (user.isAdministrator || roles.includes('TestEngineer'))
+  // The server accepts both roles everywhere this page acts; a TestLead-only user must see the same
+  // controls a TestEngineer does, or the button would predictably refuse nothing and never appear.
+  const canTest = !readOnly && (user.isAdministrator || roles.includes('TestEngineer') || roles.includes('TestLead'))
   // No procedure-level approval authority is read here. Approving a procedure is approving the test change
   // request that carries it, and that authority arrives per request in its own capabilities.
   const [coverage, setCoverage] = useState<Coverage>()
