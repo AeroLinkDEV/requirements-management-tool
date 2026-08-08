@@ -325,16 +325,9 @@ public static class VerificationImpactEndpoints
                 || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)
                 || isLead;
             var mayAuthor = isTester && holdsIt;
-            // The requirements this discipline's procedures may be written against, so the authoring form can
-            // offer a choice instead of asking an engineer to know an identifier.
-            var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel());
-            var candidates = await (from item in db.VerificationImpactItems.AsNoTracking()
-                                    where item.TestChangeReviewId == review.Id && item.RequirementRevisionId != null
-                                    join revision in db.RequirementRevisions.AsNoTracking() on item.RequirementRevisionId equals revision.Id
-                                    join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
-                                    where artifact.ProjectId == review.ProjectId && artifact.Level == wanted
-                                    select new { revisionId = revision.Id, displayNumber = artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, revision.Statement })
-                .Distinct().ToListAsync(ct);
+            // The picker and both server enforcement points use the same package/build-scoped set. Project and
+            // discipline alone do not authorize a TCR to govern an unrelated requirement.
+            var candidates = await TestChangeReviewRequirementScope.ForReviewAsync(db, review, null, ct);
             // Modify and Retire act on what this target build carries, not on the newest procedure revision
             // anywhere in the Project. Coverage is not membership and a later build is not an authoring menu.
             var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
@@ -404,6 +397,34 @@ public static class VerificationImpactEndpoints
             try
             {
                 var now = DateTimeOffset.UtcNow;
+                var driving = request.DrivingRequirementRevisionIds ?? [];
+                if (driving.Length != 0)
+                {
+                    var known = await (from revision in db.RequirementRevisions.AsNoTracking()
+                                       join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                                       where driving.Contains(revision.Id)
+                                       select new { revision.Id, artifact.ProjectId, artifact.Level })
+                        .ToDictionaryAsync(x => x.Id, ct);
+                    var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel());
+                    foreach (var drivingId in driving.Distinct())
+                    {
+                        if (!known.TryGetValue(drivingId, out var requirement))
+                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} does not exist.", code = "requirement_revision_not_found" });
+                        if (requirement.ProjectId != review.ProjectId)
+                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} belongs to another project.", code = "requirement_revision_project_mismatch" });
+                        if (requirement.Level != wanted)
+                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} is a {requirement.Level} requirement, which a {review.Discipline} procedure does not verify.", code = "requirement_revision_level_mismatch" });
+                    }
+                    var governed = await TestChangeReviewRequirementScope.ForReviewAsync(db, review, null, ct);
+                    var governedIds = governed.Select(x => x.RevisionId).ToHashSet();
+                    var outside = driving.Distinct().FirstOrDefault(x => !governedIds.Contains(x));
+                    if (outside != Guid.Empty)
+                        return Results.BadRequest(new
+                        {
+                            error = $"Requirement revision {outside} is outside this test change request's governed package/build scope.",
+                            code = "requirement_revision_outside_tcr_scope"
+                        });
+                }
                 // Introducing allocates; modifying or retiring names what already exists. Letting the caller
                 // choose a number for a new procedure would let two engineers pick the same one.
                 var baseNumber = request.Kind == TestProcedureChangeKind.Introduce
@@ -456,28 +477,6 @@ public static class VerificationImpactEndpoints
                         });
                 }
 
-                // The requirements a procedure is written against have to be this project's, and at this
-                // discipline's level. A cross-project identifier would otherwise become controlled coverage at
-                // materialization and claim verification that belongs to another program.
-                var driving = request.DrivingRequirementRevisionIds ?? [];
-                if (driving.Length != 0)
-                {
-                    var known = await (from revision in db.RequirementRevisions.AsNoTracking()
-                                       join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
-                                       where driving.Contains(revision.Id)
-                                       select new { revision.Id, artifact.ProjectId, artifact.Level })
-                        .ToDictionaryAsync(x => x.Id, ct);
-                    var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel());
-                    foreach (var drivingId in driving.Distinct())
-                    {
-                        if (!known.TryGetValue(drivingId, out var requirement))
-                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} does not exist." });
-                        if (requirement.ProjectId != review.ProjectId)
-                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} belongs to another project." });
-                        if (requirement.Level != wanted)
-                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} is a {requirement.Level} requirement, which a {review.Discipline} procedure does not verify." });
-                    }
-                }
                 var change = review.AddProcedureChange(http.UserAccount().UserName, new TestProcedureChangeDraft(
                     baseNumber, request.Revision, review.ProcedureLevel(), request.Kind, request.Title ?? "",
                     request.Objective ?? "", request.Preconditions ?? "", request.Steps ?? "",

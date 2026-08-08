@@ -44,26 +44,6 @@ public sealed class ProcedureBaselineApiTests
         baseline.Freeze("cm", now);
         db.AddRange(scr, baseline);
 
-        TestChangeReview Package(string number, bool workRequired)
-        {
-            var review = new TestChangeReview(project.Id, release.Id, scr.Id, TestChangeReviewDiscipline.System,
-                scr.DisplayNumber, now);
-            if (workRequired)
-            {
-                review.RecordTestChangeRequired("verification.engineer", now);
-                review.AssignControlledNumber(number, now);
-                review.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000931", 0,
-                    TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Oceanic waypoint sequencing",
-                    "Verify oceanic sequencing.", "Cruise.", "1. Load. 2. Read.", "Sequenced.",
-                    // Names a requirement: submission refuses an introduced procedure that verifies nothing.
-                    "Nothing covers oceanic sequencing.", $"[\"{Guid.NewGuid()}\"]"), now);
-            }
-            else review.RecordNoTestChangeRequired("verification.engineer", "Existing procedures already exercise it.", now);
-            review.Submit("verification.engineer", "test.lead", true, now);
-            review.Approve("test.lead", "Reviewed.", now);
-            return review;
-        }
-
         // Two packages against one change request would collide on the exclusivity index, so the one that
         // concluded no work is raised from its own change request.
         var quiet = new SystemChangeRequest("SRCR-00931", 0, project.Id, release.Id, "Wording", "P", "A", "S", "author", now);
@@ -73,7 +53,10 @@ public sealed class ProcedureBaselineApiTests
         quiet.ApproveActiveStage("reviewer", now);
         db.Add(quiet);
 
-        var carrying = Package("SYSTCR-000931", true);
+        var carrying = new TestChangeReview(project.Id, release.Id, scr.Id,
+            TestChangeReviewDiscipline.System, scr.DisplayNumber, now);
+        carrying.RecordTestChangeRequired("verification.engineer", now);
+        carrying.AssignControlledNumber("SYSTCR-000931", now);
         var noWork = new TestChangeReview(project.Id, release.Id, quiet.Id, TestChangeReviewDiscipline.System,
             quiet.DisplayNumber, now);
         noWork.RecordNoTestChangeRequired("verification.engineer", "Existing procedures already exercise it.", now);
@@ -110,6 +93,30 @@ public sealed class ProcedureBaselineApiTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    private static async Task PrepareCarryingPackageAsync(AeroLinkApiFactory factory, Fixture fixture)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+            .SingleAsync(x => x.Id == fixture.TcrId);
+        var request = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
+            .SingleAsync(x => x.Id == review.ChangeRequestId);
+        var revision = await db.RequirementRevisions.SingleAsync(x => x.SourceChangeRequestId == request.Id);
+        var item = VerificationImpactItem.ForIntroducedRequirement(fixture.ProjectId, fixture.ReleaseId,
+            request.Id, review.Id, request.RequirementChanges.Single().Id,
+            request.RequirementChanges.Single().DisplayNumber, "Test", now);
+        item.LinkRequirementRevision(revision.Id, now);
+        review.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000931", 0,
+            TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Oceanic waypoint sequencing",
+            "Verify oceanic sequencing.", "Cruise.", "1. Load. 2. Read.", "Sequenced.",
+            "Nothing covers oceanic sequencing.", JsonSerializer.Serialize(new[] { revision.Id })), now);
+        review.Submit("verification.engineer", "test.lead", true, now);
+        review.Approve("test.lead", "Reviewed.", now);
+        db.Add(item);
+        await db.SaveChangesAsync();
+    }
+
     [Fact]
     public async Task Approved_procedure_work_reaches_a_build_and_fixes_its_manifest()
     {
@@ -118,6 +125,7 @@ public sealed class ProcedureBaselineApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
+        await PrepareCarryingPackageAsync(factory, fixture);
 
         // Selecting happens after the freeze: a procedure is written against a requirement this baseline has
         // already fixed, so it is finished later.
@@ -153,6 +161,8 @@ public sealed class ProcedureBaselineApiTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "baseline.cm");
+        await MaterializeRequirementsAsync(client, fixture.BaselineId);
+        await PrepareCarryingPackageAsync(factory, fixture);
 
         var listing = await client.GetFromJsonAsync<JsonElement>($"/api/baselines/{fixture.BaselineId}/test-change-requests");
         var available = listing.GetProperty("available").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToList();
@@ -203,6 +213,7 @@ public sealed class ProcedureBaselineApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
+        await PrepareCarryingPackageAsync(factory, fixture);
 
         using var selected = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests",
             new { testChangeRequestId = fixture.TcrId });

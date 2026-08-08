@@ -93,18 +93,83 @@ public sealed class TestProcedureMaterializationTests
             var (project, release) = await SeedProjectAsync(db, "FMSC");
 
             var requirementRevisionId = await MaterializeRequirementAsync(db, project.Id, release.Id, now);
-            var stale = Guid.NewGuid();
-
-            // The proposal named one real revision and one that no longer exists. A stale identifier from a
-            // draft is not an instruction to link to nothing.
+            // The governed proposal names the exact requirement revision its package carries.
             Assert.Empty(await db.TestCoverage.ToListAsync());
             await MaterializeAsync(db, project.Id, release.Id, "SW-00.20", null, now,
                 Change("SYSTP-000001", 0, TestProcedureChangeKind.Introduce, "Oceanic sequencing",
-                    JsonSerializer.Serialize(new[] { requirementRevisionId, stale })));
+                    JsonSerializer.Serialize(new[] { requirementRevisionId })));
 
             var coverage = await db.TestCoverage.SingleAsync();
             Assert.Equal(requirementRevisionId, coverage.RequirementRevisionId);
             Assert.Equal((await db.TestProcedureRevisions.SingleAsync()).Id, coverage.ProcedureRevisionId);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Materialization_refuses_an_out_of_scope_driving_requirement_without_partial_writes()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-tp-scope-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            Guid baselineId;
+            await using (var db = new AeroLinkDbContext(options))
+            {
+                await db.Database.EnsureCreatedAsync();
+                var now = DateTimeOffset.UtcNow;
+                var (project, release) = await SeedProjectAsync(db, "FMSSCOPE");
+                var source = ApprovedChangeRequest(project.Id, release.Id, "SRCR-00400", now);
+                var unrelated = ApprovedChangeRequest(project.Id, release.Id, "SRCR-00401", now);
+                var baseline = new CandidateBaseline("SW-04.00", 0, project.Id, release.Id, null,
+                    "Governed scope", "cm", now);
+                baseline.Select(source, "cm", now);
+                baseline.Select(unrelated, "cm", now);
+                baseline.Freeze("cm", now);
+                baseline.MarkRequirementsMaterialized("cm", new string('f', 64), 2, now);
+
+                var governedArtifact = new RequirementArtifact(project.Id, "SYSR-000400", RequirementLevel.System, now);
+                var governedRevision = new RequirementRevision(governedArtifact.Id, 0, "Governed requirement.",
+                    "Source package.", "Test", RequirementRevisionState.Active, source.Id, baseline.Id, now);
+                var unrelatedArtifact = new RequirementArtifact(project.Id, "SYSR-000401", RequirementLevel.System, now);
+                var unrelatedRevision = new RequirementRevision(unrelatedArtifact.Id, 0, "Unrelated requirement.",
+                    "Different package.", "Test", RequirementRevisionState.Active, unrelated.Id, baseline.Id, now);
+
+                var tcr = new TestChangeReview(project.Id, release.Id, source.Id,
+                    TestChangeReviewDiscipline.System, source.DisplayNumber, now);
+                tcr.RecordTestChangeRequired("verification.engineer", now);
+                tcr.AssignControlledNumber("SYSTCR-000400", now);
+                tcr.AddProcedureChange("verification.engineer",
+                    Change("SYSTP-000400", 0, TestProcedureChangeKind.Introduce, "Malformed legacy proposal",
+                        JsonSerializer.Serialize(new[] { unrelatedRevision.Id })), now);
+                tcr.Submit("verification.engineer", "test.lead", true, now);
+                tcr.Approve("test.lead", "Approved legacy snapshot.", now);
+                var item = VerificationImpactItem.ForIntroducedRequirement(project.Id, release.Id, source.Id,
+                    tcr.Id, source.RequirementChanges.First().Id, "SYSR-000400.00", "Test", now);
+                item.LinkRequirementRevision(governedRevision.Id, now);
+
+                db.AddRange(source, unrelated, baseline, governedArtifact, governedRevision,
+                    unrelatedArtifact, unrelatedRevision, tcr, item,
+                    new BaselineRequirementSelection(baseline.Id, governedArtifact.Id, governedRevision.Id),
+                    new BaselineRequirementSelection(baseline.Id, unrelatedArtifact.Id, unrelatedRevision.Id));
+                await db.SaveChangesAsync();
+                baseline.SelectTestChangeRequest(tcr, "verification.lead", now);
+                await db.SaveChangesAsync();
+                baselineId = baseline.Id;
+
+                var error = await Assert.ThrowsAsync<DomainException>(() =>
+                    new TestProcedureBaselineMaterializer(db).MaterializeAsync(baseline.Id, "cm", now, default));
+                Assert.Contains("outside", error.Message, StringComparison.OrdinalIgnoreCase);
+            }
+
+            await using var assertDb = new AeroLinkDbContext(options);
+            Assert.Empty(await assertDb.TestProcedures.ToListAsync());
+            Assert.Empty(await assertDb.TestProcedureRevisions.ToListAsync());
+            Assert.Empty(await assertDb.TestCoverage.ToListAsync());
+            Assert.Empty(await assertDb.BaselineTestProcedures.ToListAsync());
+            Assert.Null((await assertDb.CandidateBaselines.SingleAsync(x => x.Id == baselineId))
+                .TestProceduresMaterializedAt);
         }
         finally { File.Delete(path); }
     }
@@ -204,7 +269,7 @@ public sealed class TestProcedureMaterializationTests
     }
 
     [Fact]
-    public async Task A_procedure_for_a_different_requirement_settles_nothing()
+    public async Task A_procedure_for_a_different_requirement_is_refused_and_settles_nothing()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-tp-nosettle-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
@@ -218,11 +283,11 @@ public sealed class TestProcedureMaterializationTests
             var requirementRevisionId = await MaterializeRequirementAsync(db, project.Id, release.Id, now);
             var item = await AwaitingNewProcedureAsync(db, project.Id, release.Id, requirementRevisionId, now);
 
-            // Settling is as narrow as its counterpart: a procedure that drives some other requirement must not
-            // quietly close a decision it has nothing to do with.
-            await MaterializeAsync(db, project.Id, release.Id, "SW-00.20", null, now,
-                Change("SYSTP-000001", 0, TestProcedureChangeKind.Introduce, "Something else",
-                    JsonSerializer.Serialize(new[] { Guid.NewGuid() })));
+            // A malformed snapshot cannot create unrelated coverage or quietly close the governed decision.
+            await Assert.ThrowsAsync<DomainException>(() => MaterializeAsync(db, project.Id, release.Id,
+                "SW-00.20", null, now, Change("SYSTP-000001", 0,
+                    TestProcedureChangeKind.Introduce, "Something else",
+                    JsonSerializer.Serialize(new[] { Guid.NewGuid() }))));
 
             var untouched = await db.VerificationImpactItems.SingleAsync(x => x.Id == item.Id);
             Assert.True(untouched.AwaitsNewProcedure);
@@ -278,12 +343,41 @@ public sealed class TestProcedureMaterializationTests
         var baseline = new CandidateBaseline(number, 0, projectId, releaseId, predecessor, number, "cm", now);
         baseline.Select(scr, "cm", now);
         baseline.Freeze("cm", now);
-        baseline.MarkRequirementsMaterialized("cm", new string('b', 64), 0, now);
 
         var tcr = new TestChangeReview(projectId, releaseId, scr.Id, TestChangeReviewDiscipline.System,
             scr.DisplayNumber, now);
         tcr.RecordTestChangeRequired("verification.engineer", now);
         tcr.AssignControlledNumber($"SYSTCR-{Math.Abs(number.GetHashCode()) % 1000000:D6}", now);
+        var requestedIds = JsonSerializer.Deserialize<List<Guid>>(draft.DrivingRequirementRevisionIdsJson) ?? [];
+        var fixtureMarker = Guid.Parse("5a1d1f92-6c2f-4a1e-9d33-0f5b2c7a4e10");
+        var fixtureRows = new List<(RequirementRevision Revision, RequirementArtifact Artifact)>();
+        if (requestedIds.Contains(fixtureMarker))
+        {
+            var artifact = new RequirementArtifact(projectId,
+                $"SYSR-{Math.Abs(number.GetHashCode()) % 1000000:D6}", RequirementLevel.System, now);
+            var revision = new RequirementRevision(artifact.Id, 0,
+                "The FMS shall sequence oceanic waypoints.", "Governed fixture requirement.", "Test",
+                RequirementRevisionState.Active, scr.Id, baseline.Id, now);
+            db.AddRange(artifact, revision);
+            fixtureRows.Add((revision, artifact));
+            requestedIds = requestedIds.Select(x => x == fixtureMarker ? revision.Id : x).ToList();
+            draft = draft with { DrivingRequirementRevisionIdsJson = JsonSerializer.Serialize(requestedIds) };
+        }
+        var persisted = await (from revision in db.RequirementRevisions
+                               join artifact in db.Requirements on revision.ArtifactId equals artifact.Id
+                               where requestedIds.Contains(revision.Id)
+                               select new { Revision = revision, Artifact = artifact }).ToListAsync();
+        var known = persisted.Select(x => (x.Revision, x.Artifact)).Concat(fixtureRows).ToList();
+        foreach (var row in known)
+        {
+            db.Add(new BaselineRequirementSelection(baseline.Id, row.Artifact.Id, row.Revision.Id));
+            var impact = VerificationImpactItem.ForIntroducedRequirement(projectId, releaseId, scr.Id,
+                tcr.Id, scr.RequirementChanges.First().Id,
+                $"{row.Artifact.BaseNumber}.{row.Revision.Revision:D2}", "Test", now);
+            impact.LinkRequirementRevision(row.Revision.Id, now);
+            db.Add(impact);
+        }
+        baseline.MarkRequirementsMaterialized("cm", new string('b', 64), known.Count, now);
         tcr.AddProcedureChange("verification.engineer", draft, now);
         tcr.Submit("verification.engineer", "test.lead", true, now);
         tcr.Approve("test.lead", "Procedure decisions are complete.", now);

@@ -48,6 +48,10 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
             .Include(x => x.ProcedureChanges).ToListAsync(ct);
         foreach (var tcr in tcrs.Where(x => x.State != TestChangeReviewState.Approved))
             throw new DomainException($"{tcr.DisplayNumber} is no longer approved and cannot be materialized.");
+        // Validate the approved snapshots before adding any procedure, revision, coverage, or manifest row.
+        // This is deliberately repeated here even though current API writes enforce the same scope: legacy or
+        // malformed controlled data must fail closed at the boundary where it would become real coverage.
+        await ValidateDrivingRequirementScopeAsync(baseline.Id, tcrs, ct);
 
         var created = 0;
         // What each proposal became, so the requirement links it proposed can bind to a revision that exists.
@@ -198,6 +202,24 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
             added++;
         }
         return added;
+    }
+
+    private async Task ValidateDrivingRequirementScopeAsync(Guid baselineId,
+        IReadOnlyCollection<TestChangeReview> tcrs, CancellationToken ct)
+    {
+        foreach (var tcr in tcrs)
+        {
+            var governed = await TestChangeReviewRequirementScope.ForReviewAsync(db, tcr, baselineId, ct);
+            var governedIds = governed.Select(x => x.RevisionId).ToHashSet();
+            foreach (var change in tcr.ProcedureChanges.Where(x => x.Kind != TestProcedureChangeKind.Retire))
+            {
+                var outside = DrivingRequirements(change).Distinct()
+                    .FirstOrDefault(x => !governedIds.Contains(x));
+                if (outside == Guid.Empty) continue;
+                throw new DomainException(
+                    $"{change.DisplayNumber} names requirement revision {outside}, which is outside {tcr.DisplayNumber}'s governed package/build scope.");
+            }
+        }
     }
 
     /// <summary>

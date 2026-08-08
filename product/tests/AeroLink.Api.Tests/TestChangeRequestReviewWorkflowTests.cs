@@ -49,11 +49,15 @@ public sealed class TestChangeRequestReviewWorkflowTests
         var revision = new RequirementRevision(requirement.Id, 0,
             "The FMS shall expose a workflow verification target.", "Rationale", "Test",
             RequirementRevisionState.Active, change.Id, baseline.Id, now);
+        baseline.Select(change, "author", now);
+        baseline.Freeze("author", now);
+        baseline.MarkRequirementsMaterialized("author", new string('a', 64), 1, now);
         var procedure = new TestProcedure(project.Id, "SYSTP-000900", "Workflow procedure",
             "author", now, TestProcedureLevel.System);
         var procedureRevision = new TestProcedureRevision(procedure.Id, 0,
             "Objective", "Preconditions", "Steps", "Expected", TestProcedureState.Approved, "author", now);
-        db.AddRange(change, requirement, revision, procedure, procedureRevision);
+        db.AddRange(change, requirement, revision, procedure, procedureRevision,
+            new BaselineRequirementSelection(baseline.Id, requirement.Id, revision.Id));
 
         var engineer = new UserAccount("workflow.engineer", "Workflow Engineer", "workflow.engineer@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
@@ -107,6 +111,8 @@ public sealed class TestChangeRequestReviewWorkflowTests
         var review = await db.TestChangeReviews.SingleAsync(x => x.ChangeRequestId == change.Id
             && x.Discipline == TestChangeReviewDiscipline.System);
         var item = await db.VerificationImpactItems.SingleAsync(x => x.ChangeRequestId == change.Id);
+        item.LinkRequirementRevision(revision.Id, now);
+        await db.SaveChangesAsync();
         return new(project.Id, release.Id, change.Id, review.Id, item.Id, revision.Id, baseline.Id);
     }
 

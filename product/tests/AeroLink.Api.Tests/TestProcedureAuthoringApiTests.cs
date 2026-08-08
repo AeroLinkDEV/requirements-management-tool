@@ -22,7 +22,9 @@ namespace AeroLink.Api.Tests;
 public sealed class TestProcedureAuthoringApiTests
 {
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid TcrId, Guid ReleasedTcrId,
-        Guid RequirementRevisionId, Guid OtherProjectRequirementRevisionId);
+        Guid RequirementRevisionId, Guid FoldedRequirementRevisionId, Guid UnrelatedRequirementRevisionId,
+        Guid OtherBuildRequirementRevisionId, Guid WrongLevelRequirementRevisionId,
+        Guid OtherProjectRequirementRevisionId);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -50,8 +52,9 @@ public sealed class TestProcedureAuthoringApiTests
         }
 
         var open = Approved("SRCR-00920", "SYSR-00000921", inWork.Id);
+        var folded = Approved("SRCR-00922", "SYSR-00000925", inWork.Id);
         var shipped = Approved("SRCR-00921", "SYSR-00000922", closed.Id);
-        db.AddRange(open, shipped);
+        db.AddRange(open, folded, shipped);
 
         foreach (var (user, role) in new[]
                  {
@@ -67,7 +70,7 @@ public sealed class TestProcedureAuthoringApiTests
         }
         await db.SaveChangesAsync();
 
-        foreach (var id in new[] { open.Id, shipped.Id })
+        foreach (var id in new[] { open.Id, folded.Id, shipped.Id })
         {
             var tracked = await db.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == id);
             await impact.RaiseForApprovedChangeRequestAsync(tracked, now, default);
@@ -78,7 +81,13 @@ public sealed class TestProcedureAuthoringApiTests
         await db.SaveChangesAsync();
 
         var tcrId = await db.TestChangeReviews.Where(x => x.ChangeRequestId == open.Id).Select(x => x.Id).SingleAsync();
+        var foldedTcrId = await db.TestChangeReviews.Where(x => x.ChangeRequestId == folded.Id).Select(x => x.Id).SingleAsync();
         var releasedTcrId = await db.TestChangeReviews.Where(x => x.ChangeRequestId == shipped.Id).Select(x => x.Id).SingleAsync();
+        var primaryTcr = await db.TestChangeReviews.Include(x => x.AdditionalSources).SingleAsync(x => x.Id == tcrId);
+        primaryTcr.IncludeChangeRequest("procedure.engineer", folded.Id, folded.DisplayNumber, now);
+        var foldedImpact = await db.VerificationImpactItems.SingleAsync(x => x.TestChangeReviewId == foldedTcrId
+            && x.RequirementChangeId != null);
+        foldedImpact.MoveToReview(tcrId, now);
         // The requirement revision SRCR-00920 introduced, in this project and at System level — the approved
         // change whose impact raised this very package. A procedure introduced here verifies that, so the
         // seed carries the real thing rather than an invented identifier: the server checks a driving
@@ -88,7 +97,42 @@ public sealed class TestProcedureAuthoringApiTests
         var artifact = new RequirementArtifact(project.Id, "SYSR-00000921", RequirementLevel.System, now);
         var revision = new RequirementRevision(artifact.Id, 0, "The FMS shall sequence oceanic waypoints.",
             "New capability.", "Test", RequirementRevisionState.Active, open.Id, baseline.Id, now);
-        db.AddRange(baseline, artifact, revision);
+        var foldedArtifact = new RequirementArtifact(project.Id, "SYSR-00000925", RequirementLevel.System, now);
+        var foldedRevision = new RequirementRevision(foldedArtifact.Id, 0,
+            "The FMS shall sequence a second governed source.", "Folded source.", "Test",
+            RequirementRevisionState.Active, folded.Id, baseline.Id, now);
+        var unrelatedArtifact = new RequirementArtifact(project.Id, "SYSR-00000923", RequirementLevel.System, now);
+        var unrelatedRevision = new RequirementRevision(unrelatedArtifact.Id, 0,
+            "The FMS shall calculate an unrelated performance value.", "Different engineering scope.",
+            "Test", RequirementRevisionState.Active, open.Id, baseline.Id, now);
+        var wrongLevelArtifact = new RequirementArtifact(project.Id, "HLR-00000926", RequirementLevel.HighLevel, now);
+        var wrongLevelRevision = new RequirementRevision(wrongLevelArtifact.Id, 0,
+            "The software shall implement a lower-level detail.", "Wrong discipline.", "Test",
+            RequirementRevisionState.Active, open.Id, baseline.Id, now);
+        baseline.Select(open, "cm", now);
+        baseline.Select(folded, "cm", now);
+        baseline.Freeze("cm", now);
+        baseline.MarkRequirementsMaterialized("cm", new string('a', 64), 4, now);
+        db.AddRange(baseline, artifact, revision, foldedArtifact, foldedRevision,
+            unrelatedArtifact, unrelatedRevision, wrongLevelArtifact, wrongLevelRevision,
+            new BaselineRequirementSelection(baseline.Id, artifact.Id, revision.Id),
+            new BaselineRequirementSelection(baseline.Id, foldedArtifact.Id, foldedRevision.Id),
+            new BaselineRequirementSelection(baseline.Id, unrelatedArtifact.Id, unrelatedRevision.Id),
+            new BaselineRequirementSelection(baseline.Id, wrongLevelArtifact.Id, wrongLevelRevision.Id));
+        var governedItem = await db.VerificationImpactItems.SingleAsync(x => x.TestChangeReviewId == tcrId
+            && x.RequirementChangeId == open.RequirementChanges.Single().Id);
+        governedItem.LinkRequirementRevision(revision.Id, now);
+        foldedImpact.LinkRequirementRevision(foldedRevision.Id, now);
+
+        // Same Project and level, but a distinct release/build. Project-and-level checks alone accept it.
+        var otherBuildRelease = new SoftwareRelease(project.Id, "1.7", false, inWork.Id);
+        var otherBuildBaseline = new CandidateBaseline("SW-01.70", 0, project.Id, otherBuildRelease.Id,
+            baseline.Id, "Other build", "cm", now);
+        var otherBuildArtifact = new RequirementArtifact(project.Id, "SYSR-00000924", RequirementLevel.System, now);
+        var otherBuildRevision = new RequirementRevision(otherBuildArtifact.Id, 0,
+            "The FMS shall implement a future-build-only capability.", "Other build.", "Test",
+            RequirementRevisionState.Active, shipped.Id, otherBuildBaseline.Id, now);
+        db.AddRange(otherBuildRelease, otherBuildBaseline, otherBuildArtifact, otherBuildRevision);
 
         // A requirement in a different project, so a cross-project link has something real to be refused for.
         var elsewhereProgram = new ProgramRecord("Other Program", "OTH");
@@ -101,7 +145,8 @@ public sealed class TestProcedureAuthoringApiTests
         db.AddRange(elsewhereProgram, elsewhereProject, elsewhereRelease, elsewhereBaseline, elsewhereArtifact, elsewhereRevision);
         await db.SaveChangesAsync();
 
-        return new(project.Id, inWork.Id, tcrId, releasedTcrId, revision.Id, elsewhereRevision.Id);
+        return new(project.Id, inWork.Id, tcrId, releasedTcrId, revision.Id, foldedRevision.Id,
+            unrelatedRevision.Id, otherBuildRevision.Id, wrongLevelRevision.Id, elsewhereRevision.Id);
     }
 
     private static async Task LoginAsync(HttpClient client, string user)
@@ -251,6 +296,8 @@ public sealed class TestProcedureAuthoringApiTests
             drivingRequirementRevisionIds = new[] { fixture.OtherProjectRequirementRevisionId } });
         Assert.Equal(HttpStatusCode.BadRequest, foreign.Status);
         Assert.Contains("another project", foreign.Body);
+        Assert.Equal("requirement_revision_project_mismatch",
+            JsonSerializer.Deserialize<JsonElement>(foreign.Body).GetProperty("code").GetString());
 
         // And one that does not exist at all is refused rather than silently dropped at materialization.
         var missing = await Propose(new { kind = "Introduce", revision = 0, title = "T", objective = "o",
@@ -258,6 +305,81 @@ public sealed class TestProcedureAuthoringApiTests
             drivingRequirementRevisionIds = new[] { Guid.NewGuid() } });
         Assert.Equal(HttpStatusCode.BadRequest, missing.Status);
         Assert.Contains("does not exist", missing.Body);
+        Assert.Equal("requirement_revision_not_found",
+            JsonSerializer.Deserialize<JsonElement>(missing.Body).GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task A_decision_can_only_name_requirements_governed_by_its_package_and_target_build()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "procedure.engineer");
+        await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
+
+        var workspace = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes");
+        var choices = workspace.GetProperty("drivingRequirementChoices").EnumerateArray()
+            .Select(x => x.GetProperty("revisionId").GetGuid()).ToHashSet();
+        Assert.True(choices.SetEquals([fixture.RequirementRevisionId, fixture.FoldedRequirementRevisionId]));
+
+        async Task AssertOutsideScope(Guid revisionId)
+        {
+            int before;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                before = await db.Set<TestProcedureChange>().CountAsync(
+                    x => x.TestChangeReviewId == fixture.TcrId);
+            }
+            using var response = await client.PostAsJsonAsync(
+                $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",
+                new
+                {
+                    kind = "Introduce", revision = 0, title = "Out-of-scope coverage",
+                    objective = "Verify unrelated behavior.", steps = "Execute.",
+                    expectedResult = "Observed.", rationale = "Direct API attempt.",
+                    drivingRequirementRevisionIds = new[] { revisionId }
+                });
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var body = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+            Assert.Equal("requirement_revision_outside_tcr_scope", body.GetProperty("code").GetString());
+            using var assertScope = factory.Services.CreateScope();
+            var assertDb = assertScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(before, await assertDb.Set<TestProcedureChange>().CountAsync(
+                x => x.TestChangeReviewId == fixture.TcrId));
+        }
+
+        await AssertOutsideScope(fixture.UnrelatedRequirementRevisionId);
+        await AssertOutsideScope(fixture.OtherBuildRequirementRevisionId);
+
+        using (var wrongLevel = await client.PostAsJsonAsync(
+                   $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",
+                   new
+                   {
+                       kind = "Introduce", revision = 0, title = "Wrong-level coverage",
+                       objective = "Verify wrong-level behavior.", steps = "Execute.", expectedResult = "Observed.",
+                       rationale = "Direct API attempt.",
+                       drivingRequirementRevisionIds = new[] { fixture.WrongLevelRequirementRevisionId }
+                   }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, wrongLevel.StatusCode);
+            var body = JsonSerializer.Deserialize<JsonElement>(await wrongLevel.Content.ReadAsStringAsync());
+            Assert.Equal("requirement_revision_level_mismatch", body.GetProperty("code").GetString());
+        }
+
+        using var valid = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",
+            new
+            {
+                kind = "Introduce", revision = 0, title = "Governed coverage",
+                objective = "Verify governed behavior.", steps = "Execute.",
+                expectedResult = "Observed.", rationale = "Package scope.",
+                drivingRequirementRevisionIds = new[]
+                    { fixture.RequirementRevisionId, fixture.FoldedRequirementRevisionId }
+            });
+        Assert.Equal(HttpStatusCode.OK, valid.StatusCode);
     }
 
     [Fact]
