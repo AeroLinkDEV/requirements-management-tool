@@ -323,6 +323,23 @@ public sealed class VerificationImpactItem
         Touch(now);
     }
 
+    /// <summary>
+    /// Moves the item to another test change request without recreating it, so its identity, originating
+    /// change request, assignment, decision and history survive the move.
+    ///
+    /// Used when a manual package or a fold takes over a source change's pending automatic assessment: the
+    /// work must stay actionable from the package that now claims the change, never stranded behind a
+    /// superseded assessment.
+    /// </summary>
+    public void MoveToReview(Guid testChangeReviewId, DateTimeOffset now)
+    {
+        if (testChangeReviewId == Guid.Empty)
+            throw new DomainException("A verification impact item must move to a test change request.");
+        if (testChangeReviewId == TestChangeReviewId) return;
+        TestChangeReviewId = testChangeReviewId;
+        Touch(now);
+    }
+
     public void Supersede(DateTimeOffset now)
     {
         if (State == VerificationImpactState.Superseded) return;

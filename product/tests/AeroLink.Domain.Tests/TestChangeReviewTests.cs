@@ -85,6 +85,64 @@ public sealed class TestChangeReviewTests
         Assert.NotEqual(plainHash, formatted.ReviewCycles.Single().SnapshotHash);
     }
 
+    [Fact]
+    public void Every_governed_procedure_change_field_changes_the_review_snapshot()
+    {
+        var driving = Guid.NewGuid();
+        var baseline = SnapshotFor(ProcedureDraftWith(drivingJson: $"[\"{driving}\"]"));
+
+        Assert.NotEqual(baseline, SnapshotFor(ProcedureDraftWith(
+            preconditions: "A different precondition", drivingJson: $"[\"{driving}\"]")));
+        Assert.NotEqual(baseline, SnapshotFor(ProcedureDraftWith(
+            rationale: "A different rationale", drivingJson: $"[\"{driving}\"]")));
+        Assert.NotEqual(baseline, SnapshotFor(ProcedureDraftWith(
+            drivingJson: $"[\"{Guid.NewGuid()}\"]")));
+        Assert.NotEqual(baseline, SnapshotFor(ProcedureDraftWith(
+            drivingJson: $"[\"{driving}\",\"{Guid.NewGuid()}\"]")));
+    }
+
+    [Fact]
+    public void The_snapshot_is_deterministic_and_ignores_runtime_fields()
+    {
+        var driving = Guid.NewGuid();
+        var draft = ProcedureDraftWith(drivingJson: $"[\"{driving}\"]");
+        Assert.Equal(SnapshotFor(draft), SnapshotFor(draft));
+
+        var assignedA = Create();
+        assignedA.Assign("lead.user", "engineer.a", Now.AddMinutes(1));
+        assignedA.AssignControlledNumber("SYSTCR-000056", Now.AddMinutes(1));
+        assignedA.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
+        assignedA.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        var assignedB = Create();
+        assignedB.Assign("lead.user", "engineer.b", Now.AddMinutes(1));
+        assignedB.AssignControlledNumber("SYSTCR-000056", Now.AddMinutes(1));
+        assignedB.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
+        assignedB.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        Assert.Equal(assignedA.ReviewCycles.Single().SnapshotHash,
+            assignedB.ReviewCycles.Single().SnapshotHash);
+    }
+
+    [Fact]
+    public void The_snapshot_covers_the_source_change_set()
+    {
+        var draft = ProcedureDraftWith(drivingJson: $"[\"{Guid.NewGuid()}\"]");
+        var solo = Create();
+        solo.AssignControlledNumber("SYSTCR-000057", Now.AddMinutes(1));
+        solo.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
+        solo.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        var folded = Create();
+        folded.AssignControlledNumber("SYSTCR-000057", Now.AddMinutes(1));
+        folded.IncludeChangeRequest("verification.engineer", Guid.NewGuid(), "SRCR-00060.00", Now.AddMinutes(2));
+        folded.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(3));
+        folded.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(4));
+
+        Assert.NotEqual(solo.ReviewCycles.Single().SnapshotHash,
+            folded.ReviewCycles.Single().SnapshotHash);
+    }
+
     private static TestProcedureChangeDraft ProcedureDraft(string baseNumber = "SYSTP-000123",
         TestProcedureChangeKind kind = TestProcedureChangeKind.Introduce,
         TestProcedureLevel level = TestProcedureLevel.System) =>
@@ -97,6 +155,21 @@ public sealed class TestChangeReviewTests
             // A procedure being introduced names what it verifies, and submission refuses one that does not.
             // Supplying it here keeps every test that submits a package on the path a real one takes.
             $"[\"{Guid.NewGuid()}\"]");
+
+    private static TestProcedureChangeDraft ProcedureDraftWith(string preconditions = "Preconditions",
+        string rationale = "Why this procedure work is required.", string drivingJson = "[]",
+        string baseNumber = "SYSTP-000123") =>
+        new(baseNumber, 0, TestProcedureLevel.System, TestProcedureChangeKind.Introduce,
+            "Oceanic waypoint sequencing", "Objective", preconditions, "Steps", "Expected", rationale, drivingJson);
+
+    private static string SnapshotFor(TestProcedureChangeDraft draft)
+    {
+        var review = Create();
+        review.AssignControlledNumber("SYSTCR-000055", Now.AddMinutes(1));
+        review.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+        return review.ReviewCycles.Single().SnapshotHash;
+    }
 
     [Fact]
     public void A_test_change_request_carries_procedure_changes_the_way_a_change_request_carries_requirements()

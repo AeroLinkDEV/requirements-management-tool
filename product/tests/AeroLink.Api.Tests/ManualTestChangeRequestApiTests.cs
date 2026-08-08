@@ -598,4 +598,125 @@ public sealed class ManualTestChangeRequestApiTests
         Assert.Matches(@"^LLRTCR-\d{6}\.\d{2}$",
             JsonSerializer.Deserialize<JsonElement>(llrBody).GetProperty("displayNumber").GetString()!);
     }
+
+    [Fact]
+    public async Task A_stale_case_edit_is_refused_without_writing()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Original title",
+                problem = "P", analysis = "A", solution = "S"
+            });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var packageId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var workspace = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{packageId}/procedure-changes");
+        var version = workspace.GetProperty("version").GetInt64();
+
+        using var stale = await client.PostAsJsonAsync($"/api/test-change-reviews/{packageId}/case",
+            new { title = "Stale title", problem = "P", analysis = "A", solution = "S",
+                expectedVersion = version + 1 });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Contains("stale_version", await stale.Content.ReadAsStringAsync());
+
+        var after = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{packageId}/procedure-changes");
+        Assert.Equal("Original title", after.GetProperty("title").GetString());
+        Assert.Equal(version, after.GetProperty("version").GetInt64());
+    }
+
+    [Fact]
+    public async Task A_stale_procedure_proposal_is_refused_without_writing()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Original title",
+                problem = "P", analysis = "A", solution = "S"
+            });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var packageId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var version = (await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{packageId}/procedure-changes")).GetProperty("version").GetInt64();
+
+        using var stale = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{packageId}/procedure-changes",
+            new
+            {
+                kind = "Introduce", revision = 0, title = "Proposal", objective = "Objective",
+                preconditions = "", steps = "Steps", expectedResult = "Expected", rationale = "Why",
+                drivingRequirementRevisionIds = Array.Empty<Guid>(),
+                expectedVersion = version + 1
+            });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Contains("stale_version", await stale.Content.ReadAsStringAsync());
+
+        var after = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{packageId}/procedure-changes");
+        Assert.Empty(after.GetProperty("procedureChanges").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task The_source_picker_reports_availability_honestly()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var review = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.AutoTcrId);
+            review.RecordTestChangeRequired("manual.engineer", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        var sources = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/releases/{fixture.ReleaseId}/test-change-request-sources?discipline=System");
+        var items = sources.EnumerateArray().ToList();
+        var first = items.Single(x => x.GetProperty("displayNumber").GetString()!.StartsWith("SRCR-00910"));
+        Assert.True(first.GetProperty("selectable").GetBoolean());
+        var assessed = items.Single(x => x.GetProperty("displayNumber").GetString()!.StartsWith("SRCR-00912"));
+        Assert.False(assessed.GetProperty("selectable").GetBoolean());
+        Assert.Contains("test assessment", assessed.GetProperty("reason").GetString());
+
+        // A change folded into a package is reported as claimed by that package.
+        using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Source picker package",
+                problem = "P", analysis = "A", solution = "S"
+            });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var packageId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var folded = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{packageId}/change-requests",
+            new { changeRequestId = fixture.SecondChangeId });
+        Assert.True(folded.IsSuccessStatusCode, await folded.Content.ReadAsStringAsync());
+
+        var updated = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/releases/{fixture.ReleaseId}/test-change-request-sources?discipline=System");
+        var second = updated.EnumerateArray().Single(x =>
+            x.GetProperty("displayNumber").GetString()!.StartsWith("SRCR-00911"));
+        Assert.False(second.GetProperty("selectable").GetBoolean());
+        Assert.Contains("Already covered by", second.GetProperty("reason").GetString());
+    }
 }

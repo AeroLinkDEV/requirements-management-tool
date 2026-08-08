@@ -22,6 +22,8 @@
 .tcrSourceChoices label:last-child{border-bottom:0}
 .tcrSourceChoices label span{display:flex;flex-direction:column;gap:.15rem;font-size:.85rem}
 .tcrSourceChoices label i{font-style:normal;color:#718096;font-size:.75rem}
+.tcrSourceChoices label.tcrSourceUnavailable{opacity:.65}
+.tcrSourceChoices label.tcrSourceUnavailable small{color:#a23b3b;font-weight:700}
 .tcrCaseSection .linkedScr{margin-top:.5rem}
 /* Identifying text since the row's only control is the Open assessment button; it no longer offers a hover
    affordance for a click it does not accept. */

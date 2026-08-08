@@ -288,13 +288,57 @@ public sealed class TestChangeReview
     /// </summary>
     private string ComputeSnapshotHash()
     {
-        var manifest = string.Join("|", DisplayNumber, Title, Problem, Analysis, Solution,
-            ProblemRich, AnalysisRich, SolutionRich,
-            string.Join(";", _procedureChanges.OrderBy(x => x.BaseNumber)
-                .Select(x => $"{x.DisplayNumber}:{x.Kind}:{x.Title}:{x.Objective}:{x.Steps}:{x.ExpectedResult}")));
+        // The exact controlled content an approver reads: the engineering case (plain and canonical rich),
+        // the discipline and controlled identity, the covered source change requests (deterministic order),
+        // and every governed field of every proposed procedure change — including preconditions, rationale
+        // and the exact driving requirement revision identifiers. Runtime fields (assignment, timestamps)
+        // are deliberately absent, so an approval proves the content and not the accident of when it was read.
+        var coveredSources = new[] { SourceChangeRequestNumber }
+            .Concat(_additionalSources.Select(x => x.ChangeRequestNumber))
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .Distinct(StringComparer.Ordinal);
+        var manifest = string.Join("|",
+            DisplayNumber,
+            Discipline.ToString(),
+            Title,
+            Problem,
+            Analysis,
+            Solution,
+            ProblemRich,
+            AnalysisRich,
+            SolutionRich,
+            string.Join(",", coveredSources),
+            string.Join(";", _procedureChanges
+                .OrderBy(x => x.BaseNumber, StringComparer.Ordinal)
+                .ThenBy(x => x.Revision)
+                .Select(x => string.Join("|",
+                    x.DisplayNumber,
+                    x.Kind.ToString(),
+                    x.Level.ToString(),
+                    x.Title,
+                    x.Objective,
+                    x.Preconditions,
+                    x.Steps,
+                    x.ExpectedResult,
+                    x.Rationale,
+                    string.Join(",", DrivingRequirementIds(x.DrivingRequirementRevisionIdsJson)
+                        .Select(id => id.ToString("D")).OrderBy(id => id, StringComparer.Ordinal))))));
         return Convert.ToHexString(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(manifest)))
             .ToLowerInvariant();
+    }
+
+    private static IReadOnlyList<Guid> DrivingRequirementIds(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(json) ?? [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
     }
 
     public void RemoveProcedureChange(Guid changeId, DateTimeOffset now)
@@ -383,6 +427,32 @@ public sealed class TestChangeReview
         SubmittedBy = null;
         SelectedApproverId = null;
         SubmittedAt = null;
+        Touch(now);
+    }
+
+    /// <summary>
+    /// The active reviewer returns the package, closing the review cycle as ChangesRequested.
+    ///
+    /// The prior cycle stays as historical evidence; a resubmission starts the next cycle sequence with a
+    /// fresh snapshot, so old approvals are never reused. Only the approver whose stage is currently active
+    /// may return the package, mirroring the requirement-side review.
+    /// </summary>
+    public void RequestChanges(string actorId, string rationale, DateTimeOffset now)
+    {
+        if (State != TestChangeReviewState.InReview)
+            throw new DomainException("Only a submitted test change request can be returned.");
+        Required(actorId, "reviewer");
+        Required(rationale, "return rationale");
+        var cycle = ActiveReviewCycle ?? throw new DomainException("This test change request has no active review.");
+        var active = cycle.Steps.SingleOrDefault(x => x.State == ChangeControl.ApprovalStepState.Active
+            && string.Equals(x.ApproverId, actorId, StringComparison.OrdinalIgnoreCase));
+        if (active is null)
+            throw new DomainException("Only the active approver can request changes.");
+        cycle.RequestChanges(rationale, now);
+        SubmittedBy = null;
+        SelectedApproverId = null;
+        SubmittedAt = null;
+        State = TestChangeReviewState.Open;
         Touch(now);
     }
 

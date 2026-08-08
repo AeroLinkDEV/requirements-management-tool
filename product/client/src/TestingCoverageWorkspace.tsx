@@ -178,6 +178,14 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [linkingProblemReports, setLinkingProblemReports] = useState<TestChangeRequest>()
   const [problemReportIds, setProblemReportIds] = useState<string[]>([])
   const [submitting, setSubmitting] = useState<TestChangeRequest>()
+  const [reviewWorkflow, setReviewWorkflow] = useState<{
+    required: boolean
+    name?: string
+    version?: number
+    mode?: string
+    stages: { position: number; name: string; requiredRole: string; candidates: { userId: string; name: string; role: string }[] }[]
+  }>()
+  const [stageApprovers, setStageApprovers] = useState<Record<number, string>>({})
   /// The assessment being concluded as needing no test work, which has to say why.
   const [decliningTest, setDecliningTest] = useState<TestChangeRequest>()
   const [declineRationale, setDeclineRationale] = useState('')
@@ -335,16 +343,48 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     setSaved(`${item.subjectDisplayNumber} is open again. What was decided stays in its history.`)
   }, 'The decision could not be reopened.')
 
-  const advance = (request: TestChangeRequest, action: 'submit' | 'approve' | 'return', rationale?: string, approverId?: string) => act(async () => {
+  const advance = (request: TestChangeRequest, action: 'submit' | 'approve' | 'return', rationale?: string, approverId?: string, approvers?: { userId: string }[]) => act(async () => {
     await apiRequest(`${api}/api/test-change-reviews/${request.id}/${action}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(action === 'submit' ? { approverId } : { rationale: rationale ?? '' }),
+      body: JSON.stringify(action === 'submit' ? { approverId, approvers } : { rationale: rationale ?? '' }),
     })
     setSaved(action === 'submit' ? `${request.displayNumber} sent for approval.`
       : action === 'approve' ? `${request.displayNumber} approved.`
       : `${request.displayNumber} returned for more work.`)
     if (action === 'submit') { setSubmitting(undefined); setReviewApprover({ userId: '', name: '' }) }
   }, 'The package could not be moved on.')
+
+  const workflowSubject = discipline === 'System' ? 'SystemTest'
+    : discipline === 'HighLevelSoftware' ? 'HighLevelSoftwareTest' : 'LowLevelSoftwareTest'
+  useEffect(() => {
+    if (!submitting) return
+    let active = true
+    setReviewWorkflow(undefined)
+    setStageApprovers({})
+    fetch(`${api}/api/review-workflows/applicable?projectId=${projectId}&type=${workflowSubject}`)
+      .then(async response => {
+        if (!response.ok) throw new Error('The recorded review procedure could not be loaded.')
+        return response.json()
+      })
+      .then((value: {
+        required?: boolean
+        name?: string
+        version?: number
+        mode?: string
+        stages?: { position: number; name: string; requiredRole: string; candidates: { userId: string; name: string; role: string }[] }[]
+      }) => {
+        if (!active) return
+        setReviewWorkflow({
+          required: Boolean(value.required),
+          name: value.name,
+          version: value.version,
+          mode: value.mode,
+          stages: value.stages ?? [],
+        })
+      })
+      .catch(() => { if (active) setReviewWorkflow({ required: false, stages: [] }) })
+    return () => { active = false }
+  }, [api, projectId, submitting, workflowSubject])
 
   const linkReports = (request: TestChangeRequest) => act(async () => {
     await apiRequest(`${api}/api/test-change-reviews/${request.id}/problem-reports`, {
@@ -751,15 +791,45 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         <div className="decisionModal" role="dialog" aria-label={`Select approver for ${submitting.displayNumber}`}>
           <form onSubmit={event => {
             event.preventDefault()
-            if (reviewApprover.userId) void advance(submitting, 'submit', undefined, reviewApprover.userId)
+            if (reviewWorkflow?.required) {
+              const approvers = reviewWorkflow.stages
+                .map(stage => ({ userId: stageApprovers[stage.position] }))
+                .filter(entry => Boolean(entry.userId))
+              if (approvers.length === reviewWorkflow.stages.length) {
+                void advance(submitting, 'submit', undefined, undefined, approvers)
+              }
+            } else if (reviewApprover.userId) {
+              void advance(submitting, 'submit', undefined, reviewApprover.userId)
+            }
           }}>
             <p className="eyebrow">INDEPENDENT REVIEW</p>
             <h2>Send {submitting.displayNumber} for approval</h2>
-            <p>Select the person who will independently review this exact package of test-procedure decisions.</p>
-            <PersonPicker api={api} projectId={projectId} value={reviewApprover.userId} name={reviewApprover.name}
-              index={9102} label="Independent test change request approver" excludeUserNames={[submitting.assignedEngineerId??user.userName,user.userName]} onSelect={setReviewApprover} />
+            {reviewWorkflow === undefined
+              ? <p>Loading the recorded review procedure…</p>
+              : reviewWorkflow.required
+                ? <>
+                    <p>The recorded review procedure {reviewWorkflow.name} v{reviewWorkflow.version} ({reviewWorkflow.mode}) requires one approver for each stage.</p>
+                    {reviewWorkflow.stages.map(stage => (
+                      <label key={stage.position}>{stage.name} · {stage.requiredRole}
+                        <select value={stageApprovers[stage.position] ?? ''}
+                          onChange={event => setStageApprovers(current => ({ ...current, [stage.position]: event.target.value }))}>
+                          <option value="">Choose the {stage.requiredRole} for this stage…</option>
+                          {stage.candidates.map(candidate => (
+                            <option key={candidate.userId} value={candidate.userId}>{candidate.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </>
+                : <>
+                    <p>Select the person who will independently review this exact package of test-procedure decisions.</p>
+                    <PersonPicker api={api} projectId={projectId} value={reviewApprover.userId} name={reviewApprover.name}
+                      index={9102} label="Independent test change request approver" excludeUserNames={[submitting.assignedEngineerId??user.userName,user.userName]} onSelect={setReviewApprover} />
+                  </>}
             <div className="decisionActions">
-              <button type="submit" disabled={busy || !reviewApprover.userId}>Send for approval</button>
+              <button type="submit" disabled={busy || (reviewWorkflow?.required
+                ? reviewWorkflow.stages.some(stage => !stageApprovers[stage.position])
+                : !reviewApprover.userId)}>Send for approval</button>
               <button type="button" className="quiet" onClick={() => setSubmitting(undefined)}>Cancel</button>
             </div>
           </form>

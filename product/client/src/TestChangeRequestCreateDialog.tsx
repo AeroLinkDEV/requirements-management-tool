@@ -5,7 +5,7 @@ import { fromPlainText, toPlainText } from './richContentModel'
 import { apiRequest, operationError } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
 
-type SourceChoice = { id: string; displayNumber: string; title: string; state: string }
+type SourceChoice = { changeRequestId: string; displayNumber: string; title: string; state: string; selectable: boolean; reason?: string }
 
 const labelFor = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
@@ -40,19 +40,18 @@ export default function TestChangeRequestCreateDialog({ api, projectId, releaseI
 
   useEffect(() => {
     let active = true
-    fetch(`${api}/api/change-requests?projectId=${projectId}&releaseId=${releaseId}&pageSize=200`)
+    fetch(`${api}/api/releases/${releaseId}/test-change-request-sources?discipline=${discipline}`)
       .then(async response => {
-        if (!response.ok) throw new Error('Approved change requests could not be loaded.')
+        if (!response.ok) throw new Error('Selectable source changes could not be loaded.')
         return response.json()
       })
-      .then((value: { items?: SourceChoice[] }) => {
+      .then((value: SourceChoice[]) => {
         if (!active) return
-        // The server is the authority; this filter only keeps the picker honest about what can be selected.
-        setChoices((value.items ?? []).filter(item => item.state === 'Approved' || item.state === 'SelectedForBaseline'))
+        setChoices(value)
       })
-      .catch(reason => { if (active) setLoadError(reason instanceof Error ? reason.message : 'Approved change requests could not be loaded.') })
+      .catch(reason => { if (active) setLoadError(reason instanceof Error ? reason.message : 'Selectable source changes could not be loaded.') })
     return () => { active = false }
-  }, [api, projectId, releaseId])
+  }, [api, discipline, releaseId])
 
   const toggle = (id: string) =>
     setSelected(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
@@ -124,9 +123,11 @@ export default function TestChangeRequestCreateDialog({ api, projectId, releaseI
           {choices.length === 0
             ? <p className="drawerEmpty">No approved change requests are available in this build yet. Approve engineering changes first.</p>
             : choices.map(choice => (
-              <label key={choice.id}>
-                <input type="checkbox" checked={selected.includes(choice.id)} onChange={() => toggle(choice.id)} />
-                <span><b>{choice.displayNumber}</b> {choice.title} <i>{choice.state}</i></span>
+              <label key={choice.changeRequestId} className={choice.selectable ? '' : 'tcrSourceUnavailable'}>
+                <input type="checkbox" checked={selected.includes(choice.changeRequestId)}
+                  disabled={!choice.selectable} onChange={() => toggle(choice.changeRequestId)} />
+                <span><b>{choice.displayNumber}</b> {choice.title} <i>{choice.state}</i>
+                  {!choice.selectable && choice.reason && <small>{choice.reason}</small>}</span>
               </label>
             ))}
         </fieldset>

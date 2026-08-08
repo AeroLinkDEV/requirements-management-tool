@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { PersonName } from './People'
-import { apiRequest, operationError } from './apiClient'
+import { ApiError, apiRequest, operationError } from './apiClient'
 import { RichCaseField, RichContentView } from './RichContent'
 import { fromPlainText, toPlainText } from './richContentModel'
 // The requirements queue's stylesheet, imported rather than copied. The testing side is meant to be the same
@@ -15,7 +15,7 @@ type RequirementChoice={revisionId:string;displayNumber:string;statement:string}
 /** A controlled procedure a Modify or Retire may target, with the revision it actually sits at. */
 type ProcedureTarget={baseNumber:string;title:string;currentRevision:number}
 type Capabilities={canProposeProcedureChange:boolean;canWithdrawProcedureChange:boolean;canRevise:boolean}
-type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}
+type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;version:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}
 
 const levelName=(discipline:string)=>discipline==='System'?'SYS':discipline==='HighLevelSoftware'?'HLR':'LLR'
 const procedureWord=(level:string)=>level==='System'?'SYSTP':level==='HighLevel'?'HLRTP':'LLRTP'
@@ -53,6 +53,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
   const [caseProblemRich,setCaseProblemRich]=useState(fromPlainText(''))
   const [caseAnalysisRich,setCaseAnalysisRich]=useState(fromPlainText(''))
   const [caseSolutionRich,setCaseSolutionRich]=useState(fromPlainText(''))
+  const [caseVersion,setCaseVersion]=useState<number|undefined>(undefined)
 
   const load=useCallback(async()=>{
     setError('')
@@ -73,12 +74,15 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
       baseNumber:draft.kind==='Introduce'?undefined:draft.baseNumber.trim(),
       // The requirements this procedure is written against. Without them the procedure revision cannot be
       // bound to what caused it, and the decision that asked for it never settles.
-      drivingRequirementRevisionIds:draft.driving}
+      drivingRequirementRevisionIds:draft.driving,
+      expectedVersion:item?.version}
     if(await act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/procedure-changes`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}))){
       setProposing(false);setDraft(emptyDraft)
     }
   }
-  const withdraw=(changeId:string)=>void act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/procedure-changes/${changeId}`,{method:'DELETE'}))
+  const withdraw=(changeId:string)=>void act(()=>apiRequest(
+    `${api}/api/test-change-reviews/${reviewId}/procedure-changes/${changeId}?expectedVersion=${item?.version}`,
+    {method:'DELETE'}))
   const revise=()=>void act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}))
   const saveCase=async()=>{
     setBusy(true);setError('')
@@ -91,16 +95,23 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
         problemRich:caseProblemRich,
         analysisRich:caseAnalysisRich,
         solutionRich:caseSolutionRich,
+        expectedVersion:caseVersion,
       })})
       setEditingCase(false);await load();onChanged()
-    }catch(problem){setError(operationError(problem,'The test change request case could not be saved.'))}
+    }catch(problem){
+      if(problem instanceof ApiError && problem.status===409 && problem.code==='stale_version'){
+        setError('This package changed in another session. Your edits are preserved here; copy them, refresh, and reapply.')
+      }else{
+        setError(operationError(problem,'The test change request case could not be saved.'))
+      }
+    }
     finally{setBusy(false)}
   }
   const openCaseEditor=()=>{
     if(!item)return
     setCaseTitle(item.title??'');setCaseProblemRich(item.problemRich||fromPlainText(item.problem||''))
     setCaseAnalysisRich(item.analysisRich||fromPlainText(item.analysis||''));setCaseSolutionRich(item.solutionRich||fromPlainText(item.solution||''))
-    setError('');setEditingCase(true)
+    setCaseVersion(item.version);setError('');setEditingCase(true)
   }
 
   // Answered by the server, not inferred from a broad role here. The workspace was offering authoring to
