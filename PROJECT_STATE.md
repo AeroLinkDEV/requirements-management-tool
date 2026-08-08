@@ -472,7 +472,9 @@ reason the document set can be trusted.
   tests now fail the build if a migration is undiscoverable or the model drifts from its snapshot.
   When adding a capability, ask what would fail if it were entirely absent — and make sure something
   does.
-- **Migrations must be generated, not hand-authored.** Use
+- **Migrations must be generated, not hand-authored.** Set `AEROLINK_MIGRATIONS_CONNECTION` to a disposable
+  PostgreSQL connection first (design-time EF fails closed and never defaults to the persistent database; see
+  `product/docs/OPERATIONS.md`), then run
   `dotnet ef migrations add <Name> --project src/AeroLink.Infrastructure --startup-project src/AeroLink.Api --output-dir Persistence/Migrations`.
   Entities must also be mapped in `AeroLinkDbContext`, because the non-PostgreSQL path builds its
   schema from the model rather than from migrations.
