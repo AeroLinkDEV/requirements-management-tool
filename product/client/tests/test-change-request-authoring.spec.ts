@@ -148,6 +148,7 @@ test('HLR and LLR Change Requests pages offer their own creation actions', async
   await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole('button', { name: '+ New LLR Test Change Request' })).toBeVisible()
 
+  await page.getByRole('button', { name: 'System', exact: true }).last().click()
   await page.getByRole('link', { name: 'System Test Change Requests' }).click()
   await expect(page.getByRole('button', { name: '+ New System Test Change Request' })).toBeVisible()
 })

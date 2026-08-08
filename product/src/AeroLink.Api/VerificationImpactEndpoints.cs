@@ -618,7 +618,8 @@ public static class VerificationImpactEndpoints
             foreach (var change in changes)
             {
                 var origin = await db.TestChangeReviews.AsNoTracking()
-                    .Where(x => x.ChangeRequestId == change.Id && x.Discipline == request.Discipline)
+                    .Where(x => x.ChangeRequestId == change.Id && x.Discipline == request.Discipline
+                        && (x.State != TestChangeReviewState.Open || x.Outcome != TestChangeReviewOutcome.Pending))
                     .Select(x => x.DisplayNumber).FirstOrDefaultAsync(ct);
                 var claimed = await db.TestChangeRequestClaims.AsNoTracking()
                     .Where(x => x.ChangeRequestId == change.Id)
@@ -633,6 +634,14 @@ public static class VerificationImpactEndpoints
                 if (!string.IsNullOrEmpty(claimed))
                     return Results.Conflict(new { error = $"{change.DisplayNumber} is already covered by {claimed}." });
             }
+            // Raising a package by hand is itself the conclusion that test work is required (DEC-095), so an
+            // unassessed automatic review of one of the selected changes is not a rival: the first change's
+            // review becomes this package, and the others are superseded rather than duplicated. History keeps
+            // them; nothing is deleted.
+            var pendingAutomatic = await db.TestChangeReviews
+                .Where(x => request.ChangeRequestIds.Contains(x.ChangeRequestId) && x.Discipline == request.Discipline
+                    && x.State == TestChangeReviewState.Open && x.Outcome == TestChangeReviewOutcome.Pending)
+                .ToListAsync(ct);
 
             try
             {
@@ -640,9 +649,16 @@ public static class VerificationImpactEndpoints
                 var actor = http.UserAccount().UserName;
                 var first = changes[0];
                 // Raising one by hand is itself the conclusion that test work is required, so it is numbered
-                // immediately rather than waiting to be assessed by the person who just decided it.
-                var review = new TestChangeReview(release.ProjectId, releaseId, first.Id, request.Discipline,
-                    first.DisplayNumber, now);
+                // immediately rather than waiting to be assessed by the person who just decided it. When the
+                // change already carries an unassessed automatic review, that review is the package — one
+                // row, one ChangeRequestId, one Revision, one answer.
+                var review = pendingAutomatic.SingleOrDefault(x => x.ChangeRequestId == first.Id);
+                if (review is null)
+                {
+                    review = new TestChangeReview(release.ProjectId, releaseId, first.Id, request.Discipline,
+                        first.DisplayNumber, now);
+                    db.TestChangeReviews.Add(review);
+                }
                 review.RecordTestChangeRequired(actor, now);
                 review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, request.Discipline, ct), now);
                 foreach (var extra in changes.Skip(1))
@@ -652,7 +668,10 @@ public static class VerificationImpactEndpoints
                 // DEC-102: raising the package is itself taking it on. The engineer who built it holds it,
                 // so it appears in My Work and can be worked without a meaningless "Take it on" step.
                 review.Assign(actor, actor, now);
-                db.TestChangeReviews.Add(review);
+                foreach (var automatic in pendingAutomatic.Where(x => x.Id != review.Id))
+                    automatic.Supersede(review.Id,
+                        $"{review.DisplayNumber} was raised manually and concludes that test work is required; it supersedes this unassessed automatic review.",
+                        now);
                 await problemReports.LinkTestChangeRequestAsync(review.Id, request.ProblemReportIds, actor, now, ct);
                 await db.SaveChangesAsync(ct);
                 return Results.Created($"/api/test-change-reviews/{review.Id}", new

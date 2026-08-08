@@ -5,6 +5,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -138,16 +139,25 @@ public sealed class ManualTestChangeRequestApiTests
     }
 
     /// <summary>
-    /// The automatic package already covers it. Two packages answering for one change could be approved with
+    /// An automatic assessment that has actually been concluded is a real package; a manual raise cannot
+    /// quietly take its change away. Two packages answering for one change could be approved with
     /// contradictory procedure decisions, and nothing would notice.
     /// </summary>
     [Fact]
-    public async Task A_change_already_covered_is_refused_by_name()
+    public async Task An_assessed_change_is_refused_by_name()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "manual.engineer");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var review = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.AutoTcrId);
+            review.RecordTestChangeRequired("manual.engineer", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.AutoRaisedChangeId }, title = "Verification package" });
@@ -158,6 +168,76 @@ public sealed class ManualTestChangeRequestApiTests
         // it was "covered by" its own number would name the change after itself.
         Assert.Contains("SRCR-00912", body);
         Assert.Contains("already has a System test assessment", body);
+    }
+
+    [Fact]
+    public async Task A_pending_automatic_review_becomes_the_manual_package()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "System", changeRequestIds = new[] { fixture.AutoRaisedChangeId },
+                title = "Manual package over the pending automatic review" });
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
+        var created = JsonSerializer.Deserialize<JsonElement>(body);
+        var packageId = created.GetProperty("id").GetGuid();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            // One row, one ChangeRequestId, one Discipline, one Revision: the automatic review is the
+            // package, concluded and numbered, not a second row that would fight it for the unique key.
+            var manual = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.AutoTcrId);
+            Assert.Equal(packageId, manual.Id);
+            Assert.Equal(TestChangeReviewState.Open, manual.State);
+            Assert.Matches("^SYSTCR-", manual.BaseNumber);
+            Assert.Equal("Manual package over the pending automatic review", manual.Title);
+            Assert.Equal("manual.engineer", manual.AssignedEngineerId);
+            Assert.Contains(fixture.AutoRaisedChangeId, manual.CoveredChangeRequestIds);
+        }
+    }
+
+    [Fact]
+    public async Task Folded_changes_pending_automatic_reviews_are_superseded()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var impact = scope.ServiceProvider.GetRequiredService<VerificationImpactService>();
+            var second = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
+                .SingleAsync(x => x.Id == fixture.SecondChangeId);
+            await impact.RaiseForApprovedChangeRequestAsync(second, DateTimeOffset.UtcNow, default);
+            await db.SaveChangesAsync();
+        }
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId, fixture.SecondChangeId },
+                title = "Manual package folding a pending automatic review" });
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var package = await db.TestChangeReviews.Include(x => x.AdditionalSources)
+                .SingleAsync(x => x.ChangeRequestId == fixture.FirstChangeId
+                    && x.Discipline == TestChangeReviewDiscipline.System && x.Revision == 0
+                    && x.State != TestChangeReviewState.Superseded);
+            Assert.Contains(fixture.SecondChangeId, package.CoveredChangeRequestIds);
+            var secondAutomatic = await db.TestChangeReviews.SingleAsync(x => x.ChangeRequestId == fixture.SecondChangeId
+                && x.Discipline == TestChangeReviewDiscipline.System && x.State == TestChangeReviewState.Superseded);
+            Assert.Equal(package.Id, secondAutomatic.SupersededByTestChangeRequestId);
+            Assert.Contains("raised manually", secondAutomatic.SupersededReason);
+        }
     }
 
     [Fact]
@@ -468,7 +548,7 @@ public sealed class ManualTestChangeRequestApiTests
             var hlr = new SystemChangeRequest("HLRCR-00920", 0, fixture.ProjectId, fixture.ReleaseId,
                 "HLR change", "P", "A", "S", "author", now, ChangeRequestType.Software,
                 softwareLevel: RequirementLevel.HighLevel);
-            hlr.AddRequirementChange("author", "HLR-0001", 0, RequirementLevel.HighLevel,
+            hlr.AddRequirementChange("author", "HLR-000001", 0, RequirementLevel.HighLevel,
                 RequirementChangeKind.Introduce, "The HLR shall expose the new behavior.", "r", "v", now);
             hlr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
             hlr.ApproveActiveStage("reviewer", now);
@@ -476,7 +556,7 @@ public sealed class ManualTestChangeRequestApiTests
             var llr = new SystemChangeRequest("LLRCR-00920", 0, fixture.ProjectId, fixture.ReleaseId,
                 "LLR change", "P", "A", "S", "author", now, ChangeRequestType.Software,
                 softwareLevel: RequirementLevel.LowLevel);
-            llr.AddRequirementChange("author", "LLR-0001", 0, RequirementLevel.LowLevel,
+            llr.AddRequirementChange("author", "LLR-000001", 0, RequirementLevel.LowLevel,
                 RequirementChangeKind.Introduce, "The LLR shall implement the new behavior.", "r", "v", now);
             llr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
             llr.ApproveActiveStage("reviewer", now);
