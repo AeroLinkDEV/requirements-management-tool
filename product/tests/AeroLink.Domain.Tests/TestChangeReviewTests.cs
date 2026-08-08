@@ -237,6 +237,48 @@ public sealed class TestChangeReviewTests
     }
 
     [Fact]
+    public void Coverage_removals_rationale_and_author_are_frozen_into_the_review_snapshot()
+    {
+        var removed = Guid.NewGuid();
+        TestProcedureChangeDraft Draft(Guid removal, string rationale) => new("SYSTP-000200", 1,
+            TestProcedureLevel.System, TestProcedureChangeKind.Modify, "Revised procedure", "Objective", "",
+            "Steps", "Expected", "Procedure rationale", "[]", $"[\"{removal}\"]", rationale);
+
+        var first = Create();
+        first.AssignControlledNumber("SYSTCR-000061", Now.AddMinutes(1));
+        var change = first.AddProcedureChange("verification.engineer", Draft(removed, "Coverage no longer applies."),
+            Now.AddMinutes(2));
+        first.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        var changedRationale = Create();
+        changedRationale.AssignControlledNumber("SYSTCR-000061", Now.AddMinutes(1));
+        changedRationale.AddProcedureChange("verification.engineer", Draft(removed, "A different removal decision."),
+            Now.AddMinutes(2));
+        changedRationale.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        var changedRemoval = Create();
+        changedRemoval.AssignControlledNumber("SYSTCR-000061", Now.AddMinutes(1));
+        changedRemoval.AddProcedureChange("verification.engineer",
+            Draft(Guid.NewGuid(), "Coverage no longer applies."), Now.AddMinutes(2));
+        changedRemoval.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        var changedAuthor = Create();
+        changedAuthor.AssignControlledNumber("SYSTCR-000061", Now.AddMinutes(1));
+        changedAuthor.AddProcedureChange("another.engineer", Draft(removed, "Coverage no longer applies."),
+            Now.AddMinutes(2));
+        changedAuthor.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        Assert.Equal("verification.engineer", change.CoverageChangedBy);
+        Assert.Equal("Coverage no longer applies.", change.CoverageChangeRationale);
+        Assert.NotEqual(first.ReviewCycles.Single().SnapshotHash,
+            changedRationale.ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(first.ReviewCycles.Single().SnapshotHash,
+            changedRemoval.ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(first.ReviewCycles.Single().SnapshotHash,
+            changedAuthor.ReviewCycles.Single().SnapshotHash);
+    }
+
+    [Fact]
     public void Malformed_driving_requirement_json_is_refused_at_submission()
     {
         var review = Create();

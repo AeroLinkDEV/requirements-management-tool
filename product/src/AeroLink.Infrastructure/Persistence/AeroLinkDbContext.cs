@@ -563,6 +563,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Title).HasMaxLength(300).IsRequired();
             b.Property(x => x.Level).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.RemovedRequirementRevisionIdsJson).IsRequired();
+            b.Property(x => x.CoverageChangeRationale).HasMaxLength(2000).IsRequired();
+            b.Property(x => x.CoverageChangedBy).HasMaxLength(100).IsRequired();
             b.HasIndex(x => new { x.TestChangeReviewId, x.BaseNumber }).IsUnique();
             b.Ignore(x => x.DisplayNumber);
         });

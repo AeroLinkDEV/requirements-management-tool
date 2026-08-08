@@ -21,7 +21,7 @@ public static class TestChangeReviewRequirementScope
     public static async Task<IReadOnlyList<TestChangeReviewRequirementChoice>> ForReviewAsync(
         AeroLinkDbContext db, TestChangeReview review, Guid? baselineId, CancellationToken ct)
     {
-        var effectiveBaselineId = baselineId ?? await EffectiveBaselineAsync(
+        var effectiveBaselineId = baselineId ?? await EffectiveRequirementBaselineIdAsync(
             db, review.ProjectId, review.ReleaseId, ct);
         if (effectiveBaselineId is null) return [];
 
@@ -64,7 +64,7 @@ public static class TestChangeReviewRequirementScope
                           revision.Statement)).ToListAsync(ct);
     }
 
-    private static async Task<Guid?> EffectiveBaselineAsync(AeroLinkDbContext db, Guid projectId,
+    public static async Task<Guid?> EffectiveRequirementBaselineIdAsync(AeroLinkDbContext db, Guid projectId,
         Guid releaseId, CancellationToken ct)
     {
         var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)

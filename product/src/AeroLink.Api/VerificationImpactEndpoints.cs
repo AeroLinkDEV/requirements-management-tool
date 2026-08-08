@@ -37,7 +37,8 @@ public sealed record ApproveTestChangeReviewRequest(string Rationale);
 /// </summary>
 public sealed record ProposeProcedureChangeRequest(TestProcedureChangeKind Kind, string? BaseNumber, int Revision,
     string Title, string Objective, string Preconditions, string Steps, string ExpectedResult, string Rationale,
-    Guid[]? DrivingRequirementRevisionIds, long? ExpectedVersion = null);
+    Guid[]? DrivingRequirementRevisionIds, long? ExpectedVersion = null,
+    Guid[]? RemovedRequirementRevisionIds = null, string? CoverageChangeRationale = null);
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
 
 public static class VerificationImpactEndpoints
@@ -333,6 +334,13 @@ public static class VerificationImpactEndpoints
             var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
                 db, review.ProjectId, review.ReleaseId, ct);
             var targetRevisionIds = effectivity?.RevisionIds ?? [];
+            var requirementBaselineId = await TestChangeReviewRequirementScope
+                .EffectiveRequirementBaselineIdAsync(db, review.ProjectId, review.ReleaseId, ct);
+            var carriedRequirementIds = requirementBaselineId is null
+                ? []
+                : await db.BaselineRequirements.AsNoTracking()
+                    .Where(x => x.BaselineId == requirementBaselineId.Value)
+                    .Select(x => x.RevisionId).ToListAsync(ct);
             var targets = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                      .Where(x => targetRevisionIds.Contains(x.Id))
                                  join procedure in db.TestProcedures.AsNoTracking()
@@ -341,10 +349,27 @@ public static class VerificationImpactEndpoints
                                  orderby procedure.BaseNumber
                                  select new
                                  {
+                                     revision.Id,
                                      procedure.BaseNumber,
                                      procedure.Title,
                                      CurrentRevision = revision.Revision
                                  }).Take(500).ToListAsync(ct);
+            var targetCoverage = await (from coverage in db.TestCoverage.AsNoTracking()
+                                            .Where(x => targetRevisionIds.Contains(x.ProcedureRevisionId)
+                                                && carriedRequirementIds.Contains(x.RequirementRevisionId))
+                                        join revision in db.RequirementRevisions.AsNoTracking()
+                                            on coverage.RequirementRevisionId equals revision.Id
+                                        join artifact in db.Requirements.AsNoTracking()
+                                            on revision.ArtifactId equals artifact.Id
+                                        select new
+                                        {
+                                            coverage.ProcedureRevisionId,
+                                            revisionId = revision.Id,
+                                            displayNumber = artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
+                                            revision.Statement,
+                                            level = artifact.Level.ToString(),
+                                            coverage.IsSuspect
+                                        }).ToListAsync(ct);
             return Results.Ok(new
             {
                 capabilities = new
@@ -359,6 +384,12 @@ public static class VerificationImpactEndpoints
                 {
                     x.BaseNumber, x.Title,
                     currentRevision = x.CurrentRevision,
+                    currentCoverage = targetCoverage.Where(c => c.ProcedureRevisionId == x.Id)
+                        .OrderBy(c => c.displayNumber).Select(c => new
+                        {
+                            c.revisionId, c.displayNumber, statement = c.Statement, c.level,
+                            isSuspect = c.IsSuspect
+                        }).ToList()
                 }),
                 review.Id, review.DisplayNumber, review.BaseNumber, review.Revision,
                 discipline = review.Discipline.ToString(), state = review.State.ToString(),
@@ -374,7 +405,9 @@ public static class VerificationImpactEndpoints
                         x.Id, x.DisplayNumber, x.BaseNumber, x.Revision, kind = x.Kind.ToString(),
                         level = x.Level.ToString(), x.Title, x.Objective, x.Preconditions, x.Steps,
                         x.ExpectedResult, x.Rationale,
-                        drivingRequirementRevisionIds = DrivingRequirements(x.DrivingRequirementRevisionIdsJson)
+                        drivingRequirementRevisionIds = DrivingRequirements(x.DrivingRequirementRevisionIdsJson),
+                        removedRequirementRevisionIds = DrivingRequirements(x.RemovedRequirementRevisionIdsJson),
+                        x.CoverageChangeRationale, x.CoverageChangedBy
                     }).ToList()
             });
         });
@@ -398,15 +431,29 @@ public static class VerificationImpactEndpoints
             {
                 var now = DateTimeOffset.UtcNow;
                 var driving = request.DrivingRequirementRevisionIds ?? [];
-                if (driving.Length != 0)
+                var removed = request.RemovedRequirementRevisionIds ?? [];
+                if (request.Kind != TestProcedureChangeKind.Modify && removed.Length != 0)
+                    return Results.BadRequest(new
+                    {
+                        error = "Only a procedure modification can remove existing coverage.",
+                        code = "coverage_removal_requires_modify"
+                    });
+                if (driving.Intersect(removed).Any())
+                    return Results.BadRequest(new
+                    {
+                        error = "A requirement cannot be both added and removed by one procedure change.",
+                        code = "coverage_delta_conflict"
+                    });
+                var scopedRequirementIds = driving.Concat(removed).Distinct().ToArray();
+                if (scopedRequirementIds.Length != 0)
                 {
                     var known = await (from revision in db.RequirementRevisions.AsNoTracking()
                                        join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
-                                       where driving.Contains(revision.Id)
+                                       where scopedRequirementIds.Contains(revision.Id)
                                        select new { revision.Id, artifact.ProjectId, artifact.Level })
                         .ToDictionaryAsync(x => x.Id, ct);
                     var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel());
-                    foreach (var drivingId in driving.Distinct())
+                    foreach (var drivingId in scopedRequirementIds)
                     {
                         if (!known.TryGetValue(drivingId, out var requirement))
                             return Results.BadRequest(new { error = $"Requirement revision {drivingId} does not exist.", code = "requirement_revision_not_found" });
@@ -417,7 +464,7 @@ public static class VerificationImpactEndpoints
                     }
                     var governed = await TestChangeReviewRequirementScope.ForReviewAsync(db, review, null, ct);
                     var governedIds = governed.Select(x => x.RevisionId).ToHashSet();
-                    var outside = driving.Distinct().FirstOrDefault(x => !governedIds.Contains(x));
+                    var outside = scopedRequirementIds.FirstOrDefault(x => !governedIds.Contains(x));
                     if (outside != Guid.Empty)
                         return Results.BadRequest(new
                         {
@@ -432,6 +479,7 @@ public static class VerificationImpactEndpoints
                     : (request.BaseNumber ?? "").Trim();
                 if (request.Kind != TestProcedureChangeKind.Introduce && baseNumber.Length == 0)
                     return Results.BadRequest(new { error = "A modification or retirement must name the procedure it acts on." });
+                var currentCoverageIds = new HashSet<Guid>();
                 // Deliberately no "must name a requirement revision" rule here, though the direct-create route
                 // that this replaced had one. That route wrote a controlled procedure immediately, so it
                 // needed its coverage at that moment; a package only proposes, and a proposal's driving
@@ -475,13 +523,36 @@ public static class VerificationImpactEndpoints
                             error = $"{baseNumber}.{current.Value:D2} is carried by the target build. The proposed revision must be {current.Value + 1:D2}.",
                             code = "procedure_revision_not_next_for_build"
                         });
+                    currentCoverageIds = (await db.TestCoverage.AsNoTracking()
+                            .Where(x => x.ProcedureRevisionId == carriedRevisionId)
+                            .Select(x => x.RequirementRevisionId).ToListAsync(ct)).ToHashSet();
+                }
+
+                if (request.Kind == TestProcedureChangeKind.Modify)
+                {
+                    var absent = removed.Distinct().FirstOrDefault(x => !currentCoverageIds.Contains(x));
+                    if (absent != Guid.Empty)
+                        return Results.BadRequest(new
+                        {
+                            error = $"Requirement revision {absent} is not currently covered by {baseNumber} and cannot be removed.",
+                            code = "coverage_removal_not_current"
+                        });
+                    var addsCoverage = driving.Distinct().Any(x => !currentCoverageIds.Contains(x));
+                    if ((addsCoverage || removed.Length != 0)
+                        && string.IsNullOrWhiteSpace(request.CoverageChangeRationale))
+                        return Results.BadRequest(new
+                        {
+                            error = "Explain why this modification adds or removes requirement coverage.",
+                            code = "coverage_delta_rationale_required"
+                        });
                 }
 
                 var change = review.AddProcedureChange(http.UserAccount().UserName, new TestProcedureChangeDraft(
                     baseNumber, request.Revision, review.ProcedureLevel(), request.Kind, request.Title ?? "",
                     request.Objective ?? "", request.Preconditions ?? "", request.Steps ?? "",
                     request.ExpectedResult ?? "", request.Rationale ?? "",
-                    JsonSerializer.Serialize(request.DrivingRequirementRevisionIds ?? [])), now);
+                    JsonSerializer.Serialize(driving.Distinct()), JsonSerializer.Serialize(removed.Distinct()),
+                    request.CoverageChangeRationale ?? ""), now);
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new
                 {

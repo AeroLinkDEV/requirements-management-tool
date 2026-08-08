@@ -9,7 +9,8 @@ public enum TestProcedureChangeKind { Introduce, Modify, Retire }
 
 public sealed record TestProcedureChangeDraft(string BaseNumber, int Revision, TestProcedureLevel Level,
     TestProcedureChangeKind Kind, string Title, string Objective, string Preconditions, string Steps,
-    string ExpectedResult, string Rationale, string DrivingRequirementRevisionIdsJson = "[]");
+    string ExpectedResult, string Rationale, string DrivingRequirementRevisionIdsJson = "[]",
+    string RemovedRequirementRevisionIdsJson = "[]", string CoverageChangeRationale = "");
 
 /// <summary>
 /// One proposed change to one test procedure, carried by a test change request.
@@ -32,7 +33,8 @@ public sealed class TestProcedureChange
     internal TestProcedureChange(Guid testChangeReviewId, string baseNumber, int revision,
         TestProcedureLevel level, TestProcedureChangeKind kind, string title, string objective,
         string preconditions, string steps, string expectedResult, string rationale,
-        string drivingRequirementRevisionIdsJson = "[]")
+        string drivingRequirementRevisionIdsJson = "[]", string removedRequirementRevisionIdsJson = "[]",
+        string coverageChangeRationale = "", string coverageChangedBy = "")
     {
         Id = Guid.NewGuid();
         TestChangeReviewId = testChangeReviewId;
@@ -57,6 +59,11 @@ public sealed class TestProcedureChange
         DrivingRequirementRevisionIdsJson = string.IsNullOrWhiteSpace(drivingRequirementRevisionIdsJson)
             ? "[]"
             : drivingRequirementRevisionIdsJson;
+        RemovedRequirementRevisionIdsJson = string.IsNullOrWhiteSpace(removedRequirementRevisionIdsJson)
+            ? "[]"
+            : removedRequirementRevisionIdsJson;
+        CoverageChangeRationale = coverageChangeRationale?.Trim() ?? "";
+        CoverageChangedBy = coverageChangedBy?.Trim() ?? "";
     }
 
     public Guid Id { get; private set; }
@@ -91,4 +98,10 @@ public sealed class TestProcedureChange
     /// and an approved trace.
     /// </summary>
     public string DrivingRequirementRevisionIdsJson { get; private set; } = "[]";
+    /// <summary>Exact predecessor links the approved modification deliberately removes.</summary>
+    public string RemovedRequirementRevisionIdsJson { get; private set; } = "[]";
+    /// <summary>Why the author deliberately changed procedure-to-requirement coverage.</summary>
+    public string CoverageChangeRationale { get; private set; } = "";
+    /// <summary>The engineer attributable for the approved coverage delta.</summary>
+    public string CoverageChangedBy { get; private set; } = "";
 }
