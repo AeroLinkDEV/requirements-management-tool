@@ -8,19 +8,24 @@ public sealed class ControlledArtifactEditingTests
     [Fact]
     public void Registry_covers_every_AeroLink_3_controlled_draft_family()
     {
-        var expected = Enum.GetValues<ControlledArtifactFamily>();
+        // TestProcedure is retained as an enum value for historical records but is deliberately not a
+        // controlled draft family: DEC-103 governs procedure change through a Test Change Request, so no
+        // direct universal-editing policy exists for it.
+        var expected = Enum.GetValues<ControlledArtifactFamily>()
+            .Where(family => family != ControlledArtifactFamily.TestProcedure);
 
-        Assert.Equal(expected.Length, ControlledArtifactEditPolicies.All.Count);
+        Assert.Equal(expected.Count(), ControlledArtifactEditPolicies.All.Count);
         Assert.All(expected, family =>
             Assert.Contains(ControlledArtifactEditPolicies.All, policy => policy.Family == family));
         Assert.All(ControlledArtifactEditPolicies.All, policy => Assert.True(policy.Exclusive));
+        Assert.DoesNotContain(ControlledArtifactEditPolicies.All,
+            policy => policy.Family == ControlledArtifactFamily.TestProcedure);
     }
 
     [Theory]
     [InlineData("SCR", ControlledArtifactFamily.ChangeRequest, "ChangeRequest")]
     [InlineData("swcr", ControlledArtifactFamily.ChangeRequest, "ChangeRequest")]
     [InlineData("PR", ControlledArtifactFamily.ProblemReport, "ProblemReport")]
-    [InlineData("TestProcedureRevision", ControlledArtifactFamily.TestProcedure, "TestProcedure")]
     [InlineData("CandidateBaseline", ControlledArtifactFamily.ReleasePlanning, "ReleasePlanning")]
     [InlineData("SpecificationNode", ControlledArtifactFamily.SpecificationStructure, "SpecificationStructure")]
     public void Aliases_resolve_to_one_canonical_policy(
@@ -50,8 +55,6 @@ public sealed class ControlledArtifactEditingTests
     [Theory]
     [InlineData("SCR", "Draft", true)]
     [InlineData("SCR", "Approved", false)]
-    [InlineData("TestProcedure", "ChangesRequested", true)]
-    [InlineData("TestProcedure", "Approved", false)]
     [InlineData("ProblemReport", "Investigating", true)]
     [InlineData("ConfigurationChangeSet", "Conflict", true)]
     public void Lifecycle_state_eligibility_is_explicit(
@@ -67,5 +70,11 @@ public sealed class ControlledArtifactEditingTests
     {
         Assert.False(ControlledArtifactEditPolicies.TryResolve("UnknownArtifact", out _));
         Assert.Throws<DomainException>(() => ControlledArtifactEditPolicies.Resolve("UnknownArtifact"));
+
+        // Test procedures and their historical aliases no longer resolve to any editing policy.
+        Assert.False(ControlledArtifactEditPolicies.TryResolve("TestProcedure", out _));
+        Assert.False(ControlledArtifactEditPolicies.TryResolve("Procedure", out _));
+        Assert.False(ControlledArtifactEditPolicies.TryResolve("TestProcedureRevision", out _));
+        Assert.Throws<DomainException>(() => ControlledArtifactEditPolicies.Resolve("TestProcedure"));
     }
 }

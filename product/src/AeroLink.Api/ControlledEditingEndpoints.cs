@@ -360,22 +360,6 @@ public static class ControlledEditingEndpoints
                 return new(owner.ProjectId, "InWork", null,
                     SpecificationStructureControlledEditingAdapter.Snapshot(owner, ownerNodes), "RequirementSpecification");
             }
-            case ControlledArtifactFamily.TestProcedure:
-            {
-                var revision = await db.TestProcedureRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
-                if (revision is not null)
-                {
-                    var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.Id == revision.ProcedureId, ct);
-                    return new(procedure.ProjectId, revision.State.ToString(), revision.Id,
-                        TestProcedureControlledEditingAdapter.Snapshot(procedure, revision), "TestProcedureRevision");
-                }
-                var procedureOnly = await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
-                if (procedureOnly is null) return null;
-                var latest = await db.TestProcedureRevisions.AsNoTracking().Where(x => x.ProcedureId == artifactId)
-                    .OrderByDescending(x => x.Revision).FirstOrDefaultAsync(ct);
-                return latest is null ? null : new(procedureOnly.ProjectId, latest.State.ToString(), latest.Id,
-                    TestProcedureControlledEditingAdapter.Snapshot(procedureOnly, latest), "TestProcedureRevision");
-            }
             case ControlledArtifactFamily.TraceLinkProposal:
             {
                 var item = await db.RequirementTraces.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);

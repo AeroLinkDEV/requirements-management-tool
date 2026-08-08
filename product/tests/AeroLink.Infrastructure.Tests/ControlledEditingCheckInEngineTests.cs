@@ -316,35 +316,6 @@ public sealed class ControlledEditingCheckInEngineTests
     }
 
     [Fact]
-    public async Task Test_procedure_adapter_updates_only_a_draft_revision_through_the_procedure_root()
-    {
-        await using var scenario = await Scenario.CreateAsync();
-        var procedure = new TestProcedure(scenario.Project.Id, "SYSTP-000001", "Original procedure",
-            scenario.Actor.UserName, scenario.Now, TestProcedureLevel.System);
-        var revision = new TestProcedureRevision(procedure.Id, 0, "Original objective", "Original preconditions",
-            "Original steps", "Original expected", TestProcedureState.Draft, scenario.Actor.UserName, scenario.Now);
-        scenario.Db.AddRange(procedure, revision);
-        await scenario.Db.SaveChangesAsync();
-        var adapter = new TestProcedureControlledEditingAdapter(scenario.Db);
-        var draft = JsonSerializer.Serialize(new
-        {
-            procedureId = procedure.Id, procedure.BaseNumber, title = "Updated procedure", procedure.OwnerId,
-            level = procedure.Level.ToString(), version = procedure.Version, revisionId = revision.Id,
-            revision.Revision, objective = "Updated objective", revision.Preconditions, steps = "Updated steps",
-            expectedResult = "Updated expected", state = revision.State.ToString(), revision.AuthorId
-        });
-
-        var result = await CheckInAsync(scenario, adapter, "TestProcedure", revision.Id, draft);
-
-        Assert.True(result.Success);
-        scenario.Db.ChangeTracker.Clear();
-        Assert.Equal("Updated procedure", (await scenario.Db.TestProcedures.SingleAsync(x => x.Id == procedure.Id)).Title);
-        var stored = await scenario.Db.TestProcedureRevisions.SingleAsync(x => x.Id == revision.Id);
-        Assert.Equal("Updated objective", stored.Objective);
-        Assert.Equal("Updated steps", stored.Steps);
-    }
-
-    [Fact]
     public async Task Trace_link_adapter_rejects_identity_changes_and_applies_an_authorized_proposal_update()
     {
         await using var scenario = await Scenario.CreateAsync();
