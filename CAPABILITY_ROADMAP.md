@@ -14,6 +14,14 @@ Items are numbered as they were in the analysis, so the numbering is not sequent
 > Candidate Baselines remain dormant product surfaces. See [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) before treating
 > any older item below as current UI direction or active backlog.
 
+> **Current-surface checkpoint - 2026-08-08.** Verification is now Change Requests, Test Procedure Explorer
+> and Test Results for each System/HLR/LLR discipline (Stage 3B). A manually raised Test Change Request is a
+> first-class authored package with Title/Problem/Analysis/Solution, source change requests and Problem
+> Report links (Stage 4). Test procedures are changed only through a Test Change Request (DEC-103):
+> universal controlled editing offers no procedure path and there is no procedure-level approver. See
+> [CURRENT_PRODUCT_HANDOFF_2026-08-06.md](CURRENT_PRODUCT_HANDOFF_2026-08-06.md) before treating any older
+> item below as current UI direction or active backlog.
+
 ## Accepted, in build order
 
 **Status as of 2026-08-01: items 1, 2, 3, 5, 8 and 9 are built.** The designs below are retained as the

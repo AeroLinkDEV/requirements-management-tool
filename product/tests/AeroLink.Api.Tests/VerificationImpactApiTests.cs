@@ -82,8 +82,9 @@ public sealed class VerificationImpactApiTests
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
 
         var reviews = JsonDocument.Parse(body).RootElement;
-        Assert.NotEmpty(reviews.EnumerateArray());
-        var review = reviews.EnumerateArray().First();
+        var items = reviews.GetProperty("items");
+        Assert.NotEmpty(items.EnumerateArray());
+        var review = items.EnumerateArray().First();
         Assert.Equal("System", review.GetProperty("discipline").GetString());
         Assert.Equal("Open", review.GetProperty("state").GetString());
     }
@@ -319,7 +320,7 @@ public sealed class VerificationImpactApiTests
             await LoginAsync(engineer, "eng.user");
             var reviews = await engineer.GetFromJsonAsync<JsonElement>(
                 $"/api/releases/{fixture.ReleaseId}/test-change-reviews");
-            var review = reviews[0];
+            var review = reviews.GetProperty("items")[0];
             reviewId = review.GetProperty("id").GetGuid();
             Assert.True(review.GetProperty("capabilities").GetProperty("canAssign").GetBoolean());
 
@@ -329,8 +330,9 @@ public sealed class VerificationImpactApiTests
 
             var refreshed = await engineer.GetFromJsonAsync<JsonElement>(
                 $"/api/releases/{fixture.ReleaseId}/test-change-reviews");
-            Assert.Equal("eng.user", refreshed[0].GetProperty("assignedEngineerId").GetString());
-            Assert.True(refreshed[0].GetProperty("capabilities").GetProperty("canDecide").GetBoolean());
+            var refreshedItems = refreshed.GetProperty("items");
+            Assert.Equal("eng.user", refreshedItems[0].GetProperty("assignedEngineerId").GetString());
+            Assert.True(refreshedItems[0].GetProperty("capabilities").GetProperty("canDecide").GetBoolean());
             var work = await engineer.GetFromJsonAsync<JsonElement>(
                 $"/api/my-work?projectId={fixture.ProjectId}&releaseId={fixture.ReleaseId}");
             Assert.Contains(work.GetProperty("tasks").EnumerateArray(), task =>

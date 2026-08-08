@@ -97,7 +97,7 @@ public sealed class TestChangeRequestScopeApiTests
         using var response = await client.GetAsync($"/api/releases/{fixture.ReleaseId}/test-change-reviews");
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
-        var raised = JsonSerializer.Deserialize<JsonElement>(body).EnumerateArray().ToList();
+        var raised = JsonSerializer.Deserialize<JsonElement>(body).GetProperty("items").EnumerateArray().ToList();
 
         // Raised as questions, not as controlled records. Each one shows the change it is asking about until
         // somebody answers, exactly as a downstream requirement assessment does.
@@ -125,7 +125,7 @@ public sealed class TestChangeRequestScopeApiTests
 
         var raised = JsonSerializer.Deserialize<JsonElement>(
             await client.GetStringAsync($"/api/releases/{fixture.ReleaseId}/test-change-reviews"))
-            .EnumerateArray().First().GetProperty("id").GetGuid();
+            .GetProperty("items").EnumerateArray().First().GetProperty("id").GetGuid();
 
         using var refused = await client.PostAsJsonAsync($"/api/test-change-reviews/{raised}/conclusion",
             new { testChangeRequired = false, rationale = "" });
@@ -156,7 +156,7 @@ public sealed class TestChangeRequestScopeApiTests
 
         using var listed = await client.GetAsync($"/api/releases/{fixture.ReleaseId}/test-change-reviews");
         var reviews = JsonSerializer.Deserialize<JsonElement>(await listed.Content.ReadAsStringAsync());
-        var package = reviews.EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == fixture.FirstReviewId);
+        var package = reviews.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == fixture.FirstReviewId);
         var covered = package.GetProperty("coveredChangeRequests").EnumerateArray().ToList();
         Assert.Equal(2, covered.Count);
         // The change it was raised from is distinguishable from the one folded in: a reader needs to know

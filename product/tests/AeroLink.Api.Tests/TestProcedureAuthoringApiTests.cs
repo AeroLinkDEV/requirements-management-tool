@@ -311,13 +311,12 @@ public sealed class TestProcedureAuthoringApiTests
             new { kind = "Introduce", revision = 0, title = "T", objective = "o", steps = "s", expectedResult = "e", rationale = "r" });
         Assert.Equal(HttpStatusCode.Conflict, propose.StatusCode);
 
-        // Revising it is refused on the earlier ground that it was never approved. The released-build refusal
-        // sits behind that check, and is covered where an approved package meets a closed build in
-        // TestChangeReviewTests.
+        // Revising a released package is refused first as read-only; the "never approved" refusal is covered
+        // by the too-early assertion in the approved-package journey below.
         using var revise = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.ReleasedTcrId}/revise", new { });
-        Assert.Equal(HttpStatusCode.BadRequest, revise.StatusCode);
-        Assert.Contains("Only an approved test change request", await revise.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.Conflict, revise.StatusCode);
+        Assert.Contains("read-only", await revise.Content.ReadAsStringAsync());
     }
 
     [Fact]

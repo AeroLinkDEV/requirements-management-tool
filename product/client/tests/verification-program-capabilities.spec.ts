@@ -100,7 +100,7 @@ test('verification actions follow authority in the selected Program',async({page
   const introduceApprovedProcedure=async(workspace:any,target:{requirementRevisionId:string;baselineId:string},title:string)=>{
     const reviewsResponse=await request.get(`${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`)
     expect(reviewsResponse.ok(),await reviewsResponse.text()).toBeTruthy()
-    const review=(await reviewsResponse.json()).find((x:{discipline:string})=>x.discipline==='System')
+    const review=(await reviewsResponse.json()).items.find((x:{discipline:string})=>x.discipline==='System')
     expect(review,'the approved requirement change raised no System test change request').toBeTruthy()
 
     const concluded=await request.post(`${apiBase}/api/test-change-reviews/${review.id}/conclusion`,{data:{testChangeRequired:true}})

@@ -14,6 +14,27 @@ public enum VerificationImpactTrigger
 }
 
 public enum VerificationImpactState { Open, Assigned, Resolved, Superseded }
+
+/// <summary>
+/// The governed engineering content of one verification-impact decision, as it appears in the TCR review
+/// snapshot. Assignment and timestamps are deliberately absent: they are operational, not the content an
+/// approver judges.
+/// </summary>
+public sealed record VerificationImpactSnapshot(
+    Guid ItemId,
+    Guid ChangeRequestId,
+    VerificationImpactTrigger Trigger,
+    Guid? RequirementChangeId,
+    Guid? RequirementRevisionId,
+    Guid? ProcedureId,
+    string SubjectDisplayNumber,
+    VerificationImpactOutcome? Outcome,
+    TestProcedureChangeAction? ProcedureChangeAction,
+    string ResolutionRationale,
+    Guid? ResolvedProcedureId,
+    Guid? ResolvedProcedureRevisionId,
+    Guid? RetargetedRequirementRevisionId,
+    bool PreReleaseEvidenceRequired);
 public enum VerificationImpactHistoryAction { Resolved, Reopened }
 public enum TestProcedureChangeAction { LinkExisting, CreateNew, ModifyExisting, RetireExisting, NoTestRequired }
 
@@ -320,6 +341,23 @@ public sealed class VerificationImpactItem
         if (releaseId == Guid.Empty) throw new DomainException("A verification impact item requires its target release.");
         if (releaseId == ReleaseId) return;
         ReleaseId = releaseId;
+        Touch(now);
+    }
+
+    /// <summary>
+    /// Moves the item to another test change request without recreating it, so its identity, originating
+    /// change request, assignment, decision and history survive the move.
+    ///
+    /// Used when a manual package or a fold takes over a source change's pending automatic assessment: the
+    /// work must stay actionable from the package that now claims the change, never stranded behind a
+    /// superseded assessment.
+    /// </summary>
+    public void MoveToReview(Guid testChangeReviewId, DateTimeOffset now)
+    {
+        if (testChangeReviewId == Guid.Empty)
+            throw new DomainException("A verification impact item must move to a test change request.");
+        if (testChangeReviewId == TestChangeReviewId) return;
+        TestChangeReviewId = testChangeReviewId;
         Touch(now);
     }
 

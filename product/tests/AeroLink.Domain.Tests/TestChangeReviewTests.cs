@@ -56,6 +56,317 @@ public sealed class TestChangeReviewTests
         Assert.Equal("verification.engineer", raised.DecidedBy);
     }
 
+    [Fact]
+    public void The_review_snapshot_protects_the_rich_content_of_the_case()
+    {
+        // The review has to be provably of the exact content the approver read. Plain-text hashing alone
+        // would let the same words be re-styled â€” bold, a table, a figure â€” without changing the evidence,
+        // which makes the approval of something the reviewer never saw.
+        var plain = Submittable();
+        plain.AssignControlledNumber("SYSTCR-000050", Now.AddMinutes(1));
+        plain.WriteCase("verification.engineer", "Title", "Problem", "Analysis", "Solution", Now.AddMinutes(2),
+            problemRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Problem\"}]}",
+            analysisRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Analysis\"}]}",
+            solutionRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Solution\"}]}");
+        plain.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+        var plainHash = plain.ReviewCycles.Single().SnapshotHash;
+
+        var attachmentId = Guid.NewGuid();
+        var formatted = Submittable();
+        formatted.AssignControlledNumber("SYSTCR-000050", Now.AddMinutes(1));
+        formatted.WriteCase("verification.engineer", "Title", "Problem", "Analysis", "Solution", Now.AddMinutes(2),
+            // Same readable words, different rendered content: a diagram replaces the paragraph. The plain
+            // projection is identical, so only hashing the rich structure can tell the two reviews apart.
+            problemRich: $"{{\"blocks\":[{{\"type\":\"image\",\"attachmentId\":\"{attachmentId}\",\"alt\":\"Problem\",\"caption\":\"Problem\"}}]}}",
+            analysisRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Analysis\"}]}",
+            solutionRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Solution\"}]}");
+        formatted.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        Assert.NotEqual(plainHash, formatted.ReviewCycles.Single().SnapshotHash);
+    }
+
+    [Fact]
+    public void Every_governed_procedure_change_field_changes_the_review_snapshot()
+    {
+        var driving = Guid.NewGuid();
+        var baseline = SnapshotFor(ProcedureDraftWith(drivingJson: $"[\"{driving}\"]"));
+
+        Assert.NotEqual(baseline, SnapshotFor(ProcedureDraftWith(
+            preconditions: "A different precondition", drivingJson: $"[\"{driving}\"]")));
+        Assert.NotEqual(baseline, SnapshotFor(ProcedureDraftWith(
+            rationale: "A different rationale", drivingJson: $"[\"{driving}\"]")));
+        Assert.NotEqual(baseline, SnapshotFor(ProcedureDraftWith(
+            drivingJson: $"[\"{Guid.NewGuid()}\"]")));
+        Assert.NotEqual(baseline, SnapshotFor(ProcedureDraftWith(
+            drivingJson: $"[\"{driving}\",\"{Guid.NewGuid()}\"]")));
+    }
+
+    [Fact]
+    public void The_snapshot_is_deterministic_and_ignores_runtime_fields()
+    {
+        var driving = Guid.NewGuid();
+        var draft = ProcedureDraftWith(drivingJson: $"[\"{driving}\"]");
+        var fixedChange = Guid.NewGuid();
+        Assert.Equal(SnapshotFor(draft, fixedChange), SnapshotFor(draft, fixedChange));
+
+        var changeRequestId = Guid.NewGuid();
+        var assignedA = CreateWith(changeRequestId);
+        assignedA.Assign("lead.user", "engineer.a", Now.AddMinutes(1));
+        assignedA.AssignControlledNumber("SYSTCR-000056", Now.AddMinutes(1));
+        assignedA.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
+        assignedA.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        var assignedB = CreateWith(changeRequestId);
+        assignedB.Assign("lead.user", "engineer.b", Now.AddMinutes(1));
+        assignedB.AssignControlledNumber("SYSTCR-000056", Now.AddMinutes(1));
+        assignedB.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
+        assignedB.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        Assert.Equal(assignedA.ReviewCycles.Single().SnapshotHash,
+            assignedB.ReviewCycles.Single().SnapshotHash);
+    }
+
+    [Fact]
+    public void The_snapshot_covers_the_source_change_set()
+    {
+        var draft = ProcedureDraftWith(drivingJson: $"[\"{Guid.NewGuid()}\"]");
+        var solo = Create();
+        solo.AssignControlledNumber("SYSTCR-000057", Now.AddMinutes(1));
+        solo.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
+        solo.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        var folded = Create();
+        folded.AssignControlledNumber("SYSTCR-000057", Now.AddMinutes(1));
+        folded.IncludeChangeRequest("verification.engineer", Guid.NewGuid(), "SRCR-00060.00", Now.AddMinutes(2));
+        folded.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(3));
+        folded.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(4));
+
+        Assert.NotEqual(solo.ReviewCycles.Single().SnapshotHash,
+            folded.ReviewCycles.Single().SnapshotHash);
+    }
+
+    [Fact]
+    public void Outcome_alone_changes_the_review_snapshot()
+    {
+        var required = Raised();
+        required.RecordTestChangeRequired("verification.engineer", Now.AddMinutes(1));
+        required.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(2));
+
+        var notRequired = Raised();
+        notRequired.RecordNoTestChangeRequired("verification.engineer", "Already covered.", Now.AddMinutes(1));
+        notRequired.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(2));
+
+        Assert.NotEqual(required.ReviewCycles.Single().SnapshotHash,
+            notRequired.ReviewCycles.Single().SnapshotHash);
+    }
+
+    [Fact]
+    public void No_change_rationale_alone_changes_the_review_snapshot()
+    {
+        var first = Raised();
+        first.RecordNoTestChangeRequired("verification.engineer", "Rationale A.", Now.AddMinutes(1));
+        first.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(2));
+
+        var second = Raised();
+        second.RecordNoTestChangeRequired("verification.engineer", "Rationale B.", Now.AddMinutes(1));
+        second.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(2));
+
+        Assert.NotEqual(first.ReviewCycles.Single().SnapshotHash,
+            second.ReviewCycles.Single().SnapshotHash);
+    }
+
+    [Fact]
+    public void Resubmission_after_rationale_edit_hashes_differently()
+    {
+        var review = Raised();
+        review.RecordNoTestChangeRequired("verification.engineer", "Rationale A.", Now.AddMinutes(1));
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(2));
+        var firstHash = review.ReviewCycles.Single().SnapshotHash;
+
+        review.RequestChanges("test.lead", "Rework the rationale.", Now.AddMinutes(3));
+        review.RecordNoTestChangeRequired("verification.engineer", "Rationale B.", Now.AddMinutes(4));
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(5));
+
+        Assert.Equal(2, review.ReviewCycles.Count);
+        Assert.NotEqual(firstHash, review.ReviewCycles.Last().SnapshotHash);
+        Assert.Equal(firstHash, review.ReviewCycles.First().SnapshotHash);
+    }
+
+    [Fact]
+    public void Problem_report_identities_are_governed_snapshot_content()
+    {
+        var driving = Guid.NewGuid();
+        var draft = ProcedureDraftWith(drivingJson: $"[\"{driving}\"]");
+
+        var linked = Create();
+        linked.AssignControlledNumber("SYSTCR-000058", Now.AddMinutes(1));
+        linked.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
+        linked.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3),
+            problemReportIds: new[] { Guid.NewGuid(), Guid.NewGuid() });
+
+        var plain = Create();
+        plain.AssignControlledNumber("SYSTCR-000058", Now.AddMinutes(1));
+        plain.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
+        plain.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        Assert.NotEqual(linked.ReviewCycles.Single().SnapshotHash,
+            plain.ReviewCycles.Single().SnapshotHash);
+    }
+
+    [Fact]
+    public void Delimiter_collision_produces_different_hashes()
+    {
+        var driving = Guid.NewGuid();
+        var a = Create();
+        a.AssignControlledNumber("SYSTCR-000059", Now.AddMinutes(1));
+        a.AddProcedureChange("verification.engineer",
+            new TestProcedureChangeDraft("SYSTP-000200", 0, TestProcedureLevel.System,
+                TestProcedureChangeKind.Introduce, "A|B", "C", "", "Steps", "Expected", "Why",
+                $"[\"{driving}\"]"), Now.AddMinutes(2));
+        a.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        var b = Create();
+        b.AssignControlledNumber("SYSTCR-000059", Now.AddMinutes(1));
+        b.AddProcedureChange("verification.engineer",
+            new TestProcedureChangeDraft("SYSTP-000200", 0, TestProcedureLevel.System,
+                TestProcedureChangeKind.Introduce, "A", "B|C", "", "Steps", "Expected", "Why",
+                $"[\"{driving}\"]"), Now.AddMinutes(2));
+        b.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        Assert.NotEqual(a.ReviewCycles.Single().SnapshotHash, b.ReviewCycles.Single().SnapshotHash);
+    }
+
+    [Fact]
+    public void Malformed_driving_requirement_json_is_refused_at_submission()
+    {
+        var review = Create();
+        review.AssignControlledNumber("SYSTCR-000060", Now.AddMinutes(1));
+        review.AddProcedureChange("verification.engineer",
+            ProcedureDraftWith(drivingJson: "{not-json"), Now.AddMinutes(2));
+        Assert.Throws<DomainException>(() =>
+            review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3)));
+    }
+
+    [Fact]
+    public void Reversing_input_orders_produces_the_same_hash()
+    {
+        var drivingA = Guid.NewGuid();
+        var drivingB = Guid.NewGuid();
+        var changeRequestId = Guid.NewGuid();
+        var foldedSourceA = Guid.NewGuid();
+        var foldedSourceB = Guid.NewGuid();
+
+        TestChangeReview Build(bool reverseSources, bool reverseChanges, bool reverseDriving)
+        {
+            var review = CreateWith(changeRequestId);
+            review.AssignControlledNumber("SYSTCR-000061", Now.AddMinutes(1));
+            review.IncludeChangeRequest("verification.engineer", reverseSources ? foldedSourceB : foldedSourceA,
+                reverseSources ? "SRCR-00071.00" : "SRCR-00070.00", Now.AddMinutes(2));
+            review.IncludeChangeRequest("verification.engineer", reverseSources ? foldedSourceA : foldedSourceB,
+                reverseSources ? "SRCR-00070.00" : "SRCR-00071.00", Now.AddMinutes(2));
+            var driving = reverseDriving
+                ? $"[\"{drivingB}\",\"{drivingA}\"]"
+                : $"[\"{drivingA}\",\"{drivingB}\"]";
+            var alpha = ProcedureDraftWith(baseNumber: "SYSTP-000301", drivingJson: driving);
+            var beta = ProcedureDraftWith(baseNumber: "SYSTP-000302", drivingJson: driving);
+            if (reverseChanges)
+            {
+                review.AddProcedureChange("verification.engineer", beta, Now.AddMinutes(3));
+                review.AddProcedureChange("verification.engineer", alpha, Now.AddMinutes(4));
+            }
+            else
+            {
+                review.AddProcedureChange("verification.engineer", alpha, Now.AddMinutes(3));
+                review.AddProcedureChange("verification.engineer", beta, Now.AddMinutes(4));
+            }
+            review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(5));
+            return review;
+        }
+
+        var forward = Build(reverseSources: false, reverseChanges: false, reverseDriving: false);
+        var reversed = Build(reverseSources: true, reverseChanges: true, reverseDriving: true);
+        Assert.Equal(forward.ReviewCycles.Single().SnapshotHash,
+            reversed.ReviewCycles.Single().SnapshotHash);
+    }
+
+    private static TestChangeReview SubmittedWithImpact(VerificationImpactSnapshot impact)
+    {
+        var review = Create();
+        review.AssignControlledNumber("SYSTCR-000062", Now.AddMinutes(1));
+        review.AddProcedureChange("verification.engineer",
+            ProcedureDraftWith(drivingJson: $"[\"{Guid.NewGuid()}\"]"), Now.AddMinutes(2));
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3),
+            impactDecisions: [impact]);
+        return review;
+    }
+
+    private static VerificationImpactSnapshot ImpactBase() =>
+        new(Guid.NewGuid(), Guid.NewGuid(), VerificationImpactTrigger.RequirementIntroduced,
+            Guid.NewGuid(), Guid.NewGuid(), null, "SYSR-00000100.00",
+            VerificationImpactOutcome.NewProcedureRequired, TestProcedureChangeAction.CreateNew,
+            "A new procedure is required.", null, null, null, false);
+
+    [Fact]
+    public void Every_governed_impact_decision_field_changes_the_snapshot()
+    {
+        var baseline = SubmittedWithImpact(ImpactBase()).ReviewCycles.Single().SnapshotHash;
+
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { Outcome = VerificationImpactOutcome.NoTestRequired, ProcedureChangeAction = TestProcedureChangeAction.NoTestRequired })
+            .ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { ResolutionRationale = "A different rationale." }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { PreReleaseEvidenceRequired = true }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { SubjectDisplayNumber = "SYSR-00000200.00" }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { Trigger = VerificationImpactTrigger.RequirementModified }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { ChangeRequestId = Guid.NewGuid() }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { RequirementChangeId = Guid.NewGuid() }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { RequirementRevisionId = Guid.NewGuid() }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { ProcedureId = Guid.NewGuid() }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { ResolvedProcedureId = Guid.NewGuid(), ResolvedProcedureRevisionId = Guid.NewGuid(),
+            Outcome = VerificationImpactOutcome.ProcedureCoverageConfirmed,
+            ProcedureChangeAction = TestProcedureChangeAction.LinkExisting })
+            .ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { RetargetedRequirementRevisionId = Guid.NewGuid(), Outcome = VerificationImpactOutcome.ProcedureRetargeted,
+            ProcedureChangeAction = TestProcedureChangeAction.LinkExisting })
+            .ReviewCycles.Single().SnapshotHash);
+    }
+
+    [Fact]
+    public void Impact_decision_order_is_canonical()
+    {
+        var first = ImpactBase();
+        var second = ImpactBase() with { ItemId = Guid.NewGuid(), SubjectDisplayNumber = "SYSR-00000300.00" };
+        var driving = Guid.NewGuid();
+        var changeRequestId = Guid.NewGuid();
+
+        var ordered = CreateWith(changeRequestId);
+        ordered.AssignControlledNumber("SYSTCR-000063", Now.AddMinutes(1));
+        ordered.AddProcedureChange("verification.engineer",
+            ProcedureDraftWith(drivingJson: $"[\"{driving}\"]"), Now.AddMinutes(2));
+        ordered.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3),
+            impactDecisions: [first, second]);
+
+        var reversed = CreateWith(changeRequestId);
+        reversed.AssignControlledNumber("SYSTCR-000063", Now.AddMinutes(1));
+        reversed.AddProcedureChange("verification.engineer",
+            ProcedureDraftWith(drivingJson: $"[\"{driving}\"]"), Now.AddMinutes(2));
+        reversed.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3),
+            impactDecisions: [second, first]);
+
+        Assert.Equal(ordered.ReviewCycles.Single().SnapshotHash,
+            reversed.ReviewCycles.Single().SnapshotHash);
+    }
+
     private static TestProcedureChangeDraft ProcedureDraft(string baseNumber = "SYSTP-000123",
         TestProcedureChangeKind kind = TestProcedureChangeKind.Introduce,
         TestProcedureLevel level = TestProcedureLevel.System) =>
@@ -68,6 +379,29 @@ public sealed class TestChangeReviewTests
             // A procedure being introduced names what it verifies, and submission refuses one that does not.
             // Supplying it here keeps every test that submits a package on the path a real one takes.
             $"[\"{Guid.NewGuid()}\"]");
+
+    private static TestProcedureChangeDraft ProcedureDraftWith(string preconditions = "Preconditions",
+        string rationale = "Why this procedure work is required.", string drivingJson = "[]",
+        string baseNumber = "SYSTP-000123") =>
+        new(baseNumber, 0, TestProcedureLevel.System, TestProcedureChangeKind.Introduce,
+            "Oceanic waypoint sequencing", "Objective", preconditions, "Steps", "Expected", rationale, drivingJson);
+
+    private static string SnapshotFor(TestProcedureChangeDraft draft, Guid? changeRequestId = null)
+    {
+        var review = changeRequestId is null ? Create() : CreateWith(changeRequestId.Value);
+        review.AssignControlledNumber("SYSTCR-000055", Now.AddMinutes(1));
+        review.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+        return review.ReviewCycles.Single().SnapshotHash;
+    }
+
+    private static TestChangeReview CreateWith(Guid changeRequestId, string sourceNumber = "SRCR-00039.00")
+    {
+        var review = new TestChangeReview(Guid.NewGuid(), Guid.NewGuid(), changeRequestId,
+            TestChangeReviewDiscipline.System, sourceNumber, Now);
+        review.RecordTestChangeRequired("verification.engineer", Now);
+        return review;
+    }
 
     [Fact]
     public void A_test_change_request_carries_procedure_changes_the_way_a_change_request_carries_requirements()
@@ -181,6 +515,31 @@ public sealed class TestChangeReviewTests
         // A released build is closed to change, and a revision is a change like any other.
         Assert.Throws<DomainException>(() =>
             open.StartNextRevision("verification.engineer", Now.AddMinutes(5), targetReleaseIsReleased: true));
+    }
+
+    [Fact]
+    public void Revising_an_approved_package_carries_its_case_forward_for_correction()
+    {
+        var review = Submittable();
+        review.AssignControlledNumber("SYSTCR-000046", Now.AddMinutes(1));
+        review.WriteCase("verification.engineer", "Oceanic sequencing verification", "Problem", "Analysis",
+            "Solution", Now.AddMinutes(2),
+            problemRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Problem rich\"}]}",
+            analysisRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Analysis rich\"}]}",
+            solutionRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Solution rich\"}]}");
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+        review.Approve("test.lead", "Sound.", Now.AddMinutes(4));
+
+        var next = review.StartNextRevision("verification.engineer", Now.AddMinutes(5), targetReleaseIsReleased: false);
+
+        // The successor corrects the case; it does not make the engineer retype it.
+        Assert.Equal("Oceanic sequencing verification", next.Title);
+        Assert.Equal("Problem rich", next.Problem);
+        Assert.Equal("Analysis rich", next.Analysis);
+        Assert.Equal("Solution rich", next.Solution);
+        Assert.Contains("Problem rich", next.ProblemRich);
+        Assert.Contains("Analysis rich", next.AnalysisRich);
+        Assert.Contains("Solution rich", next.SolutionRich);
     }
 
     [Fact]

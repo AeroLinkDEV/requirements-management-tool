@@ -352,7 +352,7 @@ test('verification, review and administration forms carry the same semantics', a
   // decisions asks for a new procedure — which is exactly the state that offers "Author the procedure".
   const reviewsResponse = await request.get(`${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`)
   expect(reviewsResponse.ok(), await reviewsResponse.text()).toBeTruthy()
-  const review = (await reviewsResponse.json()).find((item: { discipline: string }) => item.discipline === 'System')
+  const review = (await reviewsResponse.json()).items.find((item: { discipline: string }) => item.discipline === 'System')
   expect(review, 'the approved requirement change raised no System test change request').toBeTruthy()
   const concluded = await request.post(`${apiBase}/api/test-change-reviews/${review.id}/conclusion`,
     { data: { testChangeRequired: true } })

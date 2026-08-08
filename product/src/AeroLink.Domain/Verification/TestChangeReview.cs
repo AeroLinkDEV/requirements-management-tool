@@ -230,7 +230,9 @@ public sealed class TestChangeReview
     public ChangeControl.ReviewCycle SubmitForReview(string actorId,
         IReadOnlyList<ChangeControl.ApproverSelection> approvers, bool everyItemResolved, DateTimeOffset now,
         ChangeControl.ReviewMode mode = ChangeControl.ReviewMode.Sequential,
-        ChangeControl.ReviewWorkflowSpecification? workflow = null)
+        ChangeControl.ReviewWorkflowSpecification? workflow = null,
+        IReadOnlyList<Guid>? problemReportIds = null,
+        IReadOnlyList<VerificationImpactSnapshot>? impactDecisions = null)
     {
         EnsureOpen();
         if (Outcome == TestChangeReviewOutcome.Pending)
@@ -254,7 +256,7 @@ public sealed class TestChangeReview
         // and the honest record of them is empty. Enforcing it here would force the showcase to invent the
         // decisions those approvals never carried, which is a worse falsehood than the gap.
         var cycle = ChangeControl.ReviewCycle.ForTestChangeRequest(Id, _reviewCycles.Count + 1,
-            ComputeSnapshotHash(), approvers, now, mode, workflow);
+            ComputeSnapshotHash(problemReportIds, impactDecisions), approvers, now, mode, workflow);
         _reviewCycles.Add(cycle);
         SubmittedBy = Required(actorId, "submitting verification engineer");
         SelectedApproverId = approvers[0].UserId;
@@ -286,14 +288,141 @@ public sealed class TestChangeReview
     /// The same purpose the change request's own snapshot serves: an approval has to be provably of an exact
     /// set of decisions, so that editing the package afterwards cannot quietly reuse the signature.
     /// </summary>
-    private string ComputeSnapshotHash()
+    private string ComputeSnapshotHash(IReadOnlyList<Guid>? problemReportIds,
+        IReadOnlyList<VerificationImpactSnapshot>? impactDecisions)
     {
-        var manifest = string.Join("|", DisplayNumber, Title, Problem, Analysis, Solution,
-            string.Join(";", _procedureChanges.OrderBy(x => x.BaseNumber)
-                .Select(x => $"{x.DisplayNumber}:{x.Kind}:{x.Title}:{x.Objective}:{x.Steps}:{x.ExpectedResult}")));
+        // A versioned, canonical structured manifest: property order is deliberately controlled, delimiters
+        // are impossible to confuse with engineering text, and every governed field is present exactly once.
+        // Problem Report identities are governed package content: the reviewer sees them and they are locked
+        // while the review is active. Runtime fields (assignment, timestamps) are deliberately absent.
+        using var buffer = new MemoryStream();
+        using (var writer = new System.Text.Json.Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("contract", "aerolink.tcr-review-snapshot");
+            writer.WriteNumber("version", 1);
+
+            writer.WriteStartObject("package");
+            writer.WriteString("baseNumber", BaseNumber);
+            writer.WriteNumber("revision", Revision);
+            writer.WriteString("displayNumber", DisplayNumber);
+            writer.WriteString("discipline", Discipline.ToString());
+            writer.WriteString("outcome", Outcome.ToString());
+            writer.WriteString("noChangeRationale", NoChangeRationale);
+            writer.WriteEndObject();
+
+            writer.WriteStartObject("case");
+            writer.WriteString("title", Title);
+            writer.WriteString("problem", Problem);
+            writer.WriteString("problemRich", ProblemRich);
+            writer.WriteString("analysis", Analysis);
+            writer.WriteString("analysisRich", AnalysisRich);
+            writer.WriteString("solution", Solution);
+            writer.WriteString("solutionRich", SolutionRich);
+            writer.WriteEndObject();
+
+            writer.WriteStartArray("coveredSources");
+            foreach (var source in CoveredSourcesOrdered())
+            {
+                writer.WriteStartObject();
+                writer.WriteString("changeRequestId", source.ChangeRequestId.ToString("D"));
+                writer.WriteString("displayNumber", source.DisplayNumber);
+                writer.WriteBoolean("originating", source.Originating);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+
+            writer.WriteStartArray("procedureChanges");
+            foreach (var change in _procedureChanges
+                         .OrderBy(x => x.BaseNumber, StringComparer.Ordinal)
+                         .ThenBy(x => x.Revision)
+                         .ThenBy(x => x.Id))
+            {
+                writer.WriteStartObject();
+                writer.WriteString("baseNumber", change.BaseNumber);
+                writer.WriteNumber("revision", change.Revision);
+                writer.WriteString("displayNumber", change.DisplayNumber);
+                writer.WriteString("kind", change.Kind.ToString());
+                writer.WriteString("level", change.Level.ToString());
+                writer.WriteString("title", change.Title);
+                writer.WriteString("objective", change.Objective);
+                writer.WriteString("preconditions", change.Preconditions);
+                writer.WriteString("steps", change.Steps);
+                writer.WriteString("expectedResult", change.ExpectedResult);
+                writer.WriteString("rationale", change.Rationale);
+                writer.WriteStartArray("drivingRequirementRevisionIds");
+                foreach (var id in DrivingRequirementIds(change.DrivingRequirementRevisionIdsJson)
+                             .OrderBy(x => x.ToString("D"), StringComparer.Ordinal))
+                    writer.WriteStringValue(id.ToString("D"));
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+
+            writer.WriteStartArray("problemReportIds");
+            foreach (var id in (problemReportIds ?? []).OrderBy(x => x.ToString("D"), StringComparer.Ordinal))
+                writer.WriteStringValue(id.ToString("D"));
+            writer.WriteEndArray();
+
+            writer.WriteStartArray("impactDecisions");
+            foreach (var item in (impactDecisions ?? [])
+                         .OrderBy(x => x.ItemId.ToString("D"), StringComparer.Ordinal))
+            {
+                writer.WriteStartObject();
+                writer.WriteString("itemId", item.ItemId.ToString("D"));
+                writer.WriteString("changeRequestId", item.ChangeRequestId.ToString("D"));
+                writer.WriteString("trigger", item.Trigger.ToString());
+                if (item.RequirementChangeId is { } requirementChangeId)
+                    writer.WriteString("requirementChangeId", requirementChangeId.ToString("D"));
+                if (item.RequirementRevisionId is { } requirementRevisionId)
+                    writer.WriteString("requirementRevisionId", requirementRevisionId.ToString("D"));
+                if (item.ProcedureId is { } procedureId)
+                    writer.WriteString("procedureId", procedureId.ToString("D"));
+                writer.WriteString("subjectDisplayNumber", item.SubjectDisplayNumber);
+                if (item.Outcome is { } outcome)
+                    writer.WriteString("outcome", outcome.ToString());
+                if (item.ProcedureChangeAction is { } action)
+                    writer.WriteString("procedureChangeAction", action.ToString());
+                writer.WriteString("resolutionRationale", item.ResolutionRationale);
+                if (item.ResolvedProcedureId is { } resolvedProcedureId)
+                    writer.WriteString("resolvedProcedureId", resolvedProcedureId.ToString("D"));
+                if (item.ResolvedProcedureRevisionId is { } resolvedProcedureRevisionId)
+                    writer.WriteString("resolvedProcedureRevisionId", resolvedProcedureRevisionId.ToString("D"));
+                if (item.RetargetedRequirementRevisionId is { } retargetedRequirementRevisionId)
+                    writer.WriteString("retargetedRequirementRevisionId", retargetedRequirementRevisionId.ToString("D"));
+                writer.WriteBoolean("preReleaseEvidenceRequired", item.PreReleaseEvidenceRequired);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+
+            writer.WriteEndObject();
+        }
         return Convert.ToHexString(
-            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(manifest)))
+            System.Security.Cryptography.SHA256.HashData(buffer.ToArray()))
             .ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// The source change requests this package answers for, in a deterministic order independent of the
+    /// order the caller happened to fold them in.
+    /// </summary>
+    private IEnumerable<(Guid ChangeRequestId, string DisplayNumber, bool Originating)> CoveredSourcesOrdered() =>
+        new[] { (ChangeRequestId, SourceChangeRequestNumber, true) }
+            .Concat(_additionalSources.Select(x => (x.ChangeRequestId, x.ChangeRequestNumber, false)))
+            .OrderBy(x => x.ChangeRequestId.ToString("D"), StringComparer.Ordinal);
+
+    private static IReadOnlyList<Guid> DrivingRequirementIds(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(json) ?? [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            throw new DomainException(
+                "A procedure change carries malformed driving requirement revisions. Correct it before sending the package for review.");
+        }
     }
 
     public void RemoveProcedureChange(Guid changeId, DateTimeOffset now)
@@ -347,11 +476,13 @@ public sealed class TestChangeReview
     /// implementations of "submit" would be two things to keep in step, and the reason this one still exists is
     /// that it reads better at the call sites that genuinely have one approver and no workflow.
     /// </summary>
-    public void Submit(string actorId, string approverId, bool everyItemResolved, DateTimeOffset now)
+    public void Submit(string actorId, string approverId, bool everyItemResolved, DateTimeOffset now,
+        IReadOnlyList<Guid>? problemReportIds = null,
+        IReadOnlyList<VerificationImpactSnapshot>? impactDecisions = null)
     {
         Required(approverId, "selected test change request approver");
         SubmitForReview(actorId, [new ChangeControl.ApproverSelection(approverId, approverId)],
-            everyItemResolved, now);
+            everyItemResolved, now, problemReportIds: problemReportIds, impactDecisions: impactDecisions);
     }
 
     public void Approve(string actorId, string rationale, DateTimeOffset now)
@@ -382,6 +513,32 @@ public sealed class TestChangeReview
         SubmittedBy = null;
         SelectedApproverId = null;
         SubmittedAt = null;
+        Touch(now);
+    }
+
+    /// <summary>
+    /// The active reviewer returns the package, closing the review cycle as ChangesRequested.
+    ///
+    /// The prior cycle stays as historical evidence; a resubmission starts the next cycle sequence with a
+    /// fresh snapshot, so old approvals are never reused. Only the approver whose stage is currently active
+    /// may return the package, mirroring the requirement-side review.
+    /// </summary>
+    public void RequestChanges(string actorId, string rationale, DateTimeOffset now)
+    {
+        if (State != TestChangeReviewState.InReview)
+            throw new DomainException("Only a submitted test change request can be returned.");
+        Required(actorId, "reviewer");
+        Required(rationale, "return rationale");
+        var cycle = ActiveReviewCycle ?? throw new DomainException("This test change request has no active review.");
+        var active = cycle.Steps.SingleOrDefault(x => x.State == ChangeControl.ApprovalStepState.Active
+            && string.Equals(x.ApproverId, actorId, StringComparison.OrdinalIgnoreCase));
+        if (active is null)
+            throw new DomainException("Only the active approver can request changes.");
+        cycle.RequestChanges(rationale, now);
+        SubmittedBy = null;
+        SelectedApproverId = null;
+        SubmittedAt = null;
+        State = TestChangeReviewState.Open;
         Touch(now);
     }
 
@@ -446,6 +603,11 @@ public sealed class TestChangeReview
         var next = new TestChangeReview(ProjectId, ReleaseId, ChangeRequestId, Discipline,
             SourceChangeRequestNumber, now, BaseNumber, Revision + 1);
         next.RecordTestChangeRequired(actorId, now);
+        // The case carries forward exactly as a change request's does, so the engineer corrects the rationale
+        // rather than retyping it. Packages that predate case authoring carry no fabricated case.
+        if (!string.IsNullOrWhiteSpace(Title))
+            next.WriteCase(actorId, Title, Problem, Analysis, Solution, now,
+                ProblemRich, AnalysisRich, SolutionRich);
         foreach (var change in _procedureChanges)
             next.AddProcedureChange(actorId, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
                 change.Level, change.Kind, change.Title, change.Objective, change.Preconditions, change.Steps,
@@ -495,6 +657,14 @@ public sealed class TestChangeReview
         if (State != TestChangeReviewState.Open)
             throw new DomainException("An in-review or approved test change review cannot be edited.");
     }
+
+    /// <summary>
+    /// Advances the concurrency/version token when governed content held outside this aggregate (Problem
+    /// Report links, verification-impact decisions) changes in the same unit of work. This is what makes a
+    /// link-versus-submit or decision-versus-submit race collapse to exactly one winner: whichever side
+    /// saves second hits the EF concurrency token and receives the stale-write contract.
+    /// </summary>
+    public void RecordControlledContentChange(DateTimeOffset now) => Touch(now);
 
     private void Touch(DateTimeOffset now) { UpdatedAt = now; Version++; }
     private static string Required(string value, string name) =>

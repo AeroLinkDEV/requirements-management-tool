@@ -43,6 +43,10 @@ public sealed class AuthoredSectionTests
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.Add(account);
         db.Add(new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
+        var approver = new UserAccount("section.approver", "section.approver", "section.approver@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.Add(approver);
+        db.Add(new ProgramMembership(approver.Id, program.Id, ProgramRole.Approver, "test.setup", now));
         await db.SaveChangesAsync();
         return (project.Id, release.Id, section.Id);
     }
@@ -101,7 +105,7 @@ public sealed class AuthoredSectionTests
         {
             expectedVersion = draft.Version,
             mode = "Sequential",
-            approvers = new[] { new { userId = "section.author", name = "Section Author" } },
+            approvers = new[] { new { userId = "section.approver", name = "Section Approver" } },
         });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
@@ -124,7 +128,7 @@ public sealed class AuthoredSectionTests
         {
             expectedVersion = draft.Version,
             mode = "Sequential",
-            approvers = new[] { new { userId = "section.author", name = "Section Author" } },
+            approvers = new[] { new { userId = "section.approver", name = "Section Approver" } },
         });
         var body = await response.Content.ReadAsStringAsync();
         // Asserted against the body, so a refusal explains itself rather than arriving as a bare status.

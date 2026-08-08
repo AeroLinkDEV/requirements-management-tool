@@ -312,6 +312,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     public const string AdministratorPassword = "Bootstrap-Admin!2026";
     public const string MemberPassword = "Program-Member!2026";
     private readonly string _databasePath = NewDatabase(showcaseTemplate);
+    public string ConnectionString => $"Data Source={_databasePath};Pooling=False";
 
     /// <summary>
     /// A private database file, optionally starting as a copy of an already-seeded showcase.
@@ -355,7 +356,9 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
             services.RemoveAll<AeroLinkDbContext>();
             services.RemoveAll<DbContextOptions<AeroLinkDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<AeroLinkDbContext>>();
-            services.AddDbContext<AeroLinkDbContext>(options => options.UseSqlite($"Data Source={_databasePath};Pooling=False"));
+            services.AddDbContext<AeroLinkDbContext>(options => options
+                .UseSqlite(ConnectionString)
+                .AddInterceptors(new SaveRaceInterceptor()));
         });
     }
 

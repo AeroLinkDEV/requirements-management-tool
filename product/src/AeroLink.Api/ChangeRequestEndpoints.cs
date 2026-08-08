@@ -571,7 +571,7 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This change request changed after it was opened. Refresh it before submitting.", code = "stale_version" });
@@ -593,16 +593,46 @@ public static class ChangeRequestEndpoints
                 var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
                 if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every approver must be an active AeroLink user." });
                 var directory = known.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
-                // The authority each approver holds is resolved here, where program membership lives, and travels
-                // with the selection so the domain can enforce a recorded procedure without reaching for it.
-                var authorities = await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, known.Select(x => x.Id).ToList(), ct);
-                var selections = request.Approvers.Select(x =>
-                {
-                    var account = directory[x.UserId];
-                    authorities.TryGetValue(account.Id, out var role);
-                    return new ApproverSelection(account.UserName, account.DisplayName, role);
-                }).ToList();
                 var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, scr.ProjectId, scr.Type, ct);
+                var programId = await db.Projects.AsNoTracking().Where(x => x.Id == scr.ProjectId)
+                    .Select(x => x.ProgramId).SingleAsync(ct);
+                if (workflow is not null && request.Approvers.Count != workflow.Stages.Count)
+                    return Results.BadRequest(new
+                    {
+                        error = $"{workflow.Name} v{workflow.Version} requires {workflow.Stages.Count} approver{(workflow.Stages.Count == 1 ? "" : "s")}, one for each stage: " +
+                            string.Join(", ", workflow.Stages.Select(x => x.Name)) + "."
+                    });
+                // The authority each approver actually uses for their stage is resolved here, where program
+                // membership lives, and travels with the selection so the domain can enforce the recorded
+                // procedure without reaching for it. A multi-role user signs the stage they hold, not the
+                // strongest role they happen to have.
+                var selections = new List<ApproverSelection>();
+                for (var index = 0; index < request.Approvers.Count; index++)
+                {
+                    var chosen = request.Approvers[index];
+                    var account = directory[chosen.UserId];
+                    ProgramRole? role;
+                    if (workflow is null)
+                    {
+                        // No configured workflow means the legacy single-independent-Approver contract:
+                        // every reviewer must hold Approver authority today, with Administrator
+                        // substitution exactly as the legacy approval gate allowed it (system
+                        // administrator and Approver delegations included). Refusing at selection keeps
+                        // an uncompletable review from ever being created.
+                        if (!await identity.HasRoleAsync(account.Id, programId, ProgramRole.Approver,
+                                DateTimeOffset.UtcNow, ct))
+                            return Results.BadRequest(new
+                            {
+                                error = $"{account.DisplayName} does not hold Approver authority. With no review workflow configured, the reviewer must be an Approver."
+                            });
+                        role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
+                            .GetValueOrDefault(account.Id);
+                    }
+                    else
+                        role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
+                            workflow.Stages[index].RequiredRole, ct);
+                    selections.Add(new ApproverSelection(account.UserName, account.DisplayName, role));
+                }
                 var cycle = scr.SubmitForReview(actor.UserName, selections, now, request.Mode, workflow,
                     actor.IsAdministrator);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
@@ -619,7 +649,7 @@ public static class ChangeRequestEndpoints
         // Recovering from a misrouted review. Without this the only way out of a review sent to the wrong approver
         // was for that approver to act, which is exactly what cannot happen when they are the wrong person, on leave,
         // or no longer with the organization. The domain has always supported it; nothing exposed it.
-        app.MapPost("/api/change-requests/{id:guid}/restart-review", async (Guid id, RestartReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/restart-review", async (Guid id, RestartReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This change request changed after it was opened. Refresh it before restarting the review.", code = "stale_version" });
@@ -632,14 +662,37 @@ public static class ChangeRequestEndpoints
                 var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
                 if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every corrected approver must be an active AeroLink user." });
                 var directory = known.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
-                var authorities = await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId,
-                    known.Select(x => x.Id).ToList(), ct);
-                var corrected = request.Approvers.Select(x =>
+                var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, scr.ProjectId, scr.Type, ct);
+                var programId = await db.Projects.AsNoTracking().Where(x => x.Id == scr.ProjectId)
+                    .Select(x => x.ProgramId).SingleAsync(ct);
+                if (workflow is not null && request.Approvers.Count != workflow.Stages.Count)
+                    return Results.BadRequest(new
+                    {
+                        error = $"{workflow.Name} v{workflow.Version} requires {workflow.Stages.Count} approver{(workflow.Stages.Count == 1 ? "" : "s")}, one for each stage: " +
+                            string.Join(", ", workflow.Stages.Select(x => x.Name)) + "."
+                    });
+                var corrected = new List<ApproverSelection>();
+                for (var index = 0; index < request.Approvers.Count; index++)
                 {
-                    var account = directory[x.UserId];
-                    authorities.TryGetValue(account.Id, out var role);
-                    return new ApproverSelection(account.UserName, account.DisplayName, role);
-                }).ToList();
+                    var chosen = request.Approvers[index];
+                    var account = directory[chosen.UserId];
+                    ProgramRole? role;
+                    if (workflow is null)
+                    {
+                        if (!await identity.HasRoleAsync(account.Id, programId, ProgramRole.Approver,
+                                DateTimeOffset.UtcNow, ct))
+                            return Results.BadRequest(new
+                            {
+                                error = $"{account.DisplayName} does not hold Approver authority. With no review workflow configured, the reviewer must be an Approver."
+                            });
+                        role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
+                            .GetValueOrDefault(account.Id);
+                    }
+                    else
+                        role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
+                            workflow.Stages[index].RequiredRole, ct);
+                    corrected.Add(new ApproverSelection(account.UserName, account.DisplayName, role));
+                }
                 var cycle = scr.CancelAndRestartForWrongApprover(actor.UserName, request.Reason, corrected, now,
                     administratorAuthority: actor.IsAdministrator);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
@@ -655,7 +708,13 @@ public static class ChangeRequestEndpoints
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
             var actor = http.UserAccount(); if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
             var programId = await db.Projects.Where(x => x.Id == scr.ProjectId).Join(db.Programs, x => x.ProgramId, x => x.Id, (_, p) => p.Id).SingleAsync(ct);
-            if (!await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct)) return Results.Forbid();
+            // A configured workflow freezes stage authority on the active step, so no generic Approver gate
+            // applies there. A cycle without a recorded workflow is the legacy single-independent-Approver
+            // contract: the person signing must still hold Approver authority today, so an ineligible
+            // selection made before this rule existed cannot be completed through the live route.
+            if (scr.ActiveReviewCycle?.WorkflowId is null &&
+                !await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
+                return Results.Forbid();
             try { var now = DateTimeOffset.UtcNow; var snapshotHash = scr.ActiveReviewCycle?.SnapshotHash ?? ""; var activeBefore=scr.ActiveReviewCycle!.Steps.Where(x=>x.State==ApprovalStepState.Active).Select(x=>x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase); scr.ApproveActiveStage(actor.UserName, now); var activated=scr.ActiveReviewCycle?.Steps.Where(x=>x.State==ApprovalStepState.Active&&!activeBefore.Contains(x.ApproverId)).ToList()??[];foreach(var step in activated)db.UserNotifications.Add(new(scr.ProjectId,step.ApproverId,"ReviewActivated",$"Review {scr.DisplayNumber}",$"The prior stage is complete. You are now authorized to review {scr.DisplayNumber}: {scr.Title}",$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now)); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "SCR", scr.Id, scr.DisplayNumber, "Approve", request.Meaning, snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
                 // Approval is what settles the engineering decision, so verification work is raised here rather than
                 // waiting for baseline inclusion. Saved in the same unit of work as the approval itself.
@@ -666,11 +725,21 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/request-changes", async (Guid id, RequestChangesRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/request-changes", async (Guid id, RequestChangesRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
-            try { var now=DateTimeOffset.UtcNow;scr.RequestChanges(http.UserAccount().UserName, request.Reason, now);db.UserNotifications.Add(new(scr.ProjectId,scr.AuthorId,"ReviewChangesRequested",$"Changes requested for {scr.DisplayNumber}",request.Reason,$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now)); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr)); }
+            var actor = http.UserAccount();
+            // Returning work is review authority. Under the no-workflow fallback the same Approver contract
+            // applies, so an ineligible person cannot exercise it through request-changes either.
+            if (scr.ActiveReviewCycle?.WorkflowId is null)
+            {
+                var programId = await db.Projects.AsNoTracking().Where(x => x.Id == scr.ProjectId)
+                    .Select(x => x.ProgramId).SingleAsync(ct);
+                if (!await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
+                    return Results.Forbid();
+            }
+            try { var now=DateTimeOffset.UtcNow;scr.RequestChanges(actor.UserName, request.Reason, now);db.UserNotifications.Add(new(scr.ProjectId,scr.AuthorId,"ReviewChangesRequested",$"Changes requested for {scr.DisplayNumber}",request.Reason,$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now)); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr)); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
