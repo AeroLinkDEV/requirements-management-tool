@@ -116,10 +116,10 @@ public sealed class TestChangeRequestReviewWorkflowTests
         return new(project.Id, release.Id, change.Id, review.Id, item.Id, revision.Id, baseline.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
+    private static async Task LoginAsync(HttpClient client, string user, string password = AeroLinkApiFactory.MemberPassword)
     {
         using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
+            new { userName = user, password });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
@@ -234,7 +234,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         await LoginAsync(client, "workflow.one");
         using var stageOne = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.ReviewId}/approve",
-            new { rationale = "Stage one is sound." });
+            new { rationale = "Stage one is sound.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve the first review stage." });
         var stageOneBody = await stageOne.Content.ReadAsStringAsync();
         Assert.True(stageOne.StatusCode == HttpStatusCode.OK, $"{(int)stageOne.StatusCode}: {stageOneBody}");
         Assert.Equal("InReview", JsonSerializer.Deserialize<JsonElement>(stageOneBody).GetProperty("state").GetString());
@@ -253,7 +253,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         await LoginAsync(client, "workflow.two");
         using var stageTwo = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.ReviewId}/approve",
-            new { rationale = "Stage two is sound." });
+            new { rationale = "Stage two is sound.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve the final review stage." });
         var stageTwoBody = await stageTwo.Content.ReadAsStringAsync();
         Assert.True(stageTwo.StatusCode == HttpStatusCode.OK, $"{(int)stageTwo.StatusCode}: {stageTwoBody}");
         Assert.Equal("Approved", JsonSerializer.Deserialize<JsonElement>(stageTwoBody).GetProperty("state").GetString());
@@ -300,13 +300,13 @@ public sealed class TestChangeRequestReviewWorkflowTests
 
         await LoginAsync(client, "workflow.one");
         using var first = await client.PostAsJsonAsync(
-            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "One." });
+            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "One.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve stage one." });
         Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
         Assert.Equal("InReview", (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
 
         await LoginAsync(client, "workflow.two");
         using var second = await client.PostAsJsonAsync(
-            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Two." });
+            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Two.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve stage two." });
         Assert.True(second.IsSuccessStatusCode, await second.Content.ReadAsStringAsync());
         Assert.Equal("Approved", (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
     }
@@ -347,7 +347,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         });
         await LoginAsync(client, "workflow.two");
         using var response = await client.PostAsJsonAsync(
-            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Too early." });
+            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Too early.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve this stage." });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("Only the active approver", await response.Content.ReadAsStringAsync());
     }
@@ -438,11 +438,11 @@ public sealed class TestChangeRequestReviewWorkflowTests
 
         await LoginAsync(client, "workflow.one");
         using var approveOne = await client.PostAsJsonAsync(
-            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Rework is sound." });
+            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Rework is sound.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve the reworked stage." });
         Assert.True(approveOne.IsSuccessStatusCode, await approveOne.Content.ReadAsStringAsync());
         await LoginAsync(client, "workflow.two");
         using var approveTwo = await client.PostAsJsonAsync(
-            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Approved." });
+            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Approved.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve the final reworked stage." });
         Assert.True(approveTwo.IsSuccessStatusCode, await approveTwo.Content.ReadAsStringAsync());
 
         using (var scope = factory.Services.CreateScope())
@@ -468,7 +468,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
 
         await LoginAsync(client, "workflow.one");
         using var approved = await client.PostAsJsonAsync(
-            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Approved." });
+            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Approved.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve this exact package." });
         var body = await approved.Content.ReadAsStringAsync();
         Assert.True(approved.StatusCode == HttpStatusCode.OK, $"{(int)approved.StatusCode}: {body}");
         Assert.Equal("Approved", JsonSerializer.Deserialize<JsonElement>(body).GetProperty("state").GetString());
@@ -481,6 +481,220 @@ public sealed class TestChangeRequestReviewWorkflowTests
             Assert.Single(cycle.Steps);
             Assert.Single(await db.ElectronicSignatures.Where(x => x.ArtifactId == fixture.ReviewId).ToListAsync());
         }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-the-current-password")]
+    public async Task Missing_or_incorrect_password_refuses_signature_without_any_partial_transition(string? password)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await PreparePackageAsync(client, fixture);
+        await SubmitAsync(client, fixture.ReviewId, new { approverId = "workflow.one" });
+        int notificationsBefore;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            notificationsBefore = await db.UserNotifications.CountAsync();
+        }
+
+        await LoginAsync(client, "workflow.one");
+        using var refused = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/approve",
+            new { rationale = "The engineering case is sound.", password, meaning = "I approve this exact package." });
+        Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+        Assert.Equal("electronic_signature_confirmation_failed",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var review = await verificationDb.TestChangeReviews.SingleAsync(x => x.Id == fixture.ReviewId);
+        var cycle = await verificationDb.ReviewCycles.Include(x => x.Steps)
+            .SingleAsync(x => x.TestChangeReviewId == fixture.ReviewId);
+        Assert.Equal(TestChangeReviewState.InReview, review.State);
+        Assert.Equal(ReviewCycleState.Active, cycle.State);
+        Assert.All(cycle.Steps, step => Assert.Null(step.DecidedAt));
+        Assert.False(await verificationDb.ElectronicSignatures.AnyAsync(x => x.ArtifactId == fixture.ReviewId));
+        Assert.Equal(notificationsBefore, await verificationDb.UserNotifications.CountAsync());
+    }
+
+    [Fact]
+    public async Task Missing_signature_meaning_is_refused_without_advancing_the_active_stage()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await PreparePackageAsync(client, fixture);
+        await SubmitAsync(client, fixture.ReviewId, new { approverId = "workflow.one" });
+        await LoginAsync(client, "workflow.one");
+
+        using var refused = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/approve",
+            new { rationale = "The engineering case is sound.", password = AeroLinkApiFactory.MemberPassword, meaning = "" });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("signature_meaning_required",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(TestChangeReviewState.InReview,
+            (await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.ReviewId)).State);
+        Assert.False(await db.ElectronicSignatures.AnyAsync(x => x.ArtifactId == fixture.ReviewId));
+    }
+
+    [Theory]
+    [InlineData("workflow.lead", ProgramRole.TestLead)]
+    [InlineData("workflow.config", ProgramRole.ConfigurationManager)]
+    public async Task Configured_stage_signs_with_its_frozen_authority_without_generic_Approver(
+        string signer, ProgramRole authority)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", ("Governed stage", authority.ToString()));
+        await PreparePackageAsync(client, fixture);
+        await SubmitAsync(client, fixture.ReviewId, new { approvers = new[] { new { userId = signer } } });
+        await LoginAsync(client, signer);
+
+        const string rationale = "The engineering case and controlled procedure decision are acceptable.";
+        var meaning = $"I approve this exact package in my frozen {authority} authority.";
+        using var approved = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/approve",
+            new { rationale, password = AeroLinkApiFactory.MemberPassword, meaning });
+        Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var review = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.ReviewId);
+        var cycle = await db.ReviewCycles.Include(x => x.Steps)
+            .SingleAsync(x => x.TestChangeReviewId == fixture.ReviewId);
+        var signature = await db.ElectronicSignatures.SingleAsync(x => x.ArtifactId == fixture.ReviewId);
+        Assert.Equal(rationale, review.ApprovalRationale);
+        Assert.Equal(meaning, signature.Meaning);
+        Assert.NotEqual(rationale, signature.Meaning);
+        Assert.Equal(authority.ToString(), signature.Authority);
+        Assert.Equal(cycle.SnapshotHash, signature.ContentHash);
+        Assert.Equal(signer, signature.UserName);
+        Assert.Equal(cycle.Steps.Single().DecidedAt, signature.SignedAt);
+    }
+
+    [Fact]
+    public async Task No_workflow_fallback_accepts_current_delegated_Approver_authority()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await PreparePackageAsync(client, fixture);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var delegator = await db.UserAccounts.SingleAsync(x => x.UserName == "workflow.one");
+            var reviewer = await db.UserAccounts.SingleAsync(x => x.UserName == "workflow.reviewer");
+            var programId = await db.Projects.Where(x => x.Id == fixture.ProjectId).Select(x => x.ProgramId).SingleAsync();
+            var now = DateTimeOffset.UtcNow;
+            db.RoleDelegations.Add(new(programId, delegator.Id, reviewer.Id, ProgramRole.Approver,
+                now.AddMinutes(-1), now.AddHours(1), "Temporary approval coverage.", "test.setup", now));
+            await db.SaveChangesAsync();
+        }
+        await LoginAsync(client, "workflow.engineer");
+        await SubmitAsync(client, fixture.ReviewId, new { approverId = "workflow.reviewer" });
+        await LoginAsync(client, "workflow.reviewer");
+
+        using var approved = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/approve",
+            new { rationale = "Approved under current delegation.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve as the current delegated Approver." });
+        Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Revoked_no_workflow_delegation_cannot_sign_and_changes_nothing()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await PreparePackageAsync(client, fixture);
+        Guid delegationId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var delegator = await db.UserAccounts.SingleAsync(x => x.UserName == "workflow.one");
+            var reviewer = await db.UserAccounts.SingleAsync(x => x.UserName == "workflow.reviewer");
+            var programId = await db.Projects.Where(x => x.Id == fixture.ProjectId).Select(x => x.ProgramId).SingleAsync();
+            var now = DateTimeOffset.UtcNow;
+            var delegation = new RoleDelegation(programId, delegator.Id, reviewer.Id, ProgramRole.Approver,
+                now.AddMinutes(-1), now.AddHours(1), "Temporary approval coverage.", "test.setup", now);
+            delegationId = delegation.Id;
+            db.RoleDelegations.Add(delegation);
+            await db.SaveChangesAsync();
+        }
+        await LoginAsync(client, "workflow.engineer");
+        await SubmitAsync(client, fixture.ReviewId, new { approverId = "workflow.reviewer" });
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            (await db.RoleDelegations.SingleAsync(x => x.Id == delegationId)).Revoke(DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        await LoginAsync(client, "workflow.reviewer");
+
+        using var refused = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/approve",
+            new { rationale = "Should not apply.", password = AeroLinkApiFactory.MemberPassword, meaning = "Should not be recorded." });
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(TestChangeReviewState.InReview,
+            (await verificationDb.TestChangeReviews.SingleAsync(x => x.Id == fixture.ReviewId)).State);
+        Assert.False(await verificationDb.ElectronicSignatures.AnyAsync(x => x.ArtifactId == fixture.ReviewId));
+    }
+
+    [Fact]
+    public async Task Expired_no_workflow_delegation_cannot_complete_a_legacy_cycle()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await PreparePackageAsync(client, fixture);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var review = await db.TestChangeReviews.Include(x => x.ReviewCycles)
+                .SingleAsync(x => x.Id == fixture.ReviewId);
+            var delegator = await db.UserAccounts.SingleAsync(x => x.UserName == "workflow.one");
+            var reviewer = await db.UserAccounts.SingleAsync(x => x.UserName == "workflow.reviewer");
+            var programId = await db.Projects.Where(x => x.Id == fixture.ProjectId).Select(x => x.ProgramId).SingleAsync();
+            var now = DateTimeOffset.UtcNow;
+            db.RoleDelegations.Add(new(programId, delegator.Id, reviewer.Id, ProgramRole.Approver,
+                now.AddHours(-2), now.AddHours(-1), "Expired approval coverage.", "test.setup", now.AddHours(-3)));
+            // This represents a historical no-workflow cycle selected before the defensive signing check.
+            review.SubmitForReview("workflow.engineer",
+                [new ApproverSelection("workflow.reviewer", "workflow.reviewer", ProgramRole.Approver)], true, now);
+            await db.SaveChangesAsync();
+        }
+        await LoginAsync(client, "workflow.reviewer");
+
+        using var refused = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/approve",
+            new { rationale = "Should not apply.", password = AeroLinkApiFactory.MemberPassword, meaning = "Should not be recorded." });
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(TestChangeReviewState.InReview,
+            (await verificationDb.TestChangeReviews.SingleAsync(x => x.Id == fixture.ReviewId)).State);
+        Assert.False(await verificationDb.ElectronicSignatures.AnyAsync(x => x.ArtifactId == fixture.ReviewId));
+    }
+
+    [Fact]
+    public async Task No_workflow_fallback_preserves_administrator_substitution()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+        var fixture = await SeedAsync(factory);
+        await PreparePackageAsync(client, fixture);
+        await LoginAsync(client, "workflow.engineer");
+        await SubmitAsync(client, fixture.ReviewId, new { approverId = "admin" });
+        await LoginAsync(client, "admin", AeroLinkApiFactory.AdministratorPassword);
+
+        using var approved = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/approve",
+            new { rationale = "Administrator substitution is required.", password = AeroLinkApiFactory.AdministratorPassword, meaning = "I approve under administrator substitution." });
+        Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -517,7 +731,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
 
         await LoginAsync(client, "workflow.one");
         using var approved = await client.PostAsJsonAsync(
-            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Stage one." });
+            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Stage one.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve stage one." });
         Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
 
         // After stage one, the read model moves the actionable step to stage two without a direct API call.
@@ -597,7 +811,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         });
         await LoginAsync(client, "workflow.multirole");
         using var approved = await client.PostAsJsonAsync(
-            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Signed as Test Lead." });
+            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Signed as Test Lead.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve in the frozen Test Lead authority." });
         Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
 
         using (var scope = factory.Services.CreateScope())

@@ -360,8 +360,8 @@ public sealed class RoleDelegation
 public sealed class ElectronicSignature
 {
     private ElectronicSignature() { }
-    public ElectronicSignature(Guid userId, string userName, string displayName, Guid programId, string artifactType, Guid artifactId, string artifactRevision, string action, string meaning, string contentHash, string ipAddress, DateTimeOffset now)
-    { Id = Guid.NewGuid(); UserId = userId; UserName = userName; DisplayName = displayName; ProgramId = programId; ArtifactType = artifactType; ArtifactId = artifactId; ArtifactRevision = artifactRevision; Action = action; Meaning = meaning; ContentHash = contentHash; IpAddress = ipAddress; SignedAt = now; }
+    public ElectronicSignature(Guid userId, string userName, string displayName, Guid programId, string artifactType, Guid artifactId, string artifactRevision, string action, string meaning, string contentHash, string ipAddress, DateTimeOffset now, string authority = "")
+    { Id = Guid.NewGuid(); UserId = userId; UserName = userName; DisplayName = displayName; ProgramId = programId; ArtifactType = artifactType; ArtifactId = artifactId; ArtifactRevision = artifactRevision; Action = action; Meaning = meaning; ContentHash = contentHash; IpAddress = ipAddress; SignedAt = now; Authority = authority.Trim(); }
     public Guid Id { get; private set; }
     public Guid UserId { get; private set; }
     public string UserName { get; private set; } = "";
@@ -371,6 +371,8 @@ public sealed class ElectronicSignature
     public Guid ArtifactId { get; private set; }
     public string ArtifactRevision { get; private set; } = "";
     public string Action { get; private set; } = "";
+    /// <summary>The frozen review-stage authority exercised by this signature, when applicable.</summary>
+    public string Authority { get; private set; } = "";
     public string Meaning { get; private set; } = "";
     public string ContentHash { get; private set; } = "";
     public string IpAddress { get; private set; } = "";

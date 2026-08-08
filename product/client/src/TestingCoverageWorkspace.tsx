@@ -357,12 +357,14 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     setSaved(`${item.subjectDisplayNumber} is open again. What was decided stays in its history.`)
   }, 'The decision could not be reopened.')
 
-  const advance = (request: TestChangeRequest, action: 'submit' | 'approve' | 'return', rationale?: string, approverId?: string, approvers?: { userId: string }[]) => act(async () => {
+  const advance = (request: TestChangeRequest, action: 'submit' | 'approve' | 'return', rationale?: string, approverId?: string, approvers?: { userId: string }[], password?: string, meaning?: string) => act(async () => {
     await apiRequest(`${api}/api/test-change-reviews/${request.id}/${action}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(action === 'submit'
         ? { approverId, approvers, expectedVersion: request.version }
-        : { rationale: rationale ?? '' }),
+        : action === 'approve'
+          ? { rationale: rationale ?? '', password: password ?? '', meaning: meaning ?? '' }
+          : { rationale: rationale ?? '' }),
     })
     setSaved(action === 'submit' ? `${request.displayNumber} sent for approval.`
       : action === 'approve' ? `${request.displayNumber} approved.`
@@ -918,21 +920,29 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         <div className="decisionModal" role="dialog" aria-label={`${reviewDecision.action === 'approve' ? 'Approve' : 'Return'} ${reviewDecision.request.displayNumber}`}>
           <form onSubmit={event => {
             event.preventDefault()
-            const rationale = String(new FormData(event.currentTarget).get('rationale') ?? '').trim()
+            const form = new FormData(event.currentTarget)
+            const rationale = String(form.get('rationale') ?? '').trim()
             if (!rationale) return
             const selected = reviewDecision
+            const password = String(form.get('password') ?? '')
+            const meaning = String(form.get('meaning') ?? '').trim()
+            if (selected.action === 'approve' && (!password || !meaning)) return
             setReviewDecision(undefined)
-            void advance(selected.request, selected.action, rationale)
+            void advance(selected.request, selected.action, rationale, undefined, undefined, password, meaning)
           }}>
             <p className="eyebrow">INDEPENDENT REVIEW</p>
             <h2>{reviewDecision.action === 'approve' ? 'Approve' : 'Return'} {reviewDecision.request.displayNumber}</h2>
             <p>{reviewDecision.action === 'approve'
               ? 'Record why this exact package of test-procedure decisions is acceptable.'
               : 'State what the test engineer must update before this package can be approved.'}</p>
-            <label>Rationale<textarea name="rationale" required autoFocus /></label>
+            <label>{reviewDecision.action === 'approve' ? 'Approval rationale' : 'Rationale'}<textarea name="rationale" required autoFocus /></label>
+            {reviewDecision.action === 'approve' && <>
+              <label>Signature meaning<input name="meaning" defaultValue="I approve this exact test change request review stage." required /></label>
+              <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
+            </>}
             <div className="decisionActions">
               <button type="button" className="quiet" disabled={busy} onClick={() => setReviewDecision(undefined)}>Cancel</button>
-              <button type="submit" disabled={busy}>{reviewDecision.action === 'approve' ? 'Approve package' : 'Return for changes'}</button>
+              <button type="submit" disabled={busy}>{reviewDecision.action === 'approve' ? 'Sign and approve package' : 'Return for changes'}</button>
             </div>
           </form>
         </div>

@@ -759,7 +759,7 @@ public static class ChangeRequestEndpoints
             var actor=http.UserAccount();var query = db.ElectronicSignatures.AsNoTracking().AsQueryable();
             if(!actor.IsAdministrator){var allowed=actor.Programs.Select(x=>x.ProgramId).ToList();query=query.Where(x=>allowed.Contains(x.ProgramId));}
             if (artifactId is not null) query = query.Where(x => x.ArtifactId == artifactId);
-            var projected=query.Select(x => new { x.Id, x.ArtifactType, x.ArtifactId, x.ArtifactRevision, x.Action, x.Meaning, x.ContentHash, x.UserName, x.DisplayName, x.SignedAt });
+            var projected=query.Select(x => new { x.Id, x.ArtifactType, x.ArtifactId, x.ArtifactRevision, x.Action, x.Authority, x.Meaning, x.ContentHash, x.UserName, x.DisplayName, x.SignedAt });
             if(db.Database.IsSqlite()){var rows=await projected.ToListAsync(ct);return Results.Ok(rows.OrderByDescending(x=>x.SignedAt).Take(500));}
             return Results.Ok(await projected.OrderByDescending(x => x.SignedAt).Take(500).ToListAsync(ct));
         });

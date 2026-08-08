@@ -87,7 +87,8 @@ test('verification actions follow authority in the selected Program',async({page
   }
 
   const reviewerRequest=await playwright.request.newContext()
-  const reviewerLogin=await reviewerRequest.post(`${apiBase}/api/auth/login`,{data:{userName:'systems.reviewer',password:'AeroLink!2026'}})
+  const reviewerPassword='AeroLink!2026'
+  const reviewerLogin=await reviewerRequest.post(`${apiBase}/api/auth/login`,{data:{userName:'systems.reviewer',password:reviewerPassword}})
   expect(reviewerLogin.ok(),await reviewerLogin.text()).toBeTruthy()
   /**
    * A procedure, brought into existence the only way there is: proposed on the test change request the
@@ -134,6 +135,8 @@ test('verification actions follow authority in the selected Program',async({page
     expect(submitted.ok(),await submitted.text()).toBeTruthy()
     const approved=await reviewerRequest.post(`${apiBase}/api/test-change-reviews/${review.id}/approve`,{data:{
       rationale:'Procedure decisions are complete and technically sound.',
+      password:reviewerPassword,
+      meaning:'I approve this exact test change request package.',
     }})
     expect(approved.ok(),await approved.text()).toBeTruthy()
 
