@@ -7,6 +7,9 @@ public enum ControlledArtifactFamily
     ChangeRequest,
     RequirementProposal,
     SpecificationStructure,
+    // Retained as historical evidence only. DEC-103 governs procedure change through a Test Change Request;
+    // test procedures are deliberately absent from ControlledArtifactEditPolicies, so this value resolves to
+    // no operational editing path. Records written while the family was editable keep their type strings.
     TestProcedure,
     TraceLinkProposal,
     ReleasePlanning,
@@ -52,8 +55,6 @@ public static class ControlledArtifactEditPolicies
             Set("Draft", "Proposed"), Set("RequirementProposal", "RequirementChange", "RequirementDraft")),
         new(ControlledArtifactFamily.SpecificationStructure, "SpecificationStructure", true, 15, 2, 120,
             Set("Draft", "InWork"), Set("SpecificationStructure", "Specification", "SpecificationNode")),
-        new(ControlledArtifactFamily.TestProcedure, "TestProcedure", true, 15, 2, 120,
-            Set("Draft", "ChangesRequested"), Set("TestProcedure", "Procedure", "TestProcedureRevision")),
         new(ControlledArtifactFamily.TraceLinkProposal, "TraceLinkProposal", true, 15, 2, 120,
             Set("Draft", "Proposed", "Suspect"), Set("TraceLinkProposal", "TraceLink", "RequirementTrace")),
         new(ControlledArtifactFamily.ReleasePlanning, "ReleasePlanning", true, 15, 2, 120,

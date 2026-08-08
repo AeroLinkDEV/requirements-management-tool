@@ -69,7 +69,6 @@ public static class DependencyInjection
         services.AddScoped<IControlledEditingAdapter, SystemChangeRequestControlledEditingAdapter>();
         services.AddScoped<IControlledEditingAdapter, RequirementProposalControlledEditingAdapter>();
         services.AddScoped<IControlledEditingAdapter, SpecificationStructureControlledEditingAdapter>();
-        services.AddScoped<IControlledEditingAdapter, TestProcedureControlledEditingAdapter>();
         services.AddScoped<IControlledEditingAdapter, TraceLinkProposalControlledEditingAdapter>();
         services.AddScoped<IControlledEditingAdapter, ReleasePlanningControlledEditingAdapter>();
         services.AddScoped<IControlledEditingAdapter, DocumentTemplateControlledEditingAdapter>();

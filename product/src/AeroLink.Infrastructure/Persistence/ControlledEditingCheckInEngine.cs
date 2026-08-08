@@ -571,66 +571,6 @@ public sealed class SpecificationStructureControlledEditingAdapter(AeroLinkDbCon
         string? Heading, Guid? RequirementArtifactId);
 }
 
-public sealed class TestProcedureControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
-{
-    private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
-    public ControlledArtifactFamily Family => ControlledArtifactFamily.TestProcedure;
-    public string Name => "TestProcedureControlledEditingAdapter";
-
-    public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
-    {
-        var revision = await db.TestProcedureRevisions.SingleOrDefaultAsync(x => x.Id == artifactId, ct);
-        TestProcedure? procedure;
-        if (revision is null)
-        {
-            procedure = await db.TestProcedures.SingleOrDefaultAsync(x => x.Id == artifactId, ct);
-            if (procedure is null) return null;
-            revision = await db.TestProcedureRevisions.Where(x => x.ProcedureId == procedure.Id)
-                .OrderByDescending(x => x.Revision).FirstOrDefaultAsync(ct);
-        }
-        else procedure = await db.TestProcedures.SingleOrDefaultAsync(x => x.Id == revision.ProcedureId, ct);
-        return procedure is null || revision is null ? null : new(procedure.ProjectId, revision.State.ToString(),
-            new State(procedure, revision), procedure.Version, revision.Revision.ToString(), null);
-    }
-
-    public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null)
-    {
-        var state = (State)artifact.Aggregate;
-        return Snapshot(state.Procedure, state.Revision, versionOverride);
-    }
-
-    public static string Snapshot(TestProcedure procedure, TestProcedureRevision revision, long? versionOverride = null) =>
-        JsonSerializer.Serialize(new
-        {
-            procedureId = procedure.Id, baseNumber = procedure.BaseNumber, title = procedure.Title, ownerId = procedure.OwnerId,
-            level = procedure.Level.ToString(), version = versionOverride ?? procedure.Version,
-            revisionId = revision.Id, revision = revision.Revision, objective = revision.Objective, preconditions = revision.Preconditions,
-            steps = revision.Steps, expectedResult = revision.ExpectedResult, state = revision.State.ToString(), authorId = revision.AuthorId
-        });
-
-    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
-        bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
-    {
-        var state = (State)artifact.Aggregate;
-        var draft = JsonSerializer.Deserialize<TestProcedureDraft>(draftJson, DraftOptions)
-            ?? throw new JsonException("The latest autosaved test procedure draft is empty.");
-        var procedure = state.Procedure; var revision = state.Revision;
-        if (draft.ProcedureId != procedure.Id || draft.RevisionId != revision.Id || draft.Revision != revision.Revision ||
-            !string.Equals(draft.BaseNumber?.Trim(), procedure.BaseNumber, StringComparison.OrdinalIgnoreCase) ||
-            !Enum.TryParse<TestProcedureLevel>(draft.Level, true, out var level) || level != procedure.Level)
-            throw new DomainException("The controlled test procedure identity cannot change.");
-        procedure.UpdateDraft(draft.Title ?? string.Empty, draft.OwnerId ?? string.Empty, now);
-        revision.UpdateDraft(draft.Objective ?? string.Empty, draft.Preconditions ?? string.Empty,
-            draft.Steps ?? string.Empty, draft.ExpectedResult ?? string.Empty, actor);
-        return Task.CompletedTask;
-    }
-
-    private sealed record State(TestProcedure Procedure, TestProcedureRevision Revision);
-    private sealed record TestProcedureDraft(Guid ProcedureId, string? BaseNumber, string? Title, string? OwnerId,
-        string? Level, long Version, Guid RevisionId, int Revision, string? Objective, string? Preconditions,
-        string? Steps, string? ExpectedResult, string? State, string? AuthorId);
-}
-
 public sealed class TraceLinkProposalControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
 {
     private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
