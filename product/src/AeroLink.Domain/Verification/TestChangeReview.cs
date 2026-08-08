@@ -447,6 +447,11 @@ public sealed class TestChangeReview
         var next = new TestChangeReview(ProjectId, ReleaseId, ChangeRequestId, Discipline,
             SourceChangeRequestNumber, now, BaseNumber, Revision + 1);
         next.RecordTestChangeRequired(actorId, now);
+        // The case carries forward exactly as a change request's does, so the engineer corrects the rationale
+        // rather than retyping it. Packages that predate case authoring carry no fabricated case.
+        if (!string.IsNullOrWhiteSpace(Title))
+            next.WriteCase(actorId, Title, Problem, Analysis, Solution, now,
+                ProblemRich, AnalysisRich, SolutionRich);
         foreach (var change in _procedureChanges)
             next.AddProcedureChange(actorId, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
                 change.Level, change.Kind, change.Title, change.Objective, change.Preconditions, change.Steps,

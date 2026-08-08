@@ -213,6 +213,31 @@ public sealed class TestChangeReviewTests
     }
 
     [Fact]
+    public void Revising_an_approved_package_carries_its_case_forward_for_correction()
+    {
+        var review = Submittable();
+        review.AssignControlledNumber("SYSTCR-000046", Now.AddMinutes(1));
+        review.WriteCase("verification.engineer", "Oceanic sequencing verification", "Problem", "Analysis",
+            "Solution", Now.AddMinutes(2),
+            problemRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Problem rich\"}]}",
+            analysisRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Analysis rich\"}]}",
+            solutionRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Solution rich\"}]}");
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+        review.Approve("test.lead", "Sound.", Now.AddMinutes(4));
+
+        var next = review.StartNextRevision("verification.engineer", Now.AddMinutes(5), targetReleaseIsReleased: false);
+
+        // The successor corrects the case; it does not make the engineer retype it.
+        Assert.Equal("Oceanic sequencing verification", next.Title);
+        Assert.Equal("Problem rich", next.Problem);
+        Assert.Equal("Analysis rich", next.Analysis);
+        Assert.Equal("Solution rich", next.Solution);
+        Assert.Contains("Problem rich", next.ProblemRich);
+        Assert.Contains("Analysis rich", next.AnalysisRich);
+        Assert.Contains("Solution rich", next.SolutionRich);
+    }
+
+    [Fact]
     public void Revising_a_package_hands_its_folded_in_claims_to_the_successor()
     {
         // Submittable rather than merely created: a package answering for nothing cannot be submitted, and
