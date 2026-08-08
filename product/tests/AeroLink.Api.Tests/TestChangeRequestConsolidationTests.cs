@@ -264,4 +264,136 @@ public sealed class TestChangeRequestConsolidationTests
         Assert.Equal(HttpStatusCode.Conflict, folded.StatusCode);
         Assert.Contains("already has a System test assessment", await folded.Content.ReadAsStringAsync());
     }
+
+    [Fact]
+    public async Task Unfold_restores_availability_and_allows_refold()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "consolidation.engineer");
+
+        using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Base package",
+                problem = "P", analysis = "A", solution = "S"
+            });
+        Assert.True(created.StatusCode == HttpStatusCode.Created, await created.Content.ReadAsStringAsync());
+
+        using var folded = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests",
+            new { changeRequestId = fixture.SecondChangeId });
+        Assert.True(folded.IsSuccessStatusCode, await folded.Content.ReadAsStringAsync());
+
+        using var unfolded = await client.DeleteAsync(
+            $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests/{fixture.SecondChangeId}");
+        Assert.True(unfolded.IsSuccessStatusCode, await unfolded.Content.ReadAsStringAsync());
+
+        // After a legitimate unfold the source is selectable again and its items sit under a fresh current
+        // assessment, while the superseded review remains historical.
+        var sources = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/releases/{fixture.ReleaseId}/test-change-request-sources?discipline=System");
+        var second = sources.EnumerateArray().Single(x =>
+            x.GetProperty("changeRequestId").GetGuid() == fixture.SecondChangeId);
+        Assert.True(second.GetProperty("selectable").GetBoolean());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var supersededCount = await db.TestChangeReviews.CountAsync(x =>
+                x.ChangeRequestId == fixture.SecondChangeId
+                && x.Discipline == TestChangeReviewDiscipline.System && x.State == TestChangeReviewState.Superseded);
+            Assert.Equal(1, supersededCount);
+            var item = await db.VerificationImpactItems.SingleAsync(x => x.Id == fixture.SecondItemId);
+            Assert.NotEqual(fixture.SecondReviewId, item.TestChangeReviewId);
+        }
+
+        // Refold consumes the fresh assessment and moves the items again, without duplicating them.
+        using var refolded = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests",
+            new { changeRequestId = fixture.SecondChangeId });
+        Assert.True(refolded.IsSuccessStatusCode, await refolded.Content.ReadAsStringAsync());
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var item = await db.VerificationImpactItems.SingleAsync(x => x.Id == fixture.SecondItemId);
+            Assert.Equal(fixture.FirstReviewId, item.TestChangeReviewId);
+            var supersededCount = await db.TestChangeReviews.CountAsync(x =>
+                x.ChangeRequestId == fixture.SecondChangeId
+                && x.Discipline == TestChangeReviewDiscipline.System && x.State == TestChangeReviewState.Superseded);
+            Assert.Equal(2, supersededCount);
+            Assert.Single(await db.VerificationImpactItems
+                .Where(x => x.ChangeRequestId == fixture.SecondChangeId).ToListAsync());
+        }
+    }
+
+    [Fact]
+    public async Task Fold_unfold_with_zero_items_restores_a_current_assessment()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+
+        Guid noItemChangeId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var noItem = new SystemChangeRequest("SRCR-00955", 0, fixture.ProjectId, fixture.ReleaseId,
+                "Retire only", "P", "A", "S", "author", now);
+            noItem.AddRequirementChange("author", "SYSR-00000963", 0, RequirementLevel.System,
+                RequirementChangeKind.Retire, "Retired wording.", "Rationale", "Test", now);
+            noItem.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
+            noItem.ApproveActiveStage("reviewer", now);
+            db.Add(noItem);
+            await db.SaveChangesAsync();
+            noItemChangeId = noItem.Id;
+            Assert.Empty(await db.VerificationImpactItems
+                .Where(x => x.ChangeRequestId == noItemChangeId).ToListAsync());
+        }
+
+        await LoginAsync(client, "consolidation.engineer");
+        using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Base package",
+                problem = "P", analysis = "A", solution = "S"
+            });
+        Assert.True(created.StatusCode == HttpStatusCode.Created, await created.Content.ReadAsStringAsync());
+
+        using var folded = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests",
+            new { changeRequestId = noItemChangeId });
+        Assert.True(folded.IsSuccessStatusCode, await folded.Content.ReadAsStringAsync());
+
+        using var unfolded = await client.DeleteAsync(
+            $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests/{noItemChangeId}");
+        Assert.True(unfolded.IsSuccessStatusCode, await unfolded.Content.ReadAsStringAsync());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var fresh = await db.TestChangeReviews.SingleAsync(x =>
+                x.ChangeRequestId == noItemChangeId
+                && x.Discipline == TestChangeReviewDiscipline.System && x.State == TestChangeReviewState.Open);
+            Assert.Equal(TestChangeReviewOutcome.Pending, fresh.Outcome);
+            Assert.Equal(0, fresh.Revision);
+            Assert.Equal("", fresh.BaseNumber);
+        }
+
+        var sources = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/releases/{fixture.ReleaseId}/test-change-request-sources?discipline=System");
+        Assert.True(sources.EnumerateArray().Single(x =>
+            x.GetProperty("changeRequestId").GetGuid() == noItemChangeId).GetProperty("selectable").GetBoolean());
+
+        using var refolded = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests",
+            new { changeRequestId = noItemChangeId });
+        Assert.True(refolded.IsSuccessStatusCode, await refolded.Content.ReadAsStringAsync());
+    }
 }

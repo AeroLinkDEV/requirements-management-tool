@@ -230,7 +230,8 @@ public sealed class TestChangeReview
     public ChangeControl.ReviewCycle SubmitForReview(string actorId,
         IReadOnlyList<ChangeControl.ApproverSelection> approvers, bool everyItemResolved, DateTimeOffset now,
         ChangeControl.ReviewMode mode = ChangeControl.ReviewMode.Sequential,
-        ChangeControl.ReviewWorkflowSpecification? workflow = null)
+        ChangeControl.ReviewWorkflowSpecification? workflow = null,
+        IReadOnlyList<Guid>? problemReportIds = null)
     {
         EnsureOpen();
         if (Outcome == TestChangeReviewOutcome.Pending)
@@ -254,7 +255,7 @@ public sealed class TestChangeReview
         // and the honest record of them is empty. Enforcing it here would force the showcase to invent the
         // decisions those approvals never carried, which is a worse falsehood than the gap.
         var cycle = ChangeControl.ReviewCycle.ForTestChangeRequest(Id, _reviewCycles.Count + 1,
-            ComputeSnapshotHash(), approvers, now, mode, workflow);
+            ComputeSnapshotHash(problemReportIds), approvers, now, mode, workflow);
         _reviewCycles.Add(cycle);
         SubmittedBy = Required(actorId, "submitting verification engineer");
         SelectedApproverId = approvers[0].UserId;
@@ -286,47 +287,96 @@ public sealed class TestChangeReview
     /// The same purpose the change request's own snapshot serves: an approval has to be provably of an exact
     /// set of decisions, so that editing the package afterwards cannot quietly reuse the signature.
     /// </summary>
-    private string ComputeSnapshotHash()
+    private string ComputeSnapshotHash(IReadOnlyList<Guid>? problemReportIds)
     {
-        // The exact controlled content an approver reads: the engineering case (plain and canonical rich),
-        // the discipline and controlled identity, the covered source change requests (deterministic order),
-        // and every governed field of every proposed procedure change — including preconditions, rationale
-        // and the exact driving requirement revision identifiers. Runtime fields (assignment, timestamps)
-        // are deliberately absent, so an approval proves the content and not the accident of when it was read.
-        var coveredSources = new[] { SourceChangeRequestNumber }
-            .Concat(_additionalSources.Select(x => x.ChangeRequestNumber))
-            .OrderBy(x => x, StringComparer.Ordinal)
-            .Distinct(StringComparer.Ordinal);
-        var manifest = string.Join("|",
-            DisplayNumber,
-            Discipline.ToString(),
-            Title,
-            Problem,
-            Analysis,
-            Solution,
-            ProblemRich,
-            AnalysisRich,
-            SolutionRich,
-            string.Join(",", coveredSources),
-            string.Join(";", _procedureChanges
-                .OrderBy(x => x.BaseNumber, StringComparer.Ordinal)
-                .ThenBy(x => x.Revision)
-                .Select(x => string.Join("|",
-                    x.DisplayNumber,
-                    x.Kind.ToString(),
-                    x.Level.ToString(),
-                    x.Title,
-                    x.Objective,
-                    x.Preconditions,
-                    x.Steps,
-                    x.ExpectedResult,
-                    x.Rationale,
-                    string.Join(",", DrivingRequirementIds(x.DrivingRequirementRevisionIdsJson)
-                        .Select(id => id.ToString("D")).OrderBy(id => id, StringComparer.Ordinal))))));
+        // A versioned, canonical structured manifest: property order is deliberately controlled, delimiters
+        // are impossible to confuse with engineering text, and every governed field is present exactly once.
+        // Problem Report identities are governed package content: the reviewer sees them and they are locked
+        // while the review is active. Runtime fields (assignment, timestamps) are deliberately absent.
+        using var buffer = new MemoryStream();
+        using (var writer = new System.Text.Json.Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("contract", "aerolink.tcr-review-snapshot");
+            writer.WriteNumber("version", 1);
+
+            writer.WriteStartObject("package");
+            writer.WriteString("baseNumber", BaseNumber);
+            writer.WriteNumber("revision", Revision);
+            writer.WriteString("displayNumber", DisplayNumber);
+            writer.WriteString("discipline", Discipline.ToString());
+            writer.WriteString("outcome", Outcome.ToString());
+            writer.WriteString("noChangeRationale", NoChangeRationale);
+            writer.WriteEndObject();
+
+            writer.WriteStartObject("case");
+            writer.WriteString("title", Title);
+            writer.WriteString("problem", Problem);
+            writer.WriteString("problemRich", ProblemRich);
+            writer.WriteString("analysis", Analysis);
+            writer.WriteString("analysisRich", AnalysisRich);
+            writer.WriteString("solution", Solution);
+            writer.WriteString("solutionRich", SolutionRich);
+            writer.WriteEndObject();
+
+            writer.WriteStartArray("coveredSources");
+            foreach (var source in CoveredSourcesOrdered())
+            {
+                writer.WriteStartObject();
+                writer.WriteString("changeRequestId", source.ChangeRequestId.ToString("D"));
+                writer.WriteString("displayNumber", source.DisplayNumber);
+                writer.WriteBoolean("originating", source.Originating);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+
+            writer.WriteStartArray("procedureChanges");
+            foreach (var change in _procedureChanges
+                         .OrderBy(x => x.BaseNumber, StringComparer.Ordinal)
+                         .ThenBy(x => x.Revision)
+                         .ThenBy(x => x.Id))
+            {
+                writer.WriteStartObject();
+                writer.WriteString("baseNumber", change.BaseNumber);
+                writer.WriteNumber("revision", change.Revision);
+                writer.WriteString("displayNumber", change.DisplayNumber);
+                writer.WriteString("kind", change.Kind.ToString());
+                writer.WriteString("level", change.Level.ToString());
+                writer.WriteString("title", change.Title);
+                writer.WriteString("objective", change.Objective);
+                writer.WriteString("preconditions", change.Preconditions);
+                writer.WriteString("steps", change.Steps);
+                writer.WriteString("expectedResult", change.ExpectedResult);
+                writer.WriteString("rationale", change.Rationale);
+                writer.WriteStartArray("drivingRequirementRevisionIds");
+                foreach (var id in DrivingRequirementIds(change.DrivingRequirementRevisionIdsJson)
+                             .OrderBy(x => x.ToString("D"), StringComparer.Ordinal))
+                    writer.WriteStringValue(id.ToString("D"));
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+
+            writer.WriteStartArray("problemReportIds");
+            foreach (var id in (problemReportIds ?? []).OrderBy(x => x.ToString("D"), StringComparer.Ordinal))
+                writer.WriteStringValue(id.ToString("D"));
+            writer.WriteEndArray();
+
+            writer.WriteEndObject();
+        }
         return Convert.ToHexString(
-            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(manifest)))
+            System.Security.Cryptography.SHA256.HashData(buffer.ToArray()))
             .ToLowerInvariant();
     }
+
+    /// <summary>
+    /// The source change requests this package answers for, in a deterministic order independent of the
+    /// order the caller happened to fold them in.
+    /// </summary>
+    private IEnumerable<(Guid ChangeRequestId, string DisplayNumber, bool Originating)> CoveredSourcesOrdered() =>
+        new[] { (ChangeRequestId, SourceChangeRequestNumber, true) }
+            .Concat(_additionalSources.Select(x => (x.ChangeRequestId, x.ChangeRequestNumber, false)))
+            .OrderBy(x => x.ChangeRequestId.ToString("D"), StringComparer.Ordinal);
 
     private static IReadOnlyList<Guid> DrivingRequirementIds(string json)
     {
@@ -337,7 +387,8 @@ public sealed class TestChangeReview
         }
         catch (System.Text.Json.JsonException)
         {
-            return [];
+            throw new DomainException(
+                "A procedure change carries malformed driving requirement revisions. Correct it before sending the package for review.");
         }
     }
 
@@ -392,11 +443,12 @@ public sealed class TestChangeReview
     /// implementations of "submit" would be two things to keep in step, and the reason this one still exists is
     /// that it reads better at the call sites that genuinely have one approver and no workflow.
     /// </summary>
-    public void Submit(string actorId, string approverId, bool everyItemResolved, DateTimeOffset now)
+    public void Submit(string actorId, string approverId, bool everyItemResolved, DateTimeOffset now,
+        IReadOnlyList<Guid>? problemReportIds = null)
     {
         Required(approverId, "selected test change request approver");
         SubmitForReview(actorId, [new ChangeControl.ApproverSelection(approverId, approverId)],
-            everyItemResolved, now);
+            everyItemResolved, now, problemReportIds: problemReportIds);
     }
 
     public void Approve(string actorId, string rationale, DateTimeOffset now)

@@ -27,6 +27,7 @@ type TestChangeRequest = {
   title?: string
   discipline: string
   state: string
+  version: number
   assignedEngineerId?: string
   selectedApproverId?: string
   outcome: 'Pending' | 'ChangeRequired' | 'NoChangeRequired'
@@ -37,6 +38,17 @@ type TestChangeRequest = {
   coveredChangeRequests: ChangeRequestCover[]
   problemReports?: ProblemReportOption[]
   capabilities: { canAssign: boolean; canDecide: boolean; canSubmit: boolean; canApprove: boolean; canReturn: boolean }
+  reviewCycle?: {
+    id: string
+    sequence: number
+    mode: string
+    state: string
+    workflowId?: string
+    workflowLogicalId?: string
+    workflowName?: string
+    workflowVersion?: number
+    steps: { position: number; stageName: string; authority: string; approverId: string; approverName: string; state: string; decidedAt?: string }[]
+  }
 }
 type Procedure = { id: string; revisionId: string; displayNumber: string; title: string; state: string; requirementCount: number; ownerId: string }
 type ImpactItem = {
@@ -186,6 +198,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     stages: { position: number; name: string; requiredRole: string; candidates: { userId: string; name: string; role: string }[] }[]
   }>()
   const [stageApprovers, setStageApprovers] = useState<Record<number, string>>({})
+  const [workflowError, setWorkflowError] = useState<string | null>(null)
+  const [workflowReload, setWorkflowReload] = useState(0)
   /// The assessment being concluded as needing no test work, which has to say why.
   const [decliningTest, setDecliningTest] = useState<TestChangeRequest>()
   const [declineRationale, setDeclineRationale] = useState('')
@@ -311,7 +325,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const conclude = (request: TestChangeRequest, testChangeRequired: boolean, rationale?: string) => act(async () => {
     const result = await apiRequest<{ displayNumber: string }>(`${api}/api/test-change-reviews/${request.id}/conclusion`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ testChangeRequired, rationale: rationale ?? '' }),
+      body: JSON.stringify({ testChangeRequired, rationale: rationale ?? '', expectedVersion: request.version }),
     })
     setSaved(testChangeRequired
       ? `${result.displayNumber} raised for ${request.coveredChangeRequests.map(x => x.number).join(', ')}.`
@@ -361,6 +375,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     let active = true
     setReviewWorkflow(undefined)
     setStageApprovers({})
+    setWorkflowError(null)
     fetch(`${api}/api/review-workflows/applicable?projectId=${projectId}&type=${workflowSubject}`)
       .then(async response => {
         if (!response.ok) throw new Error('The recorded review procedure could not be loaded.')
@@ -382,14 +397,16 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           stages: value.stages ?? [],
         })
       })
-      .catch(() => { if (active) setReviewWorkflow({ required: false, stages: [] }) })
+      .catch(() => {
+        if (active) setWorkflowError('The recorded review procedure could not be loaded. Retry before submitting this package.')
+      })
     return () => { active = false }
-  }, [api, projectId, submitting, workflowSubject])
+  }, [api, projectId, submitting, workflowSubject, workflowReload])
 
   const linkReports = (request: TestChangeRequest) => act(async () => {
     await apiRequest(`${api}/api/test-change-reviews/${request.id}/problem-reports`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ problemReportIds }),
+      body: JSON.stringify({ problemReportIds, expectedVersion: request.version }),
     })
     setLinkingProblemReports(undefined)
     setSaved(`PR links updated for ${request.displayNumber}.`)
@@ -683,8 +700,32 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                 <div><dt>Responsibility</dt><dd>{request.assignedEngineerId
                   ? <><PersonName userName={request.assignedEngineerId} /> owns this assessment</>
                   : 'Unassigned'}</dd></div>
-                {request.selectedApproverId && <div><dt>Independent approver</dt>
-                  <dd><PersonName userName={request.selectedApproverId} /></dd></div>}
+                {request.reviewCycle ? (
+                  <div>
+                    <dt>Review cycle</dt>
+                    <dd>
+                      {request.reviewCycle.workflowName
+                        ? <>{request.reviewCycle.workflowName} v{request.reviewCycle.workflowVersion} · </> : null}
+                      Cycle {request.reviewCycle.sequence} · {request.reviewCycle.mode}
+                      <ul className="reviewStageList">
+                        {request.reviewCycle.steps.map(step => (
+                          <li key={step.position} data-state={step.state.toLowerCase()}>
+                            <b>{step.stageName || `Stage ${step.position + 1}`}</b>
+                            <span><PersonName userName={step.approverId} /> · {step.authority}</span>
+                            <i>{step.state === 'Active'
+                              ? 'Actionable now'
+                              : step.state === 'Approved'
+                                ? `Approved${step.decidedAt ? ' · ' + new Date(step.decidedAt).toLocaleString() : ''}`
+                                : step.state}</i>
+                          </li>
+                        ))}
+                      </ul>
+                    </dd>
+                  </div>
+                ) : request.selectedApproverId ? (
+                  <div><dt>Independent approver</dt>
+                    <dd><PersonName userName={request.selectedApproverId} /></dd></div>
+                ) : null}
                 <div><dt>Linked Problem Reports</dt><dd>{request.problemReports?.length
                   ? request.problemReports.map(report => `${report.displayNumber} · ${report.title}`).join('\n')
                   : 'None linked'}</dd></div>
@@ -804,7 +845,12 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           }}>
             <p className="eyebrow">INDEPENDENT REVIEW</p>
             <h2>Send {submitting.displayNumber} for approval</h2>
-            {reviewWorkflow === undefined
+            {workflowError
+              ? <div className="decisionModalError">
+                  <div className="workspaceError" role="alert">{workflowError}</div>
+                  <button type="button" className="quiet" onClick={() => setWorkflowReload(value => value + 1)}>Retry</button>
+                </div>
+              : reviewWorkflow === undefined
               ? <p>Loading the recorded review procedure…</p>
               : reviewWorkflow.required
                 ? <>
@@ -829,7 +875,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <div className="decisionActions">
               <button type="submit" disabled={busy || (reviewWorkflow?.required
                 ? reviewWorkflow.stages.some(stage => !stageApprovers[stage.position])
-                : !reviewApprover.userId)}>Send for approval</button>
+                : !reviewApprover.userId) || Boolean(workflowError)}>Send for approval</button>
               <button type="button" className="quiet" onClick={() => setSubmitting(undefined)}>Cancel</button>
             </div>
           </form>

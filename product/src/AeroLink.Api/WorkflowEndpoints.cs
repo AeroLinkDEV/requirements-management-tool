@@ -202,6 +202,29 @@ public static class WorkflowEndpoints
             id => memberships.Where(x => x.UserId == id).Select(x => (ProgramRole?)x.Role).OrderByDescending(Rank).FirstOrDefault());
     }
 
+    /// <summary>
+    /// The authority one user actually uses to sign one configured stage.
+    ///
+    /// A person can hold several Program roles, and the strongest one is not necessarily the one a stage
+    /// asks for: a TestLead who is also an Approver must still be able to sign the TestLead stage as a
+    /// TestLead, and a Configuration Manager who is also a Program Manager signs the Configuration Manager
+    /// stage as a Configuration Manager. Administrator remains a substitution authority for any stage.
+    /// The resolved authority is frozen on the approval step, so the signature stays explainable after
+    /// memberships change.
+    /// </summary>
+    public static async Task<ProgramRole?> StageAuthorityAsync(AeroLinkDbContext db, Guid projectId,
+        Guid userId, ProgramRole requiredRole, CancellationToken ct)
+    {
+        var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId)
+            .SingleOrDefaultAsync(ct);
+        if (programId is null) return null;
+        var roles = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.UserId == userId)
+            .Select(x => x.Role).ToListAsync(ct);
+        if (roles.Contains(ProgramRole.Administrator)) return ProgramRole.Administrator;
+        return roles.Contains(requiredRole) ? requiredRole : null;
+    }
+
     private static int Rank(ProgramRole? role) => role switch
     {
         ProgramRole.Administrator => 7,

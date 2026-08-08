@@ -25,6 +25,16 @@
 .tcrSourceChoices label.tcrSourceUnavailable{opacity:.65}
 .tcrSourceChoices label.tcrSourceUnavailable small{color:#a23b3b;font-weight:700}
 .tcrCaseSection .linkedScr{margin-top:.5rem}
+.reviewStageList{display:grid;gap:.45rem;margin:.6rem 0 0;padding:0;list-style:none}
+.reviewStageList li{display:grid;grid-template-columns:1fr auto;gap:.15rem .5rem;padding:.5rem .6rem;border:1px solid #d9e2ec;border-radius:8px;background:#f8fbff}
+.reviewStageList li b{font-size:.8rem}
+.reviewStageList li span{grid-column:1 / -1;color:#5c6878;font-size:.75rem}
+.reviewStageList li i{grid-column:1 / -1;font-style:normal;font-size:.72rem;font-weight:700}
+.reviewStageList li[data-state="active"]{border-color:#0b6bcb;background:#eef6ff}
+.reviewStageList li[data-state="active"] i{color:#0b6bcb}
+.reviewStageList li[data-state="approved"] i{color:#227a4d}
+.reviewStageList li[data-state="pending"] i{color:#8a94a3}
+.decisionModalError{display:grid;gap:.75rem;margin:.75rem 0}
 /* Identifying text since the row's only control is the Open assessment button; it no longer offers a hover
    affordance for a click it does not accept. */
 .downstreamSource{align-items:flex-start;text-align:left;color:inherit;padding:0}

@@ -73,6 +73,19 @@ public sealed class TestChangeRequestReviewWorkflowTests
             db.Add(account);
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
         }
+        var multi = new UserAccount("workflow.multirole", "Multi Role", "workflow.multirole@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.Add(multi);
+        db.Add(new ProgramMembership(multi.Id, program.Id, ProgramRole.TestLead, "test.setup", now));
+        db.Add(new ProgramMembership(multi.Id, program.Id, ProgramRole.Approver, "test.setup", now));
+        var leadOnly = new UserAccount("workflow.lead", "Lead Only", "workflow.lead@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.Add(leadOnly);
+        db.Add(new ProgramMembership(leadOnly.Id, program.Id, ProgramRole.TestLead, "test.setup", now));
+        var author = new UserAccount("workflow.author", "Workflow Author", "workflow.author@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.Add(author);
+        db.Add(new ProgramMembership(author.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
         await db.SaveChangesAsync();
 
         await impact.RaiseForApprovedChangeRequestAsync(
@@ -96,13 +109,17 @@ public sealed class TestChangeRequestReviewWorkflowTests
 
     private static async Task<Guid> CreateWorkflowAsync(HttpClient client, Guid projectId, string mode,
         params (string Name, string Role)[] stages)
+        => await CreateWorkflowAsync(client, projectId, mode, "SystemTest", stages);
+
+    private static async Task<Guid> CreateWorkflowAsync(HttpClient client, Guid projectId, string mode,
+        string appliesTo, params (string Name, string Role)[] stages)
     {
         await LoginAsync(client, "workflow.config");
         using var created = await client.PostAsJsonAsync("/api/review-workflows", new
         {
             projectId,
             name = $"TCR {mode}",
-            appliesTo = "SystemTest",
+            appliesTo,
             mode,
             stages = stages.Select(x => new { name = x.Name, requiredRole = x.Role }).ToArray()
         });
@@ -112,6 +129,14 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var activated = await client.PostAsJsonAsync($"/api/review-workflows/{id}/activate", new { });
         Assert.True(activated.IsSuccessStatusCode, await activated.Content.ReadAsStringAsync());
         return id;
+    }
+
+    private static async Task<JsonElement> ReadItemAsync(HttpClient client, Guid releaseId, Guid reviewId)
+    {
+        var list = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/releases/{releaseId}/test-change-reviews");
+        return list.GetProperty("items").EnumerateArray()
+            .Single(x => x.GetProperty("id").GetGuid() == reviewId);
     }
 
     private static async Task PreparePackageAsync(HttpClient client, Fixture fixture)
@@ -285,7 +310,8 @@ public sealed class TestChangeRequestReviewWorkflowTests
             $"/api/test-change-reviews/{fixture.ReviewId}/submit",
             new { approvers = new[] { new { userId = "workflow.outsider" }, new { userId = "workflow.two" } } });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("must be signed by", await response.Content.ReadAsStringAsync());
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(body.Contains("has no recorded authority") || body.Contains("must be signed by"), body);
     }
 
     [Fact]
@@ -438,5 +464,180 @@ public sealed class TestChangeRequestReviewWorkflowTests
             Assert.Single(cycle.Steps);
             Assert.Single(await db.ElectronicSignatures.Where(x => x.ArtifactId == fixture.ReviewId).ToListAsync());
         }
+    }
+
+    [Fact]
+    public async Task Read_model_exposes_the_active_stage_to_the_correct_approver()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
+            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+        await PreparePackageAsync(client, fixture);
+
+        await SubmitAsync(client, fixture.ReviewId, new
+        {
+            approvers = new[] { new { userId = "workflow.one" }, new { userId = "workflow.two" } }
+        });
+
+        // Stage one is the active step; stage two is not yet actionable through the read model.
+        await LoginAsync(client, "workflow.one");
+        var asOne = await ReadItemAsync(client, fixture.ReleaseId, fixture.ReviewId);
+        Assert.True(asOne.GetProperty("capabilities").GetProperty("canApprove").GetBoolean());
+        Assert.True(asOne.GetProperty("capabilities").GetProperty("canReturn").GetBoolean());
+        var cycle = asOne.GetProperty("reviewCycle");
+        Assert.Equal("TCR Sequential", cycle.GetProperty("workflowName").GetString());
+        Assert.Equal(1, cycle.GetProperty("workflowVersion").GetInt32());
+        Assert.Equal(1, cycle.GetProperty("sequence").GetInt32());
+        var steps = cycle.GetProperty("steps").EnumerateArray().ToList();
+        Assert.Equal("Active", steps[0].GetProperty("state").GetString());
+        Assert.Equal("Pending", steps[1].GetProperty("state").GetString());
+
+        await LoginAsync(client, "workflow.two");
+        var asTwo = await ReadItemAsync(client, fixture.ReleaseId, fixture.ReviewId);
+        Assert.False(asTwo.GetProperty("capabilities").GetProperty("canApprove").GetBoolean());
+
+        await LoginAsync(client, "workflow.one");
+        using var approved = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Stage one." });
+        Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
+
+        // After stage one, the read model moves the actionable step to stage two without a direct API call.
+        await LoginAsync(client, "workflow.two");
+        var afterOne = await ReadItemAsync(client, fixture.ReleaseId, fixture.ReviewId);
+        Assert.True(afterOne.GetProperty("capabilities").GetProperty("canApprove").GetBoolean());
+        Assert.True(afterOne.GetProperty("capabilities").GetProperty("canReturn").GetBoolean());
+        var updatedSteps = afterOne.GetProperty("reviewCycle").GetProperty("steps").EnumerateArray().ToList();
+        Assert.Equal("Approved", updatedSteps[0].GetProperty("state").GetString());
+        Assert.Equal("Active", updatedSteps[1].GetProperty("state").GetString());
+
+        await LoginAsync(client, "workflow.engineer");
+        var asEngineer = await ReadItemAsync(client, fixture.ReleaseId, fixture.ReviewId);
+        Assert.False(asEngineer.GetProperty("capabilities").GetProperty("canApprove").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Read_model_parallel_mode_offers_every_active_approver()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Parallel",
+            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+        await PreparePackageAsync(client, fixture);
+
+        await SubmitAsync(client, fixture.ReviewId, new
+        {
+            approvers = new[] { new { userId = "workflow.one" }, new { userId = "workflow.two" } }
+        });
+
+        foreach (var user in new[] { "workflow.one", "workflow.two" })
+        {
+            await LoginAsync(client, user);
+            var item = await ReadItemAsync(client, fixture.ReleaseId, fixture.ReviewId);
+            Assert.True(item.GetProperty("capabilities").GetProperty("canApprove").GetBoolean(), user);
+            Assert.True(item.GetProperty("capabilities").GetProperty("canReturn").GetBoolean(), user);
+        }
+    }
+
+    [Fact]
+    public async Task A_stage_requiring_test_lead_is_actionable_without_generic_approver_role()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
+            ("Lead review", nameof(ProgramRole.TestLead)), ("Assurance", nameof(ProgramRole.Approver)));
+        await PreparePackageAsync(client, fixture);
+
+        // workflow.lead holds TestLead only — no generic Approver role.
+        await SubmitAsync(client, fixture.ReviewId, new
+        {
+            approvers = new[] { new { userId = "workflow.lead" }, new { userId = "workflow.two" } }
+        });
+        await LoginAsync(client, "workflow.lead");
+        var item = await ReadItemAsync(client, fixture.ReleaseId, fixture.ReviewId);
+        Assert.True(item.GetProperty("capabilities").GetProperty("canApprove").GetBoolean());
+        Assert.True(item.GetProperty("capabilities").GetProperty("canReturn").GetBoolean());
+    }
+
+    [Fact]
+    public async Task A_multi_role_user_signs_the_stage_they_hold()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
+            ("Lead review", nameof(ProgramRole.TestLead)), ("Assurance", nameof(ProgramRole.Approver)));
+        await PreparePackageAsync(client, fixture);
+
+        // workflow.multirole holds both TestLead and Approver; the strongest role must not be forced on a
+        // stage that asks for TestLead.
+        await SubmitAsync(client, fixture.ReviewId, new
+        {
+            approvers = new[] { new { userId = "workflow.multirole" }, new { userId = "workflow.two" } }
+        });
+        await LoginAsync(client, "workflow.multirole");
+        using var approved = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.ReviewId}/approve", new { rationale = "Signed as Test Lead." });
+        Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var cycle = await db.ReviewCycles.Include(x => x.Steps)
+                .SingleAsync(x => x.TestChangeReviewId == fixture.ReviewId);
+            var step = cycle.Steps.Single(x => x.Position == 0);
+            Assert.Equal("TestLead", step.Authority);
+            Assert.Equal("workflow.multirole", step.ApproverId);
+        }
+    }
+
+    [Fact]
+    public async Task System_change_request_workflow_respects_multi_role_stage_authority()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
+            ("Lead review", nameof(ProgramRole.TestLead)));
+
+        Guid draftId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var draft = new SystemChangeRequest("SRCR-00970", 0, fixture.ProjectId, fixture.ReleaseId,
+                "SRCR multi-role", "P", "A", "S", "workflow.author", now);
+            draft.AddRequirementChange("workflow.author", "SYSR-00000980", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "A statement.", "Rationale", "Test", now);
+            db.Add(draft);
+            await db.SaveChangesAsync();
+            draftId = draft.Id;
+        }
+
+        await LoginAsync(client, "workflow.author");
+        using var submitted = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new { approvers = new[] { new { userId = "workflow.multirole" } }, mode = "Sequential" });
+        var body = await submitted.Content.ReadAsStringAsync();
+        Assert.True(submitted.StatusCode == HttpStatusCode.OK, $"{(int)submitted.StatusCode}: {body}");
+    }
+
+    [Fact]
+    public async Task A_test_lead_only_user_gets_create_decide_submit_capabilities()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "workflow.lead");
+
+        var list = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/releases/{fixture.ReleaseId}/test-change-reviews");
+        Assert.True(list.GetProperty("canCreate").GetBoolean());
+        var pending = list.GetProperty("items").EnumerateArray().Single(x =>
+            x.GetProperty("id").GetGuid() == fixture.ReviewId);
+        Assert.True(pending.GetProperty("capabilities").GetProperty("canDecide").GetBoolean());
+        Assert.True(pending.GetProperty("capabilities").GetProperty("canSubmit").GetBoolean());
     }
 }
