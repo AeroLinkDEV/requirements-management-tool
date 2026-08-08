@@ -50,9 +50,15 @@ public static class VerificationEndpoints
             if (await db.TestExecutionEvidence.AnyAsync(x => x.TestExecutionId == executionId && x.EvidenceId == evidenceId, ct)) return Results.Conflict(new { error = "Evidence is already linked." }); db.TestExecutionEvidence.Add(new TestExecutionEvidence(executionId, evidenceId)); await db.SaveChangesAsync(ct); return Results.NoContent();
         });
 
-        app.MapGet("/api/evidence/{id:guid}", async (Guid id, AeroLinkDbContext db, EvidenceFileStore store, CancellationToken ct) =>
+        app.MapGet("/api/evidence/{id:guid}", async (Guid id, HttpContext http, AeroLinkDbContext db, EvidenceFileStore store, CancellationToken ct) =>
         {
-            var evidence = await db.EvidenceRecords.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); return evidence is null ? Results.NotFound() : Results.File(store.OpenRead(evidence.StorageKey), evidence.ContentType, evidence.OriginalFileName, enableRangeProcessing: true);
+            var projectId = await db.EvidenceRecords.AsNoTracking().Where(x => x.Id == id)
+                .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
+            var evidence = await db.EvidenceRecords.AsNoTracking().SingleAsync(x => x.Id == id, ct);
+            return Results.File(store.OpenRead(evidence.StorageKey), evidence.ContentType, evidence.OriginalFileName,
+                enableRangeProcessing: true);
         });
 
         app.MapPost("/api/trace-links", async (CreateTraceLinkRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
@@ -82,8 +88,9 @@ public static class VerificationEndpoints
             db.RequirementTraces.Remove(link); await db.SaveChangesAsync(ct); return Results.NoContent();
         });
 
-        app.MapGet("/api/traceability", async (Guid projectId, Guid? baselineId, string? search, int page, int pageSize, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/traceability", async (Guid projectId, Guid? baselineId, string? search, int page, int pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
             if (baselineId is null) baselineId = await db.CandidateBaselines.Where(x => x.ProjectId == projectId && x.RequirementsMaterializedAt != null).OrderByDescending(x => x.FrozenAt).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
             if (baselineId is null) return Results.Ok(new { page, pageSize, totalCount = 0, items = Array.Empty<object>() });
@@ -593,8 +600,33 @@ public static class VerificationEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapGet("/api/test-executions", async (Guid projectId, Guid? releaseId, Guid? buildId, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/test-executions", async (Guid projectId, Guid? releaseId, Guid? buildId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            if (releaseId is not null && !await db.Releases.AsNoTracking()
+                    .AnyAsync(x => x.Id == releaseId && x.ProjectId == projectId, ct))
+                return Results.BadRequest(new
+                {
+                    error = "The selected release does not belong to this Project.",
+                    code = "release_project_mismatch"
+                });
+            if (buildId is not null)
+            {
+                var build = await db.SoftwareBuilds.AsNoTracking().Where(x => x.Id == buildId)
+                    .Select(x => new { x.ProjectId, x.ReleaseId }).SingleOrDefaultAsync(ct);
+                if (build is null || build.ProjectId != projectId)
+                    return Results.BadRequest(new
+                    {
+                        error = "The selected software build does not belong to this Project.",
+                        code = "build_project_mismatch"
+                    });
+                if (releaseId is not null && build.ReleaseId != releaseId)
+                    return Results.BadRequest(new
+                    {
+                        error = "The selected software build does not belong to the selected release.",
+                        code = "build_release_mismatch"
+                    });
+            }
             var source = db.TestExecutions.AsNoTracking().Where(x => x.ProjectId == projectId && (buildId == null || x.SoftwareBuildId == buildId)
                 && (releaseId == null || x.ReleaseId == releaseId
                     || x.ReleaseId == null && x.SoftwareBuildId != null && db.SoftwareBuilds.Any(b => b.Id == x.SoftwareBuildId && b.ReleaseId == releaseId)));
@@ -608,9 +640,27 @@ public static class VerificationEndpoints
             return Results.Ok(rows.Select(x => new { x.Id, x.procedureRevisionId, x.displayNumber, x.Title, x.outcome, x.ExecutedBy, x.Configuration, x.Determination, x.EvidenceReference, x.ExecutedAt, x.RecordedAt, x.ReleaseId, x.SoftwareBuildId, x.RetestOfExecutionId, evidence = evidence.Where(e => e.TestExecutionId == x.Id).Select(e => new { e.Id, e.OriginalFileName, e.Size, e.Sha256, e.UploadedAt }) }));
         });
 
-        app.MapGet("/api/verification-coverage", async (Guid projectId, Guid? baselineId, Guid? buildId, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/verification-coverage", async (Guid projectId, Guid? baselineId, Guid? buildId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            if (buildId is not null) baselineId = await db.SoftwareBuilds.Where(x => x.Id == buildId && x.ProjectId == projectId).Select(x => (Guid?)x.BaselineId).SingleOrDefaultAsync(ct);
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            if (buildId is not null)
+            {
+                var build = await db.SoftwareBuilds.AsNoTracking().Where(x => x.Id == buildId)
+                    .Select(x => new { x.ProjectId, x.BaselineId }).SingleOrDefaultAsync(ct);
+                if (build is null || build.ProjectId != projectId)
+                    return Results.BadRequest(new
+                    {
+                        error = "The selected software build does not belong to this Project.",
+                        code = "build_project_mismatch"
+                    });
+                if (baselineId is not null && baselineId != build.BaselineId)
+                    return Results.BadRequest(new
+                    {
+                        error = "The selected baseline is not the baseline carried by this software build.",
+                        code = "baseline_build_mismatch"
+                    });
+                baselineId = build.BaselineId;
+            }
             if (baselineId is null) return Results.BadRequest(new { error = "Select a materialized baseline or software build." });
             if (!await db.CandidateBaselines.AsNoTracking().AnyAsync(x => x.Id == baselineId && x.ProjectId == projectId, ct))
                 return Results.BadRequest(new { error = "The selected baseline does not belong to this Project.", code = "baseline_project_mismatch" });
