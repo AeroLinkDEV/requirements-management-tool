@@ -289,6 +289,7 @@ public sealed class TestChangeReview
     private string ComputeSnapshotHash()
     {
         var manifest = string.Join("|", DisplayNumber, Title, Problem, Analysis, Solution,
+            ProblemRich, AnalysisRich, SolutionRich,
             string.Join(";", _procedureChanges.OrderBy(x => x.BaseNumber)
                 .Select(x => $"{x.DisplayNumber}:{x.Kind}:{x.Title}:{x.Objective}:{x.Steps}:{x.ExpectedResult}")));
         return Convert.ToHexString(

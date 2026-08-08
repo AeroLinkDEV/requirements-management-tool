@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
+import { RichCaseField, RichContentView } from './RichContent'
+import { fromPlainText, toPlainText } from './richContentModel'
 // The requirements queue's stylesheet, imported rather than copied. The testing side is meant to be the same
 // surface for the same kind of work, and a second stylesheet that merely looked like it would drift the first
 // time either was touched.
@@ -13,7 +15,7 @@ type RequirementChoice={revisionId:string;displayNumber:string;statement:string}
 /** A controlled procedure a Modify or Retire may target, with the revision it actually sits at. */
 type ProcedureTarget={baseNumber:string;title:string;currentRevision:number}
 type Capabilities={canProposeProcedureChange:boolean;canWithdrawProcedureChange:boolean;canRevise:boolean}
-type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}
+type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}
 
 const levelName=(discipline:string)=>discipline==='System'?'SYS':discipline==='HighLevelSoftware'?'HLR':'LLR'
 const procedureWord=(level:string)=>level==='System'?'SYSTP':level==='HighLevel'?'HLRTP':'LLRTP'
@@ -42,10 +44,15 @@ const emptyDraft={kind:'Introduce' as Kind,baseNumber:'',revision:0,title:'',obj
  * invented. Nothing proposed here is a controlled procedure revision until the package is approved and
  * materialised into a build.
  */
-export default function TestChangeRequestWorkspace({api,reviewId,canAuthor,onClose,onChanged}:{api:string;reviewId:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void}){
+export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAuthor,onClose,onChanged}:{api:string;projectId:string;reviewId:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void}){
   const [item,setItem]=useState<Package>()
   const [busy,setBusy]=useState(false),[error,setError]=useState('')
   const [draft,setDraft]=useState(emptyDraft),[proposing,setProposing]=useState(false)
+  const [editingCase,setEditingCase]=useState(false)
+  const [caseTitle,setCaseTitle]=useState('')
+  const [caseProblemRich,setCaseProblemRich]=useState(fromPlainText(''))
+  const [caseAnalysisRich,setCaseAnalysisRich]=useState(fromPlainText(''))
+  const [caseSolutionRich,setCaseSolutionRich]=useState(fromPlainText(''))
 
   const load=useCallback(async()=>{
     setError('')
@@ -73,11 +80,34 @@ export default function TestChangeRequestWorkspace({api,reviewId,canAuthor,onClo
   }
   const withdraw=(changeId:string)=>void act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/procedure-changes/${changeId}`,{method:'DELETE'}))
   const revise=()=>void act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}))
+  const saveCase=async()=>{
+    setBusy(true);setError('')
+    try{
+      await apiRequest(`${api}/api/test-change-reviews/${reviewId}/case`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        title:caseTitle.trim(),
+        problem:toPlainText(caseProblemRich),
+        analysis:toPlainText(caseAnalysisRich),
+        solution:toPlainText(caseSolutionRich),
+        problemRich:caseProblemRich,
+        analysisRich:caseAnalysisRich,
+        solutionRich:caseSolutionRich,
+      })})
+      setEditingCase(false);await load();onChanged()
+    }catch(problem){setError(operationError(problem,'The test change request case could not be saved.'))}
+    finally{setBusy(false)}
+  }
+  const openCaseEditor=()=>{
+    if(!item)return
+    setCaseTitle(item.title??'');setCaseProblemRich(item.problemRich||fromPlainText(item.problem||''))
+    setCaseAnalysisRich(item.analysisRich||fromPlainText(item.analysis||''));setCaseSolutionRich(item.solutionRich||fromPlainText(item.solution||''))
+    setError('');setEditingCase(true)
+  }
 
   // Answered by the server, not inferred from a broad role here. The workspace was offering authoring to
   // anyone with test authority while the endpoints refused anyone but the engineer holding the package.
   const open=item?.state==='Open'
   const mayEdit=canAuthor&&(item?.capabilities?.canProposeProcedureChange??false)
+  const mayEditCase=canAuthor&&(item?.capabilities?.canWithdrawProcedureChange??false)
   const retiring=draft.kind==='Retire'
 
   return <div className="downstreamDrawerBackdrop" role="presentation">
@@ -93,6 +123,19 @@ export default function TestChangeRequestWorkspace({api,reviewId,canAuthor,onClo
       {error&&<div className="workspaceError" role="alert">{error}</div>}
 
       {item&&<>
+        <section className="tcrCaseSection">
+          <h3>Engineering case</h3>
+          {item.title
+            ? <dl className="sourceCase">
+                <div><dt>Title</dt><dd>{item.title}</dd></div>
+                <div><dt>Problem</dt><dd><RichContentView api={api} value={item.problemRich} empty={item.problem || 'Not recorded'} /></dd></div>
+                <div><dt>Analysis</dt><dd><RichContentView api={api} value={item.analysisRich} empty={item.analysis || 'Not recorded'} /></dd></div>
+                <div><dt>Solution</dt><dd><RichContentView api={api} value={item.solutionRich} empty={item.solution || 'Not recorded'} /></dd></div>
+              </dl>
+            : <p className="drawerEmpty">No engineering case was recorded for this package. Automatically raised packages — and history created before case authoring — are shown exactly as they are.</p>}
+          {mayEditCase&&<button type="button" className="linkedScr" disabled={busy} onClick={openCaseEditor}>Edit case</button>}
+        </section>
+
         <section className="downstreamDecisionWorkbench">
           <h3>Procedure decisions</h3>
           {/* Stated outright, as the requirements drawer states its conclusion, so a reader never has to infer
@@ -198,6 +241,30 @@ export default function TestChangeRequestWorkspace({api,reviewId,canAuthor,onClo
           <button type="button" disabled={busy||(!retiring&&(!draft.title.trim()||!draft.objective.trim()||!draft.steps.trim()))||(draft.kind!=='Introduce'&&!draft.baseNumber.trim())} onClick={()=>void propose()}>
             {busy?'Recording…':'Propose decision'}
           </button>
+        </div>
+      </section>
+    </div>}
+
+    {editingCase&&item&&<div className="downstreamDialogBackdrop" role="presentation">
+      <section className="downstreamDecisionDialog" role="dialog" aria-modal="true" aria-labelledby="tcr-case-title">
+        <p className="eyebrow">TEST CHANGE REQUEST CASE</p>
+        <h2 id="tcr-case-title">Edit the case of {item.displayNumber}</h2>
+        <p>What the reviewer is asked to judge. The case is fixed once the package is with its approver.</p>
+        {error&&<div className="workspaceError" role="alert">{error}</div>}
+        <label>Title
+          <input value={caseTitle} onChange={event=>setCaseTitle(event.target.value)} placeholder="What this package is for" />
+        </label>
+        <div className="tcrCaseFields">
+          <RichCaseField api={api} projectId={projectId} label="Problem" value={caseProblemRich}
+            onChange={setCaseProblemRich} placeholder="What is affected and why this package exists" />
+          <RichCaseField api={api} projectId={projectId} label="Analysis" value={caseAnalysisRich}
+            onChange={setCaseAnalysisRich} placeholder="What was considered and what it means for the procedures" />
+          <RichCaseField api={api} projectId={projectId} label="Solution" value={caseSolutionRich}
+            onChange={setCaseSolutionRich} placeholder="What controlled outcome is proposed" />
+        </div>
+        <div className="downstreamDialogActions">
+          <button type="button" className="quiet" disabled={busy} onClick={()=>{setEditingCase(false);setError('')}}>Cancel</button>
+          <button type="button" disabled={busy||!caseTitle.trim()} onClick={()=>void saveCase()}>{busy?'Saving…':'Save case'}</button>
         </div>
       </section>
     </div>}

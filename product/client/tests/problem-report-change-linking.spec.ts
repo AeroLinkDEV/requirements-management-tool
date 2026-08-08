@@ -77,7 +77,7 @@ test('a PR drives a change request and can be added to a System TCR through the 
   await expect(page.getByRole('status')).toContainText('PR links updated')
   await expect(assessment.getByRole('button', { name: 'Link Problem Reports · 1' })).toBeVisible()
   const requests = await (await page.request.get(`${apiBase}/api/releases/${releaseId}/test-change-reviews`)).json()
-  expect(requests.some((item: { problemReports?: { id: string }[] }) =>
+  expect(requests.items.some((item: { problemReports?: { id: string }[] }) =>
     item.problemReports?.some(linked => linked.id === report.id))).toBeTruthy()
 
   await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })

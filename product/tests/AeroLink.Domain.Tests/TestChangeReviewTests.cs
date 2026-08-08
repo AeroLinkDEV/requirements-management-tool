@@ -56,6 +56,35 @@ public sealed class TestChangeReviewTests
         Assert.Equal("verification.engineer", raised.DecidedBy);
     }
 
+    [Fact]
+    public void The_review_snapshot_protects_the_rich_content_of_the_case()
+    {
+        // The review has to be provably of the exact content the approver read. Plain-text hashing alone
+        // would let the same words be re-styled â€” bold, a table, a figure â€” without changing the evidence,
+        // which makes the approval of something the reviewer never saw.
+        var plain = Submittable();
+        plain.AssignControlledNumber("SYSTCR-000050", Now.AddMinutes(1));
+        plain.WriteCase("verification.engineer", "Title", "Problem", "Analysis", "Solution", Now.AddMinutes(2),
+            problemRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Problem\"}]}",
+            analysisRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Analysis\"}]}",
+            solutionRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Solution\"}]}");
+        plain.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+        var plainHash = plain.ReviewCycles.Single().SnapshotHash;
+
+        var attachmentId = Guid.NewGuid();
+        var formatted = Submittable();
+        formatted.AssignControlledNumber("SYSTCR-000050", Now.AddMinutes(1));
+        formatted.WriteCase("verification.engineer", "Title", "Problem", "Analysis", "Solution", Now.AddMinutes(2),
+            // Same readable words, different rendered content: a diagram replaces the paragraph. The plain
+            // projection is identical, so only hashing the rich structure can tell the two reviews apart.
+            problemRich: $"{{\"blocks\":[{{\"type\":\"image\",\"attachmentId\":\"{attachmentId}\",\"alt\":\"Problem\",\"caption\":\"Problem\"}}]}}",
+            analysisRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Analysis\"}]}",
+            solutionRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Solution\"}]}");
+        formatted.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
+
+        Assert.NotEqual(plainHash, formatted.ReviewCycles.Single().SnapshotHash);
+    }
+
     private static TestProcedureChangeDraft ProcedureDraft(string baseNumber = "SYSTP-000123",
         TestProcedureChangeKind kind = TestProcedureChangeKind.Introduce,
         TestProcedureLevel level = TestProcedureLevel.System) =>

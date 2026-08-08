@@ -102,7 +102,11 @@ public sealed class ManualTestChangeRequestApiTests
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId, fixture.SecondChangeId },
-                problemReportIds = new[] { fixture.ProblemReportId } });
+                problemReportIds = new[] { fixture.ProblemReportId },
+                title = "Oceanic sequencing verification",
+                problem = "Two approved changes touch the oceanic sequencing path.",
+                analysis = "They share one procedure and are best tested as one package.",
+                solution = "Raise one SYSTCR carrying both and verify the combined behavior." });
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
 
@@ -111,8 +115,12 @@ public sealed class ManualTestChangeRequestApiTests
         Assert.Matches(@"^SYSTCR-\d{6}\.\d{2}$", created.GetProperty("displayNumber").GetString()!);
         Assert.Equal(2, created.GetProperty("covered").EnumerateArray().Count());
         var list = await client.GetFromJsonAsync<JsonElement>($"/api/releases/{fixture.ReleaseId}/test-change-reviews");
-        var package = Assert.Single(list.EnumerateArray(), x => x.GetProperty("id").GetGuid() == created.GetProperty("id").GetGuid());
+        var package = Assert.Single(list.GetProperty("items").EnumerateArray(), x => x.GetProperty("id").GetGuid() == created.GetProperty("id").GetGuid());
         Assert.Equal("PR-00910.00", Assert.Single(package.GetProperty("problemReports").EnumerateArray()).GetProperty("displayNumber").GetString());
+        Assert.Equal("Oceanic sequencing verification", package.GetProperty("title").GetString());
+        Assert.Equal("They share one procedure and are best tested as one package.", package.GetProperty("analysis").GetString());
+        // DEC-102: raising the package is itself taking it on, so the creator holds it from the first moment.
+        Assert.Equal("manual.engineer", package.GetProperty("assignedEngineerId").GetString());
     }
 
     [Fact]
@@ -142,7 +150,7 @@ public sealed class ManualTestChangeRequestApiTests
         await LoginAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
-            new { discipline = "System", changeRequestIds = new[] { fixture.AutoRaisedChangeId } });
+            new { discipline = "System", changeRequestIds = new[] { fixture.AutoRaisedChangeId }, title = "Verification package" });
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         // Named, so the engineer knows where the change went. This one already has an assessment of its own
@@ -161,7 +169,7 @@ public sealed class ManualTestChangeRequestApiTests
         await LoginAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
-            new { discipline = "System", changeRequestIds = new[] { fixture.OtherBuildChangeId } });
+            new { discipline = "System", changeRequestIds = new[] { fixture.OtherBuildChangeId }, title = "Verification package" });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("change_request_not_selectable", await response.Content.ReadAsStringAsync());
     }
@@ -176,7 +184,7 @@ public sealed class ManualTestChangeRequestApiTests
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId },
-                problemReportIds = new[] { fixture.OtherBuildProblemReportId } });
+                problemReportIds = new[] { fixture.OtherBuildProblemReportId }, title = "Verification package" });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("target build", await response.Content.ReadAsStringAsync());
     }
@@ -221,7 +229,7 @@ public sealed class ManualTestChangeRequestApiTests
         await LoginAsync(client, "manual.outsider");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
-            new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId } });
+            new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId }, title = "Verification package" });
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
@@ -281,5 +289,216 @@ public sealed class ManualTestChangeRequestApiTests
                 .Where(x => x.ChangeRequestId == fixture.FirstChangeId).ToListAsync();
             Assert.Equal(successorId, Assert.Single(claims).TestChangeReviewId);
         }
+    }
+
+    [Fact]
+    public async Task A_manually_raised_package_requires_a_title()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId } });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("title", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_source_change_request_still_in_draft_cannot_be_covered()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        Guid draftId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var change = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == fixture.FirstChangeId);
+            var draft = new SystemChangeRequest("SRCR-00920", 0, change.ProjectId, change.TargetReleaseId,
+                "Still being drafted", "P", "A", "S", "author", DateTimeOffset.UtcNow);
+            db.Add(draft);
+            await db.SaveChangesAsync();
+            draftId = draft.Id;
+        }
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "System", changeRequestIds = new[] { draftId }, title = "Premature package" });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("approved change requests", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task The_engineering_case_round_trips_and_can_be_corrected_while_open()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Rich case round trip",
+                problem = "Problem plain",
+                analysis = "Analysis plain",
+                solution = "Solution plain",
+                problemRich = "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Problem rich\"}]}",
+                analysisRich = "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Analysis rich\"}]}",
+                solutionRich = "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Solution rich\"}]}"
+            });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var packageId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        using var caseEdit = await client.PostAsJsonAsync($"/api/test-change-reviews/{packageId}/case",
+            new
+            {
+                title = "Rich case corrected",
+                problem = "Problem corrected",
+                analysis = "Analysis corrected",
+                solution = "Solution corrected",
+                analysisRich = "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Analysis corrected rich\"}]}"
+            });
+        Assert.Equal(HttpStatusCode.OK, caseEdit.StatusCode);
+        var corrected = await caseEdit.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Rich case corrected", corrected.GetProperty("title").GetString());
+        // Rich content is authoritative: the plain projection is derived from it, never supplied beside it.
+        Assert.Equal("Analysis corrected rich", corrected.GetProperty("analysis").GetString());
+        Assert.Contains("Analysis corrected rich", corrected.GetProperty("analysisRich").GetString());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var review = await db.TestChangeReviews.SingleAsync(x => x.Id == packageId);
+            review.Submit("manual.engineer", "independent.reviewer", true, DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        using var inReview = await client.PostAsJsonAsync($"/api/test-change-reviews/{packageId}/case",
+            new { title = "Too late", problem = "P", analysis = "A", solution = "S" });
+        Assert.Equal(HttpStatusCode.BadRequest, inReview.StatusCode);
+        Assert.Contains("cannot be edited", await inReview.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task An_authored_package_cannot_be_submitted_with_an_incomplete_case()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Title only",
+                problem = "",
+                analysis = "",
+                solution = ""
+            });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var packageId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        using var submit = await client.PostAsJsonAsync($"/api/test-change-reviews/{packageId}/submit",
+            new { approverId = "independent.reviewer" });
+        Assert.Equal(HttpStatusCode.BadRequest, submit.StatusCode);
+        Assert.Contains("Complete the test change request case", await submit.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task An_unheld_package_case_cannot_be_edited_by_someone_else()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Held by its creator",
+                problem = "P",
+                analysis = "A",
+                solution = "S"
+            });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var packageId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        // A second test engineer without the lead role cannot rewrite the case of a package the creator holds.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var other = new UserAccount("manual.other", "Other Engineer", "other@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.Add(other);
+            db.Add(new ProgramMembership(other.Id,
+                await db.Programs.Where(x => x.Name == "Manual Program").Select(x => x.Id).SingleAsync(), ProgramRole.TestEngineer, "test.setup", now));
+            await db.SaveChangesAsync();
+        }
+        await LoginAsync(client, "manual.other");
+
+        using var response = await client.PostAsJsonAsync($"/api/test-change-reviews/{packageId}/case",
+            new { title = "Stolen", problem = "P", analysis = "A", solution = "S" });
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task HLR_and_LLR_packages_are_numbered_and_raised_independently()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        Guid hlrId, llrId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var hlr = new SystemChangeRequest("HLRCR-00920", 0, fixture.ProjectId, fixture.ReleaseId,
+                "HLR change", "P", "A", "S", "author", now, ChangeRequestType.Software,
+                softwareLevel: RequirementLevel.HighLevel);
+            hlr.AddRequirementChange("author", "HLR-0001", 0, RequirementLevel.HighLevel,
+                RequirementChangeKind.Introduce, "The HLR shall expose the new behavior.", "r", "v", now);
+            hlr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
+            hlr.ApproveActiveStage("reviewer", now);
+
+            var llr = new SystemChangeRequest("LLRCR-00920", 0, fixture.ProjectId, fixture.ReleaseId,
+                "LLR change", "P", "A", "S", "author", now, ChangeRequestType.Software,
+                softwareLevel: RequirementLevel.LowLevel);
+            llr.AddRequirementChange("author", "LLR-0001", 0, RequirementLevel.LowLevel,
+                RequirementChangeKind.Introduce, "The LLR shall implement the new behavior.", "r", "v", now);
+            llr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
+            llr.ApproveActiveStage("reviewer", now);
+
+            db.AddRange(hlr, llr);
+            await db.SaveChangesAsync();
+            hlrId = hlr.Id;
+            llrId = llr.Id;
+        }
+
+        using var hlrResponse = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "HighLevelSoftware", changeRequestIds = new[] { hlrId }, title = "HLR package" });
+        var hlrBody = await hlrResponse.Content.ReadAsStringAsync();
+        Assert.True(hlrResponse.StatusCode == HttpStatusCode.Created, $"{(int)hlrResponse.StatusCode}: {hlrBody}");
+        Assert.Matches(@"^HLRTCR-\d{6}\.\d{2}$",
+            JsonSerializer.Deserialize<JsonElement>(hlrBody).GetProperty("displayNumber").GetString()!);
+
+        using var llrResponse = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "LowLevelSoftware", changeRequestIds = new[] { llrId }, title = "LLR package" });
+        var llrBody = await llrResponse.Content.ReadAsStringAsync();
+        Assert.True(llrResponse.StatusCode == HttpStatusCode.Created, $"{(int)llrResponse.StatusCode}: {llrBody}");
+        Assert.Matches(@"^LLRTCR-\d{6}\.\d{2}$",
+            JsonSerializer.Deserialize<JsonElement>(llrBody).GetProperty("displayNumber").GetString()!);
     }
 }

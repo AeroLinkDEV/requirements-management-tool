@@ -16,7 +16,10 @@ public sealed record ResolveVerificationImpactRequest(VerificationImpactOutcome 
 public sealed record ReopenVerificationImpactRequest(string Rationale);
 public sealed record IncludeChangeRequestRequest(Guid ChangeRequestId);
 public sealed record CreateTestChangeRequestRequest(TestChangeReviewDiscipline Discipline, Guid[] ChangeRequestIds,
-    Guid[]? ProblemReportIds = null);
+    Guid[]? ProblemReportIds = null, string Title = "", string Problem = "", string Analysis = "",
+    string Solution = "", string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null);
+public sealed record WriteTestChangeRequestCaseRequest(string Title, string Problem, string Analysis,
+    string Solution, string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null);
 public sealed record LinkProblemReportsRequest(Guid[] ProblemReportIds);
 public sealed record SubmitTestChangeReviewRequest(string ApproverId);
 /// <param name="Rationale">Why no test work is needed. Required only when concluding that none is.</param>
@@ -80,58 +83,69 @@ public static class VerificationImpactEndpoints
             var reportIds = reportLinks.Select(x => x.ProblemReportId).Distinct().ToList();
             var reportDirectory = await db.ProblemReports.AsNoTracking().Where(x => reportIds.Contains(x.Id))
                 .ToDictionaryAsync(x => x.Id, x => new { x.Id, x.DisplayNumber, x.Title, state = x.State.ToString() }, ct);
-            return Results.Ok(reviews.Select(review => new
+            return Results.Ok(new
             {
-                review.Id,
-                review.ProjectId,
-                review.ReleaseId,
-                review.ChangeRequestId,
-                discipline = review.Discipline.ToString(),
-                state = review.State.ToString(),
-                review.SourceChangeRequestNumber,
-                review.DisplayNumber,
-                // Every change request this package answers for, the one it was raised from first. A reader
-                // scanning the list needs to see that two changes are being tested together without opening it.
-                coveredChangeRequests = new[] { new { id = review.ChangeRequestId, number = review.SourceChangeRequestNumber, title = changeRequests.GetValueOrDefault(review.ChangeRequestId) ?? "Source change request", originating = true } }
-                    .Concat(review.AdditionalSources.OrderBy(x => x.ChangeRequestNumber)
-                        .Select(x => new { id = x.ChangeRequestId, number = x.ChangeRequestNumber, title = changeRequests.GetValueOrDefault(x.ChangeRequestId) ?? "Source change request", originating = false })),
-                review.AssignedEngineerId,
-                outcome = review.Outcome.ToString(),
-                review.NoChangeRationale,
-                review.DecidedBy,
-                review.DecidedAt,
-                review.SubmittedBy,
-                review.SelectedApproverId,
-                review.SubmittedAt,
-                review.ApprovedBy,
-                review.ApprovedAt,
-                review.ApprovalRationale,
-                review.SupersededByTestChangeRequestId,
-                review.SupersededReason,
-                totalItems = items.Count(x => x.TestChangeReviewId == review.Id),
-                resolvedItems = items.Count(x => x.TestChangeReviewId == review.Id && x.State == VerificationImpactState.Resolved),
-                preReleaseEvidenceItems = items.Count(x => x.TestChangeReviewId == review.Id && x.PreReleaseEvidenceRequired)
-                ,problemReports = reportLinks.Where(x => x.ArtifactId == review.Id)
-                    .Select(x => reportDirectory.GetValueOrDefault(x.ProblemReportId)).Where(x => x is not null)
-                    .DistinctBy(x => x!.Id)
-                ,capabilities = new
+                canCreate = canTest,
+                items = reviews.Select(review => new
                 {
-                    // Unheld or held by this reader. Taking a package on used to be a step of its own before
-                    // any of its work was offered; answering it is what takes it now, so an unheld package is
-                    // open to anybody with the authority and a held one stays with whoever answered first.
-                    canAssign = canTest && review.State == TestChangeReviewState.Open && review.AssignedEngineerId == null,
-                    canDecide = canTest && review.State == TestChangeReviewState.Open
-                        && (review.AssignedEngineerId == null
-                            || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)),
-                    canSubmit = canTest && review.State == TestChangeReviewState.Open
-                        && (review.AssignedEngineerId == null
-                            || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)),
-                    canApprove = canApprove && review.State == TestChangeReviewState.InReview
-                        && string.Equals(review.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase),
-                    canReturn = canApprove && review.State == TestChangeReviewState.InReview
-                        && string.Equals(review.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase)
-                }
-            }));
+                    review.Id,
+                    review.ProjectId,
+                    review.ReleaseId,
+                    review.ChangeRequestId,
+                    discipline = review.Discipline.ToString(),
+                    state = review.State.ToString(),
+                    review.SourceChangeRequestNumber,
+                    review.DisplayNumber,
+                    review.Title,
+                    review.Problem,
+                    review.Analysis,
+                    review.Solution,
+                    review.ProblemRich,
+                    review.AnalysisRich,
+                    review.SolutionRich,
+                    // Every change request this package answers for, the one it was raised from first. A reader
+                    // scanning the list needs to see that two changes are being tested together without opening it.
+                    coveredChangeRequests = new[] { new { id = review.ChangeRequestId, number = review.SourceChangeRequestNumber, title = changeRequests.GetValueOrDefault(review.ChangeRequestId) ?? "Source change request", originating = true } }
+                        .Concat(review.AdditionalSources.OrderBy(x => x.ChangeRequestNumber)
+                            .Select(x => new { id = x.ChangeRequestId, number = x.ChangeRequestNumber, title = changeRequests.GetValueOrDefault(x.ChangeRequestId) ?? "Source change request", originating = false })),
+                    review.AssignedEngineerId,
+                    outcome = review.Outcome.ToString(),
+                    review.NoChangeRationale,
+                    review.DecidedBy,
+                    review.DecidedAt,
+                    review.SubmittedBy,
+                    review.SelectedApproverId,
+                    review.SubmittedAt,
+                    review.ApprovedBy,
+                    review.ApprovedAt,
+                    review.ApprovalRationale,
+                    review.SupersededByTestChangeRequestId,
+                    review.SupersededReason,
+                    totalItems = items.Count(x => x.TestChangeReviewId == review.Id),
+                    resolvedItems = items.Count(x => x.TestChangeReviewId == review.Id && x.State == VerificationImpactState.Resolved),
+                    preReleaseEvidenceItems = items.Count(x => x.TestChangeReviewId == review.Id && x.PreReleaseEvidenceRequired)
+                    ,problemReports = reportLinks.Where(x => x.ArtifactId == review.Id)
+                        .Select(x => reportDirectory.GetValueOrDefault(x.ProblemReportId)).Where(x => x is not null)
+                        .DistinctBy(x => x!.Id)
+                    ,capabilities = new
+                    {
+                        // Unheld or held by this reader. Taking a package on used to be a step of its own before
+                        // any of its work was offered; answering it is what takes it now, so an unheld package is
+                        // open to anybody with the authority and a held one stays with whoever answered first.
+                        canAssign = canTest && review.State == TestChangeReviewState.Open && review.AssignedEngineerId == null,
+                        canDecide = canTest && review.State == TestChangeReviewState.Open
+                            && (review.AssignedEngineerId == null
+                                || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)),
+                        canSubmit = canTest && review.State == TestChangeReviewState.Open
+                            && (review.AssignedEngineerId == null
+                                || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)),
+                        canApprove = canApprove && review.State == TestChangeReviewState.InReview
+                            && string.Equals(review.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase),
+                        canReturn = canApprove && review.State == TestChangeReviewState.InReview
+                            && string.Equals(review.SelectedApproverId, actor, StringComparison.OrdinalIgnoreCase)
+                    }
+                })
+            });
         });
 
         app.MapPost("/api/test-change-reviews/{id:guid}/problem-reports", async (Guid id,
@@ -261,6 +275,8 @@ public static class VerificationImpactEndpoints
                 discipline = review.Discipline.ToString(), state = review.State.ToString(),
                 outcome = review.Outcome.ToString(), procedureLevel = review.ProcedureLevel().ToString(),
                 review.SourceChangeRequestNumber, review.AssignedEngineerId,
+                review.Title, review.Problem, review.Analysis, review.Solution,
+                review.ProblemRich, review.AnalysisRich, review.SolutionRich,
                 procedureChanges = review.ProcedureChanges
                     .OrderBy(x => x.BaseNumber)
                     .Select(x => new
@@ -576,14 +592,18 @@ public static class VerificationImpactEndpoints
                 return Results.Forbid();
             if (request.ChangeRequestIds.Length == 0)
                 return Results.BadRequest(new { error = "Name the change requests this package answers for." });
+            if (string.IsNullOrWhiteSpace(request.Title))
+                return Results.BadRequest(new { error = "A manually raised test change request needs a title that says what it is for." });
 
             var changes = await db.SystemChangeRequests.AsNoTracking()
-                .Where(x => request.ChangeRequestIds.Contains(x.Id) && x.ProjectId == release.ProjectId && x.TargetReleaseId == releaseId)
+                .Where(x => request.ChangeRequestIds.Contains(x.Id) && x.ProjectId == release.ProjectId
+                    && x.TargetReleaseId == releaseId
+                    && (x.State == ChangeRequestState.Approved || x.State == ChangeRequestState.SelectedForBaseline))
                 .Select(x => new { x.Id, x.DisplayNumber }).ToListAsync(ct);
             if (changes.Count != request.ChangeRequestIds.Length)
                 return Results.BadRequest(new
                 {
-                    error = "A test change request can only answer for change requests allocated to this build.",
+                    error = "A test change request can only answer for approved change requests allocated to this build.",
                     code = "change_request_not_selectable"
                 });
             var problemReportError = await problemReports.ValidateSelectionAsync(release.ProjectId, releaseId,
@@ -627,6 +647,11 @@ public static class VerificationImpactEndpoints
                 review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, request.Discipline, ct), now);
                 foreach (var extra in changes.Skip(1))
                     review.IncludeChangeRequest(actor, extra.Id, extra.DisplayNumber, now);
+                review.WriteCase(actor, request.Title, request.Problem, request.Analysis, request.Solution, now,
+                    request.ProblemRich, request.AnalysisRich, request.SolutionRich);
+                // DEC-102: raising the package is itself taking it on. The engineer who built it holds it,
+                // so it appears in My Work and can be worked without a meaningless "Take it on" step.
+                review.Assign(actor, actor, now);
                 db.TestChangeReviews.Add(review);
                 await problemReports.LinkTestChangeRequestAsync(review.Id, request.ProblemReportIds, actor, now, ct);
                 await db.SaveChangesAsync(ct);
@@ -637,6 +662,41 @@ public static class VerificationImpactEndpoints
                     discipline = review.Discipline.ToString(),
                     state = review.State.ToString(),
                     covered = review.CoveredChangeRequestIds,
+                });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        /// Editing the engineering case of an open test change request.
+        ///
+        /// A deliberately raised package is authored with its case up front, and stays correctable while it
+        /// is being worked — the same window a change request's own draft edit has. Once a reviewer is
+        /// holding it, the case is fixed, because the approval has to be provably of the content the
+        /// reviewer read.
+        app.MapPost("/api/test-change-reviews/{id:guid}/case", async (Guid id,
+            WriteTestChangeRequestCaseRequest request, HttpContext http, AeroLinkDbContext db,
+            IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            var refusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
+            if (refusal is not null) return refusal;
+            try
+            {
+                review.WriteCase(http.UserAccount().UserName, request.Title, request.Problem, request.Analysis,
+                    request.Solution, DateTimeOffset.UtcNow, request.ProblemRich, request.AnalysisRich,
+                    request.SolutionRich);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new
+                {
+                    review.Id,
+                    review.Title,
+                    review.Problem,
+                    review.Analysis,
+                    review.Solution,
+                    review.ProblemRich,
+                    review.AnalysisRich,
+                    review.SolutionRich
                 });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -718,6 +778,14 @@ public static class VerificationImpactEndpoints
             {
                 if (string.IsNullOrWhiteSpace(request.ApproverId))
                     return Results.BadRequest(new { error = "Select an independent test change request approver." });
+                // Newly authored packages carry a full case: Title, Problem, Analysis and Solution are what
+                // the reviewer is asked to judge. Packages that predate case authoring — or that were raised
+                // automatically and never written up — remain submittable as history; this gate applies only
+                // to work that has begun to state its case.
+                if (!string.IsNullOrWhiteSpace(review.Title)
+                    && (string.IsNullOrWhiteSpace(review.Problem) || string.IsNullOrWhiteSpace(review.Analysis)
+                        || string.IsNullOrWhiteSpace(review.Solution)))
+                    return Results.BadRequest(new { error = "Complete the test change request case (Problem, Analysis and Solution) before sending it for review." });
                 // A package concluding that procedure work is required, and then naming none, asks an approver
                 // to approve nothing. The workspace already tells the engineer a package is unfinished until it
                 // says what the work is; this is that sentence enforced.

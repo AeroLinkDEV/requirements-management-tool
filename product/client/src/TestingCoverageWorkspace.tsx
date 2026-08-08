@@ -3,6 +3,7 @@ import { PersonName } from './People'
 import PersonPicker from './PersonPicker'
 import ProblemReportPicker, { type ProblemReportOption } from './ProblemReportPicker'
 import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
+import TestChangeRequestCreateDialog from './TestChangeRequestCreateDialog'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
@@ -23,6 +24,7 @@ type ChangeRequestCover = { id: string; number: string; title: string; originati
 type TestChangeRequest = {
   id: string
   displayNumber: string
+  title?: string
   discipline: string
   state: string
   assignedEngineerId?: string
@@ -62,6 +64,8 @@ const assessmentName = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System Test' : discipline === 'HighLevelSoftware' ? 'HLR Test' : 'LLR Test'
 const tcrAcronym = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'SYSTCR' : discipline === 'HighLevelSoftware' ? 'HLRTCR' : 'LLRTCR'
+const tcrNewLabel = (discipline: TestDiscipline) =>
+  discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
 
 /**
  * Whether the test assessment has been done, and what it concluded.
@@ -157,6 +161,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
   const [creating, setCreating] = useState(false)
+  /** The deliberate TCR creation dialog, opened from the page header. */
+  const [creatingTcr, setCreatingTcr] = useState(false)
+  const [canCreate, setCanCreate] = useState(false)
   // The requirement a procedure is being authored for, when the author arrived from a decision that asked
   // for one. It preselects that requirement so the link is not left to memory.
   const [authoringFor, setAuthoringFor] = useState("")
@@ -217,7 +224,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         : undefined,
     ])
     const rawCoverage = coverageResponse?.ok ? await coverageResponse.json() as Coverage : undefined
-    const nextRequests = requestResponse.ok ? await requestResponse.json() : undefined
+    const nextRequests = requestResponse.ok
+      ? await requestResponse.json() as { canCreate?: boolean; items?: TestChangeRequest[] }
+      : undefined
     const nextImpact = impactResponse.ok ? await impactResponse.json() : undefined
     const listed = requirementResponse?.ok ? (await requirementResponse.json()).items : undefined
     if (mine !== loadTicket.current) return
@@ -234,7 +243,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         uncovered: items.filter(x => x.disposition === 'Uncovered').length,
       })
     }
-    if (nextRequests) setRequests(nextRequests)
+    if (nextRequests) {
+      setRequests(nextRequests.items ?? [])
+      setCanCreate(Boolean(nextRequests.canCreate))
+    }
     if (nextImpact) setImpact(nextImpact)
     if (listed) setRequirements(listed)
     if (!requestResponse.ok) {
@@ -394,6 +406,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           <h1>Change Requests</h1>
           <p>The {tcrAcronym(discipline)}s controlling {buildName}'s test procedures, and the approved changes waiting for one.</p>
         </div>
+        {canCreate && (
+          <button type="button" className="newTcrAction" onClick={() => setCreatingTcr(true)}>
+            + New {tcrNewLabel(discipline)} Test Change Request
+          </button>
+        )}
       </header>
       {error && <div className="workspaceError" role="alert" aria-live="assertive">{error}</div>}
       {saved && <div className="workspaceSaved" role="status">{saved}</div>}
@@ -684,9 +701,27 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       {/* The test change request itself: the room where procedures are created, modified and retired. It is
           the same drawer the requirements queue uses, from the same stylesheet, because it is the same kind of
           work asked of a different discipline. */}
+      {creatingTcr && (
+        <TestChangeRequestCreateDialog
+          api={api}
+          projectId={projectId}
+          releaseId={releaseId}
+          discipline={discipline}
+          onClose={() => setCreatingTcr(false)}
+          onCreated={(id, displayNumber) => {
+            setCreatingTcr(false)
+            setSaved(`${displayNumber} raised.`)
+            void load()
+            // The package opens onto its workspace so the engineer can start its procedure decisions.
+            setAuthoring(id)
+          }}
+        />
+      )}
+
       {authoring && (
         <TestChangeRequestWorkspace
           api={api}
+          projectId={projectId}
           reviewId={authoring}
           canAuthor={canTest}
           onClose={() => setAuthoring('')}
