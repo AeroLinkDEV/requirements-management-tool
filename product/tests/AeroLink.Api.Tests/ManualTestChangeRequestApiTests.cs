@@ -940,6 +940,160 @@ public sealed class ManualTestChangeRequestApiTests
     }
 
     [Fact]
+    public async Task A_true_link_versus_submit_collision_when_the_link_commits_first()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var clientA = factory.CreateClient();
+        using var clientB = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, clientA, fixture.AutoTcrId, fixture.AutoItemId);
+        await LoginAsync(clientB, "manual.engineer");
+        var version = await CurrentVersionAsync(clientA, fixture.ReleaseId, reviewId);
+
+        using var gate = new SaveRaceGate(factory.ConnectionString);
+        try
+        {
+            // Both requests load Version N before either saves; the link's save is released first and
+            // commits, so the submit's save loses on the concurrency token.
+            var linkTask = clientA.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/problem-reports",
+                new { problemReportIds = new[] { fixture.ProblemReportId }, expectedVersion = version });
+            Assert.True(await gate.FirstEnteredAsync(TimeSpan.FromSeconds(30)),
+                "The link request never reached SaveChanges.");
+            var submitTask = clientB.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/submit",
+                new { approverId = "manual.reviewer", expectedVersion = version });
+            Assert.True(await gate.SecondEnteredAsync(TimeSpan.FromSeconds(30)),
+                "The submit request never reached SaveChanges.");
+
+            gate.ReleaseFirst();
+            using var link = await linkTask;
+            Assert.True(link.IsSuccessStatusCode, await link.Content.ReadAsStringAsync());
+
+            gate.ReleaseSecond();
+            using var submit = await submitTask;
+            var submitBody = await submit.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.Conflict, submit.StatusCode);
+            Assert.Contains("stale_version", submitBody);
+        }
+        finally
+        {
+            gate.Dispose();
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.True(await db.ProblemReportLinks.AnyAsync(x =>
+                x.ArtifactType == "TestChangeRequest" && x.ArtifactId == reviewId
+                && x.ProblemReportId == fixture.ProblemReportId));
+            Assert.False(await db.ReviewCycles.AnyAsync(x => x.TestChangeReviewId == reviewId));
+            Assert.False(await db.UserNotifications.AnyAsync(x =>
+                x.ArtifactId == reviewId && x.Type == "TestChangeRequestApprovalRequested"));
+            Assert.False(await db.ElectronicSignatures.AnyAsync(x => x.ArtifactId == reviewId));
+            Assert.Equal(TestChangeReviewState.Open,
+                (await db.TestChangeReviews.SingleAsync(x => x.Id == reviewId)).State);
+        }
+    }
+
+    [Fact]
+    public async Task A_true_link_versus_submit_collision_when_the_submit_commits_first()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var clientA = factory.CreateClient();
+        using var clientB = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, clientA, fixture.AutoTcrId, fixture.AutoItemId);
+        await LoginAsync(clientB, "manual.engineer");
+        var version = await CurrentVersionAsync(clientA, fixture.ReleaseId, reviewId);
+
+        using var gate = new SaveRaceGate(factory.ConnectionString);
+        try
+        {
+            var submitTask = clientA.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/submit",
+                new { approverId = "manual.reviewer", expectedVersion = version });
+            Assert.True(await gate.FirstEnteredAsync(TimeSpan.FromSeconds(30)),
+                "The submit request never reached SaveChanges.");
+            var linkTask = clientB.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/problem-reports",
+                new { problemReportIds = new[] { fixture.ProblemReportId }, expectedVersion = version });
+            Assert.True(await gate.SecondEnteredAsync(TimeSpan.FromSeconds(30)),
+                "The link request never reached SaveChanges.");
+
+            gate.ReleaseFirst();
+            using var submit = await submitTask;
+            Assert.True(submit.IsSuccessStatusCode, await submit.Content.ReadAsStringAsync());
+
+            gate.ReleaseSecond();
+            using var link = await linkTask;
+            var linkBody = await link.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.Conflict, link.StatusCode);
+            Assert.Contains("stale_version", linkBody);
+        }
+        finally
+        {
+            gate.Dispose();
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Empty(await db.ProblemReportLinks.Where(x =>
+                x.ArtifactType == "TestChangeRequest" && x.ArtifactId == reviewId).ToListAsync());
+            Assert.True(await db.ReviewCycles.AnyAsync(x => x.TestChangeReviewId == reviewId));
+            Assert.Equal(TestChangeReviewState.InReview,
+                (await db.TestChangeReviews.SingleAsync(x => x.Id == reviewId)).State);
+        }
+    }
+
+    [Fact]
+    public async Task A_true_impact_decision_change_versus_submit_collision_when_the_decision_commits_first()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var clientA = factory.CreateClient();
+        using var clientB = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, clientA, fixture.AutoTcrId, fixture.AutoItemId);
+        await LoginAsync(clientB, "manual.engineer");
+        var version = await CurrentVersionAsync(clientA, fixture.ReleaseId, reviewId);
+
+        using var gate = new SaveRaceGate(factory.ConnectionString);
+        try
+        {
+            var reopenTask = clientA.PostAsJsonAsync($"/api/verification-impact/{fixture.AutoItemId}/reopen",
+                new { rationale = "Rework the decision before submission." });
+            Assert.True(await gate.FirstEnteredAsync(TimeSpan.FromSeconds(30)),
+                "The reopen request never reached SaveChanges.");
+            var submitTask = clientB.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/submit",
+                new { approverId = "manual.reviewer", expectedVersion = version });
+            Assert.True(await gate.SecondEnteredAsync(TimeSpan.FromSeconds(30)),
+                "The submit request never reached SaveChanges.");
+
+            gate.ReleaseFirst();
+            using var reopened = await reopenTask;
+            Assert.True(reopened.IsSuccessStatusCode, await reopened.Content.ReadAsStringAsync());
+
+            gate.ReleaseSecond();
+            using var submit = await submitTask;
+            var submitBody = await submit.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.Conflict, submit.StatusCode);
+            Assert.Contains("stale_version", submitBody);
+        }
+        finally
+        {
+            gate.Dispose();
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.False(await db.ReviewCycles.AnyAsync(x => x.TestChangeReviewId == reviewId));
+            Assert.Equal(VerificationImpactState.Open,
+                (await db.VerificationImpactItems.SingleAsync(x => x.Id == fixture.AutoItemId)).State);
+            Assert.Equal(TestChangeReviewState.Open,
+                (await db.TestChangeReviews.SingleAsync(x => x.Id == reviewId)).State);
+            Assert.False(await db.ElectronicSignatures.AnyAsync(x => x.ArtifactId == reviewId));
+        }
+    }
+
+    [Fact]
     public async Task Impact_decisions_are_frozen_while_in_review_or_approved()
     {
         using var factory = new AeroLinkApiFactory();

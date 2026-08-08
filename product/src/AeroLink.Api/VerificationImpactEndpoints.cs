@@ -588,6 +588,14 @@ public static class VerificationImpactEndpoints
                 await transaction.CommitAsync(ct);
                 return Results.Ok(new { review.Id, review.AssignedEngineerId, assignedItems = assignedItems.Count });
             }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new
+                {
+                    error = "This test change request changed after it was opened. Refresh and try again.",
+                    code = "stale_version"
+                });
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
@@ -1198,6 +1206,17 @@ public static class VerificationImpactEndpoints
                     cycleId = cycle.Id,
                     sequence = cycle.Sequence,
                     stageCount = cycle.Steps.Count
+                });
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // A governed mutation committed between this request's load and save (for example a Problem
+                // Report link or an impact decision). The whole unit of work is rolled back: no cycle, no
+                // notification, no signature is persisted.
+                return Results.Conflict(new
+                {
+                    error = "This test change request changed after it was opened. Refresh it before submitting it for review.",
+                    code = "stale_version"
                 });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }

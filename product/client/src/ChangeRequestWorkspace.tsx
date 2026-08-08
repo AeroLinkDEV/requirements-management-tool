@@ -422,6 +422,10 @@ export default function ChangeRequestWorkspace({
   const [requirements, setRequirements] = useState<DraftRequirement[]>([]);
   const [problemReportIds, setProblemReportIds] = useState<string[]>([]);
   const [approvers, setApprovers] = useState<Approver[]>([]);
+  // Null means the applicable workflow has not been resolved yet (or its lookup failed): the picker stays
+  // unfiltered and the server remains authoritative. True means no workflow is configured, so only users
+  // holding Approver authority can legitimately be selected.
+  const [fallbackApproverOnly, setFallbackApproverOnly] = useState<boolean | null>(null);
   const lockRef = useRef<EditLock | undefined>(undefined);
   const draftRef = useRef("");
   const lastSavedRef = useRef("");
@@ -991,6 +995,19 @@ export default function ChangeRequestWorkspace({
     setApprovers([]);
     setReviewMode("Sequential");
     setMode("approvers");
+    setFallbackApproverOnly(null);
+    void (async () => {
+      try {
+        const subject = scr.type === "Software" ? "Software" : "System";
+        const response = await fetch(
+          `${api}/api/review-workflows/applicable?projectId=${scr.projectId}&type=${subject}`);
+        if (!response.ok) return;
+        const body = (await response.json()) as { required?: boolean };
+        setFallbackApproverOnly(body.required === false);
+      } catch {
+        // Unknown stays unfiltered; the server refuses ineligible selections with a clear message.
+      }
+    })();
   };
 
   return (
@@ -1166,6 +1183,7 @@ export default function ChangeRequestWorkspace({
                 value={person.userId}
                 name={person.name}
                 index={index}
+                allowedRoles={fallbackApproverOnly === true ? ["Approver", "Administrator"] : undefined}
                 onSelect={(selected) =>
                   setApprovers((items) =>
                     items.map((item, position) => (position === index ? selected : item)),
@@ -1180,6 +1198,12 @@ export default function ChangeRequestWorkspace({
           <button type="button" className="outline addApprover" onClick={() => setApprovers((items) => [...items, { userId: "", name: "" }])}>+ Add approver</button>
           {uniqueApprovers.size !== approvers.filter((item) => item.userId).length && (
             <div className="reviewerWarning">Each reviewer may appear only once.</div>
+          )}
+          {fallbackApproverOnly === true && (
+            <div className="reviewerWarning">
+              No review workflow is configured for this discipline. Only users holding Approver authority can
+              review; the picker is filtered to them.
+            </div>
           )}
           <div className="snapshotNote">
             <b>Snapshot protection</b>

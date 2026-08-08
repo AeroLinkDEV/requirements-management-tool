@@ -66,6 +66,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
                      ("workflow.two", ProgramRole.Approver),
                      ("workflow.config", ProgramRole.ConfigurationManager),
                      ("workflow.outsider", ProgramRole.Engineer),
+                     ("workflow.reviewer", ProgramRole.Reviewer),
                  })
         {
             var account = new UserAccount(user, user, $"{user}@example.test",
@@ -724,6 +725,143 @@ public sealed class TestChangeRequestReviewWorkflowTests
             var step = await db.ReviewCycles.Include(x => x.Steps)
                 .SelectMany(x => x.Steps).SingleAsync(x => x.ApproverId == "workflow.config");
             Assert.Equal("ConfigurationManager", step.Authority);
+        }
+    }
+
+    [Theory]
+    [InlineData("workflow.outsider")]   // Engineer only
+    [InlineData("workflow.other")]      // TestEngineer only
+    [InlineData("workflow.reviewer")]   // Reviewer only
+    public async Task No_workflow_srcr_refuses_a_reviewer_without_approver_authority(string reviewer)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        await LoginAsync(client, "workflow.author");
+        using var refused = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new { approvers = new[] { new { userId = reviewer } }, mode = "Sequential" });
+        var body = await refused.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("does not hold Approver authority", body);
+        Assert.Contains("no review workflow configured", body);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var scr = await db.SystemChangeRequests.Include(x => x.ReviewCycles)
+                .SingleAsync(x => x.Id == draftId);
+            Assert.Equal(ChangeRequestState.Draft, scr.State);
+            Assert.Empty(scr.ReviewCycles);
+            Assert.False(await db.ElectronicSignatures.AnyAsync(x => x.ArtifactId == draftId));
+        }
+    }
+
+    [Fact]
+    public async Task No_workflow_srcr_generic_approver_submits_returns_and_approves_through_the_real_route()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        await LoginAsync(client, "workflow.author");
+        using var submitted = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new { approvers = new[] { new { userId = "workflow.one" } }, mode = "Sequential" });
+        Assert.True(submitted.IsSuccessStatusCode, await submitted.Content.ReadAsStringAsync());
+
+        // Request-changes stays available to the same eligible reviewer under the fallback.
+        await LoginAsync(client, "workflow.one");
+        using var returned = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/request-changes",
+            new { reason = "Rework the statement." });
+        var returnBody = await returned.Content.ReadAsStringAsync();
+        Assert.True(returned.StatusCode == HttpStatusCode.OK, $"{(int)returned.StatusCode}: {returnBody}");
+        Assert.Equal("Draft", JsonSerializer.Deserialize<JsonElement>(returnBody).GetProperty("state").GetString());
+
+        await LoginAsync(client, "workflow.author");
+        using var resubmitted = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new { approvers = new[] { new { userId = "workflow.one" } }, mode = "Sequential" });
+        Assert.True(resubmitted.IsSuccessStatusCode, await resubmitted.Content.ReadAsStringAsync());
+
+        await LoginAsync(client, "workflow.one");
+        using var approved = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/approve",
+            new { password = AeroLinkApiFactory.MemberPassword, meaning = "Signed as the fallback approver." });
+        var body = await approved.Content.ReadAsStringAsync();
+        Assert.True(approved.StatusCode == HttpStatusCode.OK, $"{(int)approved.StatusCode}: {body}");
+        Assert.Equal("Approved", JsonSerializer.Deserialize<JsonElement>(body).GetProperty("state").GetString());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.True(await db.ElectronicSignatures.AnyAsync(x =>
+                x.ArtifactId == draftId && x.UserName == "workflow.one"));
+        }
+    }
+
+    [Fact]
+    public async Task No_workflow_srcr_system_administrator_substitution_submits_and_approves()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+        var fixture = await SeedAsync(factory);
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        using var submitted = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new { approvers = new[] { new { userId = "admin" } }, mode = "Sequential" });
+        Assert.True(submitted.IsSuccessStatusCode, await submitted.Content.ReadAsStringAsync());
+
+        using var approved = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/approve",
+            new { password = AeroLinkApiFactory.AdministratorPassword, meaning = "Administrator substitution." });
+        var body = await approved.Content.ReadAsStringAsync();
+        Assert.True(approved.StatusCode == HttpStatusCode.OK, $"{(int)approved.StatusCode}: {body}");
+        Assert.Equal("Approved", JsonSerializer.Deserialize<JsonElement>(body).GetProperty("state").GetString());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.True(await db.ElectronicSignatures.AnyAsync(x =>
+                x.ArtifactId == draftId && x.UserName == "admin"));
+        }
+    }
+
+    [Fact]
+    public async Task No_workflow_srcr_defensive_checks_refuse_a_legacy_cycle_with_an_ineligible_reviewer()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        // A cycle created before the submit-time rule existed: the domain accepted an Engineer as the
+        // sole reviewer, which the old approval gate should never have let complete.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var draft = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
+                .SingleAsync(x => x.Id == draftId);
+            draft.SubmitForReview("workflow.author",
+                [new ApproverSelection("workflow.outsider", "Outsider")], DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        await LoginAsync(client, "workflow.outsider");
+        using var refusedApprove = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/approve",
+            new { password = AeroLinkApiFactory.MemberPassword, meaning = "Not entitled." });
+        Assert.Equal(HttpStatusCode.Forbidden, refusedApprove.StatusCode);
+        using var refusedReturn = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/request-changes",
+            new { reason = "Not entitled either." });
+        Assert.Equal(HttpStatusCode.Forbidden, refusedReturn.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var scr = await db.SystemChangeRequests.Include(x => x.ReviewCycles)
+                .SingleAsync(x => x.Id == draftId);
+            Assert.Equal(ChangeRequestState.InReview, scr.State);
+            Assert.Equal(ReviewCycleState.Active, scr.ReviewCycles.Single().State);
+            Assert.False(await db.ElectronicSignatures.AnyAsync(x => x.ArtifactId == draftId));
         }
     }
 
