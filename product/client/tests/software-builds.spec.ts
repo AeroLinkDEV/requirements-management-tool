@@ -82,20 +82,23 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
   await page.getByLabel('Search requirements').fill('SYSR-000001')
   await page.getByRole('button', { name: /SYSR-000001\.00/ }).first().click()
   await page.getByRole('button', { name: 'Trace & impact' }).click()
+  // Opening a procedure named on a requirement's trace lands in the Test Procedure Explorer, which is where a
+  // procedure is read. It used to open a record dialog on the coverage page, which carried a procedure
+  // library; the library moved and the link followed it rather than being left pointing at nothing.
   await page.getByRole('button', { name: /SYSTP-000001\.00.*Open test procedure/ }).click()
-  const procedureRecord = page.getByRole('dialog', { name: /Procedure SYSTP-000001\.00/ })
-  await expect(procedureRecord).toBeVisible()
-  await expect(procedureRecord).toContainText('Objective')
-  await expect(procedureRecord.getByRole('button', { name: 'Edit' })).toHaveCount(0)
-  const procedureHistory = page.getByRole('dialog', { name: /History of SYSTP-000001/ })
-  await procedureRecord.getByRole('button', { name: 'History' }).click()
-  await expect(procedureHistory).toBeVisible()
-  await expect(procedureHistory.locator('.revisionList li.selectedRevision')).toContainText('SYSTP-000001.00')
-  await expect(procedureHistory.locator('.revisionList li.selectedRevision')).toContainText('Selected exact revision')
+  await expect(page.getByRole('heading', { name: 'Test Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
+  const inspector = page.locator('.requirementInspector')
+  await expect(inspector).toBeVisible({ timeout: 30_000 })
+  await expect(inspector).toContainText('SYSTP-000001.00')
+  await expect(inspector).toContainText('Objective')
+  // Released, so nothing here writes: the procedure is readable and there is no editor to reach.
+  await expect(page.getByRole('button', { name: 'Check out & edit' })).toHaveCount(0)
+  await inspector.getByRole('button', { name: 'History' }).click()
+  await expect(inspector.locator('.revisionList li').first()).toContainText('SYSTP-000001')
   const procedureUrl = page.url()
   await page.reload()
   await expect(page).toHaveURL(procedureUrl)
-  await expect(page.getByRole('dialog', { name: /History of SYSTP-000001/ })).toBeVisible()
+  await expect(page.locator('.requirementInspector')).toBeVisible({ timeout: 30_000 })
 
   const refusal = await page.evaluate(async (base) => {
     const response = await fetch(`${base}/api/change-request-drafts`, {
@@ -114,7 +117,7 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
     await page.screenshot({ path: process.env.AEROLINK_BUILD_15_SCREENSHOT, fullPage: true })
   }
 
-  await page.getByRole('dialog', { name: /History of SYSTP-000001/ }).getByRole('button', { name: 'Close' }).click()
+  await page.locator('.requirementInspector').getByRole('button', { name: 'Close procedure detail' }).click()
   await page.getByRole('button', { name: 'Back to Software Builds' }).click()
   await expect(page).toHaveURL(/\/projects\/fms-product-development\/builds$/)
   await page.getByRole('button', { name: 'Open build 1.6' }).click()

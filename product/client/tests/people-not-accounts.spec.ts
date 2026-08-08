@@ -162,7 +162,13 @@ test('no surface names a person by their account', async ({ page, request }) => 
     'Product line', 'Assurance', 'Qualification',
   ])
 
-  for (const [surface, path] of [['Testing Coverage', 'coverage'], ['Test Results', 'results']] as const) {
+  // The Explorer is swept too: procedure authorship moved there with the library, and "written by" is exactly
+  // the kind of place an account handle leaks out in place of a person's name.
+  for (const [surface, path] of [
+    ['Change Requests', 'coverage'],
+    ['Test Procedure Explorer', 'procedures'],
+    ['Test Results', 'results'],
+  ] as const) {
     await page.goto(`${releaseRoot}/system-verification/${path}`, { waitUntil: 'load' })
     await surfacePainted(page)
     for (const hit of await accountsOnScreen(page, checked)) offenders.push(`${surface}: ${hit}`)

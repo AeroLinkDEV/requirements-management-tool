@@ -43,3 +43,24 @@
 .revisionList b{color:#17314f;font-size:13px}
 .revisionList span{color:#5c6878;font-size:12.5px}
 .revisionDriver{color:#0868c9 !important}
+
+/* Page-level tabs, not the inspector's. The inspector's tabs switch between four views of one procedure;
+   these switch between two questions about the whole build, so they sit above the split rather than inside
+   the panel. Styled as the inspector's are, because they are the same control doing the same job at a
+   different scale — a reader should not have to learn two tab strips on one page. */
+.explorerTabs{display:flex;gap:.25rem;border-bottom:1px solid #dfe5eb;margin:0 0 14px}
+.explorerTabs button{border:0;background:transparent;padding:9px 14px;font-size:13px;font-weight:700;
+  color:#606c7d;border-bottom:2px solid transparent}
+.explorerTabs button.active{color:#176f77;border-bottom-color:#1a8a85}
+.explorerTabs button:hover:not(.active){color:#35465a}
+.explorerCoverage{display:grid;gap:14px}
+
+/* The filters, on one row with the search. Ported from the procedure library the change request page used to
+   carry: state and latest result are how somebody narrows hundreds of procedures to the handful they mean,
+   and moving the library here without them would have made this the only place procedures can be browsed and
+   the least capable one. */
+.procedureFilters{display:flex;flex-wrap:wrap;gap:.75rem;align-items:end;margin:0 0 12px}
+.procedureFilters label{display:flex;flex-direction:column;gap:.35rem;font-size:.8rem;font-weight:700}
+.procedureFilters select{padding:.5rem .65rem;border:1px solid var(--line,#cbd7e6);border-radius:8px;font:inherit;
+  background:white;min-width:150px}
+.procedureFilters .procedureFind{margin:0}

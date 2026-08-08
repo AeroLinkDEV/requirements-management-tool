@@ -67,7 +67,7 @@ test('a test engineer proposes a new procedure inside the test change request th
 
   await login(page, 'test.engineer')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
 
   const row = page.locator('.downstreamAssessment').filter({ hasText: sourceNumber }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })

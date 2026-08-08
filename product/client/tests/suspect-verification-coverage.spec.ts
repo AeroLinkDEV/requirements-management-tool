@@ -10,7 +10,9 @@ const completedImpacts = JSON.stringify({
 })
 
 test('modified requirement coverage stays suspect until an exact approved procedure is reconfirmed', async ({ page, request }) => {
-  test.setTimeout(120_000)
+  // Longer than it was: coverage and the decision about it now live on two pages, so this journey walks
+  // between them three times rather than reading both from one screen.
+  test.setTimeout(180_000)
   await apiLogin(request)
   const showcase = await showcaseSeed(request)
 
@@ -111,18 +113,44 @@ test('modified requirement coverage stays suspect until an exact approved proced
 
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Testing Coverage' }).click()
-  await expect(page.getByRole('heading', { name: 'Testing Coverage' })).toBeVisible({ timeout: 30_000 })
 
-  // The whole inventory, because this requirement is covered — it is the applicability of that coverage that
-  // is in question, and the page opens on what has no coverage at all.
   const subject = `${baseNumber}.${String(revision).padStart(2, '0')}`
-  const showAll = page.getByRole('button', { name: /Show all \d+ requirements/ })
-  await expect(showAll).toBeVisible({ timeout: 30_000 })
-  await showAll.click()
   const coverageRow = page.locator('.fullCoverage .coverageRow').filter({ hasText: subject })
+
+  // Coverage and the decision about it now live on two pages: the report is in the Test Procedure Explorer,
+  // beside the procedures it is about, and the decision is made inside the test change request that raised
+  // it. So this walks between them, which is what the engineer does.
+  const readCoverage = async () => {
+    // The assessment drawer is modal, and its backdrop swallows a click on the navigation behind it. Leaving
+    // it open here cost a full test timeout that named the link, not the drawer over it.
+    const drawer = page.getByRole('dialog', { name: /test impact/ })
+    if (await drawer.count() > 0 && await drawer.first().isVisible()) {
+      await drawer.getByRole('button', { name: 'Close test assessment' }).click()
+      await expect(drawer).toHaveCount(0, { timeout: 30_000 })
+    }
+    await openNavigationGroup(page, 'ASSURANCE')
+    await page.getByRole('link', { name: 'System Test Procedure Explorer' }).click()
+    await expect(page.getByRole('heading', { name: 'Test Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('tab', { name: 'Requirement coverage' }).click()
+    // The whole inventory, because this requirement is covered — it is the applicability of that coverage
+    // that is in question, and the tab opens on what has no coverage at all.
+    const showAll = page.getByRole('button', { name: /Show all \d+ requirements/ })
+    await expect(showAll).toBeVisible({ timeout: 30_000 })
+    await showAll.click()
+  }
+  const openChangeRequests = async () => {
+    await openNavigationGroup(page, 'ASSURANCE')
+    await page.getByRole('link', { name: 'System Test Change Requests' }).click()
+    await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+    // Waited for, not assumed. The queue is fetched after the heading paints, and the helper below enumerates
+    // it with .all(), which does not retry — so arriving a moment early means looping over nothing and never
+    // finding the decision at all.
+    await expect(page.locator('.downstreamAssessment').first()).toBeVisible({ timeout: 30_000 })
+  }
+
+  await readCoverage()
   await expect(coverageRow.getByText('Suspect', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await openChangeRequests()
 
   // The decision itself is made inside the package that raised it, which is where the work is queued.
   const decisionRow = page.locator('.decisionList li').filter({ hasText: subject })
@@ -163,13 +191,22 @@ test('modified requirement coverage stays suspect until an exact approved proced
   await reopen.getByRole('button', { name: 'Reopen decision' }).click()
   await expect(reopen).toHaveCount(0, { timeout: 30_000 })
   await expect(decisionRow.first().getByRole('button', { name: 'Decide' })).toBeVisible({ timeout: 30_000 })
+
+  // The gate is back: the requirement reads suspect again in the coverage report, not merely undecided here.
+  await readCoverage()
   await expect(coverageRow.getByText('Suspect', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await openChangeRequests()
+  await openPackage()
+  await expect(decisionRow.first()).toBeVisible({ timeout: 30_000 })
 
   await decide('The repeat review confirms the same exact controlled procedure revision.')
   await expect(decisionRow.first()).toContainText('Coverage confirmed')
   await decisionRow.first().getByText(/Decision history · 3/).click()
   await expect(decisionRow.first().getByText('Decision reopened')).toBeVisible()
 
+  // And the report agrees: reconfirmed coverage counts, and the procedure that carries it is no longer marked
+  // suspect against this requirement.
+  await readCoverage()
   await expect(coverageRow.getByText('Verified', { exact: true })).toBeVisible({ timeout: 30_000 })
   await expect(coverageRow.locator('small').filter({ hasText: approvedProcedure.displayNumber })).not.toContainText('Suspect')
 

@@ -73,9 +73,14 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   // arrives with decides which page they open, and both are named on the way in.
   await page.goto(page.url().replace(/\/traceability.*$/,'/system-verification'))
   await expect(page.getByRole('heading',{name:'Verification'})).toBeVisible()
-  await page.getByRole('button',{name:'Open Testing Coverage →'}).click()
+  await page.getByRole('button',{name:'Open Change Requests →'}).click()
   await expect(page.getByRole('heading',{name:'Downstream test assessments'})).toBeVisible()
-  await expect(page.getByRole('heading',{name:'Test procedures'})).toBeVisible()
+  // The procedures those change requests produce are browsed in the Explorer, which is its own destination
+  // rather than a section underneath this queue.
+  await openNavigationGroup(page,'ASSURANCE')
+  await page.getByRole('link',{name:'System Test Procedure Explorer'}).click()
+  await expect(page.getByRole('heading',{name:'Test Procedure Explorer'})).toBeVisible({timeout:30_000})
+  await expect(page.locator('.procedureRow').first()).toBeVisible({timeout:30_000})
 
   await openNavigationGroup(page,'RELEASE & CONFIGURATION')
   await page.getByRole('link',{name:'Lifecycle Decision Room'}).click()
