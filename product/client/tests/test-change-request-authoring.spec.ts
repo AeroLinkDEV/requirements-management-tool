@@ -20,6 +20,8 @@ async function seedWorkspace(request: import('@playwright/test').APIRequestConte
     trace: 'Not Affected', verification: 'Not Affected', documents: 'Not Affected',
     baseline: 'Not Affected', collaboration: 'Not Affected',
   })
+  if (released) return { workspace, sourceChangeId: undefined, sourceNumber: '', report: undefined }
+
   const draftResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: workspace.project.id,
     targetReleaseId: workspace.release.id,
@@ -95,7 +97,7 @@ test('an engineer raises a System test change request with its case from the Cha
   await reportChoice.check()
 
   await dialog.getByRole('button', { name: 'Raise SYSTCR' }).click()
-  await expect(page.getByRole('status')).toContainText('raised.', { timeout: 30_000 })
+  await expect(page.locator('.workspaceSaved')).toContainText('raised.', { timeout: 30_000 })
 
   // The package opens onto its workspace so the engineer can start its procedure decisions.
   const workspace = page.getByRole('dialog', { name: /procedure decisions/ })
@@ -136,6 +138,7 @@ test('HLR and LLR Change Requests pages offer their own creation actions', async
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('button', { name: 'Software' }).last().click()
 
   await page.getByRole('link', { name: 'Software HLR Test Change Requests' }).click()
   await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
