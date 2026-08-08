@@ -29,7 +29,7 @@ public static class TestProcedureEffectivity
             .Where(x => x.Id == baselineId && x.RequirementsMaterializedAt != null)
             .Select(x => new
             {
-                x.Id, x.TestProceduresMaterializedAt, x.RequirementsMaterializedAt, x.FrozenAt, x.CreatedAt
+                x.Id, x.ReleaseId, x.TestProceduresMaterializedAt, x.RequirementsMaterializedAt, x.FrozenAt, x.CreatedAt
             })
             .SingleOrDefaultAsync(ct);
         if (baseline is null) return null;
@@ -58,11 +58,17 @@ public static class TestProcedureEffectivity
                               revision.ProcedureId, RevisionId = revision.Id, revision.Revision, revision.CreatedAt
                           })
             .Distinct().ToListAsync(ct);
+        var release = await db.Releases.AsNoTracking().Where(x => x.Id == baseline.ReleaseId)
+            .Select(x => new { x.IsReleased, x.ReleasedAt }).SingleAsync(ct);
         // Materialize before comparing DateTimeOffset values because SQLite cannot reliably translate their
-        // ordering/comparison. A revision created after the baseline closed is successor evidence, not a
-        // defensible compatibility candidate for that historical build.
-        var effectiveAt = baseline.FrozenAt ?? baseline.RequirementsMaterializedAt ?? baseline.CreatedAt;
-        var legacy = rows.Where(x => x.CreatedAt <= effectiveAt).GroupBy(x => x.ProcedureId).ToDictionary(
+        // ordering/comparison. A revision created after a released baseline closed is successor evidence, not
+        // a defensible compatibility candidate for that historical build. An active pre-manifest baseline is
+        // intentionally different: approved procedure work may still arrive until its exact manifest closes.
+        var releasedAt = release.IsReleased
+            ? release.ReleasedAt ?? baseline.FrozenAt ?? baseline.RequirementsMaterializedAt ?? baseline.CreatedAt
+            : (DateTimeOffset?)null;
+        var compatibleRows = releasedAt is null ? rows : rows.Where(x => x.CreatedAt <= releasedAt.Value);
+        var legacy = compatibleRows.GroupBy(x => x.ProcedureId).ToDictionary(
             group => group.Key,
             group => group.OrderByDescending(x => x.Revision).First().RevisionId);
         return new(baseline.Id, false, legacy);
