@@ -185,7 +185,8 @@ public sealed class TestChangeReview
             throw new DomainException($"{draft.BaseNumber} already has a proposed change in this test change request.");
         var change = new TestProcedureChange(Id, draft.BaseNumber, draft.Revision, draft.Level, draft.Kind,
             draft.Title, draft.Objective, draft.Preconditions, draft.Steps, draft.ExpectedResult, draft.Rationale,
-            draft.DrivingRequirementRevisionIdsJson);
+            draft.DrivingRequirementRevisionIdsJson, draft.RemovedRequirementRevisionIdsJson,
+            draft.CoverageChangeRationale, actorId);
         _procedureChanges.Add(change);
         Touch(now);
         return change;
@@ -355,6 +356,13 @@ public sealed class TestChangeReview
                              .OrderBy(x => x.ToString("D"), StringComparer.Ordinal))
                     writer.WriteStringValue(id.ToString("D"));
                 writer.WriteEndArray();
+                writer.WriteStartArray("removedRequirementRevisionIds");
+                foreach (var id in DrivingRequirementIds(change.RemovedRequirementRevisionIdsJson)
+                             .OrderBy(x => x.ToString("D"), StringComparer.Ordinal))
+                    writer.WriteStringValue(id.ToString("D"));
+                writer.WriteEndArray();
+                writer.WriteString("coverageChangeRationale", change.CoverageChangeRationale);
+                writer.WriteString("coverageChangedBy", change.CoverageChangedBy);
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
@@ -611,7 +619,8 @@ public sealed class TestChangeReview
         foreach (var change in _procedureChanges)
             next.AddProcedureChange(actorId, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
                 change.Level, change.Kind, change.Title, change.Objective, change.Preconditions, change.Steps,
-                change.ExpectedResult, change.Rationale, change.DrivingRequirementRevisionIdsJson), now);
+                change.ExpectedResult, change.Rationale, change.DrivingRequirementRevisionIdsJson,
+                change.RemovedRequirementRevisionIdsJson, change.CoverageChangeRationale), now);
 
         // Folded-in claims move to the successor rather than staying behind or being dropped. A change
         // request is claimed by at most one package, enforced by a unique index, so the two revisions cannot

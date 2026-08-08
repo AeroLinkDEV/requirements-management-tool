@@ -113,12 +113,21 @@ public sealed class TestProcedureAuthoringApiTests
         baseline.Select(folded, "cm", now);
         baseline.Freeze("cm", now);
         baseline.MarkRequirementsMaterialized("cm", new string('a', 64), 4, now);
+        var carriedProcedure = new TestProcedure(project.Id, "SYSTP-000900", "Carried oceanic procedure",
+            "test.author", now, TestProcedureLevel.System);
+        var carriedProcedureRevision = new TestProcedureRevision(carriedProcedure.Id, 0,
+            "Verify existing oceanic behavior.", "Cruise.", "Execute the procedure.", "Behavior observed.",
+            TestProcedureState.Approved, "test.author", now);
+        baseline.MarkTestProceduresMaterialized("cm", new string('c', 64), 1, now);
         db.AddRange(baseline, artifact, revision, foldedArtifact, foldedRevision,
             unrelatedArtifact, unrelatedRevision, wrongLevelArtifact, wrongLevelRevision,
+            carriedProcedure, carriedProcedureRevision,
             new BaselineRequirementSelection(baseline.Id, artifact.Id, revision.Id),
             new BaselineRequirementSelection(baseline.Id, foldedArtifact.Id, foldedRevision.Id),
             new BaselineRequirementSelection(baseline.Id, unrelatedArtifact.Id, unrelatedRevision.Id),
-            new BaselineRequirementSelection(baseline.Id, wrongLevelArtifact.Id, wrongLevelRevision.Id));
+            new BaselineRequirementSelection(baseline.Id, wrongLevelArtifact.Id, wrongLevelRevision.Id),
+            new BaselineTestProcedureSelection(baseline.Id, carriedProcedure.Id, carriedProcedureRevision.Id),
+            new TestRequirementCoverage(carriedProcedureRevision.Id, revision.Id));
         var governedItem = await db.VerificationImpactItems.SingleAsync(x => x.TestChangeReviewId == tcrId
             && x.RequirementChangeId == open.RequirementChanges.Single().Id);
         governedItem.LinkRequirementRevision(revision.Id, now);
@@ -380,6 +389,95 @@ public sealed class TestProcedureAuthoringApiTests
                     { fixture.RequirementRevisionId, fixture.FoldedRequirementRevisionId }
             });
         Assert.Equal(HttpStatusCode.OK, valid.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_modification_exposes_current_coverage_and_requires_rationale_for_a_governed_addition()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "procedure.engineer");
+        await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
+
+        var workspace = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes");
+        var target = Assert.Single(workspace.GetProperty("procedureTargets").EnumerateArray());
+        Assert.Equal("SYSTP-000900", target.GetProperty("baseNumber").GetString());
+        var current = Assert.Single(target.GetProperty("currentCoverage").EnumerateArray());
+        Assert.Equal(fixture.RequirementRevisionId, current.GetProperty("revisionId").GetGuid());
+
+        object Proposal(string? rationale) => new
+        {
+            kind = "Modify", baseNumber = "SYSTP-000900", revision = 1, title = "Expanded coverage",
+            objective = "Verify both governed requirements.", steps = "Execute.", expectedResult = "Observed.",
+            rationale = "The approved change expands the procedure.",
+            drivingRequirementRevisionIds = new[] { fixture.FoldedRequirementRevisionId },
+            coverageChangeRationale = rationale
+        };
+        using var missingRationale = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes", Proposal(null));
+        Assert.Equal(HttpStatusCode.BadRequest, missingRationale.StatusCode);
+        Assert.Equal("coverage_delta_rationale_required",
+            JsonSerializer.Deserialize<JsonElement>(await missingRationale.Content.ReadAsStringAsync())
+                .GetProperty("code").GetString());
+
+        using var accepted = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",
+            Proposal("The folded source adds a second verification obligation."));
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        var after = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes");
+        var decision = Assert.Single(after.GetProperty("procedureChanges").EnumerateArray());
+        Assert.Equal(fixture.FoldedRequirementRevisionId,
+            Assert.Single(decision.GetProperty("drivingRequirementRevisionIds").EnumerateArray()).GetGuid());
+        Assert.Equal("The folded source adds a second verification obligation.",
+            decision.GetProperty("coverageChangeRationale").GetString());
+        Assert.Equal("procedure.engineer", decision.GetProperty("coverageChangedBy").GetString());
+    }
+
+    [Fact]
+    public async Task A_coverage_removal_must_be_current_governed_and_rationalized()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "procedure.engineer");
+        await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
+
+        async Task<JsonElement> Refused(Guid removed, string? rationale)
+        {
+            using var response = await client.PostAsJsonAsync(
+                $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes", new
+                {
+                    kind = "Modify", baseNumber = "SYSTP-000900", revision = 1, title = "Narrowed coverage",
+                    objective = "Verify retained behavior.", steps = "Execute.", expectedResult = "Observed.",
+                    rationale = "The procedure scope changes.", removedRequirementRevisionIds = new[] { removed },
+                    coverageChangeRationale = rationale
+                });
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            return JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        }
+
+        Assert.Equal("requirement_revision_outside_tcr_scope",
+            (await Refused(fixture.UnrelatedRequirementRevisionId, "Remove unrelated coverage."))
+            .GetProperty("code").GetString());
+        Assert.Equal("coverage_removal_not_current",
+            (await Refused(fixture.FoldedRequirementRevisionId, "Remove coverage not currently present."))
+            .GetProperty("code").GetString());
+        Assert.Equal("coverage_delta_rationale_required",
+            (await Refused(fixture.RequirementRevisionId, null)).GetProperty("code").GetString());
+
+        using var accepted = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes", new
+            {
+                kind = "Modify", baseNumber = "SYSTP-000900", revision = 1, title = "Narrowed coverage",
+                objective = "Verify retained behavior.", steps = "Execute.", expectedResult = "Observed.",
+                rationale = "The procedure scope changes.",
+                removedRequirementRevisionIds = new[] { fixture.RequirementRevisionId },
+                coverageChangeRationale = "The approved design retired this verification obligation."
+            });
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
     }
 
     [Fact]

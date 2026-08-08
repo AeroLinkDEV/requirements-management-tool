@@ -125,3 +125,85 @@ test('a test engineer proposes a new procedure inside the test change request th
   await again.getByRole('button', { name: 'Withdraw this decision' }).click()
   await expect(again).toContainText('No procedure decisions are proposed yet', { timeout: 30_000 })
 })
+
+test('a procedure modification shows retained coverage and records an explicit reviewed delta', async ({ page }) => {
+  test.setTimeout(120_000)
+  await login(page, 'test.engineer')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
+  const packageRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
+  await expect(packageRow).toBeVisible({ timeout: 30_000 })
+
+  const retainedId = '10000000-0000-0000-0000-000000000001'
+  const removableId = '10000000-0000-0000-0000-000000000002'
+  const additionId = '10000000-0000-0000-0000-000000000003'
+  let recorded = false
+  let submitted: Record<string, unknown> | undefined
+  await page.route('**/api/test-change-reviews/*/procedure-changes', async route => {
+    if (route.request().method() === 'POST') {
+      submitted = route.request().postDataJSON()
+      recorded = true
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        id: '20000000-0000-0000-0000-000000000001', displayNumber: 'SYSTP-000900.01',
+        baseNumber: 'SYSTP-000900', revision: 1, kind: 'Modify', level: 'System', title: 'Revised procedure',
+      }) })
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      id: '30000000-0000-0000-0000-000000000001', displayNumber: 'SYSTCR-000401.00',
+      baseNumber: 'SYSTCR-000401', revision: 0, discipline: 'System', state: 'Open',
+      outcome: 'ChangeRequired', procedureLevel: 'System', sourceChangeRequestNumber: 'SRCR-000401.00',
+      assignedEngineerId: 'test.engineer', version: recorded ? 2 : 1,
+      title: 'Govern procedure coverage', problem: 'Coverage must remain exact.', analysis: 'Use an explicit delta.',
+      solution: 'Retain unchanged links and record additions/removals.', problemRich: '', analysisRich: '', solutionRich: '',
+      capabilities: { canProposeProcedureChange: true, canWithdrawProcedureChange: true, canRevise: false },
+      drivingRequirementChoices: [
+        { revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.' },
+        { revisionId: additionId, displayNumber: 'SYSR-000403.00', statement: 'New governed requirement.' },
+      ],
+      procedureTargets: [{ baseNumber: 'SYSTP-000900', title: 'Carried procedure', currentRevision: 0,
+        currentCoverage: [
+          { revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System', isSuspect: true },
+          { revisionId: retainedId, displayNumber: 'SYSR-000402.00', statement: 'Unchanged requirement.', level: 'System', isSuspect: false },
+        ] }],
+      procedureChanges: recorded ? [{
+        id: '20000000-0000-0000-0000-000000000001', displayNumber: 'SYSTP-000900.01',
+        baseNumber: 'SYSTP-000900', revision: 1, kind: 'Modify', level: 'System', title: 'Revised procedure',
+        objective: 'Verify revised behavior.', preconditions: '', steps: 'Execute.', expectedResult: 'Observed.',
+        rationale: 'The approved change alters procedure behavior.', drivingRequirementRevisionIds: [additionId],
+        removedRequirementRevisionIds: [removableId], coverageChangeRationale: 'Replace obsolete coverage.',
+        coverageChangedBy: 'test.engineer',
+      }] : [],
+    }) })
+  })
+
+  await packageRow.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
+  const drawer = page.getByRole('dialog', { name: /procedure decisions/ })
+  await drawer.getByRole('button', { name: 'Propose a procedure change' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  await dialog.getByLabel('What is being done').selectOption('Modify')
+  await dialog.getByRole('combobox', { name: /^Procedure/ }).selectOption('SYSTP-000900')
+  const current = dialog.getByRole('group', { name: 'Current exact coverage' })
+  await expect(current).toContainText('SYSR-000401.00')
+  await expect(current).toContainText('Suspect')
+  await expect(current).toContainText('retained; outside this package change scope')
+  await current.getByLabel(/SYSR-000401\.00/).uncheck()
+  await dialog.getByRole('group', { name: 'Requirements this procedure verifies' })
+    .getByLabel(/SYSR-000403\.00/).check()
+  await expect(dialog).toContainText('Proposed coverage: 1 retained, 1 added, 1 removed.')
+  await dialog.getByLabel('Title').fill('Revised procedure')
+  await dialog.getByLabel('Objective').fill('Verify revised behavior.')
+  await dialog.getByLabel('Steps').fill('Execute.')
+  await dialog.getByLabel('Expected result').fill('Observed.')
+  await dialog.getByLabel('Why coverage is being added or removed').fill('Replace obsolete coverage.')
+  await dialog.getByLabel('Why this procedure work is required').fill('The approved change alters procedure behavior.')
+  await dialog.getByRole('button', { name: 'Propose decision' }).click()
+
+  expect(submitted?.drivingRequirementRevisionIds).toEqual([additionId])
+  expect(submitted?.removedRequirementRevisionIds).toEqual([removableId])
+  expect(submitted?.coverageChangeRationale).toBe('Replace obsolete coverage.')
+  await expect(drawer).toContainText('Retained coverage: SYSR-000402.00')
+  await expect(drawer).toContainText('Added coverage: SYSR-000403.00')
+  await expect(drawer).toContainText('Removed coverage: SYSR-000401.00')
+  await expect(drawer).toContainText('Approved final coverage: SYSR-000402.00, SYSR-000403.00')
+  await expect(drawer).toContainText('Coverage rationale: Replace obsolete coverage. · test.engineer')
+})

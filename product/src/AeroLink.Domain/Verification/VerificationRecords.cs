@@ -159,6 +159,21 @@ public sealed class TestRequirementCoverage
         return coverage;
     }
 
+    /// <summary>Copies the exact decision state when a procedure revision retains an unchanged link.</summary>
+    public static TestRequirementCoverage RetainedByProcedureRevision(Guid procedureRevisionId,
+        TestRequirementCoverage predecessor)
+    {
+        var coverage = new TestRequirementCoverage(procedureRevisionId, predecessor.RequirementRevisionId)
+        {
+            IsSuspect = predecessor.IsSuspect,
+            SuspectReason = predecessor.SuspectReason,
+            SuspectSince = predecessor.SuspectSince,
+            ConfirmedBy = predecessor.ConfirmedBy,
+            ConfirmedAt = predecessor.ConfirmedAt
+        };
+        return coverage;
+    }
+
     public Guid Id { get; private set; }
     public Guid ProcedureRevisionId { get; private set; }
     public Guid RequirementRevisionId { get; private set; }

@@ -51,11 +51,12 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
         // Validate the approved snapshots before adding any procedure, revision, coverage, or manifest row.
         // This is deliberately repeated here even though current API writes enforce the same scope: legacy or
         // malformed controlled data must fail closed at the boundary where it would become real coverage.
-        await ValidateDrivingRequirementScopeAsync(baseline.Id, tcrs, ct);
+        await ValidateDrivingRequirementScopeAsync(baseline.Id, tcrs, procedureByBase, current, ct);
 
         var created = 0;
         // What each proposal became, so the requirement links it proposed can bind to a revision that exists.
-        var materialized = new List<(TestChangeReview Tcr, TestProcedureChange Change, Guid RevisionId)>();
+        var materialized = new List<(TestChangeReview Tcr, TestProcedureChange Change, Guid RevisionId,
+            Guid? PriorRevisionId)>();
         foreach (var pair in tcrs.SelectMany(tcr => tcr.ProcedureChanges.Select(change => new { tcr, change }))
                      .OrderBy(x => x.tcr.DisplayNumber).ThenBy(x => x.change.BaseNumber).ThenBy(x => x.change.Revision))
         {
@@ -72,7 +73,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
                 db.TestProcedureRevisions.Add(revision);
                 current[procedure.Id] = revision;
                 created++;
-                materialized.Add((pair.tcr, change, revision.Id));
+                materialized.Add((pair.tcr, change, revision.Id, null));
                 continue;
             }
 
@@ -84,7 +85,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
             var next = CreateRevision(existing.Id, change, pair.tcr, baseline.Id, now, state);
             db.TestProcedureRevisions.Add(next);
             created++;
-            materialized.Add((pair.tcr, change, next.Id));
+            materialized.Add((pair.tcr, change, next.Id, prior.Id));
             if (state == TestProcedureState.Retired)
             {
                 current.Remove(existing.Id);
@@ -94,7 +95,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
             current[existing.Id] = next;
         }
 
-        var coverageLinks = await LinkDrivingRequirementsAsync(materialized, ct);
+        var coverageLinks = await LinkDrivingRequirementsAsync(baseline.Id, materialized, ct);
         var settled = await SettleAwaitingDecisionsAsync(baseline.ProjectId, materialized, procedureByBase, actorId, now, ct);
 
         var procedureById = procedureByBase.Values.ToDictionary(x => x.Id);
@@ -172,40 +173,45 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
     /// The proposal named requirement revisions; only now does a procedure revision exist for them to bind to.
     /// This is the same point at which a requirement change's proposed upstream allocation becomes a trace link.
     /// </summary>
-    private async Task<int> LinkDrivingRequirementsAsync(
-        IReadOnlyList<(TestChangeReview Tcr, TestProcedureChange Change, Guid RevisionId)> materialized,
+    private async Task<int> LinkDrivingRequirementsAsync(Guid baselineId,
+        IReadOnlyList<(TestChangeReview Tcr, TestProcedureChange Change, Guid RevisionId,
+            Guid? PriorRevisionId)> materialized,
         CancellationToken ct)
     {
-        var wanted = materialized
-            .Where(x => x.Change.Kind != TestProcedureChangeKind.Retire)
-            .SelectMany(x => DrivingRequirements(x.Change).Select(requirementRevisionId => (x.RevisionId, requirementRevisionId)))
-            .Distinct().ToList();
-        if (wanted.Count == 0) return 0;
-
-        // A named revision that no longer exists is a stale identifier from a draft, not an instruction to
-        // create a link to nothing — the same treatment a stale section identifier gets on the requirement side.
-        var requirementRevisionIds = wanted.Select(x => x.requirementRevisionId).Distinct().ToList();
-        var real = (await db.RequirementRevisions.AsNoTracking()
-            .Where(x => requirementRevisionIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
-
-        var existing = (await db.TestCoverage.AsNoTracking()
-                .Where(x => requirementRevisionIds.Contains(x.RequirementRevisionId))
-                .Select(x => new { x.ProcedureRevisionId, x.RequirementRevisionId }).ToListAsync(ct))
-            .Select(x => (x.ProcedureRevisionId, x.RequirementRevisionId)).ToHashSet();
-
+        var carriedRequirementIds = (await db.BaselineRequirements.AsNoTracking()
+            .Where(x => x.BaselineId == baselineId).Select(x => x.RevisionId).ToListAsync(ct)).ToHashSet();
         var added = 0;
-        foreach (var (procedureRevisionId, requirementRevisionId) in wanted)
+        foreach (var entry in materialized.Where(x => x.Change.Kind != TestProcedureChangeKind.Retire))
         {
-            if (!real.Contains(requirementRevisionId)) continue;
-            if (!existing.Add((procedureRevisionId, requirementRevisionId))) continue;
-            db.TestCoverage.Add(new TestRequirementCoverage(procedureRevisionId, requirementRevisionId));
-            added++;
+            var driving = DrivingRequirements(entry.Change).Distinct().ToHashSet();
+            var removed = RemovedRequirements(entry.Change).Distinct().ToHashSet();
+            var prior = entry.PriorRevisionId is null
+                ? []
+                : await db.TestCoverage.AsNoTracking()
+                    .Where(x => x.ProcedureRevisionId == entry.PriorRevisionId.Value
+                        && carriedRequirementIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
+            foreach (var predecessor in prior.Where(x => !removed.Contains(x.RequirementRevisionId)))
+            {
+                db.TestCoverage.Add(driving.Contains(predecessor.RequirementRevisionId)
+                    ? new TestRequirementCoverage(entry.RevisionId, predecessor.RequirementRevisionId)
+                    : TestRequirementCoverage.RetainedByProcedureRevision(entry.RevisionId, predecessor));
+                added++;
+            }
+            var priorIds = prior.Select(x => x.RequirementRevisionId).ToHashSet();
+            foreach (var requirementRevisionId in driving.Where(x => !priorIds.Contains(x)))
+            {
+                db.TestCoverage.Add(new TestRequirementCoverage(entry.RevisionId, requirementRevisionId));
+                added++;
+            }
         }
         return added;
+
     }
 
     private async Task ValidateDrivingRequirementScopeAsync(Guid baselineId,
-        IReadOnlyCollection<TestChangeReview> tcrs, CancellationToken ct)
+        IReadOnlyCollection<TestChangeReview> tcrs,
+        IReadOnlyDictionary<string, TestProcedure> procedureByBase,
+        IReadOnlyDictionary<Guid, TestProcedureRevision> current, CancellationToken ct)
     {
         foreach (var tcr in tcrs)
         {
@@ -213,11 +219,32 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
             var governedIds = governed.Select(x => x.RevisionId).ToHashSet();
             foreach (var change in tcr.ProcedureChanges.Where(x => x.Kind != TestProcedureChangeKind.Retire))
             {
-                var outside = DrivingRequirements(change).Distinct()
+                var driving = DrivingRequirements(change).Distinct().ToHashSet();
+                var removed = RemovedRequirements(change).Distinct().ToHashSet();
+                if (driving.Overlaps(removed))
+                    throw new DomainException($"{change.DisplayNumber} both adds and removes the same requirement coverage.");
+                var outside = driving.Concat(removed)
                     .FirstOrDefault(x => !governedIds.Contains(x));
-                if (outside == Guid.Empty) continue;
-                throw new DomainException(
-                    $"{change.DisplayNumber} names requirement revision {outside}, which is outside {tcr.DisplayNumber}'s governed package/build scope.");
+                if (outside != Guid.Empty)
+                    throw new DomainException(
+                        $"{change.DisplayNumber} names requirement revision {outside}, which is outside {tcr.DisplayNumber}'s governed package/build scope.");
+                if (change.Kind != TestProcedureChangeKind.Modify) continue;
+                if (!procedureByBase.TryGetValue(change.BaseNumber, out var procedure)
+                    || !current.TryGetValue(procedure.Id, out var priorRevision))
+                    throw new DomainException($"{change.DisplayNumber} has no carried predecessor coverage to modify.");
+                var priorIds = (await db.TestCoverage.AsNoTracking()
+                        .Where(x => x.ProcedureRevisionId == priorRevision.Id
+                            && db.BaselineRequirements.Any(b => b.BaselineId == baselineId
+                                && b.RevisionId == x.RequirementRevisionId))
+                        .Select(x => x.RequirementRevisionId).ToListAsync(ct)).ToHashSet();
+                var absent = removed.FirstOrDefault(x => !priorIds.Contains(x));
+                if (absent != Guid.Empty)
+                    throw new DomainException(
+                        $"{change.DisplayNumber} cannot remove requirement revision {absent} because its predecessor does not cover it.");
+                if ((removed.Count != 0 || driving.Any(x => !priorIds.Contains(x)))
+                    && string.IsNullOrWhiteSpace(change.CoverageChangeRationale))
+                    throw new DomainException(
+                        $"{change.DisplayNumber} changes requirement coverage without an approved rationale.");
             }
         }
     }
@@ -239,7 +266,8 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
     /// requirement revisions the new procedure actually covers.
     /// </summary>
     private async Task<int> SettleAwaitingDecisionsAsync(Guid projectId,
-        IReadOnlyList<(TestChangeReview Tcr, TestProcedureChange Change, Guid RevisionId)> materialized,
+        IReadOnlyList<(TestChangeReview Tcr, TestProcedureChange Change, Guid RevisionId,
+            Guid? PriorRevisionId)> materialized,
         IReadOnlyDictionary<string, TestProcedure> procedureByBase, string actorId, DateTimeOffset now,
         CancellationToken ct)
     {
@@ -291,5 +319,14 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
     {
         try { return JsonSerializer.Deserialize<List<Guid>>(change.DrivingRequirementRevisionIdsJson) ?? []; }
         catch (JsonException) { return []; }
+    }
+
+    private static IReadOnlyList<Guid> RemovedRequirements(TestProcedureChange change)
+    {
+        try { return JsonSerializer.Deserialize<List<Guid>>(change.RemovedRequirementRevisionIdsJson) ?? []; }
+        catch (JsonException)
+        {
+            throw new DomainException($"{change.DisplayNumber} carries malformed removed requirement revisions.");
+        }
     }
 }
