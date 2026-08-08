@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { login, openNavigationGroup, selectProgram } from './auth'
+import { apiBase, apiLogin, firstSectionId, login, openNavigationGroup, selectProgram } from './auth'
 
 /**
  * Opens an assessment this reader can actually decide, and claims it.
@@ -147,10 +147,58 @@ test('software HLR and LLR each have their own change request page', async ({ pa
  * The decision is recorded and the procedure is authored from it, so the chain from change request to
  * procedure stays intact rather than depending on the engineer remembering why they were writing it.
  */
-test('a decision can ask for a procedure that does not exist, and author it from there', async ({ page }) => {
+test('a decision can ask for a procedure that does not exist, and author it from there', async ({ page, request }) => {
   test.setTimeout(180_000)
+  // This journey depends on a build whose requirements have not been materialized: a decision that a new
+  // procedure is required is recorded, and authoring waits for an exact governed revision. The shared
+  // showcase seed is not a safe home for that state — the suspect-coverage journey materializes the seeded
+  // in-work baseline, so this test builds its own brand-new Program whose release has no baseline at all.
+  await apiLogin(request)
+  const suffix = Date.now().toString().slice(-7)
+  const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, { data: {
+    programName: `Decision Authoring ${suffix}`,
+    programCode: `DA${suffix}`,
+    projectName: 'Decision Authoring Project',
+    softwareProduct: 'Decision Authoring Product',
+    initialRelease: '1.0',
+    initialReleaseIsReleased: false,
+  } })
+  expect(workspaceResponse.ok(), await workspaceResponse.text()).toBeTruthy()
+  const workspace = await workspaceResponse.json()
+  const impacts = JSON.stringify({
+    trace: 'Not Affected', verification: 'Not Affected', documents: 'Not Affected',
+    baseline: 'Not Affected', collaboration: 'Not Affected',
+  })
+  const draftResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
+    projectId: workspace.project.id,
+    targetReleaseId: workspace.release.id,
+    type: 'System',
+    title: `Decision authoring ${suffix}`,
+    problem: 'A procedure must be written for the new behavior.',
+    analysis: 'No procedure exists for this behavior yet.',
+    solution: 'Author one from the decision that asks for it.',
+    requirementChanges: [{
+      level: 'System', kind: 'Introduce',
+      targetSectionId: await firstSectionId(request, workspace.project.id),
+      statement: `The ${suffix} product shall expose a new verification target.`,
+      rationale: 'Capability qualification.',
+      verificationMethod: 'Test',
+      impactDispositionJson: impacts,
+    }],
+  } })
+  expect(draftResponse.ok(), await draftResponse.text()).toBeTruthy()
+  const draft = await draftResponse.json()
+  const submitted = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, {
+    data: { approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }] },
+  })
+  expect(submitted.ok(), await submitted.text()).toBeTruthy()
+  const approved = await request.post(`${apiBase}/api/change-requests/${draft.id}/approve`, {
+    data: { password: 'AeroLink!2026', meaning: 'Approved for decision-authoring journey verification.' },
+  })
+  expect(approved.ok(), await approved.text()).toBeTruthy()
+
   await login(page, 'admin', { openProject: false })
-  await selectProgram(page, 'Flight Management System Live Program')
+  await selectProgram(page, `Decision Authoring ${suffix}`)
   await openNavigationGroup(page, 'VERIFICATION')
   await page.getByRole('link', { name: 'System Test Change Requests' }).click()
   await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
