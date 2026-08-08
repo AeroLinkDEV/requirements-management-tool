@@ -829,16 +829,6 @@ public static class VerificationImpactEndpoints
             if (change.TargetReleaseId != review.ReleaseId)
                 return Results.BadRequest(new { error = $"{change.DisplayNumber} is allocated to a different build." });
 
-            // A change whose assessment has already been concluded is a real package of decisions, not a
-            // pending automatic review. Folding it in would strand those decisions; the engineer should work
-            // them where they were made.
-            var concluded = await db.TestChangeReviews.AsNoTracking()
-                .Where(x => x.ChangeRequestId == request.ChangeRequestId && x.Discipline == review.Discipline
-                    && (x.State != TestChangeReviewState.Open || x.Outcome != TestChangeReviewOutcome.Pending))
-                .Select(x => x.DisplayNumber).FirstOrDefaultAsync(ct);
-            if (!string.IsNullOrEmpty(concluded))
-                return Results.Conflict(new { error = $"{change.DisplayNumber} already has a {review.Discipline} test assessment." });
-
             var claimedBy = await db.TestChangeRequestClaims.AsNoTracking()
                 .Where(x => x.ChangeRequestId == request.ChangeRequestId)
                 .Select(x => x.TestChangeReviewId).FirstOrDefaultAsync(ct);
@@ -848,6 +838,15 @@ public static class VerificationImpactEndpoints
                     .Select(x => x.DisplayNumber).SingleOrDefaultAsync(ct);
                 return Results.Conflict(new { error = $"{change.DisplayNumber} is already covered by {holder}." });
             }
+            // A change whose assessment has already been concluded is a real package of decisions, not a
+            // pending automatic review. Folding it in would strand those decisions; the engineer should work
+            // them where they were made. Checked after claims so a holder is named when one exists.
+            var concluded = await db.TestChangeReviews.AsNoTracking()
+                .Where(x => x.ChangeRequestId == request.ChangeRequestId && x.Discipline == review.Discipline
+                    && (x.State != TestChangeReviewState.Open || x.Outcome != TestChangeReviewOutcome.Pending))
+                .Select(x => x.DisplayNumber).FirstOrDefaultAsync(ct);
+            if (!string.IsNullOrEmpty(concluded))
+                return Results.Conflict(new { error = $"{change.DisplayNumber} already has a {review.Discipline} test assessment." });
             if (request.ExpectedVersion is not null && review.Version != request.ExpectedVersion)
                 return Results.Conflict(new
                 {
