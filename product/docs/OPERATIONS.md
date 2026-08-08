@@ -190,7 +190,9 @@ organization-approved RPO/RTO.
 
 Run `RESTORE_AEROLINK.bat <backup-zip> aerolink_restore_validation`. The target name must contain `restore`, `validation`, or `test`. The command verifies the archive, recreates only that isolated database, restores evidence only below `product/.local/restore-validation`, and reports the restored Program count. It never selects `aerolink` by default.
 
-Validate a pending migration on the restored copy with:
+Validate a pending migration on the restored copy with the design-time connection made explicit. Design-time
+EF commands fail closed: `AEROLINK_MIGRATIONS_CONNECTION` must be set, and the factory never falls back to the
+persistent `aerolink` database.
 
 ```powershell
 $env:AEROLINK_MIGRATIONS_CONNECTION='Host=127.0.0.1;Port=54329;Database=aerolink_restore_validation;Username=postgres'
@@ -198,7 +200,11 @@ dotnet ef database update --project product\src\AeroLink.Infrastructure\AeroLink
 Remove-Item Env:\AEROLINK_MIGRATIONS_CONNECTION
 ```
 
-The design-time migration factory uses `AEROLINK_MIGRATIONS_CONNECTION`; `ConnectionStrings__AeroLink` is an application runtime setting and does not redirect `dotnet ef`.
+`ConnectionStrings__AeroLink` is an application runtime setting and does not redirect `dotnet ef`. For
+migration experimentation, prefer a genuinely disposable PostgreSQL cluster (for example a temporary
+`initdb`/`pg_ctl` instance on a non-default port) rather than a database on the persistent server, and never
+point design-time EF at `aerolink` itself. Ordinary AeroLink startup applies runtime migrations normally via
+`Database.MigrateAsync()`; design-time EF is a separate, explicitly connected workflow.
 
 ## Attended production restore
 
