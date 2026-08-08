@@ -14,6 +14,27 @@ public enum VerificationImpactTrigger
 }
 
 public enum VerificationImpactState { Open, Assigned, Resolved, Superseded }
+
+/// <summary>
+/// The governed engineering content of one verification-impact decision, as it appears in the TCR review
+/// snapshot. Assignment and timestamps are deliberately absent: they are operational, not the content an
+/// approver judges.
+/// </summary>
+public sealed record VerificationImpactSnapshot(
+    Guid ItemId,
+    Guid ChangeRequestId,
+    VerificationImpactTrigger Trigger,
+    Guid? RequirementChangeId,
+    Guid? RequirementRevisionId,
+    Guid? ProcedureId,
+    string SubjectDisplayNumber,
+    VerificationImpactOutcome? Outcome,
+    TestProcedureChangeAction? ProcedureChangeAction,
+    string ResolutionRationale,
+    Guid? ResolvedProcedureId,
+    Guid? ResolvedProcedureRevisionId,
+    Guid? RetargetedRequirementRevisionId,
+    bool PreReleaseEvidenceRequired);
 public enum VerificationImpactHistoryAction { Resolved, Reopened }
 public enum TestProcedureChangeAction { LinkExisting, CreateNew, ModifyExisting, RetireExisting, NoTestRequired }
 

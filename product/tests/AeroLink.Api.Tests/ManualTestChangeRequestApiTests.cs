@@ -24,7 +24,7 @@ public sealed class ManualTestChangeRequestApiTests
 {
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid FirstChangeId, Guid SecondChangeId,
         Guid AutoRaisedChangeId, Guid AutoTcrId, Guid OtherBuildChangeId, Guid ProblemReportId,
-        Guid OtherBuildProblemReportId);
+        Guid OtherBuildProblemReportId, Guid AutoItemId);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -65,6 +65,7 @@ public sealed class ManualTestChangeRequestApiTests
                  {
                      ("manual.engineer", ProgramRole.TestEngineer),
                      ("manual.lead", ProgramRole.TestLead),
+                     ("manual.reviewer", ProgramRole.Approver),
                      ("manual.outsider", ProgramRole.Engineer),
                  })
         {
@@ -81,9 +82,11 @@ public sealed class ManualTestChangeRequestApiTests
         await db.SaveChangesAsync();
         var autoTcrId = await db.TestChangeReviews.Where(x => x.ChangeRequestId == autoRaised.Id)
             .Select(x => x.Id).SingleAsync();
+        var autoItemId = await db.VerificationImpactItems.Where(x => x.ChangeRequestId == autoRaised.Id)
+            .Select(x => x.Id).SingleAsync();
 
         return new(project.Id, release.Id, first.Id, second.Id, autoRaised.Id, autoTcrId, elsewhere.Id,
-            report.Id, otherReport.Id);
+            report.Id, otherReport.Id, autoItemId);
     }
 
     private static async Task LoginAsync(HttpClient client, string user)
@@ -858,5 +861,193 @@ public sealed class ManualTestChangeRequestApiTests
         using var current = await client.DeleteAsync(
             $"/api/test-change-reviews/{packageId}/procedure-changes/{changeId}?expectedVersion={currentVersion}");
         Assert.True(current.IsSuccessStatusCode, await current.Content.ReadAsStringAsync());
+    }
+
+    private static async Task<Guid> PrepareSubmittableNoChangePackageAsync(AeroLinkApiFactory factory,
+        HttpClient client, Guid autoTcrId, Guid itemId)
+    {
+        await LoginAsync(client, "manual.engineer");
+        using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve",
+            new { outcome = "NoTestRequired", rationale = "Existing procedures already cover this wording." });
+        Assert.True(resolved.IsSuccessStatusCode, await resolved.Content.ReadAsStringAsync());
+        using var concluded = await client.PostAsJsonAsync($"/api/test-change-reviews/{autoTcrId}/conclusion",
+            new { testChangeRequired = false, rationale = "Existing procedures already exercise this wording." });
+        Assert.True(concluded.IsSuccessStatusCode, await concluded.Content.ReadAsStringAsync());
+        return autoTcrId;
+    }
+
+    private static async Task<long> CurrentVersionAsync(HttpClient client, Guid releaseId, Guid reviewId)
+    {
+        var list = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/releases/{releaseId}/test-change-reviews");
+        return list.GetProperty("items").EnumerateArray()
+            .Single(x => x.GetProperty("id").GetGuid() == reviewId).GetProperty("version").GetInt64();
+    }
+
+    [Fact]
+    public async Task A_problem_report_link_versus_submit_race_has_one_winner()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var clientA = factory.CreateClient();
+        using var clientB = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, clientA, fixture.AutoTcrId, fixture.AutoItemId);
+        Assert.NotEqual(Guid.Empty, reviewId);
+        await LoginAsync(clientB, "manual.engineer");
+
+        var versionA = await CurrentVersionAsync(clientA, fixture.ReleaseId, reviewId);
+        var versionB = await CurrentVersionAsync(clientB, fixture.ReleaseId, reviewId);
+        Assert.Equal(versionA, versionB);
+
+        using var submitted = await clientB.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/submit",
+            new { approverId = "manual.reviewer", expectedVersion = versionB });
+        Assert.True(submitted.IsSuccessStatusCode, await submitted.Content.ReadAsStringAsync());
+
+        using var link = await clientA.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/problem-reports",
+            new { problemReportIds = new[] { fixture.ProblemReportId }, expectedVersion = versionA });
+        Assert.Equal(HttpStatusCode.Conflict, link.StatusCode);
+        Assert.Contains("stale_version", await link.Content.ReadAsStringAsync());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Empty(await db.ProblemReportLinks.Where(x =>
+                x.ArtifactType == "TestChangeRequest" && x.ArtifactId == reviewId).ToListAsync());
+        }
+    }
+
+    [Fact]
+    public async Task An_impact_decision_change_versus_submit_race_has_one_winner()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var clientA = factory.CreateClient();
+        using var clientB = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, clientA, fixture.AutoTcrId, fixture.AutoItemId);
+        await LoginAsync(clientB, "manual.engineer");
+        var versionBefore = await CurrentVersionAsync(clientA, fixture.ReleaseId, reviewId);
+
+        // A reopens the decision while the package is still Open; that is a governed content change and
+        // advances the package version.
+        using var reopened = await clientA.PostAsJsonAsync($"/api/verification-impact/{fixture.AutoItemId}/reopen",
+            new { rationale = "Rework the decision before submission." });
+        Assert.True(reopened.IsSuccessStatusCode, await reopened.Content.ReadAsStringAsync());
+
+        using var staleSubmit = await clientB.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/submit",
+            new { approverId = "manual.reviewer", expectedVersion = versionBefore });
+        Assert.Equal(HttpStatusCode.Conflict, staleSubmit.StatusCode);
+        Assert.Contains("stale_version", await staleSubmit.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Impact_decisions_are_frozen_while_in_review_or_approved()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, client, fixture.AutoTcrId, fixture.AutoItemId);
+        var version = await CurrentVersionAsync(client, fixture.ReleaseId, reviewId);
+        using var submitted = await client.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/submit",
+            new { approverId = "manual.reviewer", expectedVersion = version });
+        Assert.True(submitted.IsSuccessStatusCode, await submitted.Content.ReadAsStringAsync());
+
+        using var reopenInReview = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.AutoItemId}/reopen",
+            new { rationale = "Too late." });
+        Assert.Equal(HttpStatusCode.Conflict, reopenInReview.StatusCode);
+        Assert.Contains("only while the test change request is Open", await reopenInReview.Content.ReadAsStringAsync());
+
+        await LoginAsync(client, "manual.reviewer");
+        using var approved = await client.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/approve",
+            new { rationale = "Approved." });
+        Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
+        await LoginAsync(client, "manual.engineer");
+        using var reopenApproved = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.AutoItemId}/reopen",
+            new { rationale = "Even later." });
+        Assert.Equal(HttpStatusCode.Conflict, reopenApproved.StatusCode);
+    }
+
+    [Fact]
+    public async Task Returning_to_open_permits_impact_rework_and_resubmission_hashes_differently()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, client, fixture.AutoTcrId, fixture.AutoItemId);
+        var version = await CurrentVersionAsync(client, fixture.ReleaseId, reviewId);
+        using var submitted = await client.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/submit",
+            new { approverId = "manual.reviewer", expectedVersion = version });
+        Assert.True(submitted.IsSuccessStatusCode, await submitted.Content.ReadAsStringAsync());
+
+        string firstHash;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            firstHash = (await db.ReviewCycles.SingleAsync(x => x.TestChangeReviewId == reviewId)).SnapshotHash;
+        }
+
+        await LoginAsync(client, "manual.reviewer");
+        using var returned = await client.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/return",
+            new { rationale = "Rework the decision." });
+        Assert.True(returned.IsSuccessStatusCode, await returned.Content.ReadAsStringAsync());
+
+        await LoginAsync(client, "manual.engineer");
+        using var reopened = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.AutoItemId}/reopen",
+            new { rationale = "Correct the decision after return." });
+        Assert.True(reopened.IsSuccessStatusCode, await reopened.Content.ReadAsStringAsync());
+        using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.AutoItemId}/resolve",
+            new { outcome = "NoTestRequired", rationale = "Corrected decision after rework." });
+        Assert.True(resolved.IsSuccessStatusCode, await resolved.Content.ReadAsStringAsync());
+
+        var versionAfter = await CurrentVersionAsync(client, fixture.ReleaseId, reviewId);
+        using var resubmitted = await client.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/submit",
+            new { approverId = "manual.reviewer", expectedVersion = versionAfter });
+        Assert.True(resubmitted.IsSuccessStatusCode, await resubmitted.Content.ReadAsStringAsync());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var cycles = await db.ReviewCycles.Where(x => x.TestChangeReviewId == reviewId)
+                .OrderBy(x => x.Sequence).ToListAsync();
+            Assert.Equal(2, cycles.Count);
+            Assert.Equal(firstHash, cycles[0].SnapshotHash);
+            Assert.NotEqual(firstHash, cycles[1].SnapshotHash);
+        }
+    }
+
+    [Fact]
+    public async Task Concurrent_revise_requests_do_not_create_competing_successors()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var clientA = factory.CreateClient();
+        using var clientB = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, clientA, fixture.AutoTcrId, fixture.AutoItemId);
+        var version = await CurrentVersionAsync(clientA, fixture.ReleaseId, reviewId);
+        using var submitted = await clientA.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/submit",
+            new { approverId = "manual.reviewer", expectedVersion = version });
+        Assert.True(submitted.IsSuccessStatusCode, await submitted.Content.ReadAsStringAsync());
+        await LoginAsync(clientA, "manual.reviewer");
+        using var approved = await clientA.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/approve",
+            new { rationale = "Approved." });
+        Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
+
+        await LoginAsync(clientA, "manual.engineer");
+        await LoginAsync(clientB, "manual.engineer");
+        var first = clientA.PostAsync($"/api/test-change-reviews/{reviewId}/revise", null);
+        var second = clientB.PostAsync($"/api/test-change-reviews/{reviewId}/revise", null);
+        var results = await Task.WhenAll(first, second);
+        var statuses = results.Select(x => x.StatusCode).OrderBy(x => (int)x).ToArray();
+        Assert.Contains(HttpStatusCode.OK, statuses);
+        Assert.True(statuses.Contains(HttpStatusCode.Conflict) || statuses.Contains(HttpStatusCode.BadRequest),
+            string.Join(",", statuses));
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var successors = await db.TestChangeReviews.CountAsync(x =>
+                x.ChangeRequestId == fixture.AutoRaisedChangeId
+                && x.Discipline == TestChangeReviewDiscipline.System && x.Revision == 1);
+            Assert.Equal(1, successors);
+        }
     }
 }

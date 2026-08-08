@@ -231,7 +231,8 @@ public sealed class TestChangeReview
         IReadOnlyList<ChangeControl.ApproverSelection> approvers, bool everyItemResolved, DateTimeOffset now,
         ChangeControl.ReviewMode mode = ChangeControl.ReviewMode.Sequential,
         ChangeControl.ReviewWorkflowSpecification? workflow = null,
-        IReadOnlyList<Guid>? problemReportIds = null)
+        IReadOnlyList<Guid>? problemReportIds = null,
+        IReadOnlyList<VerificationImpactSnapshot>? impactDecisions = null)
     {
         EnsureOpen();
         if (Outcome == TestChangeReviewOutcome.Pending)
@@ -255,7 +256,7 @@ public sealed class TestChangeReview
         // and the honest record of them is empty. Enforcing it here would force the showcase to invent the
         // decisions those approvals never carried, which is a worse falsehood than the gap.
         var cycle = ChangeControl.ReviewCycle.ForTestChangeRequest(Id, _reviewCycles.Count + 1,
-            ComputeSnapshotHash(problemReportIds), approvers, now, mode, workflow);
+            ComputeSnapshotHash(problemReportIds, impactDecisions), approvers, now, mode, workflow);
         _reviewCycles.Add(cycle);
         SubmittedBy = Required(actorId, "submitting verification engineer");
         SelectedApproverId = approvers[0].UserId;
@@ -287,7 +288,8 @@ public sealed class TestChangeReview
     /// The same purpose the change request's own snapshot serves: an approval has to be provably of an exact
     /// set of decisions, so that editing the package afterwards cannot quietly reuse the signature.
     /// </summary>
-    private string ComputeSnapshotHash(IReadOnlyList<Guid>? problemReportIds)
+    private string ComputeSnapshotHash(IReadOnlyList<Guid>? problemReportIds,
+        IReadOnlyList<VerificationImpactSnapshot>? impactDecisions)
     {
         // A versioned, canonical structured manifest: property order is deliberately controlled, delimiters
         // are impossible to confuse with engineering text, and every governed field is present exactly once.
@@ -360,6 +362,37 @@ public sealed class TestChangeReview
             writer.WriteStartArray("problemReportIds");
             foreach (var id in (problemReportIds ?? []).OrderBy(x => x.ToString("D"), StringComparer.Ordinal))
                 writer.WriteStringValue(id.ToString("D"));
+            writer.WriteEndArray();
+
+            writer.WriteStartArray("impactDecisions");
+            foreach (var item in (impactDecisions ?? [])
+                         .OrderBy(x => x.ItemId.ToString("D"), StringComparer.Ordinal))
+            {
+                writer.WriteStartObject();
+                writer.WriteString("itemId", item.ItemId.ToString("D"));
+                writer.WriteString("changeRequestId", item.ChangeRequestId.ToString("D"));
+                writer.WriteString("trigger", item.Trigger.ToString());
+                if (item.RequirementChangeId is { } requirementChangeId)
+                    writer.WriteString("requirementChangeId", requirementChangeId.ToString("D"));
+                if (item.RequirementRevisionId is { } requirementRevisionId)
+                    writer.WriteString("requirementRevisionId", requirementRevisionId.ToString("D"));
+                if (item.ProcedureId is { } procedureId)
+                    writer.WriteString("procedureId", procedureId.ToString("D"));
+                writer.WriteString("subjectDisplayNumber", item.SubjectDisplayNumber);
+                if (item.Outcome is { } outcome)
+                    writer.WriteString("outcome", outcome.ToString());
+                if (item.ProcedureChangeAction is { } action)
+                    writer.WriteString("procedureChangeAction", action.ToString());
+                writer.WriteString("resolutionRationale", item.ResolutionRationale);
+                if (item.ResolvedProcedureId is { } resolvedProcedureId)
+                    writer.WriteString("resolvedProcedureId", resolvedProcedureId.ToString("D"));
+                if (item.ResolvedProcedureRevisionId is { } resolvedProcedureRevisionId)
+                    writer.WriteString("resolvedProcedureRevisionId", resolvedProcedureRevisionId.ToString("D"));
+                if (item.RetargetedRequirementRevisionId is { } retargetedRequirementRevisionId)
+                    writer.WriteString("retargetedRequirementRevisionId", retargetedRequirementRevisionId.ToString("D"));
+                writer.WriteBoolean("preReleaseEvidenceRequired", item.PreReleaseEvidenceRequired);
+                writer.WriteEndObject();
+            }
             writer.WriteEndArray();
 
             writer.WriteEndObject();
@@ -444,11 +477,12 @@ public sealed class TestChangeReview
     /// that it reads better at the call sites that genuinely have one approver and no workflow.
     /// </summary>
     public void Submit(string actorId, string approverId, bool everyItemResolved, DateTimeOffset now,
-        IReadOnlyList<Guid>? problemReportIds = null)
+        IReadOnlyList<Guid>? problemReportIds = null,
+        IReadOnlyList<VerificationImpactSnapshot>? impactDecisions = null)
     {
         Required(approverId, "selected test change request approver");
         SubmitForReview(actorId, [new ChangeControl.ApproverSelection(approverId, approverId)],
-            everyItemResolved, now, problemReportIds: problemReportIds);
+            everyItemResolved, now, problemReportIds: problemReportIds, impactDecisions: impactDecisions);
     }
 
     public void Approve(string actorId, string rationale, DateTimeOffset now)
@@ -623,6 +657,14 @@ public sealed class TestChangeReview
         if (State != TestChangeReviewState.Open)
             throw new DomainException("An in-review or approved test change review cannot be edited.");
     }
+
+    /// <summary>
+    /// Advances the concurrency/version token when governed content held outside this aggregate (Problem
+    /// Report links, verification-impact decisions) changes in the same unit of work. This is what makes a
+    /// link-versus-submit or decision-versus-submit race collapse to exactly one winner: whichever side
+    /// saves second hits the EF concurrency token and receives the stale-write contract.
+    /// </summary>
+    public void RecordControlledContentChange(DateTimeOffset now) => Touch(now);
 
     private void Touch(DateTimeOffset now) { UpdatedAt = now; Version++; }
     private static string Required(string value, string name) =>

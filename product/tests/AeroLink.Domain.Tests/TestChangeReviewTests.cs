@@ -289,6 +289,84 @@ public sealed class TestChangeReviewTests
             reversed.ReviewCycles.Single().SnapshotHash);
     }
 
+    private static TestChangeReview SubmittedWithImpact(VerificationImpactSnapshot impact)
+    {
+        var review = Create();
+        review.AssignControlledNumber("SYSTCR-000062", Now.AddMinutes(1));
+        review.AddProcedureChange("verification.engineer",
+            ProcedureDraftWith(drivingJson: $"[\"{Guid.NewGuid()}\"]"), Now.AddMinutes(2));
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3),
+            impactDecisions: [impact]);
+        return review;
+    }
+
+    private static VerificationImpactSnapshot ImpactBase() =>
+        new(Guid.NewGuid(), Guid.NewGuid(), VerificationImpactTrigger.RequirementIntroduced,
+            Guid.NewGuid(), Guid.NewGuid(), null, "SYSR-00000100.00",
+            VerificationImpactOutcome.NewProcedureRequired, TestProcedureChangeAction.CreateNew,
+            "A new procedure is required.", null, null, null, false);
+
+    [Fact]
+    public void Every_governed_impact_decision_field_changes_the_snapshot()
+    {
+        var baseline = SubmittedWithImpact(ImpactBase()).ReviewCycles.Single().SnapshotHash;
+
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { Outcome = VerificationImpactOutcome.NoTestRequired, ProcedureChangeAction = TestProcedureChangeAction.NoTestRequired })
+            .ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { ResolutionRationale = "A different rationale." }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { PreReleaseEvidenceRequired = true }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { SubjectDisplayNumber = "SYSR-00000200.00" }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { Trigger = VerificationImpactTrigger.RequirementModified }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { ChangeRequestId = Guid.NewGuid() }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { RequirementChangeId = Guid.NewGuid() }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { RequirementRevisionId = Guid.NewGuid() }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { ProcedureId = Guid.NewGuid() }).ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { ResolvedProcedureId = Guid.NewGuid(), ResolvedProcedureRevisionId = Guid.NewGuid(),
+            Outcome = VerificationImpactOutcome.ProcedureCoverageConfirmed,
+            ProcedureChangeAction = TestProcedureChangeAction.LinkExisting })
+            .ReviewCycles.Single().SnapshotHash);
+        Assert.NotEqual(baseline, SubmittedWithImpact(ImpactBase() with
+        { RetargetedRequirementRevisionId = Guid.NewGuid(), Outcome = VerificationImpactOutcome.ProcedureRetargeted,
+            ProcedureChangeAction = TestProcedureChangeAction.LinkExisting })
+            .ReviewCycles.Single().SnapshotHash);
+    }
+
+    [Fact]
+    public void Impact_decision_order_is_canonical()
+    {
+        var first = ImpactBase();
+        var second = ImpactBase() with { ItemId = Guid.NewGuid(), SubjectDisplayNumber = "SYSR-00000300.00" };
+        var driving = Guid.NewGuid();
+        var changeRequestId = Guid.NewGuid();
+
+        var ordered = CreateWith(changeRequestId);
+        ordered.AssignControlledNumber("SYSTCR-000063", Now.AddMinutes(1));
+        ordered.AddProcedureChange("verification.engineer",
+            ProcedureDraftWith(drivingJson: $"[\"{driving}\"]"), Now.AddMinutes(2));
+        ordered.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3),
+            impactDecisions: [first, second]);
+
+        var reversed = CreateWith(changeRequestId);
+        reversed.AssignControlledNumber("SYSTCR-000063", Now.AddMinutes(1));
+        reversed.AddProcedureChange("verification.engineer",
+            ProcedureDraftWith(drivingJson: $"[\"{driving}\"]"), Now.AddMinutes(2));
+        reversed.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3),
+            impactDecisions: [second, first]);
+
+        Assert.Equal(ordered.ReviewCycles.Single().SnapshotHash,
+            reversed.ReviewCycles.Single().SnapshotHash);
+    }
+
     private static TestProcedureChangeDraft ProcedureDraft(string baseNumber = "SYSTP-000123",
         TestProcedureChangeKind kind = TestProcedureChangeKind.Introduce,
         TestProcedureLevel level = TestProcedureLevel.System) =>

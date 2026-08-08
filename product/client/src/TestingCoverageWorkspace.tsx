@@ -360,7 +360,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const advance = (request: TestChangeRequest, action: 'submit' | 'approve' | 'return', rationale?: string, approverId?: string, approvers?: { userId: string }[]) => act(async () => {
     await apiRequest(`${api}/api/test-change-reviews/${request.id}/${action}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(action === 'submit' ? { approverId, approvers } : { rationale: rationale ?? '' }),
+      body: JSON.stringify(action === 'submit'
+        ? { approverId, approvers, expectedVersion: request.version }
+        : { rationale: rationale ?? '' }),
     })
     setSaved(action === 'submit' ? `${request.displayNumber} sent for approval.`
       : action === 'approve' ? `${request.displayNumber} approved.`
