@@ -41,8 +41,11 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
 
         var scrIds = baseline.Selections.Select(x => x.ChangeRequestId).ToList();
         var scrs = await db.SystemChangeRequests.AsNoTracking().Where(x => scrIds.Contains(x.Id)).Include(x => x.RequirementChanges).ToListAsync(ct);
-        foreach (var change in scrs.SelectMany(x => x.RequirementChanges))
-            RequirementAuthoringJson.EnsureCompleteImpactDispositions(change.ImpactDispositionJson, change.DisplayNumber);
+        // DEC-071 superseded DEC-062: review submission, baseline selection/freeze/materialization and
+        // integrity checkpoints do not require the former five impact dispositions, and existing stored
+        // disposition data remains historical and is not rewritten. A legacy change whose
+        // ImpactDispositionJson predates the capability (often "{}", written by the introducing migration's
+        // default) must therefore not block materialization.
         var created = 0;
         // What each change became, so verification work can bind to exact revisions once they exist.
         var materialized = new List<MaterializedRequirementChange>();
