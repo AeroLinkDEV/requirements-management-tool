@@ -129,7 +129,7 @@ test('a configured two-stage sequential TCR review completes through the UI', as
   await decide.getByRole('button', { name: 'Record decision' }).click()
   await expect(decide).toHaveCount(0, { timeout: 30_000 })
 
-  await drawer.getByRole('button', { name: 'SYSTCR required' }).click()
+  await drawer.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
   const packageLink = drawer.getByRole('button', { name: /SYSTCR-\d{6}\.\d{2}/ })
   await expect(packageLink).toBeVisible({ timeout: 30_000 })
   await packageLink.click()
