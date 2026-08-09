@@ -1278,3 +1278,9 @@ button.coverageState:hover {
   cursor: pointer;
 }
 .savedViewActions button:hover { border-color: #b9c8d6; color: #24405c; }
+
+/* Fail-closed exact-revision deep link: an explicit requirementRevisionId that does not belong to this
+   requirement is an unavailable record, never a reason to substitute the latest revision. */
+.deepLinkUnavailable { display: flex; flex-direction: column; gap: 4px; padding: 20px; }
+.deepLinkUnavailable b { font: 750 15px var(--font-display); color: #17314f; }
+.deepLinkUnavailable span { color: #5c6878; font-size: 13px; line-height: 1.4; }

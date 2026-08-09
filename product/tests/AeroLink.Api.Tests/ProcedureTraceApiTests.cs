@@ -61,12 +61,14 @@ public sealed class ProcedureTraceApiTests
         var release17 = new SoftwareRelease(project.Id, "1.7", false, release16.Id);
         db.AddRange(program, project, release15, release16, release17);
 
-        SystemChangeRequest Approved(string number, string requirementNumber, string statement, Guid releaseId)
+        SystemChangeRequest Approved(string number, Guid releaseId,
+            params (string Number, string Statement)[] requirements)
         {
             var request = new SystemChangeRequest(number, 0, project.Id, releaseId,
                 "Trace fixture", "Problem", "Analysis", "Solution", "author", now);
-            request.AddRequirementChange("author", requirementNumber, 0, RequirementLevel.System,
-                RequirementChangeKind.Introduce, statement, "Trace fixture rationale.", "Test", now);
+            foreach (var requirement in requirements)
+                request.AddRequirementChange("author", requirement.Number, 0, RequirementLevel.System,
+                    RequirementChangeKind.Introduce, requirement.Statement, "Trace fixture rationale.", "Test", now);
             request.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], now);
             request.ApproveActiveStage("reviewer", now);
             return request;
@@ -83,12 +85,13 @@ public sealed class ProcedureTraceApiTests
             return baseline;
         }
 
-        var scr15 = Approved("SRCR-03150", "SYSR-000001",
-            "The FMS shall retain exact build-scoped verification traceability.", release15.Id);
-        var scr16 = Approved("SRCR-03151", "SYSR-000002",
-            "The FMS shall sequence oceanic waypoints in the configured round-robin order.", release16.Id);
-        var scr17 = Approved("SRCR-03152", "SYSR-000003",
-            "The FMS shall report the active round-robin sequence to the flight crew.", release17.Id);
+        var scr15 = Approved("SRCR-03150", release15.Id,
+            ("SYSR-000001", "The FMS shall retain exact build-scoped verification traceability."));
+        var scr16 = Approved("SRCR-03151", release16.Id,
+            ("SYSR-000002", "The FMS shall sequence oceanic waypoints in the configured round-robin order."),
+            ("SYSR-000003", "The FMS shall report the active round-robin sequence to the flight crew."));
+        var scr17 = Approved("SRCR-03152", release17.Id,
+            ("SYSR-000004", "The FMS shall persist the round-robin sequence across power cycles."));
         var baseline15 = Baseline("SW-01.50", release15, scr15, null);
         var baseline16 = Baseline("SW-01.60", release16, scr16, baseline15.Id);
         var baseline17 = Baseline("SW-01.70", release17, scr17, baseline16.Id);
@@ -108,7 +111,7 @@ public sealed class ProcedureTraceApiTests
         var requirement3Revision = new RequirementRevision(requirement3.Id, 0,
             "The FMS shall report the active round-robin sequence to the flight crew.",
             "New FMS 1.7 capability.", "Test",
-            RequirementRevisionState.Active, scr17.Id, baseline17.Id, now);
+            RequirementRevisionState.Active, scr16.Id, baseline16.Id, now);
         var requirement4Revision = new RequirementRevision(requirement4.Id, 0,
             "The FMS shall persist the round-robin sequence across power cycles.",
             "Future-only capability.", "Test",
@@ -120,6 +123,7 @@ public sealed class ProcedureTraceApiTests
             new BaselineRequirementSelection(baseline15.Id, requirement1.Id, requirement1Revision.Id),
             new BaselineRequirementSelection(baseline16.Id, requirement1.Id, requirement1Revision.Id),
             new BaselineRequirementSelection(baseline16.Id, requirement2.Id, requirement2Revision.Id),
+            new BaselineRequirementSelection(baseline16.Id, requirement3.Id, requirement3Revision.Id),
             new BaselineRequirementSelection(baseline17.Id, requirement1.Id, requirement1Revision.Id),
             new BaselineRequirementSelection(baseline17.Id, requirement2.Id, requirement2Revision.Id),
             new BaselineRequirementSelection(baseline17.Id, requirement3.Id, requirement3Revision.Id),
@@ -149,6 +153,9 @@ public sealed class ProcedureTraceApiTests
             // never reconfirmed, so it must render distinctly from Confirmed coverage.
             TestRequirementCoverage.CarriedForward(revision01.Id, requirement3Revision.Id,
                 "Requirement wording changed; reconfirmation pending.", now),
+            // Deliberately malformed/historical: revision01 (Build 1.6's carried revision) has a coverage row
+            // to a requirement revision only Build 1.7 carries. It must never surface in Build 1.6's trace.
+            new TestRequirementCoverage(revision01.Id, requirement4Revision.Id),
             new TestRequirementCoverage(revision02.Id, requirement1Revision.Id),
             new TestRequirementCoverage(revision02.Id, requirement4Revision.Id));
         db.BaselineTestProcedures.AddRange(
@@ -243,13 +250,17 @@ public sealed class ProcedureTraceApiTests
             byDisplay["SYSR-000003.00"].GetProperty("revisionId").GetGuid());
         Assert.Equal("Suspect", byDisplay["SYSR-000003.00"].GetProperty("coverageState").GetString());
         Assert.True(byDisplay["SYSR-000003.00"].GetProperty("isSuspect").GetBoolean());
+        // revision01 carries a coverage row to Build 1.7's SYSR-000004. It is historical evidence and must
+        // never be presented as a requirement this build's procedure verifies.
+        Assert.DoesNotContain("SYSR-000004.00", byDisplay.Keys);
 
         var provenance = body.GetProperty("provenance").EnumerateArray().ToList();
-        Assert.Contains(provenance, x => x.GetProperty("package").GetString() == "SYSTCR-000001"
+        Assert.Contains(provenance, x => x.GetProperty("package").GetString() == "SYSTCR-000001.00"
             && x.GetProperty("changeRequest").GetString() == "SRCR-03151.00");
         Assert.Equal(fixture.TcrId, body.GetProperty("sourceTestChangeRequestId").GetGuid());
         Assert.True(body.GetProperty("build").GetProperty("isExactManifest").GetBoolean());
         Assert.Equal(fixture.Baseline16Id, body.GetProperty("build").GetProperty("effectiveBaselineId").GetGuid());
+        Assert.Equal(fixture.Baseline16Id, body.GetProperty("build").GetProperty("requirementBaselineId").GetGuid());
     }
 
     [Fact]
@@ -275,6 +286,7 @@ public sealed class ProcedureTraceApiTests
         var build16Requirements = build16.GetProperty("requirements").EnumerateArray()
             .Select(x => x.GetProperty("displayNumber").GetString()).ToList();
         Assert.Equal(["SYSR-000001.00", "SYSR-000002.00", "SYSR-000003.00"], build16Requirements);
+        Assert.DoesNotContain("SYSR-000004.00", build16Requirements);
 
         var build17 = await client.GetFromJsonAsync<JsonElement>(
             $"/api/test-procedures/{fixture.ProcedureId}/trace?releaseId={fixture.Release17Id}");
@@ -331,5 +343,135 @@ public sealed class ProcedureTraceApiTests
         using var response = await client.GetAsync(
             $"/api/test-procedures/{fixture.ProcedureId}/trace?releaseId={fixture.Release16Id}");
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Multi_source_TCR_provenance_names_each_impact_items_own_change_request()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedMultiSourceAsync(factory);
+        await LoginAsync(client, "trace.engineer");
+
+        using var response = await client.GetAsync(
+            $"/api/test-procedures/{fixture.ProcedureId}/trace?releaseId={fixture.ReleaseId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        Assert.Equal(fixture.RevisionId, body.GetProperty("revisionId").GetGuid());
+
+        var provenance = body.GetProperty("provenance").EnumerateArray().ToList();
+        Assert.Equal(2, provenance.Count);
+        var fromFirst = Assert.Single(provenance,
+            x => x.GetProperty("changeRequest").GetString() == "SRCR-04001.00");
+        Assert.Equal("SYSTCR-000401.00", fromFirst.GetProperty("package").GetString());
+        Assert.Equal("SYSR-000401.00", fromFirst.GetProperty("subjectDisplayNumber").GetString());
+        Assert.Equal("CreateNew", fromFirst.GetProperty("action").GetString());
+        var fromSecond = Assert.Single(provenance,
+            x => x.GetProperty("changeRequest").GetString() == "SRCR-04002.00");
+        Assert.Equal("SYSTCR-000401.00", fromSecond.GetProperty("package").GetString());
+        Assert.Equal("SYSR-000402.00", fromSecond.GetProperty("subjectDisplayNumber").GetString());
+        Assert.Equal("ModifyExisting", fromSecond.GetProperty("action").GetString());
+        // The folded source must never be mislabeled as the TCR's originating change.
+        Assert.DoesNotContain(provenance, x =>
+            x.GetProperty("changeRequest").GetString() == "SRCR-04001.00"
+            && x.GetProperty("subjectDisplayNumber").GetString() == "SYSR-000402.00");
+    }
+
+    private sealed record MultiSourceFixture(
+        Guid ProjectId, Guid ReleaseId, Guid ProcedureId, Guid RevisionId, Guid TcrId,
+        Guid FirstChangeId, Guid SecondChangeId);
+
+    private static async Task<MultiSourceFixture> SeedMultiSourceAsync(AeroLinkApiFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = new DateTimeOffset(2026, 8, 8, 13, 0, 0, TimeSpan.Zero);
+
+        var program = new ProgramRecord("Multi-Source Trace Program", "MTP");
+        var project = new ProjectRecord(program.Id, "FMS", "Multi-source FMS");
+        var release = new SoftwareRelease(project.Id, "1.6", false);
+        db.AddRange(program, project, release);
+
+        SystemChangeRequest Approved(string number, string requirementNumber, string statement)
+        {
+            var request = new SystemChangeRequest(number, 0, project.Id, release.Id,
+                "Multi-source fixture", "P", "A", "S", "author", now);
+            request.AddRequirementChange("author", requirementNumber, 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, statement, "Rationale", "Test", now);
+            request.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], now);
+            request.ApproveActiveStage("reviewer", now);
+            return request;
+        }
+
+        var first = Approved("SRCR-04001", "SYSR-000401",
+            "The FMS shall sequence source A waypoints.");
+        var second = Approved("SRCR-04002", "SYSR-000402",
+            "The FMS shall sequence folded source B waypoints.");
+        db.AddRange(first, second);
+
+        var baseline = new CandidateBaseline("SW-01.60", 0, project.Id, release.Id, null,
+            "Multi-source build", "cm", now);
+        baseline.Select(first, "cm", now);
+        baseline.Select(second, "cm", now);
+        baseline.Freeze("cm", now);
+        baseline.MarkRequirementsMaterialized("cm", new string('a', 64), 2, now);
+        db.Add(baseline);
+
+        var requirementA = new RequirementArtifact(project.Id, "SYSR-000401", RequirementLevel.System, now);
+        var requirementB = new RequirementArtifact(project.Id, "SYSR-000402", RequirementLevel.System, now);
+        var revisionA = new RequirementRevision(requirementA.Id, 0,
+            "The FMS shall sequence source A waypoints.", "Rationale", "Test",
+            RequirementRevisionState.Active, first.Id, baseline.Id, now);
+        var revisionB = new RequirementRevision(requirementB.Id, 0,
+            "The FMS shall sequence folded source B waypoints.", "Rationale", "Test",
+            RequirementRevisionState.Active, second.Id, baseline.Id, now);
+        db.AddRange(requirementA, requirementB, revisionA, revisionB);
+        db.BaselineRequirements.AddRange(
+            new BaselineRequirementSelection(baseline.Id, requirementA.Id, revisionA.Id),
+            new BaselineRequirementSelection(baseline.Id, requirementB.Id, revisionB.Id));
+
+        // Raised from source A, with source B folded in: a genuine Stage 4 multi-source package.
+        var review = new TestChangeReview(project.Id, release.Id, first.Id,
+            TestChangeReviewDiscipline.System, first.DisplayNumber, now);
+        review.RecordTestChangeRequired("verification.engineer", now);
+        review.AssignControlledNumber("SYSTCR-000401", now);
+        review.IncludeChangeRequest("verification.engineer", second.Id, second.DisplayNumber, now);
+        db.Add(review);
+
+        var procedure = new TestProcedure(project.Id, "SYSTP-000401", "Multi-source procedure",
+            "test.author", now, TestProcedureLevel.System);
+        var revision = new TestProcedureRevision(procedure.Id, 0,
+            "Verify both folded sources.", "Configured environment", "Execute steps.",
+            "Expected behavior observed.", TestProcedureState.Approved, "test.author", now,
+            sourceTestChangeRequestId: review.Id, effectiveBaselineId: baseline.Id);
+        db.AddRange(procedure, revision);
+        db.TestCoverage.AddRange(
+            new TestRequirementCoverage(revision.Id, revisionA.Id),
+            new TestRequirementCoverage(revision.Id, revisionB.Id));
+        db.BaselineTestProcedures.Add(new BaselineTestProcedureSelection(baseline.Id, procedure.Id, revision.Id));
+        baseline.MarkTestProceduresMaterialized("cm", new string('b', 64), 1, now);
+
+        var changeA = first.RequirementChanges.Single(x => x.BaseNumber == "SYSR-000401");
+        var changeB = second.RequirementChanges.Single(x => x.BaseNumber == "SYSR-000402");
+        var itemA = VerificationImpactItem.ForIntroducedRequirement(project.Id, release.Id, first.Id,
+            review.Id, changeA.Id, changeA.DisplayNumber, "Test", now);
+        itemA.LinkRequirementRevision(revisionA.Id, now);
+        itemA.Resolve("verification.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
+            "Source A aligned.", now, procedure.Id, revision.Id,
+            TestProcedureChangeAction.CreateNew, preReleaseEvidenceRequired: false);
+        var itemB = VerificationImpactItem.ForIntroducedRequirement(project.Id, release.Id, second.Id,
+            review.Id, changeB.Id, changeB.DisplayNumber, "Test", now);
+        itemB.LinkRequirementRevision(revisionB.Id, now);
+        itemB.Resolve("verification.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
+            "Source B aligned.", now, procedure.Id, revision.Id,
+            TestProcedureChangeAction.ModifyExisting, preReleaseEvidenceRequired: false);
+        db.AddRange(itemA, itemB);
+
+        var account = new UserAccount("trace.engineer", "Trace Engineer", "trace@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.AddRange(account, new ProgramMembership(account.Id, program.Id, ProgramRole.TestEngineer, "test.setup", now));
+        await db.SaveChangesAsync();
+        return new MultiSourceFixture(project.Id, release.Id, procedure.Id, revision.Id, review.Id,
+            first.Id, second.Id);
     }
 }

@@ -60,7 +60,7 @@ type ProcedureTrace = {
   sourceTestChangeRequestId?: string
   requirements: TraceRequirement[]
   provenance: TraceProvenance[]
-  build?: { releaseId: string; effectiveBaselineId: string; isExactManifest: boolean }
+  build?: { releaseId: string; effectiveBaselineId: string; requirementBaselineId?: string; isExactManifest: boolean }
 }
 
 type Tab = 'details' | 'trace' | 'history' | 'discussion'

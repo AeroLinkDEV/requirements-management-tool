@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { login, openNavigationGroup } from './auth'
+import { login, openNavigationGroup, selectProgram } from './auth'
 
 /**
  * #399 — the Test Procedure Explorer's Trace &amp; impact tab must be a trace, not a count.
@@ -143,4 +143,92 @@ test('zero coverage stays explicit and truthful in Trace & impact', async ({ pag
   const inspector = page.locator('.requirementInspector')
   await expect(inspector).toContainText('This procedure verifies 0 requirements.')
   await expect(inspector).toContainText(/Nothing is verified by SYSTP-000001\.00/)
+})
+
+test('a software HLR trace navigates to the exact software requirement revision', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('button', { name: 'Software' }).last().click()
+  await page.getByRole('link', { name: 'Software HLR Test Procedure Explorer' }).click()
+  await expect(page).toHaveURL(/software-verification\/hlr\/procedures$/, { timeout: 30_000 })
+
+  await page.getByLabel('Find a procedure').fill('HLRTP-000001')
+  const row = page.locator('.procedureRow').filter({ hasText: 'HLRTP-000001' }).first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.click()
+
+  const inspector = page.locator('.requirementInspector')
+  await expect(inspector).toBeVisible({ timeout: 30_000 })
+  await inspector.getByRole('button', { name: 'Trace & impact' }).click()
+  const rows = inspector.locator('.traceRequirement')
+  await expect(rows.first()).toBeVisible({ timeout: 30_000 })
+
+  await rows.first().getByRole('button', { name: /Open requirement/ }).click()
+  // The shared Software Requirements Explorer opens the exact software requirement revision; the HLR level
+  // is carried by the route and the revision identity, never substituted.
+  await expect(page).toHaveURL(
+    /\/requirements\/[0-9a-f-]{36}\?discipline=software&requirementRevisionId=[0-9a-f-]{36}/,
+    { timeout: 30_000 })
+  const heading = page.getByRole('heading', { name: /^HLR-\d{6}\.\d{2}$/ })
+  await expect(heading).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.requirementInspector')).toContainText('HIGHLEVEL REQUIREMENT')
+  const display = (await heading.textContent())!.trim()
+  const exactUrl = page.url()
+
+  await page.reload()
+  await expect(page).toHaveURL(exactUrl)
+  await expect(page.getByRole('heading', { name: display })).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.requirementInspector')).toContainText('HIGHLEVEL REQUIREMENT')
+})
+
+test('an exact requirement deep link fails closed instead of substituting the latest revision', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Test Procedure Explorer' }).click()
+  await expect(page.getByRole('heading', { name: 'Test Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
+
+  await page.getByLabel('Find a procedure').fill('SYSTP-000001')
+  const row = page.locator('.procedureRow').filter({ hasText: 'SYSTP-000001' }).first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.click()
+  const inspector = page.locator('.requirementInspector')
+  await expect(inspector).toBeVisible({ timeout: 30_000 })
+  await inspector.getByRole('button', { name: 'Trace & impact' }).click()
+  const rows = inspector.locator('.traceRequirement')
+  await expect(rows).toHaveCount(2, { timeout: 30_000 })
+  const revisionIds = await rows.evaluateAll(nodes =>
+    nodes.map(node => node.textContent?.match(/Revision ([0-9a-f-]{36})/i)?.[1] ?? ''))
+  expect(revisionIds[0]).toMatch(/^[0-9a-f-]{36}$/)
+  expect(revisionIds[1]).toMatch(/^[0-9a-f-]{36}$/)
+
+  await rows.first().getByRole('button', { name: /Open requirement/ }).click()
+  await expect(page).toHaveURL(
+    /\/requirements\/[0-9a-f-]{36}\?discipline=system&requirementRevisionId=[0-9a-f-]{36}/,
+    { timeout: 30_000 })
+  const validUrl = new URL(page.url())
+  const artifactId = validUrl.pathname.split('/').pop()!
+  expect(artifactId).toMatch(/^[0-9a-f-]{36}$/)
+  const exactHeading = page.getByRole('heading', { name: /^SYSR-\d{6}\.\d{2}$/ })
+  await expect(exactHeading).toBeVisible({ timeout: 30_000 })
+
+  // A revision belonging to a different Requirement artifact must not silently open that artifact's latest.
+  const mismatched = new URL(validUrl)
+  mismatched.searchParams.set('requirementRevisionId', revisionIds[1])
+  await page.goto(mismatched.toString())
+  await expect(page.locator('.deepLinkUnavailable')).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.requirementInspector h2')).toHaveCount(0)
+
+  // A revision that does not exist at all must not fall back to the latest either.
+  const nonexistent = new URL(validUrl)
+  nonexistent.searchParams.set('requirementRevisionId', '00000000-0000-0000-0000-000000000000')
+  await page.goto(nonexistent.toString())
+  await expect(page.locator('.deepLinkUnavailable')).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.requirementInspector h2')).toHaveCount(0)
+
+  // The build context stays intact in both failure states: same Program, Project and Release route.
+  expect(mismatched.pathname).toMatch(/^\/programs\/[^/]+\/projects\/[^/]+\/releases\/[^/]+\/requirements\//)
+  expect(nonexistent.pathname).toMatch(/^\/programs\/[^/]+\/projects\/[^/]+\/releases\/[^/]+\/requirements\//)
 })

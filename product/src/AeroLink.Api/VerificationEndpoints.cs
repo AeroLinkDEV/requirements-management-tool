@@ -460,6 +460,7 @@ public static class VerificationEndpoints
 
             Guid? selectedRevisionId = revisionId;
             Guid? effectiveBaselineId = null;
+            Guid? requirementBaselineId = null;
             var isExactManifest = false;
             if (releaseId is not null)
             {
@@ -482,6 +483,16 @@ public static class VerificationEndpoints
                 selectedRevisionId = carriedRevisionId;
                 isExactManifest = effectivity.IsExactManifest;
                 effectiveBaselineId = effectivity.BaselineId;
+                // The requirement manifest is the other half of build effectivity: the same build's exact
+                // BaselineRequirements, not a project-global view of what any build ever carried.
+                requirementBaselineId = await BuildScope.EffectiveBaselineAsync(
+                    db, procedure.ProjectId, releaseId.Value, ct);
+                if (requirementBaselineId is null)
+                    return Results.NotFound(new
+                    {
+                        error = "The selected build has no controlled requirement baseline to intersect the trace against.",
+                        code = "requirement_baseline_unavailable"
+                    });
             }
             selectedRevisionId ??= await db.TestProcedureRevisions.AsNoTracking()
                 .Where(x => x.ProcedureId == id).OrderByDescending(x => x.Revision)
@@ -517,6 +528,18 @@ public static class VerificationEndpoints
                                      requirementRevision.Statement,
                                      link.IsSuspect
                                  }).ToListAsync(ct);
+            if (requirementBaselineId is not null)
+            {
+                // A selected build must never claim a RequirementRevision outside that build's exact
+                // requirement manifest as one its carried procedure verifies. Out-of-scope coverage rows are
+                // historical database evidence and stay in place; they are simply not presented as this
+                // build's controlled traceability.
+                var manifestRevisionIds = await db.BaselineRequirements.AsNoTracking()
+                    .Where(x => x.BaselineId == requirementBaselineId.Value)
+                    .Select(x => x.RevisionId).ToListAsync(ct);
+                var manifest = manifestRevisionIds.ToHashSet();
+                covered = covered.Where(x => manifest.Contains(x.RequirementRevisionId)).ToList();
+            }
 
             // CoverageState is the product's single definition, read from the same projection the release
             // gate and the requirement workspace use. Build-scoped: the exact carried revision's own state
@@ -527,15 +550,20 @@ public static class VerificationEndpoints
                 .GroupBy(x => x.RequirementRevisionId)
                 .ToDictionary(x => x.Key, x => x.First().CoverageState);
 
+            // Provenance names each impact item's own source Change Request, not the TCR's originating one.
+            // Stage 4 permits multi-source TCRs: a folded-in source keeps its own VerificationImpactItem,
+            // so review.SourceChangeRequestNumber alone would mislabel folded work as the base change.
             var provenance = await (from item in db.VerificationImpactItems.AsNoTracking()
                                     join review in db.TestChangeReviews.AsNoTracking()
                                         on item.TestChangeReviewId equals review.Id
+                                    join change in db.SystemChangeRequests.AsNoTracking()
+                                        on item.ChangeRequestId equals change.Id
                                     where item.ResolvedProcedureRevisionId == selectedRevisionIdValue
                                     select new
                                     {
                                         item.SubjectDisplayNumber,
-                                        ChangeRequest = review.SourceChangeRequestNumber,
-                                        Package = review.BaseNumber,
+                                        ChangeRequest = change.DisplayNumber,
+                                        Package = review.DisplayNumber,
                                         Action = item.ProcedureChangeAction,
                                     }).Distinct().ToListAsync(ct);
 
@@ -576,7 +604,7 @@ public static class VerificationEndpoints
                 }),
                 build = releaseId is null ? null : new
                 {
-                    releaseId = releaseId.Value, effectiveBaselineId, isExactManifest
+                    releaseId = releaseId.Value, effectiveBaselineId, requirementBaselineId, isExactManifest
                 },
             });
         });

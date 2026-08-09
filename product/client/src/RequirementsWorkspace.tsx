@@ -219,6 +219,7 @@ export default function RequirementsWorkspace({
     [detail, setDetail] = useState<Detail>(),
     [impact, setImpact] = useState<Impact>(),
     [comments, setComments] = useState<Comment[]>([]),
+    [deepLinkMissing, setDeepLinkMissing] = useState(false),
     [inspectorTab, setInspectorTab] = useState<
       "details" | "trace" | "history" | "discussion"
     >("details"),
@@ -241,6 +242,7 @@ export default function RequirementsWorkspace({
     setSectionId("");
     setPage(1);
     setSelected(undefined);
+    setDeepLinkMissing(false);
   }, [scope]);
   const params = useMemo(() => {
     const p = new URLSearchParams({
@@ -340,6 +342,7 @@ export default function RequirementsWorkspace({
     if (response.ok) setComments(await response.json());
   };
   const open = useCallback(async (item: Requirement) => {
+    setDeepLinkMissing(false);
     setSelected(item);
     setInspectorTab("details");
     const [a, b, c] = await Promise.all([
@@ -366,6 +369,7 @@ export default function RequirementsWorkspace({
   useEffect(() => {
     if (!initialArtifactId || selected?.id === initialArtifactId) return;
     let cancelled = false;
+    setDeepLinkMissing(false);
     (async () => {
       const [detailResponse, commentsResponse, impactResponse] = await Promise.all([
         fetch(`${api}/api/enterprise-requirements/${initialArtifactId}${release?.id ? `?releaseId=${release.id}` : ""}`),
@@ -374,11 +378,24 @@ export default function RequirementsWorkspace({
         ),
         fetch(`${api}/api/enterprise-requirements/${initialArtifactId}/impact${release?.id ? `?releaseId=${release.id}` : ""}`),
       ]);
-      if (!detailResponse.ok) return;
+      if (!detailResponse.ok)
+      {
+        if (!cancelled) setDeepLinkMissing(true);
+        return;
+      }
       const value: Detail = await detailResponse.json();
-      const latest = (initialRevisionId
+      // Fail closed: an explicit requirementRevisionId that does not belong to this requirement must never
+      // silently become "the latest revision". "Open revision X" that cannot be honored is an unavailable
+      // record, not permission to substitute revision Y.
+      const requested = initialRevisionId
         ? value.history.find((entry) => entry.id === initialRevisionId)
-        : undefined) ?? value.history[0];
+        : undefined;
+      if (initialRevisionId && !requested)
+      {
+        if (!cancelled) setDeepLinkMissing(true);
+        return;
+      }
+      const latest = requested ?? value.history[0];
       if (!latest || cancelled) return;
       const item: Requirement = {
         id: value.id,
@@ -1153,7 +1170,17 @@ export default function RequirementsWorkspace({
             </button>
           </div>
         </section>
-        {selected && (
+        {deepLinkMissing ? (
+          <aside className="requirementInspector" aria-label="Unavailable requirement revision">
+            <div className="deepLinkUnavailable">
+              <b>The exact requirement revision could not be opened</b>
+              <span>
+                The requirementRevisionId in this link does not belong to this requirement. No revision was
+                substituted in its place.
+              </span>
+            </div>
+          </aside>
+        ) : selected && (
           <aside className="requirementInspector">
             <div className="inspectorTop">
               <div>
