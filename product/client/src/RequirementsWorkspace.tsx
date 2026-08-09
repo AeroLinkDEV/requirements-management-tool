@@ -159,6 +159,8 @@ type Props = {
   release?: { id: string; version: string; isReleased: boolean };
   initialViewId?: string;
   initialArtifactId?: string;
+  /** The exact requirement revision a procedure trace deep link opens, when one is named. */
+  initialRevisionId?: string;
   onBack: () => void;
   onOpenScr: (id: string) => void;
   onProposeChange: (requirementId: string, level?: Requirement["level"]) => void;
@@ -183,6 +185,7 @@ export default function RequirementsWorkspace({
   release,
   initialViewId,
   initialArtifactId,
+  initialRevisionId,
   onBack,
   onOpenScr,
   onProposeChange,
@@ -373,7 +376,9 @@ export default function RequirementsWorkspace({
       ]);
       if (!detailResponse.ok) return;
       const value: Detail = await detailResponse.json();
-      const latest = value.history[0];
+      const latest = (initialRevisionId
+        ? value.history.find((entry) => entry.id === initialRevisionId)
+        : undefined) ?? value.history[0];
       if (!latest || cancelled) return;
       const item: Requirement = {
         id: value.id,
@@ -408,7 +413,7 @@ export default function RequirementsWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [api, initialArtifactId, release?.id, selected?.id]);
+  }, [api, initialArtifactId, initialRevisionId, release?.id, selected?.id]);
   const clearFilters = () => {
     setSearch("");
     setLevel(scope);

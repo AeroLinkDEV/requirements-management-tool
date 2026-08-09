@@ -36,6 +36,32 @@ type Page = { page: number; pageSize: number; totalCount: number; totalPages: nu
 type Comment = {
   id: string; body: string; state: string; createdBy: string; createdAt: string; disposition?: string
 }
+type TraceRequirement = {
+  id: string
+  revisionId: string
+  displayNumber: string
+  level: string
+  statement: string
+  coverageState: 'Confirmed' | 'Suspect'
+  isSuspect: boolean
+}
+type TraceProvenance = { changeRequest: string; package: string; subjectDisplayNumber: string; action: string }
+type ProcedureTrace = {
+  procedureId: string
+  baseNumber: string
+  title: string
+  level: string
+  revisionId: string
+  displayNumber: string
+  revision: number
+  state: string
+  authorId: string
+  createdAt: string
+  sourceTestChangeRequestId?: string
+  requirements: TraceRequirement[]
+  provenance: TraceProvenance[]
+  build?: { releaseId: string; effectiveBaselineId: string; isExactManifest: boolean }
+}
 
 type Tab = 'details' | 'trace' | 'history' | 'discussion'
 /**
@@ -71,9 +97,11 @@ const disciplineLabel = (discipline: TestDiscipline) =>
  * from it, while a procedure's shows the requirements that drive it. A procedure exists because something has
  * to be verified.
  */
-export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, released }: {
+export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, released,
+  onOpenRequirementRevision }: {
   api: string; projectId: string; releaseId: string; discipline: TestDiscipline; buildName: string
   released: boolean
+  onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
 }) {
   const [data, setData] = useState<Page>()
   // Seeded from the address, so a link to one procedure opens on that procedure rather than on page one of
@@ -87,8 +115,13 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [page, setPage] = useState(Number(opening.get('procedurePage') ?? '1') || 1)
   const lastDiscreteState = useRef<string | null>(null)
   const [selectedId, setSelectedId] = useState(opening.get('procedureId') ?? '')
-  const [tab, setTab] = useState<Tab>('details')
+  const [tab, setTab] = useState<Tab>(() => {
+    const seeded = opening.get('procedureTab')
+    return seeded === 'trace' || seeded === 'history' || seeded === 'discussion' ? seeded : 'details'
+  })
   const [history, setHistory] = useState<History>()
+  const [trace, setTrace] = useState<ProcedureTrace>()
+  const [traceError, setTraceError] = useState(false)
   const [comments, setComments] = useState<Comment[]>([])
   const [error, setError] = useState('')
   const [pageTab, setPageTab] = useState<PageTab>('procedures')
@@ -159,6 +192,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setProcedureState(params.get('procedureState') ?? '')
       setProcedureOutcome(params.get('procedureOutcome') ?? '')
       setPage(Number(params.get('procedurePage') ?? '1') || 1)
+      const seeded = params.get('procedureTab')
+      setTab(seeded === 'trace' || seeded === 'history' || seeded === 'discussion' ? seeded : 'details')
     }
     addEventListener('popstate', restore)
     return () => removeEventListener('popstate', restore)
@@ -180,6 +215,24 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           `${api}/api/test-procedures/${selected.id}/history?releaseId=${releaseId}&revisionId=${selected.revisionId}`)
         if (response.ok && active) setHistory(await response.json())
       } catch { if (active) setHistory(undefined) }
+    })()
+    return () => { active = false }
+  }, [api, releaseId, selected, tab])
+
+  // Loaded when the tab is opened rather than with the list, like history: a reader browsing procedures does
+  // not need every trace fetched on their behalf. The server projection is authoritative, naming the exact
+  // coverage rows of the exact revision this build carries rather than a count derived in the browser.
+  useEffect(() => {
+    if (!selected || tab !== 'trace') return
+    let active = true
+    setTraceError(false)
+    void (async () => {
+      try {
+        const response = await fetch(
+          `${api}/api/test-procedures/${selected.id}/trace?releaseId=${releaseId}&revisionId=${selected.revisionId}`)
+        if (response.ok && active) setTrace(await response.json())
+        else if (active) setTraceError(true)
+      } catch { if (active) setTraceError(true) }
     })()
     return () => { active = false }
   }, [api, releaseId, selected, tab])
@@ -261,11 +314,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const suspect = coverage?.items.filter(x => x.disposition === 'Suspect') ?? []
 
   const open = (procedure: Procedure) => {
-    setSelectedId(procedure.id); setTab('details'); setHistory(undefined)
+    setSelectedId(procedure.id); setTab('details'); setHistory(undefined); setTrace(undefined); setTraceError(false)
     const params = new URLSearchParams(location.search)
     params.set('procedure', procedure.displayNumber)
     params.set('procedureId', procedure.id)
     params.set('procedureRevisionId', procedure.revisionId)
+    params.delete('procedureTab')
     window.history.replaceState({}, '', `${location.pathname}?${params}`)
   }
   const close = () => {
@@ -273,6 +327,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     const params = new URLSearchParams(location.search)
     params.delete('procedureId')
     params.delete('procedureRevisionId')
+    params.delete('procedureTab')
+    window.history.replaceState({}, '', `${location.pathname}${params.size ? `?${params}` : ''}`)
+  }
+  // The tab is part of the address, so a direct deep link to a procedure's Trace & impact tab reopens the
+  // same trace context after a refresh. Deliberately a replace: choosing a tab is not somewhere the reader
+  // went so much as how they are reading the procedure they already chose.
+  const selectTab = (next: Tab) => {
+    setTab(next)
+    const params = new URLSearchParams(location.search)
+    if (next === 'details') params.delete('procedureTab'); else params.set('procedureTab', next)
     window.history.replaceState({}, '', `${location.pathname}${params.size ? `?${params}` : ''}`)
   }
 
@@ -440,10 +504,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
               aria-label="Close procedure detail">×</button>
           </div>
           <div className="inspectorTabs">
-            <button className={tab === 'details' ? 'active' : ''} onClick={() => setTab('details')}>Overview</button>
-            <button className={tab === 'trace' ? 'active' : ''} onClick={() => setTab('trace')}>Trace &amp; impact</button>
-            <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>History</button>
-            <button className={tab === 'discussion' ? 'active' : ''} onClick={() => setTab('discussion')}>
+            <button className={tab === 'details' ? 'active' : ''} onClick={() => selectTab('details')}>Overview</button>
+            <button className={tab === 'trace' ? 'active' : ''} onClick={() => selectTab('trace')}>Trace &amp; impact</button>
+            <button className={tab === 'history' ? 'active' : ''} onClick={() => selectTab('history')}>History</button>
+            <button className={tab === 'discussion' ? 'active' : ''} onClick={() => selectTab('discussion')}>
               Discussion <span>{comments.length}</span>
             </button>
           </div>
@@ -464,15 +528,56 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           {tab === 'trace' && (
             <div className="inspectorBody">
               {/* The other direction from a requirement's trace: a requirement shows what derives from it, a
-                  procedure shows what it exists to verify. */}
-              <p className="inspectorNote">
-                This procedure verifies {selected.requirementCount} requirement{selected.requirementCount === 1 ? '' : 's'}.
-              </p>
-              {selected.requirementCount === 0 && (
-                <p className="inspectorNote warn">
-                  Nothing is verified by this procedure. Either it has not been linked yet, or the requirement it
-                  was written against has been retired.
-                </p>
+                  procedure shows what it exists to verify. The server projection names the exact revision this
+                  build carries and every exact requirement revision it verifies, with its Confirmed or Suspect
+                  coverage state and the TCR/change provenance that produced the procedure revision. */}
+              {trace ? (
+                <>
+                  <div className="traceRevisionIdentity">
+                    <b>{trace.displayNumber}</b>
+                    <span>{stateLabel(trace.state)} · {trace.level} · revision {trace.revisionId}</span>
+                    <small>Written by <PersonName userName={trace.authorId} /> · {new Date(trace.createdAt).toLocaleString()}</small>
+                  </div>
+                  {trace.provenance.length > 0 && (
+                    <p className="traceProvenance">
+                      Produced by {trace.provenance.map(driver => `${driver.package} (${driver.changeRequest})`).join(', ')}
+                    </p>
+                  )}
+                  <p className="inspectorNote">
+                    This procedure verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.
+                  </p>
+                  {trace.requirements.length === 0 ? (
+                    <p className="inspectorNote warn">
+                      Nothing is verified by {trace.displayNumber}. Either it has not been linked yet, or the
+                      requirement it was written against has been retired.
+                    </p>
+                  ) : (
+                    <ul className="traceRequirements">
+                      {trace.requirements.map(item => (
+                        <li key={item.revisionId}
+                          className={`traceRequirement${item.coverageState === 'Suspect' ? ' suspect' : ''}`}>
+                          <div className="traceRequirementHead">
+                            <b>{item.displayNumber}</b>
+                            <span>{item.level}</span>
+                            <i className={`traceCoverageBadge ${item.coverageState === 'Suspect' ? 'suspect' : 'confirmed'}`}>
+                              {item.coverageState}
+                            </i>
+                          </div>
+                          <p>{item.statement}</p>
+                          <small>Revision {item.revisionId}</small>
+                          <button type="button" className="linkedArtifactText"
+                            onClick={() => onOpenRequirementRevision(item)}>
+                            Open requirement →
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : traceError ? (
+                <p className="inspectorNote warn">The trace for this procedure revision could not be loaded.</p>
+              ) : (
+                <p className="inspectorNote">Loading trace…</p>
               )}
             </div>
           )}

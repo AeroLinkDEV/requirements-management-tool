@@ -47,6 +47,9 @@ export type AppRoute = {
   releaseId?: string;
   artifactId?: string;
   artifactKind?: string;
+  /// The exact requirement revision a procedure trace deep link opens. Immutable, so a trace that names a
+  /// requirement revision keeps naming it after later revisions exist.
+  requirementRevisionId?: string;
   savedViewId?: string;
   historyStateIntent?: HistoryStateIntent;
   historyTypeIntent?: HistoryTypeIntent;
@@ -90,13 +93,13 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   // Compatibility for links created before typed change-request routes existed. The detail view replaces this
   // with the canonical typed path after the authorized record reveals its type.
   if (tail[0] === "change-requests" && tail[1]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[1]) };
-  if (path === "systems/requirements") return { ...base, view: "requirements", discipline: "system", savedViewId: query.get("view") || undefined };
-  if (path === "software/requirements") return { ...base, view: "requirements", discipline: "software", savedViewId: query.get("view") || undefined };
+  if (path === "systems/requirements") return { ...base, view: "requirements", discipline: "system", savedViewId: query.get("view") || undefined, requirementRevisionId: query.get("requirementRevisionId") || undefined };
+  if (path === "software/requirements") return { ...base, view: "requirements", discipline: "software", savedViewId: query.get("view") || undefined, requirementRevisionId: query.get("requirementRevisionId") || undefined };
   if (path === "systems/documents") return { ...base, view: "documents", discipline: "system" };
   if (path === "software/documents") return { ...base, view: "documents", discipline: "software" };
   if (path === "system-verification/documents") return { ...base, view: "documents", discipline: "systemTest" };
   if (path === "software-verification/documents") return { ...base, view: "documents", discipline: "softwareTest" };
-  if (tail[0] === "requirements" && tail[1]) return { ...base, view: "requirements", discipline: query.get("discipline") === "software" ? "software" : "system", artifactId: decoded(tail[1]) };
+  if (tail[0] === "requirements" && tail[1]) return { ...base, view: "requirements", discipline: query.get("discipline") === "software" ? "software" : "system", artifactId: decoded(tail[1]), requirementRevisionId: query.get("requirementRevisionId") || undefined };
   // The two paths a build's verification work splits into, and their software HLR and LLR pairs. Placed
   // before the rules below that read any second segment as a problem report identifier, which would
   // otherwise take "results" for the name of a corrective action.
