@@ -6,6 +6,7 @@ import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
 import TestChangeRequestCreateDialog from './TestChangeRequestCreateDialog'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
+import { pickerSummary } from './pickerText'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './DownstreamAssessmentQueue.css'
 import './TestingCoverageWorkspace.css'
@@ -341,6 +342,13 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     }, 180)
     return () => clearTimeout(timer)
   }, [api, projectId, scope, creating, effectiveBaseline, requirementQuery, requirementPage, requirementSelection])
+
+  const procedureSummary = pickerSummary(
+    'approved procedure', procedureQuery, procedurePicker?.totalCount ?? 0,
+    procedurePicker?.items?.length ?? 0)
+  const requirementSummary = pickerSummary(
+    'requirement', requirementQuery, requirementPicker?.totalCount ?? 0,
+    requirementPicker?.items?.length ?? 0, 'in scope')
 
   const mine = requests.filter(x => x.discipline === discipline)
 
@@ -830,11 +838,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <input aria-label="Search requirements" className="pickerSearch" value={requirementQuery}
               onChange={event => { setRequirementQuery(event.target.value); setRequirementPage(1) }}
               placeholder="Search by number or wording..." />
-            <div className="pickerMeta">
-              <span>
-                {requirementPicker?.totalCount ?? 0} requirement{(requirementPicker?.totalCount ?? 0) === 1 ? '' : 's'} in scope -
-                showing {(requirementPicker?.items ?? []).length}. Search by number or wording to find any requirement in this build.
-              </span>
+              <div className="pickerMeta">
+                <span>
+                  {requirementSummary.headline}{requirementSummary.note ? ` ${requirementSummary.note}` : ''}
+                </span>
               <span className="pickerPager">
                 <button type="button" disabled={(requirementPicker?.page ?? 1) <= 1}
                   onClick={() => setRequirementPage(page => Math.max(1, page - 1))}>Previous</button>
@@ -1079,8 +1086,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                 </select>
                 <div className="pickerMeta">
                   <span>
-                    {procedurePicker?.totalCount ?? 0} approved procedure{(procedurePicker?.totalCount ?? 0) === 1 ? '' : 's'} in this build -
-                    showing {(procedurePicker?.items ?? []).length}. Search by number or title to find any approved procedure.
+                    {procedureSummary.headline}{procedureSummary.note ? ` ${procedureSummary.note}` : ''}
                   </span>
                   <span className="pickerPager">
                     <button type="button" disabled={(procedurePicker?.page ?? 1) <= 1}

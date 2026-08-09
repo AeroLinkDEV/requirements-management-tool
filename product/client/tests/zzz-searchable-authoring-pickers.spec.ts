@@ -262,8 +262,13 @@ test('an approved procedure beyond the former 200-row limit is searchable in the
   const decided = assessment.locator('.decisionList li').filter({ hasText: /LLR-000651\./ }).first()
   await decided.getByRole('button', { name: 'Decide' }).click()
   const decide = page.getByRole('dialog', { name: /Decide / })
-  await decide.getByRole('textbox', { name: 'Search approved procedures' }).fill('LLRTP-000250')
-  await expect(decide).toContainText('280 approved procedures in this build', { timeout: 30_000 })
+  const searchProcedures = decide.getByRole('textbox', { name: 'Search approved procedures' })
+
+  // With no active search the metadata truthfully states the full eligible candidate count.
+  await expect(decide).toContainText('280 approved procedures in this build.', { timeout: 30_000 })
+
+  await searchProcedures.fill('LLRTP-000250')
+  await expect(decide).toContainText('1 matching approved procedure.', { timeout: 30_000 })
   const option = decide.locator('select[name="procedureId"] option').filter({ hasText: 'LLRTP-000250' })
   await expect(option).toHaveCount(1, { timeout: 30_000 })
   const optionValue = await option.getAttribute('value')
@@ -272,11 +277,24 @@ test('an approved procedure beyond the former 200-row limit is searchable in the
 
   // The current unsaved choice is hydrated alongside the search result: changing the search to something
   // that would normally exclude procedure A must not remove A from the DOM, because the resolve mutation
-  // reads procedureId from the select.
-  await decide.getByRole('textbox', { name: 'Search approved procedures' }).fill('LLRTP-000001')
+  // reads procedureId from the select. The metadata must keep describing the actual search matches and
+  // separately explain that the retained selection is also shown.
+  await searchProcedures.fill('LLRTP-000001')
   await expect(decide.locator('select[name="procedureId"] option').filter({ hasText: 'LLRTP-000250' }))
     .toHaveCount(1, { timeout: 30_000 })
   await expect(decide.getByRole('combobox', { name: 'Covering procedure' })).toHaveValue(optionValue!)
+  await expect(decide).toContainText('1 matching approved procedure.', { timeout: 30_000 })
+  await expect(decide).toContainText('Showing 2 options, including the current selection.', { timeout: 30_000 })
+
+  // A search with no matches still keeps the exact current selection hydrated, and the metadata reports
+  // zero matches truthfully rather than claiming there are no procedures in this build.
+  await searchProcedures.fill('zz-no-such-procedure-zz')
+  await expect(decide.locator('select[name="procedureId"] option').filter({ hasText: 'LLRTP-000250' }))
+    .toHaveCount(1, { timeout: 30_000 })
+  await expect(decide.getByRole('combobox', { name: 'Covering procedure' })).toHaveValue(optionValue!)
+  await expect(decide).toContainText('0 matching approved procedures.', { timeout: 30_000 })
+  await expect(decide).toContainText('Showing 1 option, including the current selection.', { timeout: 30_000 })
+  await expect(decide).not.toContainText('0 approved procedures in this build')
 
   await decide.getByLabel('Rationale').fill('The carried LLR procedure already verifies this requirement.')
   await decide.getByRole('button', { name: 'Record decision' }).click()

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { pickerSummary } from './pickerText'
 import { PersonName } from './People'
 import { ApiError, apiRequest, operationError } from './apiClient'
 import { RichCaseField, RichContentView } from './RichContent'
@@ -103,6 +104,12 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
       .then(paged=>{if(active&&paged)setRequirementPicker(paged)})
     return ()=>{active=false}
   },[api,reviewId,proposing,requirementQuery,requirementPage,draft.driving])
+
+  const targetSummary = pickerSummary(
+    'carried procedure', targetQuery, targetPicker?.totalCount??0, targetPicker?.items?.length??0)
+  const requirementSummary = pickerSummary(
+    'governed requirement', requirementQuery, requirementPicker?.totalCount??0,
+    requirementPicker?.items?.length??0, 'in scope')
 
   const act=async(run:()=>Promise<unknown>)=>{
     setBusy(true);setError('')
@@ -312,7 +319,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                 </option>)}
             </select>
             <div className="pickerMeta">
-              <span>{targetPicker?.totalCount??0} carried procedure{(targetPicker?.totalCount??0)===1?'':'s'} in this build - showing {(targetPicker?.items??[]).length}. Search by number or title to find any procedure.</span>
+              <span>{targetSummary.headline}{targetSummary.note?` ${targetSummary.note}`:''}</span>
               <span className="pickerPager">
                 <button type="button" disabled={(targetPicker?.page??1)<=1} onClick={()=>setTargetPage(page=>Math.max(1,page-1))}>Previous</button>
                 <button type="button" disabled={(targetPicker?.page??1)>=(targetPicker?.totalPages??1)} onClick={()=>setTargetPage(page=>page+1)}>Next</button>
@@ -368,7 +375,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                 :'This build has not materialized its requirements yet, so there is no exact revision to write against. Introduce and Modify decisions wait until exact requirement revisions are available.'}</p>}
           </div>
           <div className="pickerMeta">
-            <span>{requirementPicker?.totalCount??0} governed requirement{(requirementPicker?.totalCount??0)===1?'':'s'} in scope - showing {(requirementPicker?.items??[]).length}. Search by number or wording.</span>
+            <span>{requirementSummary.headline}{requirementSummary.note?` ${requirementSummary.note}`:''}</span>
             <span className="pickerPager">
               <button type="button" disabled={(requirementPicker?.page??1)<=1} onClick={()=>setRequirementPage(page=>Math.max(1,page-1))}>Previous</button>
               <button type="button" disabled={(requirementPicker?.page??1)>=(requirementPicker?.totalPages??1)} onClick={()=>setRequirementPage(page=>page+1)}>Next</button>
