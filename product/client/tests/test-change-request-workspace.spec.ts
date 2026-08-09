@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, firstSectionId, login, openNavigationGroup, showcaseSeed } from './auth'
+import { apiBase, apiLogin, firstSectionId, login, openNavigationGroup, selectProgram } from './auth'
 
 const completeImpacts = JSON.stringify({
   trace: 'Not Affected',
@@ -21,17 +21,39 @@ const completeImpacts = JSON.stringify({
  * took one. Approving a change request is also how a test change request comes to exist in the first place,
  * so building the subject here is the honest setup rather than a workaround.
  */
-test('a test engineer proposes a new procedure inside the test change request that governs it', async ({ page, request, playwright }) => {
+test('a test engineer proposes a new procedure inside the test change request that governs it', async ({ page, request }) => {
   test.setTimeout(120_000)
-  const showcase = await showcaseSeed(request)
   await apiLogin(request)
-  const author = await playwright.request.newContext()
-  await apiLogin(author, 'systems.author')
+  const suffix = Date.now().toString().slice(-7)
+  const programName = `Procedure Authoring ${suffix}`
+  const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, { data: {
+    programName,
+    programCode: `PA${suffix}`,
+    projectName: 'Procedure Authoring Project',
+    softwareProduct: 'Procedure Authoring Product',
+    initialRelease: '1.0',
+    initialReleaseIsReleased: false,
+  } })
+  expect(workspaceResponse.ok(), await workspaceResponse.text()).toBeTruthy()
+  const workspace = await workspaceResponse.json()
+
+  // The journey owns its Program and build. Freezing the shared showcase build made this test corrupt the
+  // fixture that unrelated browser journeys inspect, and parallel CI exposed the false coupling.
+  const usersResponse = await request.get(`${apiBase}/api/admin/users`)
+  expect(usersResponse.ok(), await usersResponse.text()).toBeTruthy()
+  const testEngineer = (await usersResponse.json())
+    .find((user: { userName: string }) => user.userName === 'test.engineer')
+  expect(testEngineer).toBeTruthy()
+  const grant = await request.post(`${apiBase}/api/admin/users/${testEngineer.id}/memberships`, { data: {
+    programId: workspace.program.id,
+    role: 'TestEngineer',
+  } })
+  expect(grant.ok(), await grant.text()).toBeTruthy()
 
   const title = 'Oceanic sequencing for test change request authoring'
-  const created = await author.post(`${apiBase}/api/change-request-drafts`, { data: {
-    projectId: showcase.projectId,
-    targetReleaseId: showcase.activeReleaseId,
+  const created = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
+    projectId: workspace.project.id,
+    targetReleaseId: workspace.release.id,
     type: 'System',
     title,
     problem: 'Oceanic waypoint sequencing is not represented.',
@@ -40,7 +62,7 @@ test('a test engineer proposes a new procedure inside the test change request th
     requirementChanges: [{
       level: 'System',
       kind: 'Introduce',
-      targetSectionId: await firstSectionId(author, showcase.projectId, 'System'),
+      targetSectionId: await firstSectionId(request, workspace.project.id, 'System'),
       statement: 'The FMS shall sequence oceanic waypoints in the order the active flight plan holds.',
       rationale: 'New capability.',
       verificationMethod: 'Test',
@@ -50,7 +72,7 @@ test('a test engineer proposes a new procedure inside the test change request th
   expect(created.ok(), await created.text()).toBeTruthy()
   const draft = await created.json()
 
-  const submitted = await author.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
+  const submitted = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
     expectedVersion: draft.version,
     approvers: [{ userId: 'admin', name: 'Caller supplied name ignored' }],
     mode: 'Sequential',
@@ -67,11 +89,13 @@ test('a test engineer proposes a new procedure inside the test change request th
 
   // A procedure must link to an exact controlled requirement revision. Materialize this journey's approved
   // change into its own disposable candidate baseline so the TCR picker has that exact revision to offer.
-  const baselineResponse = await request.get(
-    `${apiBase}/api/baselines?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)
+  const baselineResponse = await request.post(`${apiBase}/api/baselines`, { data: {
+    projectId: workspace.project.id,
+    releaseId: workspace.release.id,
+    name: 'Procedure authoring materialized build',
+  } })
   expect(baselineResponse.ok(), await baselineResponse.text()).toBeTruthy()
-  const baseline = (await baselineResponse.json())[0]
-  expect(baseline, 'the in-work software build').toBeTruthy()
+  const baseline = await baselineResponse.json()
   for (const [path, data] of [
     ['selections', { changeRequestId: draft.id }],
     ['freeze', {}],
@@ -81,7 +105,8 @@ test('a test engineer proposes a new procedure inside the test change request th
     expect(response.ok(), await response.text()).toBeTruthy()
   }
 
-  await login(page, 'test.engineer')
+  await login(page, 'test.engineer', { openProject: false })
+  await selectProgram(page, programName)
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('link', { name: 'System Test Change Requests' }).click()
 
