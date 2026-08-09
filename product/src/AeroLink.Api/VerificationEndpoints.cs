@@ -442,6 +442,173 @@ public static class VerificationEndpoints
             });
         });
 
+        // The Trace & impact tab's exact revision-scoped projection (#399). A count is not a trace: this
+        // answers which exact requirement revisions the selected effective procedure revision verifies,
+        // whether each link is Confirmed or Suspect, and which TCR/change package produced the procedure
+        // revision. The selected build's exact procedure manifest is authoritative (#214): a later procedure
+        // revision or a relationship belonging to another build is never substituted for what this build
+        // actually carries.
+        app.MapGet("/api/test-procedures/{id:guid}/trace", async (Guid id, Guid? releaseId, Guid? revisionId,
+            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var procedure = await db.TestProcedures.AsNoTracking()
+                .Where(x => x.Id == id)
+                .Select(x => new { x.Id, x.ProjectId, x.BaseNumber, x.Title, x.Level })
+                .SingleOrDefaultAsync(ct);
+            if (procedure is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, procedure.ProjectId, ct)) return Results.Forbid();
+
+            Guid? selectedRevisionId = revisionId;
+            Guid? effectiveBaselineId = null;
+            Guid? requirementBaselineId = null;
+            var isExactManifest = false;
+            if (releaseId is not null)
+            {
+                var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
+                    db, procedure.ProjectId, releaseId.Value, ct);
+                if (effectivity is null || !effectivity.RevisionByProcedure.TryGetValue(id, out var carriedRevisionId))
+                    return Results.NotFound(new
+                    {
+                        error = "This procedure is not carried by the selected build.",
+                        code = "procedure_not_carried_by_build"
+                    });
+                // A request for one exact revision is a build-effectivity assertion and must match the
+                // manifest, exactly as the history endpoint enforces.
+                if (revisionId is not null && revisionId != carriedRevisionId)
+                    return Results.NotFound(new
+                    {
+                        error = "The requested procedure revision is not the revision the selected build carries.",
+                        code = "cross_build_procedure_revision"
+                    });
+                selectedRevisionId = carriedRevisionId;
+                isExactManifest = effectivity.IsExactManifest;
+                effectiveBaselineId = effectivity.BaselineId;
+                // The requirement manifest is the other half of build effectivity: the same build's exact
+                // BaselineRequirements, not a project-global view of what any build ever carried.
+                requirementBaselineId = await BuildScope.EffectiveBaselineAsync(
+                    db, procedure.ProjectId, releaseId.Value, ct);
+                if (requirementBaselineId is null)
+                    return Results.NotFound(new
+                    {
+                        error = "The selected build has no controlled requirement baseline to intersect the trace against.",
+                        code = "requirement_baseline_unavailable"
+                    });
+            }
+            selectedRevisionId ??= await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => x.ProcedureId == id).OrderByDescending(x => x.Revision)
+                .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+            if (selectedRevisionId is null) return Results.NotFound();
+            var selectedRevisionIdValue = selectedRevisionId.Value;
+            if (!await db.TestProcedureRevisions.AsNoTracking()
+                    .AnyAsync(x => x.Id == selectedRevisionIdValue && x.ProcedureId == id, ct))
+                return Results.NotFound();
+
+            var revision = await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => x.Id == selectedRevisionIdValue)
+                .Select(x => new
+                {
+                    x.Id, x.Revision, x.State, x.AuthorId, x.CreatedAt, x.SourceTestChangeRequestId
+                })
+                .SingleAsync(ct);
+
+            // The exact coverage rows this revision owns, joined to the exact requirement revisions they
+            // name. Nothing here is derived from counts, display strings or project-global latest records.
+            var covered = await (from link in db.TestCoverage.AsNoTracking()
+                                 where link.ProcedureRevisionId == selectedRevisionIdValue
+                                 join requirementRevision in db.RequirementRevisions.AsNoTracking()
+                                     on link.RequirementRevisionId equals requirementRevision.Id
+                                 join artifact in db.Requirements.AsNoTracking()
+                                     on requirementRevision.ArtifactId equals artifact.Id
+                                 select new
+                                 {
+                                     artifact.Id,
+                                     RequirementRevisionId = requirementRevision.Id,
+                                     DisplayNumber = artifact.BaseNumber + "." + requirementRevision.Revision.ToString("D2"),
+                                     Level = artifact.Level.ToString(),
+                                     requirementRevision.Statement,
+                                     link.IsSuspect
+                                 }).ToListAsync(ct);
+            if (requirementBaselineId is not null)
+            {
+                // A selected build must never claim a RequirementRevision outside that build's exact
+                // requirement manifest as one its carried procedure verifies. Out-of-scope coverage rows are
+                // historical database evidence and stay in place; they are simply not presented as this
+                // build's controlled traceability.
+                var manifestRevisionIds = await db.BaselineRequirements.AsNoTracking()
+                    .Where(x => x.BaselineId == requirementBaselineId.Value)
+                    .Select(x => x.RevisionId).ToListAsync(ct);
+                var manifest = manifestRevisionIds.ToHashSet();
+                covered = covered.Where(x => manifest.Contains(x.RequirementRevisionId)).ToList();
+            }
+
+            // CoverageState is the product's single definition, read from the same projection the release
+            // gate and the requirement workspace use. Build-scoped: the exact carried revision's own state
+            // decides, so a later-build sibling revision cannot make a released build's link suspect.
+            var coverageStates = (await VerificationCoverageProjection.ForRequirementRevisionsAsync(db,
+                    covered.Select(x => x.RequirementRevisionId).Distinct().ToList(), ct,
+                    buildScoped: true, effectiveProcedureRevisionIds: [selectedRevisionIdValue]))
+                .GroupBy(x => x.RequirementRevisionId)
+                .ToDictionary(x => x.Key, x => x.First().CoverageState);
+
+            // Provenance names each impact item's own source Change Request, not the TCR's originating one.
+            // Stage 4 permits multi-source TCRs: a folded-in source keeps its own VerificationImpactItem,
+            // so review.SourceChangeRequestNumber alone would mislabel folded work as the base change.
+            var provenance = await (from item in db.VerificationImpactItems.AsNoTracking()
+                                    join review in db.TestChangeReviews.AsNoTracking()
+                                        on item.TestChangeReviewId equals review.Id
+                                    join change in db.SystemChangeRequests.AsNoTracking()
+                                        on item.ChangeRequestId equals change.Id
+                                    where item.ResolvedProcedureRevisionId == selectedRevisionIdValue
+                                    select new
+                                    {
+                                        item.SubjectDisplayNumber,
+                                        ChangeRequest = change.DisplayNumber,
+                                        Package = review.DisplayNumber,
+                                        Action = item.ProcedureChangeAction,
+                                    }).Distinct().ToListAsync(ct);
+
+            var requirements = covered
+                .Select(x => new
+                {
+                    x.Id,
+                    revisionId = x.RequirementRevisionId,
+                    x.DisplayNumber,
+                    x.Level,
+                    x.Statement,
+                    // A link that has no projection entry must not claim Confirmed.
+                    coverageState = coverageStates.TryGetValue(x.RequirementRevisionId, out var state)
+                        ? state
+                        : RequirementCoverageState.Suspect,
+                    x.IsSuspect
+                })
+                .OrderBy(x => x.DisplayNumber)
+                .ToList();
+
+            return Results.Ok(new
+            {
+                procedureId = procedure.Id,
+                procedure.BaseNumber,
+                procedure.Title,
+                level = procedure.Level.ToString(),
+                revisionId = selectedRevisionIdValue,
+                displayNumber = $"{procedure.BaseNumber}.{revision.Revision:D2}",
+                revision.Revision,
+                state = revision.State.ToString(),
+                revision.AuthorId,
+                revision.CreatedAt,
+                revision.SourceTestChangeRequestId,
+                requirements,
+                provenance = provenance.Select(x => new
+                {
+                    x.ChangeRequest, x.Package, x.SubjectDisplayNumber, action = x.Action.ToString()
+                }),
+                build = releaseId is null ? null : new
+                {
+                    releaseId = releaseId.Value, effectiveBaselineId, requirementBaselineId, isExactManifest
+                },
+            });
+        });
+
         // The workspace rendered every procedure it was given — 440 cards on the software side — with no
         // search, filter or page. This returns a bounded page and the total, and every predicate below runs
         // in the database, because a page of twenty-five that costs a full table read is not paging.

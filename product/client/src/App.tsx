@@ -248,6 +248,7 @@ function App() {
     [selectedScrId, setSelectedScrId] = useState(initialRoute.view === "scr" ? initialRoute.artifactId ?? "" : ""),
     [selectedArtifactId,setSelectedArtifactId]=useState(initialRoute.artifactId ?? ""),
     [selectedArtifactKind,setSelectedArtifactKind]=useState(initialRoute.artifactKind ?? ""),
+    [requirementRevisionId,setRequirementRevisionId]=useState(initialRoute.requirementRevisionId ?? ""),
     [paletteOpen,setPaletteOpen]=useState(false),
     [displayOpen,setDisplayOpen]=useState(false),
     [density,setDensity]=useState<WorkspaceDensity>(()=>(localStorage.getItem('aerolink-density')==='compact'?'compact':'comfortable')),
@@ -303,7 +304,7 @@ function App() {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
-  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
+  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[]);
   useEffect(()=>{document.documentElement.dataset.density=density;localStorage.setItem('aerolink-density',density)},[density]);
   useEffect(()=>{document.documentElement.dataset.motion=motion;localStorage.setItem('aerolink-motion',motion)},[motion]);
@@ -427,7 +428,7 @@ function App() {
       </div>
     );
   const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
-  const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");if(context){const path=routePath(context,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+  const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");if(context){const path=routePath(context,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
   const linkPendingAssessment=async(changeRequestId:string)=>{
     if(!pendingAssessmentLink)return true
     try{await apiRequest(`${API}/api/downstream-assessments/${pendingAssessmentLink.assessmentId}/change-requests`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({changeRequestId})});setPendingAssessmentLink(undefined);return true}
@@ -438,8 +439,16 @@ function App() {
   // that library moved, and a link into a surface that no longer exists is worse than no link.
   const openVerificationProcedure=(procedure?:{procedureId:string;revisionId?:string;displayNumber?:string;level?:string})=>{
     const area:Discipline=procedure?.level==="System"?"systemTest":"softwareTest";
-    setView("procedureExplorer");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(procedure?.level??"");
+    setView("procedureExplorer");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(procedure?.level??"");setRequirementRevisionId("");
     if(context){const path=routePath(context,"procedureExplorer",area,undefined,procedure?.level);const params=new URLSearchParams();if(procedure?.displayNumber)params.set("procedure",procedure.displayNumber);if(procedure?.procedureId)params.set("procedureId",procedure.procedureId);if(procedure?.revisionId)params.set("procedureRevisionId",procedure.revisionId);history.pushState({},"",`${path}${params.size?`?${params}`:""}`)}
+  };
+  // The inverse of the procedure deep link: a procedure trace names an exact requirement revision, and the
+  // Requirements Explorer must open that exact revision rather than whichever revision is newest now.
+  const openRequirementRevision=(requirement:{id:string;revisionId:string;level:string})=>{
+    const area:Discipline=requirement.level==="System"?"system":"software";
+    setView("requirements");setDiscipline(area);setSelectedArtifactId(requirement.id);
+    setSelectedArtifactKind(requirement.level);setRequirementRevisionId(requirement.revisionId);
+    if(context){const base=routePath(context,"requirements",area,requirement.id);const query=new URLSearchParams();query.set("requirementRevisionId",requirement.revisionId);history.pushState({},"",`${base}&${query}`)}
   };
   if(location.pathname==="/")history.replaceState({},"","/projects");
   const signOut=async()=>{
@@ -616,6 +625,7 @@ function App() {
         release={release}
         initialViewId={initialRoute.savedViewId}
         initialArtifactId={view === "requirements" ? selectedArtifactId || undefined : undefined}
+        initialRevisionId={view === "requirements" ? requirementRevisionId || undefined : undefined}
         onBack={() => navigate("dashboard")}
         onOpenScr={(id) => navigate("scr",discipline,id)}
         onProposeChange={(id, level) => navigate(discipline === "software" ? "createSoftwareChange" : "createSystemScr", discipline, id, level)}
@@ -637,6 +647,7 @@ function App() {
           : "System"}
         buildName={`Build ${release.version}`}
         released={release.isReleased}
+        onOpenRequirementRevision={openRequirementRevision}
       />
     );
   // The two paths a build.s verification work splits into.

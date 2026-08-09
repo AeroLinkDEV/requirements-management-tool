@@ -64,3 +64,23 @@
 .procedureFilters select{padding:.5rem .65rem;border:1px solid var(--line,#cbd7e6);border-radius:8px;font:inherit;
   background:white;min-width:150px}
 .procedureFilters .procedureFind{margin:0}
+
+/* Trace & impact: one exact procedure revision, every exact requirement revision it verifies. */
+.traceRevisionIdentity{display:flex;flex-direction:column;gap:.15rem;margin:0 0 .5rem;padding:.55rem;
+  border:1px solid #e3eaf2;border-radius:8px}
+.traceRevisionIdentity b{color:#17314f;font-size:13px}
+.traceRevisionIdentity span{color:#5c6878;font-size:12.5px}
+.traceRevisionIdentity small{color:#8a93a2;font-size:11.5px}
+.traceProvenance{margin:.35rem 0;color:#0868c9;font-size:12px}
+.traceRequirements{display:grid;gap:.5rem;margin:.6rem 0 0;padding:0;list-style:none}
+.traceRequirement{display:grid;gap:.2rem;padding:.6rem;border:1px solid #e3eaf2;border-radius:8px}
+.traceRequirement.suspect{border-left:3px solid #e0b45c;padding-left:10px}
+.traceRequirementHead{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.traceRequirementHead b{color:#17314f;font-size:13px}
+.traceRequirementHead span{color:#5c6878;font-size:12px}
+.traceRequirement p{margin:0;color:#35465a;font-size:12px}
+.traceRequirement small{color:#8a93a2;font-size:11.5px}
+.traceRequirement .linkedArtifactText{justify-self:start}
+.traceCoverageBadge{font-style:normal;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.traceCoverageBadge.confirmed{background:#e7f4ec;color:#146c43}
+.traceCoverageBadge.suspect{background:#fdf3e2;color:#8a5a00}
