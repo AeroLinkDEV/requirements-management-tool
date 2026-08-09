@@ -123,6 +123,214 @@ async function openSystemAssessment(page: Page, displayNumber: string) {
   return { row, assessment }
 }
 
+/**
+ * Builds a release carrying `count` governed procedures (one approved package introduces and materializes
+ * them), then creates a second approved change request whose Open TCR can author against that build.
+ * Returns the trigger TCR id and the carried target rows.
+ */
+async function seedCarriedProcedureUniverse(
+  page: Page,
+  request: APIRequestContext,
+  suffix: string,
+  count: number,
+) {
+  const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, { data: {
+    programName: `TCR Volume ${suffix}`,
+    programCode: `TV${suffix}`,
+    projectName: 'TCR Volume Project',
+    softwareProduct: 'TCR Volume Product',
+    initialRelease: '1.0',
+    initialReleaseIsReleased: false,
+  } })
+  expect(workspaceResponse.ok(), await workspaceResponse.text()).toBeTruthy()
+  const workspace = await workspaceResponse.json()
+  const usersResponse = await request.get(`${apiBase}/api/admin/users`)
+  expect(usersResponse.ok(), await usersResponse.text()).toBeTruthy()
+  const testEngineer = (await usersResponse.json())
+    .find((user: { userName: string }) => user.userName === 'test.engineer')
+  expect(testEngineer).toBeTruthy()
+  const grant = await request.post(`${apiBase}/api/admin/users/${testEngineer.id}/memberships`, { data: {
+    programId: workspace.program.id,
+    role: 'TestEngineer',
+  } })
+  expect(grant.ok(), await grant.text()).toBeTruthy()
+  const sections = await (await request.get(
+    `${apiBase}/api/authoring/sections?projectId=${workspace.project.id}&level=System`,
+  )).json()
+  const sectionId = (sections as { id: string }[])[0]?.id
+  expect(sectionId).toBeTruthy()
+
+  const requirementChanges = Array.from({ length: count }, (_, index) => ({
+    level: 'System', kind: 'Introduce',
+    statement: `The TCR volume product shall satisfy requirement ${index + 1}.`,
+    rationale: 'TCR volume fixture.',
+    verificationMethod: 'Test',
+    impactDispositionJson: impacts,
+    targetSectionId: sectionId,
+  }))
+  const created = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
+    projectId: workspace.project.id,
+    targetReleaseId: workspace.release.id,
+    type: 'System',
+    title: `TCR volume change ${suffix}`,
+    problem: 'The TCR must stay bounded however many decisions it accumulates.',
+    analysis: 'Carry a large controlled procedure universe and accumulate many decisions.',
+    solution: 'Approve the volume package, then author many Modify decisions.',
+    requirementChanges,
+  } })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  const draft = await created.json()
+  const submitted = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
+    expectedVersion: draft.version,
+    approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }],
+    mode: 'Sequential',
+  } })
+  expect(submitted.ok(), await submitted.text()).toBeTruthy()
+  const approved = await request.post(`${apiBase}/api/change-requests/${draft.id}/approve`, { data: {
+    password: 'AeroLink!2026',
+    meaning: 'Approved for TCR-volume journey verification.',
+  } })
+  expect(approved.ok(), await approved.text()).toBeTruthy()
+  const baselineResponse = await request.post(`${apiBase}/api/baselines`, { data: {
+    baseNumber: 'SW-01.00', revision: 0, projectId: workspace.project.id,
+    releaseId: workspace.release.id, predecessorBaselineId: null,
+    name: 'TCR volume baseline',
+  } })
+  expect(baselineResponse.ok(), await baselineResponse.text()).toBeTruthy()
+  const baseline = await baselineResponse.json()
+  for (const [path, data] of [
+    ['selections', { changeRequestId: draft.id }],
+    ['freeze', {}],
+    ['materialize-requirements', {}],
+  ] as const) {
+    const response = await request.post(`${apiBase}/api/baselines/${baseline.id}/${path}`, { data })
+    expect(response.ok(), `${path}: ${await response.text()}`).toBeTruthy()
+  }
+
+  await login(page, 'test.engineer', { openProject: false })
+  await selectProgram(page, `TCR Volume ${suffix}`)
+  const { assessment } = await openSystemAssessment(page, draft.displayNumber)
+  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
+  await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
+
+  const impactItems = await (await request.get(
+    `${apiBase}/api/releases/${workspace.release.id}/verification-impact`,
+  )).json() as { id: string; testChangeReviewId: string; subjectDisplayNumber: string; requirementRevisionId?: string }[]
+  const reviewId = impactItems[0].testChangeReviewId
+  const items = impactItems.filter(item => item.requirementRevisionId)
+  expect(items).toHaveLength(count)
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index]
+    const proposed = await page.request.post(
+      `${apiBase}/api/test-change-reviews/${reviewId}/procedure-changes`, { data: {
+        kind: 'Introduce', revision: 0, title: `Volume procedure ${index + 1}`,
+        objective: `Verify TCR volume requirement ${index + 1}.`,
+        preconditions: 'The volume configuration is available.',
+        steps: '1. Load. 2. Exercise.',
+        expectedResult: 'The expected behavior is observed.',
+        rationale: `The governed requirement ${item.subjectDisplayNumber} needs exact verification.`,
+        drivingRequirementRevisionIds: [item.requirementRevisionId],
+      } })
+    expect(proposed.ok(), `proposal ${index + 1}: ${await proposed.text()}`).toBeTruthy()
+  }
+  for (const item of items) {
+    const resolved = await page.request.post(
+      `${apiBase}/api/verification-impact/${item.id}/resolve`, {
+        data: { outcome: 'NewProcedureRequired', rationale: `A volume procedure will verify ${item.subjectDisplayNumber}.` },
+      })
+    expect(resolved.ok(), await resolved.text()).toBeTruthy()
+  }
+  const initialPayload = await (await page.request.get(
+    `${apiBase}/api/test-change-reviews/${reviewId}/procedure-changes`,
+  )).json() as { version: number }
+  const caseSaved = await page.request.post(`${apiBase}/api/test-change-reviews/${reviewId}/case`, { data: {
+    title: `TCR volume package ${suffix}`,
+    problem: 'The volume build needs exact procedure coverage.',
+    analysis: `${count} governed procedures must be carried and independently modifiable.`,
+    solution: 'Approve the exact volume procedure set so the build can carry it.',
+    expectedVersion: initialPayload.version,
+  } })
+  expect(caseSaved.ok(), await caseSaved.text()).toBeTruthy()
+  const afterCase = await (await page.request.get(
+    `${apiBase}/api/test-change-reviews/${reviewId}/procedure-changes`,
+  )).json() as { version: number }
+  const submittedPackage = await page.request.post(
+    `${apiBase}/api/test-change-reviews/${reviewId}/submit`, { data: { approverId: 'admin', expectedVersion: afterCase.version } })
+  expect(submittedPackage.ok(), await submittedPackage.text()).toBeTruthy()
+  const approvedPackage = await request.post(
+    `${apiBase}/api/test-change-reviews/${reviewId}/approve`, {
+      data: { rationale: `All ${count} volume procedures are governed and complete.`,
+        password: 'AeroLink!2026', meaning: 'Approve the exact volume procedure set.' },
+    })
+  expect(approvedPackage.ok(), await approvedPackage.text()).toBeTruthy()
+  const selectedTcr = await request.post(`${apiBase}/api/baselines/${baseline.id}/test-change-requests`, {
+    data: { testChangeRequestId: reviewId },
+  })
+  expect(selectedTcr.ok(), await selectedTcr.text()).toBeTruthy()
+  const materialized = await request.post(
+    `${apiBase}/api/baselines/${baseline.id}/materialize-test-procedures`, { data: {}, timeout: 240_000 })
+  const materializedBody = await materialized.text()
+  expect(materialized.ok(), materializedBody).toBeTruthy()
+  const result = JSON.parse(materializedBody) as { activeProcedureCount?: number; createdRevisionCount?: number }
+  expect(result.activeProcedureCount ?? result.createdRevisionCount).toBe(count)
+
+  // A second approved change request provides the Open TCR that will accumulate Modify decisions.
+  const triggerResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
+    projectId: workspace.project.id,
+    targetReleaseId: workspace.release.id,
+    type: 'System',
+    title: `TCR volume trigger ${suffix}`,
+    problem: 'A second package opens the Modify picker over the volume build.',
+    analysis: 'The picker must stay bounded regardless of how many decisions the package accumulates.',
+    solution: 'Accumulate many Modify decisions, then open the picker.',
+    requirementChanges: [{
+      level: 'System', kind: 'Introduce',
+      targetSectionId: sectionId,
+      statement: `The TCR volume trigger requirement ${suffix} is introduced for the second package.`,
+      rationale: 'Creates an Open package over the already-carried build.',
+      verificationMethod: 'Test',
+      impactDispositionJson: impacts,
+    }],
+  } })
+  expect(triggerResponse.ok(), await triggerResponse.text()).toBeTruthy()
+  const trigger = await triggerResponse.json()
+  const triggerSubmitted = await request.post(`${apiBase}/api/change-requests/${trigger.id}/submit`, { data: {
+    expectedVersion: trigger.version,
+    approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }],
+    mode: 'Sequential',
+  } })
+  expect(triggerSubmitted.ok(), await triggerSubmitted.text()).toBeTruthy()
+  const triggerApproved = await request.post(`${apiBase}/api/change-requests/${trigger.id}/approve`, { data: {
+    password: 'AeroLink!2026',
+    meaning: 'Approved so the second package can open the Modify picker.',
+  } })
+  expect(triggerApproved.ok(), await triggerApproved.text()).toBeTruthy()
+
+  await page.reload()
+  const reopenedRow = page.locator('.downstreamAssessment').filter({ hasText: trigger.displayNumber }).first()
+  await expect(reopenedRow).toBeVisible({ timeout: 30_000 })
+  await reopenedRow.getByRole('button', { name: 'Open assessment' }).click()
+  const assessment2 = page.getByRole('dialog', { name: /test impact/ })
+  await assessment2.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
+  await expect(assessment2).toContainText('SYSTCR Created', { timeout: 30_000 })
+  const afterTrigger = await (await request.get(
+    `${apiBase}/api/releases/${workspace.release.id}/verification-impact`,
+  )).json() as { testChangeReviewId: string; subjectStatement?: string }[]
+  const triggerItem = afterTrigger.find(entry => entry.subjectStatement?.includes('trigger requirement'))
+  expect(triggerItem).toBeTruthy()
+  const triggerReviewId = triggerItem!.testChangeReviewId
+
+  const targets: { baseNumber: string; currentRevision: number }[] = []
+  for (let targetPage = 1; targetPage <= Math.ceil(count / 200); targetPage++) {
+    const pageBody = await (await request.get(
+      `${apiBase}/api/test-change-reviews/${triggerReviewId}/procedure-targets?page=${targetPage}&pageSize=200`,
+    )).json() as { items: { baseNumber: string; currentRevision: number }[] }
+    targets.push(...pageBody.items)
+  }
+  expect(targets).toHaveLength(count)
+  return { workspace, triggerReviewId, targets }
+}
+
 async function decideNewProcedure(page: Page, assessment: Locator, subject: string) {
   const item = assessment.locator('.decisionList li').filter({ hasText: subject }).first()
   await item.getByRole('button', { name: 'Decide' }).click()
@@ -467,4 +675,115 @@ test('a failed picker response shows a visible error and recovers instead of sil
   await authoring.getByRole('textbox', { name: 'Search requirements' }).fill('')
   await expect(authoring.getByRole('alert')).toHaveCount(0, { timeout: 15_000 })
   await expect(authoring.locator('select[name="requirement"] option').first()).toBeVisible({ timeout: 15_000 })
+
+  // A rejected (network-level) fetch must produce the same visible failure and recover.
+  await page.route('**/api/requirements?**', route => route.abort('failed'))
+  await authoring.getByRole('textbox', { name: 'Search requirements' }).fill('SYSR-000001')
+  await expect(authoring.getByRole('alert')).toContainText('could not be loaded', { timeout: 15_000 })
+  await page.unroute('**/api/requirements?**')
+  await authoring.getByRole('textbox', { name: 'Search requirements' }).fill('')
+  await expect(authoring.getByRole('alert')).toHaveCount(0, { timeout: 15_000 })
+  await expect(authoring.locator('select[name="requirement"] option').first()).toBeVisible({ timeout: 15_000 })
+})
+
+test('a Modify/Retire target picker stays bounded with a large existing-decision TCR', async ({ page, request }) => {
+  test.setTimeout(900_000)
+  await apiLogin(request)
+  const suffix = Date.now().toString().slice(-7)
+  const carriedCount = 660
+  const existingDecisions = 650
+  const { triggerReviewId, targets } = await seedCarriedProcedureUniverse(
+    page, request, suffix, carriedCount)
+
+  // Accumulate 650 Modify decisions, each on a distinct carried procedure: enough that serializing every
+  // existing target into baseNumbers would exceed the request-line limit (~15 bytes per base number).
+  for (let index = 0; index < existingDecisions; index++) {
+    const target = targets[index]
+    const proposed = await page.request.post(
+      `${apiBase}/api/test-change-reviews/${triggerReviewId}/procedure-changes`, { data: {
+        kind: 'Modify', baseNumber: target.baseNumber, revision: target.currentRevision + 1,
+        title: `Bulk modify ${index + 1}`,
+        objective: 'Verify the carried behavior after modification.',
+        preconditions: 'The volume configuration is available.',
+        steps: '1. Load. 2. Exercise.',
+        expectedResult: 'The expected behavior is observed.',
+        rationale: `The carried procedure ${target.baseNumber} needs an exact update.`,
+        drivingRequirementRevisionIds: [],
+        removedRequirementRevisionIds: [],
+      } })
+    expect(proposed.ok(), `modify ${index + 1}: ${await proposed.text()}`).toBeTruthy()
+  }
+  const payload = await (await request.get(
+    `${apiBase}/api/test-change-reviews/${triggerReviewId}/procedure-changes`,
+  )).json() as { procedureTargets: { baseNumber: string }[] }
+  expect(payload.procedureTargets).toHaveLength(existingDecisions)
+
+  await page.reload()
+  const row = page.locator('.downstreamAssessment').filter({ hasText: /TCR volume trigger/ }).first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
+  const workspaceDrawer = page.getByRole('dialog', { name: /procedure decisions/ })
+  await expect(workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }))
+    .toBeVisible({ timeout: 60_000 })
+
+  const requestUrls: string[] = []
+  const responseStatuses: number[] = []
+  page.on('request', req => {
+    if (req.method() === 'GET' && req.url().includes('/procedure-targets?')) requestUrls.push(req.url())
+  })
+  page.on('response', res => {
+    if (res.url().includes('/procedure-targets?')) responseStatuses.push(res.status())
+  })
+
+  await workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  await dialog.getByLabel('What is being done').selectOption('Modify')
+  await expect(dialog).toContainText(`${carriedCount} carried procedures in this build`, { timeout: 30_000 })
+
+  // The search/paging request must never serialize the existing decision set into baseNumbers.
+  await expect.poll(() => requestUrls.length).toBeGreaterThan(0)
+  const pickerUrl = requestUrls.at(-1)!
+  expect(pickerUrl.includes('baseNumbers=')).toBe(false)
+  expect(pickerUrl.length).toBeLessThan(2_000)
+  expect(responseStatuses.some(status => status === 414 || status === 431)).toBe(false)
+
+  // Every existing decision target stays represented from the package payload, including targets beyond
+  // the current result page, and the current selection is always chosen from represented options.
+  const options = dialog.locator('select[aria-label="Procedure"] option')
+  await expect(options).toHaveCount(existingDecisions + 1, { timeout: 30_000 })
+  const lastExisting = targets[existingDecisions - 1].baseNumber
+  await expect(options.filter({ hasText: lastExisting })).toHaveCount(1)
+
+  // Paging still works.
+  const targetPager = dialog.locator('.pickerMeta').first()
+  await targetPager.getByRole('button', { name: 'Next' }).click()
+  await expect.poll(() => requestUrls.at(-1) ?? '').toContain('page=2')
+  await targetPager.getByRole('button', { name: 'Previous' }).click()
+  await expect.poll(() => requestUrls.at(-1) ?? '').toContain('page=1')
+
+  // Searching for and selecting another carried procedure still works.
+  const searchTarget = targets[carriedCount - 1].baseNumber
+  await dialog.getByRole('textbox', { name: 'Search procedures' }).fill(searchTarget)
+  const searchOption = options.filter({ hasText: searchTarget })
+  await expect(searchOption).toHaveCount(1, { timeout: 30_000 })
+  await dialog.getByRole('combobox', { name: 'Procedure' }).selectOption(searchTarget)
+
+  // A real Modify decision succeeds and persists with the exact carried target.
+  await dialog.getByLabel('Title').fill(`Post-volume modify ${suffix}`)
+  await dialog.getByLabel('Objective').fill('Verify the carried volume procedure behavior.')
+  await dialog.getByLabel('Preconditions').fill('The volume configuration is available.')
+  await dialog.getByLabel('Steps').fill('1. Load. 2. Exercise.')
+  await dialog.getByLabel('Expected result').fill('The expected behavior is observed.')
+  await dialog.getByLabel('Why this procedure work is required').fill('The approved change requires an exact procedure update.')
+  await dialog.getByRole('button', { name: 'Propose decision' }).click()
+  await expect(dialog).toHaveCount(0, { timeout: 30_000 })
+
+  const finalPayload = await (await request.get(
+    `${apiBase}/api/test-change-reviews/${triggerReviewId}/procedure-changes`,
+  )).json() as { procedureChanges: { kind: string; baseNumber: string; revision: number }[] }
+  const modify = finalPayload.procedureChanges.find(change => change.baseNumber === searchTarget)
+  expect(modify).toBeTruthy()
+  expect(modify!.kind).toBe('Modify')
+  expect(modify!.revision).toBe(targets[carriedCount - 1].currentRevision + 1)
+  expect(finalPayload.procedureChanges.length).toBe(existingDecisions + 1)
 })

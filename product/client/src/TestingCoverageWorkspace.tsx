@@ -334,16 +334,22 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     const hydrated = [...new Set([resolving?.resolvedProcedure?.id, procedureChoice].filter(Boolean))]
     if (hydrated.length) params.set('ids', hydrated.join(','))
     void (async () => {
-      const response = await fetch(`${api}/api/test-procedures?${params}`)
-      if (!response.ok) {
+      try {
+        const response = await fetch(`${api}/api/test-procedures?${params}`)
+        if (!response.ok) {
+          if (mine === procedureTicket.current) {
+            setProcedureError('The approved procedures for this build could not be loaded. Try searching again.')
+          }
+          return
+        }
+        const paged = await response.json()
+        if (mine !== procedureTicket.current) return
+        setProcedurePicker(paged); setProcedureError('')
+      } catch {
         if (mine === procedureTicket.current) {
           setProcedureError('The approved procedures for this build could not be loaded. Try searching again.')
         }
-        return
       }
-      const paged = await response.json()
-      if (mine !== procedureTicket.current) return
-      setProcedurePicker(paged); setProcedureError('')
     })()
   }, [api, projectId, releaseId, scope, revision, procedureQuery, procedurePage, resolving?.resolvedProcedure?.id, procedureChoice])
 
@@ -354,21 +360,27 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     if (!creating) return
     const mine = ++requirementTicket.current
     const timer = setTimeout(async () => {
-      const params = new URLSearchParams({ projectId, scope, includeRetired: 'false',
-        page: String(requirementPage), pageSize: '50', search: requirementQuery })
-      if (effectiveBaseline) params.set('baselineId', effectiveBaseline)
-      // The complete selection is rendered from the client-side selected-item map; it is never serialized
-      // into the request line, so search and paging stay bounded however many requirements are selected.
-      const response = await fetch(`${api}/api/requirements?${params}`)
-      if (!response.ok) {
+      try {
+        const params = new URLSearchParams({ projectId, scope, includeRetired: 'false',
+          page: String(requirementPage), pageSize: '50', search: requirementQuery })
+        if (effectiveBaseline) params.set('baselineId', effectiveBaseline)
+        // The complete selection is rendered from the client-side selected-item map; it is never serialized
+        // into the request line, so search and paging stay bounded however many requirements are selected.
+        const response = await fetch(`${api}/api/requirements?${params}`)
+        if (!response.ok) {
+          if (mine === requirementTicket.current) {
+            setRequirementError('The requirements for this build could not be loaded. Try searching again.')
+          }
+          return
+        }
+        const paged = await response.json()
+        if (mine !== requirementTicket.current) return
+        setRequirementPicker(paged); setRequirementError('')
+      } catch {
         if (mine === requirementTicket.current) {
           setRequirementError('The requirements for this build could not be loaded. Try searching again.')
         }
-        return
       }
-      const paged = await response.json()
-      if (mine !== requirementTicket.current) return
-      setRequirementPicker(paged); setRequirementError('')
     }, 180)
     return () => clearTimeout(timer)
   }, [api, projectId, scope, creating, effectiveBaseline, requirementQuery, requirementPage])

@@ -92,8 +92,10 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
     if(!proposing)return
     let active=true
     const params=new URLSearchParams({page:String(targetPage),pageSize:'50',search:targetQuery})
-    const hydrate=[...new Set([draft.baseNumber,...(item?.procedureTargets??[]).map(x=>x.baseNumber)].filter(Boolean))]
-    if(hydrate.length)params.set('baseNumbers',hydrate.join(','))
+    // Existing decisions' targets stay represented from the package payload (item.procedureTargets), and the
+    // current selection is always chosen from those options or the current page. Neither the persisted
+    // decision set nor the current selection is serialized into the request line, so the URL cannot grow
+    // with the TCR's procedure-decision count.
     void fetch(`${api}/api/test-change-reviews/${reviewId}/procedure-targets?${params}`)
       .then(async response=>{
         if(!response.ok){if(active)setTargetError('The procedures for this build could not be loaded. Try searching again.');return undefined}
@@ -103,7 +105,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
       .then(paged=>{if(active&&paged)setTargetPicker(paged)})
       .catch(()=>{if(active)setTargetError('The procedures for this build could not be loaded. Try searching again.')})
     return ()=>{active=false}
-  },[api,reviewId,proposing,targetQuery,targetPage,draft.baseNumber,item?.procedureTargets])
+  },[api,reviewId,proposing,targetQuery,targetPage,draft.baseNumber])
 
   // The driving-requirement picker: the same governed, build-scoped candidate set the server enforces,
   // searched and paged with totals. Selected driving revisions are hydrated by ID.
@@ -126,6 +128,12 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
 
   const targetSummary = pickerSummary(
     'carried procedure', targetQuery, targetPicker?.totalCount??0, draft.baseNumber ? 1 : 0)
+  const targetOptions=useMemo(()=>{
+    const options=new Map<string,ProcedureTarget>()
+    for(const target of targetPicker?.items??[])options.set(target.baseNumber,target)
+    for(const target of item?.procedureTargets??[])if(!options.has(target.baseNumber))options.set(target.baseNumber,target)
+    return [...options.values()]
+  },[targetPicker,item?.procedureTargets])
   const requirementSummary = pickerSummary(
     'governed requirement', requirementQuery, requirementPicker?.totalCount??0,
     draft.driving.length, 'in scope')
@@ -341,7 +349,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                 driving:[],removed:[],coverageRationale:''}))
             }}>
                   <option value="">Choose the procedure this acts on...</option>
-                  {(targetPicker?.items??[]).map(target=>
+                  {targetOptions.map(target=>
                     <option value={target.baseNumber} key={target.baseNumber}>
                       {target.baseNumber}.{String(Math.max(target.currentRevision,0)).padStart(2,'0')} - {target.title}
                     </option>)}
