@@ -235,6 +235,186 @@ public sealed class TestChangeRequestConsolidationTests
         }
     }
 
+    [Theory]
+    [InlineData(ChangeRequestState.Draft, false)]
+    [InlineData(ChangeRequestState.InReview, false)]
+    [InlineData(ChangeRequestState.Deferred, false)]
+    [InlineData(ChangeRequestState.Approved, true)]
+    [InlineData(ChangeRequestState.SelectedForBaseline, true)]
+    public async Task Picker_manual_create_and_fold_share_the_complete_source_lifecycle_matrix(
+        ChangeRequestState sourceState, bool eligible)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        Guid sourceId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var source = new SystemChangeRequest("SRCR-00956", 0, fixture.ProjectId, fixture.ReleaseId,
+                $"{sourceState} source", "P", "A", "S", "author", now);
+            source.AddRequirementChange("author", "SYSR-00000964", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "The FMS shall not fold unapproved scope.",
+                "Unapproved work", "Analysis", now);
+            if (sourceState is ChangeRequestState.InReview or ChangeRequestState.Approved
+                or ChangeRequestState.SelectedForBaseline)
+                source.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
+            if (sourceState is ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)
+                source.ApproveActiveStage("reviewer", now);
+            if (sourceState == ChangeRequestState.SelectedForBaseline)
+                source.MarkSelectedForBaseline("cm", now);
+            if (sourceState == ChangeRequestState.Deferred)
+                source.Defer("author", "Not ready for engineering approval.", now);
+            db.Add(source);
+            await db.SaveChangesAsync();
+            sourceId = source.Id;
+        }
+
+        await LoginAsync(client, "consolidation.engineer");
+        var picker = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/releases/{fixture.ReleaseId}/test-change-request-sources?discipline=System");
+        Assert.Equal(eligible, picker.EnumerateArray().Any(x =>
+            x.GetProperty("changeRequestId").GetGuid() == sourceId));
+
+        if (!eligible)
+        {
+            int reviewsBefore;
+            int domainAuditBefore;
+            int securityAuditBefore;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                reviewsBefore = await db.TestChangeReviews.CountAsync();
+                domainAuditBefore = await db.AuditEvents.CountAsync();
+                securityAuditBefore = await db.SecurityAuditEvents.CountAsync();
+            }
+            using var refusedCreate = await client.PostAsJsonAsync(
+                $"/api/releases/{fixture.ReleaseId}/test-change-requests",
+                new
+                {
+                    discipline = "System",
+                    changeRequestIds = new[] { sourceId },
+                    title = "Invalid manual package",
+                    problem = "P", analysis = "A", solution = "S"
+                });
+            Assert.Equal(HttpStatusCode.BadRequest, refusedCreate.StatusCode);
+            var refusedCreateBody = await refusedCreate.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("change_request_not_selectable", refusedCreateBody.GetProperty("code").GetString());
+            Assert.Contains(sourceState.ToString(), refusedCreateBody.GetProperty("error").GetString());
+            using var verificationScope = factory.Services.CreateScope();
+            var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(reviewsBefore, await verificationDb.TestChangeReviews.CountAsync());
+            Assert.Equal(domainAuditBefore, await verificationDb.AuditEvents.CountAsync());
+            Assert.Equal(securityAuditBefore, await verificationDb.SecurityAuditEvents.CountAsync());
+            Assert.False(await verificationDb.TestChangeRequestClaims.AnyAsync(x => x.ChangeRequestId == sourceId));
+        }
+
+        using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Base package",
+                problem = "P", analysis = "A", solution = "S"
+            });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+
+        long reviewVersionBefore;
+        int impactCountBefore;
+        int domainAuditBeforeFold;
+        int securityAuditBeforeFold;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            reviewVersionBefore = await db.TestChangeReviews.Where(x => x.Id == fixture.FirstReviewId)
+                .Select(x => x.Version).SingleAsync();
+            impactCountBefore = await db.VerificationImpactItems.CountAsync();
+            domainAuditBeforeFold = await db.AuditEvents.CountAsync();
+            securityAuditBeforeFold = await db.SecurityAuditEvents.CountAsync();
+        }
+
+        using var folded = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests",
+            new { changeRequestId = sourceId });
+        if (eligible)
+        {
+            Assert.Equal(HttpStatusCode.OK, folded.StatusCode);
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.True(await db.TestChangeRequestClaims.AnyAsync(x => x.ChangeRequestId == sourceId
+                && x.TestChangeReviewId == fixture.FirstReviewId));
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, folded.StatusCode);
+            var body = await folded.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("change_request_not_selectable", body.GetProperty("code").GetString());
+            Assert.Contains(sourceState.ToString(), body.GetProperty("error").GetString());
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.False(await db.TestChangeRequestClaims.AnyAsync(x => x.ChangeRequestId == sourceId));
+            Assert.Equal(reviewVersionBefore, await db.TestChangeReviews.Where(x => x.Id == fixture.FirstReviewId)
+                .Select(x => x.Version).SingleAsync());
+            Assert.Equal(impactCountBefore, await db.VerificationImpactItems.CountAsync());
+            Assert.Equal(domainAuditBeforeFold, await db.AuditEvents.CountAsync());
+            Assert.Equal(securityAuditBeforeFold, await db.SecurityAuditEvents.CountAsync());
+            Assert.Equal(TestChangeReviewState.Open,
+                (await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.SecondReviewId)).State);
+        }
+    }
+
+    [Fact]
+    public async Task Source_that_becomes_ineligible_after_picker_read_is_refused_without_partial_fold()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "consolidation.engineer");
+        var picker = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/releases/{fixture.ReleaseId}/test-change-request-sources?discipline=System");
+        Assert.Contains(picker.EnumerateArray(), x =>
+            x.GetProperty("changeRequestId").GetGuid() == fixture.SecondChangeId);
+
+        using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Base package",
+                problem = "P", analysis = "A", solution = "S"
+            });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        long versionBefore;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var source = await db.SystemChangeRequests.Include(x => x.AuditEvents)
+                .SingleAsync(x => x.Id == fixture.SecondChangeId);
+            source.Defer("author", "Scope changed after the picker was read.", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+            versionBefore = await db.TestChangeReviews.Where(x => x.Id == fixture.FirstReviewId)
+                .Select(x => x.Version).SingleAsync();
+        }
+
+        using var folded = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests",
+            new { changeRequestId = fixture.SecondChangeId });
+        Assert.Equal(HttpStatusCode.BadRequest, folded.StatusCode);
+        Assert.Equal("change_request_not_selectable",
+            (await folded.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.False(await verificationDb.TestChangeRequestClaims.AnyAsync(x =>
+            x.ChangeRequestId == fixture.SecondChangeId));
+        Assert.Equal(versionBefore, await verificationDb.TestChangeReviews.Where(x => x.Id == fixture.FirstReviewId)
+            .Select(x => x.Version).SingleAsync());
+        Assert.Equal(TestChangeReviewState.Open,
+            (await verificationDb.TestChangeReviews.SingleAsync(x => x.Id == fixture.SecondReviewId)).State);
+        Assert.Equal(fixture.SecondReviewId,
+            (await verificationDb.VerificationImpactItems.SingleAsync(x => x.Id == fixture.SecondItemId)).TestChangeReviewId);
+    }
+
     [Fact]
     public async Task A_concluded_assessment_cannot_be_folded_in()
     {
