@@ -60,6 +60,7 @@ public sealed class TestProcedureBaselineTests
         var elsewhere = new TestChangeReview(ProjectId, Guid.NewGuid(), Guid.NewGuid(),
             TestChangeReviewDiscipline.System, "SRCR-00039.00", Now);
         elsewhere.RecordTestChangeRequired("verification.engineer", Now);
+        elsewhere.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", Now);
         elsewhere.AssignControlledNumber("SYSTCR-000043", Now);
         elsewhere.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000900", 0,
             TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Elsewhere", "Objective",
@@ -152,7 +153,8 @@ public sealed class TestProcedureBaselineTests
     public void A_package_that_states_no_procedure_work_cannot_be_carried_into_a_build()
     {
         var baseline = Frozen();
-        var empty = RaisedTestChangeRequest();
+        var empty = new TestChangeReview(ProjectId, ReleaseId, Guid.NewGuid(),
+            TestChangeReviewDiscipline.System, "SRCR-00039.00", Now, caseContractVersion: 0);
         empty.RecordTestChangeRequired("verification.engineer", Now);
         empty.AssignControlledNumber("SYSTCR-000044", Now);
         empty.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(1));
@@ -200,6 +202,7 @@ public sealed class TestProcedureBaselineTests
     {
         var tcr = RaisedTestChangeRequest();
         tcr.RecordTestChangeRequired("verification.engineer", Now);
+        tcr.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", Now);
         tcr.AssignControlledNumber("SYSTCR-000042", Now);
         tcr.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000123", 0,
             TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Oceanic waypoint sequencing",

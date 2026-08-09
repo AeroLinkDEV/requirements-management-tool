@@ -47,9 +47,14 @@ public sealed class TestChangeRequestExclusivityTests
         return new(db, project.Id, release.Id, first.Id, second.Id, contested.Id);
     }
 
-    private static TestChangeReview Package(Fixture fixture, Guid raisedFrom, string number) =>
-        new(fixture.ProjectId, fixture.ReleaseId, raisedFrom, TestChangeReviewDiscipline.System,
-            "SRCR-00031", DateTimeOffset.UtcNow, number);
+    private static TestChangeReview Package(Fixture fixture, Guid raisedFrom, string number)
+    {
+        var package = new TestChangeReview(fixture.ProjectId, fixture.ReleaseId, raisedFrom,
+            TestChangeReviewDiscipline.System, "SRCR-00031", DateTimeOffset.UtcNow, number);
+        package.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution",
+            DateTimeOffset.UtcNow);
+        return package;
+    }
 
     [Fact]
     public async Task Two_packages_cannot_both_claim_the_same_change_request()

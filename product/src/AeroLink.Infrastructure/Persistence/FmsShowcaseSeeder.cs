@@ -376,7 +376,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
                     // The showcase's packages exist precisely because they carry procedure decisions, so they
                     // are seeded as already assessed rather than as questions nobody in the demo will answer.
                     review = new TestChangeReview(projectId, request.TargetReleaseId, request.Id,
-                        discipline, request.DisplayNumber, now);
+                        discipline, request.DisplayNumber, now, caseContractVersion: 0);
                     review.RecordTestChangeRequired("verification.engineer", now);
                     review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct), now);
                     db.TestChangeReviews.Add(review);
@@ -517,6 +517,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             // test work was required. Older showcase databases predate the outcome and are brought forward.
             if (review.Outcome == TestChangeReviewOutcome.Pending)
                 review.RecordTestChangeRequired("verification.engineer", now);
+            // Build 1.5 is imported history from before the engineering-case contract. Classify that history
+            // explicitly instead of inventing case prose or weakening the rule for newly authored packages.
+            if (review.MissingCaseFields().Count > 0)
+                db.Entry(review).Property(x => x.CaseContractVersion).CurrentValue = 0;
             review.Submit("verification.engineer", "assurance.reviewer", !incompleteReviewIds.Contains(review.Id), now);
             review.Approve("assurance.reviewer",
                 "Historical procedure changes and exact coverage were approved for released software build SW-01.50.", now);

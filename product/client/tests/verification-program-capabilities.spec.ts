@@ -131,6 +131,14 @@ test('verification actions follow authority in the selected Program',async({page
     }})
     expect(proposed.ok(),await proposed.text()).toBeTruthy()
 
+    const authoredCase=await request.post(`${apiBase}/api/test-change-reviews/${review.id}/case`,{data:{
+      title:`${title} verification case`,
+      problem:'The approved behavior has no controlled verification coverage.',
+      analysis:'The proposed procedure is required to qualify the Program-scoped behavior.',
+      solution:'Approve and materialize the proposed procedure.',
+    }})
+    expect(authoredCase.ok(),await authoredCase.text()).toBeTruthy()
+
     const submitted=await request.post(`${apiBase}/api/test-change-reviews/${review.id}/submit`,{data:{approverId:'systems.reviewer'}})
     expect(submitted.ok(),await submitted.text()).toBeTruthy()
     const approved=await reviewerRequest.post(`${apiBase}/api/test-change-reviews/${review.id}/approve`,{data:{

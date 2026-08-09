@@ -149,6 +149,24 @@ test('a configured two-stage sequential TCR review completes through the UI', as
   await expect(propose).toHaveCount(0, { timeout: 30_000 })
   await workspaceDrawer.getByRole('button', { name: 'Close test change request' }).click()
 
+  // Procedure work alone is not an approvable engineering case. The queue directs the assigned engineer
+  // back to the case and withholds Send until all four governed fields are present.
+  await expect(drawer.getByRole('button', { name: 'Send for approval' })).toHaveCount(0)
+  const completeCase = drawer.getByRole('button', { name: 'Complete engineering case' })
+  await expect(completeCase).toBeVisible({ timeout: 30_000 })
+  await completeCase.click()
+  const caseWorkspace = page.getByRole('dialog', { name: /procedure decisions/ })
+  await expect(caseWorkspace.getByText(/Missing before review: Title, Problem, Analysis, Solution/)).toBeVisible()
+  await caseWorkspace.getByRole('button', { name: 'Write engineering case' }).click()
+  const caseDialog = page.getByRole('dialog', { name: /Edit the case of/ })
+  await caseDialog.getByLabel('Title').fill('Workflow journey verification case')
+  await caseDialog.getByLabel('Problem').fill('The changed behavior has no controlled verification coverage.')
+  await caseDialog.getByLabel('Analysis').fill('A new procedure is required to qualify the behavior.')
+  await caseDialog.getByLabel('Solution').fill('Introduce and independently approve the proposed procedure.')
+  await caseDialog.getByRole('button', { name: 'Save case' }).click()
+  await expect(caseDialog).toHaveCount(0, { timeout: 30_000 })
+  await caseWorkspace.getByRole('button', { name: 'Close test change request' }).click()
+
   const send = drawer.getByRole('button', { name: 'Send for approval' })
   await expect(send).toBeVisible({ timeout: 30_000 })
   await send.click()

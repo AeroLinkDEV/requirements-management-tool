@@ -609,6 +609,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ProblemRich).IsRequired();
             b.Property(x => x.AnalysisRich).IsRequired();
             b.Property(x => x.SolutionRich).IsRequired();
+            b.Property(x => x.CaseContractVersion).IsRequired();
             b.Navigation(x => x.ReviewCycles).UsePropertyAccessMode(PropertyAccessMode.Field);
             b.Property(x => x.SelectedApproverId).HasMaxLength(100);
             b.Ignore(x => x.DisplayNumber);

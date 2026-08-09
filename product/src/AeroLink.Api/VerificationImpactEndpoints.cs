@@ -132,6 +132,7 @@ public static class VerificationImpactEndpoints
                     review.ProblemRich,
                     review.AnalysisRich,
                     review.SolutionRich,
+                    review.CaseContractVersion,
                     // Every change request this package answers for, the one it was raised from first. A reader
                     // scanning the list needs to see that two changes are being tested together without opening it.
                     coveredChangeRequests = new[] { new { id = review.ChangeRequestId, number = review.SourceChangeRequestNumber, title = changeRequests.GetValueOrDefault(review.ChangeRequestId) ?? "Source change request", originating = true } }
@@ -418,6 +419,7 @@ public static class VerificationImpactEndpoints
                 version = review.Version,
                 review.Title, review.Problem, review.Analysis, review.Solution,
                 review.ProblemRich, review.AnalysisRich, review.SolutionRich,
+                review.CaseContractVersion,
                 procedureChanges = review.ProcedureChanges
                     .OrderBy(x => x.BaseNumber)
                     .Select(x => new
@@ -1237,17 +1239,16 @@ public static class VerificationImpactEndpoints
                 });
             try
             {
-                // Newly authored packages carry a full case: Title, Problem, Analysis and Solution are what
-                // the reviewer is asked to judge. Packages that predate case authoring — or that were raised
-                // automatically and never written up — remain submittable as history; this gate applies only
-                // to work that has begun to state its case.
-                if (!string.IsNullOrWhiteSpace(review.Title)
-                    && (string.IsNullOrWhiteSpace(review.Problem) || string.IsNullOrWhiteSpace(review.Analysis)
-                        || string.IsNullOrWhiteSpace(review.Solution)))
-                    return Results.BadRequest(new { error = "Complete the test change request case (Problem, Analysis and Solution) before sending it for review." });
-                // A package concluding that procedure work is required, and then naming none, asks an approver
-                // to approve nothing. The workspace already tells the engineer a package is unfinished until it
-                // says what the work is; this is that sentence enforced.
+                // Historical blank packages remain readable; compatibility is not a submission bypass.
+                // Every new review cycle requires the complete case its reviewer is being asked to approve.
+                var missingCaseFields = review.MissingCaseFields();
+                if (review.Outcome == TestChangeReviewOutcome.ChangeRequired && missingCaseFields.Count > 0)
+                    return Results.BadRequest(new
+                    {
+                        error = $"Complete the test change request case before sending it for review. Missing: {string.Join(", ", missingCaseFields)}.",
+                        code = "test_change_request_case_incomplete",
+                        fields = missingCaseFields
+                    });
                 if (review.Outcome == TestChangeReviewOutcome.ChangeRequired && review.ProcedureChanges.Count == 0)
                     return Results.BadRequest(new { error = $"{review.DisplayNumber} concluded that procedure work is required but names none. Add the procedure decisions it carries before sending it for review." });
                 var allResolved = await db.VerificationImpactItems

@@ -111,6 +111,7 @@ public sealed class ProcedureBaselineApiTests
             TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Oceanic waypoint sequencing",
             "Verify oceanic sequencing.", "Cruise.", "1. Load. 2. Read.", "Sequenced.",
             "Nothing covers oceanic sequencing.", JsonSerializer.Serialize(new[] { revision.Id })), now);
+        review.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", now);
         review.Submit("verification.engineer", "test.lead", true, now);
         review.Approve("test.lead", "Reviewed.", now);
         db.Add(item);
