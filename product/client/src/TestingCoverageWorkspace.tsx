@@ -150,7 +150,7 @@ function ExistingCoverage({ item, coverage }: { item: ImpactItem; coverage?: Cov
  * change request is approved, so nothing goes unnoticed; an engineer can also raise one deliberately when a
  * set of changes is best tested together.
  */
-export default function TestingCoverageWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, programId, user }: {
+export default function TestingCoverageWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, programId, user, onOpenRequirementRevision }: {
   api: string
   projectId: string
   releaseId: string
@@ -159,6 +159,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   readOnly: boolean
   programId: string
   user: AuthUser
+  onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
 }) {
   // Authority is per Program, and it is the server that enforces it. Reflecting it here is about not offering
   // somebody a control that will refuse them — an approval they cannot give is worse than no button at all.
@@ -826,6 +827,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           canAuthor={canTest}
           onClose={() => setAuthoring('')}
           onChanged={() => void load()}
+          onOpenRequirementRevision={onOpenRequirementRevision}
         />
       )}
 

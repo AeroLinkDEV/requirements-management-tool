@@ -191,7 +191,8 @@ public sealed class TestProcedureAuthoringApiTests
                 preconditions = "The aircraft is in cruise on an oceanic plan.",
                 steps = "1. Load the plan. 2. Read the sequencer.",
                 expectedResult = "The next eligible waypoint is sequenced.",
-                rationale = "No procedure exercises oceanic sequencing after the approved change."
+                rationale = "No procedure exercises oceanic sequencing after the approved change.",
+                drivingRequirementRevisionIds = new[] { fixture.RequirementRevisionId }
             });
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"{(int)response.StatusCode}: {body}");
@@ -250,7 +251,8 @@ public sealed class TestProcedureAuthoringApiTests
             {
                 kind = "Introduce", revision = 0, title = "Oceanic waypoint sequencing",
                 objective = "Verify oceanic sequencing.", preconditions = "Cruise.",
-                steps = "1. Load. 2. Read.", expectedResult = "Sequenced.", rationale = "Nothing covers it."
+                steps = "1. Load. 2. Read.", expectedResult = "Sequenced.", rationale = "Nothing covers it.",
+                drivingRequirementRevisionIds = new[] { fixture.RequirementRevisionId }
             });
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
         var changeId = JsonSerializer.Deserialize<JsonElement>(await created.Content.ReadAsStringAsync())
@@ -316,6 +318,28 @@ public sealed class TestProcedureAuthoringApiTests
         Assert.Contains("does not exist", missing.Body);
         Assert.Equal("requirement_revision_not_found",
             JsonSerializer.Deserialize<JsonElement>(missing.Body).GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Introduce_refuses_to_create_a_procedure_without_an_exact_driving_requirement()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "procedure.engineer");
+        await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
+
+        using var response = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes", new
+            {
+                kind = "Introduce", revision = 0, title = "Untraceable procedure",
+                objective = "Verify something unspecified.", steps = "Execute.", expectedResult = "Observed.",
+                rationale = "Direct API attempt."
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        Assert.Equal("procedure_driving_requirement_required", body.GetProperty("code").GetString());
     }
 
     [Fact]
@@ -468,7 +492,7 @@ public sealed class TestProcedureAuthoringApiTests
         Assert.Equal("coverage_delta_rationale_required",
             (await Refused(fixture.RequirementRevisionId, null)).GetProperty("code").GetString());
 
-        using var accepted = await client.PostAsJsonAsync(
+        using var emptyFinalCoverage = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes", new
             {
                 kind = "Modify", baseNumber = "SYSTP-000900", revision = 1, title = "Narrowed coverage",
@@ -477,7 +501,10 @@ public sealed class TestProcedureAuthoringApiTests
                 removedRequirementRevisionIds = new[] { fixture.RequirementRevisionId },
                 coverageChangeRationale = "The approved design retired this verification obligation."
             });
-        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, emptyFinalCoverage.StatusCode);
+        Assert.Equal("procedure_final_coverage_required",
+            JsonSerializer.Deserialize<JsonElement>(await emptyFinalCoverage.Content.ReadAsStringAsync())
+                .GetProperty("code").GetString());
     }
 
     [Fact]

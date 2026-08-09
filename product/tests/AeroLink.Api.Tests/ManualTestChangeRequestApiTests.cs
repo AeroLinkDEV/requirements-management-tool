@@ -855,19 +855,16 @@ public sealed class ManualTestChangeRequestApiTests
             });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var packageId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
-        var version = (await client.GetFromJsonAsync<JsonElement>(
-            $"/api/test-change-reviews/{packageId}/procedure-changes")).GetProperty("version").GetInt64();
-
-        using var proposed = await client.PostAsJsonAsync(
-            $"/api/test-change-reviews/{packageId}/procedure-changes",
-            new
-            {
-                kind = "Introduce", revision = 0, title = "Proposal", objective = "Objective",
-                preconditions = "", steps = "Steps", expectedResult = "Expected", rationale = "Why",
-                drivingRequirementRevisionIds = Array.Empty<Guid>()
-            });
-        Assert.True(proposed.IsSuccessStatusCode, await proposed.Content.ReadAsStringAsync());
-        var changeId = (await proposed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        Guid changeId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+                .SingleAsync(x => x.Id == packageId);
+            AddProcedureDecision(review, "manual.engineer", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+            changeId = review.ProcedureChanges.Single().Id;
+        }
         var currentVersion = (await client.GetFromJsonAsync<JsonElement>(
             $"/api/test-change-reviews/{packageId}/procedure-changes")).GetProperty("version").GetInt64();
 
