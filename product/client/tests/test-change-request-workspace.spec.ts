@@ -77,6 +77,12 @@ test('a test engineer proposes a new procedure inside the test change request th
   // Exact, because "SYSTCR required" is a substring of the button beside it that concludes the opposite.
   await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
   await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment.getByRole('button', { name: 'Decide' }).click()
+  const impactDecision = page.getByRole('dialog', { name: /Decide / })
+  await impactDecision.getByLabel('Decision').selectOption('NewProcedureRequired')
+  await impactDecision.getByLabel('Rationale').fill('A new controlled procedure is required.')
+  await impactDecision.getByRole('button', { name: 'Record decision' }).click()
+  await expect(impactDecision).toHaveCount(0, { timeout: 30_000 })
 
   // The package opens in its own workspace, as a change request does from the requirements drawer.
   await assessment.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}$/ }).click()
@@ -85,6 +91,27 @@ test('a test engineer proposes a new procedure inside the test change request th
   // A package that has concluded test work is required but names none is unfinished, and says so rather than
   // rendering an empty list that reads as "nothing to do".
   await expect(drawer).toContainText('No procedure decisions are proposed yet')
+
+  await drawer.getByRole('button', { name: 'Write engineering case' }).click()
+  const caseDialog = page.getByRole('dialog', { name: /Edit the case of/ })
+  await caseDialog.getByLabel('Title').fill('Oceanic procedure change')
+  await caseDialog.getByLabel('Problem').fill('The changed behavior has no controlled procedure decision.')
+  await caseDialog.getByLabel('Analysis').fill('A new procedure is required to verify the requirement.')
+  await caseDialog.getByLabel('Solution').fill('Propose and independently approve the new procedure.')
+  await caseDialog.getByRole('button', { name: 'Save case' }).click()
+  await expect(caseDialog).toHaveCount(0, { timeout: 30_000 })
+  await drawer.getByRole('button', { name: 'Close test change request' }).click()
+
+  // Reopen from persisted state: the queue contract must survive refresh, not depend on the drawer callback.
+  await page.reload()
+  const refreshedRow = page.locator('.downstreamAssessment').filter({ hasText: sourceNumber }).first()
+  await refreshedRow.getByRole('button', { name: 'Open assessment' }).click()
+  const refreshedAssessment = page.getByRole('dialog', { name: /test impact/ })
+  await expect(refreshedAssessment.getByRole('button', { name: 'Send for approval' })).toHaveCount(0)
+  const addDecision = refreshedAssessment.getByRole('button', { name: 'Add a procedure decision' })
+  await expect(addDecision).toBeVisible({ timeout: 30_000 })
+  await addDecision.click()
+  await expect(drawer).toBeVisible()
 
   await drawer.getByRole('button', { name: 'Propose a procedure change' }).click()
   const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })

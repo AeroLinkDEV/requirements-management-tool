@@ -94,6 +94,7 @@ public static class VerificationImpactEndpoints
             // throws, which took this whole endpoint to a 500 and left the workspace looking simply empty.
             var reviews = (await db.TestChangeReviews.AsNoTracking()
                     .Include(x => x.AdditionalSources)
+                    .Include(x => x.ProcedureChanges)
                     .Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
                     .Where(x => x.ReleaseId == releaseId)
                     .ToListAsync(ct))
@@ -133,6 +134,7 @@ public static class VerificationImpactEndpoints
                     review.AnalysisRich,
                     review.SolutionRich,
                     review.CaseContractVersion,
+                    procedureDecisionCount = review.ProcedureChanges.Count,
                     // Every change request this package answers for, the one it was raised from first. A reader
                     // scanning the list needs to see that two changes are being tested together without opening it.
                     coveredChangeRequests = new[] { new { id = review.ChangeRequestId, number = review.SourceChangeRequestNumber, title = changeRequests.GetValueOrDefault(review.ChangeRequestId) ?? "Source change request", originating = true } }

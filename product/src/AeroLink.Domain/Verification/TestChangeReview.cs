@@ -262,6 +262,10 @@ public sealed class TestChangeReview
             && CaseContractVersion >= CurrentCaseContractVersion && missingCaseFields.Count > 0)
             throw new DomainException(
                 $"Complete the test change request case before sending it for review. Missing: {string.Join(", ", missingCaseFields)}.");
+        if (Outcome == TestChangeReviewOutcome.ChangeRequired
+            && CaseContractVersion >= CurrentCaseContractVersion && _procedureChanges.Count == 0)
+            throw new DomainException(
+                "A test change request that requires test work names no procedure decisions. Add an Introduce, Modify, or Retire decision before review.");
         // A procedure being introduced has to say what it verifies, and submission is where that is checked —
         // not when it is written. A draft package is worked on incrementally, exactly as a change request is,
         // so the gate belongs at the point an approver is asked to sign rather than at the point an engineer
@@ -273,11 +277,8 @@ public sealed class TestChangeReview
                 "Every procedure this package introduces must name the requirement revisions it verifies.");
         if (approvers.Any(x => string.Equals(x.UserId, actorId, StringComparison.OrdinalIgnoreCase)))
             throw new DomainException("The test change request approver must be independent from its submitting engineer.");
-        // "Concluded work is required, names none" is refused at the endpoint rather than here, and that is a
-        // deliberate split. Every route a person can take passes through the endpoint. What does not is the
-        // reconstruction of history: Build 1.5's packages were approved before procedure decisions existed,
-        // and the honest record of them is empty. Enforcing it here would force the showcase to invent the
-        // decisions those approvals never carried, which is a worse falsehood than the gap.
+        // Version-zero history can still be reconstructed exactly as it was approved before procedure decisions
+        // existed. Current packages cannot use that compatibility path to approve an empty work package.
         var cycle = ChangeControl.ReviewCycle.ForTestChangeRequest(Id, _reviewCycles.Count + 1,
             ComputeSnapshotHash(problemReportIds, impactDecisions), approvers, now, mode, workflow);
         _reviewCycles.Add(cycle);
