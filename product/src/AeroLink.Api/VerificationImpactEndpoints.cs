@@ -41,6 +41,26 @@ public sealed record ProposeProcedureChangeRequest(TestProcedureChangeKind Kind,
     Guid[]? RemovedRequirementRevisionIds = null, string? CoverageChangeRationale = null);
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
 
+/// <summary>The one lifecycle contract shared by every route that offers or accepts a TCR source.</summary>
+internal static class TestChangeRequestSourceEligibility
+{
+    internal static readonly ChangeRequestState[] EligibleStates =
+        [ChangeRequestState.Approved, ChangeRequestState.SelectedForBaseline];
+
+    internal static bool Allows(ChangeRequestState state) => EligibleStates.Contains(state);
+
+    internal static IQueryable<SystemChangeRequest> Apply(IQueryable<SystemChangeRequest> changes) =>
+        changes.Where(x => EligibleStates.Contains(x.State));
+
+    internal static IResult Refusal(string displayNumber, ChangeRequestState state) =>
+        Results.BadRequest(new
+        {
+            error = $"{displayNumber} is {state} and cannot be a test change request source. " +
+                "Only approved change requests in Approved or SelectedForBaseline state are eligible.",
+            code = "change_request_not_selectable"
+        });
+}
+
 public static class VerificationImpactEndpoints
 {
     public static IEndpointRouteBuilder MapAeroLinkVerificationImpactEndpoints(this IEndpointRouteBuilder app)
@@ -847,15 +867,17 @@ public static class VerificationImpactEndpoints
 
             var changes = await db.SystemChangeRequests.AsNoTracking()
                 .Where(x => request.ChangeRequestIds.Contains(x.Id) && x.ProjectId == release.ProjectId
-                    && x.TargetReleaseId == releaseId
-                    && (x.State == ChangeRequestState.Approved || x.State == ChangeRequestState.SelectedForBaseline))
-                .Select(x => new { x.Id, x.DisplayNumber }).ToListAsync(ct);
+                    && x.TargetReleaseId == releaseId)
+                .Select(x => new { x.Id, x.DisplayNumber, x.State }).ToListAsync(ct);
             if (changes.Count != request.ChangeRequestIds.Length)
                 return Results.BadRequest(new
                 {
                     error = "A test change request can only answer for approved change requests allocated to this build.",
                     code = "change_request_not_selectable"
                 });
+            var ineligible = changes.FirstOrDefault(x => !TestChangeRequestSourceEligibility.Allows(x.State));
+            if (ineligible is not null)
+                return TestChangeRequestSourceEligibility.Refusal(ineligible.DisplayNumber, ineligible.State);
             // The first change the caller names is the package's base; the rest are folded in. The database
             // row order is not the caller's order, so it is restored explicitly rather than trusted.
             changes = request.ChangeRequestIds.Select(id => changes.Single(x => x.Id == id)).ToList();
@@ -1014,9 +1036,8 @@ public static class VerificationImpactEndpoints
             if (release is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, release.ProjectId, ct)) return Results.Forbid();
 
-            var changes = await db.SystemChangeRequests.AsNoTracking()
-                .Where(x => x.ProjectId == release.ProjectId && x.TargetReleaseId == releaseId
-                    && (x.State == ChangeRequestState.Approved || x.State == ChangeRequestState.SelectedForBaseline))
+            var changes = await TestChangeRequestSourceEligibility.Apply(db.SystemChangeRequests.AsNoTracking())
+                .Where(x => x.ProjectId == release.ProjectId && x.TargetReleaseId == releaseId)
                 .Select(x => new { x.Id, x.DisplayNumber, x.Title, x.State }).ToListAsync(ct);
             var ids = changes.Select(x => x.Id).ToList();
 
@@ -1071,12 +1092,14 @@ public static class VerificationImpactEndpoints
 
             var change = await db.SystemChangeRequests.AsNoTracking()
                 .Where(x => x.Id == request.ChangeRequestId && x.ProjectId == review.ProjectId)
-                .Select(x => new { x.Id, x.DisplayNumber, x.TargetReleaseId }).SingleOrDefaultAsync(ct);
+                .Select(x => new { x.Id, x.DisplayNumber, x.TargetReleaseId, x.State }).SingleOrDefaultAsync(ct);
             if (change is null) return Results.NotFound(new { error = "That change request is not in this Project." });
             // A package governs one build's test work. Folding in a change allocated to a different build
             // would put its procedures behind the wrong release gate.
             if (change.TargetReleaseId != review.ReleaseId)
                 return Results.BadRequest(new { error = $"{change.DisplayNumber} is allocated to a different build." });
+            if (!TestChangeRequestSourceEligibility.Allows(change.State))
+                return TestChangeRequestSourceEligibility.Refusal(change.DisplayNumber, change.State);
 
             var claimedBy = await db.TestChangeRequestClaims.AsNoTracking()
                 .Where(x => x.ChangeRequestId == request.ChangeRequestId)
