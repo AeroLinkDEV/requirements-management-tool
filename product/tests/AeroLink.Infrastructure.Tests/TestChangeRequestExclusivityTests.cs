@@ -3,6 +3,7 @@ using AeroLink.Domain.Programs;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -55,6 +56,13 @@ public sealed class TestChangeRequestExclusivityTests
             DateTimeOffset.UtcNow);
         return package;
     }
+
+    private static void AddProcedureDecision(TestChangeReview package, string actor, DateTimeOffset now) =>
+        package.AddProcedureChange(actor, new TestProcedureChangeDraft("SYSTP-000044", 0,
+            TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Claim transfer procedure",
+            "Verify the folded-in change.", "The target build is available.", "Exercise the change.",
+            "The changed behavior is observed.", "The package must carry concrete test work.",
+            JsonSerializer.Serialize(new[] { Guid.NewGuid() })), now);
 
     [Fact]
     public async Task Two_packages_cannot_both_claim_the_same_change_request()
@@ -148,6 +156,7 @@ public sealed class TestChangeRequestExclusivityTests
         var now = DateTimeOffset.UtcNow;
         package.RecordTestChangeRequired("verification.engineer", now);
         package.IncludeChangeRequest("verification.engineer", fixture.Contested, "SRCR-00040", now);
+        AddProcedureDecision(package, "verification.engineer", now);
         package.Submit("verification.engineer", "test.lead", true, now.AddMinutes(1));
         package.Approve("test.lead", "Sound.", now.AddMinutes(2));
         await db.SaveChangesAsync();

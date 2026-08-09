@@ -97,6 +97,13 @@ public sealed class ManualTestChangeRequestApiTests
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
+    private static void AddProcedureDecision(TestChangeReview review, string actor, DateTimeOffset now) =>
+        review.AddProcedureChange(actor, new TestProcedureChangeDraft("SYSTP-009999", 0,
+            TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Test fixture procedure",
+            "Verify the package behavior.", "The target build is available.", "Exercise the change.",
+            "The changed behavior is observed.", "The current package must name its procedure work.",
+            JsonSerializer.Serialize(new[] { Guid.NewGuid() })), now);
+
     [Fact]
     public async Task An_engineer_raises_a_package_covering_two_changes_at_once()
     {
@@ -294,6 +301,7 @@ public sealed class ManualTestChangeRequestApiTests
             // until somebody has said whether test work is required at all.
             review.RecordTestChangeRequired("manual.engineer", DateTimeOffset.UtcNow);
             review.WriteCase("manual.engineer", "Verification case", "Problem", "Analysis", "Solution", DateTimeOffset.UtcNow);
+            AddProcedureDecision(review, "manual.engineer", DateTimeOffset.UtcNow);
             review.Submit("manual.engineer", "independent.reviewer", true, DateTimeOffset.UtcNow);
             await db.SaveChangesAsync();
         }
@@ -359,6 +367,7 @@ public sealed class ManualTestChangeRequestApiTests
             package.RecordTestChangeRequired("manual.engineer", now);
             package.IncludeChangeRequest("manual.engineer", fixture.FirstChangeId, "SRCR-00910.00", now);
             package.WriteCase("manual.engineer", "Verification case", "Problem", "Analysis", "Solution", now);
+            AddProcedureDecision(package, "manual.engineer", now);
             package.Submit("manual.engineer", "test.lead", true, now.AddMinutes(1));
             package.Approve("test.lead", "Sound.", now.AddMinutes(2));
             await db.SaveChangesAsync();
@@ -476,7 +485,9 @@ public sealed class ManualTestChangeRequestApiTests
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var review = await db.TestChangeReviews.SingleAsync(x => x.Id == packageId);
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+                .SingleAsync(x => x.Id == packageId);
+            AddProcedureDecision(review, "manual.engineer", DateTimeOffset.UtcNow);
             review.Submit("manual.engineer", "independent.reviewer", true, DateTimeOffset.UtcNow);
             await db.SaveChangesAsync();
         }
