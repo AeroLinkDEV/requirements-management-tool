@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { pickerSummary } from './pickerText'
 import { PersonName } from './People'
 import { ApiError, apiRequest, operationError } from './apiClient'
@@ -63,6 +63,11 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
   const [requirementQuery,setRequirementQuery]=useState('')
   const [requirementPage,setRequirementPage]=useState(1)
   const [requirementPicker,setRequirementPicker]=useState<RequirementChoicePage>()
+  /** Full identity of every selected driving requirement, kept on the client so the whole selection never
+   * has to be serialized into a request line to stay visible across search and paging. */
+  const [drivingDetails,setDrivingDetails]=useState<Record<string,RequirementChoice>>({})
+  const [requirementError,setRequirementError]=useState('')
+  const [targetError,setTargetError]=useState('')
   const [editingCase,setEditingCase]=useState(false)
   const [caseTitle,setCaseTitle]=useState('')
   const [caseProblemRich,setCaseProblemRich]=useState(fromPlainText(''))
@@ -70,10 +75,13 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
   const [caseSolutionRich,setCaseSolutionRich]=useState(fromPlainText(''))
   const [caseVersion,setCaseVersion]=useState<number|undefined>(undefined)
 
+  const loadTicket=useRef(0)
   const load=useCallback(async()=>{
+    const mine=++loadTicket.current
     setError('')
-    try{setItem(await apiRequest<Package>(`${api}/api/test-change-reviews/${reviewId}/procedure-changes`))}
-    catch(problem){setError(operationError(problem,'The test change request could not be loaded.'))}
+    try{const next=await apiRequest<Package>(`${api}/api/test-change-reviews/${reviewId}/procedure-changes`)
+      if(mine===loadTicket.current)setItem(next)}
+    catch(problem){if(mine===loadTicket.current)setError(operationError(problem,'The test change request could not be loaded.'))}
   },[api,reviewId])
   useEffect(()=>{void load()},[load])
 
@@ -87,8 +95,13 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
     const hydrate=[...new Set([draft.baseNumber,...(item?.procedureTargets??[]).map(x=>x.baseNumber)].filter(Boolean))]
     if(hydrate.length)params.set('baseNumbers',hydrate.join(','))
     void fetch(`${api}/api/test-change-reviews/${reviewId}/procedure-targets?${params}`)
-      .then(response=>response.ok?response.json():undefined)
+      .then(async response=>{
+        if(!response.ok){if(active)setTargetError('The procedures for this build could not be loaded. Try searching again.');return undefined}
+        setTargetError('')
+        return response.json()
+      })
       .then(paged=>{if(active&&paged)setTargetPicker(paged)})
+      .catch(()=>{if(active)setTargetError('The procedures for this build could not be loaded. Try searching again.')})
     return ()=>{active=false}
   },[api,reviewId,proposing,targetQuery,targetPage,draft.baseNumber,item?.procedureTargets])
 
@@ -98,18 +111,30 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
     if(!proposing)return
     let active=true
     const params=new URLSearchParams({page:String(requirementPage),pageSize:'50',search:requirementQuery})
-    if(draft.driving.length)params.set('ids',draft.driving.join(','))
+    // The complete selection is rendered from the client-side drivingDetails map; it is never serialized
+    // into the request line, so search and paging stay bounded however many requirements are selected.
     void fetch(`${api}/api/test-change-reviews/${reviewId}/requirement-candidates?${params}`)
-      .then(response=>response.ok?response.json():undefined)
+      .then(async response=>{
+        if(!response.ok){if(active)setRequirementError('The governed requirements for this build could not be loaded. Try searching again.');return undefined}
+        setRequirementError('')
+        return response.json()
+      })
       .then(paged=>{if(active&&paged)setRequirementPicker(paged)})
+      .catch(()=>{if(active)setRequirementError('The governed requirements for this build could not be loaded. Try searching again.')})
     return ()=>{active=false}
-  },[api,reviewId,proposing,requirementQuery,requirementPage,draft.driving])
+  },[api,reviewId,proposing,requirementQuery,requirementPage])
 
   const targetSummary = pickerSummary(
     'carried procedure', targetQuery, targetPicker?.totalCount??0, draft.baseNumber ? 1 : 0)
   const requirementSummary = pickerSummary(
     'governed requirement', requirementQuery, requirementPicker?.totalCount??0,
     draft.driving.length, 'in scope')
+  const requirementOptions=useMemo(()=>{
+    const options=new Map<string,RequirementChoice>()
+    for(const choice of requirementPicker?.items??[])options.set(choice.revisionId,choice)
+    for(const entry of Object.values(drivingDetails))if(!options.has(entry.revisionId))options.set(entry.revisionId,entry)
+    return [...options.values()]
+  },[requirementPicker,drivingDetails])
 
   const act=async(run:()=>Promise<unknown>)=>{
     setBusy(true);setError('')
@@ -128,7 +153,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
       coverageChangeRationale:draft.coverageRationale,
       expectedVersion:item?.version}
     if(await act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/procedure-changes`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}))){
-      setProposing(false);setDraft(emptyDraft)
+      setProposing(false);setDraft(emptyDraft);setDrivingDetails({})
     }
   }
   const withdraw=(changeId:string)=>void act(()=>apiRequest(
@@ -255,7 +280,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                 </li>)}</ul>
             : <p className="drawerEmpty">No procedure decisions are proposed yet. A test change request exists because test work is required, so it is not finished until it says what that work is.</p>}
           <div className="drawerDecisionActions">
-            {mayEdit&&<button type="button" disabled={busy} onClick={()=>{setDraft(emptyDraft);setProposing(true);setTargetQuery('');setTargetPage(1);setRequirementQuery('');setRequirementPage(1)}}>Propose a procedure change</button>}
+            {mayEdit&&<button type="button" disabled={busy} onClick={()=>{setDraft(emptyDraft);setDrivingDetails({});setProposing(true);setTargetQuery('');setTargetPage(1);setRequirementQuery('');setRequirementPage(1);setRequirementError('');setTargetError('')}}>Propose a procedure change</button>}
             {/* Revising is the test-side twin of revising a change request: reopening approved work to correct
                 it, which carries the existing decisions into the next revision. */}
             {canAuthor&&(item.capabilities?.canRevise??false)&&<button type="button" className="quiet reopenAssessment" disabled={busy} onClick={revise}>Revise this test change request</button>}
@@ -287,8 +312,11 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
           : 'What this test change request proposes to do to the procedures. Nothing here becomes a controlled procedure revision until the package is approved and materialised into a build.'}</p>
         {error&&<div className="workspaceError" role="alert">{error}</div>}
         <label>What is being done
-          <select value={draft.kind} onChange={event=>setDraft(current=>({...current,
-            kind:event.target.value as Kind,baseNumber:'',revision:0,driving:[],removed:[],coverageRationale:''}))}>
+          <select value={draft.kind} onChange={event=>{
+            setDraft(current=>({...current,
+              kind:event.target.value as Kind,baseNumber:'',revision:0,driving:[],removed:[],coverageRationale:''}))
+            setDrivingDetails({})
+          }}>
             <option value="Introduce">Introduce a new procedure</option>
             <option value="Modify">Modify an existing procedure</option>
             <option value="Retire">Retire an existing procedure</option>
@@ -306,19 +334,22 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
             <input aria-label="Search procedures" className="pickerSearch" value={targetQuery}
               onChange={event=>{setTargetQuery(event.target.value);setTargetPage(1)}}
               placeholder="Search by number or title..." />
-            <select aria-label="Procedure" value={draft.baseNumber} onChange={event=>{
+                <select aria-label="Procedure" value={draft.baseNumber} onChange={event=>{
               const target=(targetPicker?.items??[]).find(x=>x.baseNumber===event.target.value)
                 ??(item?.procedureTargets??[]).find(x=>x.baseNumber===event.target.value)
               setDraft(current=>({...current,baseNumber:event.target.value,revision:(target?.currentRevision??-1)+1,
                 driving:[],removed:[],coverageRationale:''}))
             }}>
-              <option value="">Choose the procedure this acts on...</option>
-              {(targetPicker?.items??[]).map(target=>
-                <option value={target.baseNumber} key={target.baseNumber}>
-                  {target.baseNumber}.{String(Math.max(target.currentRevision,0)).padStart(2,'0')} - {target.title}
-                </option>)}
-            </select>
-            <div className="pickerMeta">
+                  <option value="">Choose the procedure this acts on...</option>
+                  {(targetPicker?.items??[]).map(target=>
+                    <option value={target.baseNumber} key={target.baseNumber}>
+                      {target.baseNumber}.{String(Math.max(target.currentRevision,0)).padStart(2,'0')} - {target.title}
+                    </option>)}
+                </select>
+                {targetError&&<div className="pickerMeta" role="alert" aria-live="assertive">
+                  <span>{targetError}</span>
+                </div>}
+                <div className="pickerMeta">
               <span>{targetSummary.headline}{targetSummary.note?` ${targetSummary.note}`:''}</span>
               <span className="pickerPager">
                 <button type="button" disabled={(targetPicker?.page??1)<=1} onClick={()=>setTargetPage(page=>Math.max(1,page-1))}>Previous</button>
@@ -360,20 +391,30 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
             onChange={event=>{setRequirementQuery(event.target.value);setRequirementPage(1)}}
             placeholder="Search by number or wording..." />
           <div className="pickerResults">
-            {(requirementPicker?.items??[]).map(choice=>
+            {requirementOptions.map(choice=>
               <label key={choice.revisionId} className="drivingChoice">
                 <input type="checkbox" checked={draft.driving.includes(choice.revisionId)}
-                  onChange={event=>setDraft(current=>({...current,
-                    driving:event.target.checked
-                      ?[...current.driving,choice.revisionId]
-                      :current.driving.filter(id=>id!==choice.revisionId)}))}/>
+                  onChange={event=>{
+                    const checked=event.target.checked
+                    setDraft(current=>({...current,
+                      driving:checked
+                        ?[...current.driving,choice.revisionId]
+                        :current.driving.filter(id=>id!==choice.revisionId)}))
+                    if(checked)setDrivingDetails(current=>({...current,[choice.revisionId]:choice}))
+                    else setDrivingDetails(current=>{
+                      const next={...current};delete next[choice.revisionId];return next
+                    })
+                  }}/>
                 <span><b>{choice.displayNumber}</b> {choice.statement}</span>
               </label>)}
-            {(requirementPicker?.items??[]).length===0&&
+            {requirementOptions.length===0&&
               <p className="drawerEmpty">{requirementQuery
                 ?'No governed requirement in this build matches that search.'
                 :'This build has not materialized its requirements yet, so there is no exact revision to write against. Introduce and Modify decisions wait until exact requirement revisions are available.'}</p>}
           </div>
+          {requirementError&&<div className="pickerMeta" role="alert" aria-live="assertive">
+            <span>{requirementError}</span>
+          </div>}
           <div className="pickerMeta">
             <span>{requirementSummary.headline}{requirementSummary.note?` ${requirementSummary.note}`:''}</span>
             <span className="pickerPager">

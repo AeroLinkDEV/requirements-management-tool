@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PersonName } from './People'
 import PersonPicker from './PersonPicker'
 import ProblemReportPicker, { type ProblemReportOption } from './ProblemReportPicker'
@@ -60,6 +60,9 @@ type PickerRequirement = { revisionId: string; displayNumber: string; statement:
 type PickerProcedure = { id: string; displayNumber: string; title: string; state: string }
 type RequirementPickerPage = { page: number; pageSize: number; totalCount: number; totalPages: number; items: PickerRequirement[] }
 type ProcedurePickerPage = { page: number; pageSize: number; totalCount: number; totalPages: number; items: PickerProcedure[] }
+/** Full identity of a selected requirement, retained on the client so the whole selection never has to be
+ * serialized into a picker request line to stay visible. */
+type SelectedRequirement = PickerRequirement
 type ImpactItem = {
   id: string
   testChangeReviewId: string
@@ -230,6 +233,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [requirementPage, setRequirementPage] = useState(1)
   const [requirementPicker, setRequirementPicker] = useState<RequirementPickerPage>()
   const [requirementSelection, setRequirementSelection] = useState<string[]>([])
+  const [requirementSelectionItems, setRequirementSelectionItems] = useState<Record<string, SelectedRequirement>>({})
+  const [requirementError, setRequirementError] = useState('')
+  const [procedureError, setProcedureError] = useState('')
 
   // One ticket per loader, not one for the page.
   //
@@ -255,7 +261,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     // requirements at all" on a page whose whole job is to say what is untested.
     const context = await fetch(`${api}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)
     const effective = context.ok ? (await context.json())?.effectiveBaselineId : undefined
-    setEffectiveBaseline(effective ? String(effective) : '')
     const builds = await fetch(`${api}/api/builds?projectId=${projectId}`)
     const build = builds.ok ? (await builds.json()).find((x: { releaseId: string }) => x.releaseId === releaseId) : undefined
     const configuration = build ? `buildId=${build.id}` : effective ? `baselineId=${effective}` : ''
@@ -271,6 +276,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       : undefined
     const nextImpact = impactResponse.ok ? await impactResponse.json() : undefined
     if (mine !== loadTicket.current) return
+    // The effective baseline is load-owned state too: a stale release's delayed build-context response
+    // must never overwrite the currently displayed build's baseline after the user has switched.
+    setEffectiveBaseline(effective ? String(effective) : '')
     if (rawCoverage) {
       // Coverage is computed for the whole configuration; this page speaks for one discipline.
       const prefix = discipline === 'System' ? 'SYSR-' : discipline === 'HighLevelSoftware' ? 'HLR-' : 'LLR-'
@@ -301,6 +309,18 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
 
   useEffect(() => { void load() }, [load])
 
+  // A project/release/discipline transition must never leave the previous scope's picker context visible
+  // while the new scope is loading. Reset every picker-owned state deliberately; the loaders repopulate it.
+  useEffect(() => {
+    setRequirementQuery(''); setRequirementPage(1); setRequirementPicker(undefined)
+    setRequirementSelection([]); setRequirementSelectionItems({}); setRequirementError('')
+    setProcedureQuery(''); setProcedurePage(1); setProcedurePicker(undefined)
+    setProcedureChoice(''); setProcedureError('')
+    setEffectiveBaseline('')
+    setCreating(false); setCreateError(''); setResolving(undefined)
+    setAuthoring(''); setCreatingTcr(false)
+  }, [projectId, releaseId, discipline])
+
   // The approved procedures a decision may name as already covering a requirement: bounded, server-searched
   // and paged with totals, so a valid procedure beyond the first 200 rows is findable. The exact procedure a
   // resolved decision names is hydrated by ID even when it lies beyond the current page.
@@ -315,10 +335,15 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     if (hydrated.length) params.set('ids', hydrated.join(','))
     void (async () => {
       const response = await fetch(`${api}/api/test-procedures?${params}`)
-      if (!response.ok) return
+      if (!response.ok) {
+        if (mine === procedureTicket.current) {
+          setProcedureError('The approved procedures for this build could not be loaded. Try searching again.')
+        }
+        return
+      }
       const paged = await response.json()
       if (mine !== procedureTicket.current) return
-      setProcedurePicker(paged)
+      setProcedurePicker(paged); setProcedureError('')
     })()
   }, [api, projectId, releaseId, scope, revision, procedureQuery, procedurePage, resolving?.resolvedProcedure?.id, procedureChoice])
 
@@ -332,16 +357,21 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       const params = new URLSearchParams({ projectId, scope, includeRetired: 'false',
         page: String(requirementPage), pageSize: '50', search: requirementQuery })
       if (effectiveBaseline) params.set('baselineId', effectiveBaseline)
-      const selected = [...new Set(requirementSelection)]
-      if (selected.length) params.set('ids', selected.join(','))
+      // The complete selection is rendered from the client-side selected-item map; it is never serialized
+      // into the request line, so search and paging stay bounded however many requirements are selected.
       const response = await fetch(`${api}/api/requirements?${params}`)
-      if (!response.ok) return
+      if (!response.ok) {
+        if (mine === requirementTicket.current) {
+          setRequirementError('The requirements for this build could not be loaded. Try searching again.')
+        }
+        return
+      }
       const paged = await response.json()
       if (mine !== requirementTicket.current) return
-      setRequirementPicker(paged)
+      setRequirementPicker(paged); setRequirementError('')
     }, 180)
     return () => clearTimeout(timer)
-  }, [api, projectId, scope, creating, effectiveBaseline, requirementQuery, requirementPage, requirementSelection])
+  }, [api, projectId, scope, creating, effectiveBaseline, requirementQuery, requirementPage])
 
   const procedureSummary = pickerSummary(
     'approved procedure', procedureQuery, procedurePicker?.totalCount ?? 0,
@@ -349,6 +379,14 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const requirementSummary = pickerSummary(
     'requirement', requirementQuery, requirementPicker?.totalCount ?? 0,
     requirementSelection.length, 'in scope')
+  const requirementOptions = useMemo(() => {
+    const options = new Map<string, SelectedRequirement>()
+    for (const item of requirementPicker?.items ?? []) options.set(item.revisionId, item)
+    for (const entry of Object.values(requirementSelectionItems)) {
+      if (!options.has(entry.revisionId)) options.set(entry.revisionId, entry)
+    }
+    return [...options.values()]
+  }, [requirementPicker, requirementSelectionItems])
 
   const mine = requests.filter(x => x.discipline === discipline)
 
@@ -719,6 +757,14 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                           setRequirementQuery('')
                           setRequirementPage(1)
                           setRequirementSelection(item.requirementRevisionId ? [item.requirementRevisionId] : [])
+                          setRequirementSelectionItems(item.requirementRevisionId ? {
+                            [item.requirementRevisionId]: {
+                              revisionId: item.requirementRevisionId,
+                              displayNumber: item.subjectDisplayNumber,
+                              statement: item.subjectStatement,
+                            },
+                          } : {})
+                          setRequirementError('')
                           setCreateError('')
                           setCreating(true)
                         }}>Author the procedure</button>
@@ -829,8 +875,18 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <label>Requirements it verifies
               <select name="requirement" aria-describedby="procedure-requirements-help" multiple size={6} required
                 value={requirementSelection}
-                onChange={event => setRequirementSelection(Array.from(event.target.selectedOptions, option => option.value))}>
-                {(requirementPicker?.items ?? []).map(item => (
+                onChange={event => {
+                  const selected = Array.from(event.target.selectedOptions, option => option.value)
+                  setRequirementSelection(selected)
+                  const known = new Map(requirementOptions.map(item => [item.revisionId, item]))
+                  const next: Record<string, SelectedRequirement> = {}
+                  for (const id of selected) {
+                    const entry = known.get(id)
+                    next[id] = entry ?? { revisionId: id, displayNumber: id, statement: '' }
+                  }
+                  setRequirementSelectionItems(next)
+                }}>
+                {requirementOptions.map(item => (
                   <option key={item.revisionId} value={item.revisionId}>{item.displayNumber} - {item.statement.slice(0, 70)}</option>
                 ))}
               </select>
@@ -838,6 +894,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             <input aria-label="Search requirements" className="pickerSearch" value={requirementQuery}
               onChange={event => { setRequirementQuery(event.target.value); setRequirementPage(1) }}
               placeholder="Search by number or wording..." />
+              {requirementError && <div className="pickerMeta" role="alert" aria-live="assertive">
+                <span>{requirementError}</span>
+              </div>}
               <div className="pickerMeta">
                 <span>
                   {requirementSummary.headline}{requirementSummary.note ? ` ${requirementSummary.note}` : ''}
@@ -883,6 +942,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
 
       {authoring && (
         <TestChangeRequestWorkspace
+          key={authoring}
           api={api}
           projectId={projectId}
           reviewId={authoring}
@@ -1084,6 +1144,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     <option key={x.id} value={x.id}>{x.displayNumber} - {x.title.slice(0, 60)}</option>
                   ))}
                 </select>
+                {procedureError && <div className="pickerMeta" role="alert" aria-live="assertive">
+                  <span>{procedureError}</span>
+                </div>}
                 <div className="pickerMeta">
                   <span>
                     {procedureSummary.headline}{procedureSummary.note ? ` ${procedureSummary.note}` : ''}
