@@ -65,3 +65,17 @@
 .drivingChoice{display:flex;gap:.5rem;align-items:flex-start;margin:0 0 .4rem;font-weight:400}
 .drivingChoice input{margin-top:.25rem}
 .drivingChoice b{color:#17314f}
+
+/* Searchable bounded pickers. The authoring surfaces never claim a fixed first page is the whole universe:
+   search, paging and totals make every eligible artifact reachable without loading the Project into React. */
+.pickerSearch{width:100%;box-sizing:border-box;padding:.45rem .6rem;margin:0 0 .5rem;
+  border:1px solid #cbd7e6;border-radius:8px;font:inherit}
+.pickerResults{display:flex;flex-direction:column;gap:.15rem;max-height:220px;overflow-y:auto;
+  border:1px solid #e3eaf2;border-radius:8px;padding:.5rem .6rem}
+.pickerMeta{display:flex;justify-content:space-between;align-items:center;gap:.75rem;
+  margin:.45rem 0;color:#5c6878;font-size:12px}
+.pickerMeta span{min-width:0}
+.pickerPager{display:flex;gap:.3rem;flex:none}
+.pickerPager button{border:1px solid #cbd7e6;border-radius:6px;background:white;color:#43516a;
+  font-size:12px;padding:3px 8px;cursor:pointer}
+.pickerPager button:disabled{opacity:.45;cursor:default}

@@ -613,7 +613,7 @@ public static class VerificationEndpoints
         // search, filter or page. This returns a bounded page and the total, and every predicate below runs
         // in the database, because a page of twenty-five that costs a full table read is not paging.
         app.MapGet("/api/test-procedures", async (Guid projectId, Guid? releaseId, string? search, string? scope, string? state,
-            string? owner, string? outcome, Guid? requirementRevisionId, string? sort, int? page, int? pageSize,
+            string? owner, string? outcome, Guid? requirementRevisionId, string? sort, int? page, int? pageSize, string? ids,
             HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             // This endpoint read a Project's controlled procedures without checking the caller was in it.
@@ -634,6 +634,10 @@ public static class VerificationEndpoints
             else if(string.Equals(scope,"Software",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.HighLevel||x.Level==TestProcedureLevel.LowLevel);
             else if(string.Equals(scope,"HighLevelSoftware",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.HighLevel);
             else if(string.Equals(scope,"LowLevelSoftware",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.LowLevel);
+            // Eligibility is Project plus the selected build's exact procedure manifest plus discipline.
+            // Hydration of an already selected exact procedure runs against this scoped source without the
+            // search predicate, so a selection beyond the current result page stays reachable.
+            var eligibility = source;
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var q = search.Trim().ToLower();
@@ -701,14 +705,23 @@ public static class VerificationEndpoints
             };
             var items = await ordered.Skip((currentPage - 1) * size).Take(size)
                 .Select(x => new { x.Id, x.BaseNumber, x.Title, x.OwnerId, x.Level, x.CreatedAt }).ToListAsync(ct);
-            var ids = items.Select(x => x.Id).ToList(); var revisions = await db.TestProcedureRevisions.AsNoTracking().Where(x => ids.Contains(x.ProcedureId)).ToListAsync(ct);
+            var requestedIds = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(x => Guid.TryParse(x, out var id) ? id : Guid.Empty).Where(x => x != Guid.Empty).Distinct().ToList();
+            var hydrated = requestedIds.Count == 0
+                ? []
+                : await eligibility.Where(x => requestedIds.Contains(x.Id))
+                    .Select(x => new { x.Id, x.BaseNumber, x.Title, x.OwnerId, x.Level, x.CreatedAt })
+                    .ToListAsync(ct);
+            var all = items.Concat(hydrated).DistinctBy(x => x.Id).ToList();
+            var allIds = all.Select(x => x.Id).ToList(); var revisions = await db.TestProcedureRevisions.AsNoTracking().Where(x => allIds.Contains(x.ProcedureId)).ToListAsync(ct);
             var selectedRevisionIds = scopedRevisions is null
                 ? revisions.GroupBy(x => x.ProcedureId).Select(group => group.OrderByDescending(x => x.Revision).First().Id).ToList()
-                : scopedRevisions.Where(x => ids.Contains(x.Key)).Select(x => x.Value).ToList();
+                : scopedRevisions.Where(x => allIds.Contains(x.Key)).Select(x => x.Value).ToList();
             var coverage = await db.TestCoverage.AsNoTracking().Where(x => selectedRevisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
             var executions = await db.TestExecutions.AsNoTracking().Where(x => selectedRevisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
-            return Results.Ok(new { page = currentPage, pageSize = size, totalCount, totalPages = (int)Math.Ceiling(totalCount / (double)size),
-                items = items.Select(x => { var latest = scopedRevisions is not null && scopedRevisions.TryGetValue(x.Id, out var selectedRevisionId)
+            var projected = all
+                .OrderBy(x => x.BaseNumber).ThenBy(x => x.BaseNumber)
+                .Select(x => { var latest = scopedRevisions is not null && scopedRevisions.TryGetValue(x.Id, out var selectedRevisionId)
                         ? revisions.SingleOrDefault(r => r.Id == selectedRevisionId)
                         : revisions.Where(r => r.ProcedureId == x.Id).OrderByDescending(r => r.Revision).FirstOrDefault();
                     var lastRun = latest is null ? null : executions.Where(e => e.ProcedureRevisionId == latest.Id).OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).FirstOrDefault();
@@ -717,7 +730,10 @@ public static class VerificationEndpoints
                     // No selectedApproverId. It existed to route a procedure-level signature, and that
                     // signature is gone; the package's approver is the one who approved this work. The stored
                     // value stays on legacy revisions as the honest record of who was once named.
-                    requirementCount = latest is null ? 0 : coverage.Count(c => c.ProcedureRevisionId == latest.Id), lastOutcome = lastRun?.Outcome.ToString(), lastExecutedAt = lastRun?.ExecutedAt }; }) });
+                    requirementCount = latest is null ? 0 : coverage.Count(c => c.ProcedureRevisionId == latest.Id), lastOutcome = lastRun?.Outcome.ToString(), lastExecutedAt = lastRun?.ExecutedAt }; })
+                .ToList();
+            return Results.Ok(new { page = currentPage, pageSize = size, totalCount, totalPages = (int)Math.Ceiling(totalCount / (double)size),
+                items = projected });
         });
 
         // No procedure-level approval route. The test change request carrying this procedure is what gets

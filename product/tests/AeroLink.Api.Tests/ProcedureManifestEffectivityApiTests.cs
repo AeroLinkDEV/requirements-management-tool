@@ -225,10 +225,14 @@ public sealed class ProcedureManifestEffectivityApiTests
 
         var workspace = await client.GetFromJsonAsync<JsonElement>(
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes");
-        var targets = workspace.GetProperty("procedureTargets").EnumerateArray().ToList();
-        Assert.Contains(targets, x => x.GetProperty("baseNumber").GetString() == "SYSTP-002140"
+        // The workspace payload hydrates only referenced targets; the searchable picker serves the universe.
+        Assert.Equal(0, workspace.GetProperty("procedureTargets").GetArrayLength());
+        var targets = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-targets?page=1&pageSize=200");
+        var targetItems = targets.GetProperty("items").EnumerateArray().ToList();
+        Assert.Contains(targetItems, x => x.GetProperty("baseNumber").GetString() == "SYSTP-002140"
             && x.GetProperty("currentRevision").GetInt32() == 1);
-        Assert.DoesNotContain(targets, x => x.GetProperty("baseNumber").GetString() == fixture.FutureOnlyBaseNumber);
+        Assert.DoesNotContain(targetItems, x => x.GetProperty("baseNumber").GetString() == fixture.FutureOnlyBaseNumber);
 
         using var futureOnly = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",

@@ -55,7 +55,10 @@ type TestChangeRequest = {
     steps: { position: number; stageName: string; authority: string; approverId: string; approverName: string; state: string; decidedAt?: string }[]
   }
 }
-type Procedure = { id: string; revisionId: string; displayNumber: string; title: string; state: string; requirementCount: number; ownerId: string }
+type PickerRequirement = { revisionId: string; displayNumber: string; statement: string }
+type PickerProcedure = { id: string; displayNumber: string; title: string; state: string }
+type RequirementPickerPage = { page: number; pageSize: number; totalCount: number; totalPages: number; items: PickerRequirement[] }
+type ProcedurePickerPage = { page: number; pageSize: number; totalCount: number; totalPages: number; items: PickerProcedure[] }
 type ImpactItem = {
   id: string
   testChangeReviewId: string
@@ -172,8 +175,13 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [coverage, setCoverage] = useState<Coverage>()
   const [requests, setRequests] = useState<TestChangeRequest[]>([])
   // Approved procedures only, and only so a decision can name the one that already covers a requirement.
-  // Browsing procedures is the Test Procedure Explorer's job; this page never lists them.
-  const [procedures, setProcedures] = useState<Procedure[]>([])
+  // The approved-procedure picker: bounded, server-searched and paged with totals, so a valid procedure
+  // beyond the first 200 rows is findable and an exact selected procedure is hydrated by ID.
+  const [procedureQuery, setProcedureQuery] = useState('')
+  const [procedurePage, setProcedurePage] = useState(1)
+  const [procedurePicker, setProcedurePicker] = useState<ProcedurePickerPage>()
+  const [procedureChoice, setProcedureChoice] = useState('')
+  const [effectiveBaseline, setEffectiveBaseline] = useState('')
   const [impact, setImpact] = useState<ImpactItem[]>([])
   const [opened, setOpened] = useState('')
   /** The test change request whose procedure decisions are open for authoring, if any. */
@@ -188,9 +196,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   /** The deliberate TCR creation dialog, opened from the page header. */
   const [creatingTcr, setCreatingTcr] = useState(false)
   const [canCreate, setCanCreate] = useState(false)
-  // The requirement a procedure is being authored for, when the author arrived from a decision that asked
-  // for one. It preselects that requirement so the link is not left to memory.
-  const [authoringFor, setAuthoringFor] = useState("")
   // The package a proposal belongs to. A procedure change has to be carried by one, so authoring is only
   // reachable from a decision that names it.
   const [authoringReviewId, setAuthoringReviewId] = useState("")
@@ -217,8 +222,13 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [revision, setRevision] = useState(0)
   // No procedure search, filter or page in the address any more. Those described a library this page no
   // longer has; the Explorer keeps its own. A stale link carrying them is simply ignored rather than
-  // reopening a surface that moved.
-  const [requirements, setRequirements] = useState<{ revisionId: string; displayNumber: string; statement: string }[]>([])
+  // The requirement picker for a proposed procedure: bounded, server-searched and paged with totals, so a
+  // requirement beyond the first 200 rows is findable, and the exact requirement a decision arrived from is
+  // hydrated by ID even when it is outside the current page.
+  const [requirementQuery, setRequirementQuery] = useState('')
+  const [requirementPage, setRequirementPage] = useState(1)
+  const [requirementPicker, setRequirementPicker] = useState<RequirementPickerPage>()
+  const [requirementSelection, setRequirementSelection] = useState<string[]>([])
 
   // One ticket per loader, not one for the page.
   //
@@ -229,6 +239,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   // software HLR queue being empty while the API demonstrably returned a package for that build.
   const loadTicket = useRef(0)
   const procedureTicket = useRef(0)
+  const requirementTicket = useRef(0)
   const scope = discipline
 
   const load = useCallback(async () => {
@@ -243,26 +254,21 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     // requirements at all" on a page whose whole job is to say what is untested.
     const context = await fetch(`${api}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)
     const effective = context.ok ? (await context.json())?.effectiveBaselineId : undefined
+    setEffectiveBaseline(effective ? String(effective) : '')
     const builds = await fetch(`${api}/api/builds?projectId=${projectId}`)
     const build = builds.ok ? (await builds.json()).find((x: { releaseId: string }) => x.releaseId === releaseId) : undefined
     const configuration = build ? `buildId=${build.id}` : effective ? `baselineId=${effective}` : ''
 
-    const [coverageResponse, requestResponse, impactResponse, requirementResponse] = await Promise.all([
+    const [coverageResponse, requestResponse, impactResponse] = await Promise.all([
       configuration ? fetch(`${api}/api/verification-coverage?projectId=${projectId}&${configuration}`) : undefined,
       fetch(`${api}/api/releases/${releaseId}/test-change-reviews`),
       fetch(`${api}/api/releases/${releaseId}/verification-impact`),
-      // The requirements a new procedure can be written against — read from the effective baseline rather
-      // than from the coverage list, so an author is not blocked when coverage cannot be computed.
-      effective
-        ? fetch(`${api}/api/requirements?projectId=${projectId}&baselineId=${effective}&scope=${scope}&includeRetired=false&page=1&pageSize=200`)
-        : undefined,
     ])
     const rawCoverage = coverageResponse?.ok ? await coverageResponse.json() as Coverage : undefined
     const nextRequests = requestResponse.ok
       ? await requestResponse.json() as { canCreate?: boolean; items?: TestChangeRequest[] }
       : undefined
     const nextImpact = impactResponse.ok ? await impactResponse.json() : undefined
-    const listed = requirementResponse?.ok ? (await requirementResponse.json()).items : undefined
     if (mine !== loadTicket.current) return
     if (rawCoverage) {
       // Coverage is computed for the whole configuration; this page speaks for one discipline.
@@ -282,7 +288,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       setCanCreate(Boolean(nextRequests.canCreate))
     }
     if (nextImpact) setImpact(nextImpact)
-    if (listed) setRequirements(listed)
     if (!requestResponse.ok) {
       recordClientOperationFailure('verification.coverage.load', new Error(`HTTP ${requestResponse.status}`))
       setError('The test change requests for this build could not be loaded.')
@@ -291,25 +296,47 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       recordClientOperationFailure('verification.coverage.load', new Error(`HTTP ${coverageResponse.status}`))
       setError('The requirement coverage for this build could not be read.')
     }
-  }, [api, projectId, releaseId, scope, discipline])
+  }, [api, projectId, releaseId, discipline])
 
   useEffect(() => { void load() }, [load])
 
-  // The approved procedures a decision may name as already covering a requirement. Not a library: no search,
-  // no filters, no paging into the address, because nothing here browses procedures. One page of approved
-  // ones is what the selector offers, and the server refuses anything that is not approved and in this
-  // Project regardless of what the list happened to hold.
+  // The approved procedures a decision may name as already covering a requirement: bounded, server-searched
+  // and paged with totals, so a valid procedure beyond the first 200 rows is findable. The exact procedure a
+  // resolved decision names is hydrated by ID even when it lies beyond the current page.
   useEffect(() => {
     const mine = ++procedureTicket.current
+    const params = new URLSearchParams({ projectId, releaseId, scope, state: 'Approved',
+      page: String(procedurePage), pageSize: '50', search: procedureQuery })
+    if (resolving?.resolvedProcedure?.id) params.set('ids', resolving.resolvedProcedure.id)
     void (async () => {
-      const response = await fetch(`${api}/api/test-procedures?projectId=${projectId}&releaseId=${releaseId}` +
-        `&scope=${scope}&state=Approved&page=1&pageSize=200`)
+      const response = await fetch(`${api}/api/test-procedures?${params}`)
       if (!response.ok) return
       const paged = await response.json()
       if (mine !== procedureTicket.current) return
-      setProcedures(paged.items)
+      setProcedurePicker(paged)
     })()
-  }, [api, projectId, releaseId, scope, revision])
+  }, [api, projectId, releaseId, scope, revision, procedureQuery, procedurePage, resolving?.resolvedProcedure?.id])
+
+  // The requirements a new procedure can be written against — read from the effective baseline rather than
+  // from the coverage list, bounded, server-searched and paged with totals. The exact requirement a decision
+  // arrived from is hydrated by ID even when it lies beyond the first page.
+  useEffect(() => {
+    if (!creating) return
+    const mine = ++requirementTicket.current
+    const timer = setTimeout(async () => {
+      const params = new URLSearchParams({ projectId, scope, includeRetired: 'false',
+        page: String(requirementPage), pageSize: '50', search: requirementQuery })
+      if (effectiveBaseline) params.set('baselineId', effectiveBaseline)
+      const selected = [...new Set(requirementSelection)]
+      if (selected.length) params.set('ids', selected.join(','))
+      const response = await fetch(`${api}/api/requirements?${params}`)
+      if (!response.ok) return
+      const paged = await response.json()
+      if (mine !== requirementTicket.current) return
+      setRequirementPicker(paged)
+    }, 180)
+    return () => clearTimeout(timer)
+  }, [api, projectId, scope, creating, effectiveBaseline, requirementQuery, requirementPage, requirementSelection])
 
   const mine = requests.filter(x => x.discipline === discipline)
 
@@ -436,7 +463,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
    */
   const proposeProcedure = async (form: FormData) => {
     if (busy) return
-    const requirementRevisionIds = form.getAll('requirement').map(String).filter(Boolean)
+    // The selection is state, not the form: options on other pages of the searchable picker are not in the
+    // DOM, and a selection made on one page must survive paging to another and back.
+    const requirementRevisionIds = requirementSelection
     if (!requirementRevisionIds.length) { setCreateError('A procedure has to say which requirements it verifies.'); return }
     if (!authoringReviewId) { setCreateError('This proposal has no test change request to belong to.'); return }
     setBusy(true); setCreateError(''); setError(''); setSaved('')
@@ -497,7 +526,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           said here, because this is the page a decision asks for a procedure from — the alternative is an
           authoring form whose requirement list is empty for no stated reason, which reads as a broken page
           rather than as work that has not happened yet. */}
-      {!requirements.length && (
+      {!effectiveBaseline && (
         <section className="materializationPrerequisite" role="status">
           <div>
             <b>Procedure authoring waits for governed requirement materialization</b>
@@ -656,6 +685,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     {request.capabilities.canDecide && item.state !== 'Resolved' && (
                       <button type="button" className="quiet" disabled={busy} onClick={() => {
                         setOutcome(item.trigger === 'ProcedureOrphaned' ? 'ProcedureRetired' : 'ProcedureCoverageConfirmed')
+                        setProcedureQuery('')
+                        setProcedurePage(1)
+                        setProcedureChoice(item.resolvedProcedure?.id ?? '')
                         setResolving(item)
                       }}>Decide</button>
                     )}
@@ -670,9 +702,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     {canTest && item.outcome === 'NewProcedureRequired' && (item.requirementRevisionId
                       ? (
                         <button type="button" disabled={busy} onClick={() => {
-                          setAuthoringFor(item.requirementRevisionId!)
                           setAuthoringReviewId(item.testChangeReviewId)
                           setAuthoringNumber(request.displayNumber)
+                          setRequirementQuery('')
+                          setRequirementPage(1)
+                          setRequirementSelection(item.requirementRevisionId ? [item.requirementRevisionId] : [])
                           setCreateError('')
                           setCreating(true)
                         }}>Author the procedure</button>
@@ -781,13 +815,30 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                 here rather than linked afterwards, because a procedure with no exact link never counts as
                 coverage and would sit in the library looking like work that had been done. */}
             <label>Requirements it verifies
-              <select name="requirement" aria-describedby="procedure-requirements-help" multiple size={6} required defaultValue={authoringFor ? [authoringFor] : []}>
-                {requirements.map(item => (
-                  <option key={item.revisionId} value={item.revisionId}>{item.displayNumber} · {item.statement.slice(0, 70)}</option>
+              <select name="requirement" aria-describedby="procedure-requirements-help" multiple size={6} required
+                value={requirementSelection}
+                onChange={event => setRequirementSelection(Array.from(event.target.selectedOptions, option => option.value))}>
+                {(requirementPicker?.items ?? []).map(item => (
+                  <option key={item.revisionId} value={item.revisionId}>{item.displayNumber} - {item.statement.slice(0, 70)}</option>
                 ))}
               </select>
-              <small id="procedure-requirements-help">Choose one or more. Hold Ctrl to pick several.</small>
             </label>
+            <input aria-label="Search requirements" className="pickerSearch" value={requirementQuery}
+              onChange={event => { setRequirementQuery(event.target.value); setRequirementPage(1) }}
+              placeholder="Search by number or wording..." />
+            <div className="pickerMeta">
+              <span>
+                {requirementPicker?.totalCount ?? 0} requirement{(requirementPicker?.totalCount ?? 0) === 1 ? '' : 's'} in scope -
+                showing {(requirementPicker?.items ?? []).length}. Search by number or wording to find any requirement in this build.
+              </span>
+              <span className="pickerPager">
+                <button type="button" disabled={(requirementPicker?.page ?? 1) <= 1}
+                  onClick={() => setRequirementPage(page => Math.max(1, page - 1))}>Previous</button>
+                <button type="button" disabled={(requirementPicker?.page ?? 1) >= (requirementPicker?.totalPages ?? 1)}
+                  onClick={() => setRequirementPage(page => page + 1)}>Next</button>
+              </span>
+            </div>
+            <small id="procedure-requirements-help">Choose one or more. Selections are kept while you search or page.</small>
             {/* No approver picked here. The package carries this proposal to its own review, and choosing a
                 second approver for the procedure alone would be a second approval of the same work. */}
             <label>Why it is needed<textarea name="rationale" required /></label>
@@ -1012,13 +1063,29 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             </label>
             {outcome === 'ProcedureCoverageConfirmed' && (
               <label>Covering procedure
-                <select name="procedureId" aria-label="Covering procedure" aria-describedby="covering-procedure-help" required>
-                  <option value="">Choose an approved procedure…</option>
-                  {procedures.filter(x => x.state === 'Approved').map(x => (
-                    <option key={x.id} value={x.id}>{x.displayNumber} · {x.title.slice(0, 60)}</option>
+                <input aria-label="Search approved procedures" className="pickerSearch" value={procedureQuery}
+                  onChange={event => { setProcedureQuery(event.target.value); setProcedurePage(1) }}
+                  placeholder="Search by number or title..." />
+                <select name="procedureId" aria-label="Covering procedure" aria-describedby="covering-procedure-help" required
+                  value={procedureChoice} onChange={event => setProcedureChoice(event.target.value)}>
+                  <option value="">Choose an approved procedure...</option>
+                  {(procedurePicker?.items ?? []).filter(x => x.state === 'Approved').map(x => (
+                    <option key={x.id} value={x.id}>{x.displayNumber} - {x.title.slice(0, 60)}</option>
                   ))}
                 </select>
-                <small id="covering-procedure-help">Only approved procedures in this Project. Search above to bring more into this list.</small>
+                <div className="pickerMeta">
+                  <span>
+                    {procedurePicker?.totalCount ?? 0} approved procedure{(procedurePicker?.totalCount ?? 0) === 1 ? '' : 's'} in this build -
+                    showing {(procedurePicker?.items ?? []).length}. Search by number or title to find any approved procedure.
+                  </span>
+                  <span className="pickerPager">
+                    <button type="button" disabled={(procedurePicker?.page ?? 1) <= 1}
+                      onClick={() => setProcedurePage(page => Math.max(1, page - 1))}>Previous</button>
+                    <button type="button" disabled={(procedurePicker?.page ?? 1) >= (procedurePicker?.totalPages ?? 1)}
+                      onClick={() => setProcedurePage(page => page + 1)}>Next</button>
+                  </span>
+                </div>
+                <small id="covering-procedure-help">Only approved procedures carried by this build. Search by number or title to bring more into this list.</small>
               </label>
             )}
             {outcome === 'ProcedureRetargeted' && (
