@@ -1,7 +1,7 @@
 # Aerospace Development Assurance Platform
 
 > **New here — human or model? Read [PROJECT_STATE.md](PROJECT_STATE.md) first, then the
-> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-08.md).** They record what
+> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-09.md).** They record what
 > exists today, what is deliberately excluded, where delivery stands, and the known limitations. The
 > documents indexed below are durable definitions and historical records; `PROJECT_STATE.md` describes
 > the present.
@@ -65,7 +65,8 @@ demonstrations use the `FMSLIVE` dataset described in
 | Document | Purpose |
 | --- | --- |
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
-| [Current product handoff, updated 9 August](CURRENT_PRODUCT_HANDOFF_2026-08-08.md) | **Current restart point.** Qualified Stage 3B/Stage 4 state, exact remediated `main`, TCR control architecture, completed audit sequence, and current open ownership |
+| [Current product handoff, updated 9 August](CURRENT_PRODUCT_HANDOFF_2026-08-09.md) | **Current restart point.** PR #414 delivered bounded TCR authoring pickers; post-merge picker-integrity findings #402/#415 are open; exact audited `main` `bbcccc7` |
+| [Product handoff, 8 August](CURRENT_PRODUCT_HANDOFF_2026-08-08.md) | Historical. Stage 3B/Stage 4 delivery, focused audit remediation through PR #413, and prior restart point |
 | [Product handoff, 6 August](CURRENT_PRODUCT_HANDOFF_2026-08-06.md) | Historical. Test procedures authored, revised and baselined like requirements, approved procedure work carried into builds, and Word-authored controlled documents checked out, reviewed, approved, and released as exact DOCX/PDF pairs |
 | [Product handoff, 5 August](CURRENT_PRODUCT_HANDOFF_2026-08-05.md) | Historical. Imported baselines, explicit assessment outcomes, local test-world integration, Problem Report refinements, and safe continuation |
 | [Product handoff, 4 August](CURRENT_PRODUCT_HANDOFF_2026-08-04.md) | Historical. State-aware downstream assessments with withdrawable conclusions, Problem Report editing under the universal lease, the "a procedure must be written" verification outcome, and source authority by change-request type |
