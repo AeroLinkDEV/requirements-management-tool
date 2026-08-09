@@ -39,6 +39,10 @@ public sealed class TestChangeReviewTests
     private static TestChangeReview Raised(TestChangeReviewDiscipline discipline = TestChangeReviewDiscipline.System) =>
         new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), discipline, "SRCR-00039.00", Now);
 
+    private static TestChangeReview RaisedLegacy(TestChangeReviewDiscipline discipline = TestChangeReviewDiscipline.System) =>
+        new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), discipline, "SRCR-00039.00", Now,
+            caseContractVersion: 0);
+
     [Fact]
     public void An_approved_change_arrives_needing_assessment_and_carrying_no_controlled_number()
     {
@@ -168,14 +172,12 @@ public sealed class TestChangeReviewTests
     [Fact]
     public void Outcome_alone_changes_the_review_snapshot()
     {
-        var required = Raised();
+        var required = RaisedLegacy();
         required.RecordTestChangeRequired("verification.engineer", Now.AddMinutes(1));
-        required.WriteCase("verification.engineer", "Same case", "Problem", "Analysis", "Solution", Now.AddMinutes(1));
         required.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(2));
 
-        var notRequired = Raised();
+        var notRequired = RaisedLegacy();
         notRequired.RecordNoTestChangeRequired("verification.engineer", "Already covered.", Now.AddMinutes(1));
-        notRequired.WriteCase("verification.engineer", "Same case", "Problem", "Analysis", "Solution", Now.AddMinutes(1));
         notRequired.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(2));
 
         Assert.NotEqual(required.ReviewCycles.Single().SnapshotHash,
@@ -700,6 +702,19 @@ public sealed class TestChangeReviewTests
 
         Assert.Equal(TestChangeReviewState.InReview, review.State);
         Assert.Equal("test.engineer", review.SubmittedBy);
+    }
+
+    [Fact]
+    public void Current_change_required_package_cannot_be_submitted_without_a_procedure_decision()
+    {
+        var review = Create();
+
+        var error = Assert.Throws<DomainException>(() =>
+            review.Submit("verification.engineer", "test.approver", true, Now.AddMinutes(1)));
+
+        Assert.Contains("names no procedure decisions", error.Message);
+        Assert.Equal(TestChangeReviewState.Open, review.State);
+        Assert.Empty(review.ReviewCycles);
     }
 
     [Fact]

@@ -753,6 +753,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var review = await db.TestChangeReviews.Include(x => x.ReviewCycles)
+                .Include(x => x.ProcedureChanges)
                 .SingleAsync(x => x.Id == fixture.ReviewId);
             var delegator = await db.UserAccounts.SingleAsync(x => x.UserName == "workflow.one");
             var reviewer = await db.UserAccounts.SingleAsync(x => x.UserName == "workflow.reviewer");

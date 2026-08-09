@@ -29,6 +29,7 @@ type TestChangeRequest = {
   analysis?: string
   solution?: string
   caseContractVersion: number
+  procedureDecisionCount: number
   discipline: string
   state: string
   version: number
@@ -614,6 +615,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                 {request.capabilities.canSubmit && request.totalItems > 0 && request.resolvedItems === request.totalItems && (
                   missingCaseFields(request).length
                     ? <button type="button" disabled={busy} onClick={() => setAuthoring(request.id)}>Complete engineering case</button>
+                    : request.outcome === 'ChangeRequired' && request.procedureDecisionCount === 0
+                    ? <button type="button" disabled={busy} onClick={() => setAuthoring(request.id)}>Add a procedure decision</button>
                     : <button type="button" disabled={busy} onClick={() => setSubmitting(request)}>Send for approval</button>
                 )}
                 {request.capabilities.canApprove && (
