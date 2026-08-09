@@ -7,6 +7,7 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -36,10 +37,19 @@ public sealed class BuildScopedWorkspaceApiTests
         var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify the selected build.",
             "Load the selected build.", "Exercise the controlled behavior.", "The behavior is observed.",
             TestProcedureState.Approved, user.UserName, now);
-        db.AddRange(program, project, released, inWork, releasedScr, inWorkScr, user, procedure, procedureRevision);
+        var inWorkBaseline = new CandidateBaseline("SW-01.60", 0, project.Id, inWork.Id, null,
+            "In-work controlled baseline", "build.user", now);
+        db.AddRange(program, project, released, inWork, releasedScr, inWorkScr, user, procedure,
+            procedureRevision, inWorkBaseline,
+            new BaselineTestProcedureSelection(inWorkBaseline.Id, procedure.Id, procedureRevision.Id));
         db.ProgramMemberships.Add(new ProgramMembership(user.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
         db.ProgramMemberships.Add(new ProgramMembership(user.Id, program.Id, ProgramRole.TestEngineer, "test.setup", now));
         await db.SaveChangesAsync();
+        await db.CandidateBaselines.Where(x => x.Id == inWorkBaseline.Id)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(x => x.RequirementsMaterializedAt, now)
+                .SetProperty(x => x.TestProceduresMaterializedAt, now)
+                .SetProperty(x => x.TestProceduresHash, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
         return (project.Id, released.Id, inWork.Id, releasedScr.Id, inWorkScr.Id, procedureRevision.Id);
     }
 

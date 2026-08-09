@@ -795,9 +795,16 @@ public static class VerificationEndpoints
                 if (buildBaselineId is not null)
                 {
                     var effectivity = await TestProcedureEffectivity.ForBaselineAsync(db, buildBaselineId.Value, ct);
-                    if (effectivity is not null
-                        && (!effectivity.RevisionByProcedure.TryGetValue(procedure.Id, out var carried)
-                            || carried != revision.Id))
+                    if (effectivity is null)
+                    {
+                        return Results.Conflict(new
+                        {
+                            error = "The selected build has no controlled procedure manifest; an exact carried revision cannot be established.",
+                            code = "procedure_manifest_unavailable"
+                        });
+                    }
+                    if (!effectivity.RevisionByProcedure.TryGetValue(procedure.Id, out var carried)
+                        || carried != revision.Id)
                     {
                         return Results.Conflict(new
                         {
@@ -809,11 +816,27 @@ public static class VerificationEndpoints
             }
             else if (activeReleaseId is not null)
             {
+                if (!await db.Releases.AsNoTracking()
+                        .AnyAsync(x => x.Id == activeReleaseId && x.ProjectId == request.ProjectId, ct))
+                {
+                    return Results.Conflict(new
+                    {
+                        error = "The active build workspace release does not belong to the requested project.",
+                        code = "cross_project_release"
+                    });
+                }
                 var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
                     db, request.ProjectId, activeReleaseId.Value, ct);
-                if (effectivity is not null
-                    && (!effectivity.RevisionByProcedure.TryGetValue(procedure.Id, out var carried)
-                        || carried != revision.Id))
+                if (effectivity is null)
+                {
+                    return Results.Conflict(new
+                    {
+                        error = "The selected release has no controlled procedure manifest; an exact carried revision cannot be established.",
+                        code = "procedure_manifest_unavailable"
+                    });
+                }
+                if (!effectivity.RevisionByProcedure.TryGetValue(procedure.Id, out var carried)
+                    || carried != revision.Id)
                 {
                     return Results.Conflict(new
                     {

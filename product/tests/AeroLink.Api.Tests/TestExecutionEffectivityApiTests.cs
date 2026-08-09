@@ -24,6 +24,11 @@ public sealed class TestExecutionEffectivityApiTests
         Guid Build16Id,
         Guid Release17Id,
         Guid Build17Id,
+        Guid Release18Id,
+        Guid Build18Id,
+        Guid BareBuildId,
+        Guid BareReleaseId,
+        Guid OtherReleaseId,
         Guid ProcedureId,
         Guid Revision00Id,
         Guid Revision01Id,
@@ -43,10 +48,24 @@ public sealed class TestExecutionEffectivityApiTests
             "Build 1.6 baseline", "cm", now);
         var baseline17 = new CandidateBaseline("SW-01.70", 0, project.Id, release17.Id, baseline16.Id,
             "Build 1.7 baseline", "cm", now);
+        var release18 = new SoftwareRelease(project.Id, "1.8", false, release17.Id);
+        var baseline18 = new CandidateBaseline("SW-01.80", 0, project.Id, release18.Id, baseline17.Id,
+            "Build 1.8 baseline", "cm", now);
         var build16 = new SoftwareBuild(project.Id, release16.Id, baseline16.Id, "SW-01.60",
             "Build 1.6 configuration", "cm", now);
         var build17 = new SoftwareBuild(project.Id, release17.Id, baseline17.Id, "SW-01.70",
             "Build 1.7 configuration", "cm", now);
+        var build18 = new SoftwareBuild(project.Id, release18.Id, baseline18.Id, "SW-01.80",
+            "Build 1.8 configuration", "cm", now);
+        var bareBaseline = new CandidateBaseline("SW-01.90", 0, project.Id, release17.Id, null,
+            "No manifest baseline", "cm", now);
+        var bareBuild = new SoftwareBuild(project.Id, release17.Id, bareBaseline.Id, "SW-01.91",
+            "No manifest build", "cm", now);
+        // A release chain with no materialized baseline anywhere: scoped execution must fail closed.
+        var bareRelease = new SoftwareRelease(project.Id, "9.1", false);
+        var otherProgram = new ProgramRecord("Execution Other", "EXO");
+        var otherProject = new ProjectRecord(otherProgram.Id, "Other", "Other FMS");
+        var otherRelease = new SoftwareRelease(otherProject.Id, "9.0", false);
 
         var procedure = new TestProcedure(project.Id, "SYSTP-000123", "Verify route sequencing",
             "test.author", now, TestProcedureLevel.System);
@@ -65,19 +84,26 @@ public sealed class TestExecutionEffectivityApiTests
         var user = new UserAccount("execution.tester", "Execution Tester", "execution.tester@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.AddRange(
-            program, project, release16, release17, baseline16, baseline17, build16, build17,
+            program, project, release16, release17, release18, baseline16, baseline17, baseline18,
+            build16, build17, build18, bareBaseline, bareBuild, bareRelease,
+            otherProgram, otherProject, otherRelease,
             procedure, revision00, revision01, uncarriedProcedure, uncarriedRevision,
             new BaselineTestProcedureSelection(baseline16.Id, procedure.Id, revision00.Id),
             new BaselineTestProcedureSelection(baseline17.Id, procedure.Id, revision01.Id),
+            new BaselineTestProcedureSelection(baseline18.Id, procedure.Id, revision01.Id),
             user,
-            new ProgramMembership(user.Id, program.Id, ProgramRole.TestEngineer, "test.setup", now));
+            new ProgramMembership(user.Id, program.Id, ProgramRole.TestEngineer, "test.setup", now),
+            // Access to the other program lets the workspace middleware pass so the endpoint's own
+            // header-release-vs-request-project check is the thing under test.
+            new ProgramMembership(user.Id, otherProgram.Id, ProgramRole.TestEngineer, "test.setup", now));
         await db.SaveChangesAsync();
-        await db.CandidateBaselines.Where(x => x.Id == baseline16.Id || x.Id == baseline17.Id)
+        await db.CandidateBaselines.Where(x => x.Id == baseline16.Id || x.Id == baseline17.Id || x.Id == baseline18.Id)
             .ExecuteUpdateAsync(update => update
                 .SetProperty(x => x.RequirementsMaterializedAt, now)
                 .SetProperty(x => x.TestProceduresMaterializedAt, now)
                 .SetProperty(x => x.TestProceduresHash, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
         return new(project.Id, release16.Id, build16.Id, release17.Id, build17.Id,
+            release18.Id, build18.Id, bareBuild.Id, bareRelease.Id, otherRelease.Id,
             procedure.Id, revision00.Id, revision01.Id, uncarriedRevision.Id);
     }
 
@@ -194,5 +220,81 @@ public sealed class TestExecutionEffectivityApiTests
         Assert.True(successorOnEarlier.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
             $"{(int)successorOnEarlier.StatusCode}: {successorBody}");
         Assert.Contains("procedure_revision_not_carried_by_build", successorBody);
+    }
+
+    [Fact]
+    public async Task Inherited_unchanged_revision_is_executable_through_predecessor_traversal()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client);
+
+        // Build 1.8 carries .01 unchanged from Build 1.7; the exact carried revision is accepted.
+        using var on18 = await client.PostAsJsonAsync("/api/test-executions",
+            ExecutionBody(fixture.ProjectId, fixture.Revision01Id, fixture.Build18Id));
+        Assert.Equal(HttpStatusCode.Created, on18.StatusCode);
+
+        // Release-header-only traversal over the predecessor chain accepts the effective .01 and refuses .00.
+        client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", fixture.Release18Id.ToString());
+        using var exact18 = await client.PostAsJsonAsync("/api/test-executions",
+            ExecutionBody(fixture.ProjectId, fixture.Revision01Id, null));
+        Assert.Equal(HttpStatusCode.Created, exact18.StatusCode);
+
+        using var predecessorOn18 = await client.PostAsJsonAsync("/api/test-executions",
+            ExecutionBody(fixture.ProjectId, fixture.Revision00Id, null));
+        var predecessorBody = await predecessorOn18.Content.ReadAsStringAsync();
+        Assert.True(predecessorOn18.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
+            $"{(int)predecessorOn18.StatusCode}: {predecessorBody}");
+        Assert.Contains("procedure_revision_not_carried_by_build", predecessorBody);
+    }
+
+    [Fact]
+    public async Task A_scoped_execution_without_a_controlled_manifest_is_refused()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client);
+
+        using var buildScoped = await client.PostAsJsonAsync("/api/test-executions",
+            ExecutionBody(fixture.ProjectId, fixture.Revision00Id, fixture.BareBuildId));
+        var buildBody = await buildScoped.Content.ReadAsStringAsync();
+        Assert.True(buildScoped.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
+            $"{(int)buildScoped.StatusCode}: {buildBody}");
+        Assert.Contains("procedure_manifest_unavailable", buildBody);
+
+        client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", fixture.BareReleaseId.ToString());
+        using var releaseScoped = await client.PostAsJsonAsync("/api/test-executions",
+            ExecutionBody(fixture.ProjectId, fixture.Revision00Id, null));
+        var releaseBody = await releaseScoped.Content.ReadAsStringAsync();
+        Assert.True(releaseScoped.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
+            $"{(int)releaseScoped.StatusCode}: {releaseBody}");
+        Assert.Contains("procedure_manifest_unavailable", releaseBody);
+
+        using var verifyScope = factory.Services.CreateScope();
+        var db = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(0, await db.TestExecutions.CountAsync());
+    }
+
+    [Fact]
+    public async Task A_cross_project_release_header_is_refused()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client);
+
+        client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", fixture.OtherReleaseId.ToString());
+        using var refused = await client.PostAsJsonAsync("/api/test-executions",
+            ExecutionBody(fixture.ProjectId, fixture.Revision00Id, null));
+        var body = await refused.Content.ReadAsStringAsync();
+        Assert.True(refused.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
+            $"{(int)refused.StatusCode}: {body}");
+        Assert.Contains("cross_project_release", body);
+
+        using var verifyScope = factory.Services.CreateScope();
+        var db = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(0, await db.TestExecutions.CountAsync());
     }
 }
