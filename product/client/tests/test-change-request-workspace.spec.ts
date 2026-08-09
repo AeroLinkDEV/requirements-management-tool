@@ -65,6 +65,22 @@ test('a test engineer proposes a new procedure inside the test change request th
   expect(approved.ok(), await approved.text()).toBeTruthy()
   const sourceNumber = draft.displayNumber as string
 
+  // A procedure must link to an exact controlled requirement revision. Materialize this journey's approved
+  // change into its own disposable candidate baseline so the TCR picker has that exact revision to offer.
+  const baselineResponse = await request.get(
+    `${apiBase}/api/baselines?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)
+  expect(baselineResponse.ok(), await baselineResponse.text()).toBeTruthy()
+  const baseline = (await baselineResponse.json())[0]
+  expect(baseline, 'the in-work software build').toBeTruthy()
+  for (const [path, data] of [
+    ['selections', { changeRequestId: draft.id }],
+    ['freeze', {}],
+    ['materialize-requirements', {}],
+  ] as const) {
+    const response = await request.post(`${apiBase}/api/baselines/${baseline.id}/${path}`, { data })
+    expect(response.ok(), await response.text()).toBeTruthy()
+  }
+
   await login(page, 'test.engineer')
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('link', { name: 'System Test Change Requests' }).click()
@@ -236,6 +252,6 @@ test('a procedure modification shows retained coverage and records an explicit r
   await expect(drawer).toContainText('Retained coverage: SYSR-000402.00')
   await expect(drawer).toContainText('Added coverage: SYSR-000403.00')
   await expect(drawer).toContainText('Removed coverage: SYSR-000401.00')
-  await expect(drawer).toContainText('Approved final coverage: SYSR-000402.00, SYSR-000403.00')
+  await expect(drawer).toContainText('Approved final coverage: SYSR-000402.00 · Unchanged requirement., SYSR-000403.00 · New governed requirement.')
   await expect(drawer).toContainText('Coverage rationale: Replace obsolete coverage. · test.engineer')
 })
