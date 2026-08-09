@@ -364,19 +364,26 @@ public static class VerificationImpactEndpoints
                 : await db.BaselineRequirements.AsNoTracking()
                     .Where(x => x.BaselineId == requirementBaselineId.Value)
                     .Select(x => x.RevisionId).ToListAsync(ct);
-            var targets = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                     .Where(x => targetRevisionIds.Contains(x.Id))
-                                 join procedure in db.TestProcedures.AsNoTracking()
-                                     .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel())
-                                     on revision.ProcedureId equals procedure.Id
-                                 orderby procedure.BaseNumber
-                                 select new
-                                 {
-                                     revision.Id,
-                                     procedure.BaseNumber,
-                                     procedure.Title,
-                                     CurrentRevision = revision.Revision
-                                 }).Take(500).ToListAsync(ct);
+            // The workspace payload hydrates only the targets its existing decisions reference; the picker
+            // universe itself is served by the searchable, paged procedure-targets endpoint below. A fixed
+            // Take(500) here silently truncated the authoring menu and presented it as complete.
+            var referencedBaseNumbers = review.ProcedureChanges.Select(x => x.BaseNumber).Distinct().ToList();
+            var targets = referencedBaseNumbers.Count == 0
+                ? []
+                : await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                             .Where(x => targetRevisionIds.Contains(x.Id))
+                         join procedure in db.TestProcedures.AsNoTracking()
+                             .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel()
+                                 && referencedBaseNumbers.Contains(x.BaseNumber))
+                             on revision.ProcedureId equals procedure.Id
+                         orderby procedure.BaseNumber
+                         select new
+                         {
+                             revision.Id,
+                             procedure.BaseNumber,
+                             procedure.Title,
+                             CurrentRevision = revision.Revision
+                         }).ToListAsync(ct);
             var targetCoverage = await (from coverage in db.TestCoverage.AsNoTracking()
                                             .Where(x => targetRevisionIds.Contains(x.ProcedureRevisionId)
                                                 && carriedRequirementIds.Contains(x.RequirementRevisionId))
@@ -434,6 +441,135 @@ public static class VerificationImpactEndpoints
                         removedRequirementRevisionIds = DrivingRequirements(x.RemovedRequirementRevisionIdsJson),
                         x.CoverageChangeRationale, x.CoverageChangedBy
                     }).ToList()
+            });
+        });
+
+        // The searchable Modify/Retire picker: the exact procedure universe the selected build's manifest
+        // carries for this package's discipline, bounded by server-side search and paging with totals.
+        // Hydration by immutable procedure ID or controlled base number keeps an exact current selection
+        // visible even when it lies beyond the current result page — and forged out-of-scope IDs hydrate
+        // nothing because the scoped source is the only thing ever queried.
+        app.MapGet("/api/test-change-reviews/{id:guid}/procedure-targets", async (Guid id, string? search,
+            string? ids, string? baseNumbers, int? page, int? pageSize,
+            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
+            var currentPage = Math.Max(1, page ?? 1);
+            var size = Math.Clamp(pageSize ?? 25, 1, 200);
+
+            var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
+                db, review.ProjectId, review.ReleaseId, ct);
+            var targetRevisionIds = effectivity?.RevisionIds ?? [];
+            var requirementBaselineId = await TestChangeReviewRequirementScope
+                .EffectiveRequirementBaselineIdAsync(db, review.ProjectId, review.ReleaseId, ct);
+            var carriedRequirementIds = requirementBaselineId is null
+                ? []
+                : await db.BaselineRequirements.AsNoTracking()
+                    .Where(x => x.BaselineId == requirementBaselineId.Value)
+                    .Select(x => x.RevisionId).ToListAsync(ct);
+
+            var eligibility = from revision in db.TestProcedureRevisions.AsNoTracking()
+                                  .Where(x => targetRevisionIds.Contains(x.Id))
+                              join procedure in db.TestProcedures.AsNoTracking()
+                                  .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel())
+                                  on revision.ProcedureId equals procedure.Id
+                              select new
+                              {
+                                  revision.Id,
+                                  ProcedureId = procedure.Id,
+                                  procedure.BaseNumber,
+                                  procedure.Title,
+                                  CurrentRevision = revision.Revision
+                              };
+            var query = eligibility;
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var q = search.Trim().ToLower();
+                query = query.Where(x => x.BaseNumber!.ToLower().Contains(q) || x.Title.ToLower().Contains(q));
+            }
+            var total = await query.CountAsync(ct);
+            var paged = await query.OrderBy(x => x.BaseNumber).ThenBy(x => x.ProcedureId)
+                .Skip((currentPage - 1) * size).Take(size).ToListAsync(ct);
+            var requestedIds = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(x => Guid.TryParse(x, out var value) ? value : Guid.Empty)
+                .Where(x => x != Guid.Empty).Distinct().ToList();
+            var requestedBaseNumbers = (baseNumbers ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var hydrated = requestedIds.Count == 0 && requestedBaseNumbers.Count == 0
+                ? []
+                : await eligibility
+                    .Where(x => requestedIds.Contains(x.ProcedureId) || requestedBaseNumbers.Contains(x.BaseNumber!))
+                    .ToListAsync(ct);
+            var all = paged.Concat(hydrated).DistinctBy(x => x.ProcedureId)
+                .OrderBy(x => x.BaseNumber).ThenBy(x => x.ProcedureId).ToList();
+            var coverageRows = await (from coverage in db.TestCoverage.AsNoTracking()
+                                          .Where(x => all.Select(t => t.Id).Contains(x.ProcedureRevisionId)
+                                              && carriedRequirementIds.Contains(x.RequirementRevisionId))
+                                      join revision in db.RequirementRevisions.AsNoTracking()
+                                          on coverage.RequirementRevisionId equals revision.Id
+                                      join artifact in db.Requirements.AsNoTracking()
+                                          on revision.ArtifactId equals artifact.Id
+                                      select new
+                                      {
+                                          coverage.ProcedureRevisionId,
+                                          id = artifact.Id,
+                                          revisionId = revision.Id,
+                                          displayNumber = artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
+                                          revision.Statement,
+                                          level = artifact.Level.ToString(),
+                                          coverage.IsSuspect
+                                      }).ToListAsync(ct);
+            return Results.Ok(new
+            {
+                page = currentPage,
+                pageSize = size,
+                totalCount = total,
+                totalPages = (int)Math.Ceiling(total / (double)size),
+                items = all.Select(x => new
+                {
+                    procedureId = x.ProcedureId,
+                    x.BaseNumber,
+                    x.Title,
+                    currentRevision = x.CurrentRevision,
+                    currentCoverage = coverageRows.Where(c => c.ProcedureRevisionId == x.Id)
+                        .OrderBy(c => c.displayNumber).Select(c => new
+                        {
+                            c.id, c.revisionId, c.displayNumber, statement = c.Statement, c.level,
+                            isSuspect = c.IsSuspect
+                        }).ToList()
+                })
+            });
+        });
+
+        // The searchable driving-requirement picker: the same governed, build-scoped candidate set the
+        // mutation enforcement uses, with search, stable paging, totals and exact-ID hydration. The
+        // projection retains the complete requirement identity (#413): artifact Id, revisionId,
+        // displayNumber, statement and level.
+        app.MapGet("/api/test-change-reviews/{id:guid}/requirement-candidates", async (Guid id, string? search,
+            string? ids, int? page, int? pageSize,
+            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
+            var currentPage = Math.Max(1, page ?? 1);
+            var size = Math.Clamp(pageSize ?? 25, 1, 200);
+            var requestedIds = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(x => Guid.TryParse(x, out var value) ? value : Guid.Empty)
+                .Where(x => x != Guid.Empty).Distinct().ToList();
+            var (total, items) = await TestChangeReviewRequirementScope.ForReviewPageAsync(
+                db, review, search, currentPage, size, requestedIds, ct);
+            return Results.Ok(new
+            {
+                page = currentPage,
+                pageSize = size,
+                totalCount = total,
+                totalPages = (int)Math.Ceiling(total / (double)size),
+                items
             });
         });
 

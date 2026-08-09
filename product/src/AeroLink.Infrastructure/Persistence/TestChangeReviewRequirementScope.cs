@@ -18,7 +18,11 @@ public sealed record TestChangeReviewRequirementChoice(
 
 public static class TestChangeReviewRequirementScope
 {
-    public static async Task<IReadOnlyList<TestChangeReviewRequirementChoice>> ForReviewAsync(
+    /// <summary>
+    /// The exact requirement revisions this package may govern, intersected with the build's requirement
+    /// manifest. Used by both the picker projection and the mutation enforcement so they cannot disagree.
+    /// </summary>
+    public static async Task<IReadOnlyList<Guid>> CarriedImpactRevisionIdsAsync(
         AeroLinkDbContext db, TestChangeReview review, Guid? baselineId, CancellationToken ct)
     {
         var effectiveBaselineId = baselineId ?? await EffectiveRequirementBaselineIdAsync(
@@ -44,26 +48,64 @@ public static class TestChangeReviewRequirementScope
         var carriedRevisionIds = await db.BaselineRequirements.AsNoTracking()
             .Where(x => x.BaselineId == baseline.Id && impactRevisionIds.Contains(x.RevisionId))
             .Select(x => x.RevisionId).Distinct().ToListAsync(ct);
-        if (carriedRevisionIds.Count == 0) return [];
+        return carriedRevisionIds;
+    }
 
-        var wantedLevel = review.ProcedureLevel() switch
+    public static IQueryable<TestChangeReviewRequirementChoice> ChoicesQuery(
+        AeroLinkDbContext db, Guid projectId, IReadOnlyCollection<Guid> carriedRevisionIds,
+        TestProcedureLevel procedureLevel)
+    {
+        var ids = carriedRevisionIds.Distinct().ToList();
+        var wantedLevel = procedureLevel switch
         {
             TestProcedureLevel.System => RequirementLevel.System,
             TestProcedureLevel.HighLevel => RequirementLevel.HighLevel,
             _ => RequirementLevel.LowLevel
         };
-        return await (from revision in db.RequirementRevisions.AsNoTracking()
-                          .Where(x => carriedRevisionIds.Contains(x.Id))
-                      join artifact in db.Requirements.AsNoTracking()
-                          .Where(x => x.ProjectId == review.ProjectId && x.Level == wantedLevel)
-                          on revision.ArtifactId equals artifact.Id
-                      orderby artifact.BaseNumber, revision.Revision
-                      select new TestChangeReviewRequirementChoice(
-                          artifact.Id,
-                          revision.Id,
-                          artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
-                          revision.Statement,
-                          artifact.Level)).ToListAsync(ct);
+        return from revision in db.RequirementRevisions.AsNoTracking()
+                   .Where(x => ids.Contains(x.Id))
+               join artifact in db.Requirements.AsNoTracking()
+                   .Where(x => x.ProjectId == projectId && x.Level == wantedLevel)
+                      on revision.ArtifactId equals artifact.Id
+               orderby artifact.BaseNumber, revision.Revision
+               select new TestChangeReviewRequirementChoice(
+                   artifact.Id,
+                   revision.Id,
+                   artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
+                   revision.Statement,
+                   artifact.Level);
+    }
+
+    public static async Task<IReadOnlyList<TestChangeReviewRequirementChoice>> ForReviewAsync(
+        AeroLinkDbContext db, TestChangeReview review, Guid? baselineId, CancellationToken ct) =>
+        await ChoicesQuery(db, review.ProjectId,
+            await CarriedImpactRevisionIdsAsync(db, review, baselineId, ct), review.ProcedureLevel())
+            .ToListAsync(ct);
+
+    public static async Task<(int Total, IReadOnlyList<TestChangeReviewRequirementChoice> Items)> ForReviewPageAsync(
+        AeroLinkDbContext db, TestChangeReview review, string? search, int page, int pageSize,
+        IReadOnlyCollection<Guid>? hydrateRevisionIds, CancellationToken ct)
+    {
+        var carried = await CarriedImpactRevisionIdsAsync(db, review, null, ct);
+        // The governed candidate set is the package's own scope, so materializing it is bounded by the
+        // change's actual reach, never the whole Project. Filtering and paging then run in memory because
+        // DisplayNumber is a computed projection property EF cannot translate into SQL.
+        var scoped = await ChoicesQuery(db, review.ProjectId, carried, review.ProcedureLevel()).ToListAsync(ct);
+        var query = scoped.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var q = search.Trim().ToLower();
+            query = query.Where(x => x.DisplayNumber.ToLower().Contains(q) || x.Statement.ToLower().Contains(q));
+        }
+        var total = query.Count();
+        var paged = query.OrderBy(x => x.DisplayNumber).Skip((page - 1) * pageSize).Take(pageSize).ToList();
+        var requested = (hydrateRevisionIds ?? []).Distinct().ToList();
+        var hydrated = requested.Count == 0
+            ? []
+            : scoped.Where(x => requested.Contains(x.RevisionId)).ToList();
+        var items = paged.Concat(hydrated).DistinctBy(x => x.RevisionId)
+            .OrderBy(x => x.DisplayNumber).ToList();
+        return (total, items);
     }
 
     public static async Task<Guid?> EffectiveRequirementBaselineIdAsync(AeroLinkDbContext db, Guid projectId,

@@ -424,9 +424,9 @@ public sealed class TestProcedureAuthoringApiTests
         await LoginAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
-        var workspace = await client.GetFromJsonAsync<JsonElement>(
-            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes");
-        var target = Assert.Single(workspace.GetProperty("procedureTargets").EnumerateArray());
+        var targets = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-targets?search=SYSTP-000900&page=1&pageSize=25");
+        var target = Assert.Single(targets.GetProperty("items").EnumerateArray());
         Assert.Equal("SYSTP-000900", target.GetProperty("baseNumber").GetString());
         var current = Assert.Single(target.GetProperty("currentCoverage").EnumerateArray());
         Assert.Equal(fixture.RequirementRevisionId, current.GetProperty("revisionId").GetGuid());

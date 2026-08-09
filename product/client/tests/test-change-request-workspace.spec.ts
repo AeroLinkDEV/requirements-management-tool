@@ -230,13 +230,13 @@ test('a procedure modification shows retained coverage and records an explicit r
       solution: 'Retain unchanged links and record additions/removals.', problemRich: '', analysisRich: '', solutionRich: '',
       capabilities: { canProposeProcedureChange: true, canWithdrawProcedureChange: true, canRevise: false },
       drivingRequirementChoices: [
-        { revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.' },
-        { revisionId: additionId, displayNumber: 'SYSR-000403.00', statement: 'New governed requirement.' },
+        { id: '50000000-0000-0000-0000-000000000001', revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System' },
+        { id: '50000000-0000-0000-0000-000000000002', revisionId: additionId, displayNumber: 'SYSR-000403.00', statement: 'New governed requirement.', level: 'System' },
       ],
       procedureTargets: [{ baseNumber: 'SYSTP-000900', title: 'Carried procedure', currentRevision: 0,
         currentCoverage: [
-          { revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System', isSuspect: true },
-          { revisionId: retainedId, displayNumber: 'SYSR-000402.00', statement: 'Unchanged requirement.', level: 'System', isSuspect: false },
+          { id: '50000000-0000-0000-0000-000000000003', revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System', isSuspect: true },
+          { id: '50000000-0000-0000-0000-000000000004', revisionId: retainedId, displayNumber: 'SYSR-000402.00', statement: 'Unchanged requirement.', level: 'System', isSuspect: false },
         ] }],
       procedureChanges: recorded ? [{
         id: '20000000-0000-0000-0000-000000000001', displayNumber: 'SYSTP-000900.01',
@@ -246,6 +246,26 @@ test('a procedure modification shows retained coverage and records an explicit r
         removedRequirementRevisionIds: [removableId], coverageChangeRationale: 'Replace obsolete coverage.',
         coverageChangedBy: 'test.engineer',
       }] : [],
+    }) })
+  })
+  await page.route('**/api/test-change-reviews/*/procedure-targets*', async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      page: 1, pageSize: 50, totalCount: 1, totalPages: 1,
+      items: [{ procedureId: '60000000-0000-0000-0000-000000000001', baseNumber: 'SYSTP-000900',
+        title: 'Carried procedure', currentRevision: 0,
+        currentCoverage: [
+          { id: '50000000-0000-0000-0000-000000000003', revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System', isSuspect: true },
+          { id: '50000000-0000-0000-0000-000000000004', revisionId: retainedId, displayNumber: 'SYSR-000402.00', statement: 'Unchanged requirement.', level: 'System', isSuspect: false },
+        ] }],
+    }) })
+  })
+  await page.route('**/api/test-change-reviews/*/requirement-candidates*', async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      page: 1, pageSize: 50, totalCount: 2, totalPages: 1,
+      items: [
+        { id: '50000000-0000-0000-0000-000000000001', revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System' },
+        { id: '50000000-0000-0000-0000-000000000002', revisionId: additionId, displayNumber: 'SYSR-000403.00', statement: 'New governed requirement.', level: 'System' },
+      ],
     }) })
   })
 

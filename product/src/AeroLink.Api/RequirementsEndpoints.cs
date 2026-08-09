@@ -24,7 +24,9 @@ public static class RequirementsEndpoints
 {
     public static void MapRequirementsEndpoints(this WebApplication app)
     {
-        app.MapGet("/api/requirements", async (Guid projectId, string? search, Guid? releaseId, Guid? baselineId, string? scope, bool? includeRetired, int? page, int? pageSize, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/requirements", async (Guid projectId, string? search, Guid? releaseId, Guid? baselineId,
+            string? scope, bool? includeRetired, int? page, int? pageSize, string? ids,
+            AeroLinkDbContext db, CancellationToken ct) =>
         {
             var resolvedPage=Math.Max(1,page??1);var resolvedPageSize=Math.Clamp(pageSize??50,1,200);
             var source = from artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId)
@@ -38,13 +40,25 @@ public static class RequirementsEndpoints
             if (baselineId is not null) source = source.Where(x => db.BaselineRequirements.Any(m => m.BaselineId == baselineId && m.RevisionId == x.revision.Id));
             else if (includeRetired != true) source = source.Where(x => x.revision.State == AeroLink.Domain.Requirements.RequirementRevisionState.Active);
             if (releaseId is not null) source = source.Where(x => db.CandidateBaselines.Any(b => b.Id == x.revision.EffectiveBaselineId && b.ReleaseId == releaseId));
+            // Eligibility is the scoped source; search narrows the page but must never hide an already
+            // selected exact revision. Hydration therefore runs against the scoped source without the
+            // search predicate, so a selected item outside the current result page stays reachable.
+            var scoped = source;
             if (!string.IsNullOrWhiteSpace(search)) { var q = search.Trim().ToLower(); source = source.Where(x => x.artifact.BaseNumber.ToLower().Contains(q) || x.revision.Statement.ToLower().Contains(q) || x.revision.Rationale.ToLower().Contains(q)); }
             var total = await source.CountAsync(ct);
-            var items = await source.OrderBy(x => x.artifact.BaseNumber).ThenByDescending(x => x.revision.Revision).Skip((resolvedPage - 1) * resolvedPageSize).Take(resolvedPageSize)
-                .Select(x => new { x.artifact.Id, x.artifact.BaseNumber, level = x.artifact.Level.ToString(), revisionId = x.revision.Id, x.revision.Revision,
+            var requestedIds = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(x => Guid.TryParse(x, out var id) ? id : Guid.Empty).Where(x => x != Guid.Empty).Distinct().ToList();
+            var paged = await source.OrderBy(x => x.artifact.BaseNumber).ThenByDescending(x => x.revision.Revision)
+                .Skip((resolvedPage - 1) * resolvedPageSize).Take(resolvedPageSize).ToListAsync(ct);
+            var hydrated = requestedIds.Count == 0
+                ? []
+                : await scoped.Where(x => requestedIds.Contains(x.revision.Id)).ToListAsync(ct);
+            var rows = paged.Concat(hydrated).DistinctBy(x => x.revision.Id)
+                .OrderBy(x => x.artifact.BaseNumber).ThenByDescending(x => x.revision.Revision).ToList();
+            var items = rows.Select(x => new { x.artifact.Id, x.artifact.BaseNumber, level = x.artifact.Level.ToString(), revisionId = x.revision.Id, x.revision.Revision,
                     displayNumber = x.artifact.BaseNumber + "." + (x.revision.Revision < 10 ? "0" : "") + x.revision.Revision, x.revision.Statement, x.revision.Rationale,
                     x.revision.VerificationMethod, state = x.revision.State.ToString(), x.revision.EffectiveBaselineId, sourceChangeRequestId = x.scr.Id,
-                    sourceScr = x.scr.BaseNumber + "." + (x.scr.Revision < 10 ? "0" : "") + x.scr.Revision, x.revision.CreatedAt }).ToListAsync(ct);
+                    sourceScr = x.scr.BaseNumber + "." + (x.scr.Revision < 10 ? "0" : "") + x.scr.Revision, x.revision.CreatedAt }).ToList();
             return Results.Ok(new { page=resolvedPage, pageSize=resolvedPageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)resolvedPageSize), items });
         });
 
