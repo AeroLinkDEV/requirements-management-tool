@@ -172,8 +172,8 @@ public sealed class CandidateBaseline
     /// </summary>
     public void MarkTestProceduresMaterialized(string actorId, string proceduresHash, int activeCount, DateTimeOffset now)
     {
-        if (State == CandidateBaselineState.Draft)
-            throw new DomainException("Freeze the baseline before materializing its test procedures.");
+        if (State != CandidateBaselineState.Frozen)
+            throw new DomainException("Only a frozen baseline can materialize its test procedures.");
         if (RequirementsMaterializedAt is null)
             throw new DomainException("Materialize the requirement baseline before its test procedures — a procedure verifies a requirement that has to exist first.");
         if (TestProceduresMaterializedAt is not null)
@@ -216,6 +216,6 @@ public sealed class CandidateBaseline
 
     private void EnsureDraft() { if (State != CandidateBaselineState.Draft) throw new DomainException("A frozen baseline is immutable."); }
     private void EnsureTestProceduresOpen()
-    { if (TestProceduresMaterializedAt is not null) throw new DomainException("The test procedure baseline is already materialized and immutable."); }
+    { if (State == CandidateBaselineState.Released) throw new DomainException("Released baselines are immutable; test procedure selections cannot change after release."); if (TestProceduresMaterializedAt is not null) throw new DomainException("The test procedure baseline is already materialized and immutable."); }
     private void Event(string type, string actorId, string detail, DateTimeOffset now) => _events.Add(new BaselineEvent(Id, type, actorId, detail, now));
 }

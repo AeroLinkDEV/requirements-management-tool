@@ -113,6 +113,31 @@ public sealed class TestProcedureBaselineTests
     }
 
     [Fact]
+    public void A_released_baseline_cannot_accept_or_materialize_test_procedure_work()
+    {
+        var baseline = Frozen();
+        baseline.MarkReleased("cm", Now.AddDays(1));
+        var tcr = ApprovedTestChangeRequest();
+
+        // D-029: a released baseline is immutable. Ordinary TCR selection and manifest materialization are
+        // configuration mutations and must be refused even though the manifest was never fixed.
+        Assert.Throws<DomainException>(() => baseline.SelectTestChangeRequest(tcr, "verification.lead", Now.AddDays(2)));
+        Assert.Throws<DomainException>(() => baseline.MarkTestProceduresMaterialized("cm", Hash, 12, Now.AddDays(2)));
+    }
+
+    [Fact]
+    public void A_released_baseline_cannot_remove_a_test_change_request()
+    {
+        var baseline = Frozen();
+        var tcr = ApprovedTestChangeRequest();
+        baseline.SelectTestChangeRequest(tcr, "verification.lead", Now.AddDays(1));
+        baseline.MarkReleased("cm", Now.AddDays(2));
+
+        Assert.Throws<DomainException>(() => baseline.RemoveTestChangeRequest(tcr, "verification.lead", Now.AddDays(3)));
+        Assert.Single(baseline.TestChangeSelections);
+    }
+
+    [Fact]
     public void A_procedure_revision_names_the_test_change_request_that_produced_it()
     {
         var procedureId = Guid.NewGuid();

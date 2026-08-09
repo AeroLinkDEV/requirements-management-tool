@@ -233,4 +233,88 @@ public sealed class ProcedureBaselineApiTests
         using var afterwards = await client.DeleteAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests/{fixture.TcrId}");
         Assert.Equal(HttpStatusCode.BadRequest, afterwards.StatusCode);
     }
+
+    [Fact]
+    public async Task A_released_baseline_refuses_test_procedure_mutations_without_build_context()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "baseline.cm");
+        await MaterializeRequirementsAsync(client, fixture.BaselineId);
+        await PrepareCarryingPackageAsync(factory, fixture);
+
+        using var selected = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests",
+            new { testChangeRequestId = fixture.TcrId });
+        Assert.Equal(HttpStatusCode.OK, selected.StatusCode);
+
+        // Release the baseline through the domain, exactly as release authority would.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var baseline = await db.CandidateBaselines.SingleAsync(x => x.Id == fixture.BaselineId);
+            baseline.MarkReleased("cm", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        // Ordinary configuration mutations must be refused even with NO X-AeroLink-Build-Context header.
+        using var refusedSelect = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests",
+            new { testChangeRequestId = fixture.TcrId });
+        Assert.Equal(HttpStatusCode.BadRequest, refusedSelect.StatusCode);
+
+        using var refusedRemove = await client.DeleteAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests/{fixture.TcrId}");
+        Assert.Equal(HttpStatusCode.BadRequest, refusedRemove.StatusCode);
+
+        using var refusedMaterialize = await client.PostAsJsonAsync(
+            $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
+        Assert.Equal(HttpStatusCode.BadRequest, refusedMaterialize.StatusCode);
+
+        // Persistence: the released baseline's procedure state is unchanged after every refused call.
+        using var verifyScope = factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var after = await verifyDb.CandidateBaselines
+            .Include(x => x.TestChangeSelections)
+            .SingleAsync(x => x.Id == fixture.BaselineId);
+        Assert.Single(after.TestChangeSelections);
+        Assert.Null(after.TestProceduresMaterializedAt);
+        Assert.Null(after.TestProceduresHash);
+    }
+
+    [Fact]
+    public async Task A_released_baseline_refuses_test_procedure_mutations_with_the_released_build_context_header()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "baseline.cm");
+        await MaterializeRequirementsAsync(client, fixture.BaselineId);
+        await PrepareCarryingPackageAsync(factory, fixture);
+
+        using var selected = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests",
+            new { testChangeRequestId = fixture.TcrId });
+        Assert.Equal(HttpStatusCode.OK, selected.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var baseline = await db.CandidateBaselines.SingleAsync(x => x.Id == fixture.BaselineId);
+            baseline.MarkReleased("cm", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", fixture.ReleaseId.ToString());
+        using var refusedSelect = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests",
+            new { testChangeRequestId = fixture.TcrId });
+        Assert.True(refusedSelect.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
+            $"{(int)refusedSelect.StatusCode}: {await refusedSelect.Content.ReadAsStringAsync()}");
+
+        using var refusedRemove = await client.DeleteAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests/{fixture.TcrId}");
+        Assert.True(refusedRemove.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
+            $"{(int)refusedRemove.StatusCode}: {await refusedRemove.Content.ReadAsStringAsync()}");
+
+        using var refusedMaterialize = await client.PostAsJsonAsync(
+            $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
+        Assert.True(refusedMaterialize.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
+            $"{(int)refusedMaterialize.StatusCode}: {await refusedMaterialize.Content.ReadAsStringAsync()}");
+    }
 }
