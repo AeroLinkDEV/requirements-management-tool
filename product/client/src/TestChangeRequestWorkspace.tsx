@@ -106,10 +106,10 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
   },[api,reviewId,proposing,requirementQuery,requirementPage,draft.driving])
 
   const targetSummary = pickerSummary(
-    'carried procedure', targetQuery, targetPicker?.totalCount??0, targetPicker?.items?.length??0)
+    'carried procedure', targetQuery, targetPicker?.totalCount??0, draft.baseNumber ? 1 : 0)
   const requirementSummary = pickerSummary(
     'governed requirement', requirementQuery, requirementPicker?.totalCount??0,
-    requirementPicker?.items?.length??0, 'in scope')
+    draft.driving.length, 'in scope')
 
   const act=async(run:()=>Promise<unknown>)=>{
     setBusy(true);setError('')

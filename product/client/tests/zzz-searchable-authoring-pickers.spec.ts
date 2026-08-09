@@ -277,14 +277,16 @@ test('an approved procedure beyond the former 200-row limit is searchable in the
 
   // The current unsaved choice is hydrated alongside the search result: changing the search to something
   // that would normally exclude procedure A must not remove A from the DOM, because the resolve mutation
-  // reads procedureId from the select. The metadata must keep describing the actual search matches and
-  // separately explain that the retained selection is also shown.
-  await searchProcedures.fill('LLRTP-000001')
+  // reads procedureId from the select. This search matches more than one page (groups 100-199) while
+  // excluding procedure A (group 250), so the metadata describes the cross-page match count as matches
+  // and separately states that the current selection is kept visible independently of the search.
+  await searchProcedures.fill('group 1')
+  await expect(decide).toContainText('100 matching approved procedures.', { timeout: 30_000 })
+  await expect(decide).toContainText('Current selection is kept visible independently of the search.', { timeout: 30_000 })
   await expect(decide.locator('select[name="procedureId"] option').filter({ hasText: 'LLRTP-000250' }))
     .toHaveCount(1, { timeout: 30_000 })
   await expect(decide.getByRole('combobox', { name: 'Covering procedure' })).toHaveValue(optionValue!)
-  await expect(decide).toContainText('1 matching approved procedure.', { timeout: 30_000 })
-  await expect(decide).toContainText('Showing 2 options, including the current selection.', { timeout: 30_000 })
+  await expect(decide.getByRole('button', { name: 'Next' })).toBeEnabled()
 
   // A search with no matches still keeps the exact current selection hydrated, and the metadata reports
   // zero matches truthfully rather than claiming there are no procedures in this build.
@@ -293,7 +295,7 @@ test('an approved procedure beyond the former 200-row limit is searchable in the
     .toHaveCount(1, { timeout: 30_000 })
   await expect(decide.getByRole('combobox', { name: 'Covering procedure' })).toHaveValue(optionValue!)
   await expect(decide).toContainText('0 matching approved procedures.', { timeout: 30_000 })
-  await expect(decide).toContainText('Showing 1 option, including the current selection.', { timeout: 30_000 })
+  await expect(decide).toContainText('Current selection is kept visible independently of the search.', { timeout: 30_000 })
   await expect(decide).not.toContainText('0 approved procedures in this build')
 
   await decide.getByLabel('Rationale').fill('The carried LLR procedure already verifies this requirement.')

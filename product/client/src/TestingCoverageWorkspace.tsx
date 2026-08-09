@@ -345,10 +345,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
 
   const procedureSummary = pickerSummary(
     'approved procedure', procedureQuery, procedurePicker?.totalCount ?? 0,
-    procedurePicker?.items?.length ?? 0)
+    procedureChoice ? 1 : 0)
   const requirementSummary = pickerSummary(
     'requirement', requirementQuery, requirementPicker?.totalCount ?? 0,
-    requirementPicker?.items?.length ?? 0, 'in scope')
+    requirementSelection.length, 'in scope')
 
   const mine = requests.filter(x => x.discipline === discipline)
 
