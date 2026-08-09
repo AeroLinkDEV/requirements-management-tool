@@ -1112,7 +1112,7 @@ public sealed class ManualTestChangeRequestApiTests
 
         await LoginAsync(client, "manual.reviewer");
         using var approved = await client.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/approve",
-            new { rationale = "Approved." });
+            new { rationale = "Approved.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve this exact test change request." });
         Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
         await LoginAsync(client, "manual.engineer");
         using var reopenApproved = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.AutoItemId}/reopen",
@@ -1182,7 +1182,7 @@ public sealed class ManualTestChangeRequestApiTests
         Assert.True(submitted.IsSuccessStatusCode, await submitted.Content.ReadAsStringAsync());
         await LoginAsync(clientA, "manual.reviewer");
         using var approved = await clientA.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/approve",
-            new { rationale = "Approved." });
+            new { rationale = "Approved.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve this exact test change request." });
         Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
 
         await LoginAsync(clientA, "manual.engineer");

@@ -29,7 +29,7 @@ public sealed record TestChangeRequestApproverRequest(string UserId, string Name
 /// <param name="Rationale">Why no test work is needed. Required only when concluding that none is.</param>
 public sealed record TestAssessmentConclusionRequest(bool TestChangeRequired, string? Rationale,
     long? ExpectedVersion = null);
-public sealed record ApproveTestChangeReviewRequest(string Rationale);
+public sealed record ApproveTestChangeReviewRequest(string Rationale, string Password, string Meaning);
 /// <summary>
 /// One proposed change to one procedure. <paramref name="BaseNumber"/> is omitted when introducing — the
 /// number is allocated here so two engineers cannot pick the same one — and required otherwise, because a
@@ -1326,18 +1326,44 @@ public static class VerificationImpactEndpoints
                 return Results.Conflict(new { error = "Released software-build test change reviews are read-only." });
             if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct))
                 return Results.Forbid();
+            if (string.IsNullOrWhiteSpace(request.Rationale))
+                return Results.BadRequest(new { error = "An approval rationale is required.", code = "approval_rationale_required" });
+            if (string.IsNullOrWhiteSpace(request.Meaning))
+                return Results.BadRequest(new { error = "An explicit electronic signature meaning is required.", code = "signature_meaning_required" });
+
+            var actor = http.UserAccount();
+            var cycle = review.ActiveReviewCycle;
+            if (cycle is null)
+                return Results.BadRequest(new { error = "This test change request has no active review." });
+            var activeStep = cycle.Steps.SingleOrDefault(x => x.State == ApprovalStepState.Active
+                && string.Equals(x.ApproverId, actor.UserName, StringComparison.OrdinalIgnoreCase));
+            if (activeStep is null)
+                return Results.BadRequest(new { error = "Only the active approver can approve this review stage." });
+            var programId = await db.Projects.AsNoTracking().Where(x => x.Id == review.ProjectId)
+                .Select(x => x.ProgramId).SingleAsync(ct);
+            // Configured workflows freeze the authority selected for each stage. Requiring a generic Approver
+            // here would invalidate legitimate TestLead and ConfigurationManager stages. The no-workflow
+            // fallback has no such governed stage, so its signer must still hold current Approver authority,
+            // including administrator substitution and active delegation.
+            if (cycle.WorkflowId is null
+                && !await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
+                return Results.Forbid();
+            // Credential knowledge is reconfirmed only after every other authorization/input gate and
+            // immediately before the controlled mutation. A refusal therefore cannot advance a step, create a
+            // signature, or activate/notify the next stage.
+            if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password ?? "", ct))
+                return Results.Json(new
+                {
+                    error = "Electronic signature confirmation failed.",
+                    code = "electronic_signature_confirmation_failed"
+                }, statusCode: StatusCodes.Status401Unauthorized);
             try
             {
                 var now = DateTimeOffset.UtcNow;
-                var actor = http.UserAccount();
-                var cycle = review.ActiveReviewCycle
-                    ?? throw new DomainException("This test change request has no active review.");
                 var snapshotHash = cycle.SnapshotHash;
                 var activeBefore = cycle.Steps.Where(x => x.State == ApprovalStepState.Active)
                     .Select(x => x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 review.ApproveActiveStage(actor.UserName, request.Rationale, now);
-                var programId = await db.Projects.AsNoTracking().Where(x => x.Id == review.ProjectId)
-                    .Select(x => x.ProgramId).SingleAsync(ct);
                 var activated = review.ActiveReviewCycle?.Steps
                     .Where(x => x.State == ApprovalStepState.Active && !activeBefore.Contains(x.ApproverId))
                     .ToList() ?? [];
@@ -1347,8 +1373,9 @@ public static class VerificationImpactEndpoints
                         $"The prior stage is complete. You are now authorized to review {review.DisplayNumber}.",
                         "verification", review.Id, now));
                 db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId,
-                    "TestChangeRequest", review.Id, review.DisplayNumber, "Approve", request.Rationale,
-                    snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
+                    "TestChangeRequest", review.Id, review.DisplayNumber, "Approve", request.Meaning.Trim(),
+                    snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
+                    activeStep.Authority));
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new
                 {

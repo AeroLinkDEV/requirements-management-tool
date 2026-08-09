@@ -10,6 +10,7 @@ import { apiBase, apiLogin, firstSectionId, login, openNavigationGroup, selectPr
  */
 test('a configured two-stage sequential TCR review completes through the UI', async ({ page, browser, request }) => {
   test.setTimeout(480_000)
+  const password = 'AeroLink!2026'
   await apiLogin(request)
   const suffix = Date.now().toString().slice(-7)
   const programName = `Workflow Journey ${suffix}`
@@ -175,8 +176,10 @@ test('a configured two-stage sequential TCR review completes through the UI', as
   await stageOneDrawer.getByRole('button', { name: 'Approve' }).click()
   const stageOneConfirm = stageOnePage.getByRole('dialog', { name: /Approve SYSTCR/ })
   await expect(stageOneConfirm).toBeVisible()
-  await stageOneConfirm.getByLabel(/Rationale|Meaning/).fill('Stage one is sound.')
-  await stageOneConfirm.getByRole('button', { name: 'Approve package' }).click()
+  await stageOneConfirm.getByLabel('Approval rationale').fill('Stage one is sound.')
+  await stageOneConfirm.getByLabel('Signature meaning').fill('I approve the exact Test Lead review stage.')
+  await stageOneConfirm.getByLabel('Password').fill(password)
+  await stageOneConfirm.getByRole('button', { name: 'Sign and approve package' }).click()
   await expect(stageOnePage.locator('.workspaceSaved')).toContainText('approved', { timeout: 30_000 })
   await expect(stageOneDrawer.getByRole('button', { name: 'Approve' })).toHaveCount(0, { timeout: 30_000 })
   await stageOneContext.close()
@@ -193,8 +196,10 @@ test('a configured two-stage sequential TCR review completes through the UI', as
   await stageTwoDrawer.getByRole('button', { name: 'Approve' }).click()
   const stageTwoConfirm = stageTwoPage.getByRole('dialog', { name: /Approve SYSTCR/ })
   await expect(stageTwoConfirm).toBeVisible()
-  await stageTwoConfirm.getByLabel(/Rationale|Meaning/).fill('Stage two is sound.')
-  await stageTwoConfirm.getByRole('button', { name: 'Approve package' }).click()
+  await stageTwoConfirm.getByLabel('Approval rationale').fill('Stage two is sound.')
+  await stageTwoConfirm.getByLabel('Signature meaning').fill('I approve the exact final review stage.')
+  await stageTwoConfirm.getByLabel('Password').fill(password)
+  await stageTwoConfirm.getByRole('button', { name: 'Sign and approve package' }).click()
   await expect(stageTwoPage.locator('.workspaceSaved')).toContainText('approved', { timeout: 30_000 })
   await stageTwoContext.close()
 
