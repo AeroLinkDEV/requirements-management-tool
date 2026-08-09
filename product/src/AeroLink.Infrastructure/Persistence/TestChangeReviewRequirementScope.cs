@@ -14,7 +14,7 @@ namespace AeroLink.Infrastructure.Persistence;
 /// Keeping both predicates here prevents the picker, mutation, and procedure materializer from disagreeing.
 /// </summary>
 public sealed record TestChangeReviewRequirementChoice(
-    Guid RevisionId, string DisplayNumber, string Statement);
+    Guid Id, Guid RevisionId, string DisplayNumber, string Statement, RequirementLevel Level);
 
 public static class TestChangeReviewRequirementScope
 {
@@ -59,9 +59,11 @@ public static class TestChangeReviewRequirementScope
                           on revision.ArtifactId equals artifact.Id
                       orderby artifact.BaseNumber, revision.Revision
                       select new TestChangeReviewRequirementChoice(
+                          artifact.Id,
                           revision.Id,
                           artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
-                          revision.Statement)).ToListAsync(ct);
+                          revision.Statement,
+                          artifact.Level)).ToListAsync(ct);
     }
 
     public static async Task<Guid?> EffectiveRequirementBaselineIdAsync(AeroLinkDbContext db, Guid projectId,

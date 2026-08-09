@@ -134,6 +134,10 @@ test('a test engineer proposes a new procedure inside the test change request th
   await dialog.getByLabel('Steps').fill('1. Load the plan. 2. Advance past the first waypoint.')
   await dialog.getByLabel('Expected result').fill('The next eligible oceanic waypoint is sequenced.')
   await dialog.getByLabel('Why this procedure work is required').fill('No procedure exercises oceanic sequencing after the approved change.')
+  await expect(dialog.getByText('Select at least one exact requirement this new procedure verifies.')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Propose decision' })).toBeDisabled()
+  await dialog.getByRole('group', { name: 'Requirements this procedure verifies' })
+    .getByRole('checkbox').first().check()
   await dialog.getByRole('button', { name: 'Propose decision' }).click()
 
   await expect(drawer.getByText(/SYSTP-\d{6}\.00 · New procedure/)).toBeVisible({ timeout: 30_000 })
@@ -148,6 +152,7 @@ test('a test engineer proposes a new procedure inside the test change request th
   await reopened.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2} · / }).click()
   const again = page.getByRole('dialog', { name: /procedure decisions/ })
   await expect(again.getByText(/SYSTP-\d{6}\.00 · New procedure/)).toBeVisible({ timeout: 30_000 })
+  await expect(again).toContainText('SYSR-')
 
   await again.getByRole('button', { name: 'Withdraw this decision' }).click()
   await expect(again).toContainText('No procedure decisions are proposed yet', { timeout: 30_000 })

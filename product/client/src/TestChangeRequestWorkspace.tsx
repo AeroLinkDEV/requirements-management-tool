@@ -11,9 +11,9 @@ import './DownstreamAssessmentQueue.css'
 type Kind='Introduce'|'Modify'|'Retire'
 type ProcedureChange={id:string;displayNumber:string;baseNumber:string;revision:number;kind:Kind;level:string;title:string;objective:string;preconditions:string;steps:string;expectedResult:string;rationale:string;drivingRequirementRevisionIds:string[];removedRequirementRevisionIds:string[];coverageChangeRationale:string;coverageChangedBy:string}
 /** A requirement this package's changes touched, which a procedure here may be written against. */
-type RequirementChoice={revisionId:string;displayNumber:string;statement:string}
+type RequirementChoice={id:string;revisionId:string;displayNumber:string;statement:string;level:string}
 /** A controlled procedure a Modify or Retire may target, with the revision it actually sits at. */
-type CurrentCoverage={revisionId:string;displayNumber:string;statement:string;level:string;isSuspect:boolean}
+type CurrentCoverage={id:string;revisionId:string;displayNumber:string;statement:string;level:string;isSuspect:boolean}
 type ProcedureTarget={baseNumber:string;title:string;currentRevision:number;currentCoverage:CurrentCoverage[]}
 type Capabilities={canProposeProcedureChange:boolean;canWithdrawProcedureChange:boolean;canRevise:boolean}
 type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;version:number;caseContractVersion:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}
@@ -48,7 +48,7 @@ const emptyDraft={kind:'Introduce' as Kind,baseNumber:'',revision:0,title:'',obj
  * invented. Nothing proposed here is a controlled procedure revision until the package is approved and
  * materialised into a build.
  */
-export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAuthor,onClose,onChanged}:{api:string;projectId:string;reviewId:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void}){
+export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAuthor,onClose,onChanged,onOpenRequirementRevision}:{api:string;projectId:string;reviewId:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void;onOpenRequirementRevision:(requirement:{id:string;revisionId:string;level:string})=>void}){
   const [item,setItem]=useState<Package>()
   const [busy,setBusy]=useState(false),[error,setError]=useState('')
   const [draft,setDraft]=useState(emptyDraft),[proposing,setProposing]=useState(false)
@@ -132,11 +132,23 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
   const governedIds=new Set((item?.drivingRequirementChoices??[]).map(x=>x.revisionId))
   const addedCoverage=draft.driving.filter(id=>!currentCoverageIds.has(id))
   const coverageDeltaChanged=draft.kind==='Modify'&&(addedCoverage.length>0||draft.removed.length>0)
-  const requirementLabel=(id:string)=>{
-    const known=(item?.drivingRequirementChoices??[]).find(x=>x.revisionId===id)
-      ??(item?.procedureTargets??[]).flatMap(x=>x.currentCoverage).find(x=>x.revisionId===id)
-    return known?.displayNumber??id
+  const finalCoverageCount=currentCoverage.filter(x=>!draft.removed.includes(x.revisionId)).length+addedCoverage.length
+  const missingRequiredCoverage=draft.kind==='Introduce'
+    ?draft.driving.length===0
+    :draft.kind==='Modify'&&draft.baseNumber!==''&&finalCoverageCount===0
+  const requirementDetails=(revisionId:string)=>
+    (item?.drivingRequirementChoices??[]).find(x=>x.revisionId===revisionId)
+      ??(item?.procedureTargets??[]).flatMap(x=>x.currentCoverage).find(x=>x.revisionId===revisionId)
+  const requirementLabel=(revisionId:string)=>{
+    const known=requirementDetails(revisionId)
+    return known?`${known.displayNumber} · ${known.statement}`:revisionId
   }
+  const requirementLinks=(ids:string[])=>ids.map((revisionId,index)=>{
+    const known=requirementDetails(revisionId)
+    return known
+      ? <span key={revisionId}>{index>0?', ':''}<button type="button" className="drawerArtifactLink" onClick={()=>onOpenRequirementRevision(known)}>{known.displayNumber}</button> · {known.statement}</span>
+      : <span key={revisionId}>{index>0?', ':''}{revisionId}</span>
+  })
   const procedureCoverageDelta=(change:ProcedureChange)=>{
     const current=(item?.procedureTargets??[]).find(x=>x.baseNumber===change.baseNumber)?.currentCoverage??[]
     const removed=new Set(change.removedRequirementRevisionIds)
@@ -185,6 +197,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                   <span>{change.title||'No title recorded'}</span>
                   {change.objective&&<span>{change.objective}</span>}
                   {change.rationale&&<span>Why: {change.rationale}</span>}
+                  {change.kind==='Introduce'&&<span>Verified requirements: {requirementLinks(change.drivingRequirementRevisionIds)}</span>}
                   {change.kind==='Modify'&&<>
                     <span>Retained coverage: {procedureCoverageDelta(change).retained.map(requirementLabel).join(', ')||'none'}</span>
                     <span>Added coverage: {procedureCoverageDelta(change).added.map(requirementLabel).join(', ')||'none'}</span>
@@ -296,7 +309,10 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                       :current.driving.filter(id=>id!==choice.revisionId)}))}/>
                 <span><b>{choice.displayNumber}</b> {choice.statement}</span>
               </label>)
-            :<p className="drawerEmpty">This build has not materialized its requirements yet, so there is no exact revision to write against. The procedure can still be proposed and linked once it has.</p>}
+            :<p className="drawerEmpty">This build has not materialized its requirements yet, so there is no exact revision to write against. Introduce and Modify decisions wait until exact requirement revisions are available.</p>}
+          {missingRequiredCoverage&&<p className="drawerEmpty" role="alert">{draft.kind==='Introduce'
+            ?'Select at least one exact requirement this new procedure verifies.'
+            :'A modified procedure must retain or add at least one exact requirement. Retire it instead if it verifies nothing in this build.'}</p>}
         </fieldset>}
         {coverageDeltaChanged&&<label>Why coverage is being added or removed
           <textarea value={draft.coverageRationale} onChange={event=>setDraft(current=>({...current,coverageRationale:event.target.value}))}/>
@@ -307,7 +323,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
         <label>Why this procedure work is required<textarea value={draft.rationale} onChange={event=>setDraft(current=>({...current,rationale:event.target.value}))}/></label>
         <div className="downstreamDialogActions">
           <button type="button" className="quiet" disabled={busy} onClick={()=>{setProposing(false);setError('')}}>Cancel</button>
-          <button type="button" disabled={busy||(!retiring&&(!draft.title.trim()||!draft.objective.trim()||!draft.steps.trim()))||(draft.kind!=='Introduce'&&!draft.baseNumber.trim())||(coverageDeltaChanged&&!draft.coverageRationale.trim())} onClick={()=>void propose()}>
+          <button type="button" disabled={busy||missingRequiredCoverage||(!retiring&&(!draft.title.trim()||!draft.objective.trim()||!draft.steps.trim()))||(draft.kind!=='Introduce'&&!draft.baseNumber.trim())||(coverageDeltaChanged&&!draft.coverageRationale.trim())} onClick={()=>void propose()}>
             {busy?'Recording…':'Propose decision'}
           </button>
         </div>

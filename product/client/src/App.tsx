@@ -664,6 +664,7 @@ function App() {
         readOnly={release.isReleased}
         programId={active?.program.id ?? ""}
         user={user}
+        onOpenRequirementRevision={openRequirementRevision}
       />
     );
 

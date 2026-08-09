@@ -387,6 +387,7 @@ public static class VerificationImpactEndpoints
                                         select new
                                         {
                                             coverage.ProcedureRevisionId,
+                                            id = artifact.Id,
                                             revisionId = revision.Id,
                                             displayNumber = artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
                                             revision.Statement,
@@ -410,7 +411,7 @@ public static class VerificationImpactEndpoints
                     currentCoverage = targetCoverage.Where(c => c.ProcedureRevisionId == x.Id)
                         .OrderBy(c => c.displayNumber).Select(c => new
                         {
-                            c.revisionId, c.displayNumber, statement = c.Statement, c.level,
+                            c.id, c.revisionId, c.displayNumber, statement = c.Statement, c.level,
                             isSuspect = c.IsSuspect
                         }).ToList()
                 }),
@@ -456,6 +457,12 @@ public static class VerificationImpactEndpoints
                 var now = DateTimeOffset.UtcNow;
                 var driving = request.DrivingRequirementRevisionIds ?? [];
                 var removed = request.RemovedRequirementRevisionIds ?? [];
+                if (request.Kind == TestProcedureChangeKind.Introduce && driving.Length == 0)
+                    return Results.BadRequest(new
+                    {
+                        error = "A new procedure must name at least one exact requirement revision it verifies.",
+                        code = "procedure_driving_requirement_required"
+                    });
                 if (request.Kind != TestProcedureChangeKind.Modify && removed.Length != 0)
                     return Results.BadRequest(new
                     {
@@ -568,6 +575,13 @@ public static class VerificationImpactEndpoints
                         {
                             error = "Explain why this modification adds or removes requirement coverage.",
                             code = "coverage_delta_rationale_required"
+                        });
+                    var finalCoverage = currentCoverageIds.Except(removed).Concat(driving).Distinct().Count();
+                    if (finalCoverage == 0)
+                        return Results.BadRequest(new
+                        {
+                            error = "A modified procedure must retain or add at least one exact requirement revision. Retire the procedure instead if it verifies nothing in this build.",
+                            code = "procedure_final_coverage_required"
                         });
                 }
 
