@@ -488,6 +488,9 @@ public sealed class TestProcedureAuthoringApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
+        using var authoredCase = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.TcrId}/case",
+            new { title = "No procedure decision", problem = "Problem", analysis = "Analysis", solution = "Solution" });
+        Assert.True(authoredCase.IsSuccessStatusCode, await authoredCase.Content.ReadAsStringAsync());
 
         using (var scope = factory.Services.CreateScope())
         {
@@ -575,6 +578,15 @@ public sealed class TestProcedureAuthoringApiTests
             await db.SaveChangesAsync();
         }
 
+        using var authoredCase = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.TcrId}/case",
+            new
+            {
+                title = "Oceanic sequencing verification",
+                problem = "The changed behavior needs controlled verification.",
+                analysis = "The proposed procedure supplies the required coverage.",
+                solution = "Approve and materialize the procedure change."
+            });
+        Assert.True(authoredCase.IsSuccessStatusCode, await authoredCase.Content.ReadAsStringAsync());
         using var submit = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.TcrId}/submit",
             new { approverId = "procedure.approver" });
         var submitBody = await submit.Content.ReadAsStringAsync();

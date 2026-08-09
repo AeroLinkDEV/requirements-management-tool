@@ -16,7 +16,7 @@ type RequirementChoice={revisionId:string;displayNumber:string;statement:string}
 type CurrentCoverage={revisionId:string;displayNumber:string;statement:string;level:string;isSuspect:boolean}
 type ProcedureTarget={baseNumber:string;title:string;currentRevision:number;currentCoverage:CurrentCoverage[]}
 type Capabilities={canProposeProcedureChange:boolean;canWithdrawProcedureChange:boolean;canRevise:boolean}
-type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;version:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}
+type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;version:number;caseContractVersion:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}
 
 const levelName=(discipline:string)=>discipline==='System'?'SYS':discipline==='HighLevelSoftware'?'HLR':'LLR'
 const procedureWord=(level:string)=>level==='System'?'SYSTP':level==='HighLevel'?'HLRTP':'LLRTP'
@@ -34,6 +34,9 @@ const packageStatus=(item:Package)=>{
     : `${level}TCR Open – No Procedure Decisions Yet`
 }
 const kindWords=(kind:Kind)=>kind==='Introduce'?'New procedure':kind==='Modify'?'Modified procedure':'Retired procedure'
+const missingCaseFields=(item:Package)=>[
+  ['Title',item.title],['Problem',item.problem],['Analysis',item.analysis],['Solution',item.solution],
+].filter(([,value])=>!value?.trim()).map(([name])=>name)
 
 const emptyDraft={kind:'Introduce' as Kind,baseNumber:'',revision:0,title:'',objective:'',preconditions:'',steps:'',expectedResult:'',rationale:'',driving:[] as string[],removed:[] as string[],coverageRationale:''}
 
@@ -158,6 +161,8 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
       {item&&<>
         <section className="tcrCaseSection">
           <h3>Engineering case</h3>
+          {missingCaseFields(item).length>0&&item.state==='Open'&&<p className="drawerEmpty">Missing before review: {missingCaseFields(item).join(', ')}. This package cannot be sent for approval until the complete engineering case is recorded.</p>}
+          {missingCaseFields(item).length>0&&item.caseContractVersion===0&&item.state!=='Open'&&<p className="drawerEmpty">This historical package predates the complete engineering-case contract. Its recorded content is shown unchanged; no case text has been fabricated.</p>}
           {item.title
             ? <dl className="sourceCase">
                 <div><dt>Title</dt><dd>{item.title}</dd></div>
@@ -165,8 +170,8 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                 <div><dt>Analysis</dt><dd><RichContentView api={api} value={item.analysisRich} empty={item.analysis || 'Not recorded'} /></dd></div>
                 <div><dt>Solution</dt><dd><RichContentView api={api} value={item.solutionRich} empty={item.solution || 'Not recorded'} /></dd></div>
               </dl>
-            : <p className="drawerEmpty">No engineering case was recorded for this package. Automatically raised packages — and history created before case authoring — are shown exactly as they are.</p>}
-          {mayEditCase&&<button type="button" className="linkedScr" disabled={busy} onClick={openCaseEditor}>Edit case</button>}
+            : <p className="drawerEmpty">No engineering case is recorded for this package.</p>}
+          {mayEditCase&&<button type="button" className="linkedScr" disabled={busy} onClick={openCaseEditor}>{missingCaseFields(item).length?'Write engineering case':'Edit case'}</button>}
         </section>
 
         <section className="downstreamDecisionWorkbench">

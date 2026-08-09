@@ -15,6 +15,7 @@ public sealed class TestChangeReviewTests
     {
         var review = Raised(discipline);
         review.RecordTestChangeRequired("verification.engineer", Now);
+        review.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", Now);
         return review;
     }
 
@@ -54,6 +55,25 @@ public sealed class TestChangeReviewTests
         raised.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(1));
         Assert.Equal("SYSTCR-000042", raised.BaseNumber);
         Assert.Equal("verification.engineer", raised.DecidedBy);
+    }
+
+    [Fact]
+    public void Current_packages_require_a_complete_case_while_legacy_history_can_be_reconstructed_unchanged()
+    {
+        var current = Raised();
+        current.RecordTestChangeRequired("verification.engineer", Now);
+        var refusal = Assert.Throws<DomainException>(() =>
+            current.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(1)));
+        Assert.Contains("Title, Problem, Analysis, Solution", refusal.Message);
+
+        var legacy = new TestChangeReview(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            TestChangeReviewDiscipline.System, "SRCR-00001.00", Now, caseContractVersion: 0);
+        legacy.RecordTestChangeRequired("historical.import", Now);
+        legacy.Submit("historical.import", "historical.approver", true, Now.AddMinutes(1));
+
+        Assert.Equal(TestChangeReviewState.InReview, legacy.State);
+        Assert.Equal(0, legacy.CaseContractVersion);
+        Assert.Equal(["Title", "Problem", "Analysis", "Solution"], legacy.MissingCaseFields());
     }
 
     [Fact]
@@ -150,10 +170,12 @@ public sealed class TestChangeReviewTests
     {
         var required = Raised();
         required.RecordTestChangeRequired("verification.engineer", Now.AddMinutes(1));
+        required.WriteCase("verification.engineer", "Same case", "Problem", "Analysis", "Solution", Now.AddMinutes(1));
         required.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(2));
 
         var notRequired = Raised();
         notRequired.RecordNoTestChangeRequired("verification.engineer", "Already covered.", Now.AddMinutes(1));
+        notRequired.WriteCase("verification.engineer", "Same case", "Problem", "Analysis", "Solution", Now.AddMinutes(1));
         notRequired.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(2));
 
         Assert.NotEqual(required.ReviewCycles.Single().SnapshotHash,
@@ -442,6 +464,7 @@ public sealed class TestChangeReviewTests
         var review = new TestChangeReview(Guid.NewGuid(), Guid.NewGuid(), changeRequestId,
             TestChangeReviewDiscipline.System, sourceNumber, Now);
         review.RecordTestChangeRequired("verification.engineer", Now);
+        review.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", Now);
         return review;
     }
 

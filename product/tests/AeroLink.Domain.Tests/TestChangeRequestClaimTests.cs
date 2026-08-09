@@ -17,6 +17,7 @@ public sealed class TestChangeRequestClaimTests
         var package = new TestChangeReview(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
             TestChangeReviewDiscipline.System, "SRCR-00031", DateTimeOffset.UtcNow, number);
         package.RecordTestChangeRequired("verification.engineer", DateTimeOffset.UtcNow);
+        package.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", DateTimeOffset.UtcNow);
         return package;
     }
 

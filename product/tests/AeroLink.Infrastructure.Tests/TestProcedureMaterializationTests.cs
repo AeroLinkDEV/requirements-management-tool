@@ -257,7 +257,7 @@ public sealed class TestProcedureMaterializationTests
                     "Different package.", "Test", RequirementRevisionState.Active, unrelated.Id, baseline.Id, now);
 
                 var tcr = new TestChangeReview(project.Id, release.Id, source.Id,
-                    TestChangeReviewDiscipline.System, source.DisplayNumber, now);
+                    TestChangeReviewDiscipline.System, source.DisplayNumber, now, caseContractVersion: 0);
                 tcr.RecordTestChangeRequired("verification.engineer", now);
                 tcr.AssignControlledNumber("SYSTCR-000400", now);
                 tcr.AddProcedureChange("verification.engineer",
@@ -470,6 +470,7 @@ public sealed class TestProcedureMaterializationTests
             scr.DisplayNumber, now);
         tcr.RecordTestChangeRequired("verification.engineer", now);
         tcr.AssignControlledNumber($"SYSTCR-{Math.Abs(number.GetHashCode()) % 1000000:D6}", now);
+        tcr.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", now);
         var requestedIds = JsonSerializer.Deserialize<List<Guid>>(draft.DrivingRequirementRevisionIdsJson) ?? [];
         var removedIds = JsonSerializer.Deserialize<List<Guid>>(draft.RemovedRequirementRevisionIdsJson) ?? [];
         var fixtureMarker = Guid.Parse("5a1d1f92-6c2f-4a1e-9d33-0f5b2c7a4e10");

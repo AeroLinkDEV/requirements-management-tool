@@ -24,6 +24,7 @@ public enum TestChangeReviewOutcome { Pending, ChangeRequired, NoChangeRequired 
 /// </summary>
 public sealed class TestChangeReview
 {
+    public const int CurrentCaseContractVersion = 1;
     private readonly List<TestChangeRequestClaim> _additionalSources = [];
     private readonly List<TestProcedureChange> _procedureChanges = [];
     private readonly List<ChangeControl.ReviewCycle> _reviewCycles = [];
@@ -32,9 +33,11 @@ public sealed class TestChangeReview
 
     public TestChangeReview(Guid projectId, Guid releaseId, Guid changeRequestId,
         TestChangeReviewDiscipline discipline, string sourceChangeRequestNumber, DateTimeOffset now,
-        string baseNumber = "", int revision = 0)
+        string baseNumber = "", int revision = 0, int caseContractVersion = CurrentCaseContractVersion)
     {
         Revision = revision;
+        if (caseContractVersion < 0 || caseContractVersion > CurrentCaseContractVersion)
+            throw new DomainException("A test change request requires a supported engineering-case contract version.");
         if (projectId == Guid.Empty) throw new DomainException("A test change review requires its Project.");
         if (releaseId == Guid.Empty) throw new DomainException("A test change review requires its software build.");
         if (changeRequestId == Guid.Empty) throw new DomainException("A test change review requires its originating change request.");
@@ -48,6 +51,7 @@ public sealed class TestChangeReview
         // Empty remains readable for databases created before controlled TCR numbering. The showcase
         // upgrade assigns those rows a real number without changing their identity or evidence.
         BaseNumber = baseNumber.Trim();
+        CaseContractVersion = caseContractVersion;
         State = TestChangeReviewState.Open;
         CreatedAt = now;
         UpdatedAt = now;
@@ -104,6 +108,18 @@ public sealed class TestChangeReview
     public string ProblemRich { get; private set; } = RichContent.Empty;
     public string AnalysisRich { get; private set; } = RichContent.Empty;
     public string SolutionRich { get; private set; } = RichContent.Empty;
+    /// <summary>Zero identifies persisted history created before a complete engineering case was required.</summary>
+    public int CaseContractVersion { get; private set; }
+
+    public IReadOnlyList<string> MissingCaseFields()
+    {
+        var missing = new List<string>(4);
+        if (string.IsNullOrWhiteSpace(Title)) missing.Add(nameof(Title));
+        if (string.IsNullOrWhiteSpace(Problem)) missing.Add(nameof(Problem));
+        if (string.IsNullOrWhiteSpace(Analysis)) missing.Add(nameof(Analysis));
+        if (string.IsNullOrWhiteSpace(Solution)) missing.Add(nameof(Solution));
+        return missing;
+    }
 
     /// <summary>Whether the assessment has been performed, and what it found.</summary>
     public TestChangeReviewOutcome Outcome { get; private set; }
@@ -206,6 +222,7 @@ public sealed class TestChangeReview
         (Problem, ProblemRich) = Resolve(problem, problemRich);
         (Analysis, AnalysisRich) = Resolve(analysis, analysisRich);
         (Solution, SolutionRich) = Resolve(solution, solutionRich);
+        CaseContractVersion = CurrentCaseContractVersion;
         Touch(now);
 
         static (string Plain, string Rich) Resolve(string plain, string? rich)
@@ -240,6 +257,11 @@ public sealed class TestChangeReview
             throw new DomainException("Assess the change before sending it for review.");
         if (!everyItemResolved)
             throw new DomainException("Every test-procedure decision must be completed before review.");
+        var missingCaseFields = MissingCaseFields();
+        if (Outcome == TestChangeReviewOutcome.ChangeRequired
+            && CaseContractVersion >= CurrentCaseContractVersion && missingCaseFields.Count > 0)
+            throw new DomainException(
+                $"Complete the test change request case before sending it for review. Missing: {string.Join(", ", missingCaseFields)}.");
         // A procedure being introduced has to say what it verifies, and submission is where that is checked —
         // not when it is written. A draft package is worked on incrementally, exactly as a change request is,
         // so the gate belongs at the point an approver is asked to sign rather than at the point an engineer

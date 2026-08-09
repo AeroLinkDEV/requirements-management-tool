@@ -25,6 +25,10 @@ type TestChangeRequest = {
   id: string
   displayNumber: string
   title?: string
+  problem?: string
+  analysis?: string
+  solution?: string
+  caseContractVersion: number
   discipline: string
   state: string
   version: number
@@ -76,6 +80,10 @@ const assessmentName = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System Test' : discipline === 'HighLevelSoftware' ? 'HLR Test' : 'LLR Test'
 const tcrAcronym = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'SYSTCR' : discipline === 'HighLevelSoftware' ? 'HLRTCR' : 'LLRTCR'
+const missingCaseFields = (request: TestChangeRequest) => [
+  ['Title', request.title], ['Problem', request.problem],
+  ['Analysis', request.analysis], ['Solution', request.solution],
+].filter(([, value]) => !value?.trim()).map(([name]) => name)
 const tcrNewLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
 
@@ -604,7 +612,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                 {/* Submission is offered only once every decision is recorded. The server refuses otherwise, and
                     offering an action that will be refused is a worse answer than not offering it. */}
                 {request.capabilities.canSubmit && request.totalItems > 0 && request.resolvedItems === request.totalItems && (
-                  <button type="button" disabled={busy} onClick={() => setSubmitting(request)}>Send for approval</button>
+                  missingCaseFields(request).length
+                    ? <button type="button" disabled={busy} onClick={() => setAuthoring(request.id)}>Complete engineering case</button>
+                    : <button type="button" disabled={busy} onClick={() => setSubmitting(request)}>Send for approval</button>
                 )}
                 {request.capabilities.canApprove && (
                   <>

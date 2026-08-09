@@ -156,7 +156,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
             .Single(x => x.GetProperty("id").GetGuid() == reviewId);
     }
 
-    private static async Task PreparePackageAsync(HttpClient client, Fixture fixture)
+    private static async Task PreparePackageAsync(HttpClient client, Fixture fixture, bool writeCase = true)
     {
         await LoginAsync(client, "workflow.engineer");
         using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.ItemId}/resolve",
@@ -181,6 +181,18 @@ public sealed class TestChangeRequestReviewWorkflowTests
                 drivingRequirementRevisionIds = new[] { fixture.RequirementRevisionId }
             });
         Assert.True(proposed.IsSuccessStatusCode, await proposed.Content.ReadAsStringAsync());
+        if (writeCase)
+        {
+            using var authored = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/case",
+                new
+                {
+                    title = "Workflow verification case",
+                    problem = "The changed behavior requires controlled verification coverage.",
+                    analysis = "A new procedure is the appropriate verification response.",
+                    solution = "Introduce and independently approve the proposed procedure."
+                });
+            Assert.True(authored.IsSuccessStatusCode, await authored.Content.ReadAsStringAsync());
+        }
     }
 
     private static async Task<JsonElement> SubmitAsync(HttpClient client, Guid reviewId, object body)
@@ -189,6 +201,91 @@ public sealed class TestChangeRequestReviewWorkflowTests
         var text = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"{(int)response.StatusCode}: {text}");
         return JsonSerializer.Deserialize<JsonElement>(text);
+    }
+
+    [Fact]
+    public async Task Current_automatic_package_cannot_be_submitted_without_an_engineering_case()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await PreparePackageAsync(client, fixture, writeCase: false);
+
+        using var response = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/submit",
+            new { approverId = "workflow.one" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("test_change_request_case_incomplete", body);
+        Assert.Contains("Title", body);
+        Assert.Contains("Problem", body);
+        Assert.Contains("Analysis", body);
+        Assert.Contains("Solution", body);
+    }
+
+    [Fact]
+    public async Task Historical_blank_package_is_read_exactly_as_stored_with_its_legacy_contract()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        Guid legacyId;
+        string snapshotHash;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var legacy = new TestChangeReview(fixture.ProjectId, fixture.ReleaseId, fixture.ChangeId,
+                TestChangeReviewDiscipline.System, "SRCR-00960.00", DateTimeOffset.UtcNow,
+                "SYSTCR-000099", revision: 99, caseContractVersion: 0);
+            legacy.RecordTestChangeRequired("historical.import", DateTimeOffset.UtcNow);
+            legacy.Submit("historical.import", "workflow.one", true, DateTimeOffset.UtcNow);
+            legacyId = legacy.Id;
+            snapshotHash = legacy.ReviewCycles.Single().SnapshotHash;
+            db.Add(legacy);
+            await db.SaveChangesAsync();
+        }
+
+        await LoginAsync(client, "workflow.engineer");
+        var item = await ReadItemAsync(client, fixture.ReleaseId, legacyId);
+        Assert.Equal(0, item.GetProperty("caseContractVersion").GetInt32());
+        Assert.Equal("", item.GetProperty("title").GetString());
+        Assert.Equal("InReview", item.GetProperty("state").GetString());
+
+        var workspace = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{legacyId}/procedure-changes");
+        Assert.Equal(0, workspace.GetProperty("caseContractVersion").GetInt32());
+        Assert.Equal("", workspace.GetProperty("problem").GetString());
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var persistedHash = await verificationDb.ReviewCycles.AsNoTracking()
+            .Where(x => x.TestChangeReviewId == legacyId).Select(x => x.SnapshotHash).SingleAsync();
+        Assert.Equal(snapshotHash, persistedHash);
+    }
+
+    [Fact]
+    public async Task Returned_current_package_must_restore_every_case_field_before_resubmission()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await PreparePackageAsync(client, fixture);
+        await SubmitAsync(client, fixture.ReviewId, new { approverId = "workflow.one" });
+        await LoginAsync(client, "workflow.one");
+        using var returned = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/return",
+            new { rationale = "Complete the proposed solution." });
+        Assert.True(returned.IsSuccessStatusCode, await returned.Content.ReadAsStringAsync());
+
+        await LoginAsync(client, "workflow.engineer");
+        using var edited = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/case",
+            new { title = "Returned case", problem = "Problem", analysis = "Analysis", solution = "" });
+        Assert.True(edited.IsSuccessStatusCode, await edited.Content.ReadAsStringAsync());
+        using var resubmit = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/submit",
+            new { approverId = "workflow.one" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, resubmit.StatusCode);
+        var body = await resubmit.Content.ReadAsStringAsync();
+        Assert.Contains("test_change_request_case_incomplete", body);
+        Assert.Contains("Solution", body);
     }
 
     [Fact]

@@ -293,6 +293,7 @@ public sealed class ManualTestChangeRequestApiTests
             // Automatically raised packages arrive unassessed now, and there is nothing to send for review
             // until somebody has said whether test work is required at all.
             review.RecordTestChangeRequired("manual.engineer", DateTimeOffset.UtcNow);
+            review.WriteCase("manual.engineer", "Verification case", "Problem", "Analysis", "Solution", DateTimeOffset.UtcNow);
             review.Submit("manual.engineer", "independent.reviewer", true, DateTimeOffset.UtcNow);
             await db.SaveChangesAsync();
         }
@@ -357,6 +358,7 @@ public sealed class ManualTestChangeRequestApiTests
                 .SingleAsync(x => x.Id == fixture.AutoTcrId);
             package.RecordTestChangeRequired("manual.engineer", now);
             package.IncludeChangeRequest("manual.engineer", fixture.FirstChangeId, "SRCR-00910.00", now);
+            package.WriteCase("manual.engineer", "Verification case", "Problem", "Analysis", "Solution", now);
             package.Submit("manual.engineer", "test.lead", true, now.AddMinutes(1));
             package.Approve("test.lead", "Sound.", now.AddMinutes(2));
             await db.SaveChangesAsync();
@@ -509,7 +511,12 @@ public sealed class ManualTestChangeRequestApiTests
         using var submit = await client.PostAsJsonAsync($"/api/test-change-reviews/{packageId}/submit",
             new { approverId = "independent.reviewer" });
         Assert.Equal(HttpStatusCode.BadRequest, submit.StatusCode);
-        Assert.Contains("Complete the test change request case", await submit.Content.ReadAsStringAsync());
+        var body = await submit.Content.ReadAsStringAsync();
+        Assert.Contains("Complete the test change request case", body);
+        Assert.Contains("test_change_request_case_incomplete", body);
+        Assert.Contains("Problem", body);
+        Assert.Contains("Analysis", body);
+        Assert.Contains("Solution", body);
     }
 
     [Fact]
