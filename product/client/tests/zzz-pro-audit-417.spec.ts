@@ -242,87 +242,6 @@ async function seedCarriedProcedures(
   return { workspace, triggerReviewId, targets }
 }
 
-/** A minimal program with one governed requirement and one Open TCR (for request-reordering tests). */
-async function seedSingleRequirementTcr(
-  page: Page,
-  request: APIRequestContext,
-  suffix: string,
-) {
-  const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, { data: {
-    programName: `Audit417 Single ${suffix}`,
-    programCode: `A417S${suffix}`,
-    projectName: 'Audit417 Single Project',
-    softwareProduct: 'Audit417 Single Product',
-    initialRelease: '1.0',
-    initialReleaseIsReleased: false,
-  } })
-  expect(workspaceResponse.ok(), await workspaceResponse.text()).toBeTruthy()
-  const workspace = await workspaceResponse.json()
-  const sections = await (await request.get(
-    `${apiBase}/api/authoring/sections?projectId=${workspace.project.id}&level=System`,
-  )).json()
-  const sectionId = (sections as { id: string }[])[0]?.id
-  const created = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
-    projectId: workspace.project.id,
-    targetReleaseId: workspace.release.id,
-    type: 'System',
-    title: `Audit417 single change ${suffix}`,
-    problem: 'One governed requirement.',
-    analysis: 'Minimal TCR for reordered-request testing.',
-    solution: 'One requirement, one Open TCR.',
-    requirementChanges: [{
-      level: 'System', kind: 'Introduce',
-      targetSectionId: sectionId,
-      statement: `The audit417 single requirement ${suffix} governs the package.`,
-      rationale: 'Minimal governed scope.',
-      verificationMethod: 'Test',
-      impactDispositionJson: impacts,
-    }],
-  } })
-  expect(created.ok(), await created.text()).toBeTruthy()
-  const draft = await created.json()
-  const submitted = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
-    expectedVersion: draft.version,
-    approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }],
-    mode: 'Sequential',
-  } })
-  expect(submitted.ok(), await submitted.text()).toBeTruthy()
-  const approved = await request.post(`${apiBase}/api/change-requests/${draft.id}/approve`, { data: {
-    password: 'AeroLink!2026',
-    meaning: 'Approved for audit417 journey verification.',
-  } })
-  expect(approved.ok(), await approved.text()).toBeTruthy()
-  const baselineResponse = await request.post(`${apiBase}/api/baselines`, { data: {
-    baseNumber: 'SW-01.00', revision: 0, projectId: workspace.project.id,
-    releaseId: workspace.release.id, predecessorBaselineId: null,
-    name: 'Audit417 single baseline',
-  } })
-  expect(baselineResponse.ok(), await baselineResponse.text()).toBeTruthy()
-  const baseline = await baselineResponse.json()
-  for (const [path, data] of [
-    ['selections', { changeRequestId: draft.id }],
-    ['freeze', {}],
-    ['materialize-requirements', {}],
-  ] as const) {
-    const response = await request.post(`${apiBase}/api/baselines/${baseline.id}/${path}`, { data })
-    expect(response.ok(), `${path}: ${await response.text()}`).toBeTruthy()
-  }
-  await login(page, 'admin', { openProject: false })
-  await selectProgram(page, `Audit417 Single ${suffix}`)
-  await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
-  const row = page.locator('.downstreamAssessment').filter({ hasText: draft.displayNumber }).first()
-  await expect(row).toBeVisible({ timeout: 30_000 })
-  await row.getByRole('button', { name: 'Open assessment' }).click()
-  const assessment = page.getByRole('dialog', { name: /test impact/ })
-  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
-  const impactItems = await (await request.get(
-    `${apiBase}/api/releases/${workspace.release.id}/verification-impact`,
-  )).json() as { testChangeReviewId: string }[]
-  return { workspace, reviewId: impactItems[0].testChangeReviewId }
-}
-
 test('an unsaved Modify target and its driving selections survive search, paging and target changes', async ({ page, request }) => {
   test.setTimeout(600_000)
   await apiLogin(request)
@@ -333,6 +252,7 @@ test('an unsaved Modify target and its driving selections survive search, paging
   // Both targets sit on the initial 50-row page and have no persisted decision in the trigger TCR.
   const unsavedTarget = targets[carriedCount - 11].baseNumber
   const otherTarget = targets[carriedCount - 12].baseNumber
+  const retireTarget = targets[carriedCount - 13].baseNumber
 
   await page.reload()
   const row = page.locator('.downstreamAssessment').filter({ hasText: /Audit417 trigger/ }).first()
@@ -372,6 +292,12 @@ test('an unsaved Modify target and its driving selections survive search, paging
   await expect(dialog.locator('select[aria-label="Procedure"] option').filter({ hasText: unsavedTarget }))
     .toHaveCount(1, { timeout: 15_000 })
   await expect(dialog.getByRole('combobox', { name: 'Procedure' })).toHaveValue(unsavedTarget)
+  // The retained target keeps its exact carried revision and exact current coverage across paging.
+  await expect(dialog.locator('select[aria-label="Procedure"] option').filter({ hasText: unsavedTarget }))
+    .toContainText(`${unsavedTarget}.00`)
+  await expect(dialog.locator('fieldset.drivingRequirements').first()).toContainText('Current exact coverage')
+  await expect(dialog.locator('fieldset.drivingRequirements').first().locator('label.drivingChoice'))
+    .toHaveCount(1, { timeout: 15_000 })
 
   // Finding C: switching to another target while a search excludes the previous selection must clear the
   // previous target's driving selections from the rendered candidate list (no stale unchecked choices
@@ -404,16 +330,39 @@ test('an unsaved Modify target and its driving selections survive search, paging
   expect(modify).toBeTruthy()
   expect(modify!.kind).toBe('Modify')
   expect(modify!.revision).toBe(targets[carriedCount - 11].currentRevision + 1)
+
+  // Retire-specific acceptance: an unsaved Retire target stays visibly selected through an excluding
+  // search, is the same exact target immediately before submission, and the Retire decision persists.
+  await workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }).click()
+  const retireDialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  await retireDialog.getByLabel('What is being done').selectOption('Retire')
+  const retireOptions = retireDialog.locator('select[aria-label="Procedure"] option')
+  await expect(retireOptions.filter({ hasText: retireTarget })).toHaveCount(1, { timeout: 30_000 })
+  await retireDialog.getByRole('combobox', { name: 'Procedure' }).selectOption(retireTarget)
+  const retireSearch = retireDialog.getByRole('textbox', { name: 'Search procedures' })
+  await retireSearch.fill(targets[0].baseNumber)
+  await expect(retireOptions.filter({ hasText: retireTarget })).toHaveCount(1, { timeout: 30_000 })
+  await expect(retireDialog.getByRole('combobox', { name: 'Procedure' })).toHaveValue(retireTarget)
+  await expect(retireDialog).toContainText(`${retireTarget}.00`)
+  await retireDialog.getByLabel('Why this procedure work is required').fill('The carried procedure is retired by the approved change.')
+  await retireDialog.getByRole('button', { name: 'Propose decision' }).click()
+  await expect(retireDialog).toHaveCount(0, { timeout: 30_000 })
+  const retirePayload = await (await request.get(
+    `${apiBase}/api/test-change-reviews/${triggerReviewId}/procedure-changes`,
+  )).json() as { procedureChanges: { kind: string; baseNumber: string }[] }
+  const retire = retirePayload.procedureChanges.find(change => change.baseNumber === retireTarget && change.kind === 'Retire')
+  expect(retire).toBeTruthy()
 })
 
 test('an obsolete successful picker response cannot clear a newer visible failure', async ({ page, request }) => {
   test.setTimeout(600_000)
   await apiLogin(request)
   const suffix = Date.now().toString().slice(-7)
-  await seedSingleRequirementTcr(page, request, suffix)
+  const carriedCount = 60
+  await seedCarriedProcedures(page, request, suffix, carriedCount)
 
   await page.reload()
-  const row = page.locator('.downstreamAssessment').filter({ hasText: /Audit417 single change/ }).first()
+  const row = page.locator('.downstreamAssessment').filter({ hasText: /Audit417 trigger/ }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
   const workspaceDrawer = page.getByRole('dialog', { name: /procedure decisions/ })
@@ -459,6 +408,10 @@ test('an obsolete successful picker response cannot clear a newer visible failur
   }
   await expect(targetAlert).toContainText('The procedures for this build could not be loaded.', { timeout: 15_000 })
   await expect(requirementAlert).toContainText('The governed requirements for this build could not be loaded.', { timeout: 15_000 })
+  // The obsolete successes must also NOT replace the newest request's result state: with the failing search
+  // still active, the picker reports zero matches rather than the obsolete page's match count.
+  await expect(dialog).toContainText('0 matching carried procedures.', { timeout: 15_000 })
+  await expect(dialog).toContainText('0 matching governed requirements.', { timeout: 15_000 })
 
   // A later successful retry clears the errors and restores current results.
   await page.unroute('**/procedure-targets?**')
@@ -466,6 +419,6 @@ test('an obsolete successful picker response cannot clear a newer visible failur
   await dialog.getByRole('textbox', { name: 'Search procedures' }).fill('')
   await dialog.getByRole('textbox', { name: 'Search requirements' }).fill('')
   await expect(dialog.getByRole('alert')).toHaveCount(0, { timeout: 15_000 })
-  await expect(dialog).toContainText('0 carried procedures in this build', { timeout: 15_000 })
+  await expect(dialog).toContainText(`${carriedCount} carried procedures in this build`, { timeout: 15_000 })
   await expect(dialog).toContainText('1 governed requirement in scope', { timeout: 15_000 })
 })
