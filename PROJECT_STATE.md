@@ -296,10 +296,10 @@ corrective action a Problem Report sends somebody here to perform. System has on
 HLR and LLR trios because the work is planned, done, and approved separately.
 
 Explorer lists/history and TCR Modify/Retire targets use the exact build procedure manifest, and Trace & impact
-shows navigable exact requirements. #402 delivered bounded server-searched pickers and was reopened post-merge
-for unbounded multi-selection request-line serialization and silent picker failures; #415 tracks the stale
-release build-context baseline race. #364 owns the first exact manifest for legacy builds that predate the
-mechanism.
+shows navigable exact requirements. #402 and #415 were closed by PR #416 (bounded picker hardening). The Aug. 9
+PRO-audit queue #417–#424 tracks residual picker integrity, released-baseline procedure authority, immutable
+procedure documents/provenance, revision-scoped titles, and exact execution/evidence authority. #364 owns the
+first exact manifest for legacy builds that predate the mechanism.
 
 Primary navigation mirrors that work: **Requirements** owns change requests, requirements, requirements
 documents, and Digital Thread; **Verification** owns the direct Change Requests, Test Procedure Explorer, Test
@@ -346,13 +346,12 @@ focused increments through PR #388 delivered active Problem Reports, the August 
 managed Word documents, direct verification surfaces, production-shaped client hosting, and Stage 4 manual TCR
 authoring with hardened consolidation, review snapshots, staged workflows, assignment and concurrency.
 
-`main` at `bbcccc740d9b5384936e09d185a280312207e617` incorporates the focused audit remediation through PR #414
-(bounded TCR authoring pickers for #402); its post-merge Product Quality Gate passed. Audit issues #395, #214,
-#400, #401, #398, #396, #399, and #397 are closed, as are later integrity issues #363 and #362. #402 was
-reopened post-merge for unbounded multi-selection request-line serialization and silent picker failures; #415
-tracks the stale release build-context baseline race. Residual identity federation and deployment operations
-remain closed with explicit resume conditions because they require a real provider or hosting contract, not
-generic product simulation.
+`main` at `6e1c2443b964304df1359d4dde39fe3dc4f04004` incorporates the focused audit remediation through PR #416
+(bounded TCR authoring pickers and their post-merge hardening, closing #402 and #415); its post-merge Product
+Quality Gate passed. Audit issues #395, #214, #400, #401, #398, #396, #399, and #397 are closed, as are later
+integrity issues #363 and #362. Residual identity federation and deployment operations remain closed with
+explicit resume conditions because they require a real provider or hosting contract, not generic product
+simulation.
 
 Per-workstream status is in [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md). Its
 vocabulary distinguishes **MVP delivered**, **deferred by decision**, **deployment-owned**, and **focused audit
@@ -375,10 +374,11 @@ correct, and had no route to it.
 
 Understating these is a product-integrity failure, not a marketing choice.
 
-- **Large TCR authoring pickers remain bounded incorrectly.** #402 delivered server-side search/paging and
-  exact-ID hydration, but was reopened post-merge: multi-select pickers serialize the whole selection into the
-  request line (failing at roughly 200+ UUIDs) and non-OK picker responses are silently ignored. #415 tracks a
-  stale release build-context response overwriting the active build's effective baseline.
+- **The PRO audit queue is open.** #417 tracks residual picker integrity (unsaved-target retention,
+  obsolete-response error clearing, stale driving-details, documentation truth); #418 released-baseline
+  procedure authority; #419/#420 immutable procedure documents and TCR approval provenance; #421
+  revision-scoped procedure titles; #422/#423 exact execution/evidence authority; #424 History/Trace
+  provenance parity.
 - **Legacy builds still need their first exact procedure manifest.** #364 owns the controlled bootstrap; #367
   should be rechecked against that result and #402 before evidence-only closure.
 - **Imported baselines do not yet materialize controlled requirements.** #332's UI and provenance records exist,
@@ -651,14 +651,13 @@ reason the document set can be trusted.
 
 # Current implementation checkpoint — 2026-08-09
 
-Current `main` at `bbcccc740d9b5384936e09d185a280312207e617` includes the API-served production client,
+Current `main` at `6e1c2443b964304df1359d4dde39fe3dc4f04004` includes the API-served production client,
 qualified direct verification navigation, first-class manual Test Change Requests, multi-source impact-item
 consolidation, configured staged TCR review, canonical review snapshots, assignment-aligned authority,
 optimistic concurrency including true EF-collision tests, atomic controlled TCR successor revisioning, and
-bounded server-searched TCR authoring pickers (PR #414). Two post-merge picker-integrity findings are open:
-#402 (unbounded multi-selection request-line serialization; silent picker failures) and #415 (stale release
-build-context baseline race).
+bounded server-searched TCR authoring pickers with post-merge hardening (PR #414 and PR #416; #402/#415
+closed). The Aug. 9 PRO-audit queue #417–#424 is open.
 
 The focused remediation sequence closed #395, #214, #400, #401, #398, #396, #399, #397, #363, and #362 with
-required gates green. Current open work is #402, #415, #364, #365, #367, and #332. See
+required gates green. Current open work is #417–#424, #364, #365, #367, and #332. See
 [CURRENT_PRODUCT_HANDOFF_2026-08-09.md](CURRENT_PRODUCT_HANDOFF_2026-08-09.md).

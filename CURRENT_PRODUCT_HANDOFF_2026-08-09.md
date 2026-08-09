@@ -1,18 +1,19 @@
-# AeroLink current product handoff — 9 August 2026
+# AeroLink current product handoff — 9 August 2026 (updated after PR #416)
 
-This is the current restart point after PR #414 merged and two post-merge picker-integrity findings were
-reproduced and filed. It supersedes the 8 August handoff as the document to read before starting new work.
-Older dated handoffs remain historical records and must not be used as current backlog authority.
+This is the current restart point after PR #414 and PR #416 merged. It supersedes the 8 August handoff as the
+document to read before starting new work. Older dated handoffs remain historical records and must not be used
+as current backlog authority.
 
 ## Authoritative repository state
 
 - Repository: `seanmccarthyns/requirements-management-tool`
 - Authoritative branch: `main`
-- Audited starting `main` SHA for this handoff: `bbcccc740d9b5384936e09d185a280312207e617`
-- Latest merged PR: **#414 — Make TCR authoring pickers bounded, searchable and fully reachable (#402)**
-- Exact final PR #414 head (pre-merge): `1db655c582a20b31309bd3dda8b1714649271ba3`
-- Post-merge `main` Product Quality Gate on `bbcccc7`: run `31318103042`, **successful on the exact merged tree**
-- There were **no open pull requests** at the assignment start after #414 merged
+- Audited starting `main` SHA for this handoff: `6e1c2443b964304df1359d4dde39fe3dc4f04004`
+- Latest merged PR: **#416 — Harden bounded authoring pickers after #414 (#402, #415)** (squash `6e1c244`)
+- Prior merged PR in the same sequence: **#414 — Make TCR authoring pickers bounded, searchable and fully
+  reachable (#402)** (squash `bbcccc740d9b5384936e09d185a280312207e617`)
+- Post-merge `main` Product Quality Gate on `6e1c244`: run `31329405976`, **successful on the exact merged tree**
+- There were **no open pull requests** at the start of the Aug. 9 overnight PRO-audit pass
 - Persistent PostgreSQL remains the sole engineering-data store; no reset or replacement was part of any merge
 
 Start every task by fetching `origin`, confirming `main` at the exact current GitHub head, and creating a
@@ -20,72 +21,47 @@ focused branch. GitHub is the source of truth over every local checkout.
 
 ### PR-head qualification vs post-merge check status
 
-PR #414's final pre-merge head (`1db655c`) passed its PR Product Quality Gate (run `31316935386`). The merged
-`main` SHA `bbcccc7` then passed the push-triggered gate (run `31318103042`). The exact merged-tree run is the
-current checkpoint; a PR-head run alone is not evidence about the merged commit.
+PR #416's final pre-merge head `c750ad626f67d60d0f4e486081a3719889bd13b3` passed its PR Product Quality Gate
+(run `31327972264`). The merged `main` SHA `6e1c244` then passed the push-triggered gate (run `31329405976`).
+The exact merged-tree run is the current checkpoint; a PR-head run alone is not evidence about the merged
+commit.
 
-## What PR #414 delivered
+## What PR #414 and PR #416 delivered
 
-PR #414 replaced the fixed first-page TCR authoring pickers with bounded, server-searched, paged pickers with
-totals and exact-ID hydration across all four authoring surfaces:
-
-- quick procedure-authoring requirement selection;
-- `ProcedureCoverageConfirmed` approved-procedure selection;
-- TCR Modify/Retire controlled-procedure target selection;
-- TCR driving-requirement selection.
-
-It delivered deterministic >500 Modify/Retire evidence (API and real-browser picker over a 520-procedure
-build), unsaved `procedureChoice` hydration, truthful search totals and retained-selection wording, and kept
-#412/#413 invariants and mutation-side authority intact. It is not a rollback target.
-
-## Open post-merge picker-integrity findings (open until the corrective PR merges)
-
-Two late inline review comments were posted against the exact merged #414 head approximately four minutes
-after the merge. Both were reproduced deterministically against disposable SQLite on `bbcccc7`:
-
-### #402 — reopened with post-merge evidence
-
-Issue: [#402](https://github.com/seanmccarthyns/requirements-management-tool/issues/402) (open).
-
-The multi-select requirement pickers serialized the complete selected revision-ID set into the `ids` query
-parameter. At roughly 200+ UUID selections the GET request line exceeds the server's default 8192-byte limit;
-the failed response was silently ignored, so paging stopped and candidates beyond the loaded page became
-unreachable. The same-class defect exists in the TCR driving-requirement picker. Non-OK picker responses on all
-four surfaces produced no visible error.
-
-### #415 — stale release build-context can overwrite the active build's effective baseline
-
-Issue: [#415](https://github.com/seanmccarthyns/requirements-management-tool/issues/415) (open).
-
-`TestingCoverageWorkspace.load` writes `effectiveBaseline` before the load-ticket check. When the workspace
-stays mounted across a release switch (browser Back/Forward between two same-view URLs, applied through the
-app's popstate handler without remounting), a delayed `build-context` response from the previous release can
-land last and make the requirement picker query the wrong baseline.
+- Bounded, server-searched, paged TCR authoring pickers with totals and exact-ID hydration (all four
+  authoring surfaces); >500 Modify/Retire reachability; unsaved `procedureChoice` hydration; truthful search
+  totals and retained-selection wording.
+- Stale build-context baseline race guard; bounded multi-select retention via client identity maps; visible
+  picker failures (HTTP and rejected fetch) with coherent retry; bounded Modify/Retire target hydration (no
+  `baseNumbers`/`ids` in the request line); 650-decision TCR regression.
+- #402 (bounded reachable pickers and its post-merge request-line regression) and #415 (stale build-context
+  baseline race) are **closed** by #416.
 
 ## Current open product work
 
-- #402 — reopened post-merge: bounded multi-selection hydration and visible picker failures.
-- #415 — stale release build-context baseline race.
-- #364 — explicit, attributable, idempotent legacy procedure-manifest bootstrap.
-- #365 — remaining superseded-TCR browser/history/deep-link presentation (its domain/API supersession is done).
-- #367 — evidence-only recheck/closure after #364 and the #402 regression are resolved.
-- #332 — real imported-baseline materialization (separate major campaign).
+The Aug. 9 PRO cross-discipline audit queue (marker `PRO-AUDIT: READY-DEEPSEEK`) is open:
 
-Work is tracked by issue and branch. The handoff makes no separate "active agent" ownership claims that are not
-reverified; every agent fetches current `origin/main` before acting.
+- #417 — residual post-#416 picker integrity (unsaved-target retention, obsolete-response error clearing,
+  stale driving-details, documentation truth)
+- #418 — released baselines must refuse test-procedure TCR selection/removal/materialization
+- #419 — test-procedure controlled documents must be immutable snapshots bound to the exact manifest
+- #420 — test-procedure documents must show TCR approval authority and exact source provenance
+- #421 — procedure titles must be revision-scoped
+- #422 — test executions must target the exact procedure revision carried by the build
+- #423 — evidence links to released executions must be refused by server authority
+- #424 — Test Procedure History must match Trace provenance (exact TCR revision, folded sources)
 
-## Corrective branch (unmerged, in review)
+Also open and tracked separately: #364 (legacy procedure-manifest bootstrap), #365 (superseded-TCR browser
+presentation), #367 (evidence-only recheck after #364 and the #402 regression), and #332 (imported-baseline
+materialization). Work is tracked by issue and branch; no separate "active agent" ownership claims are made
+that are not reverified.
 
-The corrective work for #402 and #415 lives on branch `deepseek/post-414-picker-integrity` as a draft pull
-request titled "Harden bounded authoring pickers after #414". It is **not on `main`**; nothing in this handoff
-should be read as claiming unmerged branch work is already merged. The PR is expected to:
+## Remediation branches (unmerged until PRO approval)
 
-- move the effective-baseline write behind the load-ticket guard and reset picker-owned state on
-  project/release/discipline transitions;
-- retain multi-select requirements in a client-side identity map instead of serializing the selection into
-  request lines;
-- surface non-OK picker responses as visible errors with coherent retry;
-- update this documentation set (the 8 August handoff stays historical).
+Remediation for the PRO-audit queue proceeds one issue per PR (or a documented same-root combination), each as
+a DRAFT PR awaiting `PRO-AUDIT: PRO-APPROVED-FOR-MERGE`. The #417 branch is
+`deepseek/pro-audit-417-picker-integrity`; nothing in this handoff claims unmerged branch work is already on
+`main`.
 
 ## Standing safety and governance rules
 
