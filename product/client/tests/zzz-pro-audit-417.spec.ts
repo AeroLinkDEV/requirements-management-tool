@@ -273,6 +273,9 @@ test('an unsaved Modify target and its driving selections survive search, paging
   const drivingBoxes = drivingFieldset.locator('input[type="checkbox"]')
   await expect(drivingBoxes.first()).toBeVisible({ timeout: 30_000 })
   await drivingBoxes.first().check()
+  const coverageIdentity = (await dialog.locator('fieldset.drivingRequirements').first()
+    .locator('label.drivingChoice').first().textContent())!.trim()
+  expect(coverageIdentity).toMatch(/SYSR-\d{6}\.\d{2}/)
 
   // Finding A: search so the unsaved target would be excluded; it must remain visible and selected.
   const search = dialog.getByRole('textbox', { name: 'Search procedures' })
@@ -298,6 +301,11 @@ test('an unsaved Modify target and its driving selections survive search, paging
   await expect(dialog.locator('fieldset.drivingRequirements').first()).toContainText('Current exact coverage')
   await expect(dialog.locator('fieldset.drivingRequirements').first().locator('label.drivingChoice'))
     .toHaveCount(1, { timeout: 15_000 })
+  await expect(dialog.locator('fieldset.drivingRequirements').first()).toContainText(coverageIdentity)
+  await targetPager.getByRole('button', { name: 'Next' }).click()
+  await expect(dialog.locator('fieldset.drivingRequirements').first()).toContainText(coverageIdentity)
+  await targetPager.getByRole('button', { name: 'Previous' }).click()
+  await expect(dialog.locator('fieldset.drivingRequirements').first()).toContainText(coverageIdentity)
 
   // Finding C: switching to another target while a search excludes the previous selection must clear the
   // previous target's driving selections from the rendered candidate list (no stale unchecked choices
@@ -352,6 +360,15 @@ test('an unsaved Modify target and its driving selections survive search, paging
   )).json() as { procedureChanges: { kind: string; baseNumber: string }[] }
   const retire = retirePayload.procedureChanges.find(change => change.baseNumber === retireTarget && change.kind === 'Retire')
   expect(retire).toBeTruthy()
+
+  // Reload and reopen: the persisted Retire decision visibly names the same exact target and revision.
+  await page.reload()
+  const reopenedRow = page.locator('.downstreamAssessment').filter({ hasText: /Audit417 trigger/ }).first()
+  await expect(reopenedRow).toBeVisible({ timeout: 30_000 })
+  await reopenedRow.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
+  const reopened = page.getByRole('dialog', { name: /procedure decisions/ })
+  await expect(reopened).toContainText(`${retireTarget}.01`, { timeout: 30_000 })
+  await expect(reopened).toContainText('Retired procedure')
 })
 
 test('an obsolete successful picker response cannot clear a newer visible failure', async ({ page, request }) => {
@@ -359,7 +376,7 @@ test('an obsolete successful picker response cannot clear a newer visible failur
   await apiLogin(request)
   const suffix = Date.now().toString().slice(-7)
   const carriedCount = 60
-  await seedCarriedProcedures(page, request, suffix, carriedCount)
+  const { targets } = await seedCarriedProcedures(page, request, suffix, carriedCount)
 
   await page.reload()
   const row = page.locator('.downstreamAssessment').filter({ hasText: /Audit417 trigger/ }).first()
@@ -421,4 +438,35 @@ test('an obsolete successful picker response cannot clear a newer visible failur
   await expect(dialog.getByRole('alert')).toHaveCount(0, { timeout: 15_000 })
   await expect(dialog).toContainText(`${carriedCount} carried procedures in this build`, { timeout: 15_000 })
   await expect(dialog).toContainText('1 governed requirement in scope', { timeout: 15_000 })
+
+  // Success-vs-success: a newer successful query must publish its own distinct result, and an older
+  // successful response arriving later must not replace it, on BOTH picker surfaces.
+  const heldPhase2Target: Route[] = []
+  let phase2TargetCount = 0
+  await page.route('**/procedure-targets?**', async route => {
+    phase2TargetCount++
+    if (phase2TargetCount === 1) { heldPhase2Target.push(route); return }
+    await route.continue()
+  })
+  const heldPhase2Requirement: Route[] = []
+  let phase2RequirementCount = 0
+  await page.route('**/requirement-candidates?**', async route => {
+    phase2RequirementCount++
+    if (phase2RequirementCount === 1) { heldPhase2Requirement.push(route); return }
+    await route.continue()
+  })
+  await dialog.getByRole('textbox', { name: 'Search procedures' }).fill('zz-no-match')
+  await expect.poll(() => heldPhase2Target.length).toBeGreaterThan(0)
+  await dialog.getByRole('textbox', { name: 'Search requirements' }).fill('zz-no-match')
+  await expect.poll(() => heldPhase2Requirement.length).toBeGreaterThan(0)
+
+  await dialog.getByRole('textbox', { name: 'Search procedures' }).fill(targets[0].baseNumber)
+  await expect(dialog).toContainText('1 matching carried procedure.', { timeout: 15_000 })
+  await dialog.getByRole('textbox', { name: 'Search requirements' }).fill('trigger requirement')
+  await expect(dialog).toContainText('1 matching governed requirement.', { timeout: 15_000 })
+
+  for (const route of heldPhase2Target) await route.continue()
+  for (const route of heldPhase2Requirement) await route.continue()
+  await expect(dialog).toContainText('1 matching carried procedure.', { timeout: 15_000 })
+  await expect(dialog).toContainText('1 matching governed requirement.', { timeout: 15_000 })
 })
