@@ -307,7 +307,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     const mine = ++procedureTicket.current
     const params = new URLSearchParams({ projectId, releaseId, scope, state: 'Approved',
       page: String(procedurePage), pageSize: '50', search: procedureQuery })
-    if (resolving?.resolvedProcedure?.id) params.set('ids', resolving.resolvedProcedure.id)
+    // Hydrate both the already-recorded resolved procedure and the current unsaved choice: an unsaved
+    // selection must remain represented by an option in the DOM even when search or paging would otherwise
+    // exclude it, so the resolve mutation never reads a procedureId with no matching option.
+    const hydrated = [...new Set([resolving?.resolvedProcedure?.id, procedureChoice].filter(Boolean))]
+    if (hydrated.length) params.set('ids', hydrated.join(','))
     void (async () => {
       const response = await fetch(`${api}/api/test-procedures?${params}`)
       if (!response.ok) return
@@ -315,7 +319,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       if (mine !== procedureTicket.current) return
       setProcedurePicker(paged)
     })()
-  }, [api, projectId, releaseId, scope, revision, procedureQuery, procedurePage, resolving?.resolvedProcedure?.id])
+  }, [api, projectId, releaseId, scope, revision, procedureQuery, procedurePage, resolving?.resolvedProcedure?.id, procedureChoice])
 
   // The requirements a new procedure can be written against — read from the effective baseline rather than
   // from the coverage list, bounded, server-searched and paged with totals. The exact requirement a decision

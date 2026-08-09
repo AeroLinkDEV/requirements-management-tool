@@ -31,6 +31,7 @@ public sealed class SearchableAuthoringPickerApiTests
         Guid Requirement250RevisionId,
         Guid Procedure500Id,
         Guid Procedure500RevisionId,
+        Guid Procedure520Id,
         Guid Requirement260RevisionId);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
@@ -97,6 +98,7 @@ public sealed class SearchableAuthoringPickerApiTests
         baseline.MarkTestProceduresMaterialized("cm", new string('b', 64), 521, now);
 
         var procedure500 = procedureRevisions.Single(x => x.Procedure.BaseNumber == "SYSTP-000500");
+        var procedure520 = procedureRevisions.Single(x => x.Procedure.BaseNumber == "SYSTP-000520");
         db.TestCoverage.AddRange(
             new TestRequirementCoverage(procedure500.Revision.Id, requirementRevisions[0].Id),
             new TestRequirementCoverage(procedure500.Revision.Id, requirementRevisions[259].Id));
@@ -151,7 +153,8 @@ public sealed class SearchableAuthoringPickerApiTests
 
         return new Fixture(project.Id, release.Id, baseline.Id, review.Id,
             requirementRevisions[0].Id, requirementRevisions[1].Id, requirementRevisions[249].Id,
-            procedure500.Procedure.Id, procedure500.Revision.Id, requirementRevisions[259].Id);
+            procedure500.Procedure.Id, procedure500.Revision.Id, procedure520.Procedure.Id,
+            requirementRevisions[259].Id);
     }
 
     private static async Task LoginAsync(HttpClient client)
@@ -210,12 +213,36 @@ public sealed class SearchableAuthoringPickerApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client);
 
+        // The old projection took the first 500 rows of the deterministic ordering, so the defect is proven
+        // only by a candidate whose position is strictly greater than 500. The fixture carries 520 System
+        // procedures; position 520 is the last row of the unfiltered universe.
+        var universe = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.ReviewId}/procedure-targets?page=1&pageSize=200");
+        Assert.Equal(520, universe.GetProperty("totalCount").GetInt32());
+        Assert.Equal(3, universe.GetProperty("totalPages").GetInt32());
+        var lastPage = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.ReviewId}/procedure-targets?page=3&pageSize=200");
+        var lastPageItems = lastPage.GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(120, lastPageItems.Count);
+        Assert.Equal("SYSTP-000520", lastPageItems[^1].GetProperty("baseNumber").GetString());
+
         var beyond500 = await client.GetFromJsonAsync<JsonElement>(
-            $"/api/test-change-reviews/{fixture.ReviewId}/procedure-targets?search=SYSTP-000500&page=1&pageSize=25");
+            $"/api/test-change-reviews/{fixture.ReviewId}/procedure-targets?search=SYSTP-000520&page=1&pageSize=25");
         Assert.Equal(1, beyond500.GetProperty("totalCount").GetInt32());
         var target = Assert.Single(beyond500.GetProperty("items").EnumerateArray());
-        Assert.Equal("SYSTP-000500", target.GetProperty("baseNumber").GetString());
+        Assert.Equal("SYSTP-000520", target.GetProperty("baseNumber").GetString());
         Assert.Equal(0, target.GetProperty("currentRevision").GetInt32());
+
+        // Exact hydration also works for the >500 target, by controlled base number and by immutable
+        // procedure ID.
+        var byBaseNumber = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.ReviewId}/procedure-targets?page=1&pageSize=25&baseNumbers=SYSTP-000520");
+        Assert.Contains(byBaseNumber.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("baseNumber").GetString() == "SYSTP-000520");
+        var byId = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.ReviewId}/procedure-targets?page=1&pageSize=25&ids={fixture.Procedure520Id}");
+        Assert.Contains(byId.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("baseNumber").GetString() == "SYSTP-000520");
 
         var future = await client.GetFromJsonAsync<JsonElement>(
             $"/api/test-change-reviews/{fixture.ReviewId}/procedure-targets?search=SYSTP-000999&page=1&pageSize=25");
