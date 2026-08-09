@@ -1,5 +1,10 @@
 # AeroLink Aug. 7–8 independent audit and Codex remediation handoff
 
+> **Execution record, 9 August 2026:** this handoff was followed in focused order. PRs #404–#413 closed #395,
+> #214, #400, #401, #398, #396, #399, #397, #363, and #362 with required gates green. The assignment and
+> stop instructions below are preserved as the audit record, not current work direction. Current open work is
+> #402, #364, #365, #367, and #332; #402/#364/#365 are separately assigned and must not be overlapped.
+
 **Status date:** 2026-08-08  
 **Purpose:** give Codex one complete, current and execution-ready handoff for the independent review of the work delivered primarily by Claude and DeepSeek on Aug. 7–8, 2026.
 

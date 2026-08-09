@@ -72,11 +72,9 @@ Each signature captures the user identifier, username and display-name snapshot,
 Ordinary System/Software Change Request approvals use password re-confirmation and configured-stage authority.
 Managed-document and release approval paths retain their own qualified contracts.
 
-Test Change Request approval currently records the active-stage signature without password re-confirmation and
-uses approval rationale as the signature meaning. Its no-workflow approval route also lacks the defensive current
-Approver check used by the SRCR closure path. This is an open review-integrity defect tracked by **#398**. Until
-that issue is completed, do not describe TCR signatures as equivalent to the password-confirmed SRCR contract,
-and do not rewrite historical TCR signatures.
+Test Change Request approval now re-confirms the current user's password, records a distinct signature meaning,
+preserves frozen configured-stage authority, and requires current Approver authority on the no-workflow fallback.
+PR #408 closed #398 without rewriting historical TCR signatures.
 
 ## Separation of duties
 
@@ -103,7 +101,7 @@ administration, role grant/revocation, session revocation, and delegation lifecy
 Everything a browser or a machine account sends is a claim, and the boundary treats it as one.
 
 - **Session reachability is decided in one place.** A middleware ahead of endpoint routing decides which paths are reachable without a session, from an explicit path list. `.AllowAnonymous()` on an endpoint has no effect there, because that middleware runs before the endpoint is selected and has no metadata to read. Anything intended to be reachable from a mail client — the unsubscribe link — must be named in that list and must prove its own authority instead, which it does through an HMAC over the recipient. An unsubscribe request answers identically whether the account exists or not, so the link cannot be used to enumerate people.
-- **Authentication is not authorization.** Every project/artifact read and write must resolve the owning Program and prove the caller is entitled to know it exists. The independent Aug. 8 audit found verification read/download routes that do not consistently enforce this boundary; **#395** tracks the required cross-Program correction. Until fixed, the verification evidence/trace read surface is not qualified for multi-Program confidentiality.
+- **Authentication is not authorization.** Every project/artifact read and write resolves the owning Program and proves the caller is entitled to know it exists. PR #404 closed #395 with two-Program negative coverage across verification reads and evidence downloads; later routes must preserve the same fail-closed pattern.
 - **A declared content type is not a fact.** An uploaded inline image is checked against its own signature bytes before it is stored, because it is later streamed back from this deployment's own origin and referenced from an approved requirement.
 - **Imported XML cannot reach outward or expand without bound.** ReqIF packages and spreadsheet parts are read with document type definitions prohibited, no resolver, and a ceiling on characters actually read. A zip file's declared entry sizes are checked too, but that check alone governs a number the sender chose.
 - **Every API response carries protection headers** — `nosniff`, `DENY` framing, no referrer, and a content security policy of `default-src 'none'; sandbox`. An API returns data, never a document, so nothing it serves should be able to load or run anything. The API-served production client has its own explicit same-origin document CSP; deployment reverse proxies may add stricter organization-owned headers but must not weaken it.
@@ -115,7 +113,7 @@ Everything a browser or a machine account sends is a claim, and the boundary tre
 
 Before operational deployment, the organization must define password policy, TLS and certificate management, reverse-proxy topology and its document response headers, backup and recovery, session revocation procedures, the procedure for releasing a locked account, privileged-administration oversight, clock synchronization, log retention/export, vulnerability management, and enterprise identity integration. The local demonstration password must be replaced and demonstration credential prefill removed.
 
-The product must also close #395 and #398 and re-run their multi-Program/security and electronic-signature
-qualification before claiming the corresponding controls are production-ready.
+The #395 and #398 security/electronic-signature corrections are complete and qualified. Deployment still must
+re-run the applicable security qualification against its selected topology, identity policy, and reverse proxy.
 
 Account lockout is deliberately permanent until an administrator releases it, which means anybody who can reach the sign-in page can lock an account they know the name of. That is the correct trade for a controlled tool — an attacker must not be handed an automatic retry window — but it makes the release procedure an operational requirement rather than an optional one.

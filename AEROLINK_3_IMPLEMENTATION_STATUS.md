@@ -1,7 +1,7 @@
 # AeroLink 3.0 - implementation status
 
-**Status date:** 2026-08-08
-**Qualified product checkpoint:** `main` at `d06fcee94473a9128a98e58b3699c1f6c0ad3af6` after Stage 4 PR #388
+**Status date:** 2026-08-09
+**Qualified product checkpoint:** `main` at `4c34aa29c270d49871594d086e9ce73b457f1cf2` after remediation PR #413
 
 This is the current scorecard for the long-lived
 [AeroLink 3.0 completion contract](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md). The contract describes the
@@ -27,8 +27,8 @@ verification navigation, and Stage 4 first-class manual Test Change Request auth
 
 Closing those increments does **not** mean AeroLink claims certification, tool qualification, completed customer
 deployment, or that no product defects remain. It means the supported MVP is coherent and qualified at the named
-checkpoint. The independent Aug. 7–8 audit raised focused follow-up issues #395–#402 and reopened #214; they are
-current GitHub backlog, not contradictions to the completed enterprise-program status.
+checkpoint. The independent Aug. 7–8 audit raised focused follow-up issues #395–#402 and reopened #214. All
+except #402 are now corrected and closed; later focused review also closed #362 and #363.
 
 ## Workstream scorecard
 
@@ -36,11 +36,11 @@ current GitHub backlog, not contradictions to the completed enterprise-program s
 | --- | --- | --- |
 | 1. Universal controlled editing | **MVP delivered** | change request checkout, renewable leases, autosave snapshots, recovery, check-in/discard, read-only observers, optimistic versions, forced unlock audit, and retained conflict evidence. Test procedures are deliberately excluded from direct universal editing under DEC-103; their controlled changes occur through TCRs. |
 | 2. Problem-report lifecycle | **MVP increment active** | Project-scoped Problem Reports are navigable and searchable, carry target-build attribution, drive change request/TCR work, project approved corrective actions and selected evidence, and remain read-only in released-build context. Broader classification and closure policy remains incremental under DEC-085/DEC-089. |
-| 3. Product-line configuration and reuse | **Delivered foundation** | Canonical software builds, exact immutable baselines, released 1.5/read-only and active 1.6 workspaces, controlled libraries, propagation decisions, variants, configuration-correct outputs, deterministic publications, and release evidence. Exact procedure effectivity remains under reopened #214. |
-| 4. Enterprise identity and account assurance | **MVP delivered; federation deferred** | Local accounts, MFA/recovery codes, Program roles, individual role revocation, distinct global/Program administration, current/other session controls, time-bounded delegation lifecycle, electronic signatures, security audit, provider/mapping foundations, and PostgreSQL migration coverage. OIDC/SAML and SCIM resume only with a real directory contract. TCR signature parity is tracked by #398. |
+| 3. Product-line configuration and reuse | **Delivered foundation** | Canonical software builds, exact immutable requirement and procedure manifests, released 1.5/read-only and active 1.6 workspaces, controlled libraries, propagation decisions, variants, configuration-correct outputs, deterministic publications, and release evidence. Legacy procedure-manifest bootstrap remains #364. |
+| 4. Enterprise identity and account assurance | **MVP delivered; federation deferred** | Local accounts, MFA/recovery codes, Program roles, individual role revocation, distinct global/Program administration, current/other session controls, time-bounded delegation lifecycle, password-confirmed electronic signatures including TCR stages, security audit, provider/mapping foundations, and PostgreSQL migration coverage. OIDC/SAML and SCIM resume only with a real directory contract. |
 | 5. Resumable interchange and monitored integrations | **Delivered foundation** | Governed CSV/XLSX onboarding, ReqIF profile round trip, scoped service identities, versioned API, transactional events, HMAC webhooks, retry/dead-letter replay, Jira mapping/link-back, OSLC foundations, and inspectable notification outbox. A real SMTP relay and vendor/provider-specific contracts remain external qualification work. |
 | 6. Rich technical content and controlled publications | **MVP delivered** | Structured rich content, approved template revisions, deterministic SYSRD/SWRD/test/change outputs in DOCX/PDF, exact provenance, document control, redlines, publication jobs, manifests, and release evidence packages. Managed Word documents use the desktop connector and retain exact DOCX/PDF candidates. |
-| 7. Quality, evidence and portfolio intelligence | **MVP delivered with focused audit backlog** | Build-scoped Command Center; direct System/HLR/LLR Change Requests, Test Procedure Explorer and Test Results surfaces; controlled manual and automatic TCRs; staged review; Build Test Sets; verification decision history/reopening; downstream assessments; exact upward allocations; release readiness; and immutable evidence/retest history. Follow-up integrity/reachability issues are #214 and #395–#402. |
+| 7. Quality, evidence and portfolio intelligence | **MVP delivered with focused backlog** | Build-scoped Command Center; direct System/HLR/LLR Change Requests, Test Procedure Explorer and Test Results surfaces; controlled manual and automatic TCRs; staged review; Build Test Sets; verification decision history/reopening; downstream assessments; exact upward allocations; release readiness; and immutable evidence/retest history. Audit issues #214 and #395–#401 are closed; scalable picker reachability remains #402. |
 | 8. Production operations and qualification | **Product foundation delivered; deployment-owned remainder** | One-click development/production/shared launchers, API-served production client, readiness, diagnostics, cryptographic attachment checkpoints, manifested backup/verification, isolated restore, retention/hold evidence, upgrade evidence, PostgreSQL migration/bootstrap, production-build browser tests, 50,000-requirement qualification, and 150-client database workload. Protected off-device storage, external alert delivery, TLS/reverse proxy, scheduler provisioning, and approved RPO/RTO/SLOs require a selected deployment. |
 
 ## Current control model
@@ -80,7 +80,7 @@ The squash merge produced `main` commit `d06fcee94473a9128a98e58b3699c1f6c0ad3af
 Gate run `31269258110` completed successfully on that exact commit. Browser shards skipped by the main-push
 classifier had run successfully on the immediately preceding PR merge candidate.
 
-## Current focused backlog from the Aug. 7–8 audit
+## Historical Aug. 7–8 audit backlog
 
 Priority is determined by reproduced/confirmed product risk, not issue number:
 
@@ -93,7 +93,8 @@ Priority is determined by reproduced/confirmed product risk, not issue number:
 7. #399 and #402 — procedure trace reachability and bounded searchable authoring pickers.
 8. #365 — remaining browser/history presentation for superseded TCR revisions.
 
-Each is implementation-ready in GitHub. Do not combine them into one unbounded hardening branch.
+All entries above except #402 were completed in focused PRs #404–#413. Current open product work is #402,
+#364, #365, #367, and #332; refresh GitHub before choosing the next branch.
 
 ## Boundaries that must remain explicit
 
@@ -103,8 +104,8 @@ Each is implementation-ready in GitHub. Do not combine them into one unbounded h
 - No claim of 150 rendered browser users; the published evidence is 150 simultaneous database clients.
 - No claim that repository scripts provision customer backup storage, monitoring, TLS, or recovery objectives.
 - No reset of the persistent demonstration database merely to prove an increment.
-- No claim that TCR approval is password-confirmed until #398 is completed.
-- No claim that Procedure Explorer/current TCR target effectivity is exact until #214 is completed.
+- No claim that fixed-size TCR pickers are complete for large Projects until #402 is completed.
+- No claim that an existing program has been imported as controlled requirements until #332 is completed.
 
 ## Governance
 

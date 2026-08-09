@@ -1,6 +1,7 @@
 # AeroLink current product handoff — 8 August 2026
 
-This is the current restart point after the Aug. 7–8 delivery window and the independent review that followed it.
+This is the current restart point after the Aug. 7–8 delivery window, the independent review that followed it,
+and the focused remediation sequence completed on 8–9 August.
 It supersedes the 6 August handoff as the document to read before starting new work. Older dated handoffs remain
 historical records and must not be used as current backlog authority.
 
@@ -8,10 +9,10 @@ historical records and must not be used as current backlog authority.
 
 - Repository: `seanmccarthyns/requirements-management-tool`
 - Authoritative branch: `main`
-- Exact qualified main SHA: `d06fcee94473a9128a98e58b3699c1f6c0ad3af6`
-- Squash merge: PR #388, **Stage 4: first-class manual test change request authoring**
-- Post-merge Product Quality Gate: run `31269258110`, successful
-- Former Stage 4 branch: deleted remotely after merge
+- Exact qualified main SHA: `4c34aa29c270d49871594d086e9ce73b457f1cf2`
+- Latest squash merge: PR #413, **Preserve exact driving requirements in TCR procedure decisions**
+- Latest PR Product Quality Gate: run `31292668358`, successful on the exact merge candidate
+- Remediation branches through PR #413: deleted remotely after merge
 - Persistent PostgreSQL remains the sole engineering-data store; no reset or replacement was part of the merge
 
 Start every task by fetching `origin`, confirming `main` at the exact current GitHub head, and creating a focused
@@ -121,7 +122,22 @@ The final PR head `6cc22acd36a1f984d54dabf2a11a952325051c2b` passed:
 
 The post-merge `main` quality gate then completed successfully at `d06fcee...`.
 
-## Fresh independent audit findings after merge
+## Remediation completion record
+
+Focused, CI-green PRs #404–#413 corrected and closed #395, #214, #400, #401, #398, #396, #399, #397,
+#363, and #362. The resulting controls include two-Program verification isolation, exact procedure-manifest
+effectivity, governed requirement scope, explicit coverage deltas, password-confirmed TCR signatures,
+approved-only folding, complete engineering cases, exact Procedure Explorer traces, non-empty ChangeRequired
+packages, and durable exact driving links.
+
+Current open work is #402 (bounded server-side TCR picker search/paging), #364 (legacy first-manifest
+bootstrap), #365 (superseded-TCR browser/history presentation), #367 (dependency recheck after #364/#402),
+and #332 (real imported-baseline materialization). #402, #364, and #365 are assigned to a separate active
+agent; do not overlap their branches. #332's five-gate UI exists, but Accept does not yet create controlled
+requirements, exact baseline membership, or source-identity links, and the representative parser remains
+deferred until a real extract is available.
+
+## Historical independent audit findings after the Stage 4 merge
 
 The Aug. 7–8 review did not modify product code. It raised implementation-ready issues against the sole source
 of truth and reopened one prior effectivity issue where the new implementation still exhibits the same root
@@ -155,7 +171,7 @@ problem.
   identity, retained evidence, concurrency protection, and released-build refusal are already implemented. Its
   body now identifies only the remaining browser/deep-link/baseline journey.
 
-## Recommended next sequence
+## Historical remediation sequence
 
 1. Fix #395 on a dedicated security branch, with two-Program negative API coverage across every affected route.
 2. Fix #214, #400, and #401 as one carefully bounded configuration-effectivity increment only if their shared
@@ -165,8 +181,8 @@ problem.
 5. Address #399 and #402 as focused reachability/scalability work.
 6. Complete #365's remaining browser/history journey.
 
-Do not combine all findings into one giant branch. Each PR must state the exact issue(s), test matrix, database
-isolation, and merge authorization boundary.
+This sequence was executed as focused PRs rather than one hardening branch. #402 remains open under separate
+active ownership.
 
 ## Documentation state
 
@@ -194,4 +210,4 @@ Before beginning any new implementation:
 7. read the target issue and its relationships;
 8. use disposable infrastructure for all automated tests;
 9. update this handoff and `PROJECT_STATE.md` when the product truth changes;
-10. never merge without explicit owner authorization.
+10. merge only with current owner authorization and required checks green.

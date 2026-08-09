@@ -89,9 +89,9 @@ evidence and immutable retest chains → typed, version-aware traceability with 
 analysis → a verification-impact queue that raises test work when an approved change alters what must be
 verified → a governed release campaign with computed readiness gates and ordered release approval.
 
-Password re-confirmation is implemented on the qualified SRCR and other established approval paths. Test Change
-Request approval currently lacks password re-confirmation and a distinct signature-meaning input; #398 tracks
-that gap and this document does not claim TCR signature parity until it is closed.
+Password re-confirmation and a distinct signature meaning are implemented on qualified SRCR and TCR approval
+paths. Configured TCR stages preserve their frozen authority; the no-workflow fallback also requires current
+Approver authority. PR #408 closed #398 without rewriting historical signatures.
 
 Around that core: enterprise requirements workspace, configurable artifact schemas, saved views and
 structured queries, governed bulk operations, visual redlines, CSV/XLSX onboarding that lands in a
@@ -205,8 +205,8 @@ A manually raised TCR adds a controlled Title / Problem / Analysis / Solution ca
 approved source changes. Folded source assessments' impact items move to the surviving package with identity,
 assignment, decision, attribution, and history retained; unfold restores a fresh actionable assessment. Review
 cycles expose active/pending/completed stages, freeze the applicable workflow and authority, and retain prior
-cycles after return and resubmission. Current automatically raised TCRs still have a completeness gap: #397
-tracks the ability to submit a newly generated package without ever writing its engineering case.
+cycles after return and resubmission. New automatic packages use the current engineering-case contract and
+cannot be submitted empty; historical packages retain their recorded legacy contract and evidence.
 
 Coverage is a question the requirements workspace can now answer. A **coverage-state filter** builds a worklist
 of what is Covered, Suspect or Uncovered, and every row carries its state; the suspect and uncovered ones are
@@ -230,14 +230,12 @@ raises its own item. **Suspect coverage is not coverage**: the `coverage` readin
 confirmed links, so a requirement cannot reach release on the strength of a procedure written against its
 previous wording.
 
-The independent Aug. 8 review found two unclosed materialization/trace invariants. #400 tracks procedure
-proposals that can name same-level requirement revisions outside the TCR's governed source/build scope. #401
-tracks Modify materialization that can silently drop unchanged predecessor coverage because only the proposal's
-explicit driving IDs are linked to the new procedure revision.
+Procedure proposals are constrained to the TCR's governed source/build scope. Modify preserves exact retained
+coverage and records governed additions/removals with rationale; materialization applies the approved final set.
 
 **Bringing in a program that already exists elsewhere** is a separate act from proposing a change (DEC-093).
-An import creates an **externally sourced baseline** directly, released on arrival, carrying the provenance
-that lets it be told apart from a baseline this product built: source system and version, source baseline
+The five-gate import surface records an externally sourced release and the provenance intended to distinguish
+it from a baseline this product built: source system and version, source baseline
 name and date, extract file name, size and SHA-256, who took the extract and when. Five gates run in order
 and none can be skipped — Source, Analyse, Map, Reconcile, Accept — and a named person accepts. The page
 states what that signature asserts beside what it never asserts: that these requirements were reviewed or
@@ -297,10 +295,9 @@ when it was run" — the build test set, recorded determinations with evidence, 
 corrective action a Problem Report sends somebody here to perform. System has one trio; software has separate
 HLR and LLR trios because the work is planned, done, and approved separately.
 
-The Explorer and authoring effectivity contract is not yet fully qualified. Reopened #214 tracks the fact that
-procedure lists/history and TCR Modify/Retire targets derive from coverage/project-global latest revisions rather
-than the exact baseline procedure manifest. #399 tracks the Explorer Trace tab showing only a count instead of
-the exact requirements. #402 tracks fixed-page candidate truncation at current dataset scale.
+Explorer lists/history and TCR Modify/Retire targets use the exact build procedure manifest, and Trace & impact
+shows navigable exact requirements. #402 still tracks fixed-page candidate truncation at current dataset scale;
+#364 owns the first exact manifest for legacy builds that predate the mechanism.
 
 Primary navigation mirrors that work: **Requirements** owns change requests, requirements, requirements
 documents, and Digital Thread; **Verification** owns the direct Change Requests, Test Procedure Explorer, Test
@@ -347,9 +344,9 @@ focused increments through PR #388 delivered active Problem Reports, the August 
 managed Word documents, direct verification surfaces, production-shaped client hosting, and Stage 4 manual TCR
 authoring with hardened consolidation, review snapshots, staged workflows, assignment and concurrency.
 
-`main` at `d06fcee94473a9128a98e58b3699c1f6c0ad3af6` passed the post-merge Product Quality Gate. That does not mean
-there is no backlog. The independent Aug. 7–8 audit raised #395–#402, reopened #214, and reconciled #365 to its
-remaining browser/history scope. Residual identity federation and deployment operations remain closed with
+`main` at `4c34aa29c270d49871594d086e9ce73b457f1cf2` incorporates the focused audit remediation through PR #413;
+its merge-candidate Product Quality Gate passed. Audit issues #395, #214, #400, #401, #398, #396, #399, and
+#397 are closed, as are later integrity issues #363 and #362. Residual identity federation and deployment operations remain closed with
 explicit resume conditions because they require a real provider or hosting contract, not generic product
 simulation.
 
@@ -374,18 +371,14 @@ correct, and had no route to it.
 
 Understating these is a product-integrity failure, not a marketing choice.
 
-- **Multi-Program verification confidentiality is not qualified.** The Aug. 8 audit found verification read and
-  evidence-download routes that do not consistently establish access to the owning Program. #395 is critical
-  and must be closed before broader multi-Program use.
-- **Build-scoped procedure effectivity is not yet sourced consistently from the exact procedure manifest.**
-  Reopened #214 covers Procedure Explorer/history and TCR Modify/Retire targets. Do not claim every procedure
-  surface is configuration-correct until it is closed.
-- **TCR trace/materialization has two open integrity defects.** #400 covers out-of-scope driving requirement
-  revisions; #401 covers Modify silently dropping unchanged predecessor coverage.
-- **TCR lifecycle/electronic-approval parity is incomplete.** #396 covers folding unapproved sources; #397
-  covers current automatic packages bypassing the case; #398 covers password/meaning/current-fallback authority.
-- **Procedure trace and authoring reachability are incomplete.** #399 covers the count-only Trace tab; #402
-  covers silent candidate truncation at fixed limits.
+- **Large TCR authoring pickers remain bounded incorrectly.** #402 owns server-side search/paging and exact-ID
+  hydration; fixed-page candidate truncation must not be presented as a complete large-Program result.
+- **Legacy builds still need their first exact procedure manifest.** #364 owns the controlled bootstrap; #367
+  should be rechecked against that result and #402 before evidence-only closure.
+- **Imported baselines do not yet materialize controlled requirements.** #332's UI and provenance records exist,
+  but Accept does not create the immutable candidate baseline, requirement revisions, exact membership, or
+  source-identity links. A representative source extract is still required to qualify the parser honestly.
+- **Superseded TCR presentation remains incomplete.** #365 owns the remaining browser/history/deep-link journey.
 - **No build carries a procedure manifest yet.** The mechanism is complete and reachable, but every existing
   build predates it, so `baseline_test_procedures` is empty in the demonstration data. `MarkReleased`
   deliberately does not require one; gating on it would make already-released builds retrospectively invalid.
@@ -409,11 +402,11 @@ Understating these is a product-integrity failure, not a marketing choice.
   security review remain organization-specific work. See
   [SECURITY_AND_IDENTITY_MODEL.md](SECURITY_AND_IDENTITY_MODEL.md).
 - **Demonstration credentials are non-production** and must be replaced before any operational use.
-- **An imported baseline cannot yet be read from a file.** The five import gates are exercisable and
-  enforced, but nothing parses a DOORS or ReqIF extract: the objects, their attributes and any source history
-  are supplied as structured input, and the extract's hash and size are recorded from whoever took it rather
-  than computed from an upload. Say the workflow is built and the reader is not. It is deliberately waiting
-  on a representative extract rather than on a design.
+- **An imported baseline is not yet a controlled requirement baseline.** The five import gates are exercisable,
+  but Accept currently creates only the released release/provenance record; it does not create controlled
+  requirement revisions, exact candidate-baseline membership, or source-identity links. Nothing yet parses a
+  DOORS or ReqIF extract: structured input is used and the hash/size are operator-supplied. #332 remains open
+  for both the durable controlled outcome and representative-extract qualification.
 The client has **no external runtime dependency**: it makes no network request outside its own origin,
 and has been verified to start with all external requests blocked. Keep it that way — a CDN reference
 in the client contradicts the on-premises posture and, as the resolved case below showed, can block
@@ -650,13 +643,13 @@ reason the document set can be trusted.
   1160px and pushed the page 106px off screen. The cascade lesson above is about load order; this is the same
   failure through the other mechanism, and the same fix applies. When a rule matters, make it win on purpose.
 
-# Current implementation checkpoint — 2026-08-08
+# Current implementation checkpoint — 2026-08-09
 
-Current `main` at `d06fcee94473a9128a98e58b3699c1f6c0ad3af6` includes the API-served production client,
+Current `main` at `4c34aa29c270d49871594d086e9ce73b457f1cf2` includes the API-served production client,
 qualified direct verification navigation, first-class manual Test Change Requests, multi-source impact-item
 consolidation, configured staged TCR review, canonical review snapshots, assignment-aligned authority,
 optimistic concurrency including true EF-collision tests, and atomic controlled TCR successor revisioning.
 
-The post-merge Product Quality Gate passed. The fresh independent review raised #395–#402, reopened #214, and
-left #365 open only for its remaining browser/history presentation. See
+The focused remediation sequence closed #395, #214, #400, #401, #398, #396, #399, #397, #363, and #362 with
+required gates green. Current open work is #402, #364, #365, #367, and #332. See
 [CURRENT_PRODUCT_HANDOFF_2026-08-08.md](CURRENT_PRODUCT_HANDOFF_2026-08-08.md).

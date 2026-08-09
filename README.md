@@ -65,7 +65,7 @@ demonstrations use the `FMSLIVE` dataset described in
 | Document | Purpose |
 | --- | --- |
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
-| [Current product handoff, 8 August](CURRENT_PRODUCT_HANDOFF_2026-08-08.md) | **Current restart point.** Qualified Stage 3B/Stage 4 state, exact `main`, TCR review/concurrency architecture, fresh independent audit issues, and safe next sequence |
+| [Current product handoff, updated 9 August](CURRENT_PRODUCT_HANDOFF_2026-08-08.md) | **Current restart point.** Qualified Stage 3B/Stage 4 state, exact remediated `main`, TCR control architecture, completed audit sequence, and current open ownership |
 | [Product handoff, 6 August](CURRENT_PRODUCT_HANDOFF_2026-08-06.md) | Historical. Test procedures authored, revised and baselined like requirements, approved procedure work carried into builds, and Word-authored controlled documents checked out, reviewed, approved, and released as exact DOCX/PDF pairs |
 | [Product handoff, 5 August](CURRENT_PRODUCT_HANDOFF_2026-08-05.md) | Historical. Imported baselines, explicit assessment outcomes, local test-world integration, Problem Report refinements, and safe continuation |
 | [Product handoff, 4 August](CURRENT_PRODUCT_HANDOFF_2026-08-04.md) | Historical. State-aware downstream assessments with withdrawable conclusions, Problem Report editing under the universal lease, the "a procedure must be written" verification outcome, and source authority by change-request type |
