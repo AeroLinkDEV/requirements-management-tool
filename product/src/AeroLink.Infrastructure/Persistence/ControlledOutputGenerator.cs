@@ -191,13 +191,16 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
 
     private async Task<List<PublicationRecord>> ProcedurePublicationRows(Guid baselineId, TestProcedureLevel level, CancellationToken ct)
     {
-        var effectivity = await TestProcedureEffectivity.ForBaselineAsync(db, baselineId, ct);
-        var revisionIds = effectivity?.RevisionIds ?? [];
-        var rows = await (from revision in db.TestProcedureRevisions.AsNoTracking().Where(x => revisionIds.Contains(x.Id))
+        // #419: a controlled procedure document renders the exact immutable manifest membership recorded at
+        // materialization (BaselineTestProcedures), never a later compatibility/current projection. Procedure
+        // document records are only created after the exact manifest exists, so the membership cannot change
+        // between generations; rendering from the manifest rows keeps the document bound to that snapshot.
+        var rows = await (from member in db.BaselineTestProcedures.AsNoTracking().Where(x => x.BaselineId == baselineId)
+                          join revision in db.TestProcedureRevisions.AsNoTracking() on member.RevisionId equals revision.Id
                           join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == level)
-                              on revision.ProcedureId equals procedure.Id
+                              on member.ProcedureId equals procedure.Id
                           orderby procedure.BaseNumber
-                          select new { procedure.Id, procedure.BaseNumber, procedure.Title, revision.Revision, revision.State, revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult, revision.AuthorId }).ToListAsync(ct);
+                          select new { procedure.BaseNumber, procedure.Title, revision.Revision, revision.State, revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult, revision.AuthorId }).ToListAsync(ct);
         return rows.OrderBy(x => x.BaseNumber)
             .Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), level + " Test Procedure", x.Title, x.Objective, new[] { ("State", x.State.ToString()), ("Author / owner", x.AuthorId), ("Preconditions", x.Preconditions), ("Procedure steps", x.Steps), ("Expected result", x.ExpectedResult) })).ToList();
     }
