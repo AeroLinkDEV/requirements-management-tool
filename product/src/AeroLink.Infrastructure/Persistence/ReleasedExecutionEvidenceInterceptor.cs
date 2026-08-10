@@ -123,12 +123,13 @@ public sealed class ReleasedExecutionEvidenceInterceptor : SaveChangesIntercepto
             + "Use an explicit post-release amendment workflow for any correction.");
 
     // ReleaseId is recorded on current executions. The build join is a truthful fallback for legacy rows that
-    // predate execution release scope but still name the exact SoftwareBuild they were run against.
+    // predate execution release scope but still name the exact SoftwareBuild they were run against. These names
+    // are the explicit ToTable mappings in AeroLinkDbContext and are shared by SQLite and PostgreSQL.
     private const string ReleaseLookupSql = """
         SELECT r."IsReleased"
         FROM "test_executions" AS e
         LEFT JOIN "software_builds" AS b ON b."Id" = e."SoftwareBuildId"
-        LEFT JOIN "releases" AS r ON r."Id" = COALESCE(e."ReleaseId", b."ReleaseId")
+        LEFT JOIN "software_releases" AS r ON r."Id" = COALESCE(e."ReleaseId", b."ReleaseId")
         WHERE e."Id" = @executionId
         """;
 }
