@@ -19,6 +19,7 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Read the original branch-only patch so the retry stays identical except for the corrected marker.
       - name: Apply corrected core patch
         shell: pwsh
         run: |
