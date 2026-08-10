@@ -32,7 +32,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
         var baseline = await db.CandidateBaselines.Include(x => x.TestChangeSelections).Include(x => x.Events)
                            .SingleOrDefaultAsync(x => x.Id == baselineId, ct)
                        ?? throw new DomainException("Baseline not found.");
-        if (baseline.State == CandidateBaselineState.Draft)
+        if (baseline.State != CandidateBaselineState.Frozen)
             throw new DomainException("Freeze the baseline before materializing its test procedures.");
         if (baseline.RequirementsMaterializedAt is null)
             throw new DomainException("Materialize the requirement baseline before its test procedures — a procedure verifies a requirement that has to exist first.");
