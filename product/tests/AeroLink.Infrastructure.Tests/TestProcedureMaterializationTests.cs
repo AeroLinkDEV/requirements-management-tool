@@ -47,6 +47,16 @@ public sealed class TestProcedureMaterializationTests
             // Retired means gone from the build, not gone from history — the same as a retired requirement.
             Assert.Empty(await db.BaselineTestProcedures.Where(x => x.BaselineId == third.Id).ToListAsync());
             Assert.Equal("Oceanic sequencing, clarified", (await db.TestProcedures.SingleAsync()).Title);
+
+            var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+                history.Select(x => x.Id).ToList(), CancellationToken.None);
+            Assert.Equal("Oceanic sequencing", titles[history[0].Id].Title);
+            Assert.True(titles[history[0].Id].IsExact);
+            Assert.Equal("Oceanic sequencing, clarified", titles[history[1].Id].Title);
+            Assert.True(titles[history[1].Id].IsExact);
+            Assert.Equal("Oceanic sequencing, clarified", titles[history[2].Id].Title);
+            Assert.True(titles[history[2].Id].IsExact);
+            Assert.Contains("Retirement revision", titles[history[2].Id].Note);
         }
         finally { File.Delete(path); }
     }

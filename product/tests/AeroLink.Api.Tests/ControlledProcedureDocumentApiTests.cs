@@ -323,6 +323,8 @@ public sealed class ControlledProcedureDocumentApiTests
         firstXml = await DocumentXmlAsync(client, firstDocumentId);
         Assert.Contains("SYSTP-000941.00", firstXml);
         Assert.Contains("SYSTP-000942.00", firstXml);
+        Assert.Contains("Oceanic waypoint sequencing", firstXml);
+        Assert.Contains("Oceanic plan display", firstXml);
         // #420: the exact TCR that authorized the materialized procedure revisions is printed as the source
         // test change request, and TCR signatures are the approval authority (DEC-103).
         Assert.Contains("SYSTCR-000941.00", firstXml);
@@ -402,17 +404,20 @@ public sealed class ControlledProcedureDocumentApiTests
         Assert.DoesNotContain("SYSTP-000941.00", secondXml);
         Assert.DoesNotContain("SYSTP-000942.00", secondXml);
         Assert.DoesNotContain("SYSTP-000942.01", secondXml);
+        Assert.Contains("Oceanic waypoint sequencing, clarified", secondXml);
+        Assert.DoesNotContain(">Oceanic waypoint sequencing<", secondXml);
         Assert.Contains("SYSTCR-000942.00", secondXml);
         Assert.Contains("Test Change Authority", secondXml);
         Assert.DoesNotContain(">Change Authority<", secondXml);
 
         // The first baseline's document remains the controlled snapshot: the same two .00 identities, no
-        // successor or retired revision leaked in, and the document record metadata is unchanged. Title text
-        // mutation across revisions is a separate tracked defect (#421) and is deliberately not byte-asserted
-        // here; #419 owns membership/body identity binding.
+        // successor or retired revision leaked in, and the document record metadata is unchanged. The title
+        // is projected from the exact source TCR, so a later catalog mutation cannot rewrite this output.
         var refreshedFirstXml = await DocumentXmlAsync(client, firstDocumentId);
         Assert.Contains("SYSTP-000941.00", refreshedFirstXml);
         Assert.Contains("SYSTP-000942.00", refreshedFirstXml);
+        Assert.Contains("Oceanic waypoint sequencing", refreshedFirstXml);
+        Assert.DoesNotContain("Oceanic waypoint sequencing, clarified", refreshedFirstXml);
         Assert.DoesNotContain("SYSTP-000941.01", refreshedFirstXml);
         Assert.DoesNotContain("SYSTP-000942.01", refreshedFirstXml);
         using (var scope = factory.Services.CreateScope())

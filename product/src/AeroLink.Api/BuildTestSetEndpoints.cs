@@ -125,9 +125,10 @@ public static class BuildTestSetEndpoints
             : await (from revision in db.TestProcedureRevisions.AsNoTracking()
                      join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
                      where revisionIds.Contains(revision.Id)
-                     select new { revision.Id, procedure.BaseNumber, revision.Revision, procedure.Title, procedure.Level })
+                     select new { revision.Id, procedure.BaseNumber, revision.Revision, procedure.Level })
                 .ToListAsync(ct);
         var byRevision = procedures.ToDictionary(x => x.Id);
+        var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db, revisionIds, ct);
 
         // The latest run of each selected procedure on this build, so a reader sees exactly what the gate sees.
         // ExecutionScope is the shared authority: written separately, this list and the release gate drifted
@@ -156,7 +157,7 @@ public static class BuildTestSetEndpoints
                     {
                         entry.ProcedureRevisionId,
                         displayNumber = procedure is null ? "" : $"{procedure.BaseNumber}.{procedure.Revision:D2}",
-                        title = procedure?.Title ?? "",
+                        title = titles.TryGetValue(entry.ProcedureRevisionId, out var title) ? title.Title : "",
                         reason = entry.Reason.ToString(),
                         entry.Note,
                         entry.AddedBy,

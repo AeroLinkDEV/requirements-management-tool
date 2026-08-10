@@ -128,6 +128,12 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
             Assert.Contains(readiness.Gates, x => x.Code == "code_traceability" && x.Complete
                 && x.Completed == requiredCode.Count && x.Total == requiredCode.Count);
             Assert.Equal(64, initialManifestHash.Length); Assert.Equal(initialManifestHash, await service.ComputeReviewManifestHashAsync(campaign.Id, default));
+            // The stable catalog may describe today's draft, but a signed release-review manifest is built
+            // from exact revision titles. Editing that catalog metadata cannot rewrite the frozen evidence.
+            procedure.UpdateDraft("Mutable catalog title changed after the exact revision", procedure.OwnerId,
+                now.AddSeconds(1));
+            await db.SaveChangesAsync();
+            Assert.Equal(initialManifestHash, await service.ComputeReviewManifestHashAsync(campaign.Id, default));
             var pendingImpact = await db.ImpactDispositions.FirstAsync(x => x.CampaignId == campaign.Id && x.State == ImpactDispositionState.Pending);
             pendingImpact.Disposition(ImpactDispositionState.Addressed, "Disposition changes are part of the signed release package.", "assurance.test", now.AddMinutes(1)); await db.SaveChangesAsync();
             var changedManifestHash = await service.ComputeReviewManifestHashAsync(campaign.Id, default); Assert.NotEqual(initialManifestHash, changedManifestHash);

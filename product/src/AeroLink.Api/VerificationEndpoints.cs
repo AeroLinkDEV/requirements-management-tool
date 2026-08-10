@@ -200,18 +200,24 @@ public static class VerificationEndpoints
                 : await buildQuery.OrderByDescending(x => x.RecordedAt).FirstOrDefaultAsync(ct);
             Guid? selectedBuildId = buildRecord?.Id;
 
-            IReadOnlyList<PathProcedureCandidate> procedureCandidates = verificationRequirementId == Guid.Empty
-                ? Array.Empty<PathProcedureCandidate>()
-                : await (from coverage in db.TestCoverage.AsNoTracking().Where(x => x.RequirementRevisionId == verificationRequirementId && !x.IsSuspect)
+            var procedureCandidateRows = await (from coverage in db.TestCoverage.AsNoTracking()
+                             .Where(x => verificationRequirementId != Guid.Empty
+                                 && x.RequirementRevisionId == verificationRequirementId && !x.IsSuspect)
                          join revision in db.TestProcedureRevisions.AsNoTracking() on coverage.ProcedureRevisionId equals revision.Id
                          join item in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals item.Id
-                         select new PathProcedureCandidate(
+                         select new
+                         {
                              item.Id,
-                             revision.Id,
-                             item.BaseNumber + "." + revision.Revision.ToString("D2"),
-                             item.Title,
-                             item.Level.ToString(),
-                             revision.State.ToString())).ToListAsync(ct);
+                             RevisionId = revision.Id,
+                             DisplayNumber = item.BaseNumber + "." + revision.Revision.ToString("D2"),
+                             Level = item.Level.ToString(),
+                             State = revision.State.ToString()
+                         }).ToListAsync(ct);
+            var candidateTitles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+                procedureCandidateRows.Select(x => x.RevisionId).Distinct().ToList(), ct);
+            IReadOnlyList<PathProcedureCandidate> procedureCandidates = procedureCandidateRows.Select(x =>
+                new PathProcedureCandidate(x.Id, x.RevisionId, x.DisplayNumber,
+                    candidateTitles[x.RevisionId].Title, x.Level, x.State)).ToList();
 
             var candidateRevisionIds = procedureCandidates.Select(x => x.RevisionId).ToList();
             IReadOnlyList<TestExecution> candidateRuns = candidateRevisionIds.Count == 0
@@ -368,7 +374,7 @@ public static class VerificationEndpoints
         {
             var procedure = await db.TestProcedures.AsNoTracking()
                 .Where(x => x.Id == id)
-                .Select(x => new { x.Id, x.ProjectId, x.BaseNumber, x.Title, x.OwnerId, x.Level, x.CreatedAt })
+                .Select(x => new { x.Id, x.ProjectId, x.BaseNumber, x.OwnerId, x.Level, x.CreatedAt })
                 .SingleOrDefaultAsync(ct);
             if (procedure is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, procedure.ProjectId, ct)) return Results.Forbid();
@@ -390,19 +396,8 @@ public static class VerificationEndpoints
                 if (revisionId is not null && revisionId != effectiveRevisionId) return Results.NotFound();
             }
 
-            // What each revision answered for: the verification decision that resolved to it, the package
-            // that decision belonged to, and the change request that package was raised from.
-            var drivers = await (from item in db.VerificationImpactItems.AsNoTracking()
-                                 join review in db.TestChangeReviews.AsNoTracking() on item.TestChangeReviewId equals review.Id
-                                 where item.ResolvedProcedureRevisionId != null && revisionIds.Contains(item.ResolvedProcedureRevisionId.Value)
-                                 select new
-                                 {
-                                     RevisionId = item.ResolvedProcedureRevisionId!.Value,
-                                     item.SubjectDisplayNumber,
-                                     ChangeRequest = review.SourceChangeRequestNumber,
-                                     Package = review.BaseNumber,
-                                     Action = item.ProcedureChangeAction,
-                                 }).ToListAsync(ct);
+            var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db, revisionIds, ct);
+            var provenance = await TestProcedureProvenanceProjection.ForRevisionsAsync(db, revisionIds, ct);
 
             // The requirements each revision covers, so a reader sees what it is for without leaving the page.
             var coverage = await (from link in db.TestCoverage.AsNoTracking()
@@ -411,33 +406,57 @@ public static class VerificationEndpoints
                                   where revisionIds.Contains(link.ProcedureRevisionId)
                                   select new { link.ProcedureRevisionId, artifact.BaseNumber, revision.Revision }).ToListAsync(ct);
 
+            var selectedId = revisionId ?? effectiveRevisionId ?? revisions.FirstOrDefault()?.Id;
+            var selectedTitle = selectedId is Guid selected && titles.TryGetValue(selected, out var title)
+                ? title
+                : null;
             return Results.Ok(new
             {
                 procedure.Id,
                 procedure.BaseNumber,
-                procedure.Title,
+                title = selectedTitle?.Title ?? "",
+                titleIsExact = selectedTitle?.IsExact ?? false,
+                titleIsLegacy = selectedTitle?.IsLegacy ?? false,
+                titleNote = selectedTitle?.Note,
                 level = procedure.Level.ToString(),
                 procedure.OwnerId,
                 procedure.CreatedAt,
-                selectedRevisionId = revisionId ?? effectiveRevisionId,
-                revisions = revisions.Select(revision => new
+                selectedRevisionId = selectedId,
+                revisions = revisions.Select(revision =>
                 {
-                    revision.Id,
-                    displayNumber = $"{procedure.BaseNumber}.{revision.Revision:D2}",
-                    revision.Revision,
-                    state = revision.State.ToString(),
-                    revision.AuthorId,
-                    revision.CreatedAt,
-                    revision.Objective,
-                    revision.Preconditions,
-                    revision.Steps,
-                    revision.ExpectedResult,
-                    selected = revision.Id == revisionId,
-                    drivenBy = drivers.Where(x => x.RevisionId == revision.Id)
-                        .Select(x => new { x.ChangeRequest, x.Package, x.SubjectDisplayNumber, action = x.Action.ToString() })
-                        .Distinct().ToList(),
-                    covers = coverage.Where(x => x.ProcedureRevisionId == revision.Id)
-                        .Select(x => $"{x.BaseNumber}.{x.Revision:D2}").Distinct().OrderBy(x => x).ToList(),
+                    var revisionTitle = titles[revision.Id];
+                    var source = provenance[revision.Id];
+                    return new
+                    {
+                        revision.Id,
+                        displayNumber = $"{procedure.BaseNumber}.{revision.Revision:D2}",
+                        revision.Revision,
+                        title = revisionTitle.Title,
+                        titleIsExact = revisionTitle.IsExact,
+                        titleIsLegacy = revisionTitle.IsLegacy,
+                        titleNote = revisionTitle.Note,
+                        state = revision.State.ToString(),
+                        revision.AuthorId,
+                        revision.CreatedAt,
+                        revision.Objective,
+                        revision.Preconditions,
+                        revision.Steps,
+                        revision.ExpectedResult,
+                        selected = revision.Id == selectedId,
+                        revision.SourceTestChangeRequestId,
+                        package = source.Package,
+                        provenanceNote = source.Note,
+                        drivenBy = source.Drivers.Select(driver => new
+                        {
+                            changeRequest = driver.ChangeRequest,
+                            package = driver.Package,
+                            subjectDisplayNumber = driver.SubjectDisplayNumber,
+                            action = driver.Action,
+                            isLegacy = driver.IsLegacy,
+                        }).ToList(),
+                        covers = coverage.Where(x => x.ProcedureRevisionId == revision.Id)
+                            .Select(x => $"{x.BaseNumber}.{x.Revision:D2}").Distinct().OrderBy(x => x).ToList(),
+                    };
                 }).ToList(),
             });
         });
@@ -453,7 +472,7 @@ public static class VerificationEndpoints
         {
             var procedure = await db.TestProcedures.AsNoTracking()
                 .Where(x => x.Id == id)
-                .Select(x => new { x.Id, x.ProjectId, x.BaseNumber, x.Title, x.Level })
+                .Select(x => new { x.Id, x.ProjectId, x.BaseNumber, x.Level })
                 .SingleOrDefaultAsync(ct);
             if (procedure is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, procedure.ProjectId, ct)) return Results.Forbid();
@@ -550,22 +569,10 @@ public static class VerificationEndpoints
                 .GroupBy(x => x.RequirementRevisionId)
                 .ToDictionary(x => x.Key, x => x.First().CoverageState);
 
-            // Provenance names each impact item's own source Change Request, not the TCR's originating one.
-            // Stage 4 permits multi-source TCRs: a folded-in source keeps its own VerificationImpactItem,
-            // so review.SourceChangeRequestNumber alone would mislabel folded work as the base change.
-            var provenance = await (from item in db.VerificationImpactItems.AsNoTracking()
-                                    join review in db.TestChangeReviews.AsNoTracking()
-                                        on item.TestChangeReviewId equals review.Id
-                                    join change in db.SystemChangeRequests.AsNoTracking()
-                                        on item.ChangeRequestId equals change.Id
-                                    where item.ResolvedProcedureRevisionId == selectedRevisionIdValue
-                                    select new
-                                    {
-                                        item.SubjectDisplayNumber,
-                                        ChangeRequest = change.DisplayNumber,
-                                        Package = review.DisplayNumber,
-                                        Action = item.ProcedureChangeAction,
-                                    }).Distinct().ToListAsync(ct);
+            var title = (await TestProcedureRevisionTitleProjection.ForRevisionsAsync(
+                db, [selectedRevisionIdValue], ct))[selectedRevisionIdValue];
+            var provenance = (await TestProcedureProvenanceProjection.ForRevisionsAsync(
+                db, [selectedRevisionIdValue], ct))[selectedRevisionIdValue];
 
             var requirements = covered
                 .Select(x => new
@@ -588,7 +595,10 @@ public static class VerificationEndpoints
             {
                 procedureId = procedure.Id,
                 procedure.BaseNumber,
-                procedure.Title,
+                title = title.Title,
+                titleIsExact = title.IsExact,
+                titleIsLegacy = title.IsLegacy,
+                titleNote = title.Note,
                 level = procedure.Level.ToString(),
                 revisionId = selectedRevisionIdValue,
                 displayNumber = $"{procedure.BaseNumber}.{revision.Revision:D2}",
@@ -597,11 +607,17 @@ public static class VerificationEndpoints
                 revision.AuthorId,
                 revision.CreatedAt,
                 revision.SourceTestChangeRequestId,
+                package = provenance.Package,
+                provenanceNote = provenance.Note,
                 requirements,
-                provenance = provenance.Select(x => new
+                provenance = provenance.Drivers.Select(driver => new
                 {
-                    x.ChangeRequest, x.Package, x.SubjectDisplayNumber, action = x.Action.ToString()
-                }),
+                    changeRequest = driver.ChangeRequest,
+                    package = driver.Package,
+                    subjectDisplayNumber = driver.SubjectDisplayNumber,
+                    action = driver.Action,
+                    isLegacy = driver.IsLegacy,
+                }).ToList(),
                 build = releaseId is null ? null : new
                 {
                     releaseId = releaseId.Value, effectiveBaselineId, requirementBaselineId, isExactManifest
@@ -646,12 +662,39 @@ public static class VerificationEndpoints
                 var requestedRevision = -1;
                 var hasRevision = q.Length > 3 && q[^3] == '.' && int.TryParse(q[^2..], out requestedRevision);
                 var baseQuery = hasRevision ? q[..^3] : q;
-                source = source.Where(x => x.BaseNumber.ToLower().Contains(baseQuery) || x.Title.ToLower().Contains(q));
+                var scopedRevisionIds = scopedRevisions?.Values.ToList();
+                // A build-scoped title is owned by its exact immutable TCR procedure-change snapshot. The
+                // mutable catalog title is deliberately absent from this predicate: searching a predecessor
+                // build for a later title must never find the older revision.
+                var titleMatches = await (from change in db.Set<TestProcedureChange>().AsNoTracking()
+                                          join revision in db.TestProcedureRevisions.AsNoTracking()
+                                              on new
+                                              {
+                                                  ReviewId = (Guid?)change.TestChangeReviewId,
+                                                  change.Revision,
+                                              }
+                                              equals new
+                                              {
+                                                  ReviewId = revision.SourceTestChangeRequestId,
+                                                  revision.Revision,
+                                              }
+                                          join procedure in db.TestProcedures.AsNoTracking()
+                                              on revision.ProcedureId equals procedure.Id
+                                          where procedure.ProjectId == projectId
+                                                && procedure.BaseNumber == change.BaseNumber
+                                                && change.Title.ToLower().Contains(q)
+                                                && (scopedRevisionIds == null
+                                                    ? revision.Revision == db.TestProcedureRevisions
+                                                        .Where(other => other.ProcedureId == procedure.Id)
+                                                        .Max(other => other.Revision)
+                                                    : scopedRevisionIds.Contains(revision.Id))
+                                          select procedure.Id).Distinct().ToListAsync(ct);
+                source = source.Where(x => x.BaseNumber.ToLower().Contains(baseQuery)
+                                           || titleMatches.Contains(x.Id));
                 if (hasRevision && scopedRevisions is not null)
                 {
-                    var scopedRevisionIds = scopedRevisions.Values.ToList();
                     var matchingProcedureIds = await db.TestProcedureRevisions.AsNoTracking()
-                        .Where(x => scopedRevisionIds.Contains(x.Id) && x.Revision == requestedRevision)
+                        .Where(x => scopedRevisionIds!.Contains(x.Id) && x.Revision == requestedRevision)
                         .Select(x => x.ProcedureId).ToListAsync(ct);
                     source = source.Where(x => matchingProcedureIds.Contains(x.Id));
                 }
@@ -698,25 +741,49 @@ public static class VerificationEndpoints
             // Every sort ends on the controlled number, so a page boundary cannot depend on tie order.
             var ordered = sort?.ToLowerInvariant() switch
             {
-                "title" => source.OrderBy(x => x.Title).ThenBy(x => x.BaseNumber),
                 "owner" => source.OrderBy(x => x.OwnerId).ThenBy(x => x.BaseNumber),
                 "level" => source.OrderBy(x => x.Level).ThenBy(x => x.BaseNumber),
                 _ => source.OrderBy(x => x.BaseNumber).ThenBy(x => x.BaseNumber),
             };
-            var items = await ordered.Skip((currentPage - 1) * size).Take(size)
-                .Select(x => new { x.Id, x.BaseNumber, x.Title, x.OwnerId, x.Level, x.CreatedAt }).ToListAsync(ct);
+            List<ProcedureListItem> items;
+            if (string.Equals(sort, "title", StringComparison.OrdinalIgnoreCase))
+            {
+                // Title ordering must use the same immutable revision title returned to the client. Ordering
+                // by the mutable catalog value would make an old build move when a successor is modified.
+                var candidates = await source.Select(x => new ProcedureListItem(
+                    x.Id, x.BaseNumber, x.OwnerId, x.Level, x.CreatedAt)).ToListAsync(ct);
+                var candidateIds = candidates.Select(x => x.Id).ToList();
+                var candidateRevisions = await db.TestProcedureRevisions.AsNoTracking()
+                    .Where(x => candidateIds.Contains(x.ProcedureId)).ToListAsync(ct);
+                var candidateRevisionByProcedure = scopedRevisions is null
+                    ? candidateRevisions.GroupBy(x => x.ProcedureId)
+                        .ToDictionary(x => x.Key, x => x.OrderByDescending(r => r.Revision).First().Id)
+                    : scopedRevisions.Where(x => candidateIds.Contains(x.Key))
+                        .ToDictionary(x => x.Key, x => x.Value);
+                var candidateTitles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+                    candidateRevisionByProcedure.Values.Distinct().ToList(), ct);
+                items = candidates.OrderBy(x => candidateTitles[candidateRevisionByProcedure[x.Id]].Title)
+                    .ThenBy(x => x.BaseNumber).Skip((currentPage - 1) * size).Take(size).ToList();
+            }
+            else
+            {
+                items = await ordered.Skip((currentPage - 1) * size).Take(size)
+                    .Select(x => new ProcedureListItem(x.Id, x.BaseNumber, x.OwnerId, x.Level, x.CreatedAt))
+                    .ToListAsync(ct);
+            }
             var requestedIds = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(x => Guid.TryParse(x, out var id) ? id : Guid.Empty).Where(x => x != Guid.Empty).Distinct().ToList();
             var hydrated = requestedIds.Count == 0
                 ? []
                 : await eligibility.Where(x => requestedIds.Contains(x.Id))
-                    .Select(x => new { x.Id, x.BaseNumber, x.Title, x.OwnerId, x.Level, x.CreatedAt })
+                    .Select(x => new ProcedureListItem(x.Id, x.BaseNumber, x.OwnerId, x.Level, x.CreatedAt))
                     .ToListAsync(ct);
             var all = items.Concat(hydrated).DistinctBy(x => x.Id).ToList();
             var allIds = all.Select(x => x.Id).ToList(); var revisions = await db.TestProcedureRevisions.AsNoTracking().Where(x => allIds.Contains(x.ProcedureId)).ToListAsync(ct);
             var selectedRevisionIds = scopedRevisions is null
                 ? revisions.GroupBy(x => x.ProcedureId).Select(group => group.OrderByDescending(x => x.Revision).First().Id).ToList()
                 : scopedRevisions.Where(x => allIds.Contains(x.Key)).Select(x => x.Value).ToList();
+            var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db, selectedRevisionIds, ct);
             var coverage = await db.TestCoverage.AsNoTracking().Where(x => selectedRevisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
             var executions = await db.TestExecutions.AsNoTracking().Where(x => selectedRevisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
             var projected = all
@@ -724,8 +791,14 @@ public static class VerificationEndpoints
                 .Select(x => { var latest = scopedRevisions is not null && scopedRevisions.TryGetValue(x.Id, out var selectedRevisionId)
                         ? revisions.SingleOrDefault(r => r.Id == selectedRevisionId)
                         : revisions.Where(r => r.ProcedureId == x.Id).OrderByDescending(r => r.Revision).FirstOrDefault();
+                    var exactTitle = latest is null || !titles.TryGetValue(latest.Id, out var projectedTitle)
+                        ? null
+                        : projectedTitle;
                     var lastRun = latest is null ? null : executions.Where(e => e.ProcedureRevisionId == latest.Id).OrderByDescending(e => e.ExecutedAt).ThenByDescending(e => e.RecordedAt).FirstOrDefault();
-                return new { x.Id, displayNumber = latest is null ? x.BaseNumber : x.BaseNumber + "." + latest.Revision.ToString("D2"), x.Title, x.OwnerId, level = x.Level.ToString(),
+                return new { x.Id, displayNumber = latest is null ? x.BaseNumber : x.BaseNumber + "." + latest.Revision.ToString("D2"),
+                    title = exactTitle?.Title ?? "", titleIsExact = exactTitle?.IsExact ?? false,
+                    titleIsLegacy = exactTitle?.IsLegacy ?? false, titleNote = exactTitle?.Note,
+                    x.OwnerId, level = x.Level.ToString(),
                     revisionId = latest?.Id, revision = latest?.Revision, state = latest?.State.ToString(), objective = latest?.Objective,
                     // No selectedApproverId. It existed to route a procedure-level signature, and that
                     // signature is gone; the package's approver is the one who approved this work. The stored
@@ -892,11 +965,13 @@ public static class VerificationEndpoints
             var rowsQuery = from execution in source join revision in db.TestProcedureRevisions.AsNoTracking() on execution.ProcedureRevisionId equals revision.Id
                               join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
                               select new { execution.Id, procedureRevisionId = revision.Id, displayNumber = procedure.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
-                                  procedure.Title, outcome = execution.Outcome.ToString(), execution.ExecutedBy, execution.Configuration, execution.Determination,
+                                  outcome = execution.Outcome.ToString(), execution.ExecutedBy, execution.Configuration, execution.Determination,
                                   execution.EvidenceReference, execution.ExecutedAt, execution.RecordedAt, execution.ReleaseId, execution.SoftwareBuildId, execution.RetestOfExecutionId };
             var rows = await (db.Database.IsSqlite() ? rowsQuery.OrderByDescending(x => x.Id) : rowsQuery.OrderByDescending(x => x.ExecutedAt)).ToListAsync(ct); var rowIds = rows.Select(x => x.Id).ToList();
             var evidence = await (from link in db.TestExecutionEvidence.AsNoTracking().Where(x => rowIds.Contains(x.TestExecutionId)) join item in db.EvidenceRecords.AsNoTracking() on link.EvidenceId equals item.Id select new { link.TestExecutionId, item.Id, item.OriginalFileName, item.Size, item.Sha256, item.UploadedAt }).ToListAsync(ct);
-            return Results.Ok(rows.Select(x => new { x.Id, x.procedureRevisionId, x.displayNumber, x.Title, x.outcome, x.ExecutedBy, x.Configuration, x.Determination, x.EvidenceReference, x.ExecutedAt, x.RecordedAt, x.ReleaseId, x.SoftwareBuildId, x.RetestOfExecutionId, evidence = evidence.Where(e => e.TestExecutionId == x.Id).Select(e => new { e.Id, e.OriginalFileName, e.Size, e.Sha256, e.UploadedAt }) }));
+            var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+                rows.Select(x => x.procedureRevisionId).Distinct().ToList(), ct);
+            return Results.Ok(rows.Select(x => new { x.Id, x.procedureRevisionId, x.displayNumber, title = titles[x.procedureRevisionId].Title, x.outcome, x.ExecutedBy, x.Configuration, x.Determination, x.EvidenceReference, x.ExecutedAt, x.RecordedAt, x.ReleaseId, x.SoftwareBuildId, x.RetestOfExecutionId, evidence = evidence.Where(e => e.TestExecutionId == x.Id).Select(e => new { e.Id, e.OriginalFileName, e.Size, e.Sha256, e.UploadedAt }) }));
         });
 
         app.MapGet("/api/verification-coverage", async (Guid projectId, Guid? baselineId, Guid? buildId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
@@ -979,4 +1054,7 @@ public static class VerificationEndpoints
         string Title,
         string Level,
         string State);
+
+    private sealed record ProcedureListItem(Guid Id, string BaseNumber, string OwnerId,
+        TestProcedureLevel Level, DateTimeOffset CreatedAt);
 }

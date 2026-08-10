@@ -277,10 +277,12 @@ test('an approved procedure beyond the former 200-row limit is searchable in the
 
   // The current unsaved choice is hydrated alongside the search result: changing the search to something
   // that would normally exclude procedure A must not remove A from the DOM, because the resolve mutation
-  // reads procedureId from the select. This search matches more than one page (groups 100-199) while
-  // excluding procedure A (group 250), so the metadata describes the cross-page match count as matches
-  // and separately states that the current selection is kept visible independently of the search.
-  await searchProcedures.fill('group 1')
+  // reads procedureId from the select. This controlled-number search matches more than one page
+  // (LLRTP-000100 through LLRTP-000199) while excluding procedure A (LLRTP-000250), so the metadata
+  // describes the cross-page match count as matches and separately states that the current selection is
+  // kept visible independently of the search. These showcase revisions predate exact TCR title snapshots;
+  // their mutable catalog titles are deliberately not treated as revision-specific search evidence.
+  await searchProcedures.fill('LLRTP-0001')
   await expect(decide).toContainText('100 matching approved procedures.', { timeout: 30_000 })
   await expect(decide).toContainText('Current selection is kept visible independently of the search.', { timeout: 30_000 })
   await expect(decide.locator('select[name="procedureId"] option').filter({ hasText: 'LLRTP-000250' }))

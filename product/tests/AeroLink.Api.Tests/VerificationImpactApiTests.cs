@@ -237,7 +237,10 @@ public sealed class VerificationImpactApiTests
             Assert.Equal(procedureRevisionId, body.GetProperty("resolvedProcedureRevisionId").GetGuid());
             var selected = body.GetProperty("resolvedProcedure");
             Assert.Equal("SYSTP-00000999.02", selected.GetProperty("displayNumber").GetString());
-            Assert.Equal("Exact retained decision evidence", selected.GetProperty("title").GetString());
+            Assert.StartsWith("Legacy procedure SYSTP-00000999.02", selected.GetProperty("title").GetString());
+            Assert.False(selected.GetProperty("titleIsExact").GetBoolean());
+            Assert.True(selected.GetProperty("titleIsLegacy").GetBoolean());
+            Assert.Contains("exact historical title was not recorded", selected.GetProperty("titleNote").GetString());
             Assert.Equal(requirementRevisionId,
                 selected.GetProperty("configuration").GetProperty("requirementRevisionId").GetGuid());
             Assert.Equal("eng.user", body.GetProperty("resolvedBy").GetString());

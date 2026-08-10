@@ -363,7 +363,10 @@ public static class ProblemReportEndpoints
             if (procedure is not null)
             {
                 originExecutionId = execution!.Id; procedureId = procedure.Id; procedureRevisionId = revision!.Id;
-                procedureNumber = procedure.BaseNumber; procedureTitle = procedure.Title; procedureLevel = procedure.Level;
+                var projectedTitle = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+                    [revision.Id], ct);
+                procedureNumber = procedure.BaseNumber; procedureTitle = projectedTitle[revision.Id].Title;
+                procedureLevel = procedure.Level;
             }
         }
 
