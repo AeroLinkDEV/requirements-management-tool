@@ -175,6 +175,43 @@ public sealed class ReleasedExecutionEvidenceApiTests
         Assert.False(await verify.TestExecutionEvidence.AnyAsync(x => x.Id == linkId));
     }
 
+    [Fact]
+    public async Task A_stale_tracked_in_work_release_cannot_bypass_a_concurrent_release()
+    {
+        using var root = new AeroLinkApiFactory();
+        using var factory = GuardedFactory(root);
+        var scenario = await SeedAsync(factory.Services);
+        Guid linkId;
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var staleRelease = await db.Releases.SingleAsync(x => x.Id == scenario.InWorkReleaseId);
+            Assert.False(staleRelease.IsReleased);
+
+            // Change the authoritative database row without refreshing the tracked entity. An interceptor that
+            // blindly trusts EntityState.Unchanged would still see false and append evidence after release.
+            await db.Releases.Where(x => x.Id == scenario.InWorkReleaseId)
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(x => x.IsReleased, true)
+                    .SetProperty(x => x.ReleasedAt, DateTimeOffset.UtcNow));
+            Assert.False(staleRelease.IsReleased);
+
+            var link = new TestExecutionEvidence(scenario.InWorkExecutionId, scenario.InWorkEvidenceId);
+            linkId = link.Id;
+            db.Add(link);
+
+            var exception = await Assert.ThrowsAsync<ReleasedBuildReadOnlyException>(() => db.SaveChangesAsync());
+            Assert.Contains("released build", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        using var verifyScope = factory.Services.CreateScope();
+        var verify = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.False(await verify.TestExecutionEvidence.AnyAsync(x => x.Id == linkId));
+        Assert.False(await verify.TestExecutionEvidence.AnyAsync(x => x.TestExecutionId == scenario.InWorkExecutionId
+            && x.EvidenceId == scenario.InWorkEvidenceId));
+    }
+
     private static WebApplicationFactory<Program> GuardedFactory(AeroLinkApiFactory root) =>
         root.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
