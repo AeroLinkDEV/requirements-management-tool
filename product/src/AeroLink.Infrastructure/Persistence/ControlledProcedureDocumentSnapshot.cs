@@ -106,9 +106,9 @@ public static class ControlledProcedureDocumentSnapshotProjection
                 .ToList();
         }
 
-        // Exact controlled revisions use the title in their immutable source-TCR snapshot. Legacy revisions
-        // retain the stable catalog title with the projection's explicit compatibility semantics. This prevents
-        // later catalog activity from rewriting a post-controlled document while refusing to invent old truth.
+        // Exact controlled revisions use the title in their immutable source-TCR snapshot. A revision whose
+        // title predates that provenance receives a deterministic, revision-specific compatibility label; the
+        // mutable catalog title is never allowed to rewrite an already-created controlled document.
         var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
             rows.Select(x => x.RevisionId).ToList(), ct);
         rows = rows.Select(row => row with { Title = titles[row.RevisionId].Title }).ToList();
