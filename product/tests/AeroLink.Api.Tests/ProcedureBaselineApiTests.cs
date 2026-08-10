@@ -253,20 +253,35 @@ public sealed class ProcedureBaselineApiTests
                 .SetProperty(x => x.ReleasedAt, DateTimeOffset.UtcNow));
     }
 
-    private static async Task<string> SnapshotProcedureStateAsync(AeroLinkApiFactory factory, Guid baselineId)
+    private static async Task<string> CaptureProcedureStateAsync(AeroLinkApiFactory factory, Guid baselineId)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var baseline = await db.CandidateBaselines.Include(x => x.TestChangeSelections).Include(x => x.Events)
             .SingleAsync(x => x.Id == baselineId);
-        var selected = string.Join(",", baseline.TestChangeSelections
-            .Select(x => x.TestChangeRequestId).OrderBy(x => x));
-        var manifestRows = await db.BaselineTestProcedures.CountAsync(x => x.BaselineId == baselineId);
-        var revisions = await db.TestProcedureRevisions.CountAsync();
-        var coverage = await db.TestCoverage.CountAsync();
-        var impacts = string.Join(",", (await db.VerificationImpactItems.AsNoTracking().ToListAsync())
-            .Select(x => $"{x.Id}:{x.State}"));
-        return $"{selected}|{manifestRows}|{baseline.TestProceduresHash}|{baseline.TestProceduresMaterializedAt}|{baseline.Events.Count}|{revisions}|{coverage}|{impacts}";
+        var selected = string.Join("|", baseline.TestChangeSelections
+            .OrderBy(x => x.TestChangeRequestId)
+            .Select(x => x.TestChangeRequestId.ToString()));
+        var manifest = string.Join("|", (await db.BaselineTestProcedures.AsNoTracking()
+            .Where(x => x.BaselineId == baselineId)
+            .OrderBy(x => x.ProcedureId).ThenBy(x => x.RevisionId)
+            .Select(x => $"{x.BaselineId}:{x.ProcedureId}:{x.RevisionId}").ToListAsync()));
+        var events = string.Join("|", baseline.Events
+            .OrderBy(x => x.OccurredAt).ThenBy(x => x.EventType)
+            .Select(x => $"{x.EventType}:{x.ActorId}:{x.Detail}:{x.OccurredAt:O}"));
+        var revisions = string.Join("|", (await db.TestProcedureRevisions.AsNoTracking()
+            .OrderBy(x => x.Id)
+            .Select(x => $"{x.Id}:{x.ProcedureId}:{x.Revision}:{x.State}:{x.Objective}:{x.Preconditions}:{x.Steps}:{x.ExpectedResult}:{x.AuthorId}:{x.CreatedAt:O}:{x.SourceTestChangeRequestId}:{x.EffectiveBaselineId}").ToListAsync()));
+        var coverage = string.Join("|", (await db.TestCoverage.AsNoTracking()
+            .OrderBy(x => x.ProcedureRevisionId).ThenBy(x => x.RequirementRevisionId)
+            .Select(x => $"{x.ProcedureRevisionId}:{x.RequirementRevisionId}:{x.IsSuspect}:{x.SuspectReason}:{x.ConfirmedBy}:{x.ConfirmedAt:O}").ToListAsync()));
+        var impacts = string.Join("|", (await db.VerificationImpactItems.AsNoTracking()
+            .OrderBy(x => x.Id)
+            .Select(x => $"{x.Id}:{x.State}:{x.Outcome}:{x.ResolvedProcedureRevisionId}:{x.ResolutionRationale}:{x.ResolvedAt:O}").ToListAsync()));
+        var history = string.Join("|", (await db.VerificationImpactDecisionHistory.AsNoTracking().ToListAsync())
+            .OrderBy(x => x.VerificationImpactItemId).ThenBy(x => x.OccurredAt)
+            .Select(x => $"{x.VerificationImpactItemId}:{x.Action}:{x.Outcome}:{x.ProcedureId}:{x.ProcedureRevisionId}:{x.Rationale}:{x.ActorId}:{x.OccurredAt:O}"));
+        return $"{selected}|{manifest}|{baseline.TestProceduresHash}|{baseline.TestProceduresMaterializedAt:O}|{events}|{revisions}|{coverage}|{impacts}|{history}";
     }
 
     [Fact]
@@ -279,7 +294,7 @@ public sealed class ProcedureBaselineApiTests
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
         await ReleaseAsync(factory, fixture.BaselineId);
-        var before = await SnapshotProcedureStateAsync(factory, fixture.BaselineId);
+        var before = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
 
         // The TCR is otherwise eligible (approved, carrying procedure work) and NOT already selected, so on
         // unmodified main this POST succeeds; only the released baseline can refuse it.
@@ -288,7 +303,7 @@ public sealed class ProcedureBaselineApiTests
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Contains("Released baselines are immutable", await refused.Content.ReadAsStringAsync());
 
-        var after = await SnapshotProcedureStateAsync(factory, fixture.BaselineId);
+        var after = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
         Assert.Equal(before, after);
     }
 
@@ -307,20 +322,48 @@ public sealed class ProcedureBaselineApiTests
             new { testChangeRequestId = fixture.TcrId });
         Assert.Equal(HttpStatusCode.OK, selected.StatusCode);
         await ReleaseAsync(factory, fixture.BaselineId);
-        var before = await SnapshotProcedureStateAsync(factory, fixture.BaselineId);
+        var before = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
 
         using var refused = await client.DeleteAsync(
             $"/api/baselines/{fixture.BaselineId}/test-change-requests/{fixture.TcrId}");
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Contains("Released baselines are immutable", await refused.Content.ReadAsStringAsync());
 
-        var after = await SnapshotProcedureStateAsync(factory, fixture.BaselineId);
+        var after = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
         Assert.Equal(before, after);
         Assert.Contains(fixture.TcrId.ToString(), after);
     }
 
     [Fact]
-    public async Task A_released_baseline_refuses_materializing_a_manifest_without_build_context()
+    public async Task A_released_baseline_refuses_materializing_with_a_selected_tcr_without_build_context()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "baseline.cm");
+        await MaterializeRequirementsAsync(client, fixture.BaselineId);
+        await PrepareCarryingPackageAsync(factory, fixture);
+
+        // The dangerous full path: the valid approved TCR is selected while the baseline is Frozen, so
+        // materialization would otherwise create procedure revisions, coverage rows, manifest membership
+        // and impact-decision settlement.
+        using var selected = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests",
+            new { testChangeRequestId = fixture.TcrId });
+        Assert.Equal(HttpStatusCode.OK, selected.StatusCode);
+        await ReleaseAsync(factory, fixture.BaselineId);
+        var before = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
+
+        using var refused = await client.PostAsJsonAsync(
+            $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("Freeze the baseline before materializing its test procedures", await refused.Content.ReadAsStringAsync());
+
+        var after = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
+        Assert.Equal(before, after);
+    }
+
+    [Fact]
+    public async Task A_released_baseline_refuses_materializing_an_empty_manifest_without_build_context()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -329,15 +372,94 @@ public sealed class ProcedureBaselineApiTests
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
         await ReleaseAsync(factory, fixture.BaselineId);
-        var before = await SnapshotProcedureStateAsync(factory, fixture.BaselineId);
+        var before = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
 
         using var refused = await client.PostAsJsonAsync(
             $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Contains("Freeze the baseline before materializing its test procedures", await refused.Content.ReadAsStringAsync());
 
-        var after = await SnapshotProcedureStateAsync(factory, fixture.BaselineId);
+        var after = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
         Assert.Equal(before, after);
+    }
+
+    [Fact]
+    public async Task Select_remove_select_materialize_fixes_the_exact_manifest_once()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "baseline.cm");
+        await MaterializeRequirementsAsync(client, fixture.BaselineId);
+        await PrepareCarryingPackageAsync(factory, fixture);
+
+        // select -> remove -> select again
+        using var firstSelect = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests",
+            new { testChangeRequestId = fixture.TcrId });
+        Assert.Equal(HttpStatusCode.OK, firstSelect.StatusCode);
+        using var removed = await client.DeleteAsync(
+            $"/api/baselines/{fixture.BaselineId}/test-change-requests/{fixture.TcrId}");
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+        using var reselect = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests",
+            new { testChangeRequestId = fixture.TcrId });
+        Assert.Equal(HttpStatusCode.OK, reselect.StatusCode);
+
+        // Record the engineering decision the materializer is expected to settle: the awaiting impact item
+        // is resolved as NewProcedureRequired against the exact linked requirement revision.
+        using (var resolveScope = factory.Services.CreateScope())
+        {
+            var resolveDb = resolveScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var awaitingItem = await resolveDb.VerificationImpactItems.SingleAsync(x => x.TestChangeReviewId == fixture.TcrId);
+            awaitingItem.Resolve("verification.engineer", VerificationImpactOutcome.NewProcedureRequired,
+                "A volume procedure will verify this requirement.", DateTimeOffset.UtcNow);
+            await resolveDb.SaveChangesAsync();
+        }
+
+        using var materialized = await client.PostAsJsonAsync(
+            $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
+        var materializedBody = await materialized.Content.ReadAsStringAsync();
+        Assert.True(materialized.StatusCode == HttpStatusCode.OK, $"{(int)materialized.StatusCode}: {materializedBody}");
+        var result = JsonSerializer.Deserialize<JsonElement>(materializedBody);
+        Assert.Equal(1, result.GetProperty("activeProcedureCount").GetInt32());
+        Assert.Equal(1, result.GetProperty("createdRevisionCount").GetInt32());
+
+        using var verifyScope = factory.Services.CreateScope();
+        var db = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var baseline = await db.CandidateBaselines.Include(x => x.TestChangeSelections).SingleAsync(x => x.Id == fixture.BaselineId);
+        Assert.Single(baseline.TestChangeSelections);
+        Assert.Equal(fixture.TcrId, baseline.TestChangeSelections.Single().TestChangeRequestId);
+        Assert.NotNull(baseline.TestProceduresMaterializedAt);
+        Assert.Equal(64, baseline.TestProceduresHash!.Length);
+
+        var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).SingleAsync(x => x.Id == fixture.TcrId);
+        var request = await db.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == review.ChangeRequestId);
+        var requirementRevision = await db.RequirementRevisions.SingleAsync(x => x.SourceChangeRequestId == request.Id);
+        var procedure = await db.TestProcedures.SingleAsync(x => x.BaseNumber == "SYSTP-000931");
+
+        // Exact procedure revision created with the exact source TCR and effective baseline.
+        var revision = await db.TestProcedureRevisions.SingleAsync(x => x.ProcedureId == procedure.Id);
+        Assert.Equal(fixture.TcrId, revision.SourceTestChangeRequestId);
+        Assert.Equal(fixture.BaselineId, revision.EffectiveBaselineId);
+        Assert.Equal(0, revision.Revision);
+        Assert.Equal(TestProcedureState.Approved, revision.State);
+
+        // Exact baseline manifest membership and exact requirement coverage.
+        Assert.True(await db.BaselineTestProcedures.AnyAsync(x => x.BaselineId == fixture.BaselineId
+            && x.ProcedureId == procedure.Id && x.RevisionId == revision.Id));
+        Assert.True(await db.TestCoverage.AnyAsync(x => x.ProcedureRevisionId == revision.Id
+            && x.RequirementRevisionId == requirementRevision.Id));
+
+        // The awaiting decision is settled against the exact approved procedure revision.
+        var item = await db.VerificationImpactItems.SingleAsync(x => x.TestChangeReviewId == fixture.TcrId);
+        Assert.Equal(VerificationImpactState.Resolved, item.State);
+        Assert.Equal(revision.Id, item.ResolvedProcedureRevisionId);
+        Assert.True(await db.VerificationImpactDecisionHistory.AnyAsync(x => x.VerificationImpactItemId == item.Id
+            && x.ProcedureRevisionId == revision.Id));
+
+        // Fixed exactly once.
+        using var again = await client.PostAsJsonAsync(
+            $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
+        Assert.Equal(HttpStatusCode.BadRequest, again.StatusCode);
     }
 
     [Fact]
@@ -351,7 +473,7 @@ public sealed class ProcedureBaselineApiTests
         await PrepareCarryingPackageAsync(factory, fixture);
         await ReleaseAsync(factory, fixture.BaselineId);
         await MarkReleaseReleasedAsync(factory, fixture.ReleaseId);
-        var before = await SnapshotProcedureStateAsync(factory, fixture.BaselineId);
+        var before = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
 
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", fixture.ReleaseId.ToString());
         using var refusedSelect = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests",
@@ -372,7 +494,7 @@ public sealed class ProcedureBaselineApiTests
         Assert.Equal(HttpStatusCode.Conflict, refusedMaterialize.StatusCode);
         Assert.Contains("released_build_read_only", materializeBody);
 
-        var after = await SnapshotProcedureStateAsync(factory, fixture.BaselineId);
+        var after = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
         Assert.Equal(before, after);
     }
 }
