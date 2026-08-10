@@ -42,8 +42,15 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             ControlledDocumentType.HighLevelTestProcedures => await ProcedurePublicationRows(document.BaselineId, TestProcedureLevel.HighLevel, ct),
             _ => await ProcedurePublicationRows(document.BaselineId, TestProcedureLevel.LowLevel, ct)
         };
-        var isProcedureDocument = document.Type is ControlledDocumentType.SystemTestProcedures or ControlledDocumentType.HighLevelTestProcedures or ControlledDocumentType.LowLevelTestProcedures;
-        var approvals = await ApprovalBasis(document.BaselineId, document.ReleaseId, document.GeneratedAt, ct, isProcedureDocument); var createdBy = (await db.BaselineEvents.AsNoTracking().Where(x => x.BaselineId == baseline.Id && x.EventType == "CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x => x.OccurredAt).Select(x => x.ActorId).FirstOrDefault() ?? "system";
+        var approvalProcedureLevel = document.Type switch
+        {
+            ControlledDocumentType.SystemTestProcedures => TestProcedureLevel.System,
+            ControlledDocumentType.HighLevelTestProcedures => TestProcedureLevel.HighLevel,
+            ControlledDocumentType.LowLevelTestProcedures => TestProcedureLevel.LowLevel,
+            _ => (TestProcedureLevel?)null,
+        };
+        var isProcedureDocument = approvalProcedureLevel is not null;
+        var approvals = await ApprovalBasis(document.BaselineId, document.ReleaseId, document.GeneratedAt, ct, approvalProcedureLevel); var createdBy = (await db.BaselineEvents.AsNoTracking().Where(x => x.BaselineId == baseline.Id && x.EventType == "CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x => x.OccurredAt).Select(x => x.ActorId).FirstOrDefault() ?? "system";
         var releasedWhenGenerated = release.IsReleased && (release.ReleasedAt is null || release.ReleasedAt <= document.GeneratedAt);
         var status = releasedWhenGenerated ? "Approved and Released" : "Controlled Draft"; var type = DocumentTypeName(document.Type);
 
@@ -216,25 +223,34 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             .Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), level + " Test Procedure", x.Title, x.Objective, new[] { ("State", x.State.ToString()), ("Author / owner", x.AuthorId), ("Preconditions", x.Preconditions), ("Procedure steps", x.Steps), ("Expected result", x.ExpectedResult), ("Source test change request", x.SourceTestChangeRequestId is null ? "Legacy / unattributed" : tcrDisplay.GetValueOrDefault(x.SourceTestChangeRequestId.Value, "Unknown TCR")) })).ToList();
     }
     private async Task<List<PublicationApproval>> ApprovalBasis(Guid baselineId, Guid releaseId,
-        DateTimeOffset generatedAt, CancellationToken ct, bool testProcedureDocument = false)
+        DateTimeOffset generatedAt, CancellationToken ct, TestProcedureLevel? procedureLevel = null)
     {
         var scrIds = await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == baselineId).Select(x => x.ChangeRequestId).ToListAsync(ct);
         var cycles = (await db.ReviewCycles.AsNoTracking().Include(x => x.Steps).Where(x => x.ChangeRequestId != null && scrIds.Contains(x.ChangeRequestId.Value) && x.State == ReviewCycleState.Approved).ToListAsync(ct)).Where(x => x.CompletedAt <= generatedAt).ToList();
-        var scrRole = testProcedureDocument ? "Upstream Change Authority" : "Change Authority";
+        var scrRole = procedureLevel is not null ? "Upstream Change Authority" : "Change Authority";
         var approvals = cycles.SelectMany(x => x.Steps.Where(s => s.State == ApprovalStepState.Approved && s.DecidedAt <= generatedAt).Select(s => new PublicationApproval(scrRole, s.ApproverName, s.ApproverId, "Approved", s.DecidedAt))).ToList();
-        // #420: a test-procedure document's approval authority is the exact approved TCR package, not the
-        // requirement change review. TCR signatures authorize the materialized procedure revisions (DEC-103).
-        var tcrIds = await db.BaselineTestChangeSelections.AsNoTracking()
-            .Where(x => x.BaselineId == baselineId).Select(x => x.TestChangeRequestId).ToListAsync(ct);
-        var tcrCycles = (await db.ReviewCycles.AsNoTracking().Include(x => x.Steps)
-                .Where(x => x.TestChangeReviewId != null && tcrIds.Contains(x.TestChangeReviewId.Value)
-                            && x.State == ReviewCycleState.Approved).ToListAsync(ct))
-            .Where(x => x.CompletedAt <= generatedAt).ToList();
-        approvals.AddRange(tcrCycles.SelectMany(x => x.Steps
-            .Where(s => s.State == ApprovalStepState.Approved && s.DecidedAt <= generatedAt)
-            .Select(s => new PublicationApproval(
-                string.IsNullOrWhiteSpace(s.StageName) ? "Test Change Authority" : $"Test Change Authority · {s.StageName}",
-                s.ApproverName, s.ApproverId, "Approved", s.DecidedAt))));
+        if (procedureLevel is not null)
+        {
+            // The carried revision is the authority link. A successor baseline may inherit a revision whose
+            // original TCR is not selected again, while a selected retire-only or other-discipline TCR does
+            // not authorize a record in this document. Derive exactly from this discipline's manifest rows.
+            var tcrIds = await (from member in db.BaselineTestProcedures.AsNoTracking().Where(x => x.BaselineId == baselineId)
+                                join revision in db.TestProcedureRevisions.AsNoTracking() on member.RevisionId equals revision.Id
+                                join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == procedureLevel.Value)
+                                    on member.ProcedureId equals procedure.Id
+                                where revision.SourceTestChangeRequestId != null
+                                select revision.SourceTestChangeRequestId!.Value)
+                .Distinct().ToListAsync(ct);
+            var tcrCycles = (await db.ReviewCycles.AsNoTracking().Include(x => x.Steps)
+                    .Where(x => x.TestChangeReviewId != null && tcrIds.Contains(x.TestChangeReviewId.Value)
+                                && x.State == ReviewCycleState.Approved).ToListAsync(ct))
+                .Where(x => x.CompletedAt <= generatedAt).ToList();
+            approvals.AddRange(tcrCycles.SelectMany(x => x.Steps
+                .Where(s => s.State == ApprovalStepState.Approved && s.DecidedAt <= generatedAt)
+                .Select(s => new PublicationApproval(
+                    string.IsNullOrWhiteSpace(s.StageName) ? "Test Change Authority" : $"Test Change Authority · {s.StageName}",
+                    s.ApproverName, s.ApproverId, "Approved", s.DecidedAt))));
+        }
         var campaigns = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
         approvals.AddRange(campaigns.SelectMany(x => x.Approvals.Where(a => a.State == AeroLink.Domain.Releases.ReleaseApprovalState.Approved && a.ApprovedAt <= generatedAt).Select(a => new PublicationApproval("Release Authority", a.ApproverName, a.ApproverId, "Approved", a.ApprovedAt))));
         return approvals.GroupBy(x => new { x.Role, x.UserId }).Select(x => x.OrderByDescending(a => a.DecidedAt).First()).OrderBy(x => x.Role).ThenBy(x => x.Name).ToList();
