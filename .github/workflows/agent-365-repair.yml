@@ -1,0 +1,63 @@
+name: Agent 365 repair patch
+
+on:
+  push:
+    branches:
+      - agent/365-tcr-supersession-browser
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ contains(github.event.head_commit.message, '[agent-365-run-repair]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Apply the focused patch and remove the obsolete local
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/agent-365-apply.yml').read_text(encoding='utf-8').splitlines()
+          start = next(index for index, line in enumerate(workflow) if "python - <<'PY'" in line)
+          end = next(index for index in range(start + 1, len(workflow)) if workflow[index].strip() == 'PY')
+          source = '\n'.join(line[10:] if line.startswith('          ') else line for line in workflow[start + 1:end])
+          exec(compile(source, 'agent-365-embedded-patch.py', 'exec'))
+
+          path = Path('product/client/src/TestChangeRequestWorkspace.tsx')
+          text = path.read_text(encoding='utf-8')
+          obsolete = "  const open=item?.state==='Open'\n"
+          if text.count(obsolete) != 1:
+              raise RuntimeError(f'expected one obsolete open local, found {text.count(obsolete)}')
+          path.write_text(text.replace(obsolete, ''), encoding='utf-8')
+          PY
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+
+      - name: Validate and publish product changes
+        shell: bash
+        run: |
+          cd product/client
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run build
+          cd ../..
+          git diff --check
+          git config user.name "seanmccarthyns"
+          git config user.email "seanmccarthyns@gmail.com"
+          git add product/client/src/TestChangeRequestWorkspace.tsx product/client/src/TestingCoverageWorkspace.tsx
+          git commit -m "[agent-365-applied] Complete TCR supersession browser history"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
