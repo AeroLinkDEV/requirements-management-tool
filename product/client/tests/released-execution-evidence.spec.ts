@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Route } from '@playwright/test'
 import { apiBase, apiLogin, login, openNavigationGroup, showcaseSeed } from './auth'
 
 type Workspace = {
@@ -9,21 +9,24 @@ type Workspace = {
   }[]
 }
 
+type TestProcedureRow = {
+  displayNumber: string
+  latestExecutionId?: string | null
+  hasEvidence: boolean
+}
+
 type TestSet = {
   discipline: 'System' | 'HighLevelSoftware' | 'LowLevelSoftware'
-  procedures: {
-    displayNumber: string
-    latestExecutionId?: string | null
-    hasEvidence: boolean
-  }[]
+  procedures: TestProcedureRow[]
 }
 
 /**
  * #423 — a released execution stays readable but cannot acquire another ordinary evidence relationship.
  *
- * The API regressions prove the headerless/server-authority path. This journey proves the user-facing side of
- * the same invariant: a released workspace exposes the existing run/evidence history and no attach/result/test-
- * set mutation control, even to an administrator.
+ * The API regressions prove the real persistence/history path, including existing evidence linked before
+ * release. The stable showcase does not itself seed an evidence file on its released execution, so this UI
+ * journey augments the two read responses with one already-linked evidence row. That keeps the browser proof
+ * focused on its responsibility: render immutable released history while exposing no mutation control.
  */
 test('released test results keep evidence history readable and expose no evidence mutation', async ({ page, request }) => {
   test.setTimeout(180_000)
@@ -41,10 +44,36 @@ test('released test results keep evidence history readable and expose no evidenc
   const setResponse = await request.get(`${apiBase}/api/releases/${released!.id}/test-sets`)
   expect(setResponse.ok(), await setResponse.text()).toBeTruthy()
   const sets = await setResponse.json() as TestSet[]
-  const set = sets.find(item => item.procedures.some(procedure =>
-    procedure.latestExecutionId && procedure.hasEvidence))
-  const procedure = set?.procedures.find(item => item.latestExecutionId && item.hasEvidence)
-  expect(set && procedure, 'the released showcase keeps a run with linked evidence').toBeTruthy()
+  const set = sets.find(item => item.procedures.some(procedure => procedure.latestExecutionId))
+  const procedure = set?.procedures.find(item => item.latestExecutionId)
+  expect(set && procedure, 'the released showcase keeps a readable execution').toBeTruthy()
+  const executionId = procedure!.latestExecutionId!
+
+  const augmentTestSets = async (route: Route) => {
+    const response = await route.fetch()
+    const body = await response.json() as TestSet[]
+    for (const candidate of body) {
+      const exact = candidate.procedures.find(item => item.displayNumber === procedure!.displayNumber)
+      if (exact) exact.hasEvidence = true
+    }
+    await route.fulfill({ response, json: body })
+  }
+  const augmentExecutionHistory = async (route: Route) => {
+    const response = await route.fetch()
+    const body = await response.json() as ({ id: string; evidence: unknown[] }[])
+    const exact = body.find(item => item.id === executionId)
+    expect(exact, 'the released execution remains in history').toBeTruthy()
+    exact!.evidence = [{
+      id: '00000000-0000-0000-0000-000000423001',
+      originalFileName: 'released-existing.txt',
+      sha256: 'a'.repeat(64),
+      size: 42,
+      uploadedAt: '2026-08-09T12:00:00Z',
+    }]
+    await route.fulfill({ response, json: body })
+  }
+  await page.route(`**/api/releases/${released!.id}/test-sets`, augmentTestSets)
+  await page.route('**/api/test-executions?**', augmentExecutionHistory)
 
   await login(page, 'admin', { openProject: false })
   await page.goto(
@@ -70,5 +99,6 @@ test('released test results keep evidence history readable and expose no evidenc
   await row.getByRole('button', { name: 'Runs' }).click()
   const history = row.locator('.runList')
   await expect(history.locator('li').first()).toBeVisible()
-  await expect(history).toContainText(/evidence file/)
+  await expect(history).toContainText('released-existing.txt')
+  await expect(history).toContainText('evidence file')
 })
