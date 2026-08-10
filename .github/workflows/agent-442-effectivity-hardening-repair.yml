@@ -1,0 +1,63 @@
+name: Issue 442 release-effectivity hardening repair
+
+on:
+  push:
+    branches:
+      - agent/442-retirement-title-search
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ contains(github.event.head_commit.message, '[agent-442-effectivity-hardening-repair]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Apply release-effectivity hardening
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/agent-442-effectivity-hardening.yml').read_text(encoding='utf-8').splitlines()
+          start = next(i for i, line in enumerate(workflow) if line.strip() == "python - <<'PY'")
+          end = next(i for i in range(start + 1, len(workflow)) if line_is_end(workflow[i]))
+          source = textwrap.dedent('\n'.join(workflow[start + 1:end]))
+          exec(compile(source, 'agent-442-effectivity-hardening.py', 'exec'))
+
+          def line_is_end(line: str) -> bool:
+              return line.strip() == 'PY'
+          PY
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate release-scoped universal search
+        shell: bash
+        run: |
+          dotnet restore product/AeroLink.slnx
+          dotnet build product/AeroLink.slnx --configuration Release --no-restore --verbosity minimal
+          dotnet test product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj \
+            --configuration Release --no-build \
+            --filter "FullyQualifiedName~TestProcedureRevisionHistoryApiTests" \
+            --logger "console;verbosity=normal"
+
+      - name: Publish effectivity hardening
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "seanmccarthyns"
+          git config user.email "seanmccarthyns@gmail.com"
+          git add product/src/AeroLink.Api/WorkspaceEndpoints.cs \
+            product/tests/AeroLink.Api.Tests/TestProcedureRevisionHistoryApiTests.cs
+          git commit -m "Keep authoritative title search inside release effectivity (#442)"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
