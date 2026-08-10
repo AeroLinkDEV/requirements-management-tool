@@ -66,10 +66,8 @@ public sealed class ReleasedExecutionEvidenceInterceptor : SaveChangesIntercepto
         try
         {
             foreach (var executionId in executionIds)
-            {
-                var releaseId = ResolveReleaseId(db, connection, executionId);
-                if (releaseId is Guid id && IsReleaseMarkedReleased(db, connection, id)) ThrowReleased();
-            }
+            foreach (var releaseId in ResolveReleaseIds(db, connection, executionId))
+                if (IsReleaseMarkedReleased(db, connection, releaseId)) ThrowReleased();
         }
         finally
         {
@@ -90,11 +88,8 @@ public sealed class ReleasedExecutionEvidenceInterceptor : SaveChangesIntercepto
         try
         {
             foreach (var executionId in executionIds)
-            {
-                var releaseId = await ResolveReleaseIdAsync(db, connection, executionId, cancellationToken);
-                if (releaseId is Guid id
-                    && await IsReleaseMarkedReleasedAsync(db, connection, id, cancellationToken)) ThrowReleased();
-            }
+            foreach (var releaseId in await ResolveReleaseIdsAsync(db, connection, executionId, cancellationToken))
+                if (await IsReleaseMarkedReleasedAsync(db, connection, releaseId, cancellationToken)) ThrowReleased();
         }
         finally
         {
@@ -103,43 +98,66 @@ public sealed class ReleasedExecutionEvidenceInterceptor : SaveChangesIntercepto
     }
 
     /// <summary>
-    /// Resolve from tracked entities first. That closes the less-obvious bypass where a future caller adds a
-    /// TestExecution and its TestExecutionEvidence relationship in the same SaveChanges: the execution does not
-    /// exist in the database yet, but its release identity is already present in the unit of work.
+    /// Resolve every configuration authority present on the execution, from tracked entities first. That
+    /// closes both same-SaveChanges writes and inconsistent metadata: ReleaseId and SoftwareBuildId are checked
+    /// independently, so pointing one at an in-work release cannot hide that the other points at a released
+    /// build. Any released authority makes the evidence relationship immutable.
     /// </summary>
-    private static Guid? ResolveReleaseId(AeroLinkDbContext db, DbConnection connection, Guid executionId)
+    private static IReadOnlyCollection<Guid> ResolveReleaseIds(
+        AeroLinkDbContext db, DbConnection connection, Guid executionId)
     {
+        var result = new HashSet<Guid>();
         var tracked = db.ChangeTracker.Entries<TestExecution>()
             .FirstOrDefault(entry => entry.State != EntityState.Deleted && entry.Entity.Id == executionId)?.Entity;
         if (tracked is not null)
         {
-            if (tracked.ReleaseId is Guid releaseId) return releaseId;
-            if (tracked.SoftwareBuildId is not Guid buildId) return null;
-            var trackedBuild = db.ChangeTracker.Entries<SoftwareBuild>()
-                .FirstOrDefault(entry => entry.State != EntityState.Deleted && entry.Entity.Id == buildId)?.Entity;
-            return trackedBuild?.ReleaseId ?? QueryGuid(db, connection, BuildReleaseLookupSql, "@buildId", buildId);
+            if (tracked.ReleaseId is Guid directReleaseId) result.Add(directReleaseId);
+            if (tracked.SoftwareBuildId is Guid buildId)
+            {
+                var trackedBuild = db.ChangeTracker.Entries<SoftwareBuild>()
+                    .FirstOrDefault(entry => entry.State != EntityState.Deleted && entry.Entity.Id == buildId)?.Entity;
+                var buildReleaseId = trackedBuild?.ReleaseId
+                    ?? QueryGuid(db, connection, BuildReleaseLookupSql, "@buildId", buildId);
+                if (buildReleaseId is Guid id) result.Add(id);
+            }
+            return result;
         }
 
-        return QueryGuid(db, connection, ExecutionReleaseLookupSql, "@executionId", executionId);
+        var direct = QueryGuid(db, connection, ExecutionDirectReleaseLookupSql, "@executionId", executionId);
+        if (direct is Guid directId) result.Add(directId);
+        var throughBuild = QueryGuid(db, connection, ExecutionBuildReleaseLookupSql, "@executionId", executionId);
+        if (throughBuild is Guid buildIdValue) result.Add(buildIdValue);
+        return result;
     }
 
-    private static async Task<Guid?> ResolveReleaseIdAsync(AeroLinkDbContext db, DbConnection connection,
-        Guid executionId, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyCollection<Guid>> ResolveReleaseIdsAsync(
+        AeroLinkDbContext db, DbConnection connection, Guid executionId, CancellationToken cancellationToken)
     {
+        var result = new HashSet<Guid>();
         var tracked = db.ChangeTracker.Entries<TestExecution>()
             .FirstOrDefault(entry => entry.State != EntityState.Deleted && entry.Entity.Id == executionId)?.Entity;
         if (tracked is not null)
         {
-            if (tracked.ReleaseId is Guid releaseId) return releaseId;
-            if (tracked.SoftwareBuildId is not Guid buildId) return null;
-            var trackedBuild = db.ChangeTracker.Entries<SoftwareBuild>()
-                .FirstOrDefault(entry => entry.State != EntityState.Deleted && entry.Entity.Id == buildId)?.Entity;
-            return trackedBuild?.ReleaseId
-                ?? await QueryGuidAsync(db, connection, BuildReleaseLookupSql, "@buildId", buildId, cancellationToken);
+            if (tracked.ReleaseId is Guid directReleaseId) result.Add(directReleaseId);
+            if (tracked.SoftwareBuildId is Guid buildId)
+            {
+                var trackedBuild = db.ChangeTracker.Entries<SoftwareBuild>()
+                    .FirstOrDefault(entry => entry.State != EntityState.Deleted && entry.Entity.Id == buildId)?.Entity;
+                var buildReleaseId = trackedBuild?.ReleaseId
+                    ?? await QueryGuidAsync(db, connection, BuildReleaseLookupSql, "@buildId", buildId,
+                        cancellationToken);
+                if (buildReleaseId is Guid id) result.Add(id);
+            }
+            return result;
         }
 
-        return await QueryGuidAsync(db, connection, ExecutionReleaseLookupSql, "@executionId", executionId,
-            cancellationToken);
+        var direct = await QueryGuidAsync(db, connection, ExecutionDirectReleaseLookupSql, "@executionId",
+            executionId, cancellationToken);
+        if (direct is Guid directId) result.Add(directId);
+        var throughBuild = await QueryGuidAsync(db, connection, ExecutionBuildReleaseLookupSql, "@executionId",
+            executionId, cancellationToken);
+        if (throughBuild is Guid buildIdValue) result.Add(buildIdValue);
+        return result;
     }
 
     private static bool IsReleaseMarkedReleased(AeroLinkDbContext db, DbConnection connection, Guid releaseId)
@@ -217,10 +235,16 @@ public sealed class ReleasedExecutionEvidenceInterceptor : SaveChangesIntercepto
             + "Use an explicit post-release amendment workflow for any correction.");
 
     // These names are the explicit ToTable mappings in AeroLinkDbContext and are shared by SQLite/PostgreSQL.
-    private const string ExecutionReleaseLookupSql = """
-        SELECT COALESCE(e."ReleaseId", b."ReleaseId")
+    private const string ExecutionDirectReleaseLookupSql = """
+        SELECT e."ReleaseId"
         FROM "test_executions" AS e
-        LEFT JOIN "software_builds" AS b ON b."Id" = e."SoftwareBuildId"
+        WHERE e."Id" = @executionId
+        """;
+
+    private const string ExecutionBuildReleaseLookupSql = """
+        SELECT b."ReleaseId"
+        FROM "test_executions" AS e
+        JOIN "software_builds" AS b ON b."Id" = e."SoftwareBuildId"
         WHERE e."Id" = @executionId
         """;
 
