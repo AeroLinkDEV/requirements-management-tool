@@ -362,8 +362,27 @@ public static class BaselineEndpoints
             // at generation and never re-resolved: revising a template afterwards must not change a document that
             // has already been produced and possibly signed.
             var approvedTemplates = await ControlledLayouts.ApprovedAsync(db, project.Id, ct);
-            var existing = await db.ControlledDocuments.Where(x => x.BaselineId == id).ToListAsync(ct); foreach (var spec in specs.Where(s => existing.All(x => x.Type != s.Item1))) { var procedureDocument = spec.Item1 is ControlledDocumentType.SystemTestProcedures or ControlledDocumentType.HighLevelTestProcedures or ControlledDocumentType.LowLevelTestProcedures; var manifestHash = procedureDocument ? baseline.TestProceduresHash ?? baseline.RequirementsHash : baseline.RequirementsHash; var content = $"{manifestHash}|{spec.Item1}|{spec.Item4}|{http.UserAccount().UserName}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant(); db.ControlledDocuments.Add(new ControlledDocument(project.Id, release.Id, baseline.Id, spec.Item1, spec.Item2, spec.Item3, 0, hash, spec.Item4, DateTimeOffset.UtcNow, approvedTemplates.GetValueOrDefault(spec.Item1))); }
-            await db.SaveChangesAsync(ct); return Results.Ok(new { generated = await db.ControlledDocuments.CountAsync(x => x.BaselineId == id, ct) });
+            // #419: a controlled test-procedure document is one exact, immutable procedure manifest. The
+            // record must never be created against a compatibility projection that materialization later
+            // changes, and its hash basis must never fall back to the requirement manifest.
+            var procedureManifestReady = baseline.TestProceduresMaterializedAt is not null && baseline.TestProceduresHash is not null;
+            var existing = await db.ControlledDocuments.Where(x => x.BaselineId == id).ToListAsync(ct);
+            var skipped = new List<ControlledDocumentType>();
+            foreach (var spec in specs.Where(s => existing.All(x => x.Type != s.Item1)))
+            {
+                var procedureDocument = spec.Item1 is ControlledDocumentType.SystemTestProcedures or ControlledDocumentType.HighLevelTestProcedures or ControlledDocumentType.LowLevelTestProcedures;
+                if (procedureDocument && !procedureManifestReady)
+                {
+                    skipped.Add(spec.Item1);
+                    continue;
+                }
+                var manifestHash = procedureDocument ? baseline.TestProceduresHash! : baseline.RequirementsHash!;
+                var content = $"{manifestHash}|{spec.Item1}|{spec.Item4}|{http.UserAccount().UserName}";
+                var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
+                db.ControlledDocuments.Add(new ControlledDocument(project.Id, release.Id, baseline.Id, spec.Item1, spec.Item2, spec.Item3, 0, hash, spec.Item4, DateTimeOffset.UtcNow, approvedTemplates.GetValueOrDefault(spec.Item1)));
+            }
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { generated = await db.ControlledDocuments.CountAsync(x => x.BaselineId == id, ct), skipped = skipped.Select(x => x.ToString()).ToArray() });
         });
 
         app.MapGet("/api/release-comparison", async (Guid projectId, Guid fromReleaseId, Guid toReleaseId, AeroLinkDbContext db, CancellationToken ct) =>
