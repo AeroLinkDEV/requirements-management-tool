@@ -1,0 +1,95 @@
+name: PR 439 publish qualified review corrections repair
+
+on:
+  push:
+    branches:
+      - agent/421-424-exact-procedure-history
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ contains(github.event.head_commit.message, '[agent-439-review-fixes-publish-repair]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      AEROLINK_MIGRATIONS_CONNECTION: Host=127.0.0.1;Port=55432;Database=aerolink_migrations_design;Username=postgres;Password=disposable-design-only
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Apply the compile-proven review corrections
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/agent-439-review-fixes-build-diagnostic-2.yml').read_text(encoding='utf-8').splitlines()
+          start = next(i for i, line in enumerate(workflow) if line.strip() == "python - <<'PY'")
+          end = next(i for i in range(start + 1, len(workflow)) if workflow[i].strip() == 'PY')
+          source = textwrap.dedent('\n'.join(workflow[start + 1:end]))
+          exec(compile(source, 'agent-439-qualified-patch.py', 'exec'))
+          PY
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore and compile before migration generation
+        shell: bash
+        run: |
+          dotnet restore product/AeroLink.slnx
+          dotnet build product/AeroLink.slnx --configuration Release --no-restore --verbosity minimal
+
+      - name: Generate additive procedure-provenance migration
+        shell: bash
+        run: |
+          dotnet tool install --global dotnet-ef --version 10.0.9
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet ef migrations add PreserveTestProcedureSourceSnapshots \
+            --project product/src/AeroLink.Infrastructure/AeroLink.Infrastructure.csproj \
+            --startup-project product/src/AeroLink.Api/AeroLink.Api.csproj \
+            --output-dir Persistence/Migrations
+
+      - name: Validate backend and focused regressions
+        shell: bash
+        run: |
+          dotnet build product/AeroLink.slnx --configuration Release --no-restore --verbosity minimal
+          dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj \
+            --configuration Release --no-build \
+            --filter "FullyQualifiedName~TestProcedureRevisionTitleProjectionTests|FullyQualifiedName~TestProcedureProvenanceProjectionTests|FullyQualifiedName~TestProcedureMaterializationTests" \
+            --logger "console;verbosity=normal"
+          dotnet test product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj \
+            --configuration Release --no-build \
+            --filter "FullyQualifiedName~TestProcedureRevisionHistoryApiTests" \
+            --logger "console;verbosity=normal"
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+
+      - name: Validate client compilation
+        working-directory: product/client
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run build
+
+      - name: Publish corrected product
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "seanmccarthyns"
+          git config user.email "seanmccarthyns@gmail.com"
+          git add product
+          git commit -m "Address exact procedure history review findings"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
