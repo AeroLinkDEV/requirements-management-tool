@@ -145,18 +145,22 @@ public sealed class ReleasedExecutionEvidenceInterceptor : SaveChangesIntercepto
     private static bool IsReleaseMarkedReleased(AeroLinkDbContext db, DbConnection connection, Guid releaseId)
     {
         var tracked = db.ChangeTracker.Entries<SoftwareRelease>()
-            .FirstOrDefault(entry => entry.State != EntityState.Deleted && entry.Entity.Id == releaseId)?.Entity;
-        return tracked?.IsReleased ?? IsReleased(QueryScalar(db, connection, ReleaseStateLookupSql, "@releaseId", releaseId));
+            .FirstOrDefault(entry => entry.State != EntityState.Deleted && entry.Entity.Id == releaseId);
+        // Added/Modified state is the current unit of work and has to win, including a release transition in
+        // the same SaveChanges. An Unchanged entity may be stale if another context released the build after it
+        // was loaded, so the database remains authoritative in that case.
+        if (tracked is { State: EntityState.Added or EntityState.Modified }) return tracked.Entity.IsReleased;
+        return IsReleased(QueryScalar(db, connection, ReleaseStateLookupSql, "@releaseId", releaseId));
     }
 
     private static async Task<bool> IsReleaseMarkedReleasedAsync(AeroLinkDbContext db, DbConnection connection,
         Guid releaseId, CancellationToken cancellationToken)
     {
         var tracked = db.ChangeTracker.Entries<SoftwareRelease>()
-            .FirstOrDefault(entry => entry.State != EntityState.Deleted && entry.Entity.Id == releaseId)?.Entity;
-        return tracked?.IsReleased
-            ?? IsReleased(await QueryScalarAsync(db, connection, ReleaseStateLookupSql, "@releaseId", releaseId,
-                cancellationToken));
+            .FirstOrDefault(entry => entry.State != EntityState.Deleted && entry.Entity.Id == releaseId);
+        if (tracked is { State: EntityState.Added or EntityState.Modified }) return tracked.Entity.IsReleased;
+        return IsReleased(await QueryScalarAsync(db, connection, ReleaseStateLookupSql, "@releaseId", releaseId,
+            cancellationToken));
     }
 
     private static Guid? QueryGuid(AeroLinkDbContext db, DbConnection connection, string sql,
