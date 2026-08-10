@@ -54,6 +54,15 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             _ => await ProcedurePublicationRows(procedureSnapshot!, TestProcedureLevel.LowLevel, ct)
         };
         var isProcedureDocument = approvalProcedureLevel is not null;
+        // A document reports the procedure-manifest state that existed when that document was generated, not
+        // the baseline's current state. Exact procedure documents bind directly to their stored content hash;
+        // a legacy record remains explicitly pre-manifest even if the baseline is materialized later.
+        var testProcedureManifestHashAtGeneration = procedureSnapshot?.IsExactManifest == true
+            ? document.ContentHash
+            : baseline.TestProceduresMaterializedAt is not null
+              && baseline.TestProceduresMaterializedAt.Value <= document.GeneratedAt
+                ? baseline.TestProceduresHash ?? "Exact procedure manifest hash unavailable"
+                : "Not materialized when this document was generated";
         var approvals = await ApprovalBasis(document.BaselineId, document.ReleaseId, document.GeneratedAt, ct,
             approvalProcedureLevel, procedureSnapshot); var createdBy = (await db.BaselineEvents.AsNoTracking().Where(x => x.BaselineId == baseline.Id && x.EventType == "CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x => x.OccurredAt).Select(x => x.ActorId).FirstOrDefault() ?? "system";
         var releasedWhenGenerated = release.IsReleased && (release.ReleasedAt is null || release.ReleasedAt <= document.GeneratedAt);
@@ -127,7 +136,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         var publication = new ProfessionalPublication(project.SoftwareProduct, program.Name + " (" + program.Code + ")", project.Name, type, title,
             subtitle, document.DocumentNumber, document.Revision.ToString("D2"), status, release.Version, baseline.DisplayNumber, createdBy, document.GeneratedAt, document.ContentHash,
             [("Controlled records", records.Count.ToString("N0")), ("Baseline content hash", baseline.ContentHash ?? "Not frozen"), ("Requirement manifest hash", baseline.RequirementsHash ?? "Not materialized"),
-             ("Test procedure manifest hash", baseline.TestProceduresHash ?? "Legacy baseline - no exact procedure manifest recorded"),
+             ("Test procedure manifest hash", testProcedureManifestHashAtGeneration),
              ("Test procedure configuration basis", procedureSnapshot is null
                  ? "Not applicable"
                  : procedureSnapshot.IsExactManifest
@@ -136,7 +145,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
              // Named in the front matter so a reader can tell which layout produced what they are holding.
              ("Document template", templateRevision is null ? "Built-in layout" : $"{templateName} revision {templateRevision.Revision} (approved {templateRevision.ApprovedAt.UtcDateTime:yyyy-MM-dd} by {templateRevision.ApprovedBy}, manifest {templateRevision.ManifestHash[..Math.Min(12, templateRevision.ManifestHash.Length)]})"),
              ("Approval basis", isProcedureDocument
-                 ? "Named approvers from the exact approved test change requests that authorized the included procedure revisions, plus completed release approvals recorded by generation time"
+                 ? "Named approvers and snapshot references from the exact approved test change requests that authorized the included procedure revisions; upstream requirement-change authority is labelled separately; completed release approvals remain separate release authority"
                  : "Named approvers from exact approved change requests and completed release approvals recorded by generation time")], approvals,
             new[] { (document.Revision.ToString("D2"), status, document.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd"), createdBy) }, sections);
         return ProfessionalPublicationRenderer.Render(publication, format, $"{document.DocumentNumber}.{document.Revision:D2}_{release.Version}");
@@ -239,15 +248,34 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             // not authorize a record in this document. Derive exactly from this document snapshot.
             var tcrIds = procedureSnapshot.Rows.Where(x => x.SourceTestChangeRequestId is not null)
                 .Select(x => x.SourceTestChangeRequestId!.Value).Distinct().ToList();
+            var tcrDisplay = await db.TestChangeReviews.AsNoTracking()
+                .Where(x => tcrIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.DisplayNumber, ct);
             var tcrCycles = (await db.ReviewCycles.AsNoTracking().Include(x => x.Steps)
                     .Where(x => x.TestChangeReviewId != null && tcrIds.Contains(x.TestChangeReviewId.Value)
                                 && x.State == ReviewCycleState.Approved).ToListAsync(ct))
                 .Where(x => x.CompletedAt <= generatedAt).ToList();
-            approvals.AddRange(tcrCycles.SelectMany(x => x.Steps
-                .Where(s => s.State == ApprovalStepState.Approved && s.DecidedAt <= generatedAt)
-                .Select(s => new PublicationApproval(
-                    string.IsNullOrWhiteSpace(s.StageName) ? "Test Change Authority" : $"Test Change Authority · {s.StageName}",
-                    s.ApproverName, s.ApproverId, "Approved", s.DecidedAt))));
+            foreach (var cycle in tcrCycles)
+            {
+                var tcrNumber = tcrDisplay.GetValueOrDefault(cycle.TestChangeReviewId!.Value, "Unknown TCR");
+                var snapshotReference = string.IsNullOrWhiteSpace(cycle.SnapshotHash)
+                    ? "snapshot unavailable"
+                    : $"snapshot {cycle.SnapshotHash[..Math.Min(12, cycle.SnapshotHash.Length)]}";
+                foreach (var step in cycle.Steps
+                             .Where(s => s.State == ApprovalStepState.Approved && s.DecidedAt <= generatedAt))
+                {
+                    var stage = !string.IsNullOrWhiteSpace(step.StageName)
+                        ? step.StageName
+                        : !string.IsNullOrWhiteSpace(step.Authority)
+                            ? step.Authority
+                            : $"Stage {step.Position + 1}";
+                    var signedAt = step.DecidedAt!.Value.UtcDateTime.ToString("HH:mm 'UTC'");
+                    approvals.Add(new PublicationApproval(
+                        $"Test Change Authority · {tcrNumber} · cycle {cycle.Sequence} · {stage}",
+                        step.ApproverName, step.ApproverId,
+                        $"Approved · signed {signedAt} · {snapshotReference}", step.DecidedAt));
+                }
+            }
         }
         var campaigns = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
         approvals.AddRange(campaigns.SelectMany(x => x.Approvals.Where(a => a.State == AeroLink.Domain.Releases.ReleaseApprovalState.Approved && a.ApprovedAt <= generatedAt).Select(a => new PublicationApproval("Release Authority", a.ApproverName, a.ApproverId, "Approved", a.ApprovedAt))));
