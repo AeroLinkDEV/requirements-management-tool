@@ -92,7 +92,10 @@ public static class ControlledProcedureDocumentSnapshotProjection
                                         revision.CreatedAt,
                                     }).ToListAsync(ct);
             rows = candidates
-                .Where(x => x.CreatedAt <= generatedAt)
+                // A newer Draft is proposed work, not controlled effectivity. Ignore it while selecting the
+                // generation-time revision; a later Retired revision remains eligible and therefore suppresses
+                // the procedure when the final Approved-only filter is applied.
+                .Where(x => x.CreatedAt <= generatedAt && x.State != TestProcedureState.Draft)
                 .GroupBy(x => x.ProcedureId)
                 .Select(group => group.OrderByDescending(x => x.Revision).First())
                 .Where(x => x.State == TestProcedureState.Approved)
