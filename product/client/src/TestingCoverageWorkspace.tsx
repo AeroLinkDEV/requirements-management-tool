@@ -33,6 +33,8 @@ type TestChangeRequest = {
   procedureDecisionCount: number
   discipline: string
   state: string
+  supersededByTestChangeRequestId?: string
+  supersededReason?: string
   version: number
   assignedEngineerId?: string
   selectedApproverId?: string
@@ -401,6 +403,22 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   }, [requirementPicker, requirementSelectionItems])
 
   const mine = requests.filter(x => x.discipline === discipline)
+  const activeMine = mine.filter(x => x.state !== 'Superseded')
+  const supersededChainFor = (current: TestChangeRequest) => {
+    const history: TestChangeRequest[] = []
+    let successorId = current.id
+    for (;;) {
+      const previous = mine.find(candidate =>
+        candidate.state === 'Superseded' && candidate.supersededByTestChangeRequestId === successorId)
+      if (!previous) return history
+      history.push(previous)
+      successorId = previous.id
+    }
+  }
+  const authoringRequest = mine.find(x => x.id === authoring)
+  const authoringSuccessor = authoringRequest?.supersededByTestChangeRequestId
+    ? mine.find(x => x.id === authoringRequest.supersededByTestChangeRequestId)
+    : undefined
 
   const act = async (work: () => Promise<void>, failure: string) => {
     if (busy) return
@@ -615,7 +633,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           <h2>Downstream test assessments</h2>
           <p>Approved upstream changes waiting for an explicit {assessmentName(discipline)} conclusion.</p>
         </div>
-        {!mine.length && (
+        {!activeMine.length && (
           <div className="coverageEmpty">
             <b>No {disciplineLabel(discipline)} test assessments for this build</b>
             <span>Nothing has been approved into this build that {disciplineLabel(discipline)} verification must answer for.</span>
@@ -624,7 +642,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         {/* The requirements queue's row, from its own stylesheet. Identifying text on the left, what the
             assessment concluded in the middle, and one control on the right in every state — what can be done
             about an assessment is decided inside it, not chosen from a row of peers. */}
-        {mine.map(request => (
+        {activeMine.map(request => {
+          const supersededRevisions = supersededChainFor(request)
+          return (
           <article className="downstreamAssessment" data-state={request.state} key={request.id}>
             <div className="downstreamSource">
               <b>{request.coveredChangeRequests.map(x => x.number).join(', ')}</b>
@@ -638,13 +658,24 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                   {request.displayNumber} · {request.state === 'InReview' ? 'In review' : request.state}
                 </button>
               )}
+              {supersededRevisions.length > 0 && (
+                <details className="decisionHistory tcrRevisionHistory">
+                  <summary>Show {supersededRevisions.length} superseded TCR revision{supersededRevisions.length === 1 ? '' : 's'}</summary>
+                  {supersededRevisions.map(prior => (
+                    <button type="button" className="linkedScr" key={prior.id} onClick={() => setAuthoring(prior.id)}>
+                      {prior.displayNumber} · Superseded
+                    </button>
+                  ))}
+                </details>
+              )}
               {request.outcome === 'NoChangeRequired' && request.noChangeRationale && <p>{request.noChangeRationale}</p>}
             </div>
             <div className="downstreamActions">
               <button type="button" className="openAssessment" onClick={() => setOpened(request.id)}>Open assessment</button>
             </div>
           </article>
-        ))}
+          )
+        })}
         <p className="downstreamHelp">
           One {tcrAcronym(discipline)} may answer several assessments, and an assessment records one decision
           for every requirement the change touched.
@@ -962,6 +993,12 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           onClose={() => setAuthoring('')}
           onChanged={() => void load()}
           onOpenRequirementRevision={onOpenRequirementRevision}
+          onOpenTestChangeRequest={setAuthoring}
+          supersededBy={authoringSuccessor ? {
+            id: authoringSuccessor.id,
+            displayNumber: authoringSuccessor.displayNumber,
+            reason: authoringRequest?.supersededReason,
+          } : undefined}
         />
       )}
 
