@@ -20,10 +20,12 @@ public static class DependencyInjection
         if (!isPostgres && !provider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(
                 $"Database:Provider is '{provider}'. AeroLink supports 'PostgreSql' and 'Sqlite'.");
-        services.AddDbContext<AeroLinkDbContext>(options =>
+        services.AddSingleton<ReleasedExecutionEvidenceInterceptor>();
+        services.AddDbContext<AeroLinkDbContext>((serviceProvider, options) =>
         {
             if (isPostgres) options.UseNpgsql(connection);
             else options.UseSqlite(connection);
+            options.AddInterceptors(serviceProvider.GetRequiredService<ReleasedExecutionEvidenceInterceptor>());
         });
         services.AddScoped<IChangeRequestRepository, ChangeRequestRepository>();
         services.AddScoped<IProgramRepository, ProgramRepository>();
