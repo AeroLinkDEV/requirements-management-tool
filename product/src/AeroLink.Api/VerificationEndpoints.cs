@@ -666,29 +666,18 @@ public static class VerificationEndpoints
                 // A build-scoped title is owned by its exact immutable TCR procedure-change snapshot. The
                 // mutable catalog title is deliberately absent from this predicate: searching a predecessor
                 // build for a later title must never find the older revision.
-                var titleMatches = await (from change in db.Set<TestProcedureChange>().AsNoTracking()
-                                          join revision in db.TestProcedureRevisions.AsNoTracking()
-                                              on new
-                                              {
-                                                  ReviewId = (Guid?)change.TestChangeReviewId,
-                                                  change.Revision,
-                                              }
-                                              equals new
-                                              {
-                                                  ReviewId = revision.SourceTestChangeRequestId,
-                                                  revision.Revision,
-                                              }
-                                          join procedure in db.TestProcedures.AsNoTracking()
-                                              on revision.ProcedureId equals procedure.Id
-                                          where procedure.ProjectId == projectId
-                                                && procedure.BaseNumber == change.BaseNumber
-                                                && change.Title.ToLower().Contains(q)
-                                                && (scopedRevisionIds == null
-                                                    ? revision.Revision == db.TestProcedureRevisions
-                                                        .Where(other => other.ProcedureId == procedure.Id)
-                                                        .Max(other => other.Revision)
-                                                    : scopedRevisionIds.Contains(revision.Id))
-                                          select procedure.Id).Distinct().ToListAsync(ct);
+                var titleCandidateRevisionIds = scopedRevisionIds
+            ?? await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                      join procedure in source on revision.ProcedureId equals procedure.Id
+                      where revision.Revision == db.TestProcedureRevisions
+                          .Where(other => other.ProcedureId == procedure.Id)
+                          .Max(other => other.Revision)
+                      select revision.Id).ToListAsync(ct);
+        var titleMatchRevisionIds = await TestProcedureRevisionTitleProjection.MatchingRevisionIdsAsync(
+            db, titleCandidateRevisionIds, q, ct);
+        var titleMatches = await db.TestProcedureRevisions.AsNoTracking()
+            .Where(x => titleMatchRevisionIds.Contains(x.Id))
+            .Select(x => x.ProcedureId).Distinct().ToListAsync(ct);
                 source = source.Where(x => x.BaseNumber.ToLower().Contains(baseQuery)
                                            || titleMatches.Contains(x.Id));
                 if (hasRevision && scopedRevisions is not null)
