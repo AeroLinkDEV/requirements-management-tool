@@ -124,6 +124,26 @@ public static class TestProcedureRevisionTitleProjection
         return requestedRows.ToDictionary(x => x.Id, x => resolved[x.Id]);
     }
 
+    /// <summary>
+    /// Finds exact procedure revisions by the same authoritative title projection every reader displays.
+    /// Raw TCR proposal text is deliberately not a search authority: retirement text is discarded in
+    /// favour of the predecessor title, and legacy compatibility labels remain searchable as displayed.
+    /// </summary>
+    public static async Task<IReadOnlyList<Guid>> MatchingRevisionIdsAsync(
+        AeroLinkDbContext db,
+        IReadOnlyCollection<Guid> procedureRevisionIds,
+        string query,
+        CancellationToken ct)
+    {
+        var requested = procedureRevisionIds.Where(x => x != Guid.Empty).Distinct().ToList();
+        var term = query?.Trim() ?? string.Empty;
+        if (requested.Count == 0 || term.Length == 0) return [];
+
+        var titles = await ForRevisionsAsync(db, requested, ct);
+        return titles.Where(x => x.Value.Title.Contains(term, StringComparison.OrdinalIgnoreCase))
+            .Select(x => x.Key).OrderBy(x => x).ToList();
+    }
+
     private static string UnavailableTitle(string baseNumber, int revision, bool legacy) =>
         $"{(legacy ? "Legacy procedure" : "Procedure")} {baseNumber}.{revision:D2} — " +
         (legacy ? "exact historical title was not recorded" : "exact revision title snapshot was not recorded");

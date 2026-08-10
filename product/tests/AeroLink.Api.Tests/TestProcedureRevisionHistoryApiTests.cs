@@ -16,7 +16,8 @@ public sealed class TestProcedureRevisionHistoryApiTests
 {
     private sealed record Fixture(Guid ProjectId, Guid Release15Id, Guid Release16Id,
         Guid Baseline15Id, Guid Baseline16Id,
-        Guid ProcedureId, Guid Revision00Id, Guid Revision01Id,
+        Guid ProcedureId, Guid Revision00Id, Guid Revision01Id, Guid Revision02Id,
+        Guid RetirementExecutionId, Guid Review16Id,
         string Tcr00, string Tcr01, string Cr00, string Cr01, string FoldedCr01);
 
     [Fact]
@@ -159,6 +160,48 @@ Assert.Equal("Verify route sequencing and discontinuities",
     newArtifact.GetProperty("title").GetString());
 Assert.Equal(fixture.Revision01Id,
     newArtifact.GetProperty("details").GetProperty("revisionId").GetGuid());
+
+        var retiredList = await JsonAsync(client,
+            $"/api/test-procedures?projectId={fixture.ProjectId}&scope=System" +
+            "&search=route%20sequencing%20and%20discontinuities&page=1&pageSize=25");
+        var retiredRow = Assert.Single(retiredList.GetProperty("items").EnumerateArray());
+        Assert.Equal(fixture.Revision02Id, retiredRow.GetProperty("revisionId").GetGuid());
+        Assert.Equal("Verify route sequencing and discontinuities",
+            retiredRow.GetProperty("title").GetString());
+
+        var discardedRetirementList = await JsonAsync(client,
+            $"/api/test-procedures?projectId={fixture.ProjectId}&scope=System" +
+            "&search=forged%20retirement%20rename&page=1&pageSize=25");
+        Assert.Equal(0, discardedRetirementList.GetProperty("totalCount").GetInt32());
+
+        var predecessorReleaseSearch = await JsonAsync(client,
+            $"/api/search?projectId={fixture.ProjectId}&releaseId={fixture.Release15Id}" +
+            "&query=route%20sequencing%20and%20discontinuities");
+        Assert.DoesNotContain(predecessorReleaseSearch.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("kind").GetString() is "test-procedure" or "test-execution");
+
+        var retiredSearch = await JsonAsync(client,
+            $"/api/search?projectId={fixture.ProjectId}&query=route%20sequencing%20and%20discontinuities");
+        Assert.Contains(retiredSearch.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("kind").GetString() == "test-procedure"
+                 && x.GetProperty("id").GetGuid() == fixture.ProcedureId
+                 && x.GetProperty("title").GetString() == "Verify route sequencing and discontinuities");
+        Assert.Contains(retiredSearch.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("kind").GetString() == "test-execution"
+                 && x.GetProperty("id").GetGuid() == fixture.RetirementExecutionId
+                 && x.GetProperty("title").GetString() == "Verify route sequencing and discontinuities result");
+
+        var discardedSearch = await JsonAsync(client,
+            $"/api/search?projectId={fixture.ProjectId}&query=forged%20retirement%20rename");
+        Assert.DoesNotContain(discardedSearch.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("kind").GetString() is "test-procedure" or "test-execution");
+
+        var targetByAuthoritativeTitle = await JsonAsync(client,
+            $"/api/test-change-reviews/{fixture.Review16Id}/procedure-targets" +
+            "?search=route%20sequencing%20and%20discontinuities&page=1&pageSize=25");
+        Assert.Equal(1, targetByAuthoritativeTitle.GetProperty("totalCount").GetInt32());
+        Assert.Equal("Verify route sequencing and discontinuities",
+            targetByAuthoritativeTitle.GetProperty("items")[0].GetProperty("title").GetString());
     }
 
     [Fact]
@@ -294,6 +337,16 @@ Assert.Equal(fixture.Revision01Id,
             "Legacy route objective", now);
         var revision01 = Revision(procedure.Id, 1, tcr16.Id, baseline16.Id,
             "Discontinuity objective", now.AddMinutes(1));
+        var tcrRetire = Review(project.Id, release16.Id, scr16.Id, scr16.DisplayNumber,
+            "SYSTCR-42150", 2, TestProcedureChangeKind.Retire,
+            "Forged retirement rename", requirement16Revision.Id, now.AddMinutes(3), procedureRevision: 2);
+        var revision02 = new TestProcedureRevision(procedure.Id, 2, "", "", "", "",
+            TestProcedureState.Retired, "verification.engineer", now.AddMinutes(3),
+            sourceTestChangeRequestId: tcrRetire.Id);
+        var retirementExecution = new TestExecution(project.Id, revision02.Id, null, null,
+            TestOutcome.Pass, "history.engineer", "Historical retirement fixture",
+            "The pre-retirement execution passed.", "evidence://retirement-title-search",
+            now.AddMinutes(4), now.AddMinutes(4), release16.Id);
         procedure.UpdateDraft("Catalog title changed after 1.6", procedure.OwnerId, now.AddMinutes(2));
         db.BaselineTestProcedures.AddRange(
             new BaselineTestProcedureSelection(baseline15.Id, procedure.Id, revision00.Id),
@@ -314,13 +367,15 @@ Assert.Equal(fixture.Revision01Id,
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.AddRange(program, project, release15, release16, scr15, scr16, foldedScr16, baseline15, baseline16,
             requirement15, requirement16, foldedRequirement16, requirement15Revision, requirement16Revision,
-            foldedRequirement16Revision, tcr15, tcr16, procedure, revision00, revision01, impact15, impact16,
+            foldedRequirement16Revision, tcr15, tcr16, tcrRetire, procedure, revision00, revision01,
+            revision02, retirementExecution, impact15, impact16,
             foldedImpact16, coverage15, coverage16, foldedCoverage16,
             engineer, new ProgramMembership(engineer.Id, program.Id, ProgramRole.TestEngineer, "test.setup", now));
         await db.SaveChangesAsync();
 
         return new(project.Id, release15.Id, release16.Id, baseline15.Id, baseline16.Id,
-            procedure.Id, revision00.Id, revision01.Id,
+            procedure.Id, revision00.Id, revision01.Id, revision02.Id,
+            retirementExecution.Id, tcr16.Id,
             tcr15.DisplayNumber, tcr16.DisplayNumber, scr15.DisplayNumber, scr16.DisplayNumber,
             foldedScr16.DisplayNumber);
     }
