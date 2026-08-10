@@ -17,6 +17,9 @@ type Procedure = {
   revisionId: string
   displayNumber: string
   title: string
+  titleIsExact?: boolean
+  titleIsLegacy?: boolean
+  titleNote?: string
   state: string
   requirementCount: number
   ownerId: string
@@ -26,12 +29,18 @@ type Procedure = {
   expectedResult?: string
 }
 type Revision = {
-  id: string; displayNumber: string; revision: number; state: string; authorId: string; createdAt: string
+  id: string; displayNumber: string; revision: number; title: string
+  titleIsExact?: boolean; titleIsLegacy?: boolean; titleNote?: string
+  state: string; authorId: string; createdAt: string
   objective: string; preconditions: string; steps: string; expectedResult: string
+  sourceTestChangeRequestId?: string; package?: string; provenanceNote?: string
   drivenBy: { changeRequest: string; package: string; subjectDisplayNumber: string; action: string }[]
   covers: string[]
 }
-type History = { id: string; baseNumber: string; title: string; ownerId: string; createdAt: string; revisions: Revision[] }
+type History = {
+  id: string; baseNumber: string; title: string; titleIsExact?: boolean; titleIsLegacy?: boolean
+  titleNote?: string; ownerId: string; createdAt: string; revisions: Revision[]
+}
 type Page = { page: number; pageSize: number; totalCount: number; totalPages: number; items: Procedure[] }
 type Comment = {
   id: string; body: string; state: string; createdBy: string; createdAt: string; disposition?: string
@@ -50,6 +59,9 @@ type ProcedureTrace = {
   procedureId: string
   baseNumber: string
   title: string
+  titleIsExact?: boolean
+  titleIsLegacy?: boolean
+  titleNote?: string
   level: string
   revisionId: string
   displayNumber: string
@@ -58,6 +70,8 @@ type ProcedureTrace = {
   authorId: string
   createdAt: string
   sourceTestChangeRequestId?: string
+  package?: string
+  provenanceNote?: string
   requirements: TraceRequirement[]
   provenance: TraceProvenance[]
   build?: { releaseId: string; effectiveBaselineId: string; requirementBaselineId?: string; isExactManifest: boolean }
@@ -514,6 +528,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
 
           {tab === 'details' && (
             <div className="inspectorBody">
+              {selected.titleNote && <p className="inspectorNote warn">{selected.titleNote}</p>}
               <dl className="procedureCase">
                 <dt>Objective</dt><dd>{selected.objective || 'Not recorded'}</dd>
                 <dt>Preconditions</dt><dd>{selected.preconditions || 'None'}</dd>
@@ -535,14 +550,20 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                 <>
                   <div className="traceRevisionIdentity">
                     <b>{trace.displayNumber}</b>
+                    <span>{trace.title}</span>
                     <span>{stateLabel(trace.state)} · {trace.level} · revision {trace.revisionId}</span>
                     <small>Written by <PersonName userName={trace.authorId} /> · {new Date(trace.createdAt).toLocaleString()}</small>
                   </div>
+                  {trace.titleNote && <p className="inspectorNote warn">{trace.titleNote}</p>}
                   {trace.provenance.length > 0 && (
                     <p className="traceProvenance">
                       Produced by {trace.provenance.map(driver => `${driver.package} (${driver.changeRequest})`).join(', ')}
                     </p>
                   )}
+                  {trace.provenance.length === 0 && trace.package && (
+                    <p className="traceProvenance">Produced by {trace.package}</p>
+                  )}
+                  {trace.provenanceNote && <p className="inspectorNote warn">{trace.provenanceNote}</p>}
                   <p className="inspectorNote">
                     This procedure verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.
                   </p>
@@ -587,12 +608,19 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
               {history
                 ? <ul className="revisionList">{history.revisions.map(revision => (
                   <li key={revision.id}>
-                    <b>{revision.displayNumber}</b>
+                    <b>{revision.displayNumber} — {revision.title}</b>
                     <span>{revision.state} · written by <PersonName userName={revision.authorId} /></span>
+                    {revision.titleNote && <span className="inspectorNote warn">{revision.titleNote}</span>}
                     {revision.drivenBy.length > 0 && (
                       <span className="revisionDriver">
                         {revision.drivenBy.map(driver => `${driver.package} · ${driver.changeRequest}`).join(', ')}
                       </span>
+                    )}
+                    {revision.drivenBy.length === 0 && revision.package && (
+                      <span className="revisionDriver">Produced by {revision.package}</span>
+                    )}
+                    {revision.provenanceNote && (
+                      <span className="inspectorNote warn">{revision.provenanceNote}</span>
                     )}
                   </li>))}</ul>
                 : <p className="inspectorNote">Loading history…</p>}
