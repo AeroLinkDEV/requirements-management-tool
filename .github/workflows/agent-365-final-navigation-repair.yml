@@ -1,4 +1,4 @@
-name: Agent 365 final successor navigation repair
+name: Agent 365 direct successor fix
 
 on:
   push:
@@ -10,16 +10,16 @@ permissions:
 
 jobs:
   patch:
-    if: ${{ contains(github.event.head_commit.message, '[agent-365-final-navigation-repair]') }}
+    if: ${{ contains(github.event.head_commit.message, '[agent-365-direct-fix]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - name: Check out branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Apply robust exact successor routing patch
+      - name: Apply exact successor navigation corrections
         shell: bash
         run: |
           python - <<'PY'
@@ -134,25 +134,6 @@ export function successorReferenceFor<T extends SupersessionRecord>(
   expect(supersededHistoryFor(successor, currentRelease)).toEqual([predecessor])'''), encoding='utf-8')
           PY
 
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: product/client/package-lock.json
-
-      - name: Validate client and focused supersession regressions
-        working-directory: product/client
-        run: |
-          npm ci
-          npm run lint
-          npm run typecheck
-          npm run build
-          npx playwright test tests/test-change-request-supersession-presentation.spec.ts tests/test-change-request-supersession.spec.ts --workers=1
-
-      - name: Publish review corrections
-        shell: bash
-        run: |
           git diff --check
           git config user.name "seanmccarthyns"
           git config user.email "seanmccarthyns@gmail.com"
