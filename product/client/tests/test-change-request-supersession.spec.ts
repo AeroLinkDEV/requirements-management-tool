@@ -1,11 +1,10 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin } from './auth'
-import { seedCarriedProcedures } from './pro-audit-fixtures'
+import { apiBase, apiLogin, firstSectionId, login, openNavigationGroup, selectProgram } from './auth'
 
 type ReviewItem = {
   id: string
+  changeRequestId: string
   displayNumber: string
-  sourceChangeRequestNumber: string
   discipline: string
   state: string
   version: number
@@ -13,21 +12,121 @@ type ReviewItem = {
   supersededReason?: string
 }
 
+const impacts = JSON.stringify({
+  trace: 'Not Affected', verification: 'Not Affected', documents: 'Not Affected',
+  baseline: 'Not Affected', collaboration: 'Not Affected',
+})
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * #365 — revising an approved TCR must leave one current work item, while its exact predecessor remains
- * readable as controlled history and cannot be selected into another baseline.
+ * readable as controlled history and cannot be selected into the still-open candidate baseline.
  */
 test('a revised TCR keeps its predecessor in history and out of active work and baseline selection', async ({ page, request }) => {
-  test.setTimeout(480_000)
+  test.setTimeout(360_000)
   await apiLogin(request)
   const suffix = Date.now().toString().slice(-7)
-  const { workspace, baseline, triggerReviewId } = await seedCarriedProcedures(page, request, suffix, 1)
+  const programName = `TCR Supersession ${suffix}`
 
-  // Complete the helper's still-Open trigger package with one exact procedure decision and an engineering
-  // case. The browser session is the assigned Test Engineer; the API request context remains the independent
-  // administrator who signs the package.
+  const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, { data: {
+    programName,
+    programCode: `TS${suffix}`,
+    projectName: 'TCR Supersession Project',
+    softwareProduct: 'TCR Supersession Product',
+    initialRelease: '1.0',
+    initialReleaseIsReleased: false,
+  } })
+  expect(workspaceResponse.ok(), await workspaceResponse.text()).toBeTruthy()
+  const workspace = await workspaceResponse.json()
+
+  const usersResponse = await request.get(`${apiBase}/api/admin/users`)
+  expect(usersResponse.ok(), await usersResponse.text()).toBeTruthy()
+  const testEngineer = (await usersResponse.json())
+    .find((user: { userName: string }) => user.userName === 'test.engineer')
+  expect(testEngineer).toBeTruthy()
+  const grant = await request.post(`${apiBase}/api/admin/users/${testEngineer.id}/memberships`, { data: {
+    programId: workspace.program.id,
+    role: 'TestEngineer',
+  } })
+  expect(grant.ok(), await grant.text()).toBeTruthy()
+
+  const draftResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
+    projectId: workspace.project.id,
+    targetReleaseId: workspace.release.id,
+    type: 'System',
+    title: `Controlled TCR revision ${suffix}`,
+    problem: 'The new behavior has no controlled procedure.',
+    analysis: 'A procedure must be introduced and independently approved.',
+    solution: 'Create and later revise the exact TCR package.',
+    requirementChanges: [{
+      level: 'System',
+      kind: 'Introduce',
+      targetSectionId: await firstSectionId(request, workspace.project.id),
+      statement: `The ${suffix} product shall expose a TCR supersession target.`,
+      rationale: 'Qualification target.',
+      verificationMethod: 'Test',
+      impactDispositionJson: impacts,
+    }],
+  } })
+  expect(draftResponse.ok(), await draftResponse.text()).toBeTruthy()
+  const draft = await draftResponse.json()
+  const submitted = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
+    expectedVersion: draft.version,
+    approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }],
+  } })
+  expect(submitted.ok(), await submitted.text()).toBeTruthy()
+  const approved = await request.post(`${apiBase}/api/change-requests/${draft.id}/approve`, { data: {
+    password: 'AeroLink!2026',
+    meaning: 'Approved for the TCR supersession journey.',
+  } })
+  expect(approved.ok(), await approved.text()).toBeTruthy()
+
+  // This is the one candidate baseline for the release. Its requirements are fixed but its procedure manifest
+  // remains open, which is exactly the interval in which an approved TCR may be selected.
+  const baselineResponse = await request.post(`${apiBase}/api/baselines`, { data: {
+    baseNumber: `SW-97.${suffix.slice(-2)}`,
+    revision: 0,
+    projectId: workspace.project.id,
+    releaseId: workspace.release.id,
+    predecessorBaselineId: null,
+    name: 'TCR supersession candidate',
+  } })
+  expect(baselineResponse.ok(), await baselineResponse.text()).toBeTruthy()
+  const baseline = await baselineResponse.json()
+  for (const [path, data] of [
+    ['selections', { changeRequestId: draft.id }],
+    ['freeze', {}],
+    ['materialize-requirements', {}],
+  ] as const) {
+    const response = await request.post(`${apiBase}/api/baselines/${baseline.id}/${path}`, { data })
+    expect(response.ok(), `${path}: ${await response.text()}`).toBeTruthy()
+  }
+  const requirementsResponse = await request.get(
+    `${apiBase}/api/requirements?projectId=${workspace.project.id}&baselineId=${baseline.id}&scope=System&includeRetired=false&page=1&pageSize=10`,
+  )
+  expect(requirementsResponse.ok(), await requirementsResponse.text()).toBeTruthy()
+  const requirementRevisionId = (await requirementsResponse.json()).items[0].revisionId as string
+  expect(requirementRevisionId).toBeTruthy()
+
+  await login(page, 'test.engineer', { openProject: false })
+  await selectProgram(page, programName)
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
+  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+
+  const assessmentRow = page.locator('.downstreamAssessment').filter({ hasText: draft.displayNumber }).first()
+  await expect(assessmentRow).toBeVisible({ timeout: 30_000 })
+  await assessmentRow.getByRole('button', { name: 'Open assessment' }).click()
+  const assessment = page.getByRole('dialog', { name: /test impact/ })
+  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
+  await expect(assessment.getByRole('button', { name: /SYSTCR-\d{6}\.\d{2}/ })).toBeVisible({ timeout: 30_000 })
+
+  const reviews = await (await request.get(
+    `${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`,
+  )).json() as { items: ReviewItem[] }
+  const initialReview = reviews.items.find(item => item.discipline === 'System' && item.changeRequestId === draft.id)
+  expect(initialReview).toBeTruthy()
+
   const impactResponse = await request.get(`${apiBase}/api/releases/${workspace.release.id}/verification-impact`)
   expect(impactResponse.ok(), await impactResponse.text()).toBeTruthy()
   const impact = await impactResponse.json() as {
@@ -36,10 +135,10 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
     requirementRevisionId?: string
     subjectDisplayNumber: string
   }[]
-  const triggerItem = impact.find(item => item.testChangeReviewId === triggerReviewId)
-  expect(triggerItem?.requirementRevisionId).toBeTruthy()
+  const impactItem = impact.find(item => item.testChangeReviewId === initialReview!.id)
+  expect(impactItem?.requirementRevisionId).toBe(requirementRevisionId)
 
-  const proposed = await page.request.post(`${apiBase}/api/test-change-reviews/${triggerReviewId}/procedure-changes`, {
+  const proposed = await page.request.post(`${apiBase}/api/test-change-reviews/${initialReview!.id}/procedure-changes`, {
     data: {
       kind: 'Introduce',
       revision: 0,
@@ -48,86 +147,60 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
       preconditions: 'The target configuration is available.',
       steps: '1. Load the target. 2. Exercise the governed behavior.',
       expectedResult: 'The governed behavior is observed.',
-      rationale: `Nothing covers ${triggerItem!.subjectDisplayNumber}.`,
-      drivingRequirementRevisionIds: [triggerItem!.requirementRevisionId],
+      rationale: `Nothing covers ${impactItem!.subjectDisplayNumber}.`,
+      drivingRequirementRevisionIds: [requirementRevisionId],
     },
   })
   expect(proposed.ok(), await proposed.text()).toBeTruthy()
-
-  const resolved = await page.request.post(`${apiBase}/api/verification-impact/${triggerItem!.id}/resolve`, {
-    data: {
-      outcome: 'NewProcedureRequired',
-      rationale: 'The approved package will introduce the exact procedure.',
-    },
-  })
+  const resolved = await page.request.post(`${apiBase}/api/verification-impact/${impactItem!.id}/resolve`, { data: {
+    outcome: 'NewProcedureRequired',
+    rationale: 'The approved package will introduce the exact procedure.',
+  } })
   expect(resolved.ok(), await resolved.text()).toBeTruthy()
 
   const beforeCase = await (await page.request.get(
-    `${apiBase}/api/test-change-reviews/${triggerReviewId}/procedure-changes`,
+    `${apiBase}/api/test-change-reviews/${initialReview!.id}/procedure-changes`,
   )).json() as { version: number }
-  const caseSaved = await page.request.post(`${apiBase}/api/test-change-reviews/${triggerReviewId}/case`, {
-    data: {
-      title: 'TCR supersession engineering case',
-      problem: 'The changed behavior has no controlled verification coverage.',
-      analysis: 'One exact procedure is required, and later package revision must retain its history.',
-      solution: 'Approve the procedure package and revise it only through the controlled successor route.',
-      expectedVersion: beforeCase.version,
-    },
-  })
+  const caseSaved = await page.request.post(`${apiBase}/api/test-change-reviews/${initialReview!.id}/case`, { data: {
+    title: 'TCR supersession engineering case',
+    problem: 'The changed behavior has no controlled verification coverage.',
+    analysis: 'One exact procedure is required, and later package revision must retain its history.',
+    solution: 'Approve the procedure package and revise it only through the controlled successor route.',
+    expectedVersion: beforeCase.version,
+  } })
   expect(caseSaved.ok(), await caseSaved.text()).toBeTruthy()
-
   const beforeSubmit = await (await page.request.get(
-    `${apiBase}/api/test-change-reviews/${triggerReviewId}/procedure-changes`,
+    `${apiBase}/api/test-change-reviews/${initialReview!.id}/procedure-changes`,
   )).json() as { version: number }
-  const submitted = await page.request.post(`${apiBase}/api/test-change-reviews/${triggerReviewId}/submit`, {
-    data: { approverId: 'admin', expectedVersion: beforeSubmit.version },
-  })
-  expect(submitted.ok(), await submitted.text()).toBeTruthy()
+  const packageSubmitted = await page.request.post(`${apiBase}/api/test-change-reviews/${initialReview!.id}/submit`, { data: {
+    approverId: 'admin',
+    expectedVersion: beforeSubmit.version,
+  } })
+  expect(packageSubmitted.ok(), await packageSubmitted.text()).toBeTruthy()
+  const packageApproved = await request.post(`${apiBase}/api/test-change-reviews/${initialReview!.id}/approve`, { data: {
+    rationale: 'The exact procedure decision and engineering case are acceptable.',
+    password: 'AeroLink!2026',
+    meaning: 'I approve this exact TCR package.',
+  } })
+  expect(packageApproved.ok(), await packageApproved.text()).toBeTruthy()
 
-  const approved = await request.post(`${apiBase}/api/test-change-reviews/${triggerReviewId}/approve`, {
-    data: {
-      rationale: 'The exact procedure decision and engineering case are acceptable.',
-      password: 'AeroLink!2026',
-      meaning: 'I approve this exact TCR package.',
-    },
-  })
-  expect(approved.ok(), await approved.text()).toBeTruthy()
-
-  const reviewsBefore = await (await request.get(
+  const predecessorBefore = (await (await request.get(
     `${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`,
-  )).json() as { items: ReviewItem[] }
-  const predecessorBefore = reviewsBefore.items.find(item => item.id === triggerReviewId)
+  )).json() as { items: ReviewItem[] }).items.find(item => item.id === initialReview!.id)
   expect(predecessorBefore?.state).toBe('Approved')
-
-  // A separate Draft candidate proves the package was genuinely selectable before revision, then proves the
-  // same immutable predecessor is omitted and refused after it becomes Superseded.
-  const selectionBaselineResponse = await request.post(`${apiBase}/api/baselines`, {
-    data: {
-      baseNumber: `SW-02.${suffix.slice(-2)}`,
-      revision: 0,
-      projectId: workspace.project.id,
-      releaseId: workspace.release.id,
-      predecessorBaselineId: null,
-      name: 'TCR supersession selection proof',
-    },
-  })
-  expect(selectionBaselineResponse.ok(), await selectionBaselineResponse.text()).toBeTruthy()
-  const selectionBaseline = await selectionBaselineResponse.json()
   const beforeCandidates = await (await request.get(
-    `${apiBase}/api/baselines/${selectionBaseline.id}/test-change-requests`,
+    `${apiBase}/api/baselines/${baseline.id}/test-change-requests`,
   )).json() as { available: { id: string }[] }
-  expect(beforeCandidates.available.map(item => item.id)).toContain(triggerReviewId)
+  expect(beforeCandidates.available.map(item => item.id)).toContain(initialReview!.id)
 
-  // Re-enter the live queue through the browser and revise the approved package. The workspace must follow
-  // the server-returned successor rather than leaving the user on a now-historical predecessor.
+  // Re-enter the live queue and revise the approved package. The workspace follows the exact server-returned
+  // successor rather than leaving the user on a package that became historical during the click.
   await page.reload()
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
-  const activeRow = page.locator('.downstreamAssessment').filter({ hasText: predecessorBefore!.displayNumber }).first()
+  const activeRow = page.locator('.downstreamAssessment').filter({ hasText: draft.displayNumber }).first()
   await expect(activeRow).toBeVisible({ timeout: 30_000 })
   await activeRow.getByRole('button', {
     name: new RegExp(`^${escapeRegex(predecessorBefore!.displayNumber)}`),
   }).click()
-
   const packageWorkspace = page.getByRole('dialog', { name: /procedure decisions/ })
   await expect(packageWorkspace.getByRole('heading', {
     name: `${predecessorBefore!.displayNumber} procedure decisions`,
@@ -136,16 +209,14 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
 
   await expect.poll(async () => {
     const response = await request.get(`${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`)
-    expect(response.ok(), await response.text()).toBeTruthy()
     const body = await response.json() as { items: ReviewItem[] }
-    return body.items.find(item => item.id === triggerReviewId)?.state
+    return body.items.find(item => item.id === initialReview!.id)?.state
   }, { timeout: 30_000 }).toBe('Superseded')
 
   const refreshedReviews = await (await request.get(
     `${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`,
   )).json() as { items: ReviewItem[] }
-  const predecessor = refreshedReviews.items.find(item => item.id === triggerReviewId)
-  expect(predecessor?.state).toBe('Superseded')
+  const predecessor = refreshedReviews.items.find(item => item.id === initialReview!.id)
   expect(predecessor?.supersededByTestChangeRequestId).toBeTruthy()
   expect(predecessor?.supersededReason).toContain('Superseded by controlled revision')
   const successor = refreshedReviews.items.find(item => item.id === predecessor!.supersededByTestChangeRequestId)
@@ -157,7 +228,6 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   })).toBeVisible({ timeout: 30_000 })
   await packageWorkspace.getByRole('button', { name: 'Close test change request' }).click()
 
-  // Only the successor is an active queue row. The predecessor sits beneath that row as explicit history.
   const successorRow = page.locator('.downstreamAssessment').filter({ hasText: successor!.displayNumber }).first()
   await expect(successorRow).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('.downstreamAssessment[data-state="Superseded"]')).toHaveCount(0)
@@ -190,17 +260,12 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
     .getByText('Show 1 superseded TCR revision', { exact: true })).toBeVisible()
 
   const afterCandidates = await (await request.get(
-    `${apiBase}/api/baselines/${selectionBaseline.id}/test-change-requests`,
+    `${apiBase}/api/baselines/${baseline.id}/test-change-requests`,
   )).json() as { available: { id: string }[] }
-  expect(afterCandidates.available.map(item => item.id)).not.toContain(triggerReviewId)
-  const forgedSelection = await request.post(
-    `${apiBase}/api/baselines/${selectionBaseline.id}/test-change-requests`,
-    { data: { testChangeRequestId: triggerReviewId } },
-  )
+  expect(afterCandidates.available.map(item => item.id)).not.toContain(initialReview!.id)
+  const forgedSelection = await request.post(`${apiBase}/api/baselines/${baseline.id}/test-change-requests`, {
+    data: { testChangeRequestId: initialReview!.id },
+  })
   expect(forgedSelection.status()).toBe(400)
   expect(await forgedSelection.text()).toContain('Only an approved test change request can be selected into a baseline.')
-
-  // The predecessor baseline created by the fixture remains intact; this journey never rewrites its exact
-  // procedure manifest merely because its source package later acquired a controlled successor.
-  expect(baseline.id).toBeTruthy()
 })
