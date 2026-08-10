@@ -1,3 +1,4 @@
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
@@ -30,7 +31,9 @@ public sealed class ReleasedExecutionEvidenceAuthorityMismatchTests
             var project = new ProjectRecord(program.Id, "Mismatch project", "Mismatch product");
             var releasedRelease = new SoftwareRelease(project.Id, "3.0", false);
             var inWorkRelease = new SoftwareRelease(project.Id, "3.1", false, releasedRelease.Id);
-            var releasedBuild = new SoftwareBuild(project.Id, releasedRelease.Id, null,
+            var baseline = new CandidateBaseline("SW-30.00", 0, project.Id, releasedRelease.Id, null,
+                "Released authority baseline", "cm", now);
+            var releasedBuild = new SoftwareBuild(project.Id, releasedRelease.Id, baseline.Id,
                 "SW-30.00", "Released authority build", "cm", now);
             var procedure = new TestProcedure(project.Id, "SYSTP-423099", "Authority mismatch procedure",
                 "verification.engineer", now, TestProcedureLevel.System);
@@ -43,7 +46,7 @@ public sealed class ReleasedExecutionEvidenceAuthorityMismatchTests
                 now, now, inWorkRelease.Id);
             var evidence = new EvidenceRecord(project.Id, "mismatch.txt", "text/plain", 1,
                 new string('e', 64), "seed/mismatch.txt", "verification.engineer", now);
-            db.AddRange(program, project, releasedRelease, inWorkRelease, releasedBuild,
+            db.AddRange(program, project, releasedRelease, inWorkRelease, baseline, releasedBuild,
                 procedure, revision, execution, evidence);
             await db.SaveChangesAsync();
             releasedRelease.MarkReleased(now.AddMinutes(1));
