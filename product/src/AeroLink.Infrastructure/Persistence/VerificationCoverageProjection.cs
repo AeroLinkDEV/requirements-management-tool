@@ -146,7 +146,7 @@ public static class VerificationCoverageProjection
             var procedureRevisionIds = effectiveProcedureRevisionIds.Distinct().ToList();
             coverageSource = coverageSource.Where(x => procedureRevisionIds.Contains(x.ProcedureRevisionId));
         }
-        return await (from coverage in coverageSource
+        var rows = await (from coverage in coverageSource
                       join revision in db.TestProcedureRevisions.AsNoTracking()
                           on coverage.ProcedureRevisionId equals revision.Id
                       join procedure in db.TestProcedures.AsNoTracking()
@@ -172,5 +172,8 @@ public static class VerificationCoverageProjection
                               && sibling.State != TestProcedureState.Approved))
                               ? "Confirmed" : "Suspect"))
             .ToListAsync(ct);
+        var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+            rows.Select(x => x.ProcedureRevisionId).Distinct().ToList(), ct);
+        return rows.Select(row => row with { Title = titles[row.ProcedureRevisionId].Title }).ToList();
     }
 }

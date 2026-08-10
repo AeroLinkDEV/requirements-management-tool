@@ -381,9 +381,10 @@ public static class VerificationImpactEndpoints
                          {
                              revision.Id,
                              procedure.BaseNumber,
-                             procedure.Title,
                              CurrentRevision = revision.Revision
                          }).ToListAsync(ct);
+            var targetTitles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+                targets.Select(x => x.Id).Distinct().ToList(), ct);
             var targetCoverage = await (from coverage in db.TestCoverage.AsNoTracking()
                                             .Where(x => targetRevisionIds.Contains(x.ProcedureRevisionId)
                                                 && carriedRequirementIds.Contains(x.RequirementRevisionId))
@@ -413,7 +414,7 @@ public static class VerificationImpactEndpoints
                 drivingRequirementChoices = candidates,
                 procedureTargets = targets.Select(x => new
                 {
-                    x.BaseNumber, x.Title,
+                    x.BaseNumber, title = targetTitles[x.Id].Title,
                     currentRevision = x.CurrentRevision,
                     currentCoverage = targetCoverage.Where(c => c.ProcedureRevisionId == x.Id)
                         .OrderBy(c => c.displayNumber).Select(c => new
@@ -481,14 +482,26 @@ public static class VerificationImpactEndpoints
                                   revision.Id,
                                   ProcedureId = procedure.Id,
                                   procedure.BaseNumber,
-                                  procedure.Title,
                                   CurrentRevision = revision.Revision
                               };
             var query = eligibility;
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var q = search.Trim().ToLower();
-                query = query.Where(x => x.BaseNumber!.ToLower().Contains(q) || x.Title.ToLower().Contains(q));
+                var titleRevisionIds = await (from change in db.Set<TestProcedureChange>().AsNoTracking()
+                                              join revision in db.TestProcedureRevisions.AsNoTracking()
+                                                  on new { ReviewId = (Guid?)change.TestChangeReviewId, change.Revision }
+                                                  equals new { ReviewId = revision.SourceTestChangeRequestId, revision.Revision }
+                                              join procedure in db.TestProcedures.AsNoTracking()
+                                                  on revision.ProcedureId equals procedure.Id
+                                              where targetRevisionIds.Contains(revision.Id)
+                                                    && procedure.ProjectId == review.ProjectId
+                                                    && procedure.Level == review.ProcedureLevel()
+                                                    && procedure.BaseNumber == change.BaseNumber
+                                                    && change.Title.ToLower().Contains(q)
+                                              select revision.Id).Distinct().ToListAsync(ct);
+                query = query.Where(x => x.BaseNumber.ToLower().Contains(q)
+                    || titleRevisionIds.Contains(x.Id));
             }
             var total = await query.CountAsync(ct);
             var paged = await query.OrderBy(x => x.BaseNumber).ThenBy(x => x.ProcedureId)
@@ -505,6 +518,8 @@ public static class VerificationImpactEndpoints
                     .ToListAsync(ct);
             var all = paged.Concat(hydrated).DistinctBy(x => x.ProcedureId)
                 .OrderBy(x => x.BaseNumber).ThenBy(x => x.ProcedureId).ToList();
+            var exactTitles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+                all.Select(x => x.Id).Distinct().ToList(), ct);
             var coverageRows = await (from coverage in db.TestCoverage.AsNoTracking()
                                           .Where(x => all.Select(t => t.Id).Contains(x.ProcedureRevisionId)
                                               && carriedRequirementIds.Contains(x.RequirementRevisionId))
@@ -532,7 +547,7 @@ public static class VerificationImpactEndpoints
                 {
                     procedureId = x.ProcedureId,
                     x.BaseNumber,
-                    x.Title,
+                    title = exactTitles[x.Id].Title,
                     currentRevision = x.CurrentRevision,
                     currentCoverage = coverageRows.Where(c => c.ProcedureRevisionId == x.Id)
                         .OrderBy(c => c.displayNumber).Select(c => new
@@ -1729,6 +1744,9 @@ public static class VerificationImpactEndpoints
                     revisionId = procedure.RevisionId,
                     procedure.DisplayNumber,
                     procedure.Title,
+                    procedure.TitleIsExact,
+                    procedure.TitleIsLegacy,
+                    procedure.TitleNote,
                     procedure.Level,
                     procedure.State,
                     configuration = new { x.RequirementRevisionId, procedureRevisionId = procedure.RevisionId }
@@ -1772,12 +1790,17 @@ public static class VerificationImpactEndpoints
                 RevisionId = revision.Id,
                 revision.Revision,
                 procedure.BaseNumber,
-                procedure.Title,
                 procedure.Level,
                 revision.State
             }).ToListAsync(ct);
-        return rows.Select(x => new ProcedureRow(x.ProcedureId, x.RevisionId, x.Revision, x.BaseNumber,
-            x.Title, x.Level.ToString(), x.State)).ToList();
+        var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+            rows.Select(x => x.RevisionId).Distinct().ToList(), ct);
+        return rows.Select(x =>
+        {
+            var title = titles[x.RevisionId];
+            return new ProcedureRow(x.ProcedureId, x.RevisionId, x.Revision, x.BaseNumber,
+                title.Title, title.IsExact, title.IsLegacy, title.Note, x.Level.ToString(), x.State);
+        }).ToList();
     }
 
     /// <summary>
@@ -1820,8 +1843,10 @@ public static class VerificationImpactEndpoints
 
     private static ApprovedProcedureSelection ToSelection(ProcedureRow row) =>
         new(row.ProcedureId, row.RevisionId, row.Revision, $"{row.BaseNumber}.{row.Revision:D2}",
-            row.Title, row.Level, row.State.ToString());
+            row.Title, row.TitleIsExact, row.TitleIsLegacy, row.TitleNote,
+            row.Level, row.State.ToString());
 
     private sealed record ProcedureRow(Guid ProcedureId, Guid RevisionId, int Revision, string BaseNumber,
-        string Title, string Level, TestProcedureState State);
+        string Title, bool TitleIsExact, bool TitleIsLegacy, string? TitleNote,
+        string Level, TestProcedureState State);
 }

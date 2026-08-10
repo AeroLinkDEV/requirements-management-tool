@@ -129,6 +129,8 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         var coverage = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
         var procedureRevisionIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
         var procedureRevisions = await db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id)).ToListAsync(ct);
+        var procedureTitles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+            procedureRevisionIds, ct);
         var procedureIds = procedureRevisions.Select(x => x.ProcedureId).Distinct().ToList();
         var procedures = await db.TestProcedures.AsNoTracking().Where(x => procedureIds.Contains(x.Id)).ToListAsync(ct);
         var executions = await db.TestExecutions.AsNoTracking().Where(x => x.SoftwareBuildId == campaign.SoftwareBuildId && procedureRevisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
@@ -153,7 +155,7 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             impacts = impacts.OrderBy(x => x.ChangeRequestId).ThenBy(x => x.Kind).ThenBy(x => x.Id).Select(x => new { x.Id, x.ChangeRequestId, kind = x.Kind.ToString(), state = x.State.ToString(), x.Rationale, x.DispositionedBy, x.DispositionedAt }),
             traces = traces.OrderBy(x => x.SourceRevisionId).ThenBy(x => x.TargetRevisionId).ThenBy(x => x.Type).Select(x => new { x.Id, x.SourceRevisionId, x.TargetRevisionId, type = x.Type.ToString(), x.Rationale }),
             coverage = coverage.OrderBy(x => x.RequirementRevisionId).ThenBy(x => x.ProcedureRevisionId).Select(x => new { x.RequirementRevisionId, x.ProcedureRevisionId }),
-            procedures = (from revision in procedureRevisions join procedure in procedures on revision.ProcedureId equals procedure.Id orderby procedure.BaseNumber, revision.Revision select new { procedure.Id, procedure.BaseNumber, procedure.Title, revisionId = revision.Id, revision.Revision, state = revision.State.ToString(), revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult }),
+            procedures = (from revision in procedureRevisions join procedure in procedures on revision.ProcedureId equals procedure.Id orderby procedure.BaseNumber, revision.Revision select new { procedure.Id, procedure.BaseNumber, title = procedureTitles[revision.Id].Title, revisionId = revision.Id, revision.Revision, state = revision.State.ToString(), revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult }),
             executions = executions.OrderBy(x => x.ProcedureRevisionId).ThenBy(x => x.ExecutedAt).ThenBy(x => x.Id).Select(x => new { x.Id, x.ProcedureRevisionId, x.SoftwareBuildId, x.RetestOfExecutionId, outcome = x.Outcome.ToString(), x.ExecutedBy, x.Configuration, x.Determination, x.EvidenceReference, x.ExecutedAt, x.RecordedAt }),
             evidence = (from link in evidenceLinks join item in evidence on link.EvidenceId equals item.Id orderby link.TestExecutionId, item.Id select new { link.TestExecutionId, item.Id, item.OriginalFileName, item.ContentType, item.Size, item.Sha256, item.UploadedBy, item.UploadedAt }),
             codeTraceability = codeTraceability.OrderBy(x => x.RequirementRevisionId).Select(x => new

@@ -25,6 +25,8 @@ public sealed record TestProcedureMaterializationResult(string ProceduresHash, i
 /// </summary>
 public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
 {
+    private sealed record ProcedureSourceSnapshot(
+        Guid ChangeRequestId, string ChangeRequestNumber, bool Originating);
     public async Task<TestProcedureMaterializationResult> MaterializeAsync(Guid baselineId, string actorId,
         DateTimeOffset now, CancellationToken ct)
     {
@@ -45,7 +47,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
 
         var tcrIds = baseline.TestChangeSelections.Select(x => x.TestChangeRequestId).ToList();
         var tcrs = await db.TestChangeReviews.AsNoTracking().Where(x => tcrIds.Contains(x.Id))
-            .Include(x => x.ProcedureChanges).ToListAsync(ct);
+            .Include(x => x.ProcedureChanges).Include(x => x.AdditionalSources).ToListAsync(ct);
         foreach (var tcr in tcrs.Where(x => x.State != TestChangeReviewState.Approved))
             throw new DomainException($"{tcr.DisplayNumber} is no longer approved and cannot be materialized.");
         // Validate the approved snapshots before adding any procedure, revision, coverage, or manifest row.
@@ -309,11 +311,27 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
         return settled;
     }
 
-    private static TestProcedureRevision CreateRevision(Guid procedureId, TestProcedureChange change,
-        TestChangeReview tcr, Guid baselineId, DateTimeOffset now, TestProcedureState state) =>
-        new(procedureId, change.Revision, change.Objective, change.Preconditions, change.Steps,
-            change.ExpectedResult, state, tcr.SubmittedBy ?? tcr.DecidedBy ?? "aerolink.lifecycle", now,
-            null, tcr.Id, baselineId);
+
+private static TestProcedureRevision CreateRevision(Guid procedureId, TestProcedureChange change,
+    TestChangeReview tcr, Guid baselineId, DateTimeOffset now, TestProcedureState state) =>
+    new(procedureId, change.Revision, change.Objective, change.Preconditions, change.Steps,
+        change.ExpectedResult, state, tcr.SubmittedBy ?? tcr.DecidedBy ?? "aerolink.lifecycle", now,
+        null, tcr.Id, baselineId, SourceSnapshotJson(tcr));
+
+private static string SourceSnapshotJson(TestChangeReview tcr)
+{
+    var sources = new[]
+        {
+            new ProcedureSourceSnapshot(
+                tcr.ChangeRequestId, tcr.SourceChangeRequestNumber, true),
+        }
+        .Concat(tcr.AdditionalSources.Select(x => new ProcedureSourceSnapshot(
+            x.ChangeRequestId, x.ChangeRequestNumber, false)))
+        .DistinctBy(x => x.ChangeRequestId)
+        .OrderBy(x => x.ChangeRequestId)
+        .ToList();
+    return JsonSerializer.Serialize(sources);
+}
 
     private static IReadOnlyList<Guid> DrivingRequirements(TestProcedureChange change)
     {

@@ -114,9 +114,17 @@ public sealed class ProcedureBrowsingApiTests
         var byNumber = await PageAsync(client, projectId, "&search=SYSTP-00000007");
         Assert.Equal(1, byNumber.GetProperty("totalCount").GetInt32());
         Assert.Equal("SYSTP-00000007.01", Numbers(byNumber).Single());
+        var legacy = byNumber.GetProperty("items")[0];
+        Assert.StartsWith("Legacy procedure SYSTP-00000007.01", legacy.GetProperty("title").GetString());
+        Assert.False(legacy.GetProperty("titleIsExact").GetBoolean());
+        Assert.True(legacy.GetProperty("titleIsLegacy").GetBoolean());
+        Assert.Contains("exact historical title was not recorded", legacy.GetProperty("titleNote").GetString());
 
-        var byTitle = await PageAsync(client, projectId, "&search=behaviour%20012");
-        Assert.Equal("SYSTP-00000012.01", Numbers(byTitle).Single());
+        // The catalog title is mutable current metadata, not an immutable snapshot belonging to this legacy
+        // revision. Searching it must not silently attribute today's value to historical controlled work.
+        var byMutableLegacyTitle = await PageAsync(client, projectId, "&search=behaviour%20012");
+        Assert.Equal(0, byMutableLegacyTitle.GetProperty("totalCount").GetInt32());
+        Assert.Empty(Numbers(byMutableLegacyTitle));
 
         var approved = await PageAsync(client, projectId, "&state=Approved&pageSize=200");
         Assert.Equal(13, approved.GetProperty("totalCount").GetInt32());

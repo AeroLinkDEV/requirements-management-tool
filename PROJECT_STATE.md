@@ -1,6 +1,6 @@
 # Project State — Start Here
 
-**Last updated: 2026-08-08.**
+**Last updated: 2026-08-10.**
 
 This is the orientation record for anyone — human or model — picking up AeroLink. It answers *what
 exists, what is true today, what is deliberately not being built, and where to start*. Every other
@@ -295,11 +295,14 @@ when it was run" — the build test set, recorded determinations with evidence, 
 corrective action a Problem Report sends somebody here to perform. System has one trio; software has separate
 HLR and LLR trios because the work is planned, done, and approved separately.
 
-Explorer lists/history and TCR Modify/Retire targets use the exact build procedure manifest, and Trace & impact
-shows navigable exact requirements. #402 and #415 were closed by PR #416 (bounded picker hardening). The Aug. 9
-PRO-audit queue #417–#424 tracks residual picker integrity, released-baseline procedure authority, immutable
-procedure documents/provenance, revision-scoped titles, and exact execution/evidence authority. #364 owns the
-first exact manifest for legacy builds that predate the mechanism.
+Explorer lists, search, detail, History, Trace & impact, coverage, test sets, execution records, generated
+documents, and release-review manifests project the title of the exact carried procedure revision. Introduce
+and Modify take that immutable title from the producing TCR snapshot; Retire preserves the predecessor title;
+legacy rows use an explicit deterministic compatibility label rather than today's mutable catalog title.
+History and Trace share one provenance projection anchored to
+`TestProcedureRevision.SourceTestChangeRequestId`: the exact TCR revision remains primary, while every folded
+source retains its own exact CR identity. #364 owns the first exact manifest for legacy builds that predate the
+mechanism.
 
 Primary navigation mirrors that work: **Requirements** owns change requests, requirements, requirements
 documents, and Digital Thread; **Verification** owns the direct Change Requests, Test Procedure Explorer, Test
@@ -374,11 +377,10 @@ correct, and had no route to it.
 
 Understating these is a product-integrity failure, not a marketing choice.
 
-- **The PRO audit queue is open.** #417 tracks residual picker integrity (unsaved-target retention,
-  obsolete-response error clearing, stale driving-details, documentation truth); #418 released-baseline
-  procedure authority; #419/#420 immutable procedure documents and TCR approval provenance; #421
-  revision-scoped procedure titles; #422/#423 exact execution/evidence authority; #424 History/Trace
-  provenance parity.
+- **The remaining procedure-control queue is open.** #364 owns legacy-manifest bootstrap, #365 owns the
+  remaining superseded-TCR browser/history presentation, and #367 owns final controlled-target selection
+  validation after the legacy bootstrap lands. Exact revision titles and History/Trace provenance parity are
+  implemented by the shared projections described above.
 - **Legacy builds still need their first exact procedure manifest.** #364 owns the controlled bootstrap; #367
   should be rechecked against that result and #402 before evidence-only closure.
 - **Imported baselines do not yet materialize controlled requirements.** #332's UI and provenance records exist,

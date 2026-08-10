@@ -22,7 +22,8 @@ public sealed record MaterializedRequirementChange(
 public sealed record MaterializationImpactResult(int BoundToRevision, int CoverageCarriedForward,
     int CoverageConfirmed, int ProceduresOrphaned);
 public sealed record ApprovedProcedureSelection(Guid ProcedureId, Guid RevisionId, int Revision,
-    string DisplayNumber, string Title, string Level, string State);
+    string DisplayNumber, string Title, bool TitleIsExact, bool TitleIsLegacy, string? TitleNote,
+    string Level, string State);
 
 /// <summary>
 /// Raises verification work when an approved change alters what must be tested, and keeps that work
@@ -420,14 +421,18 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
                                    RevisionId = revision.Id,
                                    revision.Revision,
                                    procedure.BaseNumber,
-                                   procedure.Title,
                                    Level = procedure.Level.ToString(),
                                    State = revision.State.ToString()
                                }).ToListAsync(ct);
         var selected = revisions.OrderByDescending(x => x.Revision).FirstOrDefault();
-        return selected is null ? null : new ApprovedProcedureSelection(
-            selected.Id, selected.RevisionId, selected.Revision,
-            $"{selected.BaseNumber}.{selected.Revision:D2}", selected.Title, selected.Level, selected.State);
+        if (selected is null) return null;
+        var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+            [selected.RevisionId], ct);
+        var title = titles[selected.RevisionId];
+        return new ApprovedProcedureSelection(selected.Id, selected.RevisionId, selected.Revision,
+            $"{selected.BaseNumber}.{selected.Revision:D2}", title.Title,
+            title.IsExact, title.IsLegacy, title.Note,
+            selected.Level, selected.State);
     }
 
     /// <summary>
