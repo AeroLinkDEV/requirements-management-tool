@@ -126,10 +126,12 @@ public sealed class LegacyProcedureManifestBootstrapper(AeroLinkDbContext db)
         CandidateBaseline baseline,
         CancellationToken ct)
     {
-        var bootstrapEvent = await db.BaselineEvents.AsNoTracking()
+        // SQLite cannot translate DateTimeOffset ordering. Materialize the tiny, baseline-scoped event set and
+        // apply the deterministic ordering in memory so SQLite and PostgreSQL tell the same story.
+        var bootstrapEvents = await db.BaselineEvents.AsNoTracking()
             .Where(x => x.BaselineId == baseline.Id && x.EventType == "LegacyProcedureManifestBootstrapped")
-            .OrderByDescending(x => x.OccurredAt)
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
+        var bootstrapEvent = bootstrapEvents.OrderByDescending(x => x.OccurredAt).FirstOrDefault();
 
         if (baseline.TestProceduresMaterializedAt is not null)
         {
