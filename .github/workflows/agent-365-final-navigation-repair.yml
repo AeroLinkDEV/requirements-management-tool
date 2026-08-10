@@ -1,0 +1,164 @@
+name: Agent 365 final successor navigation repair
+
+on:
+  push:
+    branches:
+      - agent/365-tcr-supersession-browser
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ contains(github.event.head_commit.message, '[agent-365-final-navigation-repair]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Apply robust exact successor routing patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{path}: expected one match, found {count}: {old[:80]!r}')
+              file.write_text(text.replace(old, new), encoding='utf-8')
+
+          presentation = Path('product/client/src/testChangeReviewPresentation.ts')
+          text = presentation.read_text(encoding='utf-8')
+          marker = '/**\n * Every exact predecessor that ultimately points to the supplied current review.'
+          if text.count(marker) != 1:
+              raise RuntimeError(f'presentation marker count: {text.count(marker)}')
+          helper = '''export type SuccessorReference = { id: string; displayNumber?: string }
+
+/**
+ * The exact superseding review remains navigable even when it belongs to another release and is not
+ * present in the release-scoped list. The optional display number is presentation metadata; the ID is
+ * the authoritative route.
+ */
+export function successorReferenceFor<T extends SupersessionRecord>(
+  review: T,
+  reviews: readonly T[],
+): SuccessorReference | undefined {
+  const id = review.supersededByTestChangeRequestId
+  if (!id) return undefined
+  return { id, displayNumber: reviews.find(candidate => candidate.id === id)?.displayNumber }
+}
+
+'''
+          presentation.write_text(text.replace(marker, helper + marker), encoding='utf-8')
+
+          workspace = Path('product/client/src/TestingCoverageWorkspace.tsx')
+          text = workspace.read_text(encoding='utf-8')
+          old_import = "import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, supersededHistoryFor } from './testChangeReviewPresentation'"
+          new_import = "import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, successorReferenceFor, supersededHistoryFor } from './testChangeReviewPresentation'"
+          if text.count(old_import) != 1:
+              raise RuntimeError(f'workspace import count: {text.count(old_import)}')
+          text = text.replace(old_import, new_import)
+
+          pattern = re.compile(
+              r"  const authoringRequest = mine\.find\(x => x\.id === authoring\)\n"
+              r"  const authoringSuccessor = authoringRequest\?\.supersededByTestChangeRequestId\n"
+              r"    \? mine\.find\(x => x\.id === authoringRequest\.supersededByTestChangeRequestId\)\n"
+              r"    : undefined")
+          replacement = '''  const authoringRequest = mine.find(x => x.id === authoring)
+  const authoringSuccessor = authoringRequest
+    ? successorReferenceFor(authoringRequest, mine)
+    : undefined'''
+          text, count = pattern.subn(replacement, text)
+          if count != 1:
+              raise RuntimeError(f'authoring successor block count: {count}')
+
+          drawer_marker = '                : <p className="drawerEmpty">Nobody has answered this yet.</p>}\n'
+          if text.count(drawer_marker) != 1:
+              raise RuntimeError(f'assessment drawer marker count: {text.count(drawer_marker)}')
+          drawer_block = '''              {request.state === 'Superseded' && request.supersededByTestChangeRequestId && (
+                <div className="conclusionBox historicalAssessment">
+                  <strong>Superseded assessment</strong>
+                  <p>{request.supersededReason ?? 'This assessment was folded into a surviving review.'}</p>
+                  <button type="button" className="drawerArtifactLink"
+                    onClick={() => setAuthoring(request.supersededByTestChangeRequestId!)}>
+                    Open exact successor
+                  </button>
+                </div>
+              )}
+'''
+          workspace.write_text(text.replace(drawer_marker, drawer_marker + drawer_block), encoding='utf-8')
+
+          replace_once(
+              'product/client/src/TestChangeRequestWorkspace.tsx',
+              'type SupersededBy={id:string;displayNumber:string;reason?:string}',
+              'type SupersededBy={id:string;displayNumber?:string;reason?:string}')
+          replace_once(
+              'product/client/src/TestChangeRequestWorkspace.tsx',
+              '?<button type="button" className="linkedScr" onClick={()=>onOpenTestChangeRequest(supersededBy.id)}>Open {supersededBy.displayNumber}</button>',
+              '?<button type="button" className="linkedScr" onClick={()=>onOpenTestChangeRequest(supersededBy.id)}>{supersededBy.displayNumber ? `Open ${supersededBy.displayNumber}` : \'Open exact successor\'}</button>')
+
+          tests = Path('product/client/tests/test-change-request-supersession-presentation.spec.ts')
+          text = tests.read_text(encoding='utf-8')
+          old_imports = '''  reviewsVisibleInCurrentRelease,
+  supersededHistoryFor,'''
+          if text.count(old_imports) != 1:
+              raise RuntimeError(f'test import block count: {text.count(old_imports)}')
+          text = text.replace(old_imports, '''  reviewsVisibleInCurrentRelease,
+  successorReferenceFor,
+  supersededHistoryFor,''')
+          cross = '''  expect(reviewsVisibleInCurrentRelease(currentRelease)).toEqual([predecessor])
+})'''
+          if text.count(cross) != 1:
+              raise RuntimeError(f'cross-release assertion count: {text.count(cross)}')
+          text = text.replace(cross, '''  expect(reviewsVisibleInCurrentRelease(currentRelease)).toEqual([predecessor])
+  expect(successorReferenceFor(predecessor, currentRelease)).toEqual({
+    id: 'successor-in-another-release',
+  })
+})''')
+          same = '''  expect(reviewsVisibleInCurrentRelease(currentRelease)).toEqual([successor])
+  expect(supersededHistoryFor(successor, currentRelease)).toEqual([predecessor])'''
+          if text.count(same) != 1:
+              raise RuntimeError(f'same-release assertion count: {text.count(same)}')
+          tests.write_text(text.replace(same, '''  expect(reviewsVisibleInCurrentRelease(currentRelease)).toEqual([successor])
+  expect(successorReferenceFor(predecessor, currentRelease)).toEqual({
+    id: successor.id,
+    displayNumber: successor.displayNumber,
+  })
+  expect(supersededHistoryFor(successor, currentRelease)).toEqual([predecessor])'''), encoding='utf-8')
+          PY
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+
+      - name: Validate client and focused supersession regressions
+        working-directory: product/client
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run build
+          npx playwright test tests/test-change-request-supersession-presentation.spec.ts tests/test-change-request-supersession.spec.ts --workers=1
+
+      - name: Publish review corrections
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "seanmccarthyns"
+          git config user.email "seanmccarthyns@gmail.com"
+          git add product/client/src/TestChangeRequestWorkspace.tsx \
+            product/client/src/TestingCoverageWorkspace.tsx \
+            product/client/src/testChangeReviewPresentation.ts \
+            product/client/tests/test-change-request-supersession-presentation.spec.ts
+          git commit -m "Preserve exact successor navigation for all superseded reviews"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
