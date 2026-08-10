@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using AeroLink.Domain.Baselines;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
@@ -27,10 +28,12 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
         var baseline = new CandidateBaseline("SW-40.00", 0, project.Id, release.Id, null,
             "Pre-manifest baseline", "cm", t0);
 
+        var source00 = new SystemChangeRequest("SRCR-419900", 0, project.Id, release.Id,
+            "Generation-time source", "Problem", "Analysis", "Solution", "author", t0);
         var procedure = new TestProcedure(project.Id, "SYSTP-419900", "Current catalog title",
             "verification.engineer", t0, TestProcedureLevel.System);
-        var tcr00 = Review(project.Id, release.Id, "SYSTCR-419900", 0,
-            TestProcedureChangeKind.Introduce, "Generation-time title", t0);
+        var tcr00 = Review(project.Id, release.Id, source00.Id, source00.DisplayNumber,
+            "SYSTCR-419900", 0, TestProcedureChangeKind.Introduce, "Generation-time title", t0);
         var revision00 = new TestProcedureRevision(procedure.Id, 0, "Generation-time objective",
             "Generation-time preconditions", "Generation-time steps", "Generation-time expected result",
             TestProcedureState.Approved, "verification.engineer", t0,
@@ -38,7 +41,7 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
         var document = new ControlledDocument(project.Id, release.Id, baseline.Id,
             ControlledDocumentType.SystemTestProcedures, "SYSTD-419900",
             "Legacy System Test Procedures", 0, new string('a', 64), 1, generatedAt);
-        db.AddRange(program, project, release, baseline, procedure, tcr00, revision00, document);
+        db.AddRange(program, project, release, baseline, source00, procedure, tcr00, revision00, document);
         await db.SaveChangesAsync();
 
         var root = Path.Combine(Path.GetTempPath(), $"aerolink-legacy-doc-{Guid.NewGuid():N}");
@@ -57,14 +60,16 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
             // Later activity that used to rewrite the old document: a new approved revision appears and the
             // stable catalog title changes. The old document must remain bound to what existed at GeneratedAt.
             var t2 = generatedAt.AddHours(1);
-            var tcr01 = Review(project.Id, release.Id, "SYSTCR-419901", 1,
-                TestProcedureChangeKind.Modify, "Later title", t2);
+            var source01 = new SystemChangeRequest("SRCR-419901", 0, project.Id, release.Id,
+                "Later source", "Problem", "Analysis", "Solution", "author", t2);
+            var tcr01 = Review(project.Id, release.Id, source01.Id, source01.DisplayNumber,
+                "SYSTCR-419901", 1, TestProcedureChangeKind.Modify, "Later title", t2);
             var revision01 = new TestProcedureRevision(procedure.Id, 1, "Later objective",
                 "Later preconditions", "Later steps", "Later expected result",
                 TestProcedureState.Approved, "verification.engineer", t2,
                 sourceTestChangeRequestId: tcr01.Id);
             procedure.UpdateDraft("Later title", procedure.OwnerId, t2);
-            db.AddRange(tcr01, revision01);
+            db.AddRange(source01, tcr01, revision01);
             await db.SaveChangesAsync();
 
             var second = await generator.GenerateAsync(document.Id, "docx", CancellationToken.None);
@@ -81,11 +86,12 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
         }
     }
 
-    private static TestChangeReview Review(Guid projectId, Guid releaseId, string number, int revision,
+    private static TestChangeReview Review(Guid projectId, Guid releaseId, Guid sourceChangeRequestId,
+        string sourceChangeRequestNumber, string number, int revision,
         TestProcedureChangeKind kind, string title, DateTimeOffset now)
     {
-        var review = new TestChangeReview(projectId, releaseId, Guid.NewGuid(),
-            TestChangeReviewDiscipline.System, $"SRCR-{419900 + revision:D6}.00", now,
+        var review = new TestChangeReview(projectId, releaseId, sourceChangeRequestId,
+            TestChangeReviewDiscipline.System, sourceChangeRequestNumber, now,
             number, revision);
         review.RecordTestChangeRequired("verification.engineer", now);
         review.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft(
