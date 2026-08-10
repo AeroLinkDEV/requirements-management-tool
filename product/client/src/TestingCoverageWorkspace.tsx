@@ -7,6 +7,7 @@ import TestChangeRequestCreateDialog from './TestChangeRequestCreateDialog'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import { pickerSummary } from './pickerText'
+import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, successorReferenceFor, supersededHistoryFor } from './testChangeReviewPresentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './DownstreamAssessmentQueue.css'
 import './TestingCoverageWorkspace.css'
@@ -33,6 +34,8 @@ type TestChangeRequest = {
   procedureDecisionCount: number
   discipline: string
   state: string
+  supersededByTestChangeRequestId?: string
+  supersededReason?: string
   version: number
   assignedEngineerId?: string
   selectedApproverId?: string
@@ -401,6 +404,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   }, [requirementPicker, requirementSelectionItems])
 
   const mine = requests.filter(x => x.discipline === discipline)
+  const visibleMine = reviewsVisibleInCurrentRelease(mine)
+  const authoringRequest = mine.find(x => x.id === authoring)
+  const authoringSuccessor = authoringRequest
+    ? successorReferenceFor(authoringRequest, mine)
+    : undefined
 
   const act = async (work: () => Promise<void>, failure: string) => {
     if (busy) return
@@ -615,7 +623,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           <h2>Downstream test assessments</h2>
           <p>Approved upstream changes waiting for an explicit {assessmentName(discipline)} conclusion.</p>
         </div>
-        {!mine.length && (
+        {!visibleMine.length && (
           <div className="coverageEmpty">
             <b>No {disciplineLabel(discipline)} test assessments for this build</b>
             <span>Nothing has been approved into this build that {disciplineLabel(discipline)} verification must answer for.</span>
@@ -624,7 +632,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         {/* The requirements queue's row, from its own stylesheet. Identifying text on the left, what the
             assessment concluded in the middle, and one control on the right in every state — what can be done
             about an assessment is decided inside it, not chosen from a row of peers. */}
-        {mine.map(request => (
+        {visibleMine.map(request => {
+          const supersededRevisions = supersededHistoryFor(request, mine)
+          return (
           <article className="downstreamAssessment" data-state={request.state} key={request.id}>
             <div className="downstreamSource">
               <b>{request.coveredChangeRequests.map(x => x.number).join(', ')}</b>
@@ -633,10 +643,23 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             </div>
             <div className="downstreamConclusion">
               <strong>{testAssessmentStatus(request, discipline)}</strong>
-              {request.outcome === 'ChangeRequired' && request.displayNumber.startsWith(tcrAcronym(discipline)) && (
+              {request.outcome === 'ChangeRequired' && isControlledTestChangeRequest(request, tcrAcronym(discipline)) && (
                 <button type="button" className="linkedScr" onClick={() => setAuthoring(request.id)}>
                   {request.displayNumber} · {request.state === 'InReview' ? 'In review' : request.state}
                 </button>
+              )}
+              {supersededRevisions.length > 0 && (
+                <details className="decisionHistory tcrRevisionHistory">
+                  <summary>Show {supersededRevisions.length} superseded history item{supersededRevisions.length === 1 ? '' : 's'}</summary>
+                  {supersededRevisions.map(prior => {
+                    const controlled = isControlledTestChangeRequest(prior, tcrAcronym(discipline))
+                    return <button type="button" className="linkedScr" key={prior.id} onClick={() => controlled
+                      ? setAuthoring(prior.id)
+                      : setOpened(prior.id)}>
+                      {prior.displayNumber} · {controlled ? 'Superseded TCR' : 'Superseded assessment'}
+                    </button>
+                  })}
+                </details>
               )}
               {request.outcome === 'NoChangeRequired' && request.noChangeRationale && <p>{request.noChangeRationale}</p>}
             </div>
@@ -644,7 +667,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
               <button type="button" className="openAssessment" onClick={() => setOpened(request.id)}>Open assessment</button>
             </div>
           </article>
-        ))}
+          )
+        })}
         <p className="downstreamHelp">
           One {tcrAcronym(discipline)} may answer several assessments, and an assessment records one decision
           for every requirement the change touched.
@@ -679,7 +703,17 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     {request.noChangeRationale && <p className="conclusionRationale">{request.noChangeRationale}</p>}
                   </div>
                 : <p className="drawerEmpty">Nobody has answered this yet.</p>}
-              {request.outcome === 'ChangeRequired' && request.displayNumber.startsWith(tcrAcronym(discipline)) && (
+              {request.state === 'Superseded' && request.supersededByTestChangeRequestId && (
+                <div className="conclusionBox historicalAssessment">
+                  <strong>Superseded assessment</strong>
+                  <p>{request.supersededReason ?? 'This assessment was folded into a surviving review.'}</p>
+                  <button type="button" className="drawerArtifactLink"
+                    onClick={() => setAuthoring(request.supersededByTestChangeRequestId!)}>
+                    Open exact successor
+                  </button>
+                </div>
+              )}
+              {request.outcome === 'ChangeRequired' && isControlledTestChangeRequest(request, tcrAcronym(discipline)) && (
                 <ul className="drawerChanges">
                   <li className="linkedDraft">
                     <button type="button" className="drawerArtifactLink" onClick={() => setAuthoring(request.id)}>{request.displayNumber}</button>
@@ -962,6 +996,12 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           onClose={() => setAuthoring('')}
           onChanged={() => void load()}
           onOpenRequirementRevision={onOpenRequirementRevision}
+          onOpenTestChangeRequest={setAuthoring}
+          supersededBy={authoringSuccessor ? {
+            id: authoringSuccessor.id,
+            displayNumber: authoringSuccessor.displayNumber,
+            reason: authoringRequest?.supersededReason,
+          } : undefined}
         />
       )}
 

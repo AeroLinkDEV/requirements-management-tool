@@ -20,6 +20,7 @@ type ProcedureTargetPage={page:number;pageSize:number;totalCount:number;totalPag
 type RequirementChoicePage={page:number;pageSize:number;totalCount:number;totalPages:number;items:RequirementChoice[]}
 type Capabilities={canProposeProcedureChange:boolean;canWithdrawProcedureChange:boolean;canRevise:boolean}
 type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;version:number;caseContractVersion:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}
+type SupersededBy={id:string;displayNumber?:string;reason?:string}
 
 const levelName=(discipline:string)=>discipline==='System'?'SYS':discipline==='HighLevelSoftware'?'HLR':'LLR'
 const procedureWord=(level:string)=>level==='System'?'SYSTP':level==='HighLevel'?'HLRTP':'LLRTP'
@@ -51,7 +52,7 @@ const emptyDraft={kind:'Introduce' as Kind,baseNumber:'',revision:0,title:'',obj
  * invented. Nothing proposed here is a controlled procedure revision until the package is approved and
  * materialised into a build.
  */
-export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAuthor,onClose,onChanged,onOpenRequirementRevision}:{api:string;projectId:string;reviewId:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void;onOpenRequirementRevision:(requirement:{id:string;revisionId:string;level:string})=>void}){
+export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAuthor,onClose,onChanged,onOpenRequirementRevision,onOpenTestChangeRequest,supersededBy}:{api:string;projectId:string;reviewId:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void;onOpenRequirementRevision:(requirement:{id:string;revisionId:string;level:string})=>void;onOpenTestChangeRequest:(id:string)=>void;supersededBy?:SupersededBy}){
   const [item,setItem]=useState<Package>()
   const [busy,setBusy]=useState(false),[error,setError]=useState('')
   const [draft,setDraft]=useState(emptyDraft),[proposing,setProposing]=useState(false)
@@ -173,7 +174,15 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
   const withdraw=(changeId:string)=>void act(()=>apiRequest(
     `${api}/api/test-change-reviews/${reviewId}/procedure-changes/${changeId}?expectedVersion=${item?.version}`,
     {method:'DELETE'}))
-  const revise=()=>void act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}))
+  const revise=()=>void (async()=>{
+    setBusy(true);setError('')
+    try{
+      const next=await apiRequest<{id:string;displayNumber:string}>(`${api}/api/test-change-reviews/${reviewId}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+      onChanged()
+      onOpenTestChangeRequest(next.id)
+    }catch(problem){setError(operationError(problem,'The next test change request revision could not be started.'))}
+    finally{setBusy(false)}
+  })()
   const saveCase=async()=>{
     setBusy(true);setError('')
     try{
@@ -206,7 +215,6 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
 
   // Answered by the server, not inferred from a broad role here. The workspace was offering authoring to
   // anyone with test authority while the endpoints refused anyone but the engineer holding the package.
-  const open=item?.state==='Open'
   const mayEdit=canAuthor&&(item?.capabilities?.canProposeProcedureChange??false)
   const mayEditCase=canAuthor&&(item?.capabilities?.canWithdrawProcedureChange??false)
   const retiring=draft.kind==='Retire'
@@ -253,6 +261,13 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
         <button type="button" className="quiet" onClick={onClose} aria-label="Close test change request">Close</button>
       </header>
       {error&&<div className="workspaceError" role="alert">{error}</div>}
+      {item?.state==='Superseded'&&<section className="tcrCaseSection" role="status">
+        <h3>Historical revision</h3>
+        <p>{supersededBy?.reason??`${item.displayNumber} has been replaced by a later controlled revision.`}</p>
+        {supersededBy
+          ?<button type="button" className="linkedScr" onClick={()=>onOpenTestChangeRequest(supersededBy.id)}>{supersededBy.displayNumber ? `Open ${supersededBy.displayNumber}` : 'Open exact successor'}</button>
+          :<p className="drawerEmpty">The successor identity is not available in this build context.</p>}
+      </section>}
 
       {item&&<>
         <section className="tcrCaseSection">
@@ -300,7 +315,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
             {!canAuthor&&<p className="drawerEmpty">{item.assignedEngineerId
               ? <><PersonName userName={item.assignedEngineerId}/> holds this test change request and records its procedure decisions.</>
               : 'Test engineering authority is required to propose procedure work.'}</p>}
-            {canAuthor&&!open&&item.state!=='Approved'&&<p className="drawerEmpty">This test change request is with its approver. Its procedure decisions cannot change until they approve or return it.</p>}
+            {canAuthor&&item.state==='InReview'&&<p className="drawerEmpty">This test change request is with its approver. Its procedure decisions cannot change until they approve or return it.</p>}
           </div>
         </section>
 
