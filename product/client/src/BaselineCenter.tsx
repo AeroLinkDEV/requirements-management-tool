@@ -3,6 +3,7 @@ import { PersonName } from "./People";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useFormDraft } from "./autosave";
 import { stateLabel } from './presentation'
+import LegacyProcedureBootstrapPanel from './LegacyProcedureBootstrapPanel'
 import type { FormEvent } from "react";
 import "./BaselineCenter.css";
 import "./Swrd.css";
@@ -423,7 +424,17 @@ export default function BaselineCenter({
                       )
                   )}
                 </div>
-                {detail.state === "Frozen" && (
+                {detail.requirementsMaterializedAt && (
+        <LegacyProcedureBootstrapPanel
+          api={api}
+          baselineId={detail.id}
+          onCompleted={async () => {
+            await loadList();
+            await loadDetail();
+          }}
+        />
+      )}
+      {detail.state === "Frozen" && (
                   <div className="hashPanel">
                     <span>SHA-256 CONTENT HASH</span>
                     <code>{detail.contentHash}</code>

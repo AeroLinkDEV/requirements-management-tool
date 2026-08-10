@@ -285,6 +285,47 @@ public static class BaselineEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        // Explicit one-time migration from a pre-manifest controlled inventory. This is separate from normal
+        // materialization so no successor can silently rewrite what its released predecessor is said to carry.
+        app.MapGet("/api/baselines/{id:guid}/legacy-procedure-manifest-bootstrap", async (Guid id,
+            HttpContext http, LegacyProcedureManifestBootstrapper bootstrapper, AeroLinkDbContext db,
+            IdentityService identity, CancellationToken ct) =>
+        {
+            var projectId = await db.CandidateBaselines.Where(x => x.Id == id)
+                .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct,
+                    ProgramRole.ConfigurationManager)) return Results.Forbid();
+            try
+            {
+                var preview = await bootstrapper.PreviewAsync(id, ct);
+                return preview is null ? Results.NotFound() : Results.Ok(preview);
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/baselines/{id:guid}/legacy-procedure-manifest-bootstrap", async (Guid id,
+            LegacyProcedureManifestBootstrapRequest request, HttpContext http,
+            LegacyProcedureManifestBootstrapper bootstrapper, AeroLinkDbContext db,
+            IdentityService identity, CancellationToken ct) =>
+        {
+            var projectId = await db.CandidateBaselines.Where(x => x.Id == id)
+                .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct,
+                    ProgramRole.ConfigurationManager)) return Results.Forbid();
+            if (!request.ConfirmLegacySnapshot)
+                return Results.BadRequest(new { error =
+                    "Confirm that this is a migration snapshot of the current legacy controlled inventory, not reconstructed historical release evidence." });
+            try
+            {
+                var result = await bootstrapper.BootstrapAsync(id, http.UserAccount().UserName,
+                    request.ExpectedHash, DateTimeOffset.UtcNow, ct);
+                return result is null ? Results.NotFound() : Results.Ok(result);
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         app.MapPost("/api/baselines/{id:guid}/materialize-test-procedures", async (Guid id, EmptyMutationRequest request,
             HttpContext http, TestProcedureBaselineMaterializer materializer, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
