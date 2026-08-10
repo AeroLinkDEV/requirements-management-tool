@@ -230,23 +230,31 @@ public sealed class ProcedureManifestEffectivityApiTests
         var targets = await client.GetFromJsonAsync<JsonElement>(
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-targets?page=1&pageSize=200");
         var targetItems = targets.GetProperty("items").EnumerateArray().ToList();
-        Assert.Contains(targetItems, x => x.GetProperty("baseNumber").GetString() == "SYSTP-002140"
-            && x.GetProperty("currentRevision").GetInt32() == 1);
+        var carriedTarget = Assert.Single(targetItems.Where(x =>
+            x.GetProperty("baseNumber").GetString() == "SYSTP-002140"));
+        Assert.Equal(1, carriedTarget.GetProperty("currentRevision").GetInt32());
+        Assert.Equal("Approved", carriedTarget.GetProperty("state").GetString());
         Assert.DoesNotContain(targetItems, x => x.GetProperty("baseNumber").GetString() == fixture.FutureOnlyBaseNumber);
 
         using var futureOnly = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",
             Proposal(fixture.FutureOnlyBaseNumber, 1));
-        Assert.Equal(HttpStatusCode.BadRequest, futureOnly.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, futureOnly.StatusCode);
         var futureBody = JsonSerializer.Deserialize<JsonElement>(await futureOnly.Content.ReadAsStringAsync());
         Assert.Equal("procedure_not_carried_by_build", futureBody.GetProperty("code").GetString());
+        Assert.Contains("Refresh", futureBody.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
 
         using var skippedRevision = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",
             Proposal("SYSTP-002140", 3));
-        Assert.Equal(HttpStatusCode.BadRequest, skippedRevision.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, skippedRevision.StatusCode);
         var skippedBody = JsonSerializer.Deserialize<JsonElement>(await skippedRevision.Content.ReadAsStringAsync());
         Assert.Equal("procedure_revision_not_next_for_build", skippedBody.GetProperty("code").GetString());
+        Assert.Contains("reselect", skippedBody.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+
+        var unchanged = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes");
+        Assert.Equal(0, unchanged.GetProperty("procedureChanges").GetArrayLength());
 
         using var accepted = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",

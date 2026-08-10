@@ -15,7 +15,7 @@ type ProcedureChange={id:string;displayNumber:string;baseNumber:string;revision:
 type RequirementChoice={id:string;revisionId:string;displayNumber:string;statement:string;level:string}
 /** A controlled procedure a Modify or Retire may target, with the revision it actually sits at. */
 type CurrentCoverage={id:string;revisionId:string;displayNumber:string;statement:string;level:string;isSuspect:boolean}
-type ProcedureTarget={procedureId?:string;baseNumber:string;title:string;currentRevision:number;currentCoverage:CurrentCoverage[]}
+type ProcedureTarget={procedureId?:string;baseNumber:string;title:string;currentRevision:number;state?:string;currentCoverage:CurrentCoverage[]}
 type ProcedureTargetPage={page:number;pageSize:number;totalCount:number;totalPages:number;items:ProcedureTarget[]}
 type RequirementChoicePage={page:number;pageSize:number;totalCount:number;totalPages:number;items:RequirementChoice[]}
 type Capabilities={canProposeProcedureChange:boolean;canWithdrawProcedureChange:boolean;canRevise:boolean}
@@ -167,9 +167,22 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
       removedRequirementRevisionIds:draft.removed,
       coverageChangeRationale:draft.coverageRationale,
       expectedVersion:item?.version}
-    if(await act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/procedure-changes`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}))){
+    setBusy(true);setError('')
+    try{
+      await apiRequest(`${api}/api/test-change-reviews/${reviewId}/procedure-changes`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      await load();onChanged()
       setProposing(false);setDraft(emptyDraft);setDrivingDetails({});setSelectedTargetDetails(undefined)
-    }
+    }catch(problem){
+      const staleTarget=problem instanceof ApiError&&problem.status===409&&[
+        'procedure_not_carried_by_build','procedure_manifest_revision_missing','procedure_revision_not_next_for_build',
+      ].includes(problem.code??'')
+      if(staleTarget){
+        setError(problem.message||'The selected procedure changed. Refresh and reselect a current target.')
+        setTargetPicker(undefined);setSelectedTargetDetails(undefined);setDrivingDetails({})
+        setTargetQuery('');setTargetPage(1)
+        setDraft(current=>({...current,baseNumber:'',revision:0,driving:[],removed:[],coverageRationale:''}))
+      }else setError(operationError(problem,'The test change request could not be updated.'))
+    }finally{setBusy(false)}
   }
   const withdraw=(changeId:string)=>void act(()=>apiRequest(
     `${api}/api/test-change-reviews/${reviewId}/procedure-changes/${changeId}?expectedVersion=${item?.version}`,
@@ -365,6 +378,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                 <select aria-label="Procedure" value={draft.baseNumber} onChange={event=>{
               const target=(targetPicker?.items??[]).find(x=>x.baseNumber===event.target.value)
                 ??(item?.procedureTargets??[]).find(x=>x.baseNumber===event.target.value)
+              setError('')
               setSelectedTargetDetails(target)
               setDrivingDetails({})
               setDraft(current=>({...current,baseNumber:event.target.value,revision:(target?.currentRevision??-1)+1,
@@ -373,7 +387,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                   <option value="">Choose the procedure this acts on...</option>
                   {targetOptions.map(target=>
                     <option value={target.baseNumber} key={target.baseNumber}>
-                      {target.baseNumber}.{String(Math.max(target.currentRevision,0)).padStart(2,'0')} - {target.title}
+                      {target.baseNumber}.{String(Math.max(target.currentRevision,0)).padStart(2,'0')} - {target.title}{target.state?` · ${target.state}`:''}
                     </option>)}
                 </select>
                 {targetError&&<div className="pickerMeta" role="alert" aria-live="assertive">

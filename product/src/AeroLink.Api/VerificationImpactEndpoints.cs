@@ -381,7 +381,8 @@ public static class VerificationImpactEndpoints
                          {
                              revision.Id,
                              procedure.BaseNumber,
-                             CurrentRevision = revision.Revision
+                             CurrentRevision = revision.Revision,
+                             State = revision.State
                          }).ToListAsync(ct);
             var targetTitles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
                 targets.Select(x => x.Id).Distinct().ToList(), ct);
@@ -416,6 +417,7 @@ public static class VerificationImpactEndpoints
                 {
                     x.BaseNumber, title = targetTitles[x.Id].Title,
                     currentRevision = x.CurrentRevision,
+                    state = x.State.ToString(),
                     currentCoverage = targetCoverage.Where(c => c.ProcedureRevisionId == x.Id)
                         .OrderBy(c => c.displayNumber).Select(c => new
                         {
@@ -482,7 +484,8 @@ public static class VerificationImpactEndpoints
                                   revision.Id,
                                   ProcedureId = procedure.Id,
                                   procedure.BaseNumber,
-                                  CurrentRevision = revision.Revision
+                                  CurrentRevision = revision.Revision,
+                             State = revision.State
                               };
             var query = eligibility;
             if (!string.IsNullOrWhiteSpace(search))
@@ -539,6 +542,7 @@ public static class VerificationImpactEndpoints
                     x.BaseNumber,
                     title = exactTitles[x.Id].Title,
                     currentRevision = x.CurrentRevision,
+                    state = x.State.ToString(),
                     currentCoverage = coverageRows.Where(c => c.ProcedureRevisionId == x.Id)
                         .OrderBy(c => c.displayNumber).Select(c => new
                         {
@@ -675,24 +679,24 @@ public static class VerificationImpactEndpoints
                     var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
                         db, review.ProjectId, review.ReleaseId, ct);
                     if (effectivity is null || !effectivity.RevisionByProcedure.TryGetValue(target.Id, out var carriedRevisionId))
-                        return Results.BadRequest(new
+                        return Results.Conflict(new
                         {
-                            error = $"{baseNumber} is not carried by the target software build.",
+                            error = $"{baseNumber} is not carried by the target software build. Refresh the procedure list and reselect a current target.",
                             code = "procedure_not_carried_by_build"
                         });
                     var current = await db.TestProcedureRevisions.AsNoTracking()
                         .Where(x => x.Id == carriedRevisionId).Select(x => (int?)x.Revision)
                         .SingleOrDefaultAsync(ct);
                     if (current is null)
-                        return Results.BadRequest(new
+                        return Results.Conflict(new
                         {
-                            error = $"The target build's selected revision for {baseNumber} no longer exists.",
+                            error = $"The target build's selected revision for {baseNumber} is no longer available. Refresh the procedure list and reselect a current target.",
                             code = "procedure_manifest_revision_missing"
                         });
                     if (request.Revision != current.Value + 1)
-                        return Results.BadRequest(new
+                        return Results.Conflict(new
                         {
-                            error = $"{baseNumber}.{current.Value:D2} is carried by the target build. The proposed revision must be {current.Value + 1:D2}.",
+                            error = $"{baseNumber}.{current.Value:D2} is now carried by the target build. Refresh the procedure list and reselect it before proposing revision {current.Value + 1:D2}.",
                             code = "procedure_revision_not_next_for_build"
                         });
                     currentCoverageIds = (await db.TestCoverage.AsNoTracking()
