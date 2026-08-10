@@ -146,31 +146,38 @@ public static class VerificationCoverageProjection
             var procedureRevisionIds = effectiveProcedureRevisionIds.Distinct().ToList();
             coverageSource = coverageSource.Where(x => procedureRevisionIds.Contains(x.ProcedureRevisionId));
         }
-        return await (from coverage in coverageSource
-                      join revision in db.TestProcedureRevisions.AsNoTracking()
-                          on coverage.ProcedureRevisionId equals revision.Id
-                      join procedure in db.TestProcedures.AsNoTracking()
-                          on revision.ProcedureId equals procedure.Id
-                      orderby procedure.BaseNumber, revision.Revision
-                      select new VerificationCoverageLinkProjection(
-                          coverage.RequirementRevisionId,
-                          procedure.Id,
-                          revision.Id,
-                          procedure.BaseNumber + "." + revision.Revision.ToString("D2"),
-                          procedure.Title,
-                          procedure.Level.ToString(),
-                          revision.State.ToString(),
-                          coverage.IsSuspect,
-                          // IsSuspect is the stored flag; CoverageState is the judgement, and it uses the
-                          // same settled rule as the release gate and the workspace filter. A link to a
-                          // procedure that is being rewritten reported Confirmed here while the gate refused
-                          // to count it — so a requirement could show "1 confirmed test" beside a workspace
-                          // row labelled Suspect, and both were describing the same link.
-                          !coverage.IsSuspect
-                          && revision.State == TestProcedureState.Approved
-                          && (buildScoped || !db.TestProcedureRevisions.Any(sibling => sibling.ProcedureId == procedure.Id
-                              && sibling.State != TestProcedureState.Approved))
-                              ? "Confirmed" : "Suspect"))
-            .ToListAsync(ct);
+        var rows = await (from coverage in coverageSource
+                          join revision in db.TestProcedureRevisions.AsNoTracking()
+                              on coverage.ProcedureRevisionId equals revision.Id
+                          join procedure in db.TestProcedures.AsNoTracking()
+                              on revision.ProcedureId equals procedure.Id
+                          orderby procedure.BaseNumber, revision.Revision
+                          select new
+                          {
+                              coverage.RequirementRevisionId,
+                              ProcedureId = procedure.Id,
+                              ProcedureRevisionId = revision.Id,
+                              DisplayNumber = procedure.BaseNumber + "." + revision.Revision.ToString("D2"),
+                              Level = procedure.Level.ToString(),
+                              ProcedureState = revision.State.ToString(),
+                              coverage.IsSuspect,
+                              CoverageState = !coverage.IsSuspect
+                                  && revision.State == TestProcedureState.Approved
+                                  && (buildScoped || !db.TestProcedureRevisions.Any(sibling => sibling.ProcedureId == procedure.Id
+                                      && sibling.State != TestProcedureState.Approved))
+                                      ? "Confirmed" : "Suspect",
+                          }).ToListAsync(ct);
+        var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+            rows.Select(x => x.ProcedureRevisionId).Distinct().ToList(), ct);
+        return rows.Select(row => new VerificationCoverageLinkProjection(
+            row.RequirementRevisionId,
+            row.ProcedureId,
+            row.ProcedureRevisionId,
+            row.DisplayNumber,
+            titles[row.ProcedureRevisionId].Title,
+            row.Level,
+            row.ProcedureState,
+            row.IsSuspect,
+            row.CoverageState)).ToList();
     }
 }
