@@ -142,6 +142,39 @@ public sealed class ReleasedExecutionEvidenceApiTests
         Assert.Equal(before, await LinkIdsAsync(factory.Services, scenario.InReviewExecutionId));
     }
 
+    [Fact]
+    public async Task A_new_execution_and_its_evidence_link_cannot_bypass_release_in_one_save()
+    {
+        using var root = new AeroLinkApiFactory();
+        using var factory = GuardedFactory(root);
+        var scenario = await SeedAsync(factory.Services);
+        Guid executionId;
+        Guid linkId;
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var revisionId = await db.TestExecutions.AsNoTracking()
+                .Where(x => x.Id == scenario.ReleasedExecutionId)
+                .Select(x => x.ProcedureRevisionId)
+                .SingleAsync();
+            var execution = Execution(scenario.ProjectId, scenario.ReleasedReleaseId, scenario.ReleasedBuildId,
+                revisionId, "Same-save bypass attempt", DateTimeOffset.UtcNow);
+            var link = new TestExecutionEvidence(execution.Id, scenario.ReleasedCandidateEvidenceId);
+            executionId = execution.Id;
+            linkId = link.Id;
+            db.AddRange(execution, link);
+
+            var exception = await Assert.ThrowsAsync<ReleasedBuildReadOnlyException>(() => db.SaveChangesAsync());
+            Assert.Contains("released build", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        using var verifyScope = factory.Services.CreateScope();
+        var verify = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.False(await verify.TestExecutions.AnyAsync(x => x.Id == executionId));
+        Assert.False(await verify.TestExecutionEvidence.AnyAsync(x => x.Id == linkId));
+    }
+
     private static WebApplicationFactory<Program> GuardedFactory(AeroLinkApiFactory root) =>
         root.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
@@ -251,8 +284,8 @@ public sealed class ReleasedExecutionEvidenceApiTests
         campaign.BeginReleaseReview("cm", new List<(string Id, string Name)> { ("release.approver", "Release Approver") },
             new string('f', 64), now.AddMinutes(3));
 
-        releasedRelease.MarkReleased(now.AddHours(1));
-
+        // Historical evidence is linked while the configuration is still in work. Release is a second,
+        // explicit lifecycle transition; the guard must preserve the old link and refuse only later additions.
         db.AddRange(
             program, project,
             releasedRelease, inWorkRelease, inReviewRelease,
@@ -265,6 +298,8 @@ public sealed class ReleasedExecutionEvidenceApiTests
             campaign,
             user,
             new ProgramMembership(user.Id, program.Id, ProgramRole.TestEngineer, "test.setup", now));
+        await db.SaveChangesAsync();
+        releasedRelease.MarkReleased(now.AddHours(1));
         await db.SaveChangesAsync();
 
         return new(
