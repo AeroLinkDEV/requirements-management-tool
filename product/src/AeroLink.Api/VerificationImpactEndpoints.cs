@@ -488,18 +488,8 @@ public static class VerificationImpactEndpoints
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var q = search.Trim().ToLower();
-                var titleRevisionIds = await (from change in db.Set<TestProcedureChange>().AsNoTracking()
-                                              join revision in db.TestProcedureRevisions.AsNoTracking()
-                                                  on new { ReviewId = (Guid?)change.TestChangeReviewId, change.Revision }
-                                                  equals new { ReviewId = revision.SourceTestChangeRequestId, revision.Revision }
-                                              join procedure in db.TestProcedures.AsNoTracking()
-                                                  on revision.ProcedureId equals procedure.Id
-                                              where targetRevisionIds.Contains(revision.Id)
-                                                    && procedure.ProjectId == review.ProjectId
-                                                    && procedure.Level == review.ProcedureLevel()
-                                                    && procedure.BaseNumber == change.BaseNumber
-                                                    && change.Title.ToLower().Contains(q)
-                                              select revision.Id).Distinct().ToListAsync(ct);
+                var titleRevisionIds = await TestProcedureRevisionTitleProjection.MatchingRevisionIdsAsync(
+                    db, targetRevisionIds, q, ct);
                 query = query.Where(x => x.BaseNumber.ToLower().Contains(q)
                     || titleRevisionIds.Contains(x.Id));
             }

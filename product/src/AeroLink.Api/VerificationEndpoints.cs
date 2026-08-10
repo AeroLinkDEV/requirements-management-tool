@@ -663,32 +663,21 @@ public static class VerificationEndpoints
                 var hasRevision = q.Length > 3 && q[^3] == '.' && int.TryParse(q[^2..], out requestedRevision);
                 var baseQuery = hasRevision ? q[..^3] : q;
                 var scopedRevisionIds = scopedRevisions?.Values.ToList();
-                // A build-scoped title is owned by its exact immutable TCR procedure-change snapshot. The
-                // mutable catalog title is deliberately absent from this predicate: searching a predecessor
-                // build for a later title must never find the older revision.
-                var titleMatches = await (from change in db.Set<TestProcedureChange>().AsNoTracking()
-                                          join revision in db.TestProcedureRevisions.AsNoTracking()
-                                              on new
-                                              {
-                                                  ReviewId = (Guid?)change.TestChangeReviewId,
-                                                  change.Revision,
-                                              }
-                                              equals new
-                                              {
-                                                  ReviewId = revision.SourceTestChangeRequestId,
-                                                  revision.Revision,
-                                              }
-                                          join procedure in db.TestProcedures.AsNoTracking()
-                                              on revision.ProcedureId equals procedure.Id
-                                          where procedure.ProjectId == projectId
-                                                && procedure.BaseNumber == change.BaseNumber
-                                                && change.Title.ToLower().Contains(q)
-                                                && (scopedRevisionIds == null
-                                                    ? revision.Revision == db.TestProcedureRevisions
-                                                        .Where(other => other.ProcedureId == procedure.Id)
-                                                        .Max(other => other.Revision)
-                                                    : scopedRevisionIds.Contains(revision.Id))
-                                          select procedure.Id).Distinct().ToListAsync(ct);
+                // Search the same exact revision title returned below. Raw TCR text is not authoritative:
+                // in particular, a supplied Retire title is discarded in favour of its predecessor title.
+                var titleCandidateRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                                       join procedure in source on revision.ProcedureId equals procedure.Id
+                                                       where scopedRevisionIds == null
+                                                           ? revision.Revision == db.TestProcedureRevisions
+                                                               .Where(other => other.ProcedureId == procedure.Id)
+                                                               .Max(other => other.Revision)
+                                                           : scopedRevisionIds.Contains(revision.Id)
+                                                       select revision.Id).ToListAsync(ct);
+                var titleMatchRevisionIds = await TestProcedureRevisionTitleProjection.MatchingRevisionIdsAsync(
+                    db, titleCandidateRevisionIds, q, ct);
+                var titleMatches = await db.TestProcedureRevisions.AsNoTracking()
+                    .Where(x => titleMatchRevisionIds.Contains(x.Id))
+                    .Select(x => x.ProcedureId).Distinct().ToListAsync(ct);
                 source = source.Where(x => x.BaseNumber.ToLower().Contains(baseQuery)
                                            || titleMatches.Contains(x.Id));
                 if (hasRevision && scopedRevisions is not null)
