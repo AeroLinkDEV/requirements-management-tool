@@ -7,7 +7,7 @@ import TestChangeRequestCreateDialog from './TestChangeRequestCreateDialog'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import { pickerSummary } from './pickerText'
-import { reviewsVisibleInCurrentRelease, supersededHistoryFor } from './testChangeReviewPresentation'
+import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, supersededHistoryFor } from './testChangeReviewPresentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './DownstreamAssessmentQueue.css'
 import './TestingCoverageWorkspace.css'
@@ -643,19 +643,22 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
             </div>
             <div className="downstreamConclusion">
               <strong>{testAssessmentStatus(request, discipline)}</strong>
-              {request.outcome === 'ChangeRequired' && request.displayNumber.startsWith(tcrAcronym(discipline)) && (
+              {request.outcome === 'ChangeRequired' && isControlledTestChangeRequest(request, tcrAcronym(discipline)) && (
                 <button type="button" className="linkedScr" onClick={() => setAuthoring(request.id)}>
                   {request.displayNumber} · {request.state === 'InReview' ? 'In review' : request.state}
                 </button>
               )}
               {supersededRevisions.length > 0 && (
                 <details className="decisionHistory tcrRevisionHistory">
-                  <summary>Show {supersededRevisions.length} superseded TCR revision{supersededRevisions.length === 1 ? '' : 's'}</summary>
-                  {supersededRevisions.map(prior => (
-                    <button type="button" className="linkedScr" key={prior.id} onClick={() => setAuthoring(prior.id)}>
-                      {prior.displayNumber} · Superseded
+                  <summary>Show {supersededRevisions.length} superseded history item{supersededRevisions.length === 1 ? '' : 's'}</summary>
+                  {supersededRevisions.map(prior => {
+                    const controlled = isControlledTestChangeRequest(prior, tcrAcronym(discipline))
+                    return <button type="button" className="linkedScr" key={prior.id} onClick={() => controlled
+                      ? setAuthoring(prior.id)
+                      : setOpened(prior.id)}>
+                      {prior.displayNumber} · {controlled ? 'Superseded TCR' : 'Superseded assessment'}
                     </button>
-                  ))}
+                  })}
                 </details>
               )}
               {request.outcome === 'NoChangeRequired' && request.noChangeRationale && <p>{request.noChangeRationale}</p>}
@@ -700,7 +703,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     {request.noChangeRationale && <p className="conclusionRationale">{request.noChangeRationale}</p>}
                   </div>
                 : <p className="drawerEmpty">Nobody has answered this yet.</p>}
-              {request.outcome === 'ChangeRequired' && request.displayNumber.startsWith(tcrAcronym(discipline)) && (
+              {request.outcome === 'ChangeRequired' && isControlledTestChangeRequest(request, tcrAcronym(discipline)) && (
                 <ul className="drawerChanges">
                   <li className="linkedDraft">
                     <button type="button" className="drawerArtifactLink" onClick={() => setAuthoring(request.id)}>{request.displayNumber}</button>

@@ -5,6 +5,14 @@ export type SupersessionRecord = {
   supersededByTestChangeRequestId?: string
 }
 
+/** A folded automatic predecessor has no controlled TCR number and remains an assessment record. */
+export function isControlledTestChangeRequest(
+  review: Pick<SupersessionRecord, 'displayNumber'>,
+  controlledPrefix: string,
+): boolean {
+  return review.displayNumber.startsWith(controlledPrefix)
+}
+
 /**
  * A Superseded review is hidden as a peer active-work row only when its exact successor is already present in
  * the loaded release. Retargeting can put the successor in another release; hiding the predecessor there would
