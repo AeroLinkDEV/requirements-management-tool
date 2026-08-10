@@ -783,10 +783,15 @@ public static class VerificationEndpoints
             }
             // #422: a build/release-scoped execution is configuration evidence. The exact procedure revision
             // being executed must be the revision the selected configuration's controlled manifest carries.
-            // Approved and same-Project are not membership, and coverage rows are not membership. A build
-            // with no manifest authority at all (a genuinely pre-manifest configuration) keeps the legacy
-            // approved-revision path under DEC-097; the moment any exact or compatibility projection exists,
-            // it is authoritative and a mismatched revision is refused.
+            // Approved and same-Project are not membership, and coverage rows are not membership.
+            //
+            // Explicitly scoped requests MUST establish configuration authority:
+            // - an exact or compatibility effectivity projection is authoritative, and a mismatched
+            //   revision is refused with procedure_revision_not_carried_by_build;
+            // - null effectivity means no configuration authority can be established, so the request is
+            //   refused with procedure_manifest_unavailable (never a Project-global Approved fallback);
+            // - only the completely unscoped path (neither SoftwareBuildId nor X-AeroLink-Build-Context)
+            //   may retain the legacy Approved-revision behavior under DEC-097.
             if (request.SoftwareBuildId is not null)
             {
                 var buildBaselineId = await db.SoftwareBuilds.AsNoTracking()

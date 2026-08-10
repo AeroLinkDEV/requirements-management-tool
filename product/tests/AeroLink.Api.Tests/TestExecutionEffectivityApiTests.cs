@@ -26,6 +26,7 @@ public sealed class TestExecutionEffectivityApiTests
         Guid Build17Id,
         Guid Release18Id,
         Guid Build18Id,
+        Guid Release19Id,
         Guid BareBuildId,
         Guid BareReleaseId,
         Guid OtherReleaseId,
@@ -51,6 +52,9 @@ public sealed class TestExecutionEffectivityApiTests
         var release18 = new SoftwareRelease(project.Id, "1.8", false, release17.Id);
         var baseline18 = new CandidateBaseline("SW-01.80", 0, project.Id, release18.Id, baseline17.Id,
             "Build 1.8 baseline", "cm", now);
+        // A later in-work release with NO baseline of its own: header-only execution must traverse to the
+        // predecessor release's exact manifest rather than resolve locally.
+        var release19 = new SoftwareRelease(project.Id, "1.9", false, release18.Id);
         var build16 = new SoftwareBuild(project.Id, release16.Id, baseline16.Id, "SW-01.60",
             "Build 1.6 configuration", "cm", now);
         var build17 = new SoftwareBuild(project.Id, release17.Id, baseline17.Id, "SW-01.70",
@@ -84,7 +88,7 @@ public sealed class TestExecutionEffectivityApiTests
         var user = new UserAccount("execution.tester", "Execution Tester", "execution.tester@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.AddRange(
-            program, project, release16, release17, release18, baseline16, baseline17, baseline18,
+            program, project, release16, release17, release18, release19, baseline16, baseline17, baseline18,
             build16, build17, build18, bareBaseline, bareBuild, bareRelease,
             otherProgram, otherProject, otherRelease,
             procedure, revision00, revision01, uncarriedProcedure, uncarriedRevision,
@@ -103,7 +107,7 @@ public sealed class TestExecutionEffectivityApiTests
                 .SetProperty(x => x.TestProceduresMaterializedAt, now)
                 .SetProperty(x => x.TestProceduresHash, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
         return new(project.Id, release16.Id, build16.Id, release17.Id, build17.Id,
-            release18.Id, build18.Id, bareBuild.Id, bareRelease.Id, otherRelease.Id,
+            release18.Id, build18.Id, release19.Id, bareBuild.Id, bareRelease.Id, otherRelease.Id,
             procedure.Id, revision00.Id, revision01.Id, uncarriedRevision.Id);
     }
 
@@ -128,6 +132,19 @@ public sealed class TestExecutionEffectivityApiTests
         executedAt = DateTimeOffset.UtcNow,
     };
 
+    private static async Task<string> CaptureExecutionStateAsync(AeroLinkApiFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var executions = string.Join("|", (await db.TestExecutions.AsNoTracking().ToListAsync())
+            .OrderBy(x => x.Id)
+            .Select(x => $"{x.Id}:{x.ProjectId}:{x.ReleaseId}:{x.ProcedureRevisionId}:{x.SoftwareBuildId}:{x.RetestOfExecutionId}:{x.Outcome}:{x.ExecutedBy}:{x.Configuration}:{x.Determination}:{x.EvidenceReference}:{x.ExecutedAt:O}:{x.RecordedAt:O}"));
+        var evidence = string.Join("|", (await db.TestExecutionEvidence.AsNoTracking().ToListAsync())
+            .OrderBy(x => x.TestExecutionId).ThenBy(x => x.EvidenceId)
+            .Select(x => $"{x.TestExecutionId}:{x.EvidenceId}"));
+        return $"{executions}|{evidence}";
+    }
+
     [Fact]
     public async Task Cross_build_procedure_revisions_are_refused_and_persist_nothing()
     {
@@ -136,6 +153,13 @@ public sealed class TestExecutionEffectivityApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client);
 
+        // A prior valid execution exists in the same test; every later refusal must leave it byte-for-byte
+        // unchanged and add no new row or evidence relationship.
+        using var valid = await client.PostAsJsonAsync("/api/test-executions",
+            ExecutionBody(fixture.ProjectId, fixture.Revision00Id, fixture.Build16Id));
+        Assert.Equal(HttpStatusCode.Created, valid.StatusCode);
+        var baselineState = await CaptureExecutionStateAsync(factory);
+
         // Build 1.7 carries .01; executing the predecessor .00 as Build 1.7 must be refused.
         using var wrongRevision = await client.PostAsJsonAsync("/api/test-executions",
             ExecutionBody(fixture.ProjectId, fixture.Revision00Id, fixture.Build17Id));
@@ -143,6 +167,7 @@ public sealed class TestExecutionEffectivityApiTests
         Assert.True(wrongRevision.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
             $"{(int)wrongRevision.StatusCode}: {wrongBody}");
         Assert.Contains("procedure_revision_not_carried_by_build", wrongBody);
+        Assert.Equal(baselineState, await CaptureExecutionStateAsync(factory));
 
         // An Approved same-Project procedure the build manifest does not carry is also refused.
         using var uncarried = await client.PostAsJsonAsync("/api/test-executions",
@@ -151,6 +176,7 @@ public sealed class TestExecutionEffectivityApiTests
         Assert.True(uncarried.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
             $"{(int)uncarried.StatusCode}: {uncarriedBody}");
         Assert.Contains("procedure_revision_not_carried_by_build", uncarriedBody);
+        Assert.Equal(baselineState, await CaptureExecutionStateAsync(factory));
 
         // A successor revision cannot be executed against the earlier build.
         using var successorOnEarlier = await client.PostAsJsonAsync("/api/test-executions",
@@ -159,11 +185,13 @@ public sealed class TestExecutionEffectivityApiTests
         Assert.True(successorOnEarlier.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
             $"{(int)successorOnEarlier.StatusCode}: {successorBody}");
         Assert.Contains("procedure_revision_not_carried_by_build", successorBody);
+        Assert.Equal(baselineState, await CaptureExecutionStateAsync(factory));
 
-        // Refused writes persist no TestExecution row and no evidence relationship.
+        // Exactly the one valid row persists, with no evidence relationship.
         using var verifyScope = factory.Services.CreateScope();
         var db = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        Assert.Equal(0, await db.TestExecutions.CountAsync());
+        Assert.Equal(1, await db.TestExecutions.CountAsync());
+        Assert.Equal(0, await db.TestExecutionEvidence.CountAsync());
     }
 
     [Fact]
@@ -199,6 +227,8 @@ public sealed class TestExecutionEffectivityApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client);
 
+        var emptyState = await CaptureExecutionStateAsync(factory);
+
         // Release-scoped through the workspace header only: Build 1.7 effective revision is .01.
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", fixture.Release17Id.ToString());
         using var wrongRevision = await client.PostAsJsonAsync("/api/test-executions",
@@ -207,10 +237,12 @@ public sealed class TestExecutionEffectivityApiTests
         Assert.True(wrongRevision.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
             $"{(int)wrongRevision.StatusCode}: {wrongBody}");
         Assert.Contains("procedure_revision_not_carried_by_build", wrongBody);
+        Assert.Equal(emptyState, await CaptureExecutionStateAsync(factory));
 
         using var exactRevision = await client.PostAsJsonAsync("/api/test-executions",
             ExecutionBody(fixture.ProjectId, fixture.Revision01Id, null));
         Assert.Equal(HttpStatusCode.Created, exactRevision.StatusCode);
+        var afterValidState = await CaptureExecutionStateAsync(factory);
 
         client.DefaultRequestHeaders.Remove("X-AeroLink-Build-Context");
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", fixture.Release16Id.ToString());
@@ -220,6 +252,12 @@ public sealed class TestExecutionEffectivityApiTests
         Assert.True(successorOnEarlier.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
             $"{(int)successorOnEarlier.StatusCode}: {successorBody}");
         Assert.Contains("procedure_revision_not_carried_by_build", successorBody);
+        Assert.Equal(afterValidState, await CaptureExecutionStateAsync(factory));
+
+        using var verifyScope = factory.Services.CreateScope();
+        var db = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(1, await db.TestExecutions.CountAsync());
+        Assert.Equal(0, await db.TestExecutionEvidence.CountAsync());
     }
 
     [Fact]
@@ -230,23 +268,33 @@ public sealed class TestExecutionEffectivityApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client);
 
+        var emptyState = await CaptureExecutionStateAsync(factory);
+
         // Build 1.8 carries .01 unchanged from Build 1.7; the exact carried revision is accepted.
         using var on18 = await client.PostAsJsonAsync("/api/test-executions",
             ExecutionBody(fixture.ProjectId, fixture.Revision01Id, fixture.Build18Id));
         Assert.Equal(HttpStatusCode.Created, on18.StatusCode);
 
-        // Release-header-only traversal over the predecessor chain accepts the effective .01 and refuses .00.
-        client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", fixture.Release18Id.ToString());
-        using var exact18 = await client.PostAsJsonAsync("/api/test-executions",
+        // Release 1.9 has NO baseline of its own, so a header-only request must actually traverse to the
+        // predecessor release's exact manifest (Release 1.8 carries .01) rather than resolve locally.
+        client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", fixture.Release19Id.ToString());
+        using var exact19 = await client.PostAsJsonAsync("/api/test-executions",
             ExecutionBody(fixture.ProjectId, fixture.Revision01Id, null));
-        Assert.Equal(HttpStatusCode.Created, exact18.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, exact19.StatusCode);
+        var afterValidState = await CaptureExecutionStateAsync(factory);
 
-        using var predecessorOn18 = await client.PostAsJsonAsync("/api/test-executions",
+        using var predecessorOn19 = await client.PostAsJsonAsync("/api/test-executions",
             ExecutionBody(fixture.ProjectId, fixture.Revision00Id, null));
-        var predecessorBody = await predecessorOn18.Content.ReadAsStringAsync();
-        Assert.True(predecessorOn18.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
-            $"{(int)predecessorOn18.StatusCode}: {predecessorBody}");
+        var predecessorBody = await predecessorOn19.Content.ReadAsStringAsync();
+        Assert.True(predecessorOn19.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
+            $"{(int)predecessorOn19.StatusCode}: {predecessorBody}");
         Assert.Contains("procedure_revision_not_carried_by_build", predecessorBody);
+        Assert.Equal(afterValidState, await CaptureExecutionStateAsync(factory));
+
+        using var verifyScope = factory.Services.CreateScope();
+        var db = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(2, await db.TestExecutions.CountAsync());
+        Assert.Equal(0, await db.TestExecutionEvidence.CountAsync());
     }
 
     [Fact]
@@ -257,12 +305,14 @@ public sealed class TestExecutionEffectivityApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client);
 
+        var baselineState = await CaptureExecutionStateAsync(factory);
         using var buildScoped = await client.PostAsJsonAsync("/api/test-executions",
             ExecutionBody(fixture.ProjectId, fixture.Revision00Id, fixture.BareBuildId));
         var buildBody = await buildScoped.Content.ReadAsStringAsync();
         Assert.True(buildScoped.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
             $"{(int)buildScoped.StatusCode}: {buildBody}");
         Assert.Contains("procedure_manifest_unavailable", buildBody);
+        Assert.Equal(baselineState, await CaptureExecutionStateAsync(factory));
 
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", fixture.BareReleaseId.ToString());
         using var releaseScoped = await client.PostAsJsonAsync("/api/test-executions",
@@ -271,10 +321,12 @@ public sealed class TestExecutionEffectivityApiTests
         Assert.True(releaseScoped.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
             $"{(int)releaseScoped.StatusCode}: {releaseBody}");
         Assert.Contains("procedure_manifest_unavailable", releaseBody);
+        Assert.Equal(baselineState, await CaptureExecutionStateAsync(factory));
 
         using var verifyScope = factory.Services.CreateScope();
         var db = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         Assert.Equal(0, await db.TestExecutions.CountAsync());
+        Assert.Equal(0, await db.TestExecutionEvidence.CountAsync());
     }
 
     [Fact]
@@ -285,6 +337,7 @@ public sealed class TestExecutionEffectivityApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client);
 
+        var baselineState = await CaptureExecutionStateAsync(factory);
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", fixture.OtherReleaseId.ToString());
         using var refused = await client.PostAsJsonAsync("/api/test-executions",
             ExecutionBody(fixture.ProjectId, fixture.Revision00Id, null));
@@ -292,9 +345,11 @@ public sealed class TestExecutionEffectivityApiTests
         Assert.True(refused.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict,
             $"{(int)refused.StatusCode}: {body}");
         Assert.Contains("cross_project_release", body);
+        Assert.Equal(baselineState, await CaptureExecutionStateAsync(factory));
 
         using var verifyScope = factory.Services.CreateScope();
         var db = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         Assert.Equal(0, await db.TestExecutions.CountAsync());
+        Assert.Equal(0, await db.TestExecutionEvidence.CountAsync());
     }
 }
