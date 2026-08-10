@@ -1,0 +1,25 @@
+name: Agent 364 run final repair
+on:
+  push:
+    branches: [agent/364-legacy-procedure-manifest-bootstrap]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Apply only on explicit trigger
+        shell: bash
+        run: |
+          if ! git log -1 --pretty=%B | grep -Fq '[run-364-repair-script]'; then exit 0; fi
+          python .github/agent-364-final-repair.py
+          git diff --check
+          git config user.name seanmccarthyns
+          git config user.email seanmccarthyns@gmail.com
+          git add product/src/AeroLink.Api/BaselineEndpoints.cs product/tests/AeroLink.Infrastructure.Tests/TestProcedureMaterializationTests.cs product/client/tests/history-and-build-provenance.spec.ts
+          git commit -m 'Repair legacy bootstrap qualification regressions'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
