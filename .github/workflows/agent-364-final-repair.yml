@@ -1,0 +1,189 @@
+name: Agent 364 final qualification repair
+
+on:
+  push:
+    branches:
+      - agent/364-legacy-procedure-manifest-bootstrap
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ contains(github.event.head_commit.message, '[run-364-final-repair]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Apply qualification repairs
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise RuntimeError(f'{path}: expected exactly one replacement anchor, found {text.count(old)}')
+              p.write_text(text.replace(old, new), encoding='utf-8')
+
+          # The Baselines route is intentionally live now; only release-planning remains dormant.
+          replace_once(
+              'product/client/tests/history-and-build-provenance.spec.ts',
+              """  const root = `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}`
+  for (const retired of ['release-planning', 'baselines']) {
+    await page.goto(`${root}/${retired}`)
+    await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
+  }
+})""",
+              """  const root = `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}`
+  await page.goto(`${root}/release-planning`)
+  await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
+
+  await page.goto(`${root}/baselines`)
+  await expect(page.getByRole('heading', { name: 'Candidate Baselines' })).toBeVisible()
+})""")
+
+          # #364 deliberately removes the old silent-empty fallback. Preserve that policy as a regression.
+          p = Path('product/tests/AeroLink.Infrastructure.Tests/TestProcedureMaterializationTests.cs')
+          text = p.read_text(encoding='utf-8')
+          pattern = re.compile(
+              r'    \[Fact\]\n    public async Task A_predecessor_with_no_procedure_manifest_starts_the_successor_empty_rather_than_failing\(\)\n    \{.*?\n    \}\n\n    \[Fact\]\n    public async Task A_decision_that_asked_for_a_procedure_settles_when_the_test_change_request_delivers_it\(\)',
+              re.S)
+          replacement = '''    [Fact]
+    public async Task A_predecessor_with_no_procedure_manifest_requires_an_explicit_legacy_bootstrap()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-tp-legacy-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var (project, release) = await SeedProjectAsync(db, "FMSL");
+
+            var legacy = new CandidateBaseline("SW-00.10", 0, project.Id, release.Id, null, "Legacy", "cm", now);
+            legacy.Select(ApprovedChangeRequest(project.Id, release.Id, "SRCR-00099", now), "cm", now);
+            legacy.Freeze("cm", now);
+            legacy.MarkRequirementsMaterialized("cm", new string('a', 64), 0, now);
+            db.Add(legacy);
+            await db.SaveChangesAsync();
+
+            var error = await Assert.ThrowsAsync<DomainException>(() =>
+                MaterializeAsync(db, project.Id, release.Id, "SW-00.20", legacy.Id, now,
+                    Change("SYSTP-000001", 0, TestProcedureChangeKind.Introduce, "Oceanic sequencing")));
+
+            Assert.Contains("legacy bootstrap snapshot", error.Message, StringComparison.OrdinalIgnoreCase);
+            var successor = await db.CandidateBaselines.SingleAsync(x => x.BaseNumber == "SW-00.20");
+            Assert.Null(successor.TestProceduresMaterializedAt);
+            Assert.Empty(await db.BaselineTestProcedures.Where(x => x.BaselineId == successor.Id).ToListAsync());
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task A_decision_that_asked_for_a_procedure_settles_when_the_test_change_request_delivers_it()'''
+          text, count = pattern.subn(replacement, text)
+          if count != 1:
+              raise RuntimeError(f'TestProcedureMaterializationTests: replacement count {count}')
+          p.write_text(text, encoding='utf-8')
+
+          # Keep provider-specific ordering / display formatting out of the SQL predecessor projection.
+          p = Path('product/src/AeroLink.Api/BaselineEndpoints.cs')
+          text = p.read_text(encoding='utf-8')
+          pattern = re.compile(
+              r'        app\.MapGet\("/api/baselines/predecessors", async \(Guid projectId, Guid releaseId, AeroLinkDbContext db, CancellationToken ct\) =>\n        \{.*?\n        \}\);\n\n        app\.MapPost\("/api/baselines",',
+              re.S)
+          replacement = '''        app.MapGet("/api/baselines/predecessors", async (Guid projectId, Guid releaseId, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var rows = await (from baseline in db.CandidateBaselines.AsNoTracking()
+                              join release in db.Releases.AsNoTracking() on baseline.ReleaseId equals release.Id
+                              where baseline.ProjectId == projectId && baseline.ReleaseId != releaseId
+                                    && baseline.RequirementsMaterializedAt != null
+                              select new
+                              {
+                                  baseline.Id,
+                                  baseline.BaseNumber,
+                                  baseline.Revision,
+                                  baseline.Name,
+                                  baseline.ReleaseId,
+                                  release = release.Version,
+                                  release.IsReleased,
+                                  baseline.RequirementsHash,
+                                  baseline.FrozenAt,
+                                  requirementCount = db.BaselineRequirements.Count(x => x.BaselineId == baseline.Id)
+                              }).ToListAsync(ct);
+            var items = rows
+                .OrderByDescending(x => x.IsReleased)
+                .ThenByDescending(x => x.release, StringComparer.Ordinal)
+                .ThenByDescending(x => x.FrozenAt)
+                .Select(x => new
+                {
+                    x.Id,
+                    displayNumber = ArtifactNumber.Display(x.BaseNumber, x.Revision),
+                    x.Name,
+                    x.ReleaseId,
+                    x.release,
+                    x.IsReleased,
+                    x.RequirementsHash,
+                    x.requirementCount
+                });
+            return Results.Ok(items);
+        });
+
+        app.MapPost("/api/baselines",'''
+          text, count = pattern.subn(replacement, text)
+          if count != 1:
+              raise RuntimeError(f'BaselineEndpoints predecessor replacement count {count}')
+          p.write_text(text, encoding='utf-8')
+
+          # Focused API regression: the SQLite-backed predecessor list used by the live Baselines route must be 200.
+          p = Path('product/tests/AeroLink.Api.Tests/LegacyProcedureManifestBootstrapApiTests.cs')
+          text = p.read_text(encoding='utf-8')
+          pairs = [
+              ('private sealed record Fixture(Guid BaselineId, Guid ProcedureId, Guid RevisionId);',
+               'private sealed record Fixture(Guid BaselineId, Guid ProcedureId, Guid RevisionId, Guid ProjectId, Guid ActiveReleaseId);'),
+              ('var release = new SoftwareRelease(project.Id, "1.5", true);',
+               'var release = new SoftwareRelease(project.Id, "1.5", true);\n        var activeRelease = new SoftwareRelease(project.Id, "1.6", false);'),
+              ('db.AddRange(program, project, release, request, baseline, procedure, revision);',
+               'db.AddRange(program, project, release, activeRelease, request, baseline, procedure, revision);'),
+              ('return new Fixture(baseline.Id, procedure.Id, revision.Id);',
+               'return new Fixture(baseline.Id, procedure.Id, revision.Id, project.Id, activeRelease.Id);'),
+          ]
+          for old, new in pairs:
+              if text.count(old) != 1:
+                  raise RuntimeError(f'Legacy bootstrap API anchor count {text.count(old)} for {old[:50]}')
+              text = text.replace(old, new, 1)
+          needle = '''        using var cm = factory.CreateClient();
+        await LoginAsync(cm, "legacy.cm");
+        using var previewResponse = await cm.GetAsync('''
+          insert = '''        using var cm = factory.CreateClient();
+        await LoginAsync(cm, "legacy.cm");
+
+        using var predecessorResponse = await cm.GetAsync(
+            $"/api/baselines/predecessors?projectId={fixture.ProjectId}&releaseId={fixture.ActiveReleaseId}");
+        var predecessorBody = await predecessorResponse.Content.ReadAsStringAsync();
+        Assert.True(predecessorResponse.StatusCode == HttpStatusCode.OK, predecessorBody);
+        var predecessors = JsonSerializer.Deserialize<JsonElement>(predecessorBody);
+        Assert.Equal(1, predecessors.GetArrayLength());
+        Assert.Equal("SW-96.00", predecessors[0].GetProperty("displayNumber").GetString());
+
+        using var previewResponse = await cm.GetAsync('''
+          if text.count(needle) != 1:
+              raise RuntimeError(f'Legacy bootstrap API insertion count {text.count(needle)}')
+          p.write_text(text.replace(needle, insert, 1), encoding='utf-8')
+          PY
+
+          git diff --check
+          git config user.name "seanmccarthyns"
+          git config user.email "seanmccarthyns@gmail.com"
+          git add product/src/AeroLink.Api/BaselineEndpoints.cs \
+            product/tests/AeroLink.Api.Tests/LegacyProcedureManifestBootstrapApiTests.cs \
+            product/tests/AeroLink.Infrastructure.Tests/TestProcedureMaterializationTests.cs \
+            product/client/tests/history-and-build-provenance.spec.ts
+          git commit -m "Repair legacy bootstrap qualification regressions"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
