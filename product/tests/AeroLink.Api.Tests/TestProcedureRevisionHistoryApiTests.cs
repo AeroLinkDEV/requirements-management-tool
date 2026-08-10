@@ -174,6 +174,12 @@ Assert.Equal(fixture.Revision01Id,
             "&search=forged%20retirement%20rename&page=1&pageSize=25");
         Assert.Equal(0, discardedRetirementList.GetProperty("totalCount").GetInt32());
 
+        var predecessorReleaseSearch = await JsonAsync(client,
+            $"/api/search?projectId={fixture.ProjectId}&releaseId={fixture.Release15Id}" +
+            "&query=route%20sequencing%20and%20discontinuities");
+        Assert.DoesNotContain(predecessorReleaseSearch.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("kind").GetString() is "test-procedure" or "test-execution");
+
         var retiredSearch = await JsonAsync(client,
             $"/api/search?projectId={fixture.ProjectId}&query=route%20sequencing%20and%20discontinuities");
         Assert.Contains(retiredSearch.GetProperty("items").EnumerateArray(),
