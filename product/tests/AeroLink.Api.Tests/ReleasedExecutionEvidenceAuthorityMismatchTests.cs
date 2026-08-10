@@ -4,8 +4,11 @@ using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace AeroLink.Api.Tests;
 
@@ -18,7 +21,8 @@ public sealed class ReleasedExecutionEvidenceAuthorityMismatchTests
     [Fact]
     public async Task A_released_build_authority_wins_even_when_execution_release_id_is_in_work()
     {
-        using var factory = new AeroLinkApiFactory();
+        using var root = new AeroLinkApiFactory();
+        using var factory = GuardedFactory(root);
         Guid executionId;
         Guid evidenceId;
         Guid linkId;
@@ -71,4 +75,15 @@ public sealed class ReleasedExecutionEvidenceAuthorityMismatchTests
         Assert.False(await verify.TestExecutionEvidence.AnyAsync(x => x.TestExecutionId == executionId
             && x.EvidenceId == evidenceId));
     }
+
+    private static WebApplicationFactory<Program> GuardedFactory(AeroLinkApiFactory root) =>
+        root.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+        {
+            services.RemoveAll<AeroLinkDbContext>();
+            services.RemoveAll<DbContextOptions<AeroLinkDbContext>>();
+            services.RemoveAll<IDbContextOptionsConfiguration<AeroLinkDbContext>>();
+            services.AddDbContext<AeroLinkDbContext>(options => options
+                .UseSqlite(root.ConnectionString)
+                .AddInterceptors(new ReleasedExecutionEvidenceInterceptor()));
+        }));
 }
