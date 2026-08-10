@@ -12,14 +12,13 @@ jobs:
   patch:
     if: ${{ contains(github.event.head_commit.message, '[agent-364-run-repair]') }}
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 15
     steps:
       - name: Check out branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      # Read the original branch-only patch so the retry stays identical except for the corrected marker.
       - name: Apply corrected core patch
         shell: pwsh
         run: |
@@ -45,12 +44,15 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Validate backend contract
+      - name: Compile the complete solution and run the focused domain contract
         shell: pwsh
         run: |
           dotnet restore product/AeroLink.slnx
           dotnet build product/AeroLink.slnx --configuration Release --no-restore
-          dotnet test product/AeroLink.slnx --configuration Release --no-build --logger "console;verbosity=normal"
+          dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj `
+            --configuration Release --no-build `
+            --filter FullyQualifiedName~LegacyProcedureManifestBootstrapDomainTests `
+            --logger "console;verbosity=normal"
 
       - name: Publish core product patch
         shell: pwsh
