@@ -134,12 +134,12 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   })).toBeVisible()
   await packageWorkspace.getByRole('button', { name: 'Revise this test change request' }).click()
 
-  const reviewsAfter = await expect.poll(async () => {
+  await expect.poll(async () => {
     const response = await request.get(`${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`)
     expect(response.ok(), await response.text()).toBeTruthy()
-    return await response.json() as { items: ReviewItem[] }
-  }, { timeout: 30_000 }).toMatchObject({ items: expect.any(Array) })
-  void reviewsAfter
+    const body = await response.json() as { items: ReviewItem[] }
+    return body.items.find(item => item.id === triggerReviewId)?.state
+  }, { timeout: 30_000 }).toBe('Superseded')
 
   const refreshedReviews = await (await request.get(
     `${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`,
@@ -160,7 +160,7 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   // Only the successor is an active queue row. The predecessor sits beneath that row as explicit history.
   const successorRow = page.locator('.downstreamAssessment').filter({ hasText: successor!.displayNumber }).first()
   await expect(successorRow).toBeVisible({ timeout: 30_000 })
-  await expect(page.locator('.downstreamAssessment').filter({ hasText: predecessor!.displayNumber })).toHaveCount(1)
+  await expect(page.locator('.downstreamAssessment[data-state="Superseded"]')).toHaveCount(0)
   const history = successorRow.locator('details.tcrRevisionHistory')
   await expect(history.getByText('Show 1 superseded TCR revision', { exact: true })).toBeVisible()
   await history.getByText('Show 1 superseded TCR revision', { exact: true }).click()
