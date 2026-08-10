@@ -91,7 +91,10 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
                 current.Remove(existing.Id);
                 continue;
             }
-            existing.UpdateDraft(change.Title, existing.OwnerId, now);
+            // #421: the title belongs to this exact revision's immutable TCR change snapshot. Mutating the
+            // stable procedure catalog row here rewrote predecessor/released titles whenever a later build
+            // modified the procedure. The catalog title remains legacy/current lookup metadata; every
+            // build/revision-scoped surface resolves the exact snapshot instead.
             current[existing.Id] = next;
         }
 
