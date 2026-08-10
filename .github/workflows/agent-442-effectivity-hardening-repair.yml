@@ -28,12 +28,9 @@ jobs:
 
           workflow = Path('.github/workflows/agent-442-effectivity-hardening.yml').read_text(encoding='utf-8').splitlines()
           start = next(i for i, line in enumerate(workflow) if line.strip() == "python - <<'PY'")
-          end = next(i for i in range(start + 1, len(workflow)) if line_is_end(workflow[i]))
+          end = next(i for i in range(start + 1, len(workflow)) if workflow[i].strip() == 'PY')
           source = textwrap.dedent('\n'.join(workflow[start + 1:end]))
           exec(compile(source, 'agent-442-effectivity-hardening.py', 'exec'))
-
-          def line_is_end(line: str) -> bool:
-              return line.strip() == 'PY'
           PY
 
       - name: Install .NET 10
