@@ -21,6 +21,10 @@ public static class OperationsEndpoints
         group.MapPost("/alerts/{id:guid}/resolve",ResolveAlertAsync);
         app.MapAeroLinkExternalIdentityAdminEndpoints();
         app.MapAeroLinkVerificationImpactEndpoints();
+        // Registered after the original verification module, with explicit lower route order inside the
+        // module. Existing public URLs therefore resolve to the exact revision-scoped read models while the
+        // legacy handlers remain available as rollback-compatible code rather than a second API contract.
+        app.MapExactTestProcedureReadEndpoints();
         return app;
     }
 
