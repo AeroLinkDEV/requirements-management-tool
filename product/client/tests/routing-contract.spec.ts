@@ -48,14 +48,14 @@ test('software change history routes preserve the selected HLR or LLR level', ()
   expect(parseRoute(assessment)).toMatchObject({view:'history',artifactKind:'HighLevel',artifactId:'assessment-a'})
 })
 
-test('problem reports are active while retired product-version and baseline pages reject direct navigation', () => {
+test('problem reports and configuration baselines are active while retired product-version pages reject direct navigation', () => {
   const root = '/programs/program-a/projects/project-a/releases/release-a'
   expect(parseRoute(`${root}/problem-reports`)).toMatchObject({ view: 'problemReports', discipline: 'system' })
   expect(routePath(context, 'problemReports')).toBe(`${root}/problem-reports`)
   expect(parseRoute(`${root}/problem-reports/report-a`)).toMatchObject({ view: 'problemReports', artifactId: 'report-a' })
   expect(routePath(context, 'problemReports', 'system', 'report-a')).toBe(`${root}/problem-reports/report-a`)
-  for (const path of ['release-planning', 'baselines'])
-    expect(parseRoute(`${root}/${path}`)).toMatchObject({ view: 'notFound' })
+  expect(parseRoute(`${root}/release-planning`)).toMatchObject({ view: 'notFound' })
+  expect(parseRoute(`${root}/baselines`)).toMatchObject({ view: 'baselines' })
   for (const kind of ['problem-report', 'baseline', 'build'])
     expect(parseRoute(`${root}/artifacts/${kind}/record-a`)).toMatchObject({ view: 'notFound' })
 })
