@@ -4,7 +4,7 @@
 > 1.6 values below describe the initial idempotent seed; the persistent demonstration database now also
 > contains legitimate engineering records created through live workflows. Present-tense seed descriptions
 > below should be read as initial conditions. See
-> [the current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-03.md) for the active product checkpoint.
+> [the current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-10.md) for the active product checkpoint.
 
 ## Purpose
 

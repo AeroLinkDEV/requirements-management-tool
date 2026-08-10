@@ -1727,6 +1727,74 @@ Future entries use:
     Cannot Reproduce, No Fault Found and Accepted Risk — and whether the last four should is deliberately
     left open.
 
+### DEC-104 - Legacy Procedure Effectivity Starts With an Explicit Attributable Bootstrap
+
+- **Date:** 2026-08-10
+- **Status:** Accepted; delivered by #364 / PR #440
+- **Decision:** A released predecessor whose controlled procedures predate build-scoped procedure manifests is
+  not treated as carrying zero procedures and is not silently reconstructed on read. A Configuration Manager
+  explicitly previews and commits one exact migration/configuration snapshot. The commit is bound to the exact
+  preview hash, records actor/time/source rule/count/hash, refuses drift without partial writes, and is
+  idempotent for the same snapshot. Normal successor materialization requires that exact predecessor manifest,
+  carries it forward, then applies selected approved Introduce/Modify/Retire TCR decisions.
+- **Rationale:** Treating a missing legacy manifest as empty turns absence of historical metadata into a false
+  configuration statement. Inferring an exact historical manifest from today's mutable inventory would make the
+  opposite false claim. An explicit bootstrap states exactly what is known: the migration snapshot established
+  now, under named authority and deterministic evidence.
+- **Consequences:** Existing procedure revisions, authorship, approvals and coverage are preserved; coverage is
+  never inferred. A genuinely empty legacy inventory can establish an exact empty snapshot. Candidate Baselines
+  at `/baselines` is the supported Configuration Management surface for this operation; `/release-planning`
+  remains retired. This supersedes only prior statements that Candidate Baselines itself was dormant/unexposed,
+  not the broader decisions that retired redundant product-version/release-planning surfaces.
+
+### DEC-105 - Procedure Search Uses the Same Exact Revision Title It Displays
+
+- **Date:** 2026-08-10
+- **Status:** Accepted; delivered by #442 / PR #444
+- **Decision:** Any search whose result represents an exact procedure revision matches the authoritative
+  `TestProcedureRevisionTitleProjection` for that revision, subject to the same project/release/effectivity/
+  discipline scope as the result. This includes procedure list search, universal procedure search, universal
+  execution search and Modify/Retire target search.
+- **Rationale:** A Retire proposal can contain supplied title text that is deliberately discarded from
+  controlled history while the retirement revision inherits the predecessor title. Searching raw proposal text
+  made discarded text discoverable and the displayed controlled title undiscoverable. Search and display cannot
+  use different definitions of the same controlled record.
+- **Consequences:** Discarded/forged Retire title text does not match; the inherited predecessor title does.
+  Legacy revisions remain searchable by the deterministic compatibility label actually displayed, without
+  promoting today's mutable catalog title into historical evidence.
+
+### DEC-106 - A Stale Controlled Procedure Target Requires Explicit Reselection
+
+- **Date:** 2026-08-10
+- **Status:** Accepted; delivered by #367 / PR #445
+- **Decision:** Modify/Retire authoring binds to the exact controlled procedure identity/effectivity the engineer
+  selected. If that build membership or current revision is stale when the mutation reaches the server, AeroLink
+  returns a conflict and requires refresh/reselection. It never silently substitutes the procedure revision that
+  happens to be current now.
+- **Rationale:** Silent repair would turn a concurrency/effectivity conflict into authorization for different
+  controlled work. Preserving the engineer's prose is useful; preserving a stale target as though it were still
+  valid is not.
+- **Consequences:** `procedure_not_carried_by_build`, `procedure_manifest_revision_missing`, and
+  `procedure_revision_not_next_for_build` are explicit 409 conflicts. The client keeps the dialog and authored
+  engineering content, clears stale target-dependent identity/coverage state, reloads the controlled picker and
+  requires deliberate reselection. Unknown/cross-project/wrong-level targets remain validation failures.
+
+### DEC-107 - Superseded TCRs Are History; Their Exact Successors Are Active Work
+
+- **Date:** 2026-08-10
+- **Status:** Accepted; completed by #365 / PR #438 on top of the atomic supersession delivered earlier
+- **Decision:** Once approved test work is revised, the predecessor remains an immutable controlled historical
+  record and the exact successor is the active package. Active engineering/baseline selection must not offer the
+  superseded predecessor. Historical presentation must show the Superseded relationship and provide an exact
+  successor route even when that successor belongs to another release or the historical item is a folded
+  automatic assessment.
+- **Rationale:** Atomic domain supersession without truthful browser/history presentation leaves two competing
+  stories: the database knows which package survives while the engineer can still encounter the predecessor as
+  if it were current. Controlled history and active work must agree at every route.
+- **Consequences:** Superseded packages remain readable with their prior decisions/signatures, are excluded and
+  authoritatively refused from new baseline selection, and route to the exact successor rather than a guessed
+  same-release row.
+
 ## Lessons Learned
 
 Findings that cost real time, recorded so they cost it once. These are about how the work is done rather than
@@ -1847,6 +1915,54 @@ And scripted multi-line edits silently changed nothing three times, because the 
 Treat "these all look the same" as a reason to open each one. Before moving a rule, ask what was true where it
 came from that may not be true where it is going. When a batch edit breaks something that was passing, read
 the breakage before undoing it — it is describing the system.
+
+### LES-010 - The Exact Head Is the Merge Authority
+
+A merge candidate is not qualified because an earlier commit was green or because its last edit looks
+non-functional. The August procedure-control sequence repeatedly refreshed `main`, compared the exact branch,
+reviewed that exact head and waited for the required aggregate gate before squash merge. A later correction,
+even to a test, creates a new head and therefore a new qualification subject.
+
+When a CI failure looks flaky, retry the **identical commit**. That can distinguish timing from code change
+without moving the evidence target. It still does not make a red aggregate acceptable: preserve the failure,
+rerun the same head, and merge only once the required final reporter is green.
+
+### LES-011 - Provider-Safe Queries Project Data Before They Format It
+
+The Candidate Baselines predecessor route was logically correct and still returned 500 in production-browser
+qualification because SQLite could not translate display/order expressions embedded in the projection. The
+correction was not provider-specific branching: select SQL-safe primitives, materialize them, then compute
+human display values and ordering in memory.
+
+A query that passes one provider or a unit-shaped test is not automatically a portable EF query. If formatting
+is not part of the filtering/join semantics, keep it out of translation.
+
+### LES-012 - A Native Select Option Exists Without Being Playwright-Visible
+
+The stale-target browser regression correctly found the new `.01 · Approved` option after refresh, but
+`toBeVisible()` failed because native `<option>` elements are not rendered as independently visible DOM boxes in
+Playwright's visibility model. The locator found the right element repeatedly; the assertion was testing the
+wrong browser contract.
+
+For native select membership, assert existence/count or selectability. Reserve visibility assertions for the
+control the user actually sees.
+
+### LES-013 - A Replacement PR Does Not Clean Up the PR It Replaced
+
+#444 was the qualified replacement for #443 and merged #442 correctly. #443 nevertheless remained open as a
+draft until the final repository check found it. Product behavior was clean; repository state was not.
+
+A closeout checklist must include open PRs as well as merged code. Close superseded drafts with an explicit
+reason so the next engineer/model does not treat them as unfinished parallel work.
+
+### LES-014 - Temporary Repair Machinery Must Disappear From the Reviewed Tree
+
+Connector-only repairs sometimes need branch-local helper workflows or scripts. Those are delivery machinery,
+not product content. The branch must be inspected and, when necessary, its history/tree cleaned so temporary
+runners do not leak into `main` or become misleading long-lived automation.
+
+Review the final filenames and exact tree, not merely the intended product diff. A self-deleting helper is only
+successful when the reviewed merge candidate contains no trace of it.
 
 ## Working Assumptions
 

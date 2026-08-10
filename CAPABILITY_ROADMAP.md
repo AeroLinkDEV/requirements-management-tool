@@ -6,7 +6,16 @@ so the work can be picked up without re-deriving the reasoning.
 
 Items are numbered as they were in the analysis, so the numbering is not sequential here.
 
-> **Current-surface checkpoint — 2026-08-06.** Verification is now Testing Coverage, Test Procedure Explorer
+> **Latest current-surface checkpoint — 2026-08-10.** The roadmap below remains a decision/history record,
+> not the live backlog. Problem Reports are first-class and **Project-scoped** with target build as an explicit
+> attribute/filter (DEC-089). Verification uses direct Change Requests, Test Procedure Explorer and Test Results
+> for each System/HLR/LLR discipline. Test procedures change only through controlled TCRs. Candidate Baselines
+> is a supported Configuration Management surface at `/baselines`, including the explicit legacy
+> procedure-manifest bootstrap delivered by #364; `/release-planning` remains retired. Current product status,
+> qualification evidence and backlog authority are in
+> [CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
+>
+> **Historical surface checkpoint — 2026-08-06.** Verification is now Testing Coverage, Test Procedure Explorer
 > and Test Results for each
 > System/HLR/LLR discipline; controlled Test Change Requests, downstream assessments, identity lifecycle, and
 > prospective upward allocation are delivered. Non-authoritative Concurrency and count-only IntegrityScan
@@ -14,7 +23,7 @@ Items are numbered as they were in the analysis, so the numbering is not sequent
 > Candidate Baselines remain dormant product surfaces. See [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md) before treating
 > any older item below as current UI direction or active backlog.
 
-> **Current-surface checkpoint - 2026-08-08.** Verification is now Change Requests, Test Procedure Explorer
+> **Historical surface checkpoint — 2026-08-08.** Verification is now Change Requests, Test Procedure Explorer
 > and Test Results for each System/HLR/LLR discipline (Stage 3B). A manually raised Test Change Request is a
 > first-class authored package with Title/Problem/Analysis/Solution, source change requests and Problem
 > Report links (Stage 4). Test procedures are changed only through a Test Change Request (DEC-103):

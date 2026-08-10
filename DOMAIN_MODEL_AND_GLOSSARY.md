@@ -1,6 +1,8 @@
 # Domain Model and Glossary
 
-This document defines the common product language. It is conceptual, not a database schema.
+This document defines the common product language. It is conceptual, not a database schema. Current terminology
+is reconciled through 10 August 2026; dated handoffs and historical review records may deliberately preserve
+superseded wording as evidence of what was believed at that earlier checkpoint.
 
 ## Core Relationships
 
@@ -62,7 +64,8 @@ requirements, verification, documents, and readiness evidence.
 **Baseline**: An immutable, named set of exact artifact and relationship revisions approved for a defined purpose. Candidate baselines may be assembled and reviewed; released baselines cannot be edited.
 
 **Candidate Baseline**: The implementation facet that assembles the proposed exact contents of an in-work
-software build. It is not a separate product-level destination in the current UI.
+software build. Candidate Baselines is also the supported Configuration Management surface at `/baselines`,
+including explicit legacy procedure-manifest bootstrap; the retired `/release-planning` route is not restored.
 
 ## Change Terms
 
@@ -121,13 +124,32 @@ The abbreviation `SRD` is not used on its own because it is ambiguous.
 
 **Test Procedure**: A stable controlled identity describing repeatable verification actions. A procedure may verify multiple requirements, and a requirement may be verified by multiple procedures.
 
-**Test Procedure Revision**: The exact approved procedure content used by a test execution.
+**Test Procedure Revision**: The exact controlled procedure content used by a test execution. Introduce,
+Modify, and Retire content is authorized through an approved Test Change Request; a procedure revision does not
+have an independent procedure-level approval workflow.
 
 **Test Step**: An ordered instruction within a procedure, with expected outcome and any required inputs or conditions.
 
-**Test Change Request**: A controlled record of the test work an approved change creates, one per affected discipline — System, Software HLR, Software LLR. It carries its own number and revisions, may cover more than one requirement change request, and may also be raised deliberately when a set of changes is best tested together. Claiming one claims every decision inside it.
+**Automatic Test Change Assessment**: Build- and discipline-scoped verification work raised from an approved
+source change request. It carries the verification-impact items created by that source and may be worked as the
+source assessment or folded into a numbered Test Change Request. Fold/unfold and supersession preserve the
+assessment's identity, decisions, attribution and history; an automatic assessment is not presented as a
+numbered controlled TCR until it is incorporated into one.
 
-**Verification Decision**: The explicit judgement recorded against each requirement inside a test change request — an approved procedure covers it, no test is required, a procedure is retired, retargeted or deliberately retained. There is deliberately no value meaning nobody looked. A decision may be reopened: what was decided stays in immutable history, the item returns to the release gate, and any coverage it claimed goes back to suspect.
+**Test Change Request (TCR)**: A numbered, revision-controlled, discipline-specific package governing test work.
+It may be raised deliberately over one or more approved source change requests and may absorb automatic
+assessment items. It carries its own Title/Problem/Analysis/Solution case, source change requests, Problem Report
+links, verification-impact decisions, procedure Link/Introduce/Modify/Retire proposals, assignment, configured
+review workflow, electronic-signature evidence and supersession history. The approved TCR is the authority for
+controlled procedure content changes; there is no separate procedure-level approval path.
+
+**Verification Decision**: The explicit judgement recorded on a verification-impact item inside an automatic
+assessment or TCR. Requirement-driven outcomes distinguish confirmed procedure coverage, no test required, and
+`NewProcedureRequired`; orphan-procedure outcomes distinguish retire, retain, and retarget. Procedure-change
+actions distinguish linking existing controlled coverage from creating, modifying, or retiring procedure
+content. There is deliberately no value meaning nobody looked. `NewProcedureRequired` records the engineering
+plan but is not coverage or execution evidence. A decision may be reopened: immutable history remains, the item
+returns to the release gate, and any coverage it claimed becomes suspect again.
 
 **Build Test Set**: The procedures a particular build has to run, one set per build per discipline. A working list rather than a controlled artefact, recording who added each entry and why — because a requirement changed, because the change makes an area worth re-exercising, because a corrective action demands it, or simply because somebody chose it. Release gates measure recorded results against this set.
 
@@ -159,11 +181,11 @@ relationship. This distinction prevents a path from appearing complete when no c
 
 **Workflow State**: The current lifecycle state of a revision or controlled process. State transitions are constrained and audited.
 
-**Review**: A controlled evaluation of a submitted snapshot of a specific SRCR, document, procedure, execution/result record, or candidate baseline revision by named reviewers. Requirement changes are reviewed as contents of the SRCR rather than as independent review artifacts. An SRCR review cycle contains its submitted snapshot, author-selected ordered approval sequence, comments, dispositions, outcomes, and timestamps. Multiple review cycles may occur for the same not-yet-approved SRCR revision.
+**Review**: A controlled evaluation of a submitted snapshot of a specific SRCR, TCR, managed/generated document workflow, execution/result record, or candidate baseline revision by named reviewers. Requirement changes are reviewed as contents of the SRCR rather than as independent review artifacts. An SRCR review cycle contains its submitted snapshot, author-selected ordered approval sequence, comments, dispositions, outcomes, and timestamps. Multiple review cycles may occur for the same not-yet-approved SRCR revision.
 
 **Review Comment**: A versioned finding or question anchored to the reviewed revision. It must be dispositioned before approval when the workflow requires it.
 
-**Approval**: An attributable unanimous decision by every approver selected by the artifact author that a specific submitted snapshot of an SRCR, document, procedure, execution/result record, or candidate baseline revision satisfies its defined approval criteria. Approval of an SRCR authorizes its contained requirement changes but does not automatically include those revisions in a release baseline.
+**Approval**: An attributable decision under the configured approval policy that a specific submitted snapshot of an SRCR, TCR, document, execution/result record, or candidate baseline revision satisfies its defined approval criteria. Approval of an SRCR authorizes its contained requirement changes but does not automatically include those revisions in a release baseline.
 
 **Review Cycle**: One submission of an artifact revision to a selected ordered approval sequence. A requested change closes the current cycle and returns an unapproved SRCR to Draft at the same revision number. Resubmission creates a new cycle with a new immutable submitted snapshot.
 
@@ -187,12 +209,14 @@ session, authority, assignment, independence, and password confirmation succeed.
 
 **Suspect Link**: A link whose continuing validity requires reassessment because a linked artifact changed or another defined trigger occurred. Suspect does not automatically mean invalid.
 
-**Problem Report (PR)**: A build-scoped controlled record of an identified product, lifecycle-data, or process
-problem. It progresses through Draft, Ready for SCCB, Open, Implementing, Verifying, Awaiting SQA Closure, and
-Closed. Raised-by/date are immutable; owner and target build may change with history. PRs drive change;
-requirements do not automatically create PRs. Any SRCR, software change request or TCR may cite one or more driving PRs. Approved
-changes appear as corrective actions and deliberately selected closure-supporting executions/results appear as
-test evidence.
+**Problem Report (PR)**: A **Project-scoped** controlled record of an identified product, lifecycle-data, or
+process problem. One Project-wide PR database is visible from every build. A PR names a target build and that
+target may change with history, but target build is an explicit record attribute/filter rather than implicit
+workspace ownership. It progresses through Draft, Ready for SCCB, Open, Implementing, Verifying, Awaiting SQA
+Closure, and Closed. Raised-by/date are immutable; owner and target build may change under controlled history.
+PRs drive change; requirements do not automatically create PRs. Any SRCR, HLRCR, LLRCR or TCR may cite one or
+more driving PRs. Approved changes appear as corrective actions and deliberately selected closure-supporting
+executions/results appear as test evidence.
 
 **Code Traceability Record**: An immutable, build-scoped pointer from one exact approved LLR revision to a
 GitLab merge request and merge commit SHA, or to a justified `No code change required` decision. GitLab remains

@@ -1,9 +1,11 @@
 # FMS 1.6 Release Campaign
 
-> **Implemented lifecycle contract; hidden planning surface.** Reconciled 2026-08-01. The model and gates
-> remain implemented, but the detailed campaign/baseline workbench is not a current navigation destination
-> (DEC-072). Seed-state counts are initial conditions only; live engineering work persists independently.
-> See [the current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-03.md).
+> **Implemented lifecycle contract; partially exposed planning surface.** Reconciled 2026-08-10. The
+> release model and thirteen gates remain implemented. Candidate Baselines is now a supported Configuration
+> Management destination at `/baselines`, including legacy procedure-manifest bootstrap and candidate work; the
+> broader release-campaign workbench remains only partially exposed and `/release-planning` remains retired.
+> Seed-state counts are initial conditions only; live engineering work persists independently. See
+> [the current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
 
 ## Repeatable user-controlled release progression
 
@@ -17,12 +19,12 @@ The live FMS workspace is no longer only a static 1.5 data demonstration. It inc
 
 The campaign is deliberately incomplete at seed time. Managers and engineers can see real blockers, disposition impacted items, choose the verification build, inspect evidence, compare releases, and progress the release through ordered approval. The product does not manufacture a green status.
 
-> **Current-surface qualification — 2026-07-29.** The lifecycle and server-side campaign model described
-> here remains implemented, but Product Versions and Candidate Baselines are intentionally hidden in the
-> current UI (DEC-072). Do not interpret the detailed workflow below as a presently exposed demonstration path.
-> Lifecycle Decision Room remains visible; restoring or redesigning the hidden planning/baseline surfaces
-> requires a new product decision. Release-campaign impact dispositions below are consuming-engineer/release
-> decisions and are not the author impact selectors superseded by DEC-071.
+> **Current-surface qualification — 2026-08-10.** The lifecycle and server-side campaign model below
+> remains implemented. Candidate Baselines is exposed at `/baselines` for supported Configuration Management
+> work, but the full detailed Release Campaign workbench below is not the primary current navigation path and
+> `/release-planning` remains retired. Lifecycle Decision Room remains visible. Release-campaign impact
+> dispositions below are consuming-engineer/release decisions and are not the author impact selectors
+> superseded by DEC-071.
 
 ## Campaign Lifecycle
 
