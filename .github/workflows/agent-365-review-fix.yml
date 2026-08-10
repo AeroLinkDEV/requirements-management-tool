@@ -1,0 +1,89 @@
+name: Agent 365 review corrections
+
+on:
+  push:
+    branches:
+      - agent/365-tcr-supersession-browser
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ contains(github.event.head_commit.message, '[agent-365-review-fix]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Apply complete supersession lineage presentation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('product/client/src/TestingCoverageWorkspace.tsx')
+          text = path.read_text(encoding='utf-8')
+
+          old_import = "import { pickerSummary } from './pickerText'\n"
+          new_import = "import { pickerSummary } from './pickerText'\nimport { reviewsVisibleInCurrentRelease, supersededHistoryFor } from './testChangeReviewPresentation'\n"
+          if text.count(old_import) != 1:
+              raise RuntimeError(f'expected one picker import, found {text.count(old_import)}')
+          text = text.replace(old_import, new_import)
+
+          old_block = """  const mine = requests.filter(x => x.discipline === discipline)
+            const activeMine = mine.filter(x => x.state !== 'Superseded')
+            const supersededChainFor = (current: TestChangeRequest) => {
+              const history: TestChangeRequest[] = []
+              let successorId = current.id
+              for (;;) {
+                const previous = mine.find(candidate =>
+                  candidate.state === 'Superseded' && candidate.supersededByTestChangeRequestId === successorId)
+                if (!previous) return history
+                history.push(previous)
+                successorId = previous.id
+              }
+            }
+          """
+          new_block = """  const mine = requests.filter(x => x.discipline === discipline)
+            const visibleMine = reviewsVisibleInCurrentRelease(mine)
+          """
+          if text.count(old_block) != 1:
+              raise RuntimeError(f'expected one old lineage block, found {text.count(old_block)}')
+          text = text.replace(old_block, new_block)
+          text = text.replace('!activeMine.length', '!visibleMine.length')
+          text = text.replace('activeMine.map(request => {', 'visibleMine.map(request => {')
+          text = text.replace('supersededChainFor(request)', 'supersededHistoryFor(request, mine)')
+          if 'activeMine' in text or 'supersededChainFor' in text:
+              raise RuntimeError('an obsolete supersession helper reference remains')
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+
+      - name: Validate client and lineage regressions
+        working-directory: product/client
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run build
+          npx playwright test tests/test-change-request-supersession-presentation.spec.ts --workers=1
+
+      - name: Publish review correction
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "seanmccarthyns"
+          git config user.email "seanmccarthyns@gmail.com"
+          git add product/client/src/TestingCoverageWorkspace.tsx
+          git commit -m "Address complete TCR supersession lineage review"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
