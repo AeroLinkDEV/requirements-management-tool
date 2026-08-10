@@ -65,7 +65,7 @@ demonstrations use the `FMSLIVE` dataset described in
 | Document | Purpose |
 | --- | --- |
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
-| [Current product handoff, updated 9 August](CURRENT_PRODUCT_HANDOFF_2026-08-09.md) | **Current restart point.** PR #414 delivered bounded TCR authoring pickers; post-merge picker-integrity findings #402/#415 are open; exact audited `main` `bbcccc7` |
+| [Current product handoff, updated 9 August](CURRENT_PRODUCT_HANDOFF_2026-08-09.md) | **Current restart point.** PR #414 and #416 delivered bounded TCR authoring pickers and post-merge hardening (#402/#415 closed); PRO-audit queue #417–#424 is open alongside other live issues (#364/#365/#367/#332); exact audited `main` `6e1c244` |
 | [Product handoff, 8 August](CURRENT_PRODUCT_HANDOFF_2026-08-08.md) | Historical. Stage 3B/Stage 4 delivery, focused audit remediation through PR #413, and prior restart point |
 | [Product handoff, 6 August](CURRENT_PRODUCT_HANDOFF_2026-08-06.md) | Historical. Test procedures authored, revised and baselined like requirements, approved procedure work carried into builds, and Word-authored controlled documents checked out, reviewed, approved, and released as exact DOCX/PDF pairs |
 | [Product handoff, 5 August](CURRENT_PRODUCT_HANDOFF_2026-08-05.md) | Historical. Imported baselines, explicit assessment outcomes, local test-world integration, Problem Report refinements, and safe continuation |

@@ -60,6 +60,9 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
   const [targetQuery,setTargetQuery]=useState('')
   const [targetPage,setTargetPage]=useState(1)
   const [targetPicker,setTargetPicker]=useState<ProcedureTargetPage>()
+  /** One current unsaved target, retained so it stays visibly represented across search and paging even
+   * though it has no persisted decision in the package payload. */
+  const [selectedTargetDetails,setSelectedTargetDetails]=useState<ProcedureTarget>()
   const [requirementQuery,setRequirementQuery]=useState('')
   const [requirementPage,setRequirementPage]=useState(1)
   const [requirementPicker,setRequirementPicker]=useState<RequirementChoicePage>()
@@ -99,6 +102,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
     void fetch(`${api}/api/test-change-reviews/${reviewId}/procedure-targets?${params}`)
       .then(async response=>{
         if(!response.ok){if(active)setTargetError('The procedures for this build could not be loaded. Try searching again.');return undefined}
+        if(!active)return undefined
         setTargetError('')
         return response.json()
       })
@@ -118,6 +122,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
     void fetch(`${api}/api/test-change-reviews/${reviewId}/requirement-candidates?${params}`)
       .then(async response=>{
         if(!response.ok){if(active)setRequirementError('The governed requirements for this build could not be loaded. Try searching again.');return undefined}
+        if(!active)return undefined
         setRequirementError('')
         return response.json()
       })
@@ -132,8 +137,9 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
     const options=new Map<string,ProcedureTarget>()
     for(const target of targetPicker?.items??[])options.set(target.baseNumber,target)
     for(const target of item?.procedureTargets??[])if(!options.has(target.baseNumber))options.set(target.baseNumber,target)
+    if(selectedTargetDetails&&!options.has(selectedTargetDetails.baseNumber))options.set(selectedTargetDetails.baseNumber,selectedTargetDetails)
     return [...options.values()]
-  },[targetPicker,item?.procedureTargets])
+  },[targetPicker,item?.procedureTargets,selectedTargetDetails])
   const requirementSummary = pickerSummary(
     'governed requirement', requirementQuery, requirementPicker?.totalCount??0,
     draft.driving.length, 'in scope')
@@ -161,7 +167,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
       coverageChangeRationale:draft.coverageRationale,
       expectedVersion:item?.version}
     if(await act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/procedure-changes`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}))){
-      setProposing(false);setDraft(emptyDraft);setDrivingDetails({})
+      setProposing(false);setDraft(emptyDraft);setDrivingDetails({});setSelectedTargetDetails(undefined)
     }
   }
   const withdraw=(changeId:string)=>void act(()=>apiRequest(
@@ -204,8 +210,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
   const mayEdit=canAuthor&&(item?.capabilities?.canProposeProcedureChange??false)
   const mayEditCase=canAuthor&&(item?.capabilities?.canWithdrawProcedureChange??false)
   const retiring=draft.kind==='Retire'
-  const selectedTarget=(targetPicker?.items??[]).find(x=>x.baseNumber===draft.baseNumber)
-    ??(item?.procedureTargets??[]).find(x=>x.baseNumber===draft.baseNumber)
+  const selectedTarget=targetOptions.find(x=>x.baseNumber===draft.baseNumber)
   const currentCoverage=selectedTarget?.currentCoverage??[]
   const currentCoverageIds=new Set(currentCoverage.map(x=>x.revisionId))
   const governedIds=new Set((item?.drivingRequirementChoices??[]).map(x=>x.revisionId))
@@ -288,7 +293,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                 </li>)}</ul>
             : <p className="drawerEmpty">No procedure decisions are proposed yet. A test change request exists because test work is required, so it is not finished until it says what that work is.</p>}
           <div className="drawerDecisionActions">
-            {mayEdit&&<button type="button" disabled={busy} onClick={()=>{setDraft(emptyDraft);setDrivingDetails({});setProposing(true);setTargetQuery('');setTargetPage(1);setRequirementQuery('');setRequirementPage(1);setRequirementError('');setTargetError('')}}>Propose a procedure change</button>}
+            {mayEdit&&<button type="button" disabled={busy} onClick={()=>{setDraft(emptyDraft);setDrivingDetails({});setSelectedTargetDetails(undefined);setProposing(true);setTargetQuery('');setTargetPage(1);setRequirementQuery('');setRequirementPage(1);setRequirementError('');setTargetError('')}}>Propose a procedure change</button>}
             {/* Revising is the test-side twin of revising a change request: reopening approved work to correct
                 it, which carries the existing decisions into the next revision. */}
             {canAuthor&&(item.capabilities?.canRevise??false)&&<button type="button" className="quiet reopenAssessment" disabled={busy} onClick={revise}>Revise this test change request</button>}
@@ -323,7 +328,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
           <select value={draft.kind} onChange={event=>{
             setDraft(current=>({...current,
               kind:event.target.value as Kind,baseNumber:'',revision:0,driving:[],removed:[],coverageRationale:''}))
-            setDrivingDetails({})
+            setDrivingDetails({});setSelectedTargetDetails(undefined)
           }}>
             <option value="Introduce">Introduce a new procedure</option>
             <option value="Modify">Modify an existing procedure</option>
@@ -345,6 +350,8 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                 <select aria-label="Procedure" value={draft.baseNumber} onChange={event=>{
               const target=(targetPicker?.items??[]).find(x=>x.baseNumber===event.target.value)
                 ??(item?.procedureTargets??[]).find(x=>x.baseNumber===event.target.value)
+              setSelectedTargetDetails(target)
+              setDrivingDetails({})
               setDraft(current=>({...current,baseNumber:event.target.value,revision:(target?.currentRevision??-1)+1,
                 driving:[],removed:[],coverageRationale:''}))
             }}>
