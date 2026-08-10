@@ -86,6 +86,55 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
         }
     }
 
+    [Fact]
+    public async Task A_pre_manifest_snapshot_ignores_a_newer_draft_but_respects_retirement()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var t0 = new DateTimeOffset(2026, 8, 10, 10, 0, 0, TimeSpan.Zero);
+        var generatedAt = t0.AddHours(1);
+        var program = new ProgramRecord("Legacy draft precedence", "LDP");
+        var project = new ProjectRecord(program.Id, "Legacy draft project", "Legacy draft product");
+        var release = new SoftwareRelease(project.Id, "4.1", false);
+        var baseline = new CandidateBaseline("SW-41.00", 0, project.Id, release.Id, null,
+            "Pre-manifest baseline", "cm", t0);
+
+        var activeProcedure = new TestProcedure(project.Id, "SYSTP-419910", "Still effective",
+            "verification.engineer", t0, TestProcedureLevel.System);
+        var activeApproved = new TestProcedureRevision(activeProcedure.Id, 0, "Approved objective",
+            "Approved preconditions", "Approved steps", "Approved expected result",
+            TestProcedureState.Approved, "verification.engineer", t0);
+        var activeDraft = new TestProcedureRevision(activeProcedure.Id, 1, "Draft objective",
+            "Draft preconditions", "Draft steps", "Draft expected result",
+            TestProcedureState.Draft, "verification.engineer", t0.AddMinutes(30));
+
+        var retiredProcedure = new TestProcedure(project.Id, "SYSTP-419911", "Retired before generation",
+            "verification.engineer", t0, TestProcedureLevel.System);
+        var retiredApproved = new TestProcedureRevision(retiredProcedure.Id, 0, "Retired objective",
+            "Retired preconditions", "Retired steps", "Retired expected result",
+            TestProcedureState.Approved, "verification.engineer", t0);
+        var retirement = new TestProcedureRevision(retiredProcedure.Id, 1, "", "", "", "",
+            TestProcedureState.Retired, "verification.engineer", t0.AddMinutes(30));
+
+        db.AddRange(program, project, release, baseline, activeProcedure, activeApproved, activeDraft,
+            retiredProcedure, retiredApproved, retirement);
+        await db.SaveChangesAsync();
+
+        var snapshot = await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(
+            db, baseline.Id, TestProcedureLevel.System, generatedAt, CancellationToken.None);
+
+        Assert.False(snapshot.IsExactManifest);
+        var row = Assert.Single(snapshot.Rows);
+        Assert.Equal(activeApproved.Id, row.RevisionId);
+        Assert.Equal("SYSTP-419910", row.BaseNumber);
+        Assert.Equal(0, row.Revision);
+        Assert.Equal(TestProcedureState.Approved, row.State);
+        Assert.DoesNotContain(snapshot.Rows, x => x.BaseNumber == "SYSTP-419911");
+    }
+
     private static TestChangeReview Review(Guid projectId, Guid releaseId, Guid sourceChangeRequestId,
         string sourceChangeRequestNumber, string number, int revision,
         TestProcedureChangeKind kind, string title, DateTimeOffset now)
