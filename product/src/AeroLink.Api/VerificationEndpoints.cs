@@ -781,6 +781,75 @@ public static class VerificationEndpoints
                     code = "released_build_read_only"
                 });
             }
+            // #422: a build/release-scoped execution is configuration evidence. The exact procedure revision
+            // being executed must be the revision the selected configuration's controlled manifest carries.
+            // Approved and same-Project are not membership, and coverage rows are not membership.
+            //
+            // Explicitly scoped requests MUST establish configuration authority:
+            // - an exact or compatibility effectivity projection is authoritative, and a mismatched
+            //   revision is refused with procedure_revision_not_carried_by_build;
+            // - null effectivity means no configuration authority can be established, so the request is
+            //   refused with procedure_manifest_unavailable (never a Project-global Approved fallback);
+            // - only the completely unscoped path (neither SoftwareBuildId nor X-AeroLink-Build-Context)
+            //   may retain the legacy Approved-revision behavior under DEC-097.
+            if (request.SoftwareBuildId is not null)
+            {
+                var buildBaselineId = await db.SoftwareBuilds.AsNoTracking()
+                    .Where(x => x.Id == request.SoftwareBuildId && x.ProjectId == request.ProjectId)
+                    .Select(x => (Guid?)x.BaselineId).SingleOrDefaultAsync(ct);
+                if (buildBaselineId is not null)
+                {
+                    var effectivity = await TestProcedureEffectivity.ForBaselineAsync(db, buildBaselineId.Value, ct);
+                    if (effectivity is null)
+                    {
+                        return Results.Conflict(new
+                        {
+                            error = "The selected build has no controlled procedure manifest; an exact carried revision cannot be established.",
+                            code = "procedure_manifest_unavailable"
+                        });
+                    }
+                    if (!effectivity.RevisionByProcedure.TryGetValue(procedure.Id, out var carried)
+                        || carried != revision.Id)
+                    {
+                        return Results.Conflict(new
+                        {
+                            error = "The exact procedure revision is not carried by the selected build's controlled manifest.",
+                            code = "procedure_revision_not_carried_by_build"
+                        });
+                    }
+                }
+            }
+            else if (activeReleaseId is not null)
+            {
+                if (!await db.Releases.AsNoTracking()
+                        .AnyAsync(x => x.Id == activeReleaseId && x.ProjectId == request.ProjectId, ct))
+                {
+                    return Results.Conflict(new
+                    {
+                        error = "The active build workspace release does not belong to the requested project.",
+                        code = "cross_project_release"
+                    });
+                }
+                var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
+                    db, request.ProjectId, activeReleaseId.Value, ct);
+                if (effectivity is null)
+                {
+                    return Results.Conflict(new
+                    {
+                        error = "The selected release has no controlled procedure manifest; an exact carried revision cannot be established.",
+                        code = "procedure_manifest_unavailable"
+                    });
+                }
+                if (!effectivity.RevisionByProcedure.TryGetValue(procedure.Id, out var carried)
+                    || carried != revision.Id)
+                {
+                    return Results.Conflict(new
+                    {
+                        error = "The exact procedure revision is not carried by the selected release's controlled manifest.",
+                        code = "procedure_revision_not_carried_by_build"
+                    });
+                }
+            }
             if (request.SoftwareBuildId is not null && await db.ReleaseCampaigns.AsNoTracking().AnyAsync(x => x.SoftwareBuildId == request.SoftwareBuildId && x.State == ReleaseCampaignState.InReview, ct))
                 return Results.Conflict(new { error = "The release package is frozen while approval is in progress.", code = "release_package_frozen" });
             if (request.RetestOfExecutionId is not null && !await db.TestExecutions.AnyAsync(x => x.Id == request.RetestOfExecutionId && x.ProcedureRevisionId == request.ProcedureRevisionId, ct)) return Results.BadRequest(new { error = "A retest must reference an earlier execution of the same procedure revision." });
