@@ -184,7 +184,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   };
   const engineeringView = ["createSystemScr","createSoftwareChange","history","requirements","scr","lifecycle"].includes(view)
     || (view === "documents" && (discipline === "system" || discipline === "software"));
-  const releaseView = ["release","releaseImpact","releaseDecision","releaseOperations","enterprise"].includes(view);
+  const releaseView = ["release","releaseImpact","releaseDecision","releaseOperations","enterprise","baselines"].includes(view);
   const engineeringScope:Discipline = discipline==="software" ? "software" : "system";
   const verificationScope:Discipline = discipline==="softwareTest"||discipline==="software" ? "softwareTest" : "systemTest";
   return (
@@ -217,7 +217,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
         <div className="navStandalone">{item("Code","code","{ }","software","Code traceability",undefined,true)}</div>
         <div className="navStandalone">{item("Documentation Center","managedDocuments","▤","system","Documentation Center",undefined,true)}</div>
         <div className="navStandalone">{item("Problem Reports","problemReports","!","system","Problem Reports",undefined,true)}</div>
-        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}</details>
+        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","▦","system","Configuration Baselines / Legacy Procedure Bootstrap")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("Review Workflows","reviewWorkflows","⇉","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","↗","system","Integration Command Center")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
       </nav>
       <footer><PersonAvatar userName={user.userName} displayName={user.displayName} size="large"/><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button><button className="workspaceDisplay" onClick={onDisplay} aria-label="Open workspace display settings"><span>Aa</span><div><b>Workspace display</b><small>{density} density</small></div><i aria-hidden="true">›</i></button></footer>
