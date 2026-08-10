@@ -1,0 +1,140 @@
+name: Agent 365 folded predecessor correction
+
+on:
+  push:
+    branches:
+      - agent/365-tcr-supersession-browser
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ contains(github.event.head_commit.message, '[agent-365-assessment-history-fix]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Route numbered and unnumbered predecessors truthfully
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          helper = Path('product/client/src/testChangeReviewPresentation.ts')
+          text = helper.read_text(encoding='utf-8')
+          marker = """export type SupersessionRecord = {
+            id: string
+            displayNumber: string
+            state: string
+            supersededByTestChangeRequestId?: string
+          }
+          """
+          insertion = marker + """
+          /** A folded automatic predecessor has no controlled TCR number and remains an assessment record. */
+          export function isControlledTestChangeRequest(
+            review: Pick<SupersessionRecord, 'displayNumber'>,
+            controlledPrefix: string,
+          ): boolean {
+            return review.displayNumber.startsWith(controlledPrefix)
+          }
+          """
+          if text.count(marker) != 1:
+              raise RuntimeError(f'expected one SupersessionRecord declaration, found {text.count(marker)}')
+          helper.write_text(text.replace(marker, insertion), encoding='utf-8')
+
+          component = Path('product/client/src/TestingCoverageWorkspace.tsx')
+          text = component.read_text(encoding='utf-8')
+          old_import = "import { reviewsVisibleInCurrentRelease, supersededHistoryFor } from './testChangeReviewPresentation'"
+          new_import = "import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, supersededHistoryFor } from './testChangeReviewPresentation'"
+          if text.count(old_import) != 1:
+              raise RuntimeError(f'expected one supersession helper import, found {text.count(old_import)}')
+          text = text.replace(old_import, new_import)
+          text = text.replace(
+              "request.displayNumber.startsWith(tcrAcronym(discipline))",
+              "isControlledTestChangeRequest(request, tcrAcronym(discipline))",
+          )
+          old_history = """                  <summary>Show {supersededRevisions.length} superseded TCR revision{supersededRevisions.length === 1 ? '' : 's'}</summary>
+                            {supersededRevisions.map(prior => (
+                              <button type=\"button\" className=\"linkedScr\" key={prior.id} onClick={() => setAuthoring(prior.id)}>
+                                {prior.displayNumber} · Superseded
+                              </button>
+                            ))}
+          """
+          new_history = """                  <summary>Show {supersededRevisions.length} superseded history item{supersededRevisions.length === 1 ? '' : 's'}</summary>
+                            {supersededRevisions.map(prior => {
+                              const controlled = isControlledTestChangeRequest(prior, tcrAcronym(discipline))
+                              return <button type=\"button\" className=\"linkedScr\" key={prior.id} onClick={() => controlled
+                                ? setAuthoring(prior.id)
+                                : setOpened(prior.id)}>
+                                {prior.displayNumber} · {controlled ? 'Superseded TCR' : 'Superseded assessment'}
+                              </button>
+                            })}
+          """
+          if text.count(old_history) != 1:
+              raise RuntimeError(f'expected one historical predecessor block, found {text.count(old_history)}')
+          component.write_text(text.replace(old_history, new_history), encoding='utf-8')
+
+          test = Path('product/client/tests/test-change-request-supersession-presentation.spec.ts')
+          text = test.read_text(encoding='utf-8')
+          old_import = """import {
+            reviewsVisibleInCurrentRelease,
+            supersededHistoryFor,
+            type SupersessionRecord,
+          } from '../src/testChangeReviewPresentation'
+          """
+          new_import = """import {
+            isControlledTestChangeRequest,
+            reviewsVisibleInCurrentRelease,
+            supersededHistoryFor,
+            type SupersessionRecord,
+          } from '../src/testChangeReviewPresentation'
+          """
+          if text.count(old_import) != 1:
+              raise RuntimeError(f'expected one presentation-test import, found {text.count(old_import)}')
+          text = text.replace(old_import, new_import)
+          addition = """
+          test('folded automatic predecessors remain assessments while numbered predecessors remain TCRs', () => {
+            const automatic = review('automatic', 'SRCR-000199.00', 'Superseded', 'current')
+            const controlled = review('controlled', 'SYSTCR-000200.00', 'Superseded', 'current')
+
+            expect(isControlledTestChangeRequest(automatic, 'SYSTCR-')).toBe(false)
+            expect(isControlledTestChangeRequest(controlled, 'SYSTCR-')).toBe(true)
+          })
+          """
+          if addition.strip() in text:
+              raise RuntimeError('the folded-predecessor routing regression already exists')
+          test.write_text(text.rstrip() + '\n' + addition, encoding='utf-8')
+          PY
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+
+      - name: Validate client and focused supersession presentation
+        working-directory: product/client
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run build
+          npx playwright test tests/test-change-request-supersession-presentation.spec.ts --workers=1
+
+      - name: Publish correction
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "seanmccarthyns"
+          git config user.email "seanmccarthyns@gmail.com"
+          git add product/client/src/TestingCoverageWorkspace.tsx \
+            product/client/src/testChangeReviewPresentation.ts \
+            product/client/tests/test-change-request-supersession-presentation.spec.ts
+          git commit -m "Route folded superseded assessments to their assessment history"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
