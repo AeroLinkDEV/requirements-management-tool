@@ -26,6 +26,22 @@ export function reviewsVisibleInCurrentRelease<T extends SupersessionRecord>(rev
     || !loadedIds.has(review.supersededByTestChangeRequestId))
 }
 
+export type SuccessorReference = { id: string; displayNumber?: string }
+
+/**
+ * The exact superseding review remains navigable even when it belongs to another release and is not
+ * present in the release-scoped list. The optional display number is presentation metadata; the ID is
+ * the authoritative route.
+ */
+export function successorReferenceFor<T extends SupersessionRecord>(
+  review: T,
+  reviews: readonly T[],
+): SuccessorReference | undefined {
+  const id = review.supersededByTestChangeRequestId
+  if (!id) return undefined
+  return { id, displayNumber: reviews.find(candidate => candidate.id === id)?.displayNumber }
+}
+
 /**
  * Every exact predecessor that ultimately points to the supplied current review.
  *

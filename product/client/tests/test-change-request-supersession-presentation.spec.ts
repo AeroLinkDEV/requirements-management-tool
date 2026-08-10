@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import {
   isControlledTestChangeRequest,
   reviewsVisibleInCurrentRelease,
+  successorReferenceFor,
   supersededHistoryFor,
   type SupersessionRecord,
 } from '../src/testChangeReviewPresentation'
@@ -18,6 +19,9 @@ test('a cross-release superseded review remains visible when its successor is no
   const currentRelease = [predecessor]
 
   expect(reviewsVisibleInCurrentRelease(currentRelease)).toEqual([predecessor])
+  expect(successorReferenceFor(predecessor, currentRelease)).toEqual({
+    id: 'successor-in-another-release',
+  })
 })
 
 test('a same-release predecessor moves under the exact successor rather than remaining a peer row', () => {
@@ -26,6 +30,10 @@ test('a same-release predecessor moves under the exact successor rather than rem
   const currentRelease = [predecessor, successor]
 
   expect(reviewsVisibleInCurrentRelease(currentRelease)).toEqual([successor])
+  expect(successorReferenceFor(predecessor, currentRelease)).toEqual({
+    id: successor.id,
+    displayNumber: successor.displayNumber,
+  })
   expect(supersededHistoryFor(successor, currentRelease)).toEqual([predecessor])
 })
 

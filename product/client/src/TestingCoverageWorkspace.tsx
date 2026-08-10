@@ -7,7 +7,7 @@ import TestChangeRequestCreateDialog from './TestChangeRequestCreateDialog'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import { pickerSummary } from './pickerText'
-import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, supersededHistoryFor } from './testChangeReviewPresentation'
+import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, successorReferenceFor, supersededHistoryFor } from './testChangeReviewPresentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './DownstreamAssessmentQueue.css'
 import './TestingCoverageWorkspace.css'
@@ -406,8 +406,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const mine = requests.filter(x => x.discipline === discipline)
   const visibleMine = reviewsVisibleInCurrentRelease(mine)
   const authoringRequest = mine.find(x => x.id === authoring)
-  const authoringSuccessor = authoringRequest?.supersededByTestChangeRequestId
-    ? mine.find(x => x.id === authoringRequest.supersededByTestChangeRequestId)
+  const authoringSuccessor = authoringRequest
+    ? successorReferenceFor(authoringRequest, mine)
     : undefined
 
   const act = async (work: () => Promise<void>, failure: string) => {
@@ -703,6 +703,16 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     {request.noChangeRationale && <p className="conclusionRationale">{request.noChangeRationale}</p>}
                   </div>
                 : <p className="drawerEmpty">Nobody has answered this yet.</p>}
+              {request.state === 'Superseded' && request.supersededByTestChangeRequestId && (
+                <div className="conclusionBox historicalAssessment">
+                  <strong>Superseded assessment</strong>
+                  <p>{request.supersededReason ?? 'This assessment was folded into a surviving review.'}</p>
+                  <button type="button" className="drawerArtifactLink"
+                    onClick={() => setAuthoring(request.supersededByTestChangeRequestId!)}>
+                    Open exact successor
+                  </button>
+                </div>
+              )}
               {request.outcome === 'ChangeRequired' && isControlledTestChangeRequest(request, tcrAcronym(discipline)) && (
                 <ul className="drawerChanges">
                   <li className="linkedDraft">

@@ -20,7 +20,7 @@ type ProcedureTargetPage={page:number;pageSize:number;totalCount:number;totalPag
 type RequirementChoicePage={page:number;pageSize:number;totalCount:number;totalPages:number;items:RequirementChoice[]}
 type Capabilities={canProposeProcedureChange:boolean;canWithdrawProcedureChange:boolean;canRevise:boolean}
 type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;version:number;caseContractVersion:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}
-type SupersededBy={id:string;displayNumber:string;reason?:string}
+type SupersededBy={id:string;displayNumber?:string;reason?:string}
 
 const levelName=(discipline:string)=>discipline==='System'?'SYS':discipline==='HighLevelSoftware'?'HLR':'LLR'
 const procedureWord=(level:string)=>level==='System'?'SYSTP':level==='HighLevel'?'HLRTP':'LLRTP'
@@ -265,7 +265,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
         <h3>Historical revision</h3>
         <p>{supersededBy?.reason??`${item.displayNumber} has been replaced by a later controlled revision.`}</p>
         {supersededBy
-          ?<button type="button" className="linkedScr" onClick={()=>onOpenTestChangeRequest(supersededBy.id)}>Open {supersededBy.displayNumber}</button>
+          ?<button type="button" className="linkedScr" onClick={()=>onOpenTestChangeRequest(supersededBy.id)}>{supersededBy.displayNumber ? `Open ${supersededBy.displayNumber}` : 'Open exact successor'}</button>
           :<p className="drawerEmpty">The successor identity is not available in this build context.</p>}
       </section>}
 
