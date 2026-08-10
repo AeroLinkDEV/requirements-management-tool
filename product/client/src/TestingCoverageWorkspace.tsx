@@ -7,6 +7,7 @@ import TestChangeRequestCreateDialog from './TestChangeRequestCreateDialog'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import { pickerSummary } from './pickerText'
+import { reviewsVisibleInCurrentRelease, supersededHistoryFor } from './testChangeReviewPresentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './DownstreamAssessmentQueue.css'
 import './TestingCoverageWorkspace.css'
@@ -403,18 +404,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   }, [requirementPicker, requirementSelectionItems])
 
   const mine = requests.filter(x => x.discipline === discipline)
-  const activeMine = mine.filter(x => x.state !== 'Superseded')
-  const supersededChainFor = (current: TestChangeRequest) => {
-    const history: TestChangeRequest[] = []
-    let successorId = current.id
-    for (;;) {
-      const previous = mine.find(candidate =>
-        candidate.state === 'Superseded' && candidate.supersededByTestChangeRequestId === successorId)
-      if (!previous) return history
-      history.push(previous)
-      successorId = previous.id
-    }
-  }
+  const visibleMine = reviewsVisibleInCurrentRelease(mine)
   const authoringRequest = mine.find(x => x.id === authoring)
   const authoringSuccessor = authoringRequest?.supersededByTestChangeRequestId
     ? mine.find(x => x.id === authoringRequest.supersededByTestChangeRequestId)
@@ -633,7 +623,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           <h2>Downstream test assessments</h2>
           <p>Approved upstream changes waiting for an explicit {assessmentName(discipline)} conclusion.</p>
         </div>
-        {!activeMine.length && (
+        {!visibleMine.length && (
           <div className="coverageEmpty">
             <b>No {disciplineLabel(discipline)} test assessments for this build</b>
             <span>Nothing has been approved into this build that {disciplineLabel(discipline)} verification must answer for.</span>
@@ -642,8 +632,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
         {/* The requirements queue's row, from its own stylesheet. Identifying text on the left, what the
             assessment concluded in the middle, and one control on the right in every state — what can be done
             about an assessment is decided inside it, not chosen from a row of peers. */}
-        {activeMine.map(request => {
-          const supersededRevisions = supersededChainFor(request)
+        {visibleMine.map(request => {
+          const supersededRevisions = supersededHistoryFor(request, mine)
           return (
           <article className="downstreamAssessment" data-state={request.state} key={request.id}>
             <div className="downstreamSource">
