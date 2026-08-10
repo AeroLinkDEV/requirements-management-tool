@@ -232,9 +232,9 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   await expect(successorRow).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('.downstreamAssessment[data-state="Superseded"]')).toHaveCount(0)
   const history = successorRow.locator('details.tcrRevisionHistory')
-  await expect(history.getByText('Show 1 superseded TCR revision', { exact: true })).toBeVisible()
-  await history.getByText('Show 1 superseded TCR revision', { exact: true }).click()
-  const predecessorLink = history.getByRole('button', { name: `${predecessor!.displayNumber} · Superseded` })
+  await expect(history.getByText('Show 1 superseded history item', { exact: true })).toBeVisible()
+  await history.getByText('Show 1 superseded history item', { exact: true }).click()
+  const predecessorLink = history.getByRole('button', { name: `${predecessor!.displayNumber} · Superseded TCR` })
   await expect(predecessorLink).toBeVisible()
   await predecessorLink.click()
 
@@ -257,7 +257,7 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   const reloadedSuccessor = page.locator('.downstreamAssessment').filter({ hasText: successor!.displayNumber }).first()
   await expect(reloadedSuccessor).toBeVisible({ timeout: 30_000 })
   await expect(reloadedSuccessor.locator('details.tcrRevisionHistory')
-    .getByText('Show 1 superseded TCR revision', { exact: true })).toBeVisible()
+    .getByText('Show 1 superseded history item', { exact: true })).toBeVisible()
 
   const afterCandidates = await (await request.get(
     `${apiBase}/api/baselines/${baseline.id}/test-change-requests`,
