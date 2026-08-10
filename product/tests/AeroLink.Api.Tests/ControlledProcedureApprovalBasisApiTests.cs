@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
@@ -45,6 +46,12 @@ public sealed class ControlledProcedureApprovalBasisApiTests
                 [new ApproverSelection("requirement.approver", "Requirement Approver")], now);
             change.ApproveActiveStage("requirement.approver", now.AddMinutes(1));
 
+            // A second source package is deliberately not selected into this successor baseline. Its System
+            // procedure is inherited exact content, so its original TCR signatures must still be printed.
+            var inheritedSource = new SystemChangeRequest("SRCR-990002", 0, project.Id, release.Id,
+                "Second inherited authority source", "Problem", "Analysis", "Solution",
+                "change.author", now);
+
             var baseline = new CandidateBaseline("SW-07.10", 0, project.Id, release.Id, null,
                 "Successor authority baseline", "cm", now);
             baseline.Select(change, "cm", now.AddMinutes(2));
@@ -52,15 +59,17 @@ public sealed class ControlledProcedureApprovalBasisApiTests
             var systemTcr = ApprovedTcr(project.Id, release.Id, change.Id, change.DisplayNumber,
                 TestChangeReviewDiscipline.System, "SYSTCR-990001", "SYSTP-990001",
                 TestProcedureLevel.System, "system.tcr.approver", now.AddMinutes(3));
+            var secondSystemTcr = ApprovedTcr(project.Id, release.Id, inheritedSource.Id,
+                inheritedSource.DisplayNumber, TestChangeReviewDiscipline.System, "SYSTCR-990002",
+                "SYSTP-990002", TestProcedureLevel.System, "system.tcr.approver", now.AddMinutes(4));
             var hlrTcr = ApprovedTcr(project.Id, release.Id, change.Id, change.DisplayNumber,
                 TestChangeReviewDiscipline.HighLevelSoftware, "HLRTCR-990001", "HLRTP-990001",
-                TestProcedureLevel.HighLevel, "hlr.tcr.approver", now.AddMinutes(4));
+                TestProcedureLevel.HighLevel, "hlr.tcr.approver", now.AddMinutes(5));
 
-            // Deliberately select only the HLR package. The System revision below represents unchanged
-            // predecessor content carried by this baseline: its original System TCR is not selected again.
-            // The old implementation therefore omitted the real System authority and printed the unrelated
-            // selected HLR authority in both the System procedure document and the requirement document.
-            baseline.SelectTestChangeRequest(hlrTcr, "cm", now.AddMinutes(5));
+            // Deliberately select only the HLR package. The two System revisions below represent unchanged
+            // predecessor content carried by this baseline: neither original System TCR is selected again.
+            // Approval evidence must follow those exact carried revisions and exclude the unrelated HLR TCR.
+            baseline.SelectTestChangeRequest(hlrTcr, "cm", now.AddMinutes(8));
 
             var systemProcedure = new TestProcedure(project.Id, "SYSTP-990001",
                 "Inherited system procedure", "system.author", now, TestProcedureLevel.System);
@@ -68,6 +77,13 @@ public sealed class ControlledProcedureApprovalBasisApiTests
                 "Verify the inherited system behaviour.", "Configured system.", "Exercise system behaviour.",
                 "System behaviour is correct.", TestProcedureState.Approved, "system.author", now,
                 sourceTestChangeRequestId: systemTcr.Id);
+            var secondSystemProcedure = new TestProcedure(project.Id, "SYSTP-990002",
+                "Second inherited system procedure", "system.author", now, TestProcedureLevel.System);
+            var secondSystemRevision = new TestProcedureRevision(secondSystemProcedure.Id, 0,
+                "Verify the second inherited system behaviour.", "Configured system.",
+                "Exercise the second system behaviour.", "The second system behaviour is correct.",
+                TestProcedureState.Approved, "system.author", now,
+                sourceTestChangeRequestId: secondSystemTcr.Id);
             var hlrProcedure = new TestProcedure(project.Id, "HLRTP-990001",
                 "Selected HLR procedure", "hlr.author", now, TestProcedureLevel.HighLevel);
             var hlrRevision = new TestProcedureRevision(hlrProcedure.Id, 0,
@@ -80,11 +96,13 @@ public sealed class ControlledProcedureApprovalBasisApiTests
                 new string('a', 64), 0, generatedAt);
             var systemDocument = new ControlledDocument(project.Id, release.Id, baseline.Id,
                 ControlledDocumentType.SystemTestProcedures, "SYSTD-990001", "Authority System Procedures", 0,
-                new string('b', 64), 1, generatedAt);
+                new string('b', 64), 2, generatedAt);
 
-            db.AddRange(program, project, release, change, baseline, systemTcr, hlrTcr,
-                systemProcedure, systemRevision, hlrProcedure, hlrRevision,
+            db.AddRange(program, project, release, change, inheritedSource, baseline, systemTcr,
+                secondSystemTcr, hlrTcr, systemProcedure, systemRevision, secondSystemProcedure,
+                secondSystemRevision, hlrProcedure, hlrRevision,
                 new BaselineTestProcedureSelection(baseline.Id, systemProcedure.Id, systemRevision.Id),
+                new BaselineTestProcedureSelection(baseline.Id, secondSystemProcedure.Id, secondSystemRevision.Id),
                 new BaselineTestProcedureSelection(baseline.Id, hlrProcedure.Id, hlrRevision.Id),
                 requirementDocument, systemDocument);
             await db.SaveChangesAsync();
@@ -100,8 +118,18 @@ public sealed class ControlledProcedureApprovalBasisApiTests
             Assert.IsType<GeneratedOutput>(await generator.GenerateAsync(requirementDocumentId, "docx", default)));
 
         Assert.Contains("SYSTCR-990001.00", systemXml);
+        Assert.Contains("SYSTCR-990002.00", systemXml);
+        Assert.Contains("Test Change Authority · SYSTCR-990001.00 · cycle 1 · Reviewer", systemXml);
+        Assert.Contains("Test Change Authority · SYSTCR-990001.00 · cycle 1 · Approver", systemXml);
+        Assert.Contains("Test Change Authority · SYSTCR-990002.00 · cycle 1 · Reviewer", systemXml);
+        Assert.Contains("Test Change Authority · SYSTCR-990002.00 · cycle 1 · Approver", systemXml);
+        Assert.Contains("system.tcr.approver.reviewer", systemXml);
         Assert.Contains("system.tcr.approver", systemXml);
-        Assert.Contains("Test Change Authority", systemXml);
+        Assert.Contains("signed 04:04 UTC", systemXml);
+        Assert.Contains("signed 04:06 UTC", systemXml);
+        Assert.Contains("snapshot ", systemXml);
+        Assert.Contains("Upstream Change Authority", systemXml);
+        Assert.Contains("requirement.approver", systemXml);
         Assert.DoesNotContain("hlr.tcr.approver", systemXml);
 
         Assert.Contains("Change Authority", requirementXml);
@@ -125,8 +153,14 @@ public sealed class ControlledProcedureApprovalBasisApiTests
             "The controlled behaviour is correct.", "Approval-basis regression.",
             JsonSerializer.Serialize(new[] { Guid.NewGuid() })), now);
         review.WriteCase("verification.author", "Authority package", "Problem", "Analysis", "Solution", now);
-        review.Submit("verification.author", approverId, true, now);
-        review.ApproveActiveStage(approverId, "Approved exact procedure authority.", now.AddMinutes(1));
+        var reviewerId = approverId + ".reviewer";
+        review.SubmitForReview("verification.author",
+            [
+                new ApproverSelection(reviewerId, approverId + " Reviewer", ProgramRole.Reviewer),
+                new ApproverSelection(approverId, approverId + " Approver", ProgramRole.Approver),
+            ], true, now);
+        review.ApproveActiveStage(reviewerId, "Reviewed exact procedure authority.", now.AddMinutes(1));
+        review.ApproveActiveStage(approverId, "Approved exact procedure authority.", now.AddMinutes(2));
         return review;
     }
 
