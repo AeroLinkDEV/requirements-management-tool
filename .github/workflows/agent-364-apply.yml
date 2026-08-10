@@ -1,0 +1,216 @@
+name: Agent 364 branch patch
+
+on:
+  push:
+    branches:
+      - agent/364-legacy-procedure-manifest-bootstrap
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[agent-364-applied]') }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Apply explicit legacy-bootstrap contract
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{path}: expected one match, found {count}')
+              file.write_text(text.replace(old, new), encoding='utf-8')
+
+          baseline = 'product/src/AeroLink.Domain/Baselines/CandidateBaseline.cs'
+          marker = '''    public void Freeze(string actorId, DateTimeOffset now)
+          {'''
+          insertion = '''    /// <summary>
+              /// Establishes the first exact procedure manifest for a released predecessor whose controlled
+              /// procedure inventory predates build-scoped manifests.
+              ///
+              /// This is a migration assertion, not ordinary engineering materialization and not a claim that the
+              /// predecessor always carried this exact set. It is intentionally a separate, narrow operation so
+              /// the ordinary released-baseline immutability rule remains unchanged.
+              /// </summary>
+              public void BootstrapLegacyTestProcedures(string actorId, string proceduresHash, int activeCount,
+                  int retiredCount, string selectionRule, DateTimeOffset now)
+              {
+                  if (State == CandidateBaselineState.Draft)
+                      throw new DomainException("Only a frozen or released legacy baseline can establish a procedure bootstrap snapshot.");
+                  if (RequirementsMaterializedAt is null)
+                      throw new DomainException("Materialize the legacy requirement baseline before establishing its procedure snapshot.");
+                  if (TestProceduresMaterializedAt is not null)
+                      throw new DomainException("The test procedure baseline is already materialized and immutable.");
+                  if (string.IsNullOrWhiteSpace(actorId))
+                      throw new DomainException("A Configuration Manager is required for the legacy procedure bootstrap.");
+                  if (string.IsNullOrWhiteSpace(proceduresHash) || proceduresHash.Length != 64)
+                      throw new DomainException("A valid test procedure manifest hash is required.");
+                  if (activeCount < 0 || retiredCount < 0)
+                      throw new DomainException("Legacy procedure bootstrap counts cannot be negative.");
+                  if (string.IsNullOrWhiteSpace(selectionRule))
+                      throw new DomainException("The legacy procedure selection rule must be recorded.");
+
+                  TestProceduresHash = proceduresHash;
+                  TestProceduresMaterializedAt = now;
+                  UpdatedAt = now;
+                  Event("LegacyProcedureManifestBootstrapped", actorId.Trim(),
+                      $"Established a legacy bootstrap snapshot with {activeCount} active procedure revisions, " +
+                      $"{retiredCount} retired procedure identities suppressed, and hash {proceduresHash}. " +
+                      $"Migration selection rule: {selectionRule}", now);
+              }
+
+              public void Freeze(string actorId, DateTimeOffset now)
+              {'''
+          replace_once(baseline, marker, insertion)
+
+          materializer = 'product/src/AeroLink.Infrastructure/Persistence/TestProcedureBaselineMaterializer.cs'
+          replace_once(materializer, 'using System.Security.Cryptography;\nusing System.Text;\n', '')
+          replace_once(materializer,
+          '''        var manifest = string.Join(";", current.OrderBy(x => procedureById[x.Key].BaseNumber)
+                      .Select(x => $"{procedureById[x.Key].BaseNumber}.{x.Value.Revision:D2}:{x.Value.Id}"));
+                  var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();''',
+          '''        var manifestEntries = current.Select(x => new TestProcedureManifestEntry(
+                      x.Key, x.Value.Id, procedureById[x.Key].BaseNumber, x.Value.Revision));
+                  var hash = TestProcedureManifest.Hash(manifestEntries);''')
+          replace_once(materializer,
+          '''        // A predecessor from before build-scoped manifests existed has no members, and reading that as "it
+                  // carried no procedures" is only truthful for a project that genuinely has none. For one that already
+                  // holds a controlled procedure inventory it would publish a manifest omitting all of it, which claims
+                  // the build contains far less than it does. So the inventory is carried forward as the starting point.
+                  //
+                  // What this establishes is a migration snapshot, not evidence that the predecessor always held exactly
+                  // these revisions — nothing recorded that, and inventing it would be worse than the gap. It is taken
+                  // once: the successor's own manifest is immutable from the moment it is written.
+                  if (predecessor.TestProceduresMaterializedAt is null)
+                      return await LegacyInventoryAsync(baseline.ProjectId, ct);''',
+          '''        // A missing predecessor manifest is not an empty manifest. It is an unresolved migration boundary:
+                  // only the explicit, attributable legacy-bootstrap action may turn the old controlled inventory into
+                  // exact predecessor membership. Silently consulting today's inventory here would claim historical
+                  // precision while materializing an unrelated successor.
+                  if (predecessor.TestProceduresMaterializedAt is null)
+                      throw new DomainException(
+                          $"Predecessor {predecessor.DisplayNumber} has no exact procedure manifest. A Configuration Manager must establish its legacy bootstrap snapshot before this successor can materialize procedures.");''')
+          replace_once(materializer,
+          '''    /// <summary>
+              /// The project's controlled procedures as they stand, used as the starting point when no predecessor
+              /// manifest exists.
+              ///
+              /// One revision per procedure: the highest-numbered approved one. A procedure whose latest revision is
+              /// retired is left out, because it is not something the build carries. Deterministic, so two runs on the
+              /// same data produce the same manifest hash.
+              /// </summary>
+              private async Task<Dictionary<Guid, TestProcedureRevision>> LegacyInventoryAsync(Guid projectId, CancellationToken ct)
+              {
+                  var revisions = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                         join procedure in db.TestProcedures.AsNoTracking()
+                                             on revision.ProcedureId equals procedure.Id
+                                         where procedure.ProjectId == projectId
+                                         select revision).ToListAsync(ct);
+                  return revisions
+                      .GroupBy(x => x.ProcedureId)
+                      .Select(group => group.OrderByDescending(x => x.Revision).First())
+                      .Where(x => x.State == TestProcedureState.Approved)
+                      .ToDictionary(x => x.ProcedureId);
+              }
+
+          ''', '')
+
+          di = 'product/src/AeroLink.Infrastructure/DependencyInjection.cs'
+          replace_once(di,
+              '        services.AddScoped<TestProcedureBaselineMaterializer>();\n',
+              '        services.AddScoped<TestProcedureBaselineMaterializer>();\n        services.AddScoped<LegacyProcedureManifestBootstrapper>();\n')
+
+          contracts = 'product/src/AeroLink.Api/ApiContracts.cs'
+          replace_once(contracts,
+              'record BaselineTestChangeSelectionRequest(Guid TestChangeRequestId);\n',
+              'record BaselineTestChangeSelectionRequest(Guid TestChangeRequestId);\nrecord LegacyProcedureManifestBootstrapRequest(string ExpectedHash, bool ConfirmLegacySnapshot);\n')
+
+          endpoints = 'product/src/AeroLink.Api/BaselineEndpoints.cs'
+          endpoint_marker = '''        app.MapPost("/api/baselines/{id:guid}/materialize-test-procedures", async (Guid id, EmptyMutationRequest request,
+                      HttpContext http, TestProcedureBaselineMaterializer materializer, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+                  {'''
+          endpoint_insertion = '''        // Explicit one-time migration from a pre-manifest controlled inventory. This is separate from normal
+                  // materialization so no successor can silently rewrite what its released predecessor is said to carry.
+                  app.MapGet("/api/baselines/{id:guid}/legacy-procedure-manifest-bootstrap", async (Guid id,
+                      HttpContext http, LegacyProcedureManifestBootstrapper bootstrapper, AeroLinkDbContext db,
+                      IdentityService identity, CancellationToken ct) =>
+                  {
+                      var projectId = await db.CandidateBaselines.Where(x => x.Id == id)
+                          .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+                      if (projectId is null) return Results.NotFound();
+                      if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct,
+                              ProgramRole.ConfigurationManager)) return Results.Forbid();
+                      try
+                      {
+                          var preview = await bootstrapper.PreviewAsync(id, ct);
+                          return preview is null ? Results.NotFound() : Results.Ok(preview);
+                      }
+                      catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+                  });
+
+                  app.MapPost("/api/baselines/{id:guid}/legacy-procedure-manifest-bootstrap", async (Guid id,
+                      LegacyProcedureManifestBootstrapRequest request, HttpContext http,
+                      LegacyProcedureManifestBootstrapper bootstrapper, AeroLinkDbContext db,
+                      IdentityService identity, CancellationToken ct) =>
+                  {
+                      var projectId = await db.CandidateBaselines.Where(x => x.Id == id)
+                          .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+                      if (projectId is null) return Results.NotFound();
+                      if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct,
+                              ProgramRole.ConfigurationManager)) return Results.Forbid();
+                      if (!request.ConfirmLegacySnapshot)
+                          return Results.BadRequest(new { error =
+                              "Confirm that this is a migration snapshot of the current legacy controlled inventory, not reconstructed historical release evidence." });
+                      try
+                      {
+                          var result = await bootstrapper.BootstrapAsync(id, http.UserAccount().UserName,
+                              request.ExpectedHash, DateTimeOffset.UtcNow, ct);
+                          return result is null ? Results.NotFound() : Results.Ok(result);
+                      }
+                      catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+                  });
+
+                  app.MapPost("/api/baselines/{id:guid}/materialize-test-procedures", async (Guid id, EmptyMutationRequest request,
+                      HttpContext http, TestProcedureBaselineMaterializer materializer, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+                  {'''
+          replace_once(endpoints, endpoint_marker, endpoint_insertion)
+          '@ | Set-Content -LiteralPath "$env:RUNNER_TEMP\agent364.py" -Encoding utf8
+          python "$env:RUNNER_TEMP\agent364.py"
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate backend contract
+        shell: pwsh
+        run: |
+          dotnet restore product/AeroLink.slnx
+          dotnet build product/AeroLink.slnx --configuration Release --no-restore
+          dotnet test product/AeroLink.slnx --configuration Release --no-build --logger "console;verbosity=normal"
+
+      - name: Publish core patch
+        shell: pwsh
+        run: |
+          git diff --check
+          git config user.name "seanmccarthyns"
+          git config user.email "seanmccarthyns@gmail.com"
+          git add product/src/AeroLink.Domain/Baselines/CandidateBaseline.cs `
+            product/src/AeroLink.Infrastructure/Persistence/TestProcedureBaselineMaterializer.cs `
+            product/src/AeroLink.Infrastructure/DependencyInjection.cs `
+            product/src/AeroLink.Api/ApiContracts.cs `
+            product/src/AeroLink.Api/BaselineEndpoints.cs
+          git commit -m "[agent-364-applied] Add explicit legacy procedure bootstrap boundary"
+          git push origin "HEAD:${env:GITHUB_REF_NAME}"
