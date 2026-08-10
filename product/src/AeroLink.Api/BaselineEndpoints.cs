@@ -144,11 +144,38 @@ public static class BaselineEndpoints
 
         app.MapGet("/api/baselines/predecessors", async (Guid projectId, Guid releaseId, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            var items = await (from baseline in db.CandidateBaselines.AsNoTracking()
-                               join release in db.Releases.AsNoTracking() on baseline.ReleaseId equals release.Id
-                               where baseline.ProjectId == projectId && baseline.ReleaseId != releaseId && baseline.RequirementsMaterializedAt != null
-                               orderby release.IsReleased descending, release.Version descending, baseline.FrozenAt descending
-                               select new { baseline.Id, baseline.DisplayNumber, baseline.Name, baseline.ReleaseId, release = release.Version, release.IsReleased, baseline.RequirementsHash, requirementCount = db.BaselineRequirements.Count(x => x.BaselineId == baseline.Id) }).ToListAsync(ct);
+            var rows = await (from baseline in db.CandidateBaselines.AsNoTracking()
+                              join release in db.Releases.AsNoTracking() on baseline.ReleaseId equals release.Id
+                              where baseline.ProjectId == projectId && baseline.ReleaseId != releaseId
+                                    && baseline.RequirementsMaterializedAt != null
+                              select new
+                              {
+                                  baseline.Id,
+                                  baseline.BaseNumber,
+                                  baseline.Revision,
+                                  baseline.Name,
+                                  baseline.ReleaseId,
+                                  release = release.Version,
+                                  release.IsReleased,
+                                  baseline.RequirementsHash,
+                                  baseline.FrozenAt,
+                                  requirementCount = db.BaselineRequirements.Count(x => x.BaselineId == baseline.Id)
+                              }).ToListAsync(ct);
+            var items = rows
+                .OrderByDescending(x => x.IsReleased)
+                .ThenByDescending(x => x.release, StringComparer.Ordinal)
+                .ThenByDescending(x => x.FrozenAt)
+                .Select(x => new
+                {
+                    x.Id,
+                    displayNumber = ArtifactNumber.Display(x.BaseNumber, x.Revision),
+                    x.Name,
+                    x.ReleaseId,
+                    x.release,
+                    x.IsReleased,
+                    x.RequirementsHash,
+                    x.requirementCount
+                });
             return Results.Ok(items);
         });
 

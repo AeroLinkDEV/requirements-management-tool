@@ -52,10 +52,11 @@ test('searches scoped change history while dormant build management stays unreac
   expect((await detail.json()).scrs.map((item:{id:string})=>item.id)).toContain(scr.id)
 
   const root = `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}`
-  for (const retired of ['release-planning', 'baselines']) {
-    await page.goto(`${root}/${retired}`)
-    await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
-  }
+  await page.goto(`${root}/release-planning`)
+  await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
+
+  await page.goto(`${root}/baselines`)
+  await expect(page.getByRole('heading', { name: 'Candidate Baselines' })).toBeVisible()
 })
 
 test('an unfiltered empty build still reports that no change requests are recorded', async ({ page, request }) => {
