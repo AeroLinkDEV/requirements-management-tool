@@ -1,0 +1,367 @@
+name: Agent 365 branch patch
+
+on:
+  push:
+    branches:
+      - agent/365-tcr-supersession-browser
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[agent-365-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Apply focused issue 365 changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{path}: expected one match, found {count}')
+              file.write_text(text.replace(old, new), encoding='utf-8')
+
+          workspace_path = 'product/client/src/TestChangeRequestWorkspace.tsx'
+          replace_once(
+              workspace_path,
+              "type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;version:number;caseContractVersion:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}\n",
+              "type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;version:number;caseContractVersion:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}\ntype SupersededBy={id:string;displayNumber:string;reason?:string}\n",
+          )
+          replace_once(
+              workspace_path,
+              "export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAuthor,onClose,onChanged,onOpenRequirementRevision}:{api:string;projectId:string;reviewId:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void;onOpenRequirementRevision:(requirement:{id:string;revisionId:string;level:string})=>void}){",
+              "export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAuthor,onClose,onChanged,onOpenRequirementRevision,onOpenTestChangeRequest,supersededBy}:{api:string;projectId:string;reviewId:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void;onOpenRequirementRevision:(requirement:{id:string;revisionId:string;level:string})=>void;onOpenTestChangeRequest:(id:string)=>void;supersededBy?:SupersededBy}){",
+          )
+          replace_once(
+              workspace_path,
+              "  const revise=()=>void act(()=>apiRequest(`${api}/api/test-change-reviews/${reviewId}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}))",
+              "  const revise=()=>void (async()=>{\n    setBusy(true);setError('')\n    try{\n      const next=await apiRequest<{id:string;displayNumber:string}>(`${api}/api/test-change-reviews/${reviewId}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})\n      onChanged()\n      onOpenTestChangeRequest(next.id)\n    }catch(problem){setError(operationError(problem,'The next test change request revision could not be started.'))}\n    finally{setBusy(false)}\n  })()",
+          )
+          replace_once(
+              workspace_path,
+              "      {error&&<div className=\"workspaceError\" role=\"alert\">{error}</div>}\n\n      {item&&<>",
+              "      {error&&<div className=\"workspaceError\" role=\"alert\">{error}</div>}\n      {item?.state==='Superseded'&&<section className=\"tcrCaseSection\" role=\"status\">\n        <h3>Historical revision</h3>\n        <p>{supersededBy?.reason??`${item.displayNumber} has been replaced by a later controlled revision.`}</p>\n        {supersededBy\n          ?<button type=\"button\" className=\"linkedScr\" onClick={()=>onOpenTestChangeRequest(supersededBy.id)}>Open {supersededBy.displayNumber}</button>\n          :<p className=\"drawerEmpty\">The successor identity is not available in this build context.</p>}\n      </section>}\n\n      {item&&<>",
+          )
+          replace_once(
+              workspace_path,
+              "            {canAuthor&&!open&&item.state!=='Approved'&&<p className=\"drawerEmpty\">This test change request is with its approver. Its procedure decisions cannot change until they approve or return it.</p>}",
+              "            {canAuthor&&item.state==='InReview'&&<p className=\"drawerEmpty\">This test change request is with its approver. Its procedure decisions cannot change until they approve or return it.</p>}",
+          )
+
+          coverage_path = 'product/client/src/TestingCoverageWorkspace.tsx'
+          replace_once(
+              coverage_path,
+              "  state: string\n  version: number",
+              "  state: string\n  supersededByTestChangeRequestId?: string\n  supersededReason?: string\n  version: number",
+          )
+          replace_once(
+              coverage_path,
+              "  const mine = requests.filter(x => x.discipline === discipline)\n",
+              "  const mine = requests.filter(x => x.discipline === discipline)\n  const activeMine = mine.filter(x => x.state !== 'Superseded')\n  const supersededChainFor = (current: TestChangeRequest) => {\n    const history: TestChangeRequest[] = []\n    let successorId = current.id\n    for (;;) {\n      const previous = mine.find(candidate =>\n        candidate.state === 'Superseded' && candidate.supersededByTestChangeRequestId === successorId)\n      if (!previous) return history\n      history.push(previous)\n      successorId = previous.id\n    }\n  }\n  const authoringRequest = mine.find(x => x.id === authoring)\n  const authoringSuccessor = authoringRequest?.supersededByTestChangeRequestId\n    ? mine.find(x => x.id === authoringRequest.supersededByTestChangeRequestId)\n    : undefined\n",
+          )
+          replace_once(coverage_path, "        {!mine.length && (", "        {!activeMine.length && (")
+          replace_once(
+              coverage_path,
+              "        {mine.map(request => (\n          <article className=\"downstreamAssessment\" data-state={request.state} key={request.id}>",
+              "        {activeMine.map(request => {\n          const supersededRevisions = supersededChainFor(request)\n          return (\n          <article className=\"downstreamAssessment\" data-state={request.state} key={request.id}>",
+          )
+          replace_once(
+              coverage_path,
+              "              {request.outcome === 'NoChangeRequired' && request.noChangeRationale && <p>{request.noChangeRationale}</p>}",
+              "              {supersededRevisions.length > 0 && (\n                <details className=\"decisionHistory tcrRevisionHistory\">\n                  <summary>Show {supersededRevisions.length} superseded TCR revision{supersededRevisions.length === 1 ? '' : 's'}</summary>\n                  {supersededRevisions.map(prior => (\n                    <button type=\"button\" className=\"linkedScr\" key={prior.id} onClick={() => setAuthoring(prior.id)}>\n                      {prior.displayNumber} · Superseded\n                    </button>\n                  ))}\n                </details>\n              )}\n              {request.outcome === 'NoChangeRequired' && request.noChangeRationale && <p>{request.noChangeRationale}</p>}",
+          )
+          replace_once(
+              coverage_path,
+              "          </article>\n        ))}",
+              "          </article>\n          )\n        })}",
+          )
+          replace_once(
+              coverage_path,
+              "          onChanged={() => void load()}\n          onOpenRequirementRevision={onOpenRequirementRevision}",
+              "          onChanged={() => void load()}\n          onOpenRequirementRevision={onOpenRequirementRevision}\n          onOpenTestChangeRequest={setAuthoring}\n          supersededBy={authoringSuccessor ? {\n            id: authoringSuccessor.id,\n            displayNumber: authoringSuccessor.displayNumber,\n            reason: authoringRequest?.supersededReason,\n          } : undefined}",
+          )
+
+          test_path = Path('product/client/tests/test-change-request-supersession.spec.ts')
+          if test_path.exists():
+              raise RuntimeError(f'{test_path} already exists')
+          test_path.write_text(r'''import { expect, test } from '@playwright/test'
+import { apiBase, apiLogin, firstSectionId, login, openNavigationGroup, selectProgram } from './auth'
+
+const impacts = JSON.stringify({
+  trace: 'Not Affected', verification: 'Not Affected', documents: 'Not Affected',
+  baseline: 'Not Affected', collaboration: 'Not Affected',
+})
+
+type ReviewItem = {
+  id: string
+  displayNumber: string
+  discipline: string
+  state: string
+  version: number
+  changeRequestId: string
+  supersededByTestChangeRequestId?: string
+  supersededReason?: string
+}
+
+test('a revised TCR keeps its predecessor in history and out of active work and baseline selection', async ({ page, request }) => {
+  test.setTimeout(360_000)
+  await apiLogin(request)
+  const suffix = Date.now().toString().slice(-7)
+  const programName = `TCR Supersession ${suffix}`
+
+  const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, { data: {
+    programName,
+    programCode: `TS${suffix}`,
+    projectName: 'TCR Supersession Project',
+    softwareProduct: 'TCR Supersession Product',
+    initialRelease: '1.0',
+    initialReleaseIsReleased: false,
+  } })
+  expect(workspaceResponse.ok(), await workspaceResponse.text()).toBeTruthy()
+  const workspace = await workspaceResponse.json()
+
+  const usersResponse = await request.get(`${apiBase}/api/admin/users`)
+  expect(usersResponse.ok(), await usersResponse.text()).toBeTruthy()
+  const testEngineer = (await usersResponse.json())
+    .find((user: { userName: string }) => user.userName === 'test.engineer')
+  expect(testEngineer).toBeTruthy()
+  const roleGrant = await request.post(`${apiBase}/api/admin/users/${testEngineer.id}/memberships`, { data: {
+    programId: workspace.program.id,
+    role: 'TestEngineer',
+  } })
+  expect(roleGrant.ok(), await roleGrant.text()).toBeTruthy()
+
+  const draftResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
+    projectId: workspace.project.id,
+    targetReleaseId: workspace.release.id,
+    type: 'System',
+    title: `Controlled TCR revision ${suffix}`,
+    problem: 'The new behavior has no controlled procedure.',
+    analysis: 'A procedure must be introduced and independently approved.',
+    solution: 'Create and later revise the exact TCR package.',
+    requirementChanges: [{
+      level: 'System',
+      kind: 'Introduce',
+      targetSectionId: await firstSectionId(request, workspace.project.id),
+      statement: `The ${suffix} product shall expose a TCR supersession target.`,
+      rationale: 'Qualification target.',
+      verificationMethod: 'Test',
+      impactDispositionJson: impacts,
+    }],
+  } })
+  expect(draftResponse.ok(), await draftResponse.text()).toBeTruthy()
+  const draft = await draftResponse.json()
+  const submitted = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
+    expectedVersion: draft.version,
+    approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }],
+  } })
+  expect(submitted.ok(), await submitted.text()).toBeTruthy()
+  const approved = await request.post(`${apiBase}/api/change-requests/${draft.id}/approve`, { data: {
+    password: 'AeroLink!2026',
+    meaning: 'Approved for the TCR supersession journey.',
+  } })
+  expect(approved.ok(), await approved.text()).toBeTruthy()
+
+  const baselineResponse = await request.post(`${apiBase}/api/baselines`, { data: {
+    baseNumber: `SW-97.${suffix.slice(-2)}`,
+    revision: 0,
+    projectId: workspace.project.id,
+    releaseId: workspace.release.id,
+    predecessorBaselineId: null,
+    name: 'TCR supersession baseline',
+  } })
+  expect(baselineResponse.ok(), await baselineResponse.text()).toBeTruthy()
+  const baseline = await baselineResponse.json()
+  for (const [path, data] of [
+    ['selections', { changeRequestId: draft.id }],
+    ['freeze', {}],
+    ['materialize-requirements', {}],
+  ] as const) {
+    const response = await request.post(`${apiBase}/api/baselines/${baseline.id}/${path}`, { data })
+    expect(response.ok(), `${path}: ${await response.text()}`).toBeTruthy()
+  }
+  const requirementsResponse = await request.get(
+    `${apiBase}/api/requirements?projectId=${workspace.project.id}&baselineId=${baseline.id}&scope=System&includeRetired=false&page=1&pageSize=10`)
+  expect(requirementsResponse.ok(), await requirementsResponse.text()).toBeTruthy()
+  const requirementRevisionId = (await requirementsResponse.json()).items[0].revisionId as string
+  expect(requirementRevisionId).toBeTruthy()
+
+  const initialReviews = await (await request.get(
+    `${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`)).json() as { items: ReviewItem[] }
+  const initialReview = initialReviews.items.find(item =>
+    item.discipline === 'System' && item.changeRequestId === draft.id)
+  expect(initialReview).toBeTruthy()
+
+  await login(page, 'test.engineer', { openProject: false })
+  await selectProgram(page, programName)
+
+  const conclusion = await page.request.post(
+    `${apiBase}/api/test-change-reviews/${initialReview!.id}/conclusion`, { data: {
+      testChangeRequired: true,
+      expectedVersion: initialReview!.version,
+    } })
+  expect(conclusion.ok(), await conclusion.text()).toBeTruthy()
+  const impactResponse = await page.request.get(
+    `${apiBase}/api/releases/${workspace.release.id}/verification-impact`)
+  expect(impactResponse.ok(), await impactResponse.text()).toBeTruthy()
+  const impactItem = (await impactResponse.json()).find(
+    (item: { testChangeReviewId: string }) => item.testChangeReviewId === initialReview!.id)
+  expect(impactItem?.requirementRevisionId).toBe(requirementRevisionId)
+  const resolved = await page.request.post(`${apiBase}/api/verification-impact/${impactItem.id}/resolve`, { data: {
+    outcome: 'NewProcedureRequired',
+    rationale: 'The introduced requirement needs one exact procedure.',
+  } })
+  expect(resolved.ok(), await resolved.text()).toBeTruthy()
+  const proposed = await page.request.post(
+    `${apiBase}/api/test-change-reviews/${initialReview!.id}/procedure-changes`, { data: {
+      kind: 'Introduce',
+      revision: 0,
+      title: 'TCR supersession procedure',
+      objective: 'Verify the exact TCR supersession target.',
+      preconditions: 'The target configuration is available.',
+      steps: '1. Load the target. 2. Exercise the behavior.',
+      expectedResult: 'The expected behavior is observed.',
+      rationale: 'No controlled procedure covers the introduced requirement.',
+      drivingRequirementRevisionIds: [requirementRevisionId],
+    } })
+  expect(proposed.ok(), await proposed.text()).toBeTruthy()
+  const beforeCase = await (await page.request.get(
+    `${apiBase}/api/test-change-reviews/${initialReview!.id}/procedure-changes`)).json()
+  const caseSaved = await page.request.post(
+    `${apiBase}/api/test-change-reviews/${initialReview!.id}/case`, { data: {
+      title: 'TCR supersession engineering case',
+      problem: 'The changed behavior has no controlled verification coverage.',
+      analysis: 'One procedure is required and its later correction must retain exact history.',
+      solution: 'Approve the procedure package, then revise it through the controlled route.',
+      expectedVersion: beforeCase.version,
+    } })
+  expect(caseSaved.ok(), await caseSaved.text()).toBeTruthy()
+  const beforeSubmit = await (await page.request.get(
+    `${apiBase}/api/test-change-reviews/${initialReview!.id}/procedure-changes`)).json()
+  const packageSubmitted = await page.request.post(
+    `${apiBase}/api/test-change-reviews/${initialReview!.id}/submit`, { data: {
+      approverId: 'admin',
+      expectedVersion: beforeSubmit.version,
+    } })
+  expect(packageSubmitted.ok(), await packageSubmitted.text()).toBeTruthy()
+  const packageApproved = await request.post(
+    `${apiBase}/api/test-change-reviews/${initialReview!.id}/approve`, { data: {
+      rationale: 'The exact procedure decision is acceptable.',
+      password: 'AeroLink!2026',
+      meaning: 'I approve this exact TCR package.',
+    } })
+  expect(packageApproved.ok(), await packageApproved.text()).toBeTruthy()
+
+  const beforeRevisionCandidates = await (await request.get(
+    `${apiBase}/api/baselines/${baseline.id}/test-change-requests`)).json()
+  expect(beforeRevisionCandidates.available.map((item: { id: string }) => item.id))
+    .toContain(initialReview!.id)
+
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
+  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+  const activeRow = page.locator('.downstreamAssessment').filter({ hasText: draft.displayNumber }).first()
+  await expect(activeRow).toBeVisible({ timeout: 30_000 })
+  const approvedLink = activeRow.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ })
+  await expect(approvedLink).toBeVisible()
+  const predecessorDisplay = (await approvedLink.textContent())!.split(' · ')[0].trim()
+  await approvedLink.click()
+  const packageWorkspace = page.getByRole('dialog', { name: /procedure decisions/ })
+  await expect(packageWorkspace.getByRole('heading', { name: `${predecessorDisplay} procedure decisions` })).toBeVisible()
+  await packageWorkspace.getByRole('button', { name: 'Revise this test change request' }).click()
+
+  await expect(packageWorkspace.getByRole('heading', { name: /\.01 procedure decisions$/ }))
+    .toBeVisible({ timeout: 30_000 })
+  const afterRevision = await (await request.get(
+    `${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`)).json() as { items: ReviewItem[] }
+  const predecessor = afterRevision.items.find(item => item.id === initialReview!.id)
+  expect(predecessor?.state).toBe('Superseded')
+  expect(predecessor?.supersededByTestChangeRequestId).toBeTruthy()
+  const successor = afterRevision.items.find(item => item.id === predecessor!.supersededByTestChangeRequestId)
+  expect(successor?.state).toBe('Open')
+  expect(successor?.displayNumber).toMatch(/\.01$/)
+  await expect(packageWorkspace.getByRole('heading', { name: `${successor!.displayNumber} procedure decisions` }))
+    .toBeVisible()
+  await packageWorkspace.getByRole('button', { name: 'Close test change request' }).click()
+
+  const currentRow = page.locator('.downstreamAssessment').filter({ hasText: draft.displayNumber }).first()
+  await expect(currentRow.getByRole('button', { name: new RegExp(`^${successor!.displayNumber.replace('.', '\\.')}`) }))
+    .toBeVisible({ timeout: 30_000 })
+  const history = currentRow.locator('details.tcrRevisionHistory')
+  await expect(history.getByText('Show 1 superseded TCR revision', { exact: true })).toBeVisible()
+  await expect(history.getByRole('button', { name: `${predecessorDisplay} · Superseded` })).toBeHidden()
+  await history.getByText('Show 1 superseded TCR revision', { exact: true }).click()
+  await expect(history.getByRole('button', { name: `${predecessorDisplay} · Superseded` })).toBeVisible()
+  await history.getByRole('button', { name: `${predecessorDisplay} · Superseded` }).click()
+
+  const historicalWorkspace = page.getByRole('dialog', { name: /procedure decisions/ })
+  await expect(historicalWorkspace.getByRole('heading', { name: `${predecessorDisplay} procedure decisions` })).toBeVisible()
+  await expect(historicalWorkspace.getByText('SYSTCR Superseded', { exact: true })).toBeVisible()
+  await expect(historicalWorkspace.getByText(predecessor!.supersededReason!, { exact: true })).toBeVisible()
+  const successorLink = historicalWorkspace.getByRole('button', { name: `Open ${successor!.displayNumber}` })
+  await expect(successorLink).toBeVisible()
+  await successorLink.click()
+  await expect(page.getByRole('dialog', { name: /procedure decisions/ })
+    .getByRole('heading', { name: `${successor!.displayNumber} procedure decisions` })).toBeVisible()
+  await page.getByRole('dialog', { name: /procedure decisions/ })
+    .getByRole('button', { name: 'Close test change request' }).click()
+
+  await page.reload()
+  const refreshedRow = page.locator('.downstreamAssessment').filter({ hasText: draft.displayNumber }).first()
+  await expect(refreshedRow.getByRole('button', { name: new RegExp(`^${successor!.displayNumber.replace('.', '\\.')}`) }))
+    .toBeVisible({ timeout: 30_000 })
+  await expect(refreshedRow.locator('details.tcrRevisionHistory')
+    .getByText('Show 1 superseded TCR revision', { exact: true })).toBeVisible()
+
+  const afterRevisionCandidates = await (await request.get(
+    `${apiBase}/api/baselines/${baseline.id}/test-change-requests`)).json()
+  expect(afterRevisionCandidates.available.map((item: { id: string }) => item.id))
+    .not.toContain(initialReview!.id)
+  const staleSelection = await request.post(
+    `${apiBase}/api/baselines/${baseline.id}/test-change-requests`, { data: {
+      testChangeRequestId: initialReview!.id,
+    } })
+  expect(staleSelection.status()).toBe(400)
+  expect(await staleSelection.text()).toContain('Only an approved test change request can be selected into a baseline.')
+})
+''', encoding='utf-8')
+          PY
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+
+      - name: Validate client changes
+        working-directory: product/client
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run build
+
+      - name: Check and publish patch
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "seanmccarthyns"
+          git config user.email "seanmccarthyns@gmail.com"
+          git add product/client/src/TestChangeRequestWorkspace.tsx \
+            product/client/src/TestingCoverageWorkspace.tsx \
+            product/client/tests/test-change-request-supersession.spec.ts
+          git commit -m "[agent-365-applied] Complete TCR supersession browser history"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
