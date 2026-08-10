@@ -300,3 +300,90 @@ test('a procedure modification shows retained coverage and records an explicit r
   await expect(drawer).toContainText('Approved final coverage: SYSR-000402.00 · Unchanged requirement., SYSR-000403.00 · New governed requirement.')
   await expect(drawer).toContainText('Coverage rationale: Replace obsolete coverage. · test.engineer')
 })
+test('a stale Modify target reloads controlled state and requires an explicit re-selection', async ({ page }) => {
+  test.setTimeout(120_000)
+  await login(page, 'test.engineer')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
+  const packageRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
+  await expect(packageRow).toBeVisible({ timeout: 30_000 })
+
+  let targetReads = 0
+  let proposals = 0
+  let staleReturned = false
+  await page.route('**/api/test-change-reviews/*/procedure-changes', async route => {
+    if (route.request().method() === 'POST') {
+      proposals += 1
+      staleReturned = true
+      return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({
+        code: 'procedure_revision_not_next_for_build',
+        error: 'The selected procedure changed after it was loaded. Refresh the procedure list and reselect the current controlled revision.',
+      }) })
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      id: '30000000-0000-0000-0000-000000000002', displayNumber: 'SYSTCR-000402.00',
+      baseNumber: 'SYSTCR-000402', revision: 0, discipline: 'System', state: 'Open',
+      outcome: 'ChangeRequired', procedureLevel: 'System', sourceChangeRequestNumber: 'SRCR-000402.00',
+      assignedEngineerId: 'test.engineer', version: 1,
+      title: 'Recover stale procedure target', problem: 'The selected revision may change.', analysis: 'Refresh authoritative effectivity.',
+      solution: 'Require re-selection.', problemRich: '', analysisRich: '', solutionRich: '',
+      capabilities: { canProposeProcedureChange: true, canWithdrawProcedureChange: true, canRevise: false },
+      drivingRequirementChoices: [],
+      procedureTargets: [],
+      procedureChanges: [],
+    }) })
+  })
+  await page.route('**/api/test-change-reviews/*/procedure-targets*', async route => {
+    targetReads += 1
+    const revision = staleReturned ? 1 : 0
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      page: 1, pageSize: 50, totalCount: 1, totalPages: 1,
+      items: [{
+        procedureId: '60000000-0000-0000-0000-000000000002',
+        baseNumber: 'SYSTP-000901',
+        title: 'Carried recovery procedure',
+        currentRevision: revision,
+        state: 'Approved',
+        currentCoverage: [{
+          id: '50000000-0000-0000-0000-000000000005',
+          revisionId: '10000000-0000-0000-0000-000000000005',
+          displayNumber: 'SYSR-000405.00',
+          statement: 'Retained controlled requirement.',
+          level: 'System',
+          isSuspect: false,
+        }],
+      }],
+    }) })
+  })
+  await page.route('**/api/test-change-reviews/*/requirement-candidates*', async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      page: 1, pageSize: 50, totalCount: 0, totalPages: 0, items: [],
+    }) })
+  })
+
+  await packageRow.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
+  const drawer = page.getByRole('dialog', { name: /procedure decisions/ })
+  await drawer.getByRole('button', { name: 'Propose a procedure change' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  await dialog.getByLabel('What is being done').selectOption('Modify')
+  const procedure = dialog.getByRole('combobox', { name: /^Procedure/ })
+  await expect(procedure.getByRole('option', { name: 'SYSTP-000901.00 - Carried recovery procedure · Approved' })).toHaveCount(1)
+  await procedure.selectOption('SYSTP-000901')
+  await dialog.getByLabel('Title').fill('Preserved procedure edit')
+  await dialog.getByLabel('Objective').fill('Preserve authored intent while refreshing the controlled target.')
+  await dialog.getByLabel('Steps').fill('Execute the retained controlled procedure.')
+  await dialog.getByLabel('Expected result').fill('The selected behavior remains correct.')
+  await dialog.getByLabel('Why this procedure work is required').fill('The build changed after the picker was loaded.')
+  const readsBeforeProposal = targetReads
+
+  await dialog.getByRole('button', { name: 'Propose decision' }).click()
+
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('alert')).toContainText(/refresh.*reselect/i)
+  await expect(procedure).toHaveValue('')
+  await expect(dialog.getByLabel('Title')).toHaveValue('Preserved procedure edit')
+  await expect.poll(() => targetReads).toBeGreaterThan(readsBeforeProposal)
+  await expect(procedure.getByRole('option', { name: 'SYSTP-000901.01 - Carried recovery procedure · Approved' })).toHaveCount(1)
+  expect(proposals).toBe(1)
+})
+
