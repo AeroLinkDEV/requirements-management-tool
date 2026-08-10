@@ -12,7 +12,7 @@ This roadmap is capability-driven, not calendar-driven. Each phase ends with evi
 | 2 — SRCRs, review, baselines, and SYSRD | Complete |
 | 3 — System verification and traceability | Complete |
 | 4 — Software-level lifecycle | Delivered: HLRs, LLRs, software change requests, SWRDs, and software verification are implemented |
-| 5 — PR management and integrations | First active increment delivered: build-scoped PR center plus change request/TCR and corrective-action links; broader lifecycle policy remains incremental |
+| 5 — PR management and integrations | Active: Project-scoped Problem Report center with target-build attribution plus change request/TCR, corrective-action, evidence, lifecycle, history, and controlled-editing links |
 | Enterprise maturity program | MVP program closed 2026-08-01; provider/deployment-specific boundaries remain conditional |
 
 The phase goals and exit evidence below are retained as the definition of what each phase had to
@@ -135,7 +135,7 @@ That recommendation is historical. Subsequent increments delivered universal con
 email outbox delivery, broad search/filtering, verification/retest/release journeys, build-scoped verification,
 controlled Test Change Requests, downstream assessments, identity lifecycle administration, and exact software
 upward allocation. Current continuation starts from a reproduced need and the
-[current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-03.md), not this old next-increment sentence.
+[current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-10.md), not this old next-increment sentence.
 
 ### 2026-07-18 Requirements Explorer boundary delivered
 
@@ -158,9 +158,11 @@ configuration work. The current program and its per-workstream status are in
 
 **Goal:** Add the full PR lifecycle, PR-driven impact analysis, broader configuration/release functions, enterprise identity, and selected external references or integrations.
 
-Retained Problem Report relationships support corrective routing, but the broad first-class Problem Reports
-surface remains dormant by decision. A future PR increment requires a fresh product decision and validated
-classification/lifecycle contract; retained code or this roadmap sentence is not authority to restore it.
+The first-class Problem Report surface is active. There is one Problem Report database per Project; its queue,
+dashboard counts, detail and controlled editing are identical whichever build the reader is standing in. Target
+build is an explicit record attribute/filter rather than an implicit workspace scope (DEC-089). Problem Reports
+link to change requests/TCRs, corrective actions and selected test evidence without becoming build-owned
+configuration records.
 
 ## Post-MVP Identity and Account Hardening Backlog
 

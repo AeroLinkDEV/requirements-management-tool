@@ -6,7 +6,7 @@ comes from the actual API and persistence layer. The former `showcase/` prototyp
 [DESIGN_VISION_AND_DASHBOARDS.md](../DESIGN_VISION_AND_DASHBOARDS.md).
 
 For project-wide orientation, start at [PROJECT_STATE.md](../PROJECT_STATE.md), then read the
-[current product handoff](../CURRENT_PRODUCT_HANDOFF_2026-08-06.md).
+[current product handoff](../CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
 
 ## Current vertical slice
 
@@ -14,8 +14,11 @@ The current entry path is login → Projects → FMS Product Development → Sof
 build-scoped workspace. `SW-01.50` (informally Build 1.5) is released/read-only; `SW-01.60` (informally Build
 1.6) is in work. A baseline and software build are one product concept. System and Software remain
 separate, while Command Center summarizes System, Software and Verification. Requirements and Verification are
-the primary grouped work areas; Code, Documentation Center, and Problem Reports are standalone build-scoped workspaces. Product Versions, Candidate Baselines and the old Change Request Software
-Builds view remain deliberately dormant even though underlying lifecycle implementation remains.
+the primary grouped work areas. Code and Documentation Center are standalone build-scoped workspaces. Problem
+Reports are a standalone **Project-scoped** center: the same report database is visible from every build, while
+target build remains an explicit report attribute/filter. Product Versions and the old Change Request Software
+Builds view remain dormant. **Candidate Baselines** is a supported Configuration Management route at
+`/baselines`, including explicit legacy procedure-manifest bootstrap; `/release-planning` remains retired.
 
 The 2026-07-13 enterprise control increment adds durable URL routing and context restoration, a keyboard command palette, Program-aware universal artifact search, authoritative artifact detail links, change request exclusive checkout, renewable leases, server autosave snapshots, read-only observers, check-in/discard, forced-unlock auditing, authentication throttling, Program-scope enforcement, isolated browser-test infrastructure, and verified backup/restore operations.
 
@@ -64,7 +67,7 @@ The 2026-07-13 enterprise control increment adds durable URL routing and context
 - reusable, revision-controlled test procedures with many-to-many links to exact requirement revisions
 - externally executed Pass, Fail, and Blocked results with configuration, human determination, and evidence references
 - immutable retest chains and release/build-specific coverage and verified-status dashboards
-- governed FMS 1.6 release campaign with thirteen computed readiness gates, consuming-engineer/release impact dispositions, build selection, and ordered release approval; detailed planning/baseline UI is currently dormant
+- governed FMS 1.6 release campaign with thirteen computed readiness gates, consuming-engineer/release impact dispositions, build selection, and ordered release approval; Candidate Baselines is exposed at `/baselines` for current Configuration Management work while the broader release-campaign workbench remains only partially exposed
 - checksum-protected evidence upload, download, and exact test-execution linkage with cross-project isolation
 - live 1.5-to-1.6 comparison covering effective and proposed requirement changes
 - deterministic, downloadable SYSRD, HLR SWRD, LLR SWRD, and three test-procedure documents in DOCX and PDF

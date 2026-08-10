@@ -1,6 +1,6 @@
 # System-Level Workflow
 
-This document defines the intended first product slice at behavior level. It is decision-complete enough for product validation, but it is not a technical design.
+This document defines the intended system-level behavior and retains the original paper scenarios. It is not a technical design. **Reconciled through 10 August 2026:** later decisions supersede the original direct procedure-approval model with controlled Test Change Requests (DEC-103), and Problem Reports are Project-scoped with explicit target-build attribution (DEC-089). Historical scenario intent is preserved while current control semantics below take precedence.
 
 ## 1. Lifecycle Overview
 
@@ -30,13 +30,14 @@ The workflow assumes these conceptual roles; one person may hold multiple roles 
 - **Reviewer:** evaluates a specified revision and records comments and a decision.
 - **Approver:** provides the final approval decision when workflow criteria are satisfied.
 - **Configuration Manager:** assembles and controls candidate baselines and document releases.
-- **Verification Author:** authors test procedures.
+- **Verification/Test Engineer:** resolves verification-impact work and authors Link/Introduce/Modify/Retire procedure changes inside a governed TCR.
+- **Test Lead / TCR Approver:** assigns or reviews TCR work under the configured independent approval workflow; procedures do not have a second independent approval path.
 - **Test Contributor:** enters or imports externally produced execution data and evidence.
-- **Verification Reviewer:** reviews procedures, executions, outcomes, and evidence.
+- **Verification Reviewer:** reviews executions, outcomes, and evidence where that workflow requires it.
 - **Program Administrator:** configures authorized users, roles, and program-level policy.
 - **System Administrator:** operates the platform without authority to erase controlled history.
 
-For the initial product behavior, the SRCR author selects and orders the people required to approve the SRCR. Review proceeds sequentially in that order; only the active approver can record the next decision. Approval is unanimous among the author-selected sequence: every selected approver must approve the same SRCR revision and submitted content. Requirements contained in an SRCR are not reviewed or approved independently. Any selected approver rejection or request for changes prevents approval. Independence rules and the approval-authentication ceremony remain to be defined.
+For the initial product behavior, the SRCR author selects and orders the people required to approve the SRCR. Review proceeds sequentially in that order; only the active approver can record the next decision. Approval is unanimous among the author-selected sequence: every selected approver must approve the same SRCR revision and submitted content. Requirements contained in an SRCR are not reviewed or approved independently. Any selected approver rejection or request for changes prevents approval. Current implementation enforces role/independence authority and password-confirmed electronic approval evidence; later workflow configuration must preserve those assurance boundaries.
 
 ## 3. SRCR Lifecycle
 
@@ -120,11 +121,24 @@ The first slice is procedure-first. A separate test-case object is deferred unti
 
 ### Procedure Behavior
 
-- Each procedure has a globally unique identity and controlled revisions.
-- A procedure revision contains purpose, preconditions, configuration needs, ordered steps, expected outcomes, and applicable verification relationships.
-- A many-to-many relationship is supported: one procedure may verify several requirements, and one requirement may use several procedures.
-- Procedure revisions follow draft, review, rework/rejection, and approval behavior equivalent to other controlled artifacts.
-- Changing an approved procedure creates a new revision and makes affected verification links or evidence subject to reassessment.
+- Each procedure has a globally unique identity and immutable controlled revisions.
+- A procedure revision contains purpose, preconditions, configuration needs, ordered steps, expected outcomes,
+  and applicable verification relationships.
+- A many-to-many relationship is supported: one procedure may verify several requirements, and one requirement
+  may use several procedures.
+- **Procedure content changes only through a controlled TCR (DEC-103).** Universal direct procedure editing and
+  a separate procedure-level approver are not current product paths.
+- Requirement-change approval raises build/discipline-specific verification-impact assessment work. A manual
+  TCR may deliberately cover several approved source changes; automatic assessment work may be folded into it
+  without recreating item identity or deleting prior decisions.
+- Link/Introduce/Modify/Retire proposals inside the TCR are bound to the governed Project, build, discipline and
+  exact carried procedure/requirement scope. Modify preserves retained coverage and records governed
+  additions/removals; Retire preserves historical procedure identity and title.
+- Modify/Retire target selection uses the exact controlled procedure carried by the target build. If membership
+  or the current revision changes before submission, the server returns a stale conflict and the engineer must
+  refresh/reselect; AeroLink never silently remaps the request to a different procedure revision.
+- TCR approval authorizes the governed package; materialization creates the new controlled procedure revision
+  and exact coverage changes while prior revisions remain immutable.
 - Procedures may be grouped into test suites or campaigns; the detailed model remains open.
 
 ## 7. Execution, Result, and Evidence Lifecycle
@@ -226,10 +240,15 @@ These scenarios are acceptance tests for the documentation baseline.
 
 ### Scenario 6: Reuse a Test Procedure
 
-- **Actor/Input:** Verification author links one approved procedure revision to multiple requirement revisions authorized through approved SRCRs and included in the applicable baseline.
-- **State change:** Each typed link is reviewed and controlled independently.
-- **Output:** Trace views show the procedure under every applicable requirement and all requirements under the procedure.
-- **History:** Link authorship, revision applicability, rationale, approvals, and later suspect transitions remain visible.
+- **Actor/Input:** Verification/Test Engineer resolves governed impact work by linking an existing exact
+  controlled procedure revision to several applicable requirement revisions, or authors the required coverage
+  delta inside a TCR.
+- **State change:** The TCR review governs the exact decision/procedure-change package. Materialization creates
+  or confirms the exact coverage links; there is no independent procedure-approval cycle.
+- **Output:** Trace views show the same exact procedure revision under every applicable requirement and all
+  requirements under the procedure.
+- **History:** TCR source, decision/procedure-change content, actor, rationale, review/signature evidence,
+  materialized coverage, revision applicability, and later suspect/reopen transitions remain visible.
 
 ### Scenario 7: Failure and Retest
 

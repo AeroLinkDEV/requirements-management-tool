@@ -2,13 +2,14 @@
 
 This document turns the AeroLink concept mockups into guiding product direction. The images are inspiration, not approved implementation specifications. Future design work may refine layout, naming, metrics, and visual treatment while preserving the behaviors and principles defined here.
 
-> **Current implementation note — 2026-08-01.** The active Command Center is intentionally a simpler
-> three-way System/Software/Verification view, reached only after Project and Software Build selection.
-> Requirement totals, Release Attention and Change Request Flow are not current dashboard requirements.
-> Problem Reports are active through their dedicated build-scoped center; Product Versions and Candidate
-> Baselines remain dormant UI. Treat the mockups below as inspiration, not instructions to restore retired
-> dashboard elements. See
-> [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md).
+> **Current implementation note — 2026-08-10.** The active Command Center remains the simpler
+> three-way System/Software/Verification view reached after Project and Software Build selection. Problem
+> Reports are active through a dedicated **Project-scoped** center and are not implicitly filtered by the
+> workspace build; target build is an explicit record attribute/filter (DEC-089). Product Versions remains
+> dormant. Candidate Baselines is now a supported Configuration Management surface at `/baselines`, while the
+> old `/release-planning` route remains retired. Treat the mockups below as inspiration, not instructions to
+> restore retired dashboard elements. See
+> [CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
 
 ## Experience Vision
 

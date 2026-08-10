@@ -134,9 +134,10 @@ document, baseline/build, collaboration or lifecycle consequences; the engineers
 change make those decisions in their governed workspaces (DEC-071, which supersedes DEC-059 and the
 impact-disposition portion of DEC-062).
 
-Software Drafts retain their HLR or LLR workspace even before the first requirement proposal exists. Problem
-Reports and test change requests are Build-scoped controlled records with explicit identifiers, truthful totals,
-and preserved superseded history. Downstream assessment evidence is read before the engineer records a
+Software Drafts retain their HLR or LLR workspace even before the first requirement proposal exists. Test Change Requests are build-scoped controlled packages with explicit identifiers, truthful totals, and
+preserved superseded history. Problem Reports are **Project-scoped** controlled records: the same queue, detail
+and controlled-editing surface is available from every build, while target build remains an explicit report
+attribute/filter (DEC-089). Downstream assessment evidence is read before the engineer records a
 conclusion, and Release Readiness exposes every candidate change through a searchable selector rather than
 choosing one implicitly. Controlled dialogs are viewport-bound at any scroll depth.
 
@@ -186,13 +187,15 @@ a Test Engineer resolves each one by naming an approved procedure, by recording 
 requirement the author declared verifiable by analysis still needs that confirmation — or by recording that a
 procedure must be written and does not exist yet. That third answer is an answer and never verification: it
 settles the `verification_impact` gate, because somebody has looked and decided, and deliberately does not
-settle coverage, so the release keeps waiting until the procedure is approved. The procedure is authored from
-the decision, pre-linked to the exact requirement revision, and approving it advances the decision without the
-engineer returning to re-answer.
+settle coverage, so the release keeps waiting until the required TCR procedure work is approved and materialized. Procedure work is authored as an Introduce/Modify/Retire proposal inside the governed Test Change Request,
+pre-linked to the exact requirement change/revision scope. There is no separate procedure-level approval path:
+the TCR review approves the governed package, and materialization creates the controlled procedure revision and
+coverage changes. `NewProcedureRequired` is an explicit engineering decision and may settle the impact-planning
+gate, but it never settles coverage until approved TCR procedure work actually materializes.
 Undecided items hold the `verification_impact` release-readiness gate, so they block release approval; they
 deliberately do **not** block the baseline freeze, because freezing and materializing is what creates the
-requirement revisions a procedure is written against. "Decided" means the procedures are authored and
-approved — it says nothing about whether they have been executed.
+requirement revisions a procedure is written against. "Decided" means a qualified engineer recorded an explicit verification-impact outcome. It says nothing
+about whether required procedure changes have been approved/materialized or whether any procedure has been executed.
 
 A test change request opens as a workbench: the record itself is the disclosure, and it shows its source
 change requests, who holds it, its linked Problem Reports, and one decision per requirement carrying the
@@ -277,8 +280,7 @@ actor and time (DEC-091). Their center supports durable detail links and
 links forward to SRCRs, HLRCRs, LLRCRs, every TCR discipline, requirements, procedures, executions/evidence, documents,
 and releases where those records exist. Every change-request type can select one or more driving PRs; approved
 engineering changes are projected back as corrective actions, and only results selected to support closure
-are projected as test evidence. Product Versions, Candidate
-Baselines, and the old Change Request Software Builds view remain dormant under DEC-072. Lifecycle Decision
+are projected as test evidence. Product Versions and the old Change Request Software Builds view remain dormant. Candidate Baselines is an explicit Configuration Management surface at `/baselines`; the old `/release-planning` route remains retired. Lifecycle Decision
 Room remains visible.
 
 Procedures covering requirements introduced or modified by the active build are automatically included as
@@ -299,10 +301,12 @@ Explorer lists, search, detail, History, Trace & impact, coverage, test sets, ex
 documents, and release-review manifests project the title of the exact carried procedure revision. Introduce
 and Modify take that immutable title from the producing TCR snapshot; Retire preserves the predecessor title;
 legacy rows use an explicit deterministic compatibility label rather than today's mutable catalog title.
-History and Trace share one provenance projection anchored to
-`TestProcedureRevision.SourceTestChangeRequestId`: the exact TCR revision remains primary, while every folded
-source retains its own exact CR identity. #364 owns the first exact manifest for legacy builds that predate the
-mechanism.
+List search, universal procedure/execution search and Modify/Retire target search use that same authoritative
+title projection, so discarded Retire proposal text cannot become searchable history. History and Trace share
+one provenance projection anchored to `TestProcedureRevision.SourceTestChangeRequestId`: the exact TCR revision
+remains primary, while every folded source retains its own exact CR identity. Legacy builds that predate exact
+procedure manifests are established through the explicit Configuration Manager bootstrap delivered by #364;
+the recorded snapshot is migration provenance, not reconstructed historical precision.
 
 Primary navigation mirrors that work: **Requirements** owns change requests, requirements, requirements
 documents, and Digital Thread; **Verification** owns the direct Change Requests, Test Procedure Explorer, Test
@@ -325,7 +329,7 @@ several approved source changes are best tested as one package. TCRs have their 
 Problem Reports, exact source identities, governed impact decisions, staged review cycles, and successor history.
 
 The restart-ready description, exact qualified `main`, audit findings and safe next sequence are in
-[CURRENT_PRODUCT_HANDOFF_2026-08-09.md](CURRENT_PRODUCT_HANDOFF_2026-08-09.md).
+[CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
 
 ## The demonstration dataset
 
@@ -344,52 +348,39 @@ The tool never auto-creates or auto-approves a successor release. Details in
 
 ## Where delivery stands
 
-The original AeroLink 3.0 implementation program and its review follow-ups have been reconciled. Subsequent
-focused increments through PR #388 delivered active Problem Reports, the August engineering-observation work,
-managed Word documents, direct verification surfaces, production-shaped client hosting, and Stage 4 manual TCR
-authoring with hardened consolidation, review snapshots, staged workflows, assignment and concurrency.
+The original AeroLink 3.0 implementation program and its review follow-ups have been reconciled. The August
+verification/procedure-control audit sequence is also closed: #417–#424, #442, #364, #365 and #367 are complete
+and merged. The audited product checkpoint immediately before this documentation-only closeout is
+`af8760a6ad17b6266a770fb8c0beb2b67eaf3c90` after #367. Replacement draft PR #443 was closed as superseded by
+merged #444, leaving no orphan open PR from the sequence.
 
-`main` at `6e1c2443b964304df1359d4dde39fe3dc4f04004` incorporates the focused audit remediation through PR #416
-(bounded TCR authoring pickers and their post-merge hardening, closing #402 and #415); its post-merge Product
-Quality Gate passed. Audit issues #395, #214, #400, #401, #398, #396, #399, and #397 are closed, as are later
-integrity issues #363 and #362. Residual identity federation and deployment operations remain closed with
-explicit resume conditions because they require a real provider or hosting contract, not generic product
-simulation.
+The current GitHub product backlog at this checkpoint contains one open issue: #332, completing the durable
+controlled outcome and representative-extract qualification for bringing an existing program in as an imported
+baseline. Deployment-owned work remains bounded by real customer/provider/topology decisions rather than being
+simulated in repository code.
 
 Per-workstream status is in [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md). Its
-vocabulary distinguishes **MVP delivered**, **deferred by decision**, **deployment-owned**, and **focused audit
-backlog** from an unqualified claim that every enterprise deployment capability is complete.
+vocabulary distinguishes **MVP delivered**, **deferred by decision**, **deployment-owned**, and real focused
+backlog from an unqualified claim that every enterprise deployment capability is complete.
 
-**[PRODUCT_REVIEW_2026_07_26.md](PRODUCT_REVIEW_2026_07_26.md)** holds the findings from the first evening of
-using the product as an engineer would. **Every item in it is now closed** — the six defects, and all nine that
-needed a product decision first. Its impact-disposition outcome was later superseded: computed trace remains
-useful context, but downstream decisions now belong to consuming engineers rather than the change author
-(DEC-071). The file is retained as the record of what was found and decided, not as current product direction.
-
-A second evening of review followed on 27 July, and its eleven observations are also closed. Four of them were
-not missing features but unreachable ones: a Revise action gated on a state no change request in the programme
-rested in, a deferral shelf the domain supported and nothing exposed, a change-type field that was read-only on
-the one proposal that arrived pre-seeded, and section filtering that worked on the read side while no authoring
-path could set a section. **The recurring failure was reachability, not absence** — code that existed, was
-correct, and had no route to it.
+**[PRODUCT_REVIEW_2026_07_26.md](PRODUCT_REVIEW_2026_07_26.md)** and the dated handoffs remain historical review
+records. Closed findings are not rewritten out of those records; current status lives here and in the current
+handoff.
 
 ## Known limitations — state these accurately
 
 Understating these is a product-integrity failure, not a marketing choice.
 
-- **The remaining procedure-control queue is open.** #364 owns legacy-manifest bootstrap, #365 owns the
-  remaining superseded-TCR browser/history presentation, and #367 owns final controlled-target selection
-  validation after the legacy bootstrap lands. Exact revision titles and History/Trace provenance parity are
-  implemented by the shared projections described above.
-- **Legacy builds still need their first exact procedure manifest.** #364 owns the controlled bootstrap; #367
-  should be rechecked against that result and #402 before evidence-only closure.
-- **Imported baselines do not yet materialize controlled requirements.** #332's UI and provenance records exist,
-  but Accept does not create the immutable candidate baseline, requirement revisions, exact membership, or
-  source-identity links. A representative source extract is still required to qualify the parser honestly.
-- **Superseded TCR presentation remains incomplete.** #365 owns the remaining browser/history/deep-link journey.
-- **No build carries a procedure manifest yet.** The mechanism is complete and reachable, but every existing
-  build predates it, so `baseline_test_procedures` is empty in the demonstration data. `MarkReleased`
-  deliberately does not require one; gating on it would make already-released builds retrospectively invalid.
+- **The current product backlog is #332.** The imported-baseline five-gate workflow and provenance records
+  exist, but the accepted import does not yet materialize the complete immutable controlled requirement
+  baseline, exact membership and source-identity relationships required by that issue, and representative
+  extract/parser qualification is still required.
+- **Legacy procedure manifests are established explicitly, never invented silently.** The #364 Configuration
+  Manager bootstrap records one exact migration snapshot with actor/time/rule/count/hash and then normal
+  successor carry-forward applies. It does not claim to reconstruct every historical build's exact procedure
+  manifest.
+- **Candidate Baselines is live Configuration Management, not a dormant legacy page.** `/baselines` is the
+  supported surface and includes legacy procedure-manifest bootstrap. `/release-planning` remains retired.
 
 - **The scale claim is 150 simultaneous *database clients* and 50,000 requirements on one workstation,**
   with zero failures. This is **not** 150 rendered browser sessions on production topology, and must never
@@ -487,8 +478,7 @@ and controlled-editing evidence identifies the administrator as the actual actor
 are shared by System and Software change requests.
 
 Test-procedure applicability begins at exact baseline materialization (DEC-066). Before that lifecycle point,
-new procedure authoring is disabled with the reason and the governed materialization prerequisite; the former
-Product Versions and Candidate Baselines pages are not exposed in the current product surface. Existing inherited
+new procedure authoring is disabled with the reason and the governed materialization prerequisite; the former Product Versions surface remains unexposed; Candidate Baselines is now the explicit `/baselines` Configuration Management surface, while `/release-planning` remains retired. Existing inherited
 procedures remain tied to their predecessor revisions and change-impact work remains planned rather than
 counted as coverage. Release readiness exposes traceability, coverage, verification, and evidence as
 `WaitingForPrerequisite` with `baseline` as their dependency. Once materialized they become evaluated gates;
@@ -651,15 +641,32 @@ reason the document set can be trusted.
   1160px and pushed the page 106px off screen. The cascade lesson above is about load order; this is the same
   failure through the other mechanism, and the same fix applies. When a rule matters, make it win on purpose.
 
-# Current implementation checkpoint — 2026-08-09
+- **The exact head is the merge authority.** The August procedure-control sequence repeatedly refreshed `main`,
+  reviewed the exact candidate head and waited for the required aggregate gate. A green older head is useful
+  evidence, not permission to merge a different tree.
+- **Provider-sensitive display logic belongs after SQL-safe projection.** `/api/baselines/predecessors` worked
+  only after primitives were materialized before display formatting/ordering, avoiding SQLite/provider
+  translation assumptions in a production browser route.
+- **A native option can exist without being Playwright-visible.** The stale-target regression originally used
+  `toBeVisible()` on an `<option>` and failed while repeatedly locating the correct option. Existence/count is
+  the correct assertion for membership in a native select.
+- **Replacement work must close the thing it replaced.** #444 fixed #442, but draft #443 remained an open PR
+  until closeout explicitly marked it superseded. Repository hygiene is part of a truthful clean baseline.
+- **Use identical-head reruns to distinguish a flake from a product change.** The #364 browser shard timing
+  failure was retried without changing the commit and passed; the first failure remains evidence, and merge
+  still waited for the required aggregate to be green.
 
-Current `main` at `6e1c2443b964304df1359d4dde39fe3dc4f04004` includes the API-served production client,
-qualified direct verification navigation, first-class manual Test Change Requests, multi-source impact-item
-consolidation, configured staged TCR review, canonical review snapshots, assignment-aligned authority,
-optimistic concurrency including true EF-collision tests, atomic controlled TCR successor revisioning, and
-bounded server-searched TCR authoring pickers with post-merge hardening (PR #414 and PR #416; #402/#415
-closed). The Aug. 9 PRO-audit queue #417–#424 is open.
+# Current implementation checkpoint — 2026-08-10
 
-The focused remediation sequence closed #395, #214, #400, #401, #398, #396, #399, #397, #363, and #362 with
-required gates green. Current open work is #417–#424, #364, #365, #367, and #332. See
-[CURRENT_PRODUCT_HANDOFF_2026-08-09.md](CURRENT_PRODUCT_HANDOFF_2026-08-09.md).
+The audited product checkpoint immediately before this documentation-only closeout is
+`af8760a6ad17b6266a770fb8c0beb2b67eaf3c90`. It includes the API-served production client, direct verification
+navigation, first-class manual TCRs, bounded server-search authoring pickers, exact procedure effectivity and
+revision titles, immutable procedure-document/provenance hardening, exact execution/evidence build authority,
+controlled TCR supersession history, explicit legacy procedure-manifest bootstrap, and controlled Modify/Retire
+target selection with stale-conflict/reselection behavior.
+
+The completed August closeout sequence includes #417–#424, #442, #365, #364 and #367. #442 merged through
+replacement PR #444; superseded draft #443 was then closed without merge. Current GitHub product work at the
+audited checkpoint is **#332 only**. See
+[CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md) for exact merge/qualification
+evidence, what works, what remains intentionally constrained, and the safe restart sequence.

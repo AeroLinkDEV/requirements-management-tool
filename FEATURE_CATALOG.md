@@ -7,7 +7,7 @@ capability inventory, not the status record** — for current status read
 [PROJECT_STATE.md](PROJECT_STATE.md) and
 [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md). For the current supported routes,
 dormant UI and aligned issue backlog, read
-[CURRENT_PRODUCT_HANDOFF_2026-08-06.md](CURRENT_PRODUCT_HANDOFF_2026-08-06.md). A capability listed here may be
+[CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md). A capability listed here may be
 implemented but deliberately not exposed; the catalog is not authority to reconnect dormant modules. The paragraph below is a
 2026-07-18 snapshot retained for history and is not maintained.
 

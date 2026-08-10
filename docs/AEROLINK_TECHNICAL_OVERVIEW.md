@@ -1,7 +1,7 @@
 # AeroLink Technical Overview
 
 **Audience:** Software, systems, verification, configuration-management, and IT colleagues
-**Status:** Current implementation brief, 6 August 2026
+**Status:** Current implementation brief, 10 August 2026
 
 ## System shape
 
@@ -23,21 +23,26 @@ A controlled requirement revision is never edited in place after approval; a cha
 revision, ordered review/electronic signatures approve it, and baseline materialization selects exact revision
 IDs for a build.
 
-The same pattern governs test procedures, executions/evidence, generated documents, Word-authored managed
-documents, Problem Reports, and code traceability. Managed documents separate the stable register identity from
+The same stable-identity/immutable-revision pattern governs test procedures, executions/evidence, generated
+documents, Word-authored managed documents, and code traceability. Procedure revisions are authorized only by
+controlled Test Change Requests; released legacy predecessors that predate exact procedure manifests use the
+explicit Configuration Manager bootstrap rather than a silent empty/current reconstruction. Problem Reports
+remain controlled records but are **Project-scoped** rather than build-owned: target build is an explicit
+attribute/filter (DEC-089). Managed documents separate the stable register identity from
 formal `.00`/`.01` revisions and from retained working-file versions. PostgreSQL holds their lifecycle metadata;
 the controlled evidence store holds checksummed DOCX/PDF bytes. Exact build-selection rows determine which
 released revision applies to each build. Build 1.5 resolves to its released immutable baseline. Build 1.6 inherits that exact baseline until
-its own candidate is materialized, while its changes, assessments, tests, PRs, and code mappings remain a
-separate active layer. Foreign keys, unique constraints, concurrency tokens, immutable hashes, audit events, and
+its own candidate is materialized, while its changes, assessments, tests, and code mappings remain a separate
+active build layer. Problem Reports stay in the Project-wide report database and carry target-build attribution
+without being implicitly hidden by the active build. Foreign keys, unique constraints, concurrency tokens, immutable hashes, audit events, and
 server-side build guards protect these relationships.
 
 ## Versioning and traceability
 
 There are four complementary version controls. Git/GitHub versions the application source and documentation;
-work is delivered on focused `codex/*` branches through pull requests and CI, never directly to `main`.
+work is delivered on focused branches through pull requests and CI, never directly to `main`.
 AeroLink artifact revisioning versions controlled engineering content. Candidate baselines select exact
-approved revisions into a build. Generated DOCX/PDF outputs and release packages record their source baseline,
+approved revisions into a build; `/baselines` is the supported Configuration Management surface for candidate work and legacy procedure-manifest bootstrap. Generated DOCX/PDF outputs and release packages record their source baseline,
 template revision, and content hashes.
 
 Documentation Center adds one more controlled boundary without attempting to recreate Word in a browser. A
@@ -49,9 +54,14 @@ rejects any candidate that still presents itself as Draft, then hashes the exact
 electronic signature releases it. Stale-source check-ins fail without overwriting.
 
 Digital Thread follows exact baseline revisions across SYSR, HLR, LLR, procedure, execution/result, linked
-checksummed evidence, and software build. When several confirmed procedures cover the same exact requirement,
-it prefers the build-scoped run with linked evidence; a free-text reference remains context, not proof of an
-attached evidence file. GitLab remains authoritative for source code. AeroLink records immutable pointers from
+checksummed evidence, and software build. Exact procedure views and search share one authoritative revision-title
+projection, so discarded Retire proposal text cannot be searched as though it were controlled history and
+release/build effectivity remains part of discovery. Modify/Retire authoring binds to the exact controlled
+procedure carried by the target build; stale manifest/current-revision conflicts preserve authored prose but
+clear target-dependent state and require explicit refresh/reselection rather than silent remapping.
+
+When several confirmed procedures cover the same exact requirement, the Digital Thread prefers the build-scoped
+run with linked evidence; a free-text reference remains context, not proof of an attached evidence file. GitLab remains authoritative for source code. AeroLink records immutable pointers from
 an exact approved LLR revision to a GitLab merge request and merge commit SHA, or a justified `No code change
 required` decision. That same exact-LLR scope drives the Code workspace, release-readiness gate, and signed
 review manifest.

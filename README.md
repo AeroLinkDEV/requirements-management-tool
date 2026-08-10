@@ -1,7 +1,7 @@
 # Aerospace Development Assurance Platform
 
 > **New here — human or model? Read [PROJECT_STATE.md](PROJECT_STATE.md) first, then the
-> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-09.md).** They record what
+> [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).** They record what
 > exists today, what is deliberately excluded, where delivery stands, and the known limitations. The
 > documents indexed below are durable definitions and historical records; `PROJECT_STATE.md` describes
 > the present.
@@ -65,7 +65,8 @@ demonstrations use the `FMSLIVE` dataset described in
 | Document | Purpose |
 | --- | --- |
 | [Project state](PROJECT_STATE.md) | **Start here.** What exists today, what is excluded, delivery status, known limitations |
-| [Current product handoff, updated 9 August](CURRENT_PRODUCT_HANDOFF_2026-08-09.md) | **Current restart point.** PR #414 and #416 delivered bounded TCR authoring pickers and post-merge hardening (#402/#415 closed); PRO-audit queue #417–#424 is open alongside other live issues (#364/#365/#367/#332); exact audited `main` `6e1c244` |
+| [Current product handoff, updated 10 August](CURRENT_PRODUCT_HANDOFF_2026-08-10.md) | **Current restart point.** Clean post-remediation baseline after #442/#365/#364/#367; exact-title search, TCR supersession presentation, legacy procedure-manifest bootstrap, controlled stale-target handling, qualification evidence and latest lessons; #332 is the only open product issue at the audited checkpoint |
+| [Product handoff, 9 August](CURRENT_PRODUCT_HANDOFF_2026-08-09.md) | Historical. Post-#416 restart point and PRO-audit queue before the August 10 remediation/closeout sequence |
 | [Product handoff, 8 August](CURRENT_PRODUCT_HANDOFF_2026-08-08.md) | Historical. Stage 3B/Stage 4 delivery, focused audit remediation through PR #413, and prior restart point |
 | [Product handoff, 6 August](CURRENT_PRODUCT_HANDOFF_2026-08-06.md) | Historical. Test procedures authored, revised and baselined like requirements, approved procedure work carried into builds, and Word-authored controlled documents checked out, reviewed, approved, and released as exact DOCX/PDF pairs |
 | [Product handoff, 5 August](CURRENT_PRODUCT_HANDOFF_2026-08-05.md) | Historical. Imported baselines, explicit assessment outcomes, local test-world integration, Problem Report refinements, and safe continuation |

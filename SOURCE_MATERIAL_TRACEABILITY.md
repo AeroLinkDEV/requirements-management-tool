@@ -3,7 +3,7 @@
 > **Source-disposition record.** The root `.docx` files are retained, unmodified historical inputs. This
 > trace explains how their ideas entered the product definition; labels such as **First slice**, **Later**,
 > and **Open** reflect the decision point when this trace was written and are not a current backlog. Use
-> [Project State](PROJECT_STATE.md) and the [current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-03.md) for
+> [Project State](PROJECT_STATE.md) and the [current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-10.md) for
 > delivered behavior and current boundaries.
 
 This document records how substantive ideas from the supplied source files were dispositioned. It is a product-intent trace, not a line-by-line legal comparison.
@@ -74,7 +74,7 @@ Disposition values:
 
 | Source Intent | Disposition | Authoritative Destination |
 | --- | --- | --- |
-| PR module remains in the conversation | Delivered MVP | Features PR-001/PR-002 and DEC-085/DEC-087 |
+| PR module remains in the conversation | Delivered MVP | Features PR-001/PR-002 and DEC-087/DEC-089 |
 | PR contains description, dates, originator, type, severity, and other controlled fields | Delivered selectively | Immutable origin/date, rich description and supporting fields, target build, owner, corrective action, root cause, impact decisions, closure date, and evidence are delivered; optional classifications remain later |
 | PR lifecycle includes new, approval, in-work, closed, and rejected states | Delivered with product terminology | Draft, Ready for SCCB, Open, Implementing, Verifying, Awaiting SQA Closure, and Closed are controlled states |
 | PRs link broadly across requirements, tests, changes, and releases | Delivered incrementally | Feature PR-002; change request/TCR selection, corrective actions, and test evidence are implemented |

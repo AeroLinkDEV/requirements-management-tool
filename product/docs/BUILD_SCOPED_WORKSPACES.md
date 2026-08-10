@@ -40,7 +40,7 @@ The build boundary follows relationships that already exist:
 | Downstream change assessments | target build plus exact upstream/downstream requirement revisions |
 | Prospective upward allocations | target build plus exact child and proposed parent revisions |
 | Test executions | `TestExecution.ReleaseId`; an optional immutable `SoftwareBuildId` adds exact configuration provenance |
-| Problem reports | explicit `ProblemReportLink` to the owning `SoftwareRelease`; failure-origin reports derive it from their execution build |
+| Problem reports | **Project-owned**; target build is an explicit report attribute/link used for filtering and provenance, never implicit workspace ownership (DEC-089) |
 | Code traceability | `CodeTraceabilityRecord.ReleaseId` plus exact LLR artifact and immutable revision IDs; GitLab remains the code authority |
 | Requirement history | revision plus source SRCR and effective baseline; historical rows retain their origin |
 
@@ -69,8 +69,13 @@ release/baseline and remains read-only evidence. Opening that evidence does not 
 - The browser sends the route release context on API calls.
 - The API rejects a context whose release does not belong to the addressed project.
 - The API rejects release-owned resource IDs from a different release.
-- Every unsafe browser request made while a released build is active is rejected server-side. The UI also
-  presents the workspace as read-only, but that is explanatory rather than the security boundary.
+- **Problem Reports are the deliberate exception (DEC-089):** their queue/detail/edit authority is Project-scoped,
+  so a report can be opened and worked from any build. `targetReleaseId` remains an explicit filter/attribute and
+  does not become the active workspace scope.
+- Every unsafe browser request to a **build-owned** record while a released build is active is rejected
+  server-side. The UI also presents the build workspace as read-only, but that is explanatory rather than the
+  security boundary. Project-scoped Problem Reports are exempt from that workspace write refusal and enforce
+  their own lifecycle and authority rules.
 - Existing domain rules that prevent new work against released releases remain in force.
 
 API clients that do not send a browser workspace context retain their existing explicit request contracts. This
@@ -79,10 +84,18 @@ to be enforced by endpoint and domain rules.
 
 ## Verification alignment and release evidence
 
-Approval of a change request automatically creates one controlled Test Change Review for each affected
-discipline: System, Software HLR, or Software LLR. A mixed-level software request therefore creates two
-independent reviews. Verification engineers decide whether to create, link, modify, retire, or omit a test
-procedure; the review cannot be submitted until every item is decided, and an approver closes it.
+Approval of a change request raises discipline-specific automatic test-change assessment work and its
+verification-impact items for the target build. HLRCR and LLRCR are distinct level-specific artifacts, so a
+mixed-level software change request cannot exist (DEC-092). An automatic assessment may be worked directly or
+folded into a numbered Test Change Request; a manually raised TCR may deliberately cover several approved source
+change requests. Folding moves the source assessment's impact items into the surviving package without
+recreating their identity or deleting history, and unfolding restores actionable assessment work while
+retaining superseded evidence.
+
+The TCR is the controlled procedure-change authority. Verification engineers record the required impact outcome
+and, where procedure content must change, author Link/Introduce/Modify/Retire work inside the governed package.
+TCR review and approval govern that exact package; there is no independent procedure-level approver or direct
+universal procedure-editing path (DEC-103).
 
 Approved requirement changes also create consuming-discipline assessments where an exact upstream change can
 affect downstream requirements. The consuming engineer owns the rationale and independent approval. When a
@@ -115,9 +128,11 @@ nullable. New browser-workspace results take the validated route release directl
 imports take the campaign release.
 
 The existing predecessor-release, baseline membership, source-SRCR, controlled-document, software-build,
-campaign, verification-impact, and typed problem-report link relationships provide the remaining build
-identity and lineage. New manual problem reports are linked to the route build at creation; reports created
-from failed verification derive that same explicit link from the execution's release/build context.
+campaign and verification-impact relationships provide the remaining build identity and lineage. Problem
+Reports are different by decision: one Project-wide report database is visible from every build. A manually
+raised report names its target build explicitly; a failure-origin report derives that target from its execution
+context. That relationship supports filtering/provenance but never makes the active workspace silently filter or
+own the report.
 
 Records that are genuinely project governance, rather than build content, are intentionally not duplicated per
 release. This increment never infers build ownership from affected-configuration free text.

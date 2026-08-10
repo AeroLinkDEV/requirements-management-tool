@@ -6,12 +6,15 @@ AeroLink already implements the controlled requirements lifecycle that originall
 
 AeroLink 3.0 completes the remaining enterprise lifecycle capabilities without introducing AI assistance. It must extend existing domain rules rather than duplicate or bypass them.
 
-> **Current product-surface note — 2026-07-29.** This file is the long-lived completion contract, not a
-> statement that every implemented module is currently exposed. DEC-070 through DEC-072 establish explicit
-> Project/Build selection and intentionally make Problem Reports, Product Versions and Candidate Baselines
-> dormant in the current UI. Workstream acceptance boundaries remain recorded here, but restoring a dormant
-> surface requires a new product decision. See
-> [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](CURRENT_PRODUCT_HANDOFF_2026-08-02.md).
+> **Current product-surface note — 2026-08-10.** This file is the long-lived completion contract, not the
+> live status record. Later decisions intentionally narrowed or reshaped parts of the contract: Problem Reports
+> are active and Project-scoped (DEC-089); test procedures are introduced/modified/retired only through a
+> controlled Test Change Request (DEC-103); Candidate Baselines is a supported Configuration Management route at
+> `/baselines`, including explicit legacy procedure-manifest bootstrap (#364), while `/release-planning` and the
+> redundant Product Versions surface remain retired/dormant. Do not infer current backlog or current UI exposure
+> from an older workstream sentence below. See
+> [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md) and
+> [CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
 
 ## Non-negotiable delivery rules
 
