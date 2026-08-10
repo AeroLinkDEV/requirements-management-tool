@@ -1,3 +1,4 @@
+using AeroLink.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 
@@ -5,6 +6,19 @@ public sealed class ConcurrencyExceptionHandler(ILogger<ConcurrencyExceptionHand
 {
     public async ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken)
     {
+        if (exception is ReleasedBuildReadOnlyException released)
+        {
+            logger.LogWarning(released, "Refused a released-build mutation for {Method} {Path}",
+                context.Request.Method, context.Request.Path);
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                error = released.Message,
+                code = "released_build_read_only"
+            }, cancellationToken);
+            return true;
+        }
+
         // A number that could not be claimed is a conflict, not a fault: the request was valid and resubmitting
         // it is the right response. It is answered with a code of its own so a caller can tell it apart from a
         // stale record, which needs a refresh first and is not worth retrying blind.
