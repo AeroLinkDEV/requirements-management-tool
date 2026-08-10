@@ -198,6 +198,15 @@ public sealed class SearchableAuthoringPickerApiTests
         Assert.Equal(520, first.GetProperty("totalCount").GetInt32());
         Assert.Equal(200, first.GetProperty("items").GetArrayLength());
 
+        var exactDisplayedTitle = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-procedures?projectId={fixture.ProjectId}&releaseId={fixture.ReleaseId}" +
+            "&scope=System&state=Approved&search=exact%20historical%20title%20was%20not%20recorded&page=1&pageSize=25");
+        Assert.Equal(520, exactDisplayedTitle.GetProperty("totalCount").GetInt32());
+        var mutableCatalogTitle = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-procedures?projectId={fixture.ProjectId}&releaseId={fixture.ReleaseId}" +
+            "&scope=System&state=Approved&search=Picker%20procedure%20500&page=1&pageSize=25");
+        Assert.Equal(0, mutableCatalogTitle.GetProperty("totalCount").GetInt32());
+
         var hydrated = await client.GetFromJsonAsync<JsonElement>(
             $"/api/test-procedures?projectId={fixture.ProjectId}&releaseId={fixture.ReleaseId}&scope=System&state=Approved&page=1&pageSize=200&ids={fixture.Procedure500Id}");
         var items = hydrated.GetProperty("items").EnumerateArray().ToList();
@@ -232,6 +241,12 @@ public sealed class SearchableAuthoringPickerApiTests
         var target = Assert.Single(beyond500.GetProperty("items").EnumerateArray());
         Assert.Equal("SYSTP-000520", target.GetProperty("baseNumber").GetString());
         Assert.Equal(0, target.GetProperty("currentRevision").GetInt32());
+
+        var byDisplayedTitle = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.ReviewId}/procedure-targets" +
+            "?search=exact%20historical%20title%20was%20not%20recorded&page=1&pageSize=25");
+        Assert.Equal(520, byDisplayedTitle.GetProperty("totalCount").GetInt32());
+        Assert.Equal(25, byDisplayedTitle.GetProperty("items").GetArrayLength());
 
         // Exact hydration also works for the >500 target, by controlled base number and by immutable
         // procedure ID.

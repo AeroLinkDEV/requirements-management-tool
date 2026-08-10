@@ -58,6 +58,13 @@ public sealed class TestProcedureRevisionTitleProjectionTests
         Assert.Equal("Verify route sequencing and discontinuities", result[revision02.Id].Title);
         Assert.True(result[revision02.Id].IsExact);
         Assert.Contains("Retirement revision", result[revision02.Id].Note);
+
+        var authoritative = await TestProcedureRevisionTitleProjection.MatchingRevisionIdsAsync(db,
+            [revision02.Id], "route sequencing and discontinuities", CancellationToken.None);
+        Assert.Contains(revision02.Id, authoritative);
+        var discarded = await TestProcedureRevisionTitleProjection.MatchingRevisionIdsAsync(db,
+            [revision02.Id], "forged retirement rename", CancellationToken.None);
+        Assert.Empty(discarded);
     }
 
     [Fact]
