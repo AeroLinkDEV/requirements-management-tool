@@ -185,6 +185,41 @@ public sealed class CandidateBaseline
         Event("TestProceduresMaterialized", actorId, $"Materialized {activeCount} effective test procedure revisions with hash {proceduresHash}.", now);
     }
 
+    /// <summary>
+    /// Establishes the first exact procedure manifest for a released predecessor whose controlled
+    /// procedure inventory predates build-scoped manifests.
+    ///
+    /// This is a migration assertion, not ordinary engineering materialization and not a claim that the
+    /// predecessor always carried this exact set. It is intentionally a separate, narrow operation so
+    /// the ordinary released-baseline immutability rule remains unchanged.
+    /// </summary>
+    public void BootstrapLegacyTestProcedures(string actorId, string proceduresHash, int activeCount,
+        int retiredCount, string selectionRule, DateTimeOffset now)
+    {
+        if (State == CandidateBaselineState.Draft)
+            throw new DomainException("Only a frozen or released legacy baseline can establish a procedure bootstrap snapshot.");
+        if (RequirementsMaterializedAt is null)
+            throw new DomainException("Materialize the legacy requirement baseline before establishing its procedure snapshot.");
+        if (TestProceduresMaterializedAt is not null)
+            throw new DomainException("The test procedure baseline is already materialized and immutable.");
+        if (string.IsNullOrWhiteSpace(actorId))
+            throw new DomainException("A Configuration Manager is required for the legacy procedure bootstrap.");
+        if (string.IsNullOrWhiteSpace(proceduresHash) || proceduresHash.Length != 64)
+            throw new DomainException("A valid test procedure manifest hash is required.");
+        if (activeCount < 0 || retiredCount < 0)
+            throw new DomainException("Legacy procedure bootstrap counts cannot be negative.");
+        if (string.IsNullOrWhiteSpace(selectionRule))
+            throw new DomainException("The legacy procedure selection rule must be recorded.");
+
+        TestProceduresHash = proceduresHash;
+        TestProceduresMaterializedAt = now;
+        UpdatedAt = now;
+        Event("LegacyProcedureManifestBootstrapped", actorId.Trim(),
+            $"Established a legacy bootstrap snapshot with {activeCount} active procedure revisions, " +
+            $"{retiredCount} retired procedure identities suppressed, and hash {proceduresHash}. " +
+            $"Migration selection rule: {selectionRule}", now);
+    }
+
     public void Freeze(string actorId, DateTimeOffset now)
     {
         EnsureDraft();

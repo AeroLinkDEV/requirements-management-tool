@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddScoped<IBaselineRepository, BaselineRepository>();
         services.AddScoped<RequirementBaselineMaterializer>();
         services.AddScoped<TestProcedureBaselineMaterializer>();
+        services.AddScoped<LegacyProcedureManifestBootstrapper>();
         services.AddScoped<FmsShowcaseSeeder>();
         services.AddScoped<ImportPracticeSeeder>();
         services.AddScoped<NotificationOutbox>();

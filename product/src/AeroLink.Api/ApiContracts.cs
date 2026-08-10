@@ -44,6 +44,7 @@ record CreateReleaseCampaignRequest(Guid ProjectId, Guid ReleaseId, Guid Baselin
 record BaselineSelectionRequest(Guid ChangeRequestId);
 /// <summary>An approved test change request whose procedure decisions a baseline is to carry.</summary>
 record BaselineTestChangeSelectionRequest(Guid TestChangeRequestId);
+record LegacyProcedureManifestBootstrapRequest(string ExpectedHash, bool ConfirmLegacySnapshot);
 record EmptyMutationRequest();
 record CreateBuildRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, string BuildNumber, string Description);
 record RecordTestExecutionRequest(Guid ProjectId, Guid ProcedureRevisionId, Guid? SoftwareBuildId, Guid? RetestOfExecutionId, TestOutcome Outcome, string Configuration, string Determination, string EvidenceReference, DateTimeOffset ExecutedAt);

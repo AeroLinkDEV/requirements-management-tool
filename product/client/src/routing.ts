@@ -136,7 +136,8 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   // itself to a bare /traceability, the app re-read that URL, and the requirement the reader arrived from
   // was cleared before the thread could open on it.
   if (tail[0] === "traceability" && tail[1]) return { ...base, view: "lifecycle", discipline: "system", artifactId: decoded(tail[1]) };
-  if (path === "release-planning" || path === "baselines") return { ...base, view: "notFound", discipline: "system" };
+  if (path === "release-planning") return { ...base, view: "notFound", discipline: "system" };
+  if (path === "baselines") return { ...base, view: "baselines", discipline: "system" };
   if (path === "release-readiness" || path === "release-campaign") return { ...base, view: "release", discipline: "system" };
   if (tail[0] === "release-readiness" && tail[1] === "changes" && tail[2]) return { ...base, view: "releaseImpact", discipline: "system", artifactId: decoded(tail[2]) };
   if (path === "release-readiness/evidence") return { ...base, view: "releaseDecision", discipline: "system" };

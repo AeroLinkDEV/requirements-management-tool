@@ -337,7 +337,7 @@ public sealed class TestProcedureMaterializationTests
     }
 
     [Fact]
-    public async Task A_predecessor_with_no_procedure_manifest_starts_the_successor_empty_rather_than_failing()
+    public async Task A_predecessor_with_no_procedure_manifest_requires_an_explicit_legacy_bootstrap()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-tp-legacy-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
@@ -348,8 +348,6 @@ public sealed class TestProcedureMaterializationTests
             var now = DateTimeOffset.UtcNow;
             var (project, release) = await SeedProjectAsync(db, "FMSL");
 
-            // Every build that exists today is this: frozen and materialized for requirements, with no procedure
-            // manifest at all. Its successor has to be able to start.
             var legacy = new CandidateBaseline("SW-00.10", 0, project.Id, release.Id, null, "Legacy", "cm", now);
             legacy.Select(ApprovedChangeRequest(project.Id, release.Id, "SRCR-00099", now), "cm", now);
             legacy.Freeze("cm", now);
@@ -357,10 +355,14 @@ public sealed class TestProcedureMaterializationTests
             db.Add(legacy);
             await db.SaveChangesAsync();
 
-            var successor = await MaterializeAsync(db, project.Id, release.Id, "SW-00.20", legacy.Id, now,
-                Change("SYSTP-000001", 0, TestProcedureChangeKind.Introduce, "Oceanic sequencing"));
+            var error = await Assert.ThrowsAsync<DomainException>(() =>
+                MaterializeAsync(db, project.Id, release.Id, "SW-00.20", legacy.Id, now,
+                    Change("SYSTP-000001", 0, TestProcedureChangeKind.Introduce, "Oceanic sequencing")));
 
-            Assert.Single(await db.BaselineTestProcedures.Where(x => x.BaselineId == successor.Id).ToListAsync());
+            Assert.Contains("legacy bootstrap snapshot", error.Message, StringComparison.OrdinalIgnoreCase);
+            var successor = await db.CandidateBaselines.SingleAsync(x => x.BaseNumber == "SW-00.20");
+            Assert.Null(successor.TestProceduresMaterializedAt);
+            Assert.Empty(await db.BaselineTestProcedures.Where(x => x.BaselineId == successor.Id).ToListAsync());
         }
         finally { File.Delete(path); }
     }
