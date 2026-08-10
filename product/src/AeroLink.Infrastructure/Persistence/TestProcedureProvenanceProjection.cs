@@ -100,9 +100,12 @@ public static class TestProcedureProvenanceProjection
         foreach (var revision in revisions)
         {
             var sourceReviewId = revision.SourceTestChangeRequestId;
-            var hasReview = sourceReviewId is Guid reviewId && reviewById.TryGetValue(reviewId, out var review);
-            var package = hasReview
-                ? Display(review!.BaseNumber, review.Revision, review.SourceChangeRequestNumber)
+            var sourceReview = sourceReviewId is Guid reviewId && reviewById.TryGetValue(reviewId, out var found)
+                ? found
+                : null;
+            var hasReview = sourceReview is not null;
+            var package = sourceReview is not null
+                ? Display(sourceReview.BaseNumber, sourceReview.Revision, sourceReview.SourceChangeRequestNumber)
                 : sourceReviewId is null ? null : $"Unresolved TCR {sourceReviewId}";
             var legacy = sourceReviewId is null;
             var rows = new List<TestProcedureProvenanceDriver>();
@@ -121,13 +124,13 @@ public static class TestProcedureProvenanceProjection
 
             // Manual first-class TCRs can produce a revision without any resolving impact item. The package
             // still owns exact primary/additional CR claims, so expose those instead of showing no provenance.
-            if (rows.Count == 0 && hasReview)
+            if (rows.Count == 0 && sourceReview is not null)
             {
                 var sources = new List<(Guid Id, string Fallback)>
                 {
-                    (review!.ChangeRequestId, review.SourceChangeRequestNumber),
+                    (sourceReview.ChangeRequestId, sourceReview.SourceChangeRequestNumber),
                 };
-                sources.AddRange(claims.Where(x => x.TestChangeReviewId == review.Id)
+                sources.AddRange(claims.Where(x => x.TestChangeReviewId == sourceReview.Id)
                     .Select(x => (x.ChangeRequestId, x.ChangeRequestNumber)));
                 foreach (var source in sources.DistinctBy(x => x.Id))
                 {
