@@ -183,6 +183,9 @@ public sealed class DocumentTemplateGenerationTests(ShowcaseDatabaseFixture show
                 .FirstAsync(x => x.BaselineId == seed.BaselineId
                                  && x.Type == ControlledDocumentType.SystemTestProcedures);
             var before = await DocumentXmlAsync((await Generator(db).GenerateAsync(document.Id, "docx", default))!);
+            // #420: the procedure document names its source TCR provenance and TCR approval authority rather
+            // than substituting requirement-change approvers for procedure authority.
+            Assert.Contains("Source test change request", before);
 
             // Unrelated later activity: an approved procedure revision that is NOT part of the released
             // baseline's exact manifest must not appear in, or change, the already-created document.

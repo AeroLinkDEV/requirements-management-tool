@@ -42,7 +42,8 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             ControlledDocumentType.HighLevelTestProcedures => await ProcedurePublicationRows(document.BaselineId, TestProcedureLevel.HighLevel, ct),
             _ => await ProcedurePublicationRows(document.BaselineId, TestProcedureLevel.LowLevel, ct)
         };
-        var approvals = await ApprovalBasis(document.BaselineId, document.ReleaseId, document.GeneratedAt, ct); var createdBy = (await db.BaselineEvents.AsNoTracking().Where(x => x.BaselineId == baseline.Id && x.EventType == "CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x => x.OccurredAt).Select(x => x.ActorId).FirstOrDefault() ?? "system";
+        var isProcedureDocument = document.Type is ControlledDocumentType.SystemTestProcedures or ControlledDocumentType.HighLevelTestProcedures or ControlledDocumentType.LowLevelTestProcedures;
+        var approvals = await ApprovalBasis(document.BaselineId, document.ReleaseId, document.GeneratedAt, ct, isProcedureDocument); var createdBy = (await db.BaselineEvents.AsNoTracking().Where(x => x.BaselineId == baseline.Id && x.EventType == "CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x => x.OccurredAt).Select(x => x.ActorId).FirstOrDefault() ?? "system";
         var releasedWhenGenerated = release.IsReleased && (release.ReleasedAt is null || release.ReleasedAt <= document.GeneratedAt);
         var status = releasedWhenGenerated ? "Approved and Released" : "Controlled Draft"; var type = DocumentTypeName(document.Type);
 
@@ -117,7 +118,9 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
              ("Test procedure manifest hash", baseline.TestProceduresHash ?? "Legacy baseline - no exact procedure manifest recorded"),
              // Named in the front matter so a reader can tell which layout produced what they are holding.
              ("Document template", templateRevision is null ? "Built-in layout" : $"{templateName} revision {templateRevision.Revision} (approved {templateRevision.ApprovedAt.UtcDateTime:yyyy-MM-dd} by {templateRevision.ApprovedBy}, manifest {templateRevision.ManifestHash[..Math.Min(12, templateRevision.ManifestHash.Length)]})"),
-             ("Approval basis", "Named approvers from exact approved change requests and completed release approvals recorded by generation time")], approvals,
+             ("Approval basis", isProcedureDocument
+                 ? "Named approvers from the exact approved test change requests that authorized the included procedure revisions, plus completed release approvals recorded by generation time"
+                 : "Named approvers from exact approved change requests and completed release approvals recorded by generation time")], approvals,
             new[] { (document.Revision.ToString("D2"), status, document.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd"), createdBy) }, sections);
         return ProfessionalPublicationRenderer.Render(publication, format, $"{document.DocumentNumber}.{document.Revision:D2}_{release.Version}");
     }
@@ -200,15 +203,38 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
                           join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == level)
                               on member.ProcedureId equals procedure.Id
                           orderby procedure.BaseNumber
-                          select new { procedure.BaseNumber, procedure.Title, revision.Revision, revision.State, revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult, revision.AuthorId }).ToListAsync(ct);
+                          select new { procedure.BaseNumber, procedure.Title, revision.Revision, revision.State, revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult, revision.AuthorId, revision.SourceTestChangeRequestId }).ToListAsync(ct);
+        // #420: the exact TCR that authorized each procedure revision is the controlled provenance for that
+        // revision (DEC-103 removed separate procedure-level approval). Legacy revisions with no source TCR
+        // are stated truthfully as legacy/unattributed rather than assigned a fabricated package.
+        var tcrIds = rows.Where(x => x.SourceTestChangeRequestId is not null)
+            .Select(x => x.SourceTestChangeRequestId!.Value).Distinct().ToList();
+        var tcrDisplay = await db.TestChangeReviews.AsNoTracking()
+            .Where(x => tcrIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.DisplayNumber, ct);
         return rows.OrderBy(x => x.BaseNumber)
-            .Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), level + " Test Procedure", x.Title, x.Objective, new[] { ("State", x.State.ToString()), ("Author / owner", x.AuthorId), ("Preconditions", x.Preconditions), ("Procedure steps", x.Steps), ("Expected result", x.ExpectedResult) })).ToList();
+            .Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), level + " Test Procedure", x.Title, x.Objective, new[] { ("State", x.State.ToString()), ("Author / owner", x.AuthorId), ("Preconditions", x.Preconditions), ("Procedure steps", x.Steps), ("Expected result", x.ExpectedResult), ("Source test change request", x.SourceTestChangeRequestId is null ? "Legacy / unattributed" : tcrDisplay.GetValueOrDefault(x.SourceTestChangeRequestId.Value, "Unknown TCR")) })).ToList();
     }
-    private async Task<List<PublicationApproval>> ApprovalBasis(Guid baselineId, Guid releaseId, DateTimeOffset generatedAt, CancellationToken ct)
+    private async Task<List<PublicationApproval>> ApprovalBasis(Guid baselineId, Guid releaseId,
+        DateTimeOffset generatedAt, CancellationToken ct, bool testProcedureDocument = false)
     {
         var scrIds = await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == baselineId).Select(x => x.ChangeRequestId).ToListAsync(ct);
         var cycles = (await db.ReviewCycles.AsNoTracking().Include(x => x.Steps).Where(x => x.ChangeRequestId != null && scrIds.Contains(x.ChangeRequestId.Value) && x.State == ReviewCycleState.Approved).ToListAsync(ct)).Where(x => x.CompletedAt <= generatedAt).ToList();
-        var approvals = cycles.SelectMany(x => x.Steps.Where(s => s.State == ApprovalStepState.Approved && s.DecidedAt <= generatedAt).Select(s => new PublicationApproval("Change Authority", s.ApproverName, s.ApproverId, "Approved", s.DecidedAt))).ToList();
+        var scrRole = testProcedureDocument ? "Upstream Change Authority" : "Change Authority";
+        var approvals = cycles.SelectMany(x => x.Steps.Where(s => s.State == ApprovalStepState.Approved && s.DecidedAt <= generatedAt).Select(s => new PublicationApproval(scrRole, s.ApproverName, s.ApproverId, "Approved", s.DecidedAt))).ToList();
+        // #420: a test-procedure document's approval authority is the exact approved TCR package, not the
+        // requirement change review. TCR signatures authorize the materialized procedure revisions (DEC-103).
+        var tcrIds = await db.BaselineTestChangeSelections.AsNoTracking()
+            .Where(x => x.BaselineId == baselineId).Select(x => x.TestChangeRequestId).ToListAsync(ct);
+        var tcrCycles = (await db.ReviewCycles.AsNoTracking().Include(x => x.Steps)
+                .Where(x => x.TestChangeReviewId != null && tcrIds.Contains(x.TestChangeReviewId.Value)
+                            && x.State == ReviewCycleState.Approved).ToListAsync(ct))
+            .Where(x => x.CompletedAt <= generatedAt).ToList();
+        approvals.AddRange(tcrCycles.SelectMany(x => x.Steps
+            .Where(s => s.State == ApprovalStepState.Approved && s.DecidedAt <= generatedAt)
+            .Select(s => new PublicationApproval(
+                string.IsNullOrWhiteSpace(s.StageName) ? "Test Change Authority" : $"Test Change Authority · {s.StageName}",
+                s.ApproverName, s.ApproverId, "Approved", s.DecidedAt))));
         var campaigns = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
         approvals.AddRange(campaigns.SelectMany(x => x.Approvals.Where(a => a.State == AeroLink.Domain.Releases.ReleaseApprovalState.Approved && a.ApprovedAt <= generatedAt).Select(a => new PublicationApproval("Release Authority", a.ApproverName, a.ApproverId, "Approved", a.ApprovedAt))));
         return approvals.GroupBy(x => new { x.Role, x.UserId }).Select(x => x.OrderByDescending(a => a.DecidedAt).First()).OrderBy(x => x.Role).ThenBy(x => x.Name).ToList();

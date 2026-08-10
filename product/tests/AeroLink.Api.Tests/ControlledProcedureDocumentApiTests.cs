@@ -104,7 +104,8 @@ public sealed class ControlledProcedureDocumentApiTests
             "Nothing covers oceanic sequencing.", JsonSerializer.Serialize(new[] { revision.Id })), now);
         review.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", now);
         review.Submit("verification.engineer", "test.lead", true, now);
-        review.Approve("test.lead", "Reviewed.", now);
+        await db.SaveChangesAsync();
+        review.ApproveActiveStage("test.lead", "Reviewed.", now);
         db.Add(item);
         await db.SaveChangesAsync();
     }
@@ -278,7 +279,8 @@ public sealed class ControlledProcedureDocumentApiTests
                     revision.Id), now);
             review.WriteCase("verification.engineer", "Two procedures", "Problem", "Analysis", "Solution", now);
             review.Submit("verification.engineer", "test.lead", true, now);
-            review.Approve("test.lead", "Reviewed.", now);
+            await db.SaveChangesAsync();
+            review.ApproveActiveStage("test.lead", "Reviewed.", now);
             db.Add(item);
             await db.SaveChangesAsync();
         }
@@ -308,12 +310,26 @@ public sealed class ControlledProcedureDocumentApiTests
                 .Where(x => x.BaselineId == fixture.BaselineId
                             && x.Type == ControlledDocumentType.SystemTestProcedures)
                 .SingleAsync();
-            firstDocumentId = record.Id;
-            firstRecord = (record.ContentHash, record.ArtifactCount, record.GeneratedAt);
+        firstDocumentId = record.Id;
+        firstRecord = (record.ContentHash, record.ArtifactCount, record.GeneratedAt);
+        // #420: requirement documents keep their existing source-change provenance and change-authority role.
+        var requirementDocumentId = await db.ControlledDocuments.AsNoTracking()
+            .Where(x => x.BaselineId == fixture.BaselineId && x.Type == ControlledDocumentType.Sysrd)
+            .Select(x => x.Id).SingleAsync();
+        var requirementXml = await DocumentXmlAsync(client, requirementDocumentId);
+        Assert.Contains("Source change request", requirementXml);
+        Assert.Contains("Change Authority", requirementXml);
         }
         firstXml = await DocumentXmlAsync(client, firstDocumentId);
         Assert.Contains("SYSTP-000941.00", firstXml);
         Assert.Contains("SYSTP-000942.00", firstXml);
+        // #420: the exact TCR that authorized the materialized procedure revisions is printed as the source
+        // test change request, and TCR signatures are the approval authority (DEC-103).
+        Assert.Contains("SYSTCR-000941.00", firstXml);
+        Assert.Contains("Source test change request", firstXml);
+        Assert.Contains("Test Change Authority", firstXml);
+        Assert.Contains("test.lead", firstXml);
+        Assert.DoesNotContain(">Change Authority<", firstXml);
 
         // Successor baseline 2 modifies SYSTP-000941 to .01 and retires SYSTP-000942.
         Guid secondBaselineId, secondTcrId;
@@ -343,7 +359,8 @@ public sealed class ControlledProcedureDocumentApiTests
                 Draft("SYSTP-000942", 1, TestProcedureChangeKind.Retire, ""), now);
             tcr2.WriteCase("verification.engineer", "Successor package", "Problem", "Analysis", "Solution", now);
             tcr2.Submit("verification.engineer", "test.lead", true, now);
-            tcr2.Approve("test.lead", "Reviewed.", now);
+            await db.SaveChangesAsync();
+            tcr2.ApproveActiveStage("test.lead", "Reviewed.", now);
             db.AddRange(release17, scr2, second, tcr2);
             await db.SaveChangesAsync();
             secondBaselineId = second.Id;
@@ -385,6 +402,9 @@ public sealed class ControlledProcedureDocumentApiTests
         Assert.DoesNotContain("SYSTP-000941.00", secondXml);
         Assert.DoesNotContain("SYSTP-000942.00", secondXml);
         Assert.DoesNotContain("SYSTP-000942.01", secondXml);
+        Assert.Contains("SYSTCR-000942.00", secondXml);
+        Assert.Contains("Test Change Authority", secondXml);
+        Assert.DoesNotContain(">Change Authority<", secondXml);
 
         // The first baseline's document remains the controlled snapshot: the same two .00 identities, no
         // successor or retired revision leaked in, and the document record metadata is unchanged. Title text
