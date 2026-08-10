@@ -1,0 +1,142 @@
+name: Agent 364 final product completion repair 6
+
+on:
+  push:
+    branches:
+      - agent/364-legacy-procedure-manifest-bootstrap
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: ${{ contains(github.event.head_commit.message, '[agent-364-finalize-repair6]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Apply completed product patch and robust fixtures
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/agent-364-finalize-repair4.yml').read_text(encoding='utf-8').splitlines()
+          start = next(i for i, line in enumerate(workflow) if line.strip() == "python - <<'PY'")
+          end = next(i for i in range(start + 1, len(workflow)) if workflow[i].strip() == 'PY')
+          source = textwrap.dedent('\n'.join(workflow[start + 1:end]))
+          exec(compile(source, 'agent-364-final-patch.py', 'exec'))
+
+          lifecycle = Path('product/tests/AeroLink.Infrastructure.Tests/LegacyProcedureManifestBootstrapLifecycleTests.cs')
+          lines = lifecycle.read_text(encoding='utf-8').splitlines()
+          using_index = next(i for i, line in enumerate(lines) if line == 'using Microsoft.EntityFrameworkCore;')
+          lines.insert(using_index + 1, 'using System.Text.Json;')
+
+          tcr_index = next(i for i, line in enumerate(lines)
+              if 'var tcr = new TestChangeReview(project.Id, release17.Id, source17.Id,' in line)
+          indent = lines[tcr_index][:len(lines[tcr_index]) - len(lines[tcr_index].lstrip())]
+          requirement_lines = [
+              indent + 'var requirementArtifact = new RequirementArtifact(project.Id,',
+              indent + '    "SYSR-09502000", RequirementLevel.System, now.AddHours(4));',
+              indent + 'var requirementRevision = new RequirementRevision(requirementArtifact.Id, 0,',
+              indent + '    "The product shall verify the successor behavior.", "Successor verification input.",',
+              indent + '    "Test", RequirementRevisionState.Active, source17.Id, baseline17.Id, now.AddHours(4));',
+              indent + 'var requirementMember = new BaselineRequirementSelection(baseline17.Id,',
+              indent + '    requirementArtifact.Id, requirementRevision.Id);',
+          ]
+          lines[tcr_index:tcr_index] = requirement_lines
+
+          introduce_index = next(i for i, line in enumerate(lines)
+              if 'TestProcedureChangeKind.Introduce, "New successor procedure"), now.AddHours(4));' in line)
+          introduce_indent = lines[introduce_index][:len(lines[introduce_index]) - len(lines[introduce_index].lstrip())]
+          lines[introduce_index:introduce_index + 1] = [
+              introduce_indent + 'TestProcedureChangeKind.Introduce, "New successor procedure",',
+              introduce_indent + 'JsonSerializer.Serialize(new[] { requirementRevision.Id })), now.AddHours(4));',
+          ]
+
+          add_index = next(i for i, line in enumerate(lines)
+              if 'db.AddRange(release17, source17, baseline17, tcr);' in line)
+          add_indent = lines[add_index][:len(lines[add_index]) - len(lines[add_index].lstrip())]
+          lines[add_index:add_index + 1] = [
+              add_indent + 'db.AddRange(release17, source17, baseline17, requirementArtifact,',
+              add_indent + '    requirementRevision, requirementMember, tcr);',
+          ]
+
+          helper_start = next(i for i, line in enumerate(lines)
+              if 'private static TestProcedureChangeDraft Change(string number, int revision,' in line)
+          helper_end = next(i for i in range(helper_start, len(lines))
+              if '"Approved successor procedure disposition.");' in lines[i])
+          helper_indent = lines[helper_start][:len(lines[helper_start]) - len(lines[helper_start].lstrip())]
+          lines[helper_start:helper_end + 1] = [
+              helper_indent + 'private static TestProcedureChangeDraft Change(string number, int revision,',
+              helper_indent + '    TestProcedureChangeKind kind, string title,',
+              helper_indent + '    string drivingRequirementRevisionIdsJson = "[]") =>',
+              helper_indent + '    new(number, revision, TestProcedureLevel.System, kind, title,',
+              helper_indent + '        kind == TestProcedureChangeKind.Retire ? "" : "Verify the successor behavior.",',
+              helper_indent + '        "Configured product.", kind == TestProcedureChangeKind.Retire ? "" : "1. Exercise the behavior.",',
+              helper_indent + '        kind == TestProcedureChangeKind.Retire ? "" : "Behavior is correct.",',
+              helper_indent + '        "Approved successor procedure disposition.", drivingRequirementRevisionIdsJson);',
+          ]
+          lifecycle.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+
+          browser = Path('product/client/tests/legacy-procedure-bootstrap.spec.ts')
+          browser_text = browser.read_text(encoding='utf-8')
+          if browser_text.count("await openNavigationGroup(page, 'RELEASE & CONFIGURATION')") != 1:
+              raise RuntimeError('Expected one legacy browser navigation group.')
+          browser.write_text(browser_text.replace(
+              "await openNavigationGroup(page, 'RELEASE & CONFIGURATION')",
+              "await openNavigationGroup(page, 'RELEASE')"), encoding='utf-8')
+          PY
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+
+      - name: Compile and run focused backend qualification
+        shell: bash
+        run: |
+          dotnet restore product/AeroLink.slnx
+          dotnet build product/AeroLink.slnx --configuration Release --no-restore
+          dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --no-build --filter "FullyQualifiedName~LegacyProcedureManifestBootstrap" --logger "console;verbosity=normal"
+          dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj --configuration Release --no-build --filter "FullyQualifiedName~LegacyProcedureManifestBootstrap" --logger "console;verbosity=normal"
+          dotnet test product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj --configuration Release --no-build --filter "FullyQualifiedName~LegacyProcedureManifestBootstrap" --logger "console;verbosity=normal"
+
+      - name: Validate client and real browser journey
+        working-directory: product/client
+        shell: bash
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run build
+          npx playwright install chromium
+          npx playwright test tests/legacy-procedure-bootstrap.spec.ts --workers=1
+
+      - name: Publish completed product work
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "seanmccarthyns"
+          git config user.email "seanmccarthyns@gmail.com"
+          git add product/client/src/App.tsx \
+            product/client/src/BaselineCenter.tsx \
+            product/client/src/LegacyProcedureBootstrapPanel.tsx \
+            product/client/src/routing.ts \
+            product/client/tests/legacy-procedure-bootstrap.spec.ts \
+            product/tests/AeroLink.Api.Tests/LegacyProcedureManifestBootstrapApiTests.cs \
+            product/tests/AeroLink.Infrastructure.Tests/LegacyProcedureManifestBootstrapLifecycleTests.cs
+          git commit -m "Complete explicit legacy procedure bootstrap workflow"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
