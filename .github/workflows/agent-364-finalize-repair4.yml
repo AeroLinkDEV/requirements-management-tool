@@ -1,3 +1,4 @@
+# Retry after making the event lookup portable across SQLite and PostgreSQL.
 name: Agent 364 final product completion repair 4
 
 on:
