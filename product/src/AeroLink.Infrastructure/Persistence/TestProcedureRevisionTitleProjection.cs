@@ -8,8 +8,9 @@ namespace AeroLink.Infrastructure.Persistence;
 ///
 /// Controlled revisions produced by a TCR take their title from the exact approved procedure-change snapshot
 /// that produced them. A retirement carries the nearest predecessor title because it withdraws that procedure
-/// rather than asking the engineer to restate it. Revisions that predate controlled TCR provenance retain the
-/// stable catalog title with an explicit compatibility note; the projection never invents historical precision.
+/// rather than asking the engineer to restate it. Revisions that predate controlled TCR provenance cannot be
+/// assigned today's mutable catalog title as though it were historical truth; they receive a deterministic,
+/// revision-specific compatibility label instead.
 /// </summary>
 public sealed record TestProcedureRevisionTitleSnapshot(
     Guid RevisionId,
@@ -36,10 +37,6 @@ public static class TestProcedureRevisionTitleProjection
                                    {
                                        revision.Id,
                                        revision.ProcedureId,
-                                       revision.Revision,
-                                       revision.SourceTestChangeRequestId,
-                                       procedure.BaseNumber,
-                                       CatalogTitle = procedure.Title,
                                    }).ToListAsync(ct);
         var procedureIds = requestedRows.Select(x => x.ProcedureId).Distinct().ToList();
 
@@ -56,7 +53,6 @@ public static class TestProcedureRevisionTitleProjection
                                 revision.Revision,
                                 revision.SourceTestChangeRequestId,
                                 procedure.BaseNumber,
-                                CatalogTitle = procedure.Title,
                             }).ToListAsync(ct);
         var tcrIds = chains.Where(x => x.SourceTestChangeRequestId is not null)
             .Select(x => x.SourceTestChangeRequestId!.Value).Distinct().ToList();
@@ -76,14 +72,16 @@ public static class TestProcedureRevisionTitleProjection
         var resolved = new Dictionary<Guid, TestProcedureRevisionTitleSnapshot>();
         foreach (var chain in chains.GroupBy(x => x.ProcedureId))
         {
-            string? predecessorTitle = null;
+            TestProcedureRevisionTitleSnapshot? predecessor = null;
             foreach (var revision in chain.OrderBy(x => x.Revision))
             {
                 TestProcedureRevisionTitleSnapshot snapshot;
                 if (revision.SourceTestChangeRequestId is not Guid sourceTcrId)
                 {
-                    snapshot = new(revision.Id, revision.CatalogTitle, false, true,
-                        "Legacy revision — the exact historical title was not recorded on a controlled TCR snapshot; the stable catalog title is shown for compatibility.");
+                    snapshot = new(revision.Id,
+                        UnavailableTitle(revision.BaseNumber, revision.Revision, legacy: true),
+                        false, true,
+                        "Legacy revision — the exact historical title was not recorded on a controlled TCR snapshot; a deterministic compatibility label is shown.");
                 }
                 else if (changeByRevision.TryGetValue(
                              (sourceTcrId, revision.BaseNumber.ToUpperInvariant(), revision.Revision), out var change))
@@ -92,28 +90,39 @@ public static class TestProcedureRevisionTitleProjection
                     {
                         snapshot = new(revision.Id, change.Title.Trim(), true, false, null);
                     }
-                    else if (change.Kind == TestProcedureChangeKind.Retire && !string.IsNullOrWhiteSpace(predecessorTitle))
+                    else if (change.Kind == TestProcedureChangeKind.Retire && predecessor is not null)
                     {
-                        snapshot = new(revision.Id, predecessorTitle, true, false,
-                            "Retirement revision — title preserved from the exact predecessor being retired.");
+                        snapshot = new(revision.Id, predecessor.Title,
+                            predecessor.IsExact, predecessor.IsLegacy,
+                            predecessor.IsExact
+                                ? "Retirement revision — title preserved from the exact predecessor being retired."
+                                : "Retirement revision — the predecessor's deterministic compatibility label is preserved because no exact historical title exists.");
                     }
                     else
                     {
-                        snapshot = new(revision.Id, revision.CatalogTitle, false, false,
-                            "The producing TCR is recorded, but its revision-title snapshot is unavailable; the stable catalog title is shown.");
+                        snapshot = new(revision.Id,
+                            UnavailableTitle(revision.BaseNumber, revision.Revision, legacy: false),
+                            false, false,
+                            "The producing TCR is recorded, but its revision-title snapshot is unavailable; a deterministic revision label is shown.");
                     }
                 }
                 else
                 {
-                    snapshot = new(revision.Id, revision.CatalogTitle, false, false,
-                        "The producing TCR is recorded, but no matching procedure-change title snapshot could be resolved; the stable catalog title is shown.");
+                    snapshot = new(revision.Id,
+                        UnavailableTitle(revision.BaseNumber, revision.Revision, legacy: false),
+                        false, false,
+                        "The producing TCR is recorded, but no matching procedure-change title snapshot could be resolved; a deterministic revision label is shown.");
                 }
 
                 resolved[revision.Id] = snapshot;
-                if (!string.IsNullOrWhiteSpace(snapshot.Title)) predecessorTitle = snapshot.Title;
+                predecessor = snapshot;
             }
         }
 
         return requestedRows.ToDictionary(x => x.Id, x => resolved[x.Id]);
     }
+
+    private static string UnavailableTitle(string baseNumber, int revision, bool legacy) =>
+        $"{(legacy ? "Legacy procedure" : "Procedure")} {baseNumber}.{revision:D2} — " +
+        (legacy ? "exact historical title was not recorded" : "exact revision title snapshot was not recorded");
 }
