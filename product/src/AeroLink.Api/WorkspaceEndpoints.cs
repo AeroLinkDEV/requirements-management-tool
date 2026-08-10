@@ -442,7 +442,7 @@ public static class WorkspaceEndpoints
             var ordered=items.OrderByDescending(x=>x.Identifier.ToLowerInvariant().Contains(q)).ThenByDescending(x=>x.UpdatedAt).ThenBy(x=>x.Identifier).Take(take).ToList();return Results.Ok(new{query,items=ordered});
         });
 
-        app.MapGet("/api/artifacts/{kind}/{id:guid}",async(string kind,Guid id,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        app.MapGet("/api/artifacts/{kind}/{id:guid}",async(string kind,Guid id,Guid? releaseId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
         {
             static Dictionary<string,object?> Details(params (string Key,object? Value)[] values)=>values.ToDictionary(x=>x.Key,x=>x.Value);
             var normalized=kind.Trim().ToLowerInvariant();
@@ -452,8 +452,48 @@ public static class WorkspaceEndpoints
             {var item=await db.SoftwareBuilds.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var baseline=await db.CandidateBaselines.AsNoTracking().SingleAsync(x=>x.Id==item.BaselineId,ct);var related=new[]{new RelatedArtifactDto("baseline",baseline.Id,baseline.DisplayNumber,baseline.Name)};return Results.Ok(new{kind=normalized,item.Id,identifier=item.BuildNumber,title=item.Description,state=item.State.ToString(),subtitle="Immutable software build provenance",updatedAt=item.ReleasedAt??item.RecordedAt,details=Details(("releaseId",item.ReleaseId),("baseline",baseline.DisplayNumber),("recordedBy",item.RecordedBy),("recordedAt",item.RecordedAt),("releasedAt",item.ReleasedAt)),related});}
             if(normalized=="document")
             {var item=await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var baseline=await db.CandidateBaselines.AsNoTracking().SingleAsync(x=>x.Id==item.BaselineId,ct);var related=new[]{new RelatedArtifactDto("baseline",baseline.Id,baseline.DisplayNumber,baseline.Name)};return Results.Ok(new{kind=normalized,item.Id,identifier=$"{item.DocumentNumber}.{item.Revision:D2}",title=item.Title,state="Generated",subtitle=$"{ApiMap.ControlledDocumentTypeLabel(item.Type)} controlled output",updatedAt=item.GeneratedAt,details=Details(("baseline",baseline.DisplayNumber),("artifactCount",item.ArtifactCount),("contentHash",item.ContentHash),("generatedAt",item.GeneratedAt)),related});}
-            if(normalized=="test-procedure")
-            {var item=await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var revisions=await db.TestProcedureRevisions.AsNoTracking().Where(x=>x.ProcedureId==id).OrderByDescending(x=>x.Revision).ToListAsync(ct);var latest=revisions.FirstOrDefault();var coverage=latest is null?0:await db.TestCoverage.CountAsync(x=>x.ProcedureRevisionId==latest.Id,ct);var projectedTitle=latest is null?item.Title:(await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,[latest.Id],ct))[latest.Id].Title;return Results.Ok(new{kind=normalized,item.Id,identifier=latest is null?item.BaseNumber:$"{item.BaseNumber}.{latest.Revision:D2}",title=projectedTitle,state=latest?.State.ToString()??"Draft",subtitle=$"{item.Level} verification procedure",updatedAt=latest?.CreatedAt??item.CreatedAt,details=Details(("owner",item.OwnerId),("revisionCount",revisions.Count),("coveredRequirements",coverage),("objective",latest?.Objective),("expectedResult",latest?.ExpectedResult)),related=Array.Empty<RelatedArtifactDto>()});}
+
+if(normalized=="test-procedure")
+{
+    var item=await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);
+    if(item is null)return Results.NotFound();
+    if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();
+    var revisions=await db.TestProcedureRevisions.AsNoTracking().Where(x=>x.ProcedureId==id)
+        .OrderByDescending(x=>x.Revision).ToListAsync(ct);
+    TestProcedureRevision? selected;
+    if(releaseId is Guid scopedReleaseId)
+    {
+        if(!await db.Releases.AsNoTracking().AnyAsync(
+               x=>x.Id==scopedReleaseId&&x.ProjectId==item.ProjectId,ct))
+            return Results.NotFound();
+        var effectivity=await TestProcedureEffectivity.ForReleaseAsync(
+            db,item.ProjectId,scopedReleaseId,ct);
+        if(effectivity is null
+           || !effectivity.RevisionByProcedure.TryGetValue(item.Id,out var selectedRevisionId))
+            return Results.NotFound();
+        selected=revisions.SingleOrDefault(x=>x.Id==selectedRevisionId);
+        if(selected is null)return Results.NotFound();
+    }
+    else selected=revisions.FirstOrDefault();
+    var coverage=selected is null?0:await db.TestCoverage.CountAsync(
+        x=>x.ProcedureRevisionId==selected.Id,ct);
+    var projectedTitle=selected is null?item.Title:
+        (await TestProcedureRevisionTitleProjection.ForRevisionsAsync(
+            db,[selected.Id],ct))[selected.Id].Title;
+    return Results.Ok(new
+    {
+        kind=normalized,item.Id,
+        identifier=selected is null?item.BaseNumber:$"{item.BaseNumber}.{selected.Revision:D2}",
+        title=projectedTitle,state=selected?.State.ToString()??"Draft",
+        subtitle=$"{item.Level} verification procedure",
+        updatedAt=selected?.CreatedAt??item.CreatedAt,
+        details=Details(("owner",item.OwnerId),("revisionCount",revisions.Count),
+            ("revisionId",selected?.Id),("effectiveReleaseId",releaseId),
+            ("coveredRequirements",coverage),("objective",selected?.Objective),
+            ("expectedResult",selected?.ExpectedResult)),
+        related=Array.Empty<RelatedArtifactDto>()
+    });
+}
             if(normalized=="release-campaign")
             {var item=await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var baseline=await db.CandidateBaselines.AsNoTracking().SingleAsync(x=>x.Id==item.BaselineId,ct);var related=new[]{new RelatedArtifactDto("baseline",baseline.Id,baseline.DisplayNumber,baseline.Name)};return Results.Ok(new{kind=normalized,item.Id,identifier=item.Name,title=item.Name,state=item.State.ToString(),subtitle="Governed release readiness and approval campaign",updatedAt=item.ReleasedAt??item.CreatedAt,details=Details(("releaseId",item.ReleaseId),("baseline",baseline.DisplayNumber),("verificationBuildId",item.SoftwareBuildId),("releaseHash",item.ReleaseHash)),related});}
             if(normalized=="release")

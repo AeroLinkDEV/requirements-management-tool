@@ -86,6 +86,11 @@ public sealed class TestProcedureMaterializationTests
             var reloaded = await db.CandidateBaselines.SingleAsync(x => x.Id == baseline.Id);
             Assert.Equal(64, reloaded.TestProceduresHash!.Length);
             Assert.NotNull(reloaded.TestProceduresMaterializedAt);
+            var sourceSnapshot = JsonSerializer.Deserialize<JsonElement>(revision.SourceChangeRequestsJson);
+            var source = Assert.Single(sourceSnapshot.EnumerateArray());
+            Assert.Equal(tcr.ChangeRequestId, source.GetProperty("ChangeRequestId").GetGuid());
+            Assert.Equal(tcr.SourceChangeRequestNumber, source.GetProperty("ChangeRequestNumber").GetString());
+            Assert.True(source.GetProperty("Originating").GetBoolean());
         }
         finally { File.Delete(path); }
     }

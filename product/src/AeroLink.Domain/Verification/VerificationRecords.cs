@@ -66,7 +66,8 @@ public sealed class TestProcedureRevision
     private TestProcedureRevision() { }
     public TestProcedureRevision(Guid procedureId, int revision, string objective, string preconditions,
         string steps, string expectedResult, TestProcedureState state, string authorId, DateTimeOffset now,
-        string? selectedApproverId = null, Guid? sourceTestChangeRequestId = null, Guid? effectiveBaselineId = null)
+        string? selectedApproverId = null, Guid? sourceTestChangeRequestId = null,
+        Guid? effectiveBaselineId = null, string sourceChangeRequestsJson = "[]")
     {
         if (revision < 0) throw new DomainException("Test procedure revision cannot be negative.");
         // A retired procedure is being removed, not restated — the same exemption a retired requirement revision
@@ -78,6 +79,13 @@ public sealed class TestProcedureRevision
         Preconditions = preconditions.Trim(); Steps = steps.Trim(); ExpectedResult = expectedResult.Trim();
         State = state; AuthorId = authorId.Trim(); SelectedApproverId = selectedApproverId?.Trim(); CreatedAt = now;
         SourceTestChangeRequestId = sourceTestChangeRequestId; EffectiveBaselineId = effectiveBaselineId;
+        var sourceSnapshot = string.IsNullOrWhiteSpace(sourceChangeRequestsJson)
+            ? "[]"
+            : sourceChangeRequestsJson.Trim();
+        try { using var parsed = System.Text.Json.JsonDocument.Parse(sourceSnapshot); }
+        catch (System.Text.Json.JsonException)
+        { throw new DomainException("Test procedure source-change provenance must be valid JSON."); }
+        SourceChangeRequestsJson = sourceSnapshot;
     }
     public Guid Id { get; private set; }
     public Guid ProcedureId { get; private set; }
@@ -98,6 +106,8 @@ public sealed class TestProcedureRevision
     public Guid? SourceTestChangeRequestId { get; private set; }
     /// <summary>The baseline this revision first became effective in. Null for the same legacy reason.</summary>
     public Guid? EffectiveBaselineId { get; private set; }
+    /// <summary>Exact source-CR identities captured from the producing TCR revision.</summary>
+    public string SourceChangeRequestsJson { get; private set; } = "[]";
     public DateTimeOffset CreatedAt { get; private set; }
 
     public void UpdateDraft(string objective, string preconditions, string steps, string expectedResult, string actor)

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
@@ -90,6 +91,56 @@ public sealed class TestProcedureProvenanceProjectionTests
         Assert.Equal(new[] { "SRCR-04250.00", "SRCR-04251.00" },
             provenance.Drivers.Select(x => x.ChangeRequest).OrderBy(x => x).ToArray());
     }
+
+
+[Fact]
+public async Task Exact_source_snapshot_survives_claims_moving_to_a_successor_tcr_revision()
+{
+    await using var fixture = await Fixture.CreateAsync();
+    var now = fixture.Now;
+    var primary = ChangeRequest("SRCR-04255", fixture.Project.Id, fixture.Release.Id,
+        "Revisioned manual primary", now);
+    var folded = ChangeRequest("SRCR-04256", fixture.Project.Id, fixture.Release.Id,
+        "Revisioned manual folded", now);
+    var tcr = new TestChangeReview(fixture.Project.Id, fixture.Release.Id, primary.Id,
+        TestChangeReviewDiscipline.System, primary.DisplayNumber, now,
+        baseNumber: "SYSTCR-04255", revision: 0, caseContractVersion: 0);
+    tcr.RecordTestChangeRequired("verification.engineer", now);
+    tcr.IncludeChangeRequest("verification.engineer", folded.Id, folded.DisplayNumber, now);
+    tcr.Submit("verification.engineer", "test.lead", true, now.AddMinutes(1));
+    tcr.Approve("test.lead", "Approved exact manual package.", now.AddMinutes(2));
+    var procedure = new TestProcedure(fixture.Project.Id, "SYSTP-04255",
+        "Revisioned manual package procedure", "verification.engineer", now,
+        TestProcedureLevel.System);
+    var snapshot = JsonSerializer.Serialize(new[]
+    {
+        new { ChangeRequestId = primary.Id, ChangeRequestNumber = primary.DisplayNumber, Originating = true },
+        new { ChangeRequestId = folded.Id, ChangeRequestNumber = folded.DisplayNumber, Originating = false },
+    });
+    var revision = new TestProcedureRevision(procedure.Id, 0,
+        "Verify exact provenance.", "The build is available.",
+        "1. Exercise the controlled behavior.", "The expected behavior is observed.",
+        TestProcedureState.Approved, "verification.engineer", now,
+        sourceTestChangeRequestId: tcr.Id, sourceChangeRequestsJson: snapshot);
+    fixture.Db.AddRange(primary, folded, tcr, procedure, revision);
+    await fixture.Db.SaveChangesAsync();
+
+    var successor = tcr.StartNextRevision("verification.engineer", now.AddMinutes(3), false);
+    tcr.Supersede(successor.Id, "Procedure package revision opened.", now.AddMinutes(3));
+    fixture.Db.Add(successor);
+    await fixture.Db.SaveChangesAsync();
+    Assert.Empty(await fixture.Db.TestChangeRequestClaims.AsNoTracking()
+        .Where(x => x.TestChangeReviewId == tcr.Id).ToListAsync());
+
+    var result = await TestProcedureProvenanceProjection.ForRevisionsAsync(
+        fixture.Db, [revision.Id], CancellationToken.None);
+    var provenance = result[revision.Id];
+    Assert.Equal("SYSTCR-04255.00", provenance.Package);
+    Assert.Null(provenance.Note);
+    Assert.Equal(new[] { primary.DisplayNumber, folded.DisplayNumber },
+        provenance.Drivers.Select(x => x.ChangeRequest).OrderBy(x => x).ToArray());
+    Assert.All(provenance.Drivers, row => Assert.Equal("PackageSource", row.Action));
+}
 
     [Fact]
     public async Task Legacy_revision_remains_readable_without_an_invented_package()

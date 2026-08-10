@@ -7,10 +7,9 @@ namespace AeroLink.Infrastructure.Persistence;
 /// The immutable human-readable title belonging to one exact procedure revision.
 ///
 /// Controlled revisions produced by a TCR take their title from the exact approved procedure-change snapshot
-/// that produced them. A retirement carries the nearest predecessor title because it withdraws that procedure
-/// rather than asking the engineer to restate it. Revisions that predate controlled TCR provenance cannot be
-/// assigned today's mutable catalog title as though it were historical truth; they receive a deterministic,
-/// revision-specific compatibility label instead.
+/// that produced them. A retirement always carries the nearest predecessor title because it withdraws that
+/// procedure rather than authorizing a rename. Revisions that predate controlled TCR provenance receive a
+/// deterministic, revision-specific compatibility label rather than today's mutable catalog title.
 /// </summary>
 public sealed record TestProcedureRevisionTitleSnapshot(
     Guid RevisionId,
@@ -40,8 +39,6 @@ public static class TestProcedureRevisionTitleProjection
                                    }).ToListAsync(ct);
         var procedureIds = requestedRows.Select(x => x.ProcedureId).Distinct().ToList();
 
-        // Retirement title inheritance may need a predecessor that was not part of the caller's bounded set,
-        // so resolve the complete small revision chain for only the requested procedure identities.
         var chains = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                             join procedure in db.TestProcedures.AsNoTracking()
                                 on revision.ProcedureId equals procedure.Id
@@ -86,17 +83,22 @@ public static class TestProcedureRevisionTitleProjection
                 else if (changeByRevision.TryGetValue(
                              (sourceTcrId, revision.BaseNumber.ToUpperInvariant(), revision.Revision), out var change))
                 {
-                    if (!string.IsNullOrWhiteSpace(change.Title))
+                    if (change.Kind == TestProcedureChangeKind.Retire)
+                    {
+                        snapshot = predecessor is not null
+                            ? new(revision.Id, predecessor.Title,
+                                predecessor.IsExact, predecessor.IsLegacy,
+                                predecessor.IsExact
+                                    ? "Retirement revision — title preserved from the exact predecessor being retired."
+                                    : "Retirement revision — the predecessor compatibility label is preserved because no exact historical title exists.")
+                            : new(revision.Id,
+                                UnavailableTitle(revision.BaseNumber, revision.Revision, legacy: false),
+                                false, false,
+                                "The TCR records a retirement, but no predecessor title can be resolved; supplied retirement text is not treated as exact.");
+                    }
+                    else if (!string.IsNullOrWhiteSpace(change.Title))
                     {
                         snapshot = new(revision.Id, change.Title.Trim(), true, false, null);
-                    }
-                    else if (change.Kind == TestProcedureChangeKind.Retire && predecessor is not null)
-                    {
-                        snapshot = new(revision.Id, predecessor.Title,
-                            predecessor.IsExact, predecessor.IsLegacy,
-                            predecessor.IsExact
-                                ? "Retirement revision — title preserved from the exact predecessor being retired."
-                                : "Retirement revision — the predecessor's deterministic compatibility label is preserved because no exact historical title exists.");
                     }
                     else
                     {

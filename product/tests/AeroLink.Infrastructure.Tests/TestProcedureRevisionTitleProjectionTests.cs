@@ -33,7 +33,7 @@ public sealed class TestProcedureRevisionTitleProjectionTests
             "SYSTCR-04210", 1, TestProcedureChangeKind.Modify,
             "Verify route sequencing and discontinuities", now.AddMinutes(1));
         var retire = Review(project.Id, release.Id, change.Id, change.DisplayNumber,
-            "SYSTCR-04210", 2, TestProcedureChangeKind.Retire, "", now.AddMinutes(2));
+            "SYSTCR-04210", 2, TestProcedureChangeKind.Retire, "Forged retirement rename", now.AddMinutes(2));
 
         var revision00 = Revision(procedure.Id, 0, introduce.Id, now);
         var revision01 = Revision(procedure.Id, 1, modify.Id, now.AddMinutes(1));

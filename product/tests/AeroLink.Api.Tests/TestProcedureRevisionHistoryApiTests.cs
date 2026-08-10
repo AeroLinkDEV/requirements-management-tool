@@ -144,6 +144,21 @@ public sealed class TestProcedureRevisionHistoryApiTests
         Assert.Contains(newSearch.GetProperty("items").EnumerateArray(),
             x => x.GetProperty("kind").GetString() == "test-procedure"
                  && x.GetProperty("title").GetString() == "Verify route sequencing and discontinuities");
+
+var oldArtifact = await JsonAsync(client,
+    $"/api/artifacts/test-procedure/{fixture.ProcedureId}?releaseId={fixture.Release15Id}");
+Assert.Equal("SYSTP-42150.00", oldArtifact.GetProperty("identifier").GetString());
+Assert.Equal("Verify legacy route sequencing", oldArtifact.GetProperty("title").GetString());
+Assert.Equal(fixture.Revision00Id,
+    oldArtifact.GetProperty("details").GetProperty("revisionId").GetGuid());
+
+var newArtifact = await JsonAsync(client,
+    $"/api/artifacts/test-procedure/{fixture.ProcedureId}?releaseId={fixture.Release16Id}");
+Assert.Equal("SYSTP-42150.01", newArtifact.GetProperty("identifier").GetString());
+Assert.Equal("Verify route sequencing and discontinuities",
+    newArtifact.GetProperty("title").GetString());
+Assert.Equal(fixture.Revision01Id,
+    newArtifact.GetProperty("details").GetProperty("revisionId").GetGuid());
     }
 
     [Fact]
