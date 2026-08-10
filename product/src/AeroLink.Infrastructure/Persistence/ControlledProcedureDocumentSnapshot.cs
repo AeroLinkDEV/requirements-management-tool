@@ -1,4 +1,3 @@
-using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
@@ -45,62 +44,71 @@ public static class ControlledProcedureDocumentSnapshotProjection
             .SingleAsync(ct);
         var exact = baseline.TestProceduresMaterializedAt is not null
             && baseline.TestProceduresMaterializedAt <= generatedAt;
+        List<ControlledProcedureDocumentRow> rows;
         if (exact)
         {
-            var rows = await (from member in db.BaselineTestProcedures.AsNoTracking()
-                              where member.BaselineId == baselineId
-                              join revision in db.TestProcedureRevisions.AsNoTracking()
-                                  on member.RevisionId equals revision.Id
-                              join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == level)
-                                  on member.ProcedureId equals procedure.Id
-                              orderby procedure.BaseNumber
-                              select new ControlledProcedureDocumentRow(
-                                  revision.Id,
-                                  procedure.BaseNumber,
-                                  procedure.Title,
-                                  revision.Revision,
-                                  revision.State,
-                                  revision.Objective,
-                                  revision.Preconditions,
-                                  revision.Steps,
-                                  revision.ExpectedResult,
-                                  revision.AuthorId,
-                                  revision.SourceTestChangeRequestId)).ToListAsync(ct);
-            return new(true, rows);
+            rows = await (from member in db.BaselineTestProcedures.AsNoTracking()
+                          where member.BaselineId == baselineId
+                          join revision in db.TestProcedureRevisions.AsNoTracking()
+                              on member.RevisionId equals revision.Id
+                          join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == level)
+                              on member.ProcedureId equals procedure.Id
+                          orderby procedure.BaseNumber
+                          select new ControlledProcedureDocumentRow(
+                              revision.Id,
+                              procedure.BaseNumber,
+                              procedure.Title,
+                              revision.Revision,
+                              revision.State,
+                              revision.Objective,
+                              revision.Preconditions,
+                              revision.Steps,
+                              revision.ExpectedResult,
+                              revision.AuthorId,
+                              revision.SourceTestChangeRequestId)).ToListAsync(ct);
+        }
+        else
+        {
+            // DateTimeOffset ordering is deliberately done in memory for SQLite parity. This path only applies
+            // to legacy records and is bounded to one Project/discipline's controlled procedure inventory.
+            var candidates = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                    join procedure in db.TestProcedures.AsNoTracking()
+                                        on revision.ProcedureId equals procedure.Id
+                                    where procedure.ProjectId == baseline.ProjectId && procedure.Level == level
+                                    select new
+                                    {
+                                        ProcedureId = procedure.Id,
+                                        revision.Id,
+                                        procedure.BaseNumber,
+                                        procedure.Title,
+                                        revision.Revision,
+                                        revision.State,
+                                        revision.Objective,
+                                        revision.Preconditions,
+                                        revision.Steps,
+                                        revision.ExpectedResult,
+                                        revision.AuthorId,
+                                        revision.SourceTestChangeRequestId,
+                                        revision.CreatedAt,
+                                    }).ToListAsync(ct);
+            rows = candidates
+                .Where(x => x.CreatedAt <= generatedAt)
+                .GroupBy(x => x.ProcedureId)
+                .Select(group => group.OrderByDescending(x => x.Revision).First())
+                .Where(x => x.State == TestProcedureState.Approved)
+                .OrderBy(x => x.BaseNumber)
+                .Select(x => new ControlledProcedureDocumentRow(
+                    x.Id, x.BaseNumber, x.Title, x.Revision, x.State, x.Objective, x.Preconditions,
+                    x.Steps, x.ExpectedResult, x.AuthorId, x.SourceTestChangeRequestId))
+                .ToList();
         }
 
-        // DateTimeOffset ordering is deliberately done in memory for SQLite parity. This path only applies to
-        // legacy records and is bounded to one Project/discipline's controlled procedure inventory.
-        var candidates = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                join procedure in db.TestProcedures.AsNoTracking()
-                                    on revision.ProcedureId equals procedure.Id
-                                where procedure.ProjectId == baseline.ProjectId && procedure.Level == level
-                                select new
-                                {
-                                    ProcedureId = procedure.Id,
-                                    revision.Id,
-                                    procedure.BaseNumber,
-                                    procedure.Title,
-                                    revision.Revision,
-                                    revision.State,
-                                    revision.Objective,
-                                    revision.Preconditions,
-                                    revision.Steps,
-                                    revision.ExpectedResult,
-                                    revision.AuthorId,
-                                    revision.SourceTestChangeRequestId,
-                                    revision.CreatedAt,
-                                }).ToListAsync(ct);
-        var legacyRows = candidates
-            .Where(x => x.CreatedAt <= generatedAt)
-            .GroupBy(x => x.ProcedureId)
-            .Select(group => group.OrderByDescending(x => x.Revision).First())
-            .Where(x => x.State == TestProcedureState.Approved)
-            .OrderBy(x => x.BaseNumber)
-            .Select(x => new ControlledProcedureDocumentRow(
-                x.Id, x.BaseNumber, x.Title, x.Revision, x.State, x.Objective, x.Preconditions,
-                x.Steps, x.ExpectedResult, x.AuthorId, x.SourceTestChangeRequestId))
-            .ToList();
-        return new(false, legacyRows);
+        // Exact controlled revisions use the title in their immutable source-TCR snapshot. Legacy revisions
+        // retain the stable catalog title with the projection's explicit compatibility semantics. This prevents
+        // later catalog activity from rewriting a post-controlled document while refusing to invent old truth.
+        var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+            rows.Select(x => x.RevisionId).ToList(), ct);
+        rows = rows.Select(row => row with { Title = titles[row.RevisionId].Title }).ToList();
+        return new(exact, rows);
     }
 }
