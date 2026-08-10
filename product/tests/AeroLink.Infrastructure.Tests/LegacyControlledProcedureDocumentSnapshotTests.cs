@@ -56,6 +56,7 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
             Assert.Contains("Generation-time title", firstXml);
             Assert.Contains("Generation-time objective", firstXml);
             Assert.Contains("Legacy generation-time compatibility snapshot", firstXml);
+            Assert.Contains("Not materialized when this document was generated", firstXml);
 
             // Later activity that used to rewrite the old document: a new approved revision appears and the
             // stable catalog title changes. The old document must remain bound to what existed at GeneratedAt.
@@ -132,7 +133,67 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
         Assert.Equal("SYSTP-419910", row.BaseNumber);
         Assert.Equal(0, row.Revision);
         Assert.Equal(TestProcedureState.Approved, row.State);
+        Assert.Equal("Legacy procedure SYSTP-419910.00 — exact historical title was not recorded", row.Title);
         Assert.DoesNotContain(snapshot.Rows, x => x.BaseNumber == "SYSTP-419911");
+    }
+
+    [Fact]
+    public async Task A_pre_manifest_unattributed_title_and_manifest_metadata_do_not_drift_after_later_materialization()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var t0 = new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
+        var generatedAt = t0.AddHours(1);
+        var later = generatedAt.AddHours(1);
+        var program = new ProgramRecord("Legacy metadata immutability", "LMI");
+        var project = new ProjectRecord(program.Id, "Legacy metadata project", "Legacy metadata product");
+        var release = new SoftwareRelease(project.Id, "4.2", false);
+        var baseline = new CandidateBaseline("SW-42.00", 0, project.Id, release.Id, null,
+            "Pre-manifest baseline", "cm", t0);
+        var procedure = new TestProcedure(project.Id, "SYSTP-419920", "Catalog title at generation",
+            "verification.engineer", t0, TestProcedureLevel.System);
+        var revision = new TestProcedureRevision(procedure.Id, 0, "Legacy objective",
+            "Legacy preconditions", "Legacy steps", "Legacy expected result",
+            TestProcedureState.Approved, "verification.engineer", t0);
+        var document = new ControlledDocument(project.Id, release.Id, baseline.Id,
+            ControlledDocumentType.SystemTestProcedures, "SYSTD-419920",
+            "Legacy Unattributed Procedures", 0, new string('c', 64), 1, generatedAt);
+        db.AddRange(program, project, release, baseline, procedure, revision, document);
+        await db.SaveChangesAsync();
+
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-legacy-metadata-{Guid.NewGuid():N}");
+        try
+        {
+            var generator = new ControlledOutputGenerator(db,
+                new RichContentPublisher(db, new EvidenceFileStore(root)));
+            var first = Assert.IsType<GeneratedOutput>(
+                await generator.GenerateAsync(document.Id, "docx", CancellationToken.None));
+            var firstXml = DocumentXml(first);
+            Assert.Contains("Legacy procedure SYSTP-419920.00 — exact historical title was not recorded", firstXml);
+            Assert.Contains("Not materialized when this document was generated", firstXml);
+
+            procedure.UpdateDraft("Later mutable catalog title", procedure.OwnerId, later);
+            await db.SaveChangesAsync();
+            var laterHash = new string('f', 64);
+            await db.CandidateBaselines.Where(x => x.Id == baseline.Id)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.TestProceduresMaterializedAt, (DateTimeOffset?)later)
+                    .SetProperty(x => x.TestProceduresHash, laterHash));
+
+            var second = Assert.IsType<GeneratedOutput>(
+                await generator.GenerateAsync(document.Id, "docx", CancellationToken.None));
+            var secondXml = DocumentXml(second);
+            Assert.Equal(firstXml, secondXml);
+            Assert.DoesNotContain("Later mutable catalog title", secondXml);
+            Assert.DoesNotContain(laterHash, secondXml);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     private static TestChangeReview Review(Guid projectId, Guid releaseId, Guid sourceChangeRequestId,
