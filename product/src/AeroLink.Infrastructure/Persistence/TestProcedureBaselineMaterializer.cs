@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Common;
@@ -101,9 +99,9 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
         var procedureById = procedureByBase.Values.ToDictionary(x => x.Id);
         foreach (var item in current.OrderBy(x => procedureById[x.Key].BaseNumber))
             db.BaselineTestProcedures.Add(new BaselineTestProcedureSelection(baseline.Id, item.Key, item.Value.Id));
-        var manifest = string.Join(";", current.OrderBy(x => procedureById[x.Key].BaseNumber)
-            .Select(x => $"{procedureById[x.Key].BaseNumber}.{x.Value.Revision:D2}:{x.Value.Id}"));
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
+        var manifestEntries = current.Select(x => new TestProcedureManifestEntry(
+            x.Key, x.Value.Id, procedureById[x.Key].BaseNumber, x.Value.Revision));
+        var hash = TestProcedureManifest.Hash(manifestEntries);
         baseline.MarkTestProceduresMaterialized(actorId, hash, current.Count, now);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -127,44 +125,19 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
                           ?? throw new DomainException("The predecessor baseline does not exist.");
         if (predecessor.ProjectId != baseline.ProjectId)
             throw new DomainException("The predecessor must be a baseline from the same project.");
-        // A predecessor from before build-scoped manifests existed has no members, and reading that as "it
-        // carried no procedures" is only truthful for a project that genuinely has none. For one that already
-        // holds a controlled procedure inventory it would publish a manifest omitting all of it, which claims
-        // the build contains far less than it does. So the inventory is carried forward as the starting point.
-        //
-        // What this establishes is a migration snapshot, not evidence that the predecessor always held exactly
-        // these revisions — nothing recorded that, and inventing it would be worse than the gap. It is taken
-        // once: the successor's own manifest is immutable from the moment it is written.
+        // A missing predecessor manifest is not an empty manifest. It is an unresolved migration boundary:
+        // only the explicit, attributable legacy-bootstrap action may turn the old controlled inventory into
+        // exact predecessor membership. Silently consulting today's inventory here would claim historical
+        // precision while materializing an unrelated successor.
         if (predecessor.TestProceduresMaterializedAt is null)
-            return await LegacyInventoryAsync(baseline.ProjectId, ct);
+            throw new DomainException(
+                $"Predecessor {predecessor.DisplayNumber} has no exact procedure manifest. A Configuration Manager must establish its legacy bootstrap snapshot before this successor can materialize procedures.");
         var items = await db.BaselineTestProcedures.AsNoTracking().Where(x => x.BaselineId == predecessor.Id).ToListAsync(ct);
         var revisionIds = items.Select(x => x.RevisionId).ToList();
         var revisions = await db.TestProcedureRevisions.AsNoTracking()
             .Where(x => revisionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
         foreach (var item in items) current[item.ProcedureId] = revisions[item.RevisionId];
         return current;
-    }
-
-    /// <summary>
-    /// The project's controlled procedures as they stand, used as the starting point when no predecessor
-    /// manifest exists.
-    ///
-    /// One revision per procedure: the highest-numbered approved one. A procedure whose latest revision is
-    /// retired is left out, because it is not something the build carries. Deterministic, so two runs on the
-    /// same data produce the same manifest hash.
-    /// </summary>
-    private async Task<Dictionary<Guid, TestProcedureRevision>> LegacyInventoryAsync(Guid projectId, CancellationToken ct)
-    {
-        var revisions = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                               join procedure in db.TestProcedures.AsNoTracking()
-                                   on revision.ProcedureId equals procedure.Id
-                               where procedure.ProjectId == projectId
-                               select revision).ToListAsync(ct);
-        return revisions
-            .GroupBy(x => x.ProcedureId)
-            .Select(group => group.OrderByDescending(x => x.Revision).First())
-            .Where(x => x.State == TestProcedureState.Approved)
-            .ToDictionary(x => x.ProcedureId);
     }
 
     /// <summary>
