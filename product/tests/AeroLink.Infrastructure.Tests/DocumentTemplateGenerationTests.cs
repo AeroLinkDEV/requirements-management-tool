@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -167,6 +168,39 @@ public sealed class DocumentTemplateGenerationTests(ShowcaseDatabaseFixture show
             var xml = await DocumentXmlAsync((await Generator(db).GenerateAsync(document.Id, "docx", default))!);
             Assert.Contains("Controlled Records", xml);
             Assert.Contains("Fallback title", xml);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
+    public async Task A_procedure_document_keeps_its_exact_manifest_records_after_unrelated_activity()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            await using var db = new AeroLinkDbContext(seed.Options);
+            var document = await db.ControlledDocuments.AsNoTracking()
+                .FirstAsync(x => x.BaselineId == seed.BaselineId
+                                 && x.Type == ControlledDocumentType.SystemTestProcedures);
+            var before = await DocumentXmlAsync((await Generator(db).GenerateAsync(document.Id, "docx", default))!);
+            // #420: the procedure document names its source TCR provenance and TCR approval authority rather
+            // than substituting requirement-change approvers for procedure authority.
+            Assert.Contains("Source test change request", before);
+
+            // Unrelated later activity: an approved procedure revision that is NOT part of the released
+            // baseline's exact manifest must not appear in, or change, the already-created document.
+            var now = DateTimeOffset.UtcNow;
+            var unrelated = new TestProcedure(seed.ProjectId, "SYSTP-099999", "Uncarried later procedure",
+                "verification.engineer", now, TestProcedureLevel.System);
+            db.TestProcedures.Add(unrelated);
+            db.TestProcedureRevisions.Add(new TestProcedureRevision(unrelated.Id, 0, "Later objective",
+                "Preconditions", "Steps", "Expected", TestProcedureState.Approved, "verification.engineer", now,
+                effectiveBaselineId: seed.BaselineId));
+            await db.SaveChangesAsync();
+
+            var after = await DocumentXmlAsync((await Generator(db).GenerateAsync(document.Id, "docx", default))!);
+            Assert.Equal(before, after);
+            Assert.DoesNotContain("SYSTP-099999", after);
         }
         finally { File.Delete(seed.Path); }
     }
