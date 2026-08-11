@@ -416,6 +416,7 @@ public static class ProblemReportEndpoints
             generatedAt = DateTimeOffset.UtcNow,
             generatorVersion = "AeroLink-3.0",
             snapshot = new { candidate.Id, candidate.ReportRevision, candidate.SchemaVersion,
+                candidate.ReportSnapshotSchemaVersion,
                 candidate.PackageProvenance, candidate.ClosurePackageHash, candidate.ApprovedByAccountId,
                 candidate.ApprovedBy, candidate.ApprovedAt,
                 approvalAuthority = ClosureApprovalAuthority(candidate.ClosurePackageJson) },
@@ -505,7 +506,7 @@ public static class ProblemReportEndpoints
             && link.ArtifactId == x.ResolutionVerificationExecutionId).Select(LinkResponse).ToList();
         var now = DateTimeOffset.UtcNow; var waiverHistory = (releaseWaivers ?? []).ToList();
         var activeWaiver = waiverHistory.FirstOrDefault(item => item.IsActiveFor(x, now));
-        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.CorrectiveAction, x.Workaround, type = x.Type.ToString(), x.SystemAircraftImpact, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), capabilities, links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotHash, x.OccurredAt }) };
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.CorrectiveAction, x.Workaround, type = x.Type.ToString(), x.SystemAircraftImpact, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotSchemaVersion, x.SnapshotHash, x.SnapshotJson, x.OccurredAt }) };
     }
 
     private static object WaiverResponse(ReadinessWaiver item, ProblemReport report, DateTimeOffset now) => new
@@ -521,6 +522,7 @@ public static class ProblemReportEndpoints
         candidate.ReportRevision,
         candidate.Sequence,
         candidate.SchemaVersion,
+        candidate.ReportSnapshotSchemaVersion,
         candidate.ReportVersion,
         candidate.VerificationExecutionId,
         candidate.ManifestHash,

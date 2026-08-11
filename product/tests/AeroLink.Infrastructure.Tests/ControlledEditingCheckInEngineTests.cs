@@ -409,15 +409,37 @@ public sealed class ControlledEditingCheckInEngineTests
     {
         await using var scenario = await Scenario.CreateAsync();
         var report = new ProblemReport(scenario.Project.Id, "PR-00001", "Unexpected reset", "The unit reset unexpectedly.", "Initial analysis", scenario.Actor.UserName, scenario.Now);
-        scenario.Db.ProblemReports.Add(report); await scenario.Db.SaveChangesAsync();
+        const string legacyJson = "{\"Id\":\"legacy\",\"Title\":\"Before canonical evidence\"}";
+        var legacyHash = new string('a', 64);
+        var legacy = new ProblemReportRevision(report.Id, report.Revision, "LegacyImported", "system",
+            legacyHash, legacyJson, scenario.Now, snapshotSchemaVersion: 0);
+        scenario.Db.AddRange(report, legacy); await scenario.Db.SaveChangesAsync();
         var adapter = new ProblemReportControlledEditingAdapter(scenario.Db);
-        var draft = JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, title = "Reset under recovery load", problem = "The unit reset during recovery load.", analysis = "Latest root-cause analysis", report.ReportedBy, state = report.State.ToString(), version = report.Version });
+        const string workaround = "Use redundant input until correction is released.";
+        var draft = JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, title = "Reset under recovery load", problem = "The unit reset during recovery load.", analysis = "Latest root-cause analysis", report.ReportedBy, state = report.State.ToString(), version = report.Version, type = "Code", workaround });
 
         var result = await CheckInAsync(scenario, adapter, "ProblemReport", report.Id, draft);
 
         Assert.True(result.Success); scenario.Db.ChangeTracker.Clear();
-        Assert.Equal("Latest root-cause analysis", (await scenario.Db.ProblemReports.SingleAsync(x => x.Id == report.Id)).Analysis);
+        var saved = await scenario.Db.ProblemReports.SingleAsync(x => x.Id == report.Id);
+        Assert.Equal("Latest root-cause analysis", saved.Analysis);
+        Assert.Equal(ProblemReportType.Code, saved.Type);
+        Assert.Equal(workaround, saved.Workaround);
         Assert.Equal("ProblemReportControlledEditingAdapter", (await scenario.Db.ControlledArtifactCheckInEvidence.SingleAsync(x => x.Id == result.EvidenceId)).Adapter);
+        var revisions = await scenario.Db.ProblemReportRevisions.Where(x => x.ProblemReportId == report.Id).ToListAsync();
+        var checkedIn = Assert.Single(revisions, x => x.EventType == "DetailsCheckedIn");
+        Assert.Equal(ProblemReportEvidenceContract.SchemaVersion, checkedIn.SnapshotSchemaVersion);
+        Assert.Equal(saved.CanonicalHash(), checkedIn.SnapshotHash);
+        Assert.Equal(saved.CanonicalSnapshot(), checkedIn.SnapshotJson);
+        using (var evidence = JsonDocument.Parse(checkedIn.SnapshotJson))
+        {
+            Assert.Equal("Code", evidence.RootElement.GetProperty("type").GetString());
+            Assert.Equal(workaround, evidence.RootElement.GetProperty("workaround").GetString());
+        }
+        var retainedLegacy = Assert.Single(revisions, x => x.EventType == "LegacyImported");
+        Assert.Equal(0, retainedLegacy.SnapshotSchemaVersion);
+        Assert.Equal(legacyJson, retainedLegacy.SnapshotJson);
+        Assert.Equal(legacyHash, retainedLegacy.SnapshotHash);
     }
 
     [Fact]

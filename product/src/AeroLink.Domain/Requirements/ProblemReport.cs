@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using AeroLink.Domain.Common;
 
 namespace AeroLink.Domain.Requirements;
@@ -37,14 +35,15 @@ public sealed class ProblemReportClosureCandidate
         int schemaVersion, long reportVersion, string reportSnapshotJson, string reportSnapshotHash,
         Guid verificationExecutionId, string verificationEvidenceJson, string verificationEvidenceHash,
         string linksManifestJson, string linksManifestHash, string manifestHash,
-        string selectedBy, DateTimeOffset selectedAt)
+        string selectedBy, DateTimeOffset selectedAt, int reportSnapshotSchemaVersion)
     {
         if (problemReportId == Guid.Empty || verificationExecutionId == Guid.Empty)
             throw new DomainException("A closure candidate requires its Problem Report and verification execution.");
-        if (sequence < 1 || schemaVersion < 1 || reportVersion < 1)
+        if (sequence < 1 || schemaVersion < 1 || reportVersion < 1 || reportSnapshotSchemaVersion < 1)
             throw new DomainException("A closure candidate requires a valid sequence, schema, and Problem Report version.");
         Id = Guid.NewGuid(); ProblemReportId = problemReportId; ReportRevision = reportRevision;
         Sequence = sequence; SchemaVersion = schemaVersion; ReportVersion = reportVersion;
+        ReportSnapshotSchemaVersion = reportSnapshotSchemaVersion;
         ReportSnapshotJson = Required(reportSnapshotJson); ReportSnapshotHash = Hash(reportSnapshotHash);
         VerificationExecutionId = verificationExecutionId;
         VerificationEvidenceJson = Required(verificationEvidenceJson); VerificationEvidenceHash = Hash(verificationEvidenceHash);
@@ -59,6 +58,7 @@ public sealed class ProblemReportClosureCandidate
     public int ReportRevision { get; private set; }
     public int Sequence { get; private set; }
     public int SchemaVersion { get; private set; }
+    public int ReportSnapshotSchemaVersion { get; private set; }
     public long ReportVersion { get; private set; }
     public string ReportSnapshotJson { get; private set; } = "";
     public string ReportSnapshotHash { get; private set; } = "";
@@ -116,10 +116,13 @@ public sealed class ProblemReportRevision
 {
     private ProblemReportRevision() { }
     public ProblemReportRevision(Guid problemReportId, int revision, string eventType, string actor,
-        string snapshotHash, string snapshotJson, DateTimeOffset occurredAt)
+        string snapshotHash, string snapshotJson, DateTimeOffset occurredAt,
+        int snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion)
     {
         Id = Guid.NewGuid(); ProblemReportId = problemReportId; Revision = revision; EventType = Required(eventType);
-        Actor = Required(actor); SnapshotHash = Required(snapshotHash); SnapshotJson = Required(snapshotJson); OccurredAt = occurredAt;
+        if (snapshotSchemaVersion < 0) throw new DomainException("A Problem Report snapshot schema cannot be negative.");
+        Actor = Required(actor); SnapshotHash = Required(snapshotHash); SnapshotJson = Required(snapshotJson);
+        SnapshotSchemaVersion = snapshotSchemaVersion; OccurredAt = occurredAt;
     }
     public Guid Id { get; private set; }
     public Guid ProblemReportId { get; private set; }
@@ -128,6 +131,7 @@ public sealed class ProblemReportRevision
     public string Actor { get; private set; } = "";
     public string SnapshotHash { get; private set; } = "";
     public string SnapshotJson { get; private set; } = "";
+    public int SnapshotSchemaVersion { get; private set; }
     public DateTimeOffset OccurredAt { get; private set; }
     private static string Required(string? value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("Problem-report evidence is required.") : value.Trim();
 }
@@ -360,11 +364,8 @@ public sealed class ProblemReport
         Disposition = null; DispositionRationale = ""; State = ProblemReportState.Open; Touch(now);
     }
 
-    public string CanonicalSnapshot() => string.Join("|", Id, ProjectId, DisplayNumber, Title, Problem, ProblemRich, AdditionalInformation,
-        AdditionalInformationRich, Analysis, ReportedBy, ResponsibleEngineerId, TargetReleaseId, Classification, Severity, Priority, Origin,
-        AffectedConfiguration, RootCause, Effects, Containment, CorrectiveAction, SystemAircraftImpact, ImpactAssessmentJson, Disposition,
-        DispositionRationale, ResolutionVerificationExecutionId, State, IsReleaseBlocker, ReleaseBlockerVersion, WaiverRationale, Version);
-    public string CanonicalHash() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(CanonicalSnapshot()))).ToLowerInvariant();
+    public string CanonicalSnapshot() => ProblemReportEvidenceContract.Serialize(this);
+    public string CanonicalHash() => ProblemReportEvidenceContract.Hash(this);
     public bool InvalidateClosureVerification(string actor, DateTimeOffset now)
     {
         Required(actor, "An invalidation actor is required.");

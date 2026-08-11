@@ -81,22 +81,26 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
   await expect(editor).toBeVisible({ timeout: 30_000 })
   await expect(editor.getByText('CONTROLLED DRAFT / EXCLUSIVE LEASE')).toBeVisible()
-  const corrected = `Autopilot disconnect tone lags the disconnect ${stamp}`
-  await editor.getByLabel('Title').fill(corrected)
-  await editor.getByLabel('Root cause').fill('The tone is queued behind the mode-annunciation refresh.')
-  await editor.getByLabel('Priority').selectOption('Urgent')
+  const workaround = `Use the redundant aural channel until build ${stamp} is released.`
+  // Only these controlled values change. The evidence must bind the values themselves, not merely the
+  // aggregate version increment caused by check-in.
+  await editor.getByLabel('Type').selectOption('Code')
+  await editor.getByLabel('Workaround').fill(workaround)
   await editor.getByRole('button', { name: 'Check in' }).click()
   await expect(editor).toHaveCount(0, { timeout: 30_000 })
 
-  await expect(page.getByRole('heading', { name: corrected })).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText('Urgent priority')).toBeVisible()
+  await expect(page.getByRole('heading', { name: `Autopilot disconnect tone lags ${stamp}` })).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.prIdentity').getByText('Code', { exact: true })).toBeVisible()
   // The lifecycle did not move because the record was corrected.
   await expect(page.locator('.prState')).toHaveText('Open')
 
   // A record, not a screen state: it survives a reload, and it is in the report's own History.
   await page.reload({ waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: corrected })).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText('The tone is queued behind the mode-annunciation refresh.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: `Autopilot disconnect tone lags ${stamp}` })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(workaround)).toBeVisible()
   await page.getByRole('button', { name: /History/ }).click()
-  await expect(page.locator('.prTimeline').getByText('Details Checked In')).toBeVisible()
+  const checkIn = page.locator('.prTimeline article').filter({ hasText: 'Details Checked In' })
+  await expect(checkIn).toContainText('Snapshot schema 2')
+  await expect(checkIn).toContainText('Type Code')
+  await expect(checkIn).toContainText(`Workaround ${workaround}`)
 })

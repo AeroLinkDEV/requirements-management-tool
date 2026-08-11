@@ -23,8 +23,8 @@ public sealed record ProblemReportClosureCandidateDecision(
 /// </summary>
 public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
 {
-    public const int SchemaVersion = 1;
-    public const int ClosurePackageSchemaVersion = 3;
+    public const int SchemaVersion = 2;
+    public const int ClosurePackageSchemaVersion = 4;
 
     public async Task<ProblemReportClosureCandidate> CreateAsync(ProblemReport report,
         TestExecution execution, ProblemReportLink resolutionLink, string actor, DateTimeOffset now,
@@ -41,8 +41,8 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
             .Where(item => item.ProblemReportId == report.Id && item.ReportRevision == report.Revision)
             .Select(item => item.Sequence).ToListAsync(ct);
         var reportJson = ReportSnapshot(report);
-        var evidenceJson = VerificationEvidence(execution);
-        var linksJson = await LinksManifestAsync(report.Id, resolutionLink, ct);
+        var evidenceJson = VerificationEvidence(execution, SchemaVersion);
+        var linksJson = await LinksManifestAsync(report.Id, resolutionLink, SchemaVersion, ct);
         var reportHash = Hash(reportJson);
         var evidenceHash = Hash(evidenceJson);
         var linksHash = Hash(linksJson);
@@ -53,6 +53,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
             problemReportId = report.Id,
             reportRevision = report.Revision,
             reportVersion = report.Version,
+            reportSnapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion,
             reportHash,
             verificationExecutionId = execution.Id,
             evidenceHash,
@@ -63,7 +64,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         var candidate = new ProblemReportClosureCandidate(report.Id, report.Revision,
             sequences.DefaultIfEmpty(0).Max() + 1, SchemaVersion, report.Version,
             reportJson, reportHash, execution.Id, evidenceJson, evidenceHash, linksJson, linksHash,
-            manifestHash, actor, now);
+            manifestHash, actor, now, ProblemReportEvidenceContract.SchemaVersion);
         db.ProblemReportClosureCandidates.Add(candidate);
         return candidate;
     }
@@ -97,11 +98,12 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
             return ProblemReportClosureCandidateDecision.Reject("pr_closure_candidate_stale",
                 "The SQA closure candidate was invalidated by a later change. Record new verification before closure.", candidate);
         if (candidate.ReportVersion != report.Version
-            || !string.Equals(candidate.ReportSnapshotHash, Hash(ReportSnapshot(report)), StringComparison.Ordinal))
+            || !string.Equals(candidate.ReportSnapshotHash,
+                Hash(ReportSnapshotForSchema(report, candidate.ReportSnapshotSchemaVersion)), StringComparison.Ordinal))
             return ProblemReportClosureCandidateDecision.Reject("pr_closure_candidate_stale",
                 "The Problem Report changed after its closure candidate was selected. Record new verification before closure.", candidate);
 
-        var linksJson = await LinksManifestAsync(report.Id, additionalLink: null, ct);
+        var linksJson = await LinksManifestAsync(report.Id, additionalLink: null, candidate.SchemaVersion, ct);
         if (!string.Equals(candidate.LinksManifestHash, Hash(linksJson), StringComparison.Ordinal))
             return ProblemReportClosureCandidateDecision.Reject("pr_closure_candidate_stale",
                 "The Problem Report evidence relationships changed after verification. Record new verification before closure.", candidate);
@@ -109,7 +111,8 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         var execution = await db.TestExecutions.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == candidate.VerificationExecutionId, ct);
         if (execution is null
-            || !string.Equals(candidate.VerificationEvidenceHash, Hash(VerificationEvidence(execution)), StringComparison.Ordinal))
+            || !string.Equals(candidate.VerificationEvidenceHash,
+                Hash(VerificationEvidence(execution, candidate.SchemaVersion)), StringComparison.Ordinal))
             return ProblemReportClosureCandidateDecision.Reject("pr_closure_candidate_stale",
                 "The selected verification evidence no longer matches the SQA closure candidate.", candidate);
         return ProblemReportClosureCandidateDecision.Accept(candidate);
@@ -136,6 +139,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
             contract = "aerolink.problem-report-closure-package",
             schemaVersion = ClosurePackageSchemaVersion,
             candidateSchemaVersion = candidate.SchemaVersion,
+            reportSnapshotSchemaVersion = candidate.ReportSnapshotSchemaVersion,
             provenance = "FrozenAtApproval",
             candidate = new
             {
@@ -144,6 +148,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
                 reportRevision = candidate.ReportRevision,
                 sequence = candidate.Sequence,
                 reportVersion = candidate.ReportVersion,
+                reportSnapshotSchemaVersion = candidate.ReportSnapshotSchemaVersion,
                 manifestHash = candidate.ManifestHash,
                 selectedBy = candidate.SelectedBy,
                 selectedAt = candidate.SelectedAt,
@@ -156,6 +161,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
                 displayNumber = report.DisplayNumber,
                 revision = report.Revision,
                 version = report.Version,
+                reportSnapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion,
                 reportSnapshotJson = finalReportJson,
                 reportSnapshotHash = Hash(finalReportJson),
                 approvedByAccountId = actorAccountId,
@@ -195,6 +201,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
                 revision = item.Revision,
                 eventType = item.EventType,
                 actor = item.Actor,
+                snapshotSchemaVersion = item.SnapshotSchemaVersion,
                 snapshotHash = item.SnapshotHash,
                 snapshotJson = item.SnapshotJson,
                 occurredAt = item.OccurredAt,
@@ -203,10 +210,21 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         candidate.Approve(actor, actorAccountId, now, packageJson, Hash(packageJson));
     }
 
-    public static string ReportSnapshot(ProblemReport report) => JsonSerializer.Serialize(new
+    public static string ReportSnapshot(ProblemReport report) => ProblemReportEvidenceContract.Serialize(report);
+
+    private static string ReportSnapshotForSchema(ProblemReport report, int schemaVersion) => schemaVersion switch
+    {
+        ProblemReportEvidenceContract.SchemaVersion => ReportSnapshot(report),
+        1 => LegacyV1ReportSnapshot(report),
+        _ => throw new InvalidOperationException($"Problem Report snapshot schema {schemaVersion} is not supported."),
+    };
+
+    // Reader/validator only. Existing v1 candidates keep the exact contract they were selected under; no new
+    // evidence is written through this independently maintained legacy projection.
+    private static string LegacyV1ReportSnapshot(ProblemReport report) => JsonSerializer.Serialize(new
     {
         contract = "aerolink.problem-report-closure-review",
-        schemaVersion = SchemaVersion,
+        schemaVersion = 1,
         report.Id,
         report.ProjectId,
         report.ReportNumber,
@@ -249,7 +267,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
     });
 
     private async Task<string> LinksManifestAsync(Guid reportId, ProblemReportLink? additionalLink,
-        CancellationToken ct)
+        int schemaVersion, CancellationToken ct)
     {
         var links = await db.ProblemReportLinks.AsNoTracking()
             .Where(item => item.ProblemReportId == reportId).ToListAsync(ct);
@@ -257,7 +275,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         return JsonSerializer.Serialize(new
         {
             contract = "aerolink.problem-report-closure-links",
-            schemaVersion = SchemaVersion,
+            schemaVersion,
             problemReportId = reportId,
             links = links.OrderBy(item => item.Relationship, StringComparer.Ordinal)
                 .ThenBy(item => item.ArtifactType, StringComparer.Ordinal)
@@ -275,10 +293,10 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         });
     }
 
-    private static string VerificationEvidence(TestExecution execution) => JsonSerializer.Serialize(new
+    private static string VerificationEvidence(TestExecution execution, int schemaVersion) => JsonSerializer.Serialize(new
     {
         contract = "aerolink.problem-report-closure-verification",
-        schemaVersion = SchemaVersion,
+        schemaVersion,
         execution.Id,
         execution.ProjectId,
         execution.ReleaseId,

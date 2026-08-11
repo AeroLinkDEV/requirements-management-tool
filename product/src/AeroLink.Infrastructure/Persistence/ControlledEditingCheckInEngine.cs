@@ -705,28 +705,14 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
     // Every name is written out in camelCase rather than left to shorthand. The working copy is read by the
     // browser editor, and a snapshot that mixed PascalCase shorthand with explicitly-named camelCase members
     // handed the client a document where half the fields were invisible to it.
-    public static string Snapshot(ProblemReport item, long? versionOverride = null) => JsonSerializer.Serialize(new
-    {
-        id = item.Id, projectId = item.ProjectId, reportNumber = item.ReportNumber, revision = item.Revision,
-        title = item.Title, problem = item.Problem, problemRich = item.ProblemRich,
-        additionalInformation = item.AdditionalInformation, additionalInformationRich = item.AdditionalInformationRich,
-        analysis = item.Analysis, reportedBy = item.ReportedBy, responsibleEngineerId = item.ResponsibleEngineerId,
-        classification = item.Classification, severity = item.Severity.ToString(), priority = item.Priority.ToString(),
-        origin = item.Origin, affectedConfiguration = item.AffectedConfiguration, rootCause = item.RootCause,
-        effects = item.Effects, containment = item.Containment, correctiveAction = item.CorrectiveAction,
-        systemAircraftImpact = item.SystemAircraftImpact, impactAssessmentJson = item.ImpactAssessmentJson,
-        type = item.Type.ToString(), workaround = item.Workaround,
-        disposition = item.Disposition?.ToString(), dispositionRationale = item.DispositionRationale,
-        resolutionVerificationExecutionId = item.ResolutionVerificationExecutionId,
-        isReleaseBlocker = item.IsReleaseBlocker, releaseBlockerVersion = item.ReleaseBlockerVersion, waiverRationale = item.WaiverRationale,
-        state = item.State.ToString(), version = versionOverride ?? item.Version
-    });
+    public static string Snapshot(ProblemReport item, long? versionOverride = null) =>
+        ProblemReportEvidenceContract.Serialize(item, versionOverride);
     /// <summary>
     /// The immutable lifecycle evidence written for the report's History. Shared with the lifecycle
     /// endpoints so a correction made under checkout is recorded exactly like every other change, rather
     /// than in a shape of its own that a reader would have to interpret differently.
     /// </summary>
-    public static string EvidenceSnapshot(ProblemReport report) => JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision, report.DisplayNumber, report.Title, report.Problem, report.ProblemRich, report.AdditionalInformation, report.AdditionalInformationRich, report.Analysis, report.ReportedBy, report.ResponsibleEngineerId, report.TargetReleaseId, report.Classification, severity = report.Severity.ToString(), priority = report.Priority.ToString(), report.Origin, report.AffectedConfiguration, report.RootCause, report.Effects, report.CorrectiveAction, report.SystemAircraftImpact, report.ImpactAssessmentJson, disposition = report.Disposition?.ToString(), report.DispositionRationale, report.ResolutionVerificationExecutionId, report.ClosureApprovedByName, report.ClosureApprovedAt, report.IsReleaseBlocker, report.ReleaseBlockerVersion, report.WaiverRationale, report.WaivedBy, state = report.State.ToString(), report.Version });
+    public static string EvidenceSnapshot(ProblemReport report) => ProblemReportEvidenceContract.Serialize(report);
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var item = (ProblemReport)artifact.Aggregate; var draft = JsonSerializer.Deserialize<ProblemDraft>(draftJson, Options) ?? throw new JsonException("The latest problem-report draft is empty.");
