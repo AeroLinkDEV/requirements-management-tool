@@ -286,7 +286,7 @@ function Write-AeroLinkRemoteDemoLog {
 
 function Get-AeroLinkRemoteDemoPostgresBin {
     param([Parameter(Mandatory)]$Config)
-    return Join-Path $Config.AeroLinkRoot '.local\postgresql\pgsql\bin'
+    return Join-Path $Config.AeroLinkRoot 'product\.local\postgresql\pgsql\bin'
 }
 
 function Test-AeroLinkRemoteDemoPostgresReady {
@@ -300,7 +300,7 @@ function Test-AeroLinkRemoteDemoPostgresReady {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Config,
-        [string]$PostgresBin = (Get-AeroLinkRemoteDemoPostgresBin -Config $Config),
+        [string]$PostgresBin = '',
         [string]$DatabaseHost = '127.0.0.1',
         [int]$DatabasePort = 54329,
         [string]$DatabaseUser = 'postgres',
@@ -308,6 +308,11 @@ function Test-AeroLinkRemoteDemoPostgresReady {
         [scriptblock]$PgIsreadyProbe,
         [scriptblock]$QueryProbe
     )
+    # Parameter default expressions run in the CALLER's scope, so a module-internal
+    # helper is not resolvable there. Resolve the binary path inside the function
+    # instead; an empty PostgresBin previously made the probes fail with an empty
+    # executable path even when PostgreSQL was healthy (#483 handover).
+    if (-not $PostgresBin) { $PostgresBin = Get-AeroLinkRemoteDemoPostgresBin -Config $Config }
     $logDirectory = $Config.LogsPath
     if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
     if ($null -eq $PgIsreadyProbe) {

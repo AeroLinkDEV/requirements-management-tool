@@ -176,6 +176,18 @@ $pgFail = { param($Bin, $DbHost, $DbPort, $DbUser, $Db, $Out, $Err) $false }
 $ready = Test-AeroLinkRemoteDemoPostgresReady -Config (New-TestConfig) -PgIsreadyProbe $pgFail -QueryProbe $queryOk
 Assert-True ($ready.Ready -eq $false -and $ready.PgIsreadyOk -eq $false) 'Readiness: pg_isready failure must not be Ready.'
 
+# Default PostgresBin must resolve inside the function (not in the caller scope):
+# an empty bin previously made the probes fail against a healthy database.
+$capturedBin = ''
+$binCaptureProbe = {
+    param($Bin, $DbHost, $DbPort, $DbUser, $Db, $Out, $Err)
+    $script:capturedBin = $Bin
+    return $true
+}
+$binConfig = New-TestConfig
+$null = Test-AeroLinkRemoteDemoPostgresReady -Config $binConfig -PgIsreadyProbe $binCaptureProbe -QueryProbe $queryOk
+Assert-True ($script:capturedBin -eq (Join-Path $binConfig.AeroLinkRoot 'product\.local\postgresql\pgsql\bin')) "Default PostgresBin must resolve inside the function to the repository runtime; got '$script:capturedBin'."
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Remote-demo recovery regression FAILED ($($failures.Count) failure(s))." -ForegroundColor Red

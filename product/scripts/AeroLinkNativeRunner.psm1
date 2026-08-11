@@ -137,14 +137,21 @@ function Invoke-AeroLinkChildScript {
     $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath) + $ArgumentList
     $argumentLine = (($arguments | ForEach-Object {
-        if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
+        if ($_ -match '\s' -and -not ($_ -match '^".*"$')) { '"' + $_ + '"' } else { $_ }
     }) -join ' ')
     $outputDirectory = Split-Path -Parent $StandardOutput
     if ($outputDirectory -and -not (Test-Path -LiteralPath $outputDirectory)) {
         New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
     }
     $flag = Join-Path $outputDirectory ("timeout-" + [guid]::NewGuid().ToString('N') + ".flag")
-    $child = Start-Process -FilePath $powershell -ArgumentList $argumentLine -WindowStyle Hidden `
+    $marker = Join-Path $outputDirectory ("exit-" + [guid]::NewGuid().ToString('N') + ".txt")
+    $cmd = Join-Path $env:WINDIR 'System32\cmd.exe'
+    # cmd /v:on with delayed expansion (!ERRORLEVEL!) captures the child PowerShell
+    # exit code at execution time into a marker file; Start-Process object ExitCode
+    # is unreliable in Windows PowerShell 5.1 for a polled process.
+    $inner = '"' + $powershell + '" ' + $argumentLine + ' & echo !ERRORLEVEL!> "' + $marker + '"'
+    $wrapped = '/v:on /d /s /c "' + $inner + '"'
+    $child = Start-Process -FilePath $cmd -ArgumentList $wrapped -WindowStyle Hidden `
         -RedirectStandardOutput $StandardOutput -RedirectStandardError $StandardError -PassThru
     $watchdogCommand = "Start-Sleep -Seconds $TimeoutSeconds; Stop-Process -Id $($child.Id) -Force -ErrorAction SilentlyContinue; New-Item -ItemType File -Path '$flag' -Force | Out-Null"
     $watchdog = Start-Process -FilePath $powershell `
@@ -161,13 +168,18 @@ function Invoke-AeroLinkChildScript {
             Detail = "Step '$StepName' (PID $($child.Id)) exceeded $TimeoutSeconds seconds; the owned helper was terminated. Logs: stdout=$StandardOutput stderr=$StandardError"
         }
     }
+    $exitCode = $null
+    if (Test-Path -LiteralPath $marker) {
+        $markerText = (Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue).Trim()
+        if ($markerText -match '^\d+$') { $exitCode = [int]$markerText }
+    }
     return [pscustomobject]@{
-        ExitCode = $child.ExitCode
+        ExitCode = $exitCode
         TimedOut = $false
         ProcessId = $child.Id
         StdOutPath = $StandardOutput
         StdErrPath = $StandardError
-        Detail = "Step '$StepName' (PID $($child.Id)) exited with code $($child.ExitCode). Logs: stdout=$StandardOutput stderr=$StandardError"
+        Detail = "Step '$StepName' (PID $($child.Id)) exited with code $exitCode. Logs: stdout=$StandardOutput stderr=$StandardError"
     }
 }
 
