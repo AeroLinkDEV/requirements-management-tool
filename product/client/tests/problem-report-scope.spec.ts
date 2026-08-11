@@ -2,53 +2,115 @@ import { expect, test } from '@playwright/test'
 import { apiBase, apiLogin, login, showcaseSeed } from './auth'
 
 /**
- * One Problem Report database, read the same from any build.
- *
- * A report names a target build and may be closed during a particular one, but the database of what is open
- * and in work is a Project-level record set. Scoping the queue to the active workspace showed ten reports in
- * Build 1.6 and none in Build 1.5 — not a different view of one database, but what reads as a different
- * database. See DEC-089; this deliberately reverses the build-scoping half of #298.
- *
- * The report is raised against the in-work build through the API so the journey owns a record whose target
- * build is unambiguous, and is then looked for from the build that is *not* its target.
+ * DEC-089: one Project-scoped Problem Report database, with build target as an explicit filter rather than
+ * workspace ownership. Build-owned records keep their ordinary released-build policy; this journey proves
+ * only the deliberate Problem Report exception.
  */
-test('the Problem Report queue is identical in the active and the released build', async ({ page, request }) => {
-  test.setTimeout(120_000)
+test('Problem Reports remain workable and explicitly target-filtered from every build', async ({ page, request }) => {
+  test.setTimeout(240_000)
   await apiLogin(request)
   const showcase = await showcaseSeed(request)
-  const title = `Project-scoped queue check ${Date.now()}`
-  const raised = await request.post(`${apiBase}/api/problem-reports`, {
+  const stamp = Date.now()
+  const title = `Project-scoped correction ${stamp}`
+  const unassignedTitle = `Unassigned Project problem ${stamp}`
+  const workaround = `Use the redundant channel until correction ${stamp} is released.`
+
+  const targeted = await request.post(`${apiBase}/api/problem-reports`, {
     data: {
       projectId: showcase.projectId,
       releaseId: showcase.activeReleaseId,
       title,
-      problem: 'Raised against the in-work build to prove the queue is not filtered by workspace.',
+      problem: 'Raised against Build 1.6 and corrected while the browser stands in Build 1.5.',
     },
   })
-  expect(raised.ok(), await raised.text()).toBeTruthy()
+  expect(targeted.ok(), await targeted.text()).toBeTruthy()
+  const targetedId = (await targeted.json()).id as string
+  const unassigned = await request.post(`${apiBase}/api/problem-reports`, {
+    data: {
+      projectId: showcase.projectId,
+      title: unassignedTitle,
+      problem: 'No target build has been selected for this Project-scoped report.',
+    },
+  })
+  expect(unassigned.ok(), await unassigned.text()).toBeTruthy()
+
+  const openProblemReports = async () => {
+    await page.getByRole('link', { name: 'Problem Reports' }).click()
+    await expect(page.getByRole('heading', { name: 'Problem Report queue' })).toBeVisible({ timeout: 30_000 })
+  }
+  const targetBuild = () => page.getByLabel('Target build').first()
+  const metrics = () => page.locator('.prMetrics article b').allTextContents()
+  const selectTargetBuild = async (value: string) => {
+    const expected = value === 'unassigned'
+      ? (url: URL) => url.searchParams.get('targetUnassigned') === 'true'
+      : (url: URL) => url.searchParams.get('targetReleaseId') === value
+    const [listResponse, dashboardResponse] = await Promise.all([
+      page.waitForResponse(response => response.url().includes('/api/problem-reports?') && expected(new URL(response.url()))),
+      page.waitForResponse(response => response.url().includes('/api/problem-reports/dashboard?') && expected(new URL(response.url()))),
+      targetBuild().selectOption(value),
+    ])
+    const list = await listResponse.json() as { items: unknown[] }
+    const dashboard = await dashboardResponse.json() as { summary: { active: number; releaseBlockers: number; closureAwaitingApproval: number; closed: number } }
+    const expectedMetrics = [dashboard.summary.active, dashboard.summary.releaseBlockers, dashboard.summary.closureAwaitingApproval, dashboard.summary.closed].map(String)
+    await expect(page.locator('.prList button')).toHaveCount(list.items.length)
+    await expect.poll(metrics).toEqual(expectedMetrics)
+    return { rows: list.items.length, metrics: expectedMetrics }
+  }
 
   await login(page)
-  await page.getByRole('link', { name: 'Problem Reports' }).click()
-  await expect(page.getByRole('heading', { name: 'Problem Report queue' })).toBeVisible({ timeout: 30_000 })
-
-  // The heading paints before the queue has loaded, so the record is waited for and only then counted.
-  // Counting first reads zero on a slower runner and fails as "the build lists nothing" when the answer had
-  // simply not arrived yet — which is exactly what this journey did on its first CI run.
+  await openProblemReports()
+  const inWorkScope = await selectTargetBuild(showcase.activeReleaseId)
   await expect(page.locator('.prList').getByText(title)).toBeVisible({ timeout: 30_000 })
-  const inWorkCount = await page.locator('.prList button').count()
-  expect(inWorkCount, 'the in-work build should list the report it raised').toBeGreaterThan(0)
+  await expect(page).toHaveURL(new RegExp(`targetBuild=${showcase.activeReleaseId}`))
 
-  // The released build is a different workspace, not a different database.
+  // Enter the released workspace. Its build-owned surfaces remain read-only, but the Project Problem Report
+  // itself is governed by its own lifecycle, authority and lease.
   await page.getByRole('button', { name: 'Back to Software Builds' }).click()
   await page.getByRole('button', { name: 'Open build 1.5' }).click()
-  await page.getByRole('link', { name: 'Problem Reports' }).click()
-  await expect(page.getByRole('heading', { name: 'Problem Report queue' })).toBeVisible({ timeout: 30_000 })
-
+  await openProblemReports()
+  await expect(page.locator('.problemReportsPage').getByText('Released build · read-only')).toHaveCount(0)
+  const releasedScope = await selectTargetBuild(showcase.activeReleaseId)
   await expect(page.locator('.prList').getByText(title)).toBeVisible({ timeout: 30_000 })
-  expect(await page.locator('.prList button').count(), 'the released build must show the same database').toBe(inWorkCount)
+  expect(releasedScope).toEqual(inWorkScope)
 
-  // And the record itself opens from the build that is not its target, rather than being refused as a
-  // cross-build resource.
   await page.locator('.prList').getByText(title).click()
-  await expect(page.getByText(title).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page).toHaveURL(new RegExp(`${targetedId}.*targetBuild=${showcase.activeReleaseId}`))
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
+  await expect(editor).toBeVisible({ timeout: 30_000 })
+  await editor.getByLabel('Workaround').fill(workaround)
+  await editor.getByRole('button', { name: 'Check in' }).click()
+  await expect(editor).toHaveCount(0, { timeout: 30_000 })
+  await expect(page.getByText(workaround)).toBeVisible({ timeout: 30_000 })
+
+  // The same committed record opens from Build 1.6 without switching workspace to match the PR target.
+  await page.getByRole('button', { name: 'Back to Software Builds' }).click()
+  await page.getByRole('button', { name: 'Open build 1.6' }).click()
+  await openProblemReports()
+  await selectTargetBuild(showcase.activeReleaseId)
+  await page.locator('.prList').getByText(title).click()
+  await expect(page.getByText(workaround)).toBeVisible({ timeout: 30_000 })
+
+  const releasedOption = await targetBuild().locator('option').filter({ hasText: 'released' }).getAttribute('value')
+  expect(releasedOption).toBeTruthy()
+  await selectTargetBuild(releasedOption!)
+  await expect(page.locator('.prList').getByText(title)).toHaveCount(0)
+
+  // Target filter state is addressable and follows browser history rather than silently following workspace.
+  await page.goBack()
+  await expect(targetBuild()).toHaveValue(showcase.activeReleaseId)
+  await expect(page.locator('.prList').getByText(title)).toBeVisible({ timeout: 30_000 })
+  await page.goForward()
+  await expect(targetBuild()).toHaveValue(releasedOption!)
+  await expect(page.locator('.prList').getByText(title)).toHaveCount(0)
+
+  await selectTargetBuild('unassigned')
+  await expect(page.locator('.prList').getByText(unassignedTitle)).toBeVisible({ timeout: 30_000 })
+  await page.locator('.prList').getByText(unassignedTitle).click()
+  await expect(page.locator('.prIdentity').getByText('Not assigned', { exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/targetBuild=unassigned/)
+  await page.reload({ waitUntil: 'load' })
+  await expect(targetBuild()).toHaveValue('unassigned')
+  await expect(page.getByRole('heading', { name: unassignedTitle })).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.prIdentity').getByText('Not assigned', { exact: true })).toBeVisible()
 })

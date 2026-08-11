@@ -100,9 +100,11 @@ public static class ProblemReportEndpoints
         catch (DbUpdateException) { return Results.Conflict(new { error = "A problem report number was allocated concurrently. Retry the create request.", code = "number_allocation_conflict" }); }
     }
 
-    private static async Task<IResult> ListAsync(Guid projectId, Guid? targetReleaseId, string? search, ProblemReportState? state, ProblemReportSeverity? severity, ProblemReportPriority? priority, string? owner, bool? blockersOnly, ProblemReportType? type, int? page, int? pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(Guid projectId, Guid? targetReleaseId, bool? targetUnassigned, string? search, ProblemReportState? state, ProblemReportSeverity? severity, ProblemReportPriority? priority, string? owner, bool? blockersOnly, ProblemReportType? type, int? page, int? pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+        if (targetReleaseId is not null && targetUnassigned == true)
+            return Results.BadRequest(new { error = "Choose either a target build or unassigned Problem Reports, not both." });
         // One Problem Report database, read the same from any build.
         //
         // A report points at a target build and may be closed during a particular one, but the database itself
@@ -114,8 +116,7 @@ public static class ProblemReportEndpoints
         // `targetReleaseId` still filters, but only when a user asks for it. The workspace no longer supplies
         // it silently. This deliberately reverses the build-scoping half of #298; see DEC-089.
         var query = db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId);
-        if (targetReleaseId is not null)
-            query = query.Where(x => db.ProblemReportLinks.Any(link => link.ProblemReportId == x.Id && link.ArtifactType == "Release" && link.ArtifactId == targetReleaseId));
+        query = ApplyTargetFilter(query, targetReleaseId, targetUnassigned, db);
         if (state is not null) query = query.Where(x => x.State == state);
         if (severity is not null) query = query.Where(x => x.Severity == severity);
         if (priority is not null) query = query.Where(x => x.Priority == priority);
@@ -136,14 +137,15 @@ public static class ProblemReportEndpoints
         return Results.Ok(new { page = current, pageSize = size, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)size), items = items.Select(x => Summary(x, activeWaiverIds.Contains(x.Id))) });
     }
 
-    private static async Task<IResult> DashboardAsync(Guid projectId, Guid? targetReleaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> DashboardAsync(Guid projectId, Guid? targetReleaseId, bool? targetUnassigned, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+        if (targetReleaseId is not null && targetUnassigned == true)
+            return Results.BadRequest(new { error = "Choose either a target build or unassigned Problem Reports, not both." });
         var query = db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId);
         // The dashboard counts the same database the list shows. Filtering it by the active build while the
         // list is Project-scoped would give two different answers about one record set.
-        if (targetReleaseId is not null)
-            query = query.Where(x => db.ProblemReportLinks.Any(link => link.ProblemReportId == x.Id && link.ArtifactType == "Release" && link.ArtifactId == targetReleaseId));
+        query = ApplyTargetFilter(query, targetReleaseId, targetUnassigned, db);
         var reports = await query.ToListAsync(ct);
         var now = DateTimeOffset.UtcNow;
         var waiverRows = await db.ReadinessWaivers.AsNoTracking().Where(x => x.ProjectId == projectId
@@ -158,6 +160,15 @@ public static class ProblemReportEndpoints
             byState = reports.GroupBy(x => x.State).OrderBy(x => x.Key).Select(x => new { state = x.Key.ToString(), count = x.Count() }),
             attention = active.OrderByDescending(x => x.IsReleaseBlocker).ThenByDescending(x => x.Severity).ThenBy(x => x.CreatedAt).Take(12).Select(x => Summary(x, IsWaived(x)))
         });
+    }
+
+    private static IQueryable<ProblemReport> ApplyTargetFilter(IQueryable<ProblemReport> query,
+        Guid? targetReleaseId, bool? targetUnassigned, AeroLinkDbContext db)
+    {
+        if (targetReleaseId is not null)
+            return query.Where(report => db.ProblemReportLinks.Any(link => link.ProblemReportId == report.Id
+                && link.ArtifactType == "Release" && link.ArtifactId == targetReleaseId));
+        return targetUnassigned == true ? query.Where(report => report.TargetReleaseId == null) : query;
     }
 
     private static async Task<IResult> LinkedAsync(string artifactType, Guid artifactId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
