@@ -157,7 +157,16 @@ public sealed class BuildScopedWorkspaceApiTests
             problem = "An anomaly raised while Build 1.6 was the active workspace."
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        var reportId = (await created.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("id").GetGuid();
+        var createdReport = await created.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        var reportId = createdReport.GetProperty("id").GetGuid();
+        var reportVersion = createdReport.GetProperty("version").GetInt64();
+        using var unassignedCreated = await client.PostAsJsonAsync("/api/problem-reports", new
+        {
+            projectId = seeded.ProjectId,
+            title = "UNASSIGNED-PROJECT anomaly",
+            problem = "An anomaly whose target build has not been assigned."
+        });
+        Assert.Equal(HttpStatusCode.Created, unassignedCreated.StatusCode);
 
         client.DefaultRequestHeaders.Add("X-AeroLink-Build-Context", seeded.InWorkId.ToString());
         using var fromInWork = await client.GetAsync($"/api/problem-reports?projectId={seeded.ProjectId}");
@@ -174,6 +183,28 @@ public sealed class BuildScopedWorkspaceApiTests
         Assert.Contains("RAISED-AGAINST-ONE-SIX", await fromReleased.Content.ReadAsStringAsync());
         using var detailFromReleased = await client.GetAsync($"/api/problem-reports/{reportId}");
         Assert.Equal(HttpStatusCode.OK, detailFromReleased.StatusCode);
+        using var mutateFromReleased = await client.PostAsJsonAsync(
+            $"/api/problem-reports/{reportId}/ready-for-sccb", new { expectedVersion = reportVersion });
+        Assert.Equal(HttpStatusCode.OK, mutateFromReleased.StatusCode);
+        using var checkoutFromReleased = await client.PostAsJsonAsync("/api/controlled-editing/checkout", new
+        {
+            artifactType = "ProblemReport",
+            artifactId = reportId,
+            leaseMinutes = 15
+        });
+        Assert.Equal(HttpStatusCode.Created, checkoutFromReleased.StatusCode);
+        var checkout = await checkoutFromReleased.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        using var discardFromReleased = await client.PostAsJsonAsync(
+            $"/api/controlled-editing/sessions/{checkout.GetProperty("id").GetGuid()}/discard",
+            new { expectedVersion = checkout.GetProperty("version").GetInt64(), reason = "Released-context contract proof." });
+        Assert.Equal(HttpStatusCode.NoContent, discardFromReleased.StatusCode);
+        using var refusedBuildOwnedCheckout = await client.PostAsJsonAsync("/api/controlled-editing/checkout", new
+        {
+            artifactType = "DocumentTemplate",
+            artifactId = Guid.NewGuid(),
+            leaseMinutes = 15
+        });
+        Assert.Equal(HttpStatusCode.Conflict, refusedBuildOwnedCheckout.StatusCode);
 
         // Target build is still recorded, and still filters when somebody asks for it deliberately.
         using var targeted = await client.GetAsync(
@@ -182,6 +213,20 @@ public sealed class BuildScopedWorkspaceApiTests
         using var otherTarget = await client.GetAsync(
             $"/api/problem-reports?projectId={seeded.ProjectId}&targetReleaseId={seeded.ReleasedId}");
         Assert.DoesNotContain("RAISED-AGAINST-ONE-SIX", await otherTarget.Content.ReadAsStringAsync());
+        using var unassigned = await client.GetAsync(
+            $"/api/problem-reports?projectId={seeded.ProjectId}&targetUnassigned=true");
+        var unassignedBody = await unassigned.Content.ReadAsStringAsync();
+        Assert.Contains("UNASSIGNED-PROJECT", unassignedBody);
+        Assert.DoesNotContain("RAISED-AGAINST-ONE-SIX", unassignedBody);
+        var targetDashboard = await client.GetFromJsonAsync<System.Text.Json.JsonElement>(
+            $"/api/problem-reports/dashboard?projectId={seeded.ProjectId}&targetReleaseId={seeded.InWorkId}");
+        var unassignedDashboard = await client.GetFromJsonAsync<System.Text.Json.JsonElement>(
+            $"/api/problem-reports/dashboard?projectId={seeded.ProjectId}&targetUnassigned=true");
+        Assert.Equal(1, targetDashboard.GetProperty("summary").GetProperty("total").GetInt32());
+        Assert.Equal(1, unassignedDashboard.GetProperty("summary").GetProperty("total").GetInt32());
+        using var conflictingTarget = await client.GetAsync(
+            $"/api/problem-reports?projectId={seeded.ProjectId}&targetReleaseId={seeded.InWorkId}&targetUnassigned=true");
+        Assert.Equal(HttpStatusCode.BadRequest, conflictingTarget.StatusCode);
     }
 
     [Fact]

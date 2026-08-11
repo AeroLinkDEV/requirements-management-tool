@@ -729,10 +729,9 @@ function App() {
         projectId={project.project.id}
         releaseId={release?.id ?? ""}
         releases={project.releases}
-        readOnly={release?.isReleased ?? false}
         user={user}
         initialReportId={selectedArtifactId||undefined}
-        onSelected={(id)=>navigate("problemReports","system",id,undefined,true)}
+        onSelected={(id,targetBuild)=>{navigate("problemReports","system",id,undefined,true);if(targetBuild){const url=new URL(location.href);url.searchParams.set("targetBuild",targetBuild);history.replaceState({},"",`${url.pathname}${url.search}`)}}}
         onBack={() => navigate("dashboard")}
         onOpenVerification={(target) => navigate("testResults", target?.discipline === "software" ? "softwareTest" : "systemTest", target?.problemReportId, target?.discipline === "software" ? "HighLevel" : undefined)}
         onOpenArtifact={(kind,id,identifier)=>{if(kind==="change-request")navigate("scr",identifier?.startsWith("HLRCR-")||identifier?.startsWith("LLRCR-")?"software":"system",id);else if(kind==="problem-report")navigate("problemReports","system",id);else if(kind==="requirement")navigate("requirements",identifier?.startsWith("SYSR-")?"system":"software",id);else navigate("artifact","system",id,kind)}}

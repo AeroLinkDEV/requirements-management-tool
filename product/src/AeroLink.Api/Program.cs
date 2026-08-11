@@ -194,7 +194,33 @@ app.Use(async (context, next) =>
         // catches "/api/baseline-imports" by accident — which would refuse every import gate with a message
         // about a build the import does not touch.
         var portsAnotherProgramIn=path.StartsWith("/api/baseline-imports",StringComparison.OrdinalIgnoreCase);
-        var unsafeBuildMutation=!portsAnotherProgramIn
+        // Problem Reports are Project-scoped (DEC-089), so the build in the browser header cannot make their
+        // lifecycle read-only. Keep the exception exact: direct PR routes qualify; universal editing routes
+        // qualify only when the authoritative request/session identifies a Problem Report. A forged query
+        // parameter therefore cannot turn editing for a build-owned artifact into a Project-scoped mutation.
+        var projectScopedProblemReportMutation=path.StartsWith("/api/problem-reports",StringComparison.OrdinalIgnoreCase);
+        if(!projectScopedProblemReportMutation&&path.Equals("/api/controlled-editing/checkout",StringComparison.OrdinalIgnoreCase)
+            &&context.Request.Method=="POST")
+        {
+            context.Request.EnableBuffering();
+            try
+            {
+                var checkout=await context.Request.ReadFromJsonAsync<UniversalCheckoutRequest>(cancellationToken:context.RequestAborted);
+                projectScopedProblemReportMutation=checkout is not null
+                    &&ControlledArtifactEditPolicies.TryResolve(checkout.ArtifactType,out var checkoutPolicy)
+                    &&checkoutPolicy.Family==ControlledArtifactFamily.ProblemReport;
+            }
+            catch(JsonException) { /* The endpoint returns the authoritative malformed-payload response. */ }
+            finally { context.Request.Body.Position=0; }
+        }
+        if(!projectScopedProblemReportMutation&&path.StartsWith("/api/controlled-editing/sessions/",StringComparison.OrdinalIgnoreCase))
+        {
+            var editSegments=path.Split('/',StringSplitOptions.RemoveEmptyEntries);
+            projectScopedProblemReportMutation=editSegments.Length>=4&&Guid.TryParse(editSegments[3],out var editSessionId)
+                &&await db.ArtifactEditSessions.AsNoTracking().AnyAsync(session=>session.Id==editSessionId
+                    &&session.ArtifactType=="ProblemReport",context.RequestAborted);
+        }
+        var unsafeBuildMutation=!portsAnotherProgramIn&&!projectScopedProblemReportMutation
             &&context.Request.Method is not ("GET" or "HEAD" or "OPTIONS" or "TRACE")
             &&primaryMutationPrefixes.Any(prefix=>path.StartsWith(prefix,StringComparison.OrdinalIgnoreCase));
         if(selectedBuild.IsReleased&&unsafeBuildMutation)

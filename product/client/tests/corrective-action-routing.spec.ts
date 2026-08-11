@@ -110,8 +110,10 @@ test("a corrective action opens the discipline, report and procedure it belongs 
   await expect(page.getByRole("heading", { name: "Problem Reports" })).toBeVisible()
   const historicalRoot = root.replace(/\/releases\/[^/]+$/, `/releases/${historicalReleaseId}`)
   await page.goto(new URL(historicalRoot + "/problem-reports", page.url()).toString(), { waitUntil: "load" })
-  await expect(page.getByText("Released build · read-only")).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByRole("button", { name: "+ Record problem" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Problem Reports" })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole("button", { name: "+ Record problem" })).toBeVisible()
+  await expect(page.getByRole("button", { name: new RegExp(system.report.displayNumber.replace('.', '\\.')) })).toBeVisible()
+  await expect(page.getByRole("button", { name: new RegExp(software.report.displayNumber.replace('.', '\\.')) })).toBeVisible()
 });
 
 /**
