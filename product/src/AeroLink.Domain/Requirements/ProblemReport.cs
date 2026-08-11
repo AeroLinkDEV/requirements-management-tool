@@ -117,12 +117,16 @@ public sealed class ProblemReportRevision
     private ProblemReportRevision() { }
     public ProblemReportRevision(Guid problemReportId, int revision, string eventType, string actor,
         string snapshotHash, string snapshotJson, DateTimeOffset occurredAt,
-        int snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion)
+        int snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion,
+        string? detail = null, string? evidenceJson = null, int? eventSchemaVersion = null)
     {
         Id = Guid.NewGuid(); ProblemReportId = problemReportId; Revision = revision; EventType = Required(eventType);
         if (snapshotSchemaVersion < 0) throw new DomainException("A Problem Report snapshot schema cannot be negative.");
         Actor = Required(actor); SnapshotHash = Required(snapshotHash); SnapshotJson = Required(snapshotJson);
         SnapshotSchemaVersion = snapshotSchemaVersion; OccurredAt = occurredAt;
+        Detail = detail?.Trim() ?? ""; EvidenceJson = evidenceJson;
+        EventSchemaVersion = eventSchemaVersion ?? (evidenceJson is null ? 0 : 1);
+        if (EventSchemaVersion < 0) throw new DomainException("A Problem Report event schema cannot be negative.");
     }
     public Guid Id { get; private set; }
     public Guid ProblemReportId { get; private set; }
@@ -132,6 +136,9 @@ public sealed class ProblemReportRevision
     public string SnapshotHash { get; private set; } = "";
     public string SnapshotJson { get; private set; } = "";
     public int SnapshotSchemaVersion { get; private set; }
+    public string Detail { get; private set; } = "";
+    public string? EvidenceJson { get; private set; }
+    public int EventSchemaVersion { get; private set; }
     public DateTimeOffset OccurredAt { get; private set; }
     private static string Required(string? value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("Problem-report evidence is required.") : value.Trim();
 }
@@ -284,6 +291,14 @@ public sealed class ProblemReport
         if (!automatic) EnsureResponsible(actor); else Required(actor, "An implementation actor is required.");
         if (State != ProblemReportState.Open) throw new DomainException("Only an Open problem report can begin implementation.");
         State = ProblemReportState.Implementing; Touch(now);
+    }
+
+    public void RevertAutomaticImplementation(string actor, DateTimeOffset now)
+    {
+        Required(actor, "An implementation reconciliation actor is required.");
+        if (State != ProblemReportState.Implementing)
+            throw new DomainException("Only an automatically implementing problem report can be reconciled to Open.");
+        State = ProblemReportState.Open; Touch(now);
     }
 
     public void BeginInvestigation(string actor, string analysis, string rootCause, string effects, string containment, DateTimeOffset now)
