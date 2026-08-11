@@ -254,7 +254,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
         if (item is null) return null;
         var reportIds = await db.ProblemReportLinks.AsNoTracking().Where(link => link.ArtifactType == "ChangeRequest"
-            && link.ArtifactId == item.Id && link.Relationship == "ProposedCorrectiveAction")
+            && link.ArtifactId == item.Id && link.Relationship == ProblemReportRelationshipPolicy.ProposedCorrectiveAction)
             .Select(link => link.ProblemReportId).OrderBy(id => id).ToListAsync(ct);
         return new(item.ProjectId, item.State.ToString(), new State(item, reportIds), item.Version,
             item.Revision.ToString(), item.Id);

@@ -4,13 +4,140 @@ using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
 
 public sealed class ProblemReportApiTests
 {
+    [Fact]
+    public async Task Generic_links_fail_closed_for_controlled_or_unknown_semantics_and_keep_context_links_versioned_and_scoped()
+    {
+        using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
+        Guid projectId, requirementId, otherRequirementId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("PR relationship policy", $"RL{Guid.NewGuid():N}"[..12]);
+            var project = new ProjectRecord(program.Id, "Flight Management Product", "Flight Management System");
+            var otherProject = new ProjectRecord(program.Id, "Other Product", "Other System");
+            var requirement = new RequirementArtifact(project.Id, "SYSR-008448", RequirementLevel.System, DateTimeOffset.UtcNow);
+            var otherRequirement = new RequirementArtifact(otherProject.Id, "SYSR-008449", RequirementLevel.System, DateTimeOffset.UtcNow);
+            db.AddRange(program, project, otherProject, requirement, otherRequirement); await db.SaveChangesAsync();
+            projectId = project.Id; requirementId = requirement.Id; otherRequirementId = otherRequirement.Id;
+        }
+        using var created = await client.PostAsJsonAsync("/api/problem-reports", new
+        {
+            projectId, title = "Controlled relationship forgery", problem = "A generic caller can forge evidence."
+        });
+        var report = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var reportId = report.GetProperty("id").GetGuid();
+        var version = report.GetProperty("version").GetInt64();
+
+        foreach (var definition in ProblemReportRelationshipPolicy.Definitions.Where(item => item.IsControlled))
+        {
+            using var rejected = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/links", new
+            {
+                expectedVersion = version, artifactType = definition.ArtifactType, artifactId = requirementId,
+                relationship = definition.Relationship
+            });
+            Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+            var error = await rejected.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("problem_report_relationship_not_generic", error.GetProperty("code").GetString());
+        }
+        using (var rejected = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/links", new
+        {
+            expectedVersion = version, artifactType = "Requirement", artifactId = requirementId, relationship = "CallerInventedEvidence"
+        }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+            Assert.Equal("problem_report_relationship_not_generic", (await rejected.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        }
+        using (var missingVersion = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/links", new
+        {
+            artifactType = "Requirement", artifactId = requirementId, relationship = ProblemReportRelationshipPolicy.AffectedRequirement
+        }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, missingVersion.StatusCode);
+            Assert.Equal("expected_version_required", (await missingVersion.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        }
+
+        using var linked = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/links", new
+        {
+            expectedVersion = version, artifactType = "Requirement", artifactId = requirementId,
+            relationship = ProblemReportRelationshipPolicy.AffectedRequirement
+        });
+        Assert.Equal(HttpStatusCode.Created, linked.StatusCode);
+        var linkedBody = await linked.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(version + 1, linkedBody.GetProperty("version").GetInt64());
+
+        using var stale = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/links", new
+        {
+            expectedVersion = version, artifactType = "Requirement", artifactId = requirementId,
+            relationship = ProblemReportRelationshipPolicy.AffectedRequirement
+        });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal("stale_version", (await stale.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+
+        using var crossProject = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/links", new
+        {
+            expectedVersion = version + 1, artifactType = "Requirement", artifactId = otherRequirementId,
+            relationship = ProblemReportRelationshipPolicy.AffectedRequirement
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, crossProject.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var stored = await db.ProblemReports.SingleAsync(item => item.Id == reportId);
+            stored.ApplyDisposition("admin", ProblemReportDisposition.CannotReproduce,
+                "Closed for the terminal-state relationship check.", null, DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        using var terminal = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/links", new
+        {
+            expectedVersion = version + 2, artifactType = "Requirement", artifactId = requirementId,
+            relationship = ProblemReportRelationshipPolicy.AffectedRequirement
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, terminal.StatusCode);
+        Assert.Contains("closed or dispositioned", (await terminal.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        using var detail = await client.GetAsync($"/api/problem-reports/{reportId}");
+        var detailBody = await detail.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Single(detailBody.GetProperty("links").EnumerateArray());
+        Assert.Contains(detailBody.GetProperty("revisions").EnumerateArray(), item => item.GetProperty("eventType").GetString() == "ContextArtifactLinked");
+    }
+
+    [Fact]
+    public async Task Detail_keeps_legacy_links_readable_without_promoting_untrusted_controlled_evidence()
+    {
+        using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
+        Guid reportId, forgedChangeId, forgedExecutionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("PR legacy relationship", $"LR{Guid.NewGuid():N}"[..12]);
+            var project = new ProjectRecord(program.Id, "Flight Management Product", "Flight Management System");
+            var report = new ProblemReport(project.Id, "PR-04480", "Legacy forged links", "Links predate relationship policy.", "", "admin", now);
+            forgedChangeId = Guid.NewGuid(); forgedExecutionId = Guid.NewGuid(); reportId = report.Id;
+            db.AddRange(program, project, report,
+                new ProblemReportLink(report.Id, "ChangeRequest", forgedChangeId, ProblemReportRelationshipPolicy.ApprovedCorrectiveAction, "legacy", now),
+                new ProblemReportLink(report.Id, "TestExecution", forgedExecutionId, ProblemReportRelationshipPolicy.ResolutionVerification, "legacy", now));
+            await db.SaveChangesAsync();
+        }
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        Assert.Equal(2, detail.GetProperty("links").GetArrayLength());
+        Assert.Empty(detail.GetProperty("approvedCorrectiveActions").EnumerateArray());
+        Assert.Empty(detail.GetProperty("testEvidence").EnumerateArray());
+        Assert.Contains(detail.GetProperty("links").EnumerateArray(), item => item.GetProperty("artifactId").GetGuid() == forgedChangeId);
+        Assert.Contains(detail.GetProperty("links").EnumerateArray(), item => item.GetProperty("artifactId").GetGuid() == forgedExecutionId);
+    }
+
     [Fact]
     public async Task Build_queue_is_numeric_oldest_first_and_reports_when_more_than_ten_match()
     {

@@ -22,7 +22,7 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
             .Where(report => selected.Contains(report.Id) && report.ProjectId == projectId
                 && db.ProblemReportLinks.Any(link => link.ProblemReportId == report.Id
                     && link.ArtifactType == "Release" && link.ArtifactId == releaseId
-                    && link.Relationship == "BuildScope"))
+                    && link.Relationship == ProblemReportRelationshipPolicy.BuildScope))
             .Select(report => report.Id).ToListAsync(ct);
         return valid.Count == selected.Count
             ? null
@@ -33,7 +33,8 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
         string actor, DateTimeOffset now, CancellationToken ct)
     {
         var selected = Selected(problemReportIds);
-        await AddLinksAsync("ChangeRequest", changeRequestId, "ProposedCorrectiveAction", selected, actor, now, ct);
+        await AddLinksAsync("ChangeRequest", changeRequestId, ProblemReportRelationshipPolicy.ProposedCorrectiveAction,
+            ProblemReportRelationshipProducer.ChangeRequestWorkflow, selected, actor, now, ct);
         await StartImplementationForOpenReportsAsync(selected, actor, now, ct);
     }
 
@@ -47,14 +48,14 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
         if (validation is not null) throw new DomainException(validation);
 
         var existing = await db.ProblemReportLinks.Where(link => link.ArtifactType == "ChangeRequest"
-            && link.ArtifactId == request.Id && link.Relationship == "ProposedCorrectiveAction").ToListAsync(ct);
+            && link.ArtifactId == request.Id && link.Relationship == ProblemReportRelationshipPolicy.ProposedCorrectiveAction).ToListAsync(ct);
         var existingIds = existing.Select(link => link.ProblemReportId).ToHashSet();
         var selectedIds = selected.ToHashSet();
         if (existingIds.SetEquals(selectedIds)) return;
 
         db.ProblemReportLinks.RemoveRange(existing.Where(link => !selectedIds.Contains(link.ProblemReportId)));
-        await AddLinksAsync("ChangeRequest", request.Id, "ProposedCorrectiveAction",
-            selectedIds.Except(existingIds), actor, now, ct);
+        await AddLinksAsync("ChangeRequest", request.Id, ProblemReportRelationshipPolicy.ProposedCorrectiveAction,
+            ProblemReportRelationshipProducer.ChangeRequestWorkflow, selectedIds.Except(existingIds), actor, now, ct);
         await StartImplementationForOpenReportsAsync(selectedIds.Except(existingIds), actor, now, ct);
         db.AuditEvents.Add(new AuditEvent(request.Id, "ProblemReportLinksUpdated", actor,
             $"Updated the driving Problem Report set to {selectedIds.Count} record(s).", now));
@@ -62,14 +63,15 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
 
     public Task LinkTestChangeRequestAsync(Guid testChangeRequestId, IEnumerable<Guid>? problemReportIds,
         string actor, DateTimeOffset now, CancellationToken ct)
-        => AddLinksAsync("TestChangeRequest", testChangeRequestId, "VerificationForProblem", problemReportIds, actor, now, ct);
+        => AddLinksAsync("TestChangeRequest", testChangeRequestId, ProblemReportRelationshipPolicy.VerificationForProblem,
+            ProblemReportRelationshipProducer.TestChangeRequestWorkflow, problemReportIds, actor, now, ct);
 
     public async Task PropagateToTestChangeRequestAsync(Guid changeRequestId, Guid testChangeRequestId,
         string actor, DateTimeOffset now, CancellationToken ct)
     {
         var reportIds = await db.ProblemReportLinks.AsNoTracking()
             .Where(link => link.ArtifactType == "ChangeRequest" && link.ArtifactId == changeRequestId
-                && link.Relationship == "ProposedCorrectiveAction")
+                && link.Relationship == ProblemReportRelationshipPolicy.ProposedCorrectiveAction)
             .Select(link => link.ProblemReportId).Distinct().ToListAsync(ct);
         await LinkTestChangeRequestAsync(testChangeRequestId, reportIds, actor, now, ct);
     }
@@ -80,12 +82,14 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
         if (request.State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)) return;
         var reportIds = await db.ProblemReportLinks.AsNoTracking()
             .Where(link => link.ArtifactType == "ChangeRequest" && link.ArtifactId == request.Id
-                && link.Relationship == "ProposedCorrectiveAction")
+                && link.Relationship == ProblemReportRelationshipPolicy.ProposedCorrectiveAction)
             .Select(link => link.ProblemReportId).Distinct().ToListAsync(ct);
-        await AddLinksAsync("ChangeRequest", request.Id, "ApprovedCorrectiveAction", reportIds, actor, now, ct);
+        await AddLinksAsync("ChangeRequest", request.Id, ProblemReportRelationshipPolicy.ApprovedCorrectiveAction,
+            ProblemReportRelationshipProducer.ChangeRequestWorkflow, reportIds, actor, now, ct);
     }
 
     private async Task AddLinksAsync(string artifactType, Guid artifactId, string relationship,
+        ProblemReportRelationshipProducer producer,
         IEnumerable<Guid>? problemReportIds, string actor, DateTimeOffset now, CancellationToken ct)
     {
         foreach (var reportId in Selected(problemReportIds))
@@ -97,8 +101,8 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
                 link.ProblemReportId == reportId && link.ArtifactType == artifactType
                 && link.ArtifactId == artifactId && link.Relationship == relationship, ct);
             if (!alreadyTracked && !alreadySaved)
-                db.ProblemReportLinks.Add(new ProblemReportLink(reportId, artifactType, artifactId,
-                    relationship, actor, now));
+                db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(reportId, artifactType,
+                    artifactId, relationship, producer, actor, now));
         }
     }
 

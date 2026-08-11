@@ -55,9 +55,10 @@ async function raiseReport(page: Page, projectId: string, releaseId: string, sco
     report = await created.json();
 
     const linked = await page.request.post(`${apiBase}/api/problem-reports/${report.id}/links`, {
-      data: { artifactType: "Requirement", artifactId: requirement.id, relationship: "AffectedRequirement" },
+      data: { expectedVersion: report.version, artifactType: "Requirement", artifactId: requirement.id, relationship: "AffectedRequirement" },
     });
     expect(linked.ok(), `linking the ${scope} requirement: ${linked.status()}`).toBe(true);
+    report.version = (await linked.json()).version;
   }
 
   // Advance to the state whose call to action is the one under test.
