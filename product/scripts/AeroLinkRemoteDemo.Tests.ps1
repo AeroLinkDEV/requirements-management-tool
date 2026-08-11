@@ -138,12 +138,24 @@ $taskConfig = [pscustomobject]@{
 }
 $xml = Get-AeroLinkRemoteDemoTaskXml -Config $taskConfig
 Assert-True ($xml -match 'AeroLinkRemoteDemoRecovery') 'Task XML must name the recovery task.'
+Assert-True ($xml -match 'encoding="UTF-16"') 'Task XML must declare UTF-16 encoding.'
 Assert-True ($xml -match 'LogonTrigger') 'Task XML must use a logon trigger.'
 Assert-True ($xml -match 'StartWhenAvailable') 'Task XML must enable StartWhenAvailable.'
 Assert-True ($xml -match 'InteractiveToken') 'Task XML must run as the interactive current user.'
 Assert-True ($xml -match 'LeastPrivilege') 'Task XML must run with least privilege.'
 Assert-True ($xml -match 'AeroLinkRemoteDemo\.ps1" -Action Start -Scheduled') 'Task XML must invoke the same tested start implementation.'
 Assert-True ($xml -notmatch 'SUPERSECRET|hunter2|AeroLink!2026|authtoken') 'Task XML must not contain secrets.'
+
+# The written file must use the encoding its declaration promises (UTF-16 LE with BOM),
+# or schtasks rejects the XML as malformed.
+$savedXmlPath = Join-Path $tempRoot 'saved-task.xml'
+Save-AeroLinkRemoteDemoTaskXml -Config $taskConfig -Path $savedXmlPath
+$bytes = [System.IO.File]::ReadAllBytes($savedXmlPath)
+Assert-True ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) 'Task XML file must be written as UTF-16 LE with BOM.'
+$savedText = [System.IO.File]::ReadAllText($savedXmlPath, [System.Text.Encoding]::Unicode)
+$parsed = $null
+try { $parsed = [xml]$savedText } catch { }
+Assert-True ($null -ne $parsed -and $parsed.Task.Triggers.LogonTrigger -ne $null) 'Task XML file must parse as well-formed task XML.'
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }

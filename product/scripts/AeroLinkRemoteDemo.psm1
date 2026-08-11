@@ -469,15 +469,32 @@ function Get-AeroLinkRemoteDemoTaskXml {
 "@
 }
 
+function Save-AeroLinkRemoteDemoTaskXml {
+    <#
+      .SYNOPSIS Writes the task XML in the encoding its declaration promises.
+      .DESCRIPTION
+        The XML declares UTF-16; schtasks rejects a file whose actual encoding
+        does not match. Set-Content -Encoding Unicode writes UTF-16 LE with BOM,
+        which is what the declaration describes.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Path
+    )
+    $xml = Get-AeroLinkRemoteDemoTaskXml -Config $Config
+    Set-Content -LiteralPath $Path -Value $xml -Encoding Unicode
+    return $Path
+}
+
 function Install-AeroLinkRemoteDemoTask {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Config
     )
     if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
-    $xml = Get-AeroLinkRemoteDemoTaskXml -Config $Config
     $xmlPath = Join-Path $Config.StatePath 'remote-demo-task.xml'
-    Set-Content -LiteralPath $xmlPath -Value $xml -Encoding UTF8
+    Save-AeroLinkRemoteDemoTaskXml -Config $Config -Path $xmlPath
     & schtasks.exe /Create /TN $script:RemoteDemoTaskName /XML $xmlPath /F
     if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed with exit code $LASTEXITCODE." }
     return Get-AeroLinkRemoteDemoTaskStatus
@@ -573,6 +590,7 @@ Export-ModuleMember -Function `
     Start-AeroLinkRemoteDemo, `
     Stop-AeroLinkRemoteDemo, `
     Get-AeroLinkRemoteDemoTaskXml, `
+    Save-AeroLinkRemoteDemoTaskXml, `
     Install-AeroLinkRemoteDemoTask, `
     Remove-AeroLinkRemoteDemoTask, `
     Get-AeroLinkRemoteDemoTaskStatus, `
