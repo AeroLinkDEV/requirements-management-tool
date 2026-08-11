@@ -1813,6 +1813,22 @@ Future entries use:
   cyclic relationships remain immutable and are exposed through a versioned diagnostic status for deliberate
   reconciliation; they are never silently normalized or rewritten.
 
+### DEC-109 - Draft Corrective Actions Sustain Only Their Own Automatic Implementation Claim
+
+- **Date:** 2026-08-11
+- **Status:** Accepted; implemented by #458
+- **Decision:** Linking an Open Problem Report to a Draft change request may automatically enter Implementing.
+  Removing the last proposed corrective action returns it to Open only when immutable lifecycle evidence proves
+  the current Implementing state began automatically and no investigation, corrective work, manual start, or
+  approved corrective action has superseded that inference. A no-op link edit has no lifecycle side effect.
+- **Rationale:** Implementing is a controlled statement that must not outlive its sole inferred cause, but
+  removing one Draft relationship must not erase deliberate engineering work or approved evidence. Deriving
+  provenance from append-only events avoids a mutable flag that could drift from the history it summarizes.
+- **Consequences:** Automatic start and reconciliation events carry versioned narrative/evidence naming the
+  exact Draft change request. The canonical Problem Report snapshot and historical hashes remain unchanged;
+  pre-contract events without exact routing evidence are retained conservatively rather than retroactively
+  reinterpreted.
+
 ## Lessons Learned
 
 Findings that cost real time, recorded so they cost it once. These are about how the work is done rather than

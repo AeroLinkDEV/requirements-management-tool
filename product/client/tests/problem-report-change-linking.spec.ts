@@ -18,6 +18,14 @@ test('a PR drives a change request and can be added to a System TCR through the 
   })
   expect(createdReport.ok(), await createdReport.text()).toBeTruthy()
   const report = await createdReport.json()
+  const ready = await page.request.post(`${apiBase}/api/problem-reports/${report.id}/ready-for-sccb`, {
+    data: { expectedVersion: report.version },
+  })
+  expect(ready.ok(), await ready.text()).toBeTruthy()
+  const opened = await page.request.post(`${apiBase}/api/problem-reports/${report.id}/sccb/open`, {
+    data: { expectedVersion: (await ready.json()).version },
+  })
+  expect(opened.ok(), await opened.text()).toBeTruthy()
 
   await page.goto(new URL(`${root}/systems/change-requests/new`, page.url()).toString(), { waitUntil: 'load' })
   await expect(page.getByRole('heading', { name: 'Create System Change Request' })).toBeVisible({ timeout: 30_000 })
@@ -95,4 +103,25 @@ test('a PR drives a change request and can be added to a System TCR through the 
   await expect(page.getByRole('heading', { name: 'Problem Reports' })).toBeVisible()
   await expect(page.getByText('Proposed Corrective Action')).toBeVisible()
   await expect(page.getByText('Verification For Problem')).toBeVisible()
+
+  const implementing = await (await page.request.get(`${apiBase}/api/problem-reports/${report.id}`)).json()
+  expect(implementing.state).toBe('Implementing')
+  await page.goto(new URL(`${root}/systems/change-requests/${changeRequestId}`, page.url()).toString(), { waitUntil: 'load' })
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  const drivingReport = page.getByRole('checkbox', { name: new RegExp(report.displayNumber.replace('.', '\\.')) })
+  await expect(drivingReport).toBeChecked()
+  await drivingReport.uncheck()
+  await page.getByRole('button', { name: 'Save & check in' }).click()
+  await expect(page.getByRole('button', { name: 'Check out & edit' })).toBeVisible({ timeout: 30_000 })
+
+  await page.goto(new URL(`${root}/problem-reports/${report.id}`, page.url()).toString(), { waitUntil: 'load' })
+  await page.reload({ waitUntil: 'load' })
+  await expect(page.locator('.prState')).toHaveText('Open')
+  await expect(page.getByText('Proposed Corrective Action')).toHaveCount(0)
+  await page.getByRole('button', { name: /History/ }).click()
+  const history = page.locator('.prTimeline')
+  await expect(history.getByText('Implementation Started By Linked Change Request')).toBeVisible()
+  const reverted = history.locator('article').filter({ hasText: 'Implementation Reverted After Draft Corrective Action Removed' })
+  await expect(reverted).toContainText(change.displayNumber)
+  await expect(reverted).toContainText(changeRequestId)
 })

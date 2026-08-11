@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
@@ -207,7 +208,10 @@ public sealed class ProblemReportApiTests
         Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
 
         using var change = await client.PostAsJsonAsync("/api/change-requests", new { projectId, targetReleaseId = releaseId, type = "Software", softwareLevel = "HighLevel", title = "Keep disagreement alert active", problem = "P", analysis = "A", solution = "S", problemReportIds = new[] { id } });
-        Assert.Equal(HttpStatusCode.Created, change.StatusCode);
+        Assert.True(change.StatusCode == HttpStatusCode.Created,
+            $"Expected Created, received {change.StatusCode}: {await change.Content.ReadAsStringAsync()}");
+        var changeBody = await change.Content.ReadFromJsonAsync<JsonElement>();
+        var changeRequestId = changeBody.GetProperty("id").GetGuid();
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
         Assert.Equal("Implementing", detail.GetProperty("state").GetString());
         Assert.Equal("admin", detail.GetProperty("reportedBy").GetString());
@@ -218,6 +222,70 @@ public sealed class ProblemReportApiTests
 
         var filtered = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports?projectId={projectId}&releaseId={releaseId}&state=Implementing&severity=Major&priority=Normal&owner=admin&search=disagreement");
         Assert.Equal(id, Assert.Single(filtered.GetProperty("items").EnumerateArray()).GetProperty("id").GetGuid());
+
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ChangeRequest", artifactId = changeRequestId });
+        Assert.Equal(HttpStatusCode.Created, checkout.StatusCode);
+        var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid();
+        var draft = JsonNode.Parse(session.GetProperty("draftJson").GetString()!)!.AsObject();
+        draft["problemReportIds"] = new JsonArray();
+        using var autosave = await client.PutAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/autosave",
+            new { expectedVersion = session.GetProperty("version").GetInt64(), draftJson = draft.ToJsonString() });
+        Assert.Equal(HttpStatusCode.OK, autosave.StatusCode);
+        var sessionVersion = (await autosave.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var concurrent = await db.SystemChangeRequests.Include(item => item.RequirementChanges)
+                .SingleAsync(item => item.Id == changeRequestId);
+            concurrent.UpdateDraft("admin", concurrent.Title + " (authoritative update)", concurrent.Problem,
+                concurrent.Analysis, concurrent.Solution, [], DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        using var staleCheckIn = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/check-in",
+            new { expectedVersion = sessionVersion });
+        Assert.Equal(HttpStatusCode.Conflict, staleCheckIn.StatusCode);
+        Assert.Equal("stale_artifact_version",
+            (await staleCheckIn.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        var afterConflict = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
+        Assert.Equal("Implementing", afterConflict.GetProperty("state").GetString());
+        Assert.Contains(afterConflict.GetProperty("links").EnumerateArray(), link =>
+            link.GetProperty("artifactId").GetGuid() == changeRequestId
+            && link.GetProperty("relationship").GetString() == ProblemReportRelationshipPolicy.ProposedCorrectiveAction);
+        using var discard = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/discard",
+            new { expectedVersion = sessionVersion, reason = "Discard stale reconciliation proof." });
+        Assert.Equal(HttpStatusCode.NoContent, discard.StatusCode);
+
+        using var retryCheckout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ChangeRequest", artifactId = changeRequestId });
+        Assert.Equal(HttpStatusCode.Created, retryCheckout.StatusCode);
+        var retrySession = await retryCheckout.Content.ReadFromJsonAsync<JsonElement>();
+        var retrySessionId = retrySession.GetProperty("id").GetGuid();
+        var retryDraft = JsonNode.Parse(retrySession.GetProperty("draftJson").GetString()!)!.AsObject();
+        retryDraft["problemReportIds"] = new JsonArray();
+        using var retryAutosave = await client.PutAsJsonAsync($"/api/controlled-editing/sessions/{retrySessionId}/autosave",
+            new { expectedVersion = retrySession.GetProperty("version").GetInt64(), draftJson = retryDraft.ToJsonString() });
+        Assert.Equal(HttpStatusCode.OK, retryAutosave.StatusCode);
+        var retryVersion = (await retryAutosave.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using var checkIn = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{retrySessionId}/check-in",
+            new { expectedVersion = retryVersion });
+        Assert.Equal(HttpStatusCode.OK, checkIn.StatusCode);
+
+        var reconciled = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
+        Assert.Equal("Open", reconciled.GetProperty("state").GetString());
+        Assert.DoesNotContain(reconciled.GetProperty("links").EnumerateArray(), link =>
+            link.GetProperty("artifactId").GetGuid() == changeRequestId
+            && link.GetProperty("relationship").GetString() == ProblemReportRelationshipPolicy.ProposedCorrectiveAction);
+        var routingHistory = reconciled.GetProperty("revisions").EnumerateArray().Where(revision =>
+            revision.GetProperty("eventType").GetString() is "ImplementationStartedByLinkedChangeRequest"
+                or "ImplementationRevertedAfterDraftCorrectiveActionRemoved").ToList();
+        Assert.Equal(2, routingHistory.Count);
+        Assert.All(routingHistory, revision =>
+        {
+            Assert.Contains(changeRequestId.ToString(), revision.GetProperty("detail").GetString());
+            Assert.Equal(1, revision.GetProperty("eventSchemaVersion").GetInt32());
+        });
     }
 
     [Theory]

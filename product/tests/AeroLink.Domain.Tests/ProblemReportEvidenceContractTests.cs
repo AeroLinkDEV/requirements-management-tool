@@ -72,8 +72,30 @@ public sealed class ProblemReportEvidenceContractTests
         Assert.Equal(0, revision.SnapshotSchemaVersion);
         Assert.Equal(legacyJson, revision.SnapshotJson);
         Assert.Equal(legacyHash, revision.SnapshotHash);
+        Assert.Equal(0, revision.EventSchemaVersion);
+        Assert.Empty(revision.Detail);
+        Assert.Null(revision.EvidenceJson);
         using var parsed = JsonDocument.Parse(revision.SnapshotJson);
         Assert.Equal("Original evidence", parsed.RootElement.GetProperty("Title").GetString());
+    }
+
+    [Fact]
+    public void Lifecycle_event_metadata_does_not_rewrite_the_canonical_snapshot_commitment()
+    {
+        var report = NewReport();
+        var snapshot = report.CanonicalSnapshot();
+        var hash = report.CanonicalHash();
+        const string evidence = "{\"policy\":\"DraftCorrectiveActionImplementationV1\"}";
+
+        var revision = new ProblemReportRevision(report.Id, report.Revision,
+            "ImplementationStartedByLinkedChangeRequest", "engineer", hash, snapshot, Now,
+            detail: "Automatically entered Implementing from SRCR-00001.", evidenceJson: evidence);
+
+        Assert.Equal(snapshot, revision.SnapshotJson);
+        Assert.Equal(hash, revision.SnapshotHash);
+        Assert.Equal(ProblemReportEvidenceContract.SchemaVersion, revision.SnapshotSchemaVersion);
+        Assert.Equal(1, revision.EventSchemaVersion);
+        Assert.Equal(evidence, revision.EvidenceJson);
     }
 
     private static ProblemReport NewReport() => new(Guid.Parse("11111111-1111-1111-1111-111111111111"),

@@ -12,6 +12,159 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class ProblemReportLinkServiceTests
 {
     [Fact]
+    public async Task Removing_the_only_draft_correction_reverts_its_automatic_implementation_state()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-pr-link-reconcile-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("PR link reconciliation", "PRLR");
+            var project = new ProjectRecord(program.Id, "FMS", "FMS");
+            var release = new SoftwareRelease(project.Id, "1.6", false);
+            var report = new ProblemReport(project.Id, "PR-00458", "Automatic implementation",
+                "The draft correction is the only implementation basis.", "", "engineer", now,
+                targetReleaseId: release.Id);
+            report.ReadyForSccb("engineer", now.AddMinutes(1));
+            report.OpenBySccb("sccb", now.AddMinutes(2));
+            var change = new SystemChangeRequest("SRCR-00458", 0, project.Id, release.Id,
+                "Draft correction", "P", "A", "S", "engineer", now);
+            db.AddRange(program, project, release, report, change);
+            db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, "Release", release.Id,
+                ProblemReportRelationshipPolicy.BuildScope, "engineer", now));
+            await db.SaveChangesAsync();
+
+            var service = new ProblemReportLinkService(db);
+            await service.ReplaceDraftChangeRequestLinksAsync(change, [report.Id], "engineer", now.AddMinutes(3), default);
+            await db.SaveChangesAsync();
+            Assert.Equal(ProblemReportState.Implementing, report.State);
+
+            await service.ReplaceDraftChangeRequestLinksAsync(change, [], "engineer", now.AddMinutes(4), default);
+            await db.SaveChangesAsync();
+
+            Assert.Equal(ProblemReportState.Open, report.State);
+            var revisions = (await db.ProblemReportRevisions.Where(item => item.ProblemReportId == report.Id)
+                .ToListAsync()).OrderBy(item => item.OccurredAt).ToList();
+            Assert.Equal(new[]
+            {
+                "ImplementationStartedByLinkedChangeRequest",
+                "ImplementationRevertedAfterDraftCorrectiveActionRemoved",
+            }, revisions.Select(item => item.EventType));
+            Assert.All(revisions, item =>
+            {
+                Assert.Equal(1, item.EventSchemaVersion);
+                Assert.Contains(change.Id.ToString(), item.Detail);
+                Assert.Contains(change.DisplayNumber, item.Detail);
+                Assert.False(string.IsNullOrWhiteSpace(item.EvidenceJson));
+            });
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Automatic_reconciliation_preserves_other_manual_substantive_and_approved_sources()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-pr-link-sources-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("PR implementation sources", "PRIS");
+            var project = new ProjectRecord(program.Id, "FMS", "FMS");
+            var release = new SoftwareRelease(project.Id, "1.6", false);
+            ProblemReport OpenReport(string number, string title)
+            {
+                var item = new ProblemReport(project.Id, number, title, "Controlled anomaly.", "", "engineer",
+                    now, targetReleaseId: release.Id);
+                item.ReadyForSccb("engineer", now.AddMinutes(1));
+                item.OpenBySccb("sccb", now.AddMinutes(2));
+                return item;
+            }
+            SystemChangeRequest Change(string number, string title) => new(number, 0, project.Id, release.Id,
+                title, "P", "A", "S", "engineer", now);
+
+            var multiple = OpenReport("PR-04581", "Multiple corrections");
+            var substantive = OpenReport("PR-04582", "Substantive investigation");
+            var manual = OpenReport("PR-04583", "Manual implementation");
+            manual.BeginImplementation("engineer", now.AddMinutes(3));
+            var approved = OpenReport("PR-04584", "Approved correction");
+            var first = Change("SRCR-04581", "First draft correction");
+            var second = Change("SRCR-04582", "Second draft correction");
+            var substantiveChange = Change("SRCR-04583", "Investigated draft correction");
+            var manualChange = Change("SRCR-04584", "Manual-state draft correction");
+            var draftWithApproval = Change("SRCR-04585", "Draft beside approved correction");
+            var approvedChange = Change("SRCR-04586", "Approved correction source");
+            db.AddRange(program, project, release, multiple, substantive, manual, approved, first, second,
+                substantiveChange, manualChange, draftWithApproval, approvedChange);
+            foreach (var report in new[] { multiple, substantive, manual, approved })
+                db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, "Release", release.Id,
+                    ProblemReportRelationshipPolicy.BuildScope, "engineer", now));
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(manual.Id, manual.Revision,
+                "ImplementationStarted", "engineer", manual.CanonicalHash(), manual.CanonicalSnapshot(),
+                now.AddMinutes(3)));
+            await db.SaveChangesAsync();
+            var service = new ProblemReportLinkService(db);
+
+            await service.ReplaceDraftChangeRequestLinksAsync(first, [multiple.Id], "engineer", now.AddMinutes(4), default);
+            await service.ReplaceDraftChangeRequestLinksAsync(second, [multiple.Id], "engineer", now.AddMinutes(5), default);
+            await db.SaveChangesAsync();
+            await service.ReplaceDraftChangeRequestLinksAsync(first, [], "engineer", now.AddMinutes(6), default);
+            await db.SaveChangesAsync();
+            Assert.Equal(ProblemReportState.Implementing, multiple.State);
+            var versionBeforeNoOp = multiple.Version;
+            var historyBeforeNoOp = await db.ProblemReportRevisions.CountAsync(item => item.ProblemReportId == multiple.Id);
+            await service.ReplaceDraftChangeRequestLinksAsync(second, [multiple.Id], "engineer", now.AddMinutes(7), default);
+            await db.SaveChangesAsync();
+            Assert.Equal(versionBeforeNoOp, multiple.Version);
+            Assert.Equal(historyBeforeNoOp,
+                await db.ProblemReportRevisions.CountAsync(item => item.ProblemReportId == multiple.Id));
+
+            await service.ReplaceDraftChangeRequestLinksAsync(substantiveChange, [substantive.Id], "engineer", now.AddMinutes(8), default);
+            await db.SaveChangesAsync();
+            substantive.BeginInvestigation("engineer", "Confirmed analysis", "Root cause", "Effect", "", now.AddMinutes(9));
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(substantive.Id, substantive.Revision,
+                "InvestigationRecorded", "engineer", substantive.CanonicalHash(), substantive.CanonicalSnapshot(),
+                now.AddMinutes(9)));
+            await db.SaveChangesAsync();
+            await service.ReplaceDraftChangeRequestLinksAsync(substantiveChange, [], "engineer", now.AddMinutes(10), default);
+            await db.SaveChangesAsync();
+            Assert.Equal(ProblemReportState.Implementing, substantive.State);
+
+            await service.ReplaceDraftChangeRequestLinksAsync(manualChange, [manual.Id], "engineer", now.AddMinutes(11), default);
+            await db.SaveChangesAsync();
+            await service.ReplaceDraftChangeRequestLinksAsync(manualChange, [], "engineer", now.AddMinutes(12), default);
+            await db.SaveChangesAsync();
+            Assert.Equal(ProblemReportState.Implementing, manual.State);
+
+            await service.ReplaceDraftChangeRequestLinksAsync(draftWithApproval, [approved.Id], "engineer", now.AddMinutes(13), default);
+            db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(approved.Id, "ChangeRequest",
+                approvedChange.Id, ProblemReportRelationshipPolicy.ApprovedCorrectiveAction,
+                ProblemReportRelationshipProducer.ChangeRequestWorkflow, "approver", now.AddMinutes(14)));
+            await db.SaveChangesAsync();
+            await service.ReplaceDraftChangeRequestLinksAsync(draftWithApproval, [], "engineer", now.AddMinutes(15), default);
+            await db.SaveChangesAsync();
+            Assert.Equal(ProblemReportState.Implementing, approved.State);
+            Assert.Contains(await db.ProblemReportLinks.Where(item => item.ProblemReportId == approved.Id).ToListAsync(),
+                item => item.Relationship == ProblemReportRelationshipPolicy.ApprovedCorrectiveAction);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Relationship_registry_assigns_one_artifact_type_and_producer_to_every_semantic()
     {
         Assert.Equal(ProblemReportRelationshipPolicy.Definitions.Count,
@@ -67,7 +220,7 @@ public sealed class ProblemReportLinkServiceTests
             var service = new ProblemReportLinkService(db);
             Assert.Null(await service.ValidateSelectionAsync(project.Id, release.Id, [report.Id], default));
             Assert.NotNull(await service.ValidateSelectionAsync(project.Id, otherRelease.Id, [report.Id], default));
-            await service.LinkChangeRequestAsync(scr.Id, [report.Id], "software.engineer", now, default);
+            await service.LinkChangeRequestAsync(scr.Id, scr.DisplayNumber, [report.Id], "software.engineer", now, default);
             await db.SaveChangesAsync();
             await service.ReplaceDraftChangeRequestLinksAsync(scr, [replacement.Id], "software.engineer", now, default);
             await db.SaveChangesAsync();
@@ -131,7 +284,7 @@ public sealed class ProblemReportLinkServiceTests
             db.AddRange(program, project, release, report, candidate, change);
             await db.SaveChangesAsync();
 
-            await new ProblemReportLinkService(db).LinkChangeRequestAsync(change.Id, [report.Id],
+            await new ProblemReportLinkService(db).LinkChangeRequestAsync(change.Id, change.DisplayNumber, [report.Id],
                 "change.engineer", now.AddMinutes(6), default);
             await db.SaveChangesAsync();
 
@@ -179,7 +332,7 @@ public sealed class ProblemReportLinkServiceTests
 
             var version = report.Version;
             var error = await Assert.ThrowsAsync<DomainException>(() =>
-                new ProblemReportLinkService(db).LinkChangeRequestAsync(change.Id, [report.Id],
+                new ProblemReportLinkService(db).LinkChangeRequestAsync(change.Id, change.DisplayNumber, [report.Id],
                     "change.engineer", now.AddMinutes(7), default));
             Assert.Contains("closed or dispositioned", error.Message);
             Assert.Equal(version, report.Version);

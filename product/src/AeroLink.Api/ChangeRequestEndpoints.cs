@@ -143,7 +143,7 @@ public static class ChangeRequestEndpoints
                         && link.Relationship == ProblemReportRelationshipPolicy.ProposedCorrectiveAction)
                     .Select(link => link.ProblemReportId).ToListAsync(ct);
                 await repository.AddAsync(next, ct);
-                await new ProblemReportLinkService(db).LinkChangeRequestAsync(next.Id, reportIds,
+                await new ProblemReportLinkService(db).LinkChangeRequestAsync(next.Id, next.DisplayNumber, reportIds,
                     actor.UserName, now, ct);
                 await repository.SaveAsync(ct);
                 return Results.Created($"/api/change-requests/{next.Id}", ApiMap.ChangeRequestDetail(next));
@@ -455,7 +455,7 @@ public static class ChangeRequestEndpoints
                 var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
                     request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, DateTimeOffset.UtcNow, request.Type,
                     request.ProblemRich, request.AnalysisRich, request.SolutionRich, request.SoftwareLevel);
-                await problemReports.LinkChangeRequestAsync(scr.Id, request.ProblemReportIds,
+                await problemReports.LinkChangeRequestAsync(scr.Id, scr.DisplayNumber, request.ProblemReportIds,
                     http.UserAccount().UserName, DateTimeOffset.UtcNow, ct);
                 await repository.AddAsync(scr, ct); await repository.SaveAsync(ct);
                 return Results.Created($"/api/change-requests/{scr.Id}", ApiMap.ChangeRequestDetail(scr));
@@ -545,7 +545,7 @@ public static class ChangeRequestEndpoints
                         change.TargetSectionId, proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(change.UpstreamRevisionIds ?? []));
                 }
                 await repository.AddAsync(scr, ct);
-                await problemReports.LinkChangeRequestAsync(scr.Id, request.ProblemReportIds, actor, now, ct);
+                await problemReports.LinkChangeRequestAsync(scr.Id, scr.DisplayNumber, request.ProblemReportIds, actor, now, ct);
                 await repository.SaveAsync(ct);
                 await transaction.CommitAsync(ct);
                 return Results.Created($"/api/change-requests/{scr.Id}", ApiMap.ChangeRequestDetail(scr));
