@@ -24,6 +24,7 @@ public sealed record ProblemReportClosureCandidateDecision(
 public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
 {
     public const int SchemaVersion = 1;
+    public const int ClosurePackageSchemaVersion = 2;
 
     public async Task<ProblemReportClosureCandidate> CreateAsync(ProblemReport report,
         TestExecution execution, ProblemReportLink resolutionLink, string actor, DateTimeOffset now,
@@ -115,7 +116,8 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
     }
 
     public async Task FreezeForApprovalAsync(ProblemReport report, ProblemReportClosureCandidate candidate,
-        ProblemReportRevision closureRevision, string actor, Guid actorAccountId, DateTimeOffset now,
+        ProblemReportRevision closureRevision, string actor, Guid actorAccountId, string approvalAuthority,
+        DateTimeOffset now,
         CancellationToken ct)
     {
         if (report.State != ProblemReportState.Closed || report.ClosureApprovedAt != now
@@ -129,7 +131,8 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         var packageJson = JsonSerializer.Serialize(new
         {
             contract = "aerolink.problem-report-closure-package",
-            schemaVersion = SchemaVersion,
+            schemaVersion = ClosurePackageSchemaVersion,
+            candidateSchemaVersion = candidate.SchemaVersion,
             provenance = "FrozenAtApproval",
             candidate = new
             {
@@ -155,6 +158,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
                 approvedByAccountId = actorAccountId,
                 approvedBy = actor,
                 approvedAt = now,
+                authority = approvalAuthority,
                 authorityMeaning = "IndependentSqaClosure",
                 approvalRevisionId = closureRevision.Id,
             },

@@ -210,6 +210,15 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await secondRecord.getByRole('button', { name: 'Record determination' }).click()
   await expect(page.getByText(/selected as PR closure evidence/)).toBeVisible({ timeout: 30_000 })
 
+  for (const userName of ['systems.reviewer', 'cm.fms', 'program.manager']) {
+    await page.context().clearCookies()
+    await login(page, userName, { openProject: false })
+    await selectProgram(page, 'Flight Management System Live Program')
+    await page.goto(reportAddress, { waitUntil: 'load' })
+    await expect(page.locator('.prState')).toHaveText('Awaiting SQA Closure', { timeout: 30_000 })
+    await expect(page.getByRole('button', { name: /Approve independent SQA closure/ })).toHaveCount(0)
+  }
+
   await page.context().clearCookies()
   await login(page, 'quality.analyst', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
@@ -222,6 +231,7 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await expect(page.locator('.prTimeline').getByText('Closure Approved')).toBeVisible()
   const packageCard = page.locator('.prClosurePackages article').filter({ hasText: 'Closure revision 0' })
   await expect(packageCard).toContainText('Marcus Hale')
+  await expect(packageCard).toContainText('Software Quality Analyst')
   const packageLink = packageCard.getByRole('link', { name: 'Open frozen closure package' })
   const packageHref = await packageLink.getAttribute('href')
   expect(packageHref).toContain(`candidateId=`)
@@ -230,7 +240,9 @@ test("a corrective action opens Test Results, names the report, and survives a r
   const frozen = await frozenResponse.json()
   expect(frozen.snapshot.packageProvenance).toBe('FrozenAtApproval')
   expect(frozen.snapshot.closurePackageHash).toMatch(/^[0-9a-f]{64}$/)
+  expect(frozen.snapshot.approvalAuthority).toBe('SoftwareQualityAnalyst')
   expect(frozen.package.closure.approvedBy).toBe('quality.analyst')
+  expect(frozen.package.closure.authority).toBe('SoftwareQualityAnalyst')
 
   // Reopening begins a new controlled revision without erasing or relabeling the prior package.
   await page.context().clearCookies()
