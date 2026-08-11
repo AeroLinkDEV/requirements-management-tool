@@ -140,7 +140,7 @@ public static class ChangeRequestEndpoints
                 var next = approved.StartNextRevision(actor.UserName, now, released, actor.IsAdministrator);
                 var reportIds = await db.ProblemReportLinks.AsNoTracking().Where(link =>
                         link.ArtifactType == "ChangeRequest" && link.ArtifactId == approved.Id
-                        && link.Relationship == "ProposedCorrectiveAction")
+                        && link.Relationship == ProblemReportRelationshipPolicy.ProposedCorrectiveAction)
                     .Select(link => link.ProblemReportId).ToListAsync(ct);
                 await repository.AddAsync(next, ct);
                 await new ProblemReportLinkService(db).LinkChangeRequestAsync(next.Id, reportIds,

@@ -186,8 +186,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         {
             var now = DateTimeOffset.UtcNow;
             report.Retarget(report.ResponsibleEngineerId, active.Id, now);
-            if (!await db.ProblemReportLinks.AnyAsync(x => x.ProblemReportId == report.Id && x.ArtifactType == "Release" && x.Relationship == "BuildScope", ct))
-                db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, "Release", active.Id, "BuildScope", "system.workspace", now));
+            if (!await db.ProblemReportLinks.AnyAsync(x => x.ProblemReportId == report.Id && x.ArtifactType == "Release" && x.Relationship == ProblemReportRelationshipPolicy.BuildScope, ct))
+                db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(report.Id, "Release", active.Id,
+                    ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow, "system.workspace", now));
             var snapshot = JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision,
                 report.DisplayNumber, report.Title, report.ResponsibleEngineerId, report.TargetReleaseId,
                 state = report.State.ToString(), report.Version });

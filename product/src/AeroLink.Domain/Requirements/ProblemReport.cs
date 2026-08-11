@@ -168,6 +168,11 @@ public sealed class ProblemReport
         TargetReleaseId = targetReleaseId; Touch(now);
     }
 
+    public void RecordContextLink(string actor, DateTimeOffset now)
+    {
+        EnsureResponsible(actor); EnsureNotTerminal(); Touch(now);
+    }
+
     public void ReadyForSccb(string actor, DateTimeOffset now)
     {
         EnsureResponsible(actor);

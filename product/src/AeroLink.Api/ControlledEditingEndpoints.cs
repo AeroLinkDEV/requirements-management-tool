@@ -328,7 +328,7 @@ public static class ControlledEditingEndpoints
                 if (item is null) return null;
                 var reportIds = await db.ProblemReportLinks.AsNoTracking().Where(link =>
                         link.ArtifactType == "ChangeRequest" && link.ArtifactId == item.Id
-                        && link.Relationship == "ProposedCorrectiveAction")
+                        && link.Relationship == ProblemReportRelationshipPolicy.ProposedCorrectiveAction)
                     .Select(link => link.ProblemReportId).OrderBy(id => id).ToListAsync(ct);
                 return new(item.ProjectId, item.State.ToString(), null,
                     SystemChangeRequestControlledEditingAdapter.Snapshot(item, reportIds),

@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
@@ -10,6 +11,27 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class ProblemReportLinkServiceTests
 {
+    [Fact]
+    public void Relationship_registry_assigns_one_artifact_type_and_producer_to_every_semantic()
+    {
+        Assert.Equal(ProblemReportRelationshipPolicy.Definitions.Count,
+            ProblemReportRelationshipPolicy.Definitions.Select(item => item.Relationship).Distinct(StringComparer.Ordinal).Count());
+        Assert.All(ProblemReportRelationshipPolicy.Definitions, item =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(item.ArtifactType));
+            Assert.True(ProblemReportRelationshipPolicy.Matches(item.Relationship, item.ArtifactType));
+        });
+        Assert.Equal(7, ProblemReportRelationshipPolicy.Definitions.Count(item => item.IsControlled));
+        Assert.True(ProblemReportRelationshipPolicy.IsGenericContextPair("Requirement", ProblemReportRelationshipPolicy.AffectedRequirement));
+        Assert.False(ProblemReportRelationshipPolicy.IsGenericContextPair("ChangeRequest", ProblemReportRelationshipPolicy.ApprovedCorrectiveAction));
+        Assert.Throws<DomainException>(() => ProblemReportRelationshipPolicy.CreateControlled(Guid.NewGuid(),
+            "TestExecution", Guid.NewGuid(), ProblemReportRelationshipPolicy.ResolutionVerification,
+            ProblemReportRelationshipProducer.ChangeRequestWorkflow, "actor", DateTimeOffset.UtcNow));
+        Assert.Throws<DomainException>(() => ProblemReportRelationshipPolicy.CreateGenericContext(Guid.NewGuid(),
+            "ChangeRequest", Guid.NewGuid(), ProblemReportRelationshipPolicy.ApprovedCorrectiveAction,
+            "actor", DateTimeOffset.UtcNow));
+    }
+
     [Fact]
     public async Task A_build_scoped_pr_flows_from_proposed_change_to_tcr_and_approved_corrective_action()
     {
