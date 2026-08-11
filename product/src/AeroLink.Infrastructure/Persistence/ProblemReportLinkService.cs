@@ -119,7 +119,8 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
         var tracked = db.ChangeTracker.Entries<ProblemReport>()
             .Select(entry => entry.Entity).SingleOrDefault(report => report.Id == reportId);
         var report = tracked ?? await db.ProblemReports.SingleOrDefaultAsync(item => item.Id == reportId, ct);
-        if (report?.InvalidateClosureVerification(actor, now) == true)
+        if (report is null) throw new DomainException("The selected Problem Report does not exist.");
+        if (report.PrepareControlledRelationshipChange(actor, now))
             await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor,
                 operation, now, ct);
     }

@@ -220,4 +220,30 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await page.getByRole('button', { name: /History/ }).click()
   await expect(page.locator('.prTimeline').getByText('Closure Verification Invalidated By Change')).toBeVisible()
   await expect(page.locator('.prTimeline').getByText('Closure Approved')).toBeVisible()
+  const packageCard = page.locator('.prClosurePackages article').filter({ hasText: 'Closure revision 0' })
+  await expect(packageCard).toContainText('Marcus Hale')
+  const packageLink = packageCard.getByRole('link', { name: 'Open frozen closure package' })
+  const packageHref = await packageLink.getAttribute('href')
+  expect(packageHref).toContain(`candidateId=`)
+  const frozenResponse = await page.request.get(packageHref!)
+  expect(frozenResponse.ok(), await frozenResponse.text()).toBeTruthy()
+  const frozen = await frozenResponse.json()
+  expect(frozen.snapshot.packageProvenance).toBe('FrozenAtApproval')
+  expect(frozen.snapshot.closurePackageHash).toMatch(/^[0-9a-f]{64}$/)
+  expect(frozen.package.closure.approvedBy).toBe('quality.analyst')
+
+  // Reopening begins a new controlled revision without erasing or relabeling the prior package.
+  await page.context().clearCookies()
+  await login(page, 'test.engineer', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  const closedDetail = await (await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}`)).json()
+  const reopened = await page.request.post(`${apiBase}/api/problem-reports/${raised.report.id}/reopen`, {
+    data: { expectedVersion: closedDetail.version, rationale: 'A follow-on field report requires a new closure cycle.' },
+  })
+  expect(reopened.ok(), await reopened.text()).toBeTruthy()
+  await page.goto(reportAddress, { waitUntil: 'load' })
+  await expect(page.locator('.prState')).toHaveText('Open', { timeout: 30_000 })
+  await page.getByRole('button', { name: /History/ }).click()
+  await expect(page.locator('.prClosurePackages')).toContainText('Closure revision 0 · prior closure cycle')
+  await expect(page.locator('.prClosurePackages')).toContainText(frozen.snapshot.closurePackageHash.slice(0, 12))
 });

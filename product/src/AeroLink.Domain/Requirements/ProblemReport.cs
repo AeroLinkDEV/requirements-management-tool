@@ -24,7 +24,7 @@ public enum ProblemReportSeverity { Critical, High, Major, Minor, Trivial }
 public enum ProblemReportType { Documentation, Code, Test, Other }
 public enum ProblemReportPriority { Urgent, High, Normal, Low }
 public enum ProblemReportDisposition { Fixed, Duplicate, CannotReproduce, NoFaultFound, Deferred, AcceptedRisk, Rejected }
-public enum ProblemReportClosureCandidateState { Pending, Invalidated, Approved }
+public enum ProblemReportClosureCandidateState { Pending, Invalidated, Approved, LegacyUnavailable }
 
 /// <summary>
 /// The exact closure basis selected for independent SQA review. A candidate is never rewritten: a
@@ -50,6 +50,7 @@ public sealed class ProblemReportClosureCandidate
         VerificationEvidenceJson = Required(verificationEvidenceJson); VerificationEvidenceHash = Hash(verificationEvidenceHash);
         LinksManifestJson = Required(linksManifestJson); LinksManifestHash = Hash(linksManifestHash);
         ManifestHash = Hash(manifestHash); SelectedBy = Required(selectedBy); SelectedAt = selectedAt;
+        PackageProvenance = "Candidate";
         State = ProblemReportClosureCandidateState.Pending;
     }
 
@@ -76,6 +77,9 @@ public sealed class ProblemReportClosureCandidate
     public Guid? ApprovedByAccountId { get; private set; }
     public string ApprovedBy { get; private set; } = "";
     public DateTimeOffset? ApprovedAt { get; private set; }
+    public string PackageProvenance { get; private set; } = "";
+    public string ClosurePackageJson { get; private set; } = "";
+    public string ClosurePackageHash { get; private set; } = "";
 
     public void Invalidate(string actor, string reason, DateTimeOffset now)
     {
@@ -84,13 +88,15 @@ public sealed class ProblemReportClosureCandidate
         InvalidatedBy = Required(actor); InvalidationReason = Required(reason); InvalidatedAt = now;
     }
 
-    public void Approve(string actor, Guid actorAccountId, DateTimeOffset now)
+    public void Approve(string actor, Guid actorAccountId, DateTimeOffset now,
+        string closurePackageJson, string closurePackageHash)
     {
         if (State != ProblemReportClosureCandidateState.Pending)
             throw new DomainException("Only the current pending closure candidate can be approved.");
         State = ProblemReportClosureCandidateState.Approved;
         ApprovedBy = Required(actor); ApprovedByAccountId = actorAccountId == Guid.Empty ? null : actorAccountId;
-        ApprovedAt = now;
+        ApprovedAt = now; PackageProvenance = "FrozenAtApproval";
+        ClosurePackageJson = Required(closurePackageJson); ClosurePackageHash = Hash(closurePackageHash);
     }
 
     private static string Required(string? value) => string.IsNullOrWhiteSpace(value)
@@ -356,6 +362,11 @@ public sealed class ProblemReport
         Required(actor, "An invalidation actor is required.");
         if (State != ProblemReportState.AwaitingSqaClosure) return false;
         InvalidateClosureVerificationForChange(); Touch(now); return true;
+    }
+    public bool PrepareControlledRelationshipChange(string actor, DateTimeOffset now)
+    {
+        Required(actor, "A controlled relationship actor is required."); EnsureNotTerminal();
+        return InvalidateClosureVerification(actor, now);
     }
     private void Touch(DateTimeOffset now) { UpdatedAt = now; Version++; }
     private void InvalidateClosureVerificationForChange()

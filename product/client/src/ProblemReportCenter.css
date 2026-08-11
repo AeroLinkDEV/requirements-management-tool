@@ -5,6 +5,7 @@
 .prFlow .draftState { align-self: start; }
 .problemReportsPage[data-read-only="true"] .prFlow{display:none}
 .prClosureInvalidated{flex:1 1 100%;display:flex;flex-direction:column;gap:3px;padding:12px 14px;border:1px solid #d8a93b;border-radius:10px;background:#fff8e8;color:#6d4d05}.prClosureInvalidated span{font-size:.86rem}
+.prClosurePackages{display:grid;gap:8px;padding:12px;border:1px solid #bed5c7;border-radius:10px;background:#f5fbf7}.prClosurePackages h4{margin:0;color:#245a3b}.prClosurePackages article{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px;background:#fff;border-radius:8px}.prClosurePackages article div{display:flex;flex-direction:column;gap:2px}.prClosurePackages article a{grid-column:2/-1;color:#176b43;font-size:.82rem;font-weight:750}.prClosurePackages article em{font-size:.78rem;color:#8a5b16}
 
 .prLinks button.artifactReferenceCard{display:flex;align-items:center;gap:10px;width:100%;padding:9px;border:0;border-top:1px solid #edf1f5;background:#fff;color:inherit;text-align:left;cursor:pointer}.prLinks button.artifactReferenceCard:hover,.prLinks button.artifactReferenceCard:focus-visible{background:#f2f7fc}.prLinks .artifactReferenceCard em,.prLinks .artifactUnavailable em{margin-left:auto;color:#2f6f9d;font-size:11px;font-style:normal;font-weight:750}.prLinks .artifactUnavailable em{color:#8a6d49}
 

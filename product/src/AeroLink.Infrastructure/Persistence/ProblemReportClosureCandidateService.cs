@@ -114,6 +114,75 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         return ProblemReportClosureCandidateDecision.Accept(candidate);
     }
 
+    public async Task FreezeForApprovalAsync(ProblemReport report, ProblemReportClosureCandidate candidate,
+        ProblemReportRevision closureRevision, string actor, Guid actorAccountId, DateTimeOffset now,
+        CancellationToken ct)
+    {
+        if (report.State != ProblemReportState.Closed || report.ClosureApprovedAt != now
+            || !string.Equals(report.ClosureApprovedByName, actor, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The Problem Report must be closed by this approval before its package is frozen.");
+
+        var revisions = await db.ProblemReportRevisions.AsNoTracking()
+            .Where(item => item.ProblemReportId == report.Id).ToListAsync(ct);
+        if (revisions.All(item => item.Id != closureRevision.Id)) revisions.Add(closureRevision);
+        var finalReportJson = ReportSnapshot(report);
+        var packageJson = JsonSerializer.Serialize(new
+        {
+            contract = "aerolink.problem-report-closure-package",
+            schemaVersion = SchemaVersion,
+            provenance = "FrozenAtApproval",
+            candidate = new
+            {
+                id = candidate.Id,
+                problemReportId = candidate.ProblemReportId,
+                reportRevision = candidate.ReportRevision,
+                sequence = candidate.Sequence,
+                reportVersion = candidate.ReportVersion,
+                manifestHash = candidate.ManifestHash,
+                selectedBy = candidate.SelectedBy,
+                selectedAt = candidate.SelectedAt,
+                reportSnapshotJson = candidate.ReportSnapshotJson,
+                reportSnapshotHash = candidate.ReportSnapshotHash,
+            },
+            closure = new
+            {
+                problemReportId = report.Id,
+                displayNumber = report.DisplayNumber,
+                revision = report.Revision,
+                version = report.Version,
+                reportSnapshotJson = finalReportJson,
+                reportSnapshotHash = Hash(finalReportJson),
+                approvedByAccountId = actorAccountId,
+                approvedBy = actor,
+                approvedAt = now,
+                authorityMeaning = "IndependentSqaClosure",
+                approvalRevisionId = closureRevision.Id,
+            },
+            verification = new
+            {
+                verificationExecutionId = candidate.VerificationExecutionId,
+                verificationEvidenceJson = candidate.VerificationEvidenceJson,
+                verificationEvidenceHash = candidate.VerificationEvidenceHash,
+            },
+            relationships = new
+            {
+                linksManifestJson = candidate.LinksManifestJson,
+                linksManifestHash = candidate.LinksManifestHash,
+            },
+            history = revisions.OrderBy(item => item.OccurredAt).ThenBy(item => item.Id).Select(item => new
+            {
+                id = item.Id,
+                revision = item.Revision,
+                eventType = item.EventType,
+                actor = item.Actor,
+                snapshotHash = item.SnapshotHash,
+                snapshotJson = item.SnapshotJson,
+                occurredAt = item.OccurredAt,
+            }),
+        });
+        candidate.Approve(actor, actorAccountId, now, packageJson, Hash(packageJson));
+    }
+
     public static string ReportSnapshot(ProblemReport report) => JsonSerializer.Serialize(new
     {
         contract = "aerolink.problem-report-closure-review",
@@ -204,6 +273,6 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         execution.RecordedAt,
     });
 
-    private static string Hash(string value) =>
+    public static string Hash(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 }

@@ -300,6 +300,36 @@ public sealed class ProblemReportApiTests
     }
 
     [Fact]
+    public async Task Legacy_closed_report_is_identified_truthfully_instead_of_fabricating_a_package()
+    {
+        using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient();
+        await BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory);
+        Guid reportId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var report = new ProblemReport(projectId, "PR-LEGACY-CLOSED", "Historical closure",
+                "This report closed before frozen packages existed.", "", "admin", now,
+                responsibleEngineerId: "admin");
+            report.ReadyForSccb("admin", now.AddMinutes(1));
+            report.OpenBySccb("sccb", now.AddMinutes(2));
+            report.BeginInvestigation("admin", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));
+            report.ProposeResolution("admin", "Historical correction", now.AddMinutes(4));
+            report.RecordResolutionVerification("admin", Guid.NewGuid(), now.AddMinutes(5));
+            report.ApproveClosure("legacy.quality", Guid.NewGuid(), now.AddMinutes(6));
+            db.ProblemReports.Add(report); await db.SaveChangesAsync(); reportId = report.Id;
+        }
+
+        using var response = await client.GetAsync($"/api/problem-reports/{reportId}/closure-package");
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("pr_closure_package_legacy_unfrozen", body.GetProperty("code").GetString());
+        Assert.Equal("LegacyClosureNotFrozen", body.GetProperty("provenance").GetString());
+    }
+
+    [Fact]
     public async Task Dashboard_exposes_unwaived_release_blockers_as_exact_records()
     {
         using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);

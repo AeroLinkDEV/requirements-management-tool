@@ -237,17 +237,57 @@ public sealed class ProblemReportVerificationApiTests
         Assert.Equal("Invalidated", cycles[1].GetProperty("state").GetString());
         Assert.NotEqual(cycles[0].GetProperty("manifestHash").GetString(), cycles[1].GetProperty("manifestHash").GetString());
 
+        var approvedCandidateId = cycles[0].GetProperty("id").GetGuid();
         var package = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}/closure-package");
-        Assert.Equal(cycles[0].GetProperty("id").GetGuid(), package.GetProperty("closureCandidate").GetProperty("id").GetGuid());
-        Assert.Equal(cycles[0].GetProperty("manifestHash").GetString(),
-            package.GetProperty("manifest").GetProperty("closureCandidateManifestHash").GetString());
+        Assert.Equal(approvedCandidateId, package.GetProperty("snapshot").GetProperty("id").GetGuid());
+        Assert.Equal("FrozenAtApproval", package.GetProperty("snapshot").GetProperty("packageProvenance").GetString());
+        var firstPackageHash = package.GetProperty("snapshot").GetProperty("closurePackageHash").GetString();
+        Assert.Equal("closure.quality", package.GetProperty("package").GetProperty("closure").GetProperty("approvedBy").GetString());
+        Assert.Contains(package.GetProperty("package").GetProperty("history").EnumerateArray(), revision =>
+            revision.GetProperty("eventType").GetString() == "ClosureApproved");
+        var frozenPackage = package.GetProperty("package").GetRawText();
 
-        await using var scope = factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        var persistedFirst = await db.ProblemReportClosureCandidates.AsNoTracking()
-            .SingleAsync(item => item.Id == firstCandidate.GetProperty("id").GetGuid());
-        Assert.Contains("Correct and retest.", persistedFirst.ReportSnapshotJson);
-        Assert.DoesNotContain("materially revised correction", persistedFirst.ReportSnapshotJson);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var persistedFirst = await db.ProblemReportClosureCandidates.AsNoTracking()
+                .SingleAsync(item => item.Id == firstCandidate.GetProperty("id").GetGuid());
+            Assert.Contains("Correct and retest.", persistedFirst.ReportSnapshotJson);
+            Assert.DoesNotContain("materially revised correction", persistedFirst.ReportSnapshotJson);
+            var persistedApproved = await db.ProblemReportClosureCandidates.AsNoTracking()
+                .SingleAsync(item => item.Id == approvedCandidateId);
+            Assert.False(string.IsNullOrWhiteSpace(persistedApproved.ClosurePackageJson));
+            db.ProblemReports.Add(new ProblemReport(fixture.ProjectId, $"PR-UNRELATED-{Guid.NewGuid():N}",
+                "Unrelated activity", "Must not alter a frozen package.", "", "admin", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+        var repeated = await engineer.GetFromJsonAsync<JsonElement>(
+            $"/api/problem-reports/{fixture.ReportId}/closure-package?candidateId={approvedCandidateId}");
+        Assert.Equal(firstPackageHash, repeated.GetProperty("snapshot").GetProperty("closurePackageHash").GetString());
+        Assert.Equal(frozenPackage, repeated.GetProperty("package").GetRawText());
+
+        using var reopened = await engineer.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/reopen",
+            new { expectedVersion = final.GetProperty("version").GetInt64(), rationale = "A field report requires a second controlled closure cycle." });
+        Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
+        var reopenVersion = (await reopened.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using var implementing = await engineer.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/implementation",
+            new { expectedVersion = reopenVersion });
+        Assert.Equal(HttpStatusCode.OK, implementing.StatusCode);
+        var implementingVersion = (await implementing.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using var resolution = await engineer.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/resolution",
+            new { expectedVersion = implementingVersion, correctiveAction = "Apply and verify the follow-on correction." });
+        Assert.Equal(HttpStatusCode.OK, resolution.StatusCode);
+        var third = await SelectCandidateAsync(engineer, fixture, fixture.TargetBuildId, targetReleaseId: null);
+        using var reclosed = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
+            new { expectedVersion = third.ReportVersion });
+        Assert.Equal(HttpStatusCode.OK, reclosed.StatusCode);
+        var latestPackage = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}/closure-package");
+        Assert.Equal(1, latestPackage.GetProperty("snapshot").GetProperty("reportRevision").GetInt32());
+        Assert.NotEqual(firstPackageHash, latestPackage.GetProperty("snapshot").GetProperty("closurePackageHash").GetString());
+        var priorPackage = await engineer.GetFromJsonAsync<JsonElement>(
+            $"/api/problem-reports/{fixture.ReportId}/closure-package?candidateId={approvedCandidateId}");
+        Assert.Equal(firstPackageHash, priorPackage.GetProperty("snapshot").GetProperty("closurePackageHash").GetString());
+        Assert.Equal(frozenPackage, priorPackage.GetProperty("package").GetRawText());
     }
 
     [Fact]
@@ -324,6 +364,35 @@ public sealed class ProblemReportVerificationApiTests
             Assert.Equal("Verifying", detail.GetProperty("state").GetString());
             Assert.Equal("Invalidated", persistedCandidate.GetProperty("state").GetString());
         }
+    }
+
+    [Fact]
+    public async Task Concurrent_closure_approvals_freeze_exactly_one_package()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var engineer = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(engineer);
+        var fixture = await SeedAsync(factory);
+        var candidate = await SelectCandidateAsync(engineer, fixture, fixture.TargetBuildId, targetReleaseId: null);
+        using var qualityOne = factory.CreateClient();
+        using var qualityTwo = factory.CreateClient();
+        await LoginAsync(qualityOne, "closure.quality");
+        await LoginAsync(qualityTwo, "closure.quality");
+
+        var firstTask = qualityOne.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
+            new { expectedVersion = candidate.ReportVersion });
+        var secondTask = qualityTwo.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
+            new { expectedVersion = candidate.ReportVersion });
+        await Task.WhenAll(firstTask, secondTask);
+        using var first = await firstTask;
+        using var second = await secondTask;
+        Assert.Equal(1, new[] { first.IsSuccessStatusCode, second.IsSuccessStatusCode }.Count(success => success));
+
+        var detail = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+        var frozen = Assert.Single(detail.GetProperty("closureCandidates").EnumerateArray());
+        Assert.Equal("Approved", frozen.GetProperty("state").GetString());
+        Assert.Equal("FrozenAtApproval", frozen.GetProperty("packageProvenance").GetString());
+        Assert.Equal(64, frozen.GetProperty("closurePackageHash").GetString()!.Length);
     }
 
     private static async Task<(Guid ExecutionId, long ReportVersion)> SelectCandidateAsync(HttpClient client,

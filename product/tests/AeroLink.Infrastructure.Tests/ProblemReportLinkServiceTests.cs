@@ -149,4 +149,46 @@ public sealed class ProblemReportLinkServiceTests
             if (File.Exists(path)) File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task A_controlled_relationship_cannot_be_added_after_closure_until_reopen()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-pr-frozen-links-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Frozen PR links", "FPRL");
+            var project = new ProjectRecord(program.Id, "FMS", "FMS");
+            var release = new SoftwareRelease(project.Id, "1.6", false);
+            var report = new ProblemReport(project.Id, "PR-00451", "Frozen closure",
+                "Closed relationships must not drift.", "", "engineer", now, targetReleaseId: release.Id);
+            report.ReadyForSccb("engineer", now.AddMinutes(1));
+            report.OpenBySccb("sccb", now.AddMinutes(2));
+            report.BeginInvestigation("engineer", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));
+            report.ProposeResolution("engineer", "Correction", now.AddMinutes(4));
+            report.RecordResolutionVerification("engineer", Guid.NewGuid(), now.AddMinutes(5));
+            report.ApproveClosure("quality", Guid.NewGuid(), now.AddMinutes(6));
+            var change = new SystemChangeRequest("SRCR-00451", 0, project.Id, release.Id,
+                "Late correction", "P", "A", "S", "change.engineer", now);
+            db.AddRange(program, project, release, report, change); await db.SaveChangesAsync();
+
+            var version = report.Version;
+            var error = await Assert.ThrowsAsync<DomainException>(() =>
+                new ProblemReportLinkService(db).LinkChangeRequestAsync(change.Id, [report.Id],
+                    "change.engineer", now.AddMinutes(7), default));
+            Assert.Contains("closed or dispositioned", error.Message);
+            Assert.Equal(version, report.Version);
+            Assert.Empty(db.ChangeTracker.Entries<ProblemReportLink>());
+            Assert.Empty(await db.ProblemReportLinks.AsNoTracking().ToListAsync());
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 }
