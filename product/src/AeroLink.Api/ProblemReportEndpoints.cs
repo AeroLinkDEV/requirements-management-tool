@@ -216,8 +216,12 @@ public static class ProblemReportEndpoints
     {
         var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
-        var execution = await db.TestExecutions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.TestExecutionId && x.ProjectId == report.ProjectId, ct);
-        if (execution is null || execution.Outcome != TestOutcome.Pass) return Results.BadRequest(new { error = "Closure verification requires a passing successor test execution in the same project." });
+        var execution = await db.TestExecutions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.TestExecutionId, ct);
+        if (execution is null)
+            return Results.BadRequest(new { error = "The selected closure execution does not exist in this Problem Report Project.", code = "pr_verification_wrong_project" });
+        var decision = await new ProblemReportClosureVerificationPolicy(db).ValidateAsync(report, execution, ct);
+        if (!decision.Accepted)
+            return Results.Conflict(new { error = decision.Error, code = decision.Code });
         return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ResolutionVerified", (item, actor, now) => item.RecordResolutionVerification(actor.UserName, execution.Id, now),
             link: (actor, now) => ProblemReportRelationshipPolicy.CreateControlled(report.Id, "TestExecution", execution.Id,
                 ProblemReportRelationshipPolicy.ResolutionVerification, ProblemReportRelationshipProducer.ResolutionVerificationWorkflow, actor.UserName, now));
@@ -227,7 +231,17 @@ public static class ProblemReportEndpoints
     {
         var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
         if (!await http.HasProjectRoleAsync(db, identity, report.ProjectId, ct, ProgramRole.SoftwareQualityAnalyst, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Approver)) return Results.Forbid();
-        var actor = http.UserAccount();
+        if (report.State == ProblemReportState.AwaitingSqaClosure)
+        {
+            var execution = report.ResolutionVerificationExecutionId is { } executionId
+                ? await db.TestExecutions.AsNoTracking().SingleOrDefaultAsync(item => item.Id == executionId, ct)
+                : null;
+            if (execution is null)
+                return Results.Conflict(new { error = "The recorded closure execution is unavailable.", code = "pr_verification_missing_evidence" });
+            var decision = await new ProblemReportClosureVerificationPolicy(db).ValidateAsync(report, execution, ct);
+            if (!decision.Accepted)
+                return Results.Conflict(new { error = decision.Error, code = decision.Code });
+        }
         return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ClosureApproved", (item, user, now) => item.ApproveClosure(user.UserName, user.Id, now));
     }
 
@@ -360,76 +374,44 @@ public static class ProblemReportEndpoints
         var report = await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
         if (report is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
-
-        // Materialized before ordering: SQLite cannot ORDER BY a DateTimeOffset server-side, and the rest of
-        // this codebase already orders these rows in memory for that reason.
-        var originatingLinks = (await db.ProblemReportLinks.AsNoTracking()
-            .Where(x => x.ProblemReportId == id && x.ArtifactType == "TestExecution" && x.Relationship == ProblemReportRelationshipPolicy.OriginatingFailure)
-            .ToListAsync(ct)).OrderBy(x => x.AddedAt).ToList();
-        Guid? executionId = originatingLinks.Count > 0 ? originatingLinks[0].ArtifactId : null;
-
-        Guid? originExecutionId = null, procedureId = null, procedureRevisionId = null;
-        string? procedureNumber = null, procedureTitle = null;
-        TestProcedureLevel? procedureLevel = null;
-        if (executionId is not null)
-        {
-            var executionValue = executionId.Value;
-            var execution = await db.TestExecutions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == executionValue, ct);
-            var revision = execution is null ? null
-                : await db.TestProcedureRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == execution.ProcedureRevisionId, ct);
-            var procedure = revision is null ? null
-                : await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x => x.Id == revision.ProcedureId, ct);
-            if (procedure is not null)
-            {
-                originExecutionId = execution!.Id; procedureId = procedure.Id; procedureRevisionId = revision!.Id;
-                var projectedTitle = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
-                    [revision.Id], ct);
-                procedureNumber = procedure.BaseNumber; procedureTitle = projectedTitle[revision.Id].Title;
-                procedureLevel = procedure.Level;
-            }
-        }
-
-        // With no originating execution the report was raised by hand, so the discipline comes from whatever
-        // requirement it is about. Falling back to System silently would send half of them to the wrong place.
-        RequirementLevel? requirementLevel = null;
-        if (procedureLevel is null)
-        {
-            var linkedRequirementIds = await db.ProblemReportLinks.AsNoTracking()
-                .Where(x => x.ProblemReportId == id && x.ArtifactType == "Requirement").Select(x => x.ArtifactId).ToListAsync(ct);
-            if (linkedRequirementIds.Count > 0)
-            {
-                var levels = await db.Requirements.AsNoTracking()
-                    .Where(x => linkedRequirementIds.Contains(x.Id)).Select(x => x.Level).Take(1).ToListAsync(ct);
-                if (levels.Count > 0) requirementLevel = levels[0];
-            }
-        }
-
-        var discipline = procedureLevel is not null
-            ? procedureLevel == TestProcedureLevel.System ? "system" : "software"
-            : requirementLevel switch
-            {
-                RequirementLevel.System => "system",
-                RequirementLevel.HighLevel or RequirementLevel.LowLevel => "software",
-                _ => (string?)null,
-            };
-
-        var reason = procedureNumber is not null
-            ? $"Record the successor execution against {procedureNumber}, the procedure whose failure raised this report."
-            : discipline is not null
-                ? "This report was raised by hand, so no originating execution is preselected. Choose the procedure that verifies the affected requirement."
-                : "This report is not linked to a procedure or a requirement, so the applicable verification scope cannot be determined. Link the affected artifact first.";
+        var scope = await new ProblemReportClosureVerificationPolicy(db).ResolveAsync(report, ct);
+        var targetRevisionId = scope.PermittedProcedureRevisionIds.Count == 1
+            ? scope.PermittedProcedureRevisionIds.Single()
+            : (Guid?)null;
+        var revision = targetRevisionId is null ? null : await db.TestProcedureRevisions.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == targetRevisionId, ct);
+        var procedure = revision is null ? null : await db.TestProcedures.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == revision.ProcedureId, ct);
+        var levels = await (from candidateRevision in db.TestProcedureRevisions.AsNoTracking()
+                            join candidateProcedure in db.TestProcedures.AsNoTracking()
+                                on candidateRevision.ProcedureId equals candidateProcedure.Id
+                            where scope.PermittedProcedureRevisionIds.Contains(candidateRevision.Id)
+                            select candidateProcedure.Level).Distinct().ToListAsync(ct);
+        var procedureLevel = levels.Count == 1 ? levels[0] : (TestProcedureLevel?)null;
+        var discipline = procedureLevel is null ? null
+            : procedureLevel == TestProcedureLevel.System ? "system" : "software";
+        string? procedureTitle = null;
+        if (revision is not null)
+            procedureTitle = (await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+                [revision.Id], ct))[revision.Id].Title;
+        var reason = scope.IsResolved
+            ? procedure is not null
+                ? $"Record a passing successor execution against {procedure.BaseNumber}, using the exact revision carried by the target build."
+                : "Choose one of the controlled corrective procedures carried by the target build."
+            : scope.Error!;
 
         return Results.Ok(new
         {
             problemReportId = report.Id,
             problemReportNumber = report.DisplayNumber,
-            available = discipline is not null,
+            available = scope.IsResolved && discipline is not null,
             discipline,
             reason,
-            executionId = originExecutionId,
-            procedureId,
-            procedureRevisionId,
-            procedureNumber,
+            verificationCode = scope.ErrorCode,
+            executionId = scope.OriginExecutionId,
+            procedureId = procedure?.Id ?? scope.ProcedureId,
+            procedureRevisionId = revision?.Id,
+            procedureNumber = procedure?.BaseNumber,
             procedureTitle,
             // Naming the authority a handoff needs, rather than only refusing.
             requiredRole = ProgramRole.TestEngineer.ToString(),

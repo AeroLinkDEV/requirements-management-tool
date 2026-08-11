@@ -97,10 +97,10 @@ test("a corrective action opens the discipline, report and procedure it belongs 
   for (const [scope, raised] of [["System", system], ["Software", software]] as const) {
     const corrective = await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}/corrective-action`)
     expect(corrective.ok(), await corrective.text()).toBeTruthy()
-    expect(await corrective.json()).toEqual(expect.objectContaining({
-      problemReportId: raised.report.id,
-      discipline: scope.toLowerCase(),
-    }))
+    const target = await corrective.json()
+    expect(target.problemReportId).toBe(raised.report.id)
+    if (raised.procedureNumber) expect(target).toEqual(expect.objectContaining({ available: true, discipline: scope.toLowerCase() }))
+    else expect(target).toEqual(expect.objectContaining({ available: false, verificationCode: 'pr_verification_scope_unknown' }))
   }
   await page.goto(new URL(root + "/problem-reports", page.url()).toString(), { waitUntil: "load" })
   await expect(page.getByRole("heading", { name: "Problem Reports" })).toBeVisible({ timeout: 30_000 })
@@ -147,4 +147,26 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await expect(page.getByRole("heading", { name: "Test Results" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("status", { name: "Corrective verification action" })).toContainText(raised.report.displayNumber);
   expect(page.url()).toContain(raised.report.id);
+
+  const corrective = await (await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}/corrective-action`)).json()
+  const setDiscipline = corrective.procedureNumber.startsWith('HLRTP-') ? 'HighLevelSoftware'
+    : corrective.procedureNumber.startsWith('LLRTP-') ? 'LowLevelSoftware' : 'System'
+  const included = await page.request.post(`${apiBase}/api/releases/${releaseId}/test-sets/${setDiscipline}/procedures`, {
+    data: { procedureRevisionIds: [corrective.procedureRevisionId], reason: 'CorrectiveAction', note: `Closure retest for ${raised.report.displayNumber}` },
+  })
+  expect(included.ok(), await included.text()).toBeTruthy()
+  await page.reload({ waitUntil: 'load' })
+  await page.getByRole('button', { name: /Record successor execution/ }).click()
+  const record = page.getByRole('dialog', { name: /Record a result for/ })
+  await expect(record).toBeVisible()
+  await record.getByLabel('Configuration under test').fill('FMS corrective rig')
+  await record.getByLabel('Determination', { exact: true }).fill('The corrected behavior satisfies the effective controlled procedure.')
+  await record.getByLabel('Evidence reference').fill('controlled://browser/pr-corrective-successor')
+  await record.getByRole('button', { name: 'Record determination' }).click()
+  await expect(page.getByText(/selected as PR closure evidence/)).toBeVisible({ timeout: 30_000 })
+
+  const detail = await (await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}`)).json()
+  expect(detail.state).toBe('AwaitingSqaClosure')
+  expect(detail.testEvidence).toHaveLength(1)
+  expect(detail.testEvidence[0].artifactId).toBe(detail.resolutionVerificationExecutionId)
 });
