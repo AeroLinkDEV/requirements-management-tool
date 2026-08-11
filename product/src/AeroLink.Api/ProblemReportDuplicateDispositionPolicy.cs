@@ -44,6 +44,33 @@ public sealed class ProblemReportDuplicateDispositionPolicy(AeroLinkDbContext db
         return new(true, null, null);
     }
 
+    /// <summary>
+    /// Purpose-specific picker projection. It applies the same canonical-root invariants as the write policy,
+    /// while the disposition command repeats them inside its serializable transaction at commit time.
+    /// </summary>
+    public async Task<IReadOnlyList<ProblemReport>> EligibleTargetsAsync(ProblemReport source, string? search,
+        int limit, CancellationToken ct)
+    {
+        var links = await DuplicateLinksAsync(ct);
+        if (links.Any(link => link.ProblemReportId == source.Id)
+            || links.Any(link => IsProblemReportLink(link) && link.ArtifactId == source.Id
+                && link.ProblemReportId != source.Id))
+            return [];
+
+        var nonCanonicalIds = links.Select(link => link.ProblemReportId).Distinct().ToList();
+        var query = db.ProblemReports.AsNoTracking().Where(item => item.ProjectId == source.ProjectId
+            && item.Id != source.Id && item.State != ProblemReportState.Duplicate
+            && !nonCanonicalIds.Contains(item.Id));
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLower();
+            query = query.Where(item => item.ReportNumber.ToLower().Contains(term)
+                || item.Title.ToLower().Contains(term));
+        }
+        return await query.OrderBy(item => item.ReportNumber).ThenBy(item => item.Revision)
+            .Take(Math.Clamp(limit, 1, 200)).ToListAsync(ct);
+    }
+
     public async Task<ProblemReportDuplicateDiagnostic> DiagnoseAsync(ProblemReport source, CancellationToken ct)
     {
         var links = await DuplicateLinksAsync(ct);
@@ -127,7 +154,8 @@ public sealed class ProblemReportDuplicateDispositionPolicy(AeroLinkDbContext db
     private static ProblemReportDuplicateDiagnostic Diagnostic(string status, string message,
         IReadOnlyList<Guid> path, ProblemReport? canonical = null) =>
         new(PolicyName, status, message, path, canonical?.Id,
-            canonical is null ? null : $"{canonical.ReportNumber}.{canonical.Revision:D2}");
+            canonical is null ? null : $"{canonical.ReportNumber}.{canonical.Revision:D2}",
+            canonical?.Title, canonical?.State.ToString());
 
     private sealed record DuplicateWalk(bool ReachesSource, bool InvalidGraph);
 }
@@ -135,4 +163,5 @@ public sealed class ProblemReportDuplicateDispositionPolicy(AeroLinkDbContext db
 public sealed record ProblemReportDuplicateDecision(bool Accepted, string? Code, string? Error);
 
 public sealed record ProblemReportDuplicateDiagnostic(string Policy, string Status, string Message,
-    IReadOnlyList<Guid> Path, Guid? CanonicalTargetId, string? CanonicalTargetIdentifier);
+    IReadOnlyList<Guid> Path, Guid? CanonicalTargetId, string? CanonicalTargetIdentifier,
+    string? CanonicalTargetTitle, string? CanonicalTargetState);

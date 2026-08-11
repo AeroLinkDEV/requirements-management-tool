@@ -91,6 +91,8 @@ public sealed class ProblemReportTests
         var report = NewReport();
         report.ReadyForSccb("verification.engineer", Now);
         report.OpenBySccb("change.board", Now);
+        Assert.Throws<DomainException>(() => report.ApplyDisposition("verification.engineer", ProblemReportDisposition.CannotReproduce, " ", null, Now));
+        Assert.Throws<DomainException>(() => report.ApplyDisposition("verification.engineer", ProblemReportDisposition.Fixed, "Generic fixed result", null, Now));
         Assert.Throws<DomainException>(() => report.ApplyDisposition("verification.engineer", ProblemReportDisposition.Duplicate, "Same failure", null, Now));
         report.ApplyDisposition("verification.engineer", ProblemReportDisposition.Duplicate, "Same failure", Guid.NewGuid(), Now);
         Assert.Equal(ProblemReportState.Duplicate, report.State);
