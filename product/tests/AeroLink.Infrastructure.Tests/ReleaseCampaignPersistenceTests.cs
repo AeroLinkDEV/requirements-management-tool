@@ -28,9 +28,30 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
             Assert.Equal(32, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id)); Assert.Equal(8, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id && x.State == ImpactDispositionState.Addressed));
             var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default); Assert.False(readiness.ReadyForRelease); Assert.Contains(readiness.Gates, x => x.Code == "change_control" && x.Completed == 2 && x.Total == 7);
             var blocker = new ProblemReport(summary.ProjectId, "PR-00001", "Unresolved release-impacting failure", "A failed verification result remains unresolved.", "", "verification.engineer", DateTimeOffset.UtcNow);
-            blocker.SetReleaseBlocker("verification.engineer", true, "", DateTimeOffset.UtcNow); db.ProblemReports.Add(blocker); await db.SaveChangesAsync(); db.ChangeTracker.Clear();
+            blocker.SetReleaseBlocker("verification.engineer", true, DateTimeOffset.UtcNow); db.ProblemReports.Add(blocker); await db.SaveChangesAsync(); db.ChangeTracker.Clear();
             readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default);
             Assert.Contains(readiness.Gates, x => x.Code == "problem_reports" && !x.Complete && x.Total == 1 && x.Detail.Contains("PR-00001.00"));
+            var waiverActorId = Guid.NewGuid(); var waiverAt = DateTimeOffset.UtcNow;
+            blocker.RecordReleaseWaiverDecision("independent.quality", waiverAt);
+            var waiver = new ReadinessWaiver(blocker.ProjectId, "ProblemReportReleaseBlocker", blocker.Id,
+                blocker.Revision, blocker.ReleaseBlockerVersion, "A bounded release interval was independently accepted.",
+                waiverActorId, "independent.quality", "SoftwareQualityAnalyst",
+                "IndependentProblemReportReleaseWaiver", waiverAt.AddDays(2), "independent.quality", waiverAt);
+            db.ReadinessWaivers.Add(waiver); await db.SaveChangesAsync(); db.ChangeTracker.Clear();
+            readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default);
+            Assert.Contains(readiness.Gates, x => x.Code == "problem_reports" && x.Complete && x.Total == 0);
+            waiver = await db.ReadinessWaivers.SingleAsync(x => x.Id == waiver.Id);
+            waiver.Revoke("independent.quality", "The bounded interval ended.", waiverAt.AddHours(1));
+            await db.SaveChangesAsync(); db.ChangeTracker.Clear();
+            readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default);
+            Assert.Contains(readiness.Gates, x => x.Code == "problem_reports" && !x.Complete && x.Total == 1);
+            var expired = new ReadinessWaiver(blocker.ProjectId, "ProblemReportReleaseBlocker", blocker.Id,
+                blocker.Revision, blocker.ReleaseBlockerVersion, "An expired bounded interval.", Guid.NewGuid(),
+                "independent.quality", "SoftwareQualityAnalyst", "IndependentProblemReportReleaseWaiver",
+                waiverAt.AddHours(-1), "independent.quality", waiverAt.AddHours(-2));
+            db.ReadinessWaivers.Add(expired); await db.SaveChangesAsync(); db.ChangeTracker.Clear();
+            readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default);
+            Assert.Contains(readiness.Gates, x => x.Code == "problem_reports" && !x.Complete && x.Total == 1);
             var documentId = await db.ControlledDocuments.Where(x => x.BaselineId == summary.ReleasedBaselineId).Select(x => x.Id).FirstAsync(); var generator = new ControlledOutputGenerator(db, new RichContentPublisher(db, new EvidenceFileStore(Path.Combine(Path.GetTempPath(), $"aerolink-evidence-{Guid.NewGuid():N}"))));
             var docx = await generator.GenerateAsync(documentId, "docx", default); var pdf = await generator.GenerateAsync(documentId, "pdf", default); Assert.NotNull(docx); Assert.NotNull(pdf); Assert.StartsWith("%PDF-1.4", System.Text.Encoding.ASCII.GetString(pdf!.Content, 0, 8));
             using (var archive = new ZipArchive(new MemoryStream(docx!.Content), ZipArchiveMode.Read))

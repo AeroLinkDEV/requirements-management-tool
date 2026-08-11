@@ -209,6 +209,7 @@ public sealed class ProblemReport
     public string ClosureApprovedByName { get; private set; } = "";
     public DateTimeOffset? ClosureApprovedAt { get; private set; }
     public bool IsReleaseBlocker { get; private set; }
+    public long ReleaseBlockerVersion { get; private set; }
     public string WaiverRationale { get; private set; } = "";
     public string WaivedBy { get; private set; } = "";
     public DateTimeOffset? WaivedAt { get; private set; }
@@ -326,12 +327,18 @@ public sealed class ProblemReport
         Touch(now);
     }
 
-    public void SetReleaseBlocker(string actor, bool isBlocker, string waiverRationale, DateTimeOffset now)
+    public void SetReleaseBlocker(string actor, bool isBlocker, DateTimeOffset now)
     {
-        EnsureResponsible(actor); InvalidateClosureVerificationForChange(); IsReleaseBlocker = isBlocker;
-        if (!isBlocker) { WaiverRationale = ""; WaivedBy = ""; WaivedAt = null; }
-        else if (!string.IsNullOrWhiteSpace(waiverRationale)) { WaiverRationale = waiverRationale.Trim(); WaivedBy = actor; WaivedAt = now; }
-        Touch(now);
+        EnsureResponsible(actor); InvalidateClosureVerificationForChange();
+        var newlyRaised = isBlocker && !IsReleaseBlocker; IsReleaseBlocker = isBlocker; Touch(now);
+        if (newlyRaised) ReleaseBlockerVersion = Version;
+    }
+
+    public void RecordReleaseWaiverDecision(string actor, DateTimeOffset now)
+    {
+        Required(actor, "A release-waiver actor is required."); EnsureNotTerminal();
+        if (!IsReleaseBlocker) throw new DomainException("Only a current release blocker can be waived.");
+        InvalidateClosureVerificationForChange(); Touch(now);
     }
 
     public void Reopen(string actor, string rationale, DateTimeOffset now)
@@ -341,7 +348,8 @@ public sealed class ProblemReport
         if (State == ProblemReportState.Closed || IsTerminalDisposition())
         {
             Revision++; State = ProblemReportState.Open; Disposition = null; DispositionRationale = ""; ResolutionVerificationExecutionId = null;
-            ClosureApprovedBy = null; ClosureApprovedByName = ""; ClosureApprovedAt = null; Touch(now); return;
+            ClosureApprovedBy = null; ClosureApprovedByName = ""; ClosureApprovedAt = null; Touch(now);
+            if (IsReleaseBlocker) ReleaseBlockerVersion = Version; return;
         }
         throw new DomainException("Only a closed or dispositioned problem report can be reopened.");
     }
@@ -355,7 +363,7 @@ public sealed class ProblemReport
     public string CanonicalSnapshot() => string.Join("|", Id, ProjectId, DisplayNumber, Title, Problem, ProblemRich, AdditionalInformation,
         AdditionalInformationRich, Analysis, ReportedBy, ResponsibleEngineerId, TargetReleaseId, Classification, Severity, Priority, Origin,
         AffectedConfiguration, RootCause, Effects, Containment, CorrectiveAction, SystemAircraftImpact, ImpactAssessmentJson, Disposition,
-        DispositionRationale, ResolutionVerificationExecutionId, State, IsReleaseBlocker, WaiverRationale, Version);
+        DispositionRationale, ResolutionVerificationExecutionId, State, IsReleaseBlocker, ReleaseBlockerVersion, WaiverRationale, Version);
     public string CanonicalHash() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(CanonicalSnapshot()))).ToLowerInvariant();
     public bool InvalidateClosureVerification(string actor, DateTimeOffset now)
     {

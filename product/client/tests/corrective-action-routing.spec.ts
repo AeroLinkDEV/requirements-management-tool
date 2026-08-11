@@ -200,6 +200,9 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await login(page, 'test.engineer', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await page.goto(reportAddress, { waitUntil: 'load' })
+  await page.getByRole('button', { name: 'Raise release blocker' }).click()
+  await expect(page.getByText('Requires a separate independent release-waiver decision.')).toBeVisible()
+  await expect(page.getByText('Approve independent release waiver')).toHaveCount(0)
   await page.getByRole('button', { name: /Select closure-supporting test result/ }).click()
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: /Record successor execution/ }).click()
@@ -217,6 +220,7 @@ test("a corrective action opens Test Results, names the report, and survives a r
     await page.goto(reportAddress, { waitUntil: 'load' })
     await expect(page.locator('.prState')).toHaveText('Awaiting SQA Closure', { timeout: 30_000 })
     await expect(page.getByRole('button', { name: /Approve independent SQA closure/ })).toHaveCount(0)
+    await expect(page.getByText('Approve independent release waiver')).toHaveCount(userName === 'systems.reviewer' ? 0 : 1)
   }
 
   await page.context().clearCookies()

@@ -50,7 +50,13 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         var docs = await db.ControlledDocuments.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
         // A release cannot be declared ready while an unwaived controlled problem report remains a blocker.
         // This is deliberately project-scoped until product-line configuration provides exact release applicability.
-        var problemBlockers = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == campaign.ProjectId && x.IsReleaseBlocker && string.IsNullOrEmpty(x.WaiverRationale)).ToListAsync(ct);
+        var allProblemBlockers = await db.ProblemReports.AsNoTracking()
+            .Where(x => x.ProjectId == campaign.ProjectId && x.IsReleaseBlocker).ToListAsync(ct);
+        var problemWaivers = await db.ReadinessWaivers.AsNoTracking().Where(x => x.ProjectId == campaign.ProjectId
+            && x.BlockerType == "ProblemReportReleaseBlocker").ToListAsync(ct);
+        var waiverDecisionAt = DateTimeOffset.UtcNow;
+        var problemBlockers = allProblemBlockers.Where(report =>
+            !problemWaivers.Any(waiver => waiver.IsActiveFor(report, waiverDecisionAt))).ToList();
         // Every requirement this release introduced or modified raised a verification impact item when its
         // change request was approved. Each one carries an owed decision: a procedure that covers it, or a
         // recorded confirmation that no test is required. A release with no requirement changes raises none,
