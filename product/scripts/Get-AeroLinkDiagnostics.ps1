@@ -104,9 +104,9 @@ else {
 }
 
 if (Test-Path $psql) {
-    $migrationCount = & $psql -h $DatabaseHost -p $DatabasePort -U $DatabaseUser -d $DatabaseName -tAc 'SELECT COUNT(*) FROM "__EFMigrationsHistory"' 2>$null
-    $migrationHealthy = $LASTEXITCODE -eq 0 -and [int]$migrationCount -gt 0
-    Add-Check 'Migration posture' 'Applied migrations' $migrationHealthy "$migrationCount applied migration(s)"
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkMigrationPosture.psm1') -Force -ErrorAction Stop
+    $migration = Get-AeroLinkMigrationCount -PsqlPath $psql -DatabaseHost $DatabaseHost -DatabasePort $DatabasePort -DatabaseUser $DatabaseUser -DatabaseName $DatabaseName
+    Add-Check 'Migration posture' 'Applied migrations' $migration.Healthy $migration.Detail
 }
 else {
     Add-Check 'Migration posture' 'Applied migrations' $false 'psql.exe was not found under the configured AeroLink runtime.'
