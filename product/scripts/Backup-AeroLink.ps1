@@ -11,8 +11,12 @@ $archive = "$staging.zip"
 $pgDump = Join-Path $productRoot '.local\postgresql\pgsql\bin\pg_dump.exe'
 $evidence = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AeroLink\evidence'
 
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Start-Postgres.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL is not available for backup.' }
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
+$start = Invoke-AeroLinkChildScript -ScriptPath (Join-Path $PSScriptRoot 'Start-Postgres.ps1') `
+    -StandardOutput (Join-Path $productRoot '.local\logs\backup-postgres-start.stdout.log') `
+    -StandardError (Join-Path $productRoot '.local\logs\backup-postgres-start.stderr.log') `
+    -TimeoutSeconds 420 -StepName 'Start-Postgres.ps1 (backup)'
+if ($start.ExitCode -ne 0) { throw "PostgreSQL is not available for backup: $($start.Detail)" }
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
 try {

@@ -1,4 +1,5 @@
 #Requires -Version 5.1
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1')
 <#
     AeroLink protected remote-demo operator mode.
 
@@ -258,15 +259,338 @@ function Get-AeroLinkRemoteDemoStartDecision {
     return [pscustomobject]@{ Decision = 'CanStart'; Message = 'No owned tunnel exists and the public endpoint is free; starting the protected tunnel.' }
 }
 
+function New-AeroLinkRemoteDemoRun {
+    <#
+      .SYNOPSIS A correlation context for one recovery attempt.
+    #>
+    param([switch]$Scheduled)
+    return [pscustomobject]@{
+        CorrelationId = [guid]::NewGuid().ToString('N')
+        Invocation = if ($Scheduled) { 'scheduled' } else { 'manual' }
+        StartedAt = (Get-Date).ToUniversalTime()
+    }
+}
+
 function Write-AeroLinkRemoteDemoLog {
     param(
         [Parameter(Mandatory)]$Config,
-        [Parameter(Mandatory)][string]$Message
+        [Parameter(Mandatory)][string]$Message,
+        $Run
     )
     $logDirectory = $Config.LogsPath
     if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
-    $line = "$((Get-Date).ToUniversalTime().ToString('o')) $Message"
+    $context = if ($Run) { "$($Run.CorrelationId) [$($Run.Invocation)]" } else { 'manual' }
+    $line = "$((Get-Date).ToUniversalTime().ToString('o')) [$context] $Message"
     Add-Content -LiteralPath (Join-Path $logDirectory 'remote-demo.log') -Value $line -Encoding UTF8
+}
+
+function Get-AeroLinkRemoteDemoPostgresBin {
+    param([Parameter(Mandatory)]$Config)
+    return Join-Path $Config.AeroLinkRoot '.local\postgresql\pgsql\bin'
+}
+
+function Test-AeroLinkRemoteDemoPostgresReady {
+    <#
+      .SYNOPSIS PostgreSQL readiness = pg_isready success AND a bounded real query.
+      .DESCRIPTION
+        A listening socket alone is never treated as healthy. Both probes are
+        file-redirected and bounded so a scheduled invocation cannot block on
+        inherited stdio handles.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [string]$PostgresBin = (Get-AeroLinkRemoteDemoPostgresBin -Config $Config),
+        [string]$DatabaseHost = '127.0.0.1',
+        [int]$DatabasePort = 54329,
+        [string]$DatabaseUser = 'postgres',
+        [string]$DatabaseName = 'aerolink',
+        [scriptblock]$PgIsreadyProbe,
+        [scriptblock]$QueryProbe
+    )
+    $logDirectory = $Config.LogsPath
+    if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
+    if ($null -eq $PgIsreadyProbe) {
+        $PgIsreadyProbe = {
+            param($Bin, $DbHost, $DbPort, $DbUser, $Db, $Out, $Err)
+            $result = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $Bin 'pg_isready.exe') `
+                -ArgumentList @('-h', $DbHost, '-p', "$DbPort", '-U', $DbUser, '-d', $Db) `
+                -StandardOutput $Out -StandardError $Err -TimeoutSeconds 30 -StepName 'pg_isready' -CaptureOutput
+            return $result.ExitCode -eq 0
+        }
+    }
+    if ($null -eq $QueryProbe) {
+        $QueryProbe = {
+            param($Bin, $DbHost, $DbPort, $DbUser, $Db, $Out, $Err)
+            $result = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $Bin 'psql.exe') `
+                -ArgumentList @('-X', '-h', $DbHost, '-p', "$DbPort", '-U', $DbUser, '-d', $Db, '-tA', '-q', '-c', 'SELECT 1') `
+                -StandardOutput $Out -StandardError $Err -TimeoutSeconds 30 -StepName 'postgres real query' -CaptureOutput
+            if ($result.ExitCode -ne 0) { return $false }
+            $value = ($result.StdOutText -split "`r?`n" | Where-Object { $_ -ne '' } | Select-Object -Last 1)
+            return ([string]$value).Trim() -eq '1'
+        }
+    }
+    $readyOk = & $PgIsreadyProbe $PostgresBin $DatabaseHost $DatabasePort $DatabaseUser 'postgres' `
+        (Join-Path $logDirectory 'pg-ready-pg_isready.stdout.log') (Join-Path $logDirectory 'pg-ready-pg_isready.stderr.log')
+    $queryOk = $false
+    if ($readyOk) {
+        $queryOk = & $QueryProbe $PostgresBin $DatabaseHost $DatabasePort $DatabaseUser $DatabaseName `
+            (Join-Path $logDirectory 'pg-ready-query.stdout.log') (Join-Path $logDirectory 'pg-ready-query.stderr.log')
+    }
+    $detail = if ($readyOk -and $queryOk) {
+        'pg_isready and a real read-only SELECT 1 both succeeded.'
+    }
+    elseif (-not $readyOk) {
+        'pg_isready did not report accepting connections (listener alone is not health).'
+    }
+    else {
+        'pg_isready succeeded but a real read-only SELECT 1 did not return 1.'
+    }
+    return [pscustomobject]@{ Ready = ($readyOk -and $queryOk); PgIsreadyOk = $readyOk; QueryOk = $queryOk; Detail = $detail }
+}
+
+function Start-AeroLinkRemoteDemoPostgresHelper {
+    <#
+      .SYNOPSIS Launches Start-Postgres.ps1 as an owned, file-redirected child and
+        returns a live process handle the orchestrator can poll and terminate.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        $Run
+    )
+    $logDirectory = $Config.LogsPath
+    if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
+    $script = Join-Path $Config.AeroLinkRoot 'product\scripts\Start-Postgres.ps1'
+    $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $stdout = Join-Path $logDirectory 'postgres-helper.stdout.log'
+    $stderr = Join-Path $logDirectory 'postgres-helper.stderr.log'
+    $argumentLine = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -WaitSeconds 300"
+    $process = Start-Process -FilePath $powershell -ArgumentList $argumentLine -WindowStyle Hidden `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    $helper = [pscustomobject]@{
+        Id = $process.Id
+        Process = $process
+        HasExited = $false
+        ExitCode = $null
+        StdOutPath = $stdout
+        StdErrPath = $stderr
+    }
+    $helper | Add-Member -MemberType ScriptMethod -Name Refresh -Value {
+        $this.Process.Refresh()
+        $this.HasExited = $this.Process.HasExited
+        if ($this.Process.HasExited -and $null -eq $this.ExitCode) { $this.ExitCode = $this.Process.ExitCode }
+    }
+    return $helper
+}
+
+function Stop-AeroLinkRemoteDemoOwnedProcess {
+    <#
+      .SYNOPSIS Terminates only a helper PID this recovery attempt launched.
+      .DESCRIPTION Refuses anything whose process name is not a PowerShell helper.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][int]$ProcessId)
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return }
+    if ($process.ProcessName -ne 'powershell' -and $process.ProcessName -ne 'pwsh') {
+        throw "Refusing to stop PID ${ProcessId}: it is $($process.ProcessName), not an owned PowerShell helper."
+    }
+    Stop-Process -Id $ProcessId -Force
+}
+
+function Start-AeroLinkRemoteDemoPostgres {
+    <#
+      .SYNOPSIS Bounded, self-healing PostgreSQL start for one recovery attempt.
+      .DESCRIPTION
+        Waits (bounded) for pg_isready plus a real read-only query. If PostgreSQL
+        becomes independently healthy while the helper child is still running, the
+        owned helper is terminated and startup proceeds. If the deadline expires
+        without query-ready health, the owned helper is terminated and the attempt
+        fails with step/PID/log details. Never touches an unowned process.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        $Run,
+        [scriptblock]$ReadyTest,
+        [scriptblock]$HelperLauncher,
+        [scriptblock]$HelperStopper,
+        [int]$RecoveryTimeoutSeconds = 300,
+        [int]$PollIntervalSeconds = 2,
+        [int]$GraceSeconds = 5
+    )
+    if ($null -eq $ReadyTest) { $ReadyTest = { param($C, $R) Test-AeroLinkRemoteDemoPostgresReady -Config $C } }
+    if ($null -eq $HelperLauncher) { $HelperLauncher = { param($C, $R) Start-AeroLinkRemoteDemoPostgresHelper -Config $C -Run $R } }
+    if ($null -eq $HelperStopper) { $HelperStopper = { param($C, $R, $ProcessId) Stop-AeroLinkRemoteDemoOwnedProcess -ProcessId $ProcessId } }
+
+    $ready = & $ReadyTest $Config $Run
+    if ($ready.Ready) {
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "PostgreSQL already query-ready: $($ready.Detail)"
+        return [pscustomobject]@{ Healthy = $true; HelperUsed = $false; ProcessId = $null; Step = 'postgres-ready'; Detail = $ready.Detail; LogPath = (Join-Path $Config.LogsPath 'remote-demo.log') }
+    }
+
+    $helper = & $HelperLauncher $Config $Run
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "PostgreSQL helper started (PID $($helper.Id), step postgres-helper, stdout $($helper.StdOutPath), stderr $($helper.StdErrPath))."
+    $deadline = (Get-Date).AddSeconds($RecoveryTimeoutSeconds)
+    $helperExited = $false
+    $ready = $null
+    do {
+        Start-Sleep -Seconds $PollIntervalSeconds
+        $helper.Refresh()
+        if ($helper.HasExited -and -not $helperExited) {
+            $helperExited = $true
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "PostgreSQL helper exited with code $($helper.ExitCode)."
+        }
+        $ready = & $ReadyTest $Config $Run
+    } while (-not $ready.Ready -and (Get-Date) -lt $deadline)
+
+    if ($ready.Ready) {
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "PostgreSQL became query-ready: $($ready.Detail)"
+        Start-Sleep -Seconds $GraceSeconds
+        if (-not $helper.HasExited) {
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Terminating owned PostgreSQL helper PID $($helper.Id) because PostgreSQL is independently query-ready."
+            & $HelperStopper $Config $Run $helper.Id
+        }
+        return [pscustomobject]@{ Healthy = $true; HelperUsed = $true; ProcessId = $helper.Id; Step = 'postgres-recovery'; Detail = $ready.Detail; LogPath = (Join-Path $Config.LogsPath 'remote-demo.log') }
+    }
+
+    if (-not $helper.HasExited) {
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "PostgreSQL helper PID $($helper.Id) exceeded $RecoveryTimeoutSeconds seconds; terminating the owned helper."
+        & $HelperStopper $Config $Run $helper.Id
+    }
+    $detail = if ($helperExited) {
+        "PostgreSQL helper exited with code $($helper.ExitCode) but the database never became query-ready within $RecoveryTimeoutSeconds seconds. Step: postgres-recovery. Helper PID: $($helper.Id). Logs: $($helper.StdOutPath), $($helper.StdErrPath), $(Join-Path $Config.LogsPath 'remote-demo.log')"
+    }
+    else {
+        "PostgreSQL helper PID $($helper.Id) exceeded $RecoveryTimeoutSeconds seconds and was terminated; the database never became query-ready. Step: postgres-recovery. Logs: $($helper.StdOutPath), $($helper.StdErrPath), $(Join-Path $Config.LogsPath 'remote-demo.log')"
+    }
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "AEROLINK REMOTE DEMO NOT READY: $detail"
+    return [pscustomobject]@{ Healthy = $false; HelperUsed = $true; ProcessId = $helper.Id; Step = 'postgres-recovery'; Detail = $detail; LogPath = (Join-Path $Config.LogsPath 'remote-demo.log') }
+}
+
+function Start-AeroLinkRemoteDemoProductionHelper {
+    <#
+      .SYNOPSIS Launches Start-AeroLinkProduction.ps1 -DoNotOpenBrowser as an owned,
+        file-redirected child the orchestrator can poll.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        $Run
+    )
+    $logDirectory = $Config.LogsPath
+    if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
+    $script = Join-Path $Config.AeroLinkRoot 'product\scripts\Start-AeroLinkProduction.ps1'
+    $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $stdout = Join-Path $logDirectory 'production-helper.stdout.log'
+    $stderr = Join-Path $logDirectory 'production-helper.stderr.log'
+    $argumentLine = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -DoNotOpenBrowser"
+    $process = Start-Process -FilePath $powershell -ArgumentList $argumentLine -WindowStyle Hidden `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    $helper = [pscustomobject]@{
+        Id = $process.Id
+        Process = $process
+        HasExited = $false
+        ExitCode = $null
+        StdOutPath = $stdout
+        StdErrPath = $stderr
+    }
+    $helper | Add-Member -MemberType ScriptMethod -Name Refresh -Value {
+        $this.Process.Refresh()
+        $this.HasExited = $this.Process.HasExited
+        if ($this.Process.HasExited -and $null -eq $this.ExitCode) { $this.ExitCode = $this.Process.ExitCode }
+    }
+    return $helper
+}
+
+function Invoke-AeroLinkProductionLauncher {
+    <#
+      .SYNOPSIS Bounded production-launcher invocation for one recovery attempt.
+      .DESCRIPTION
+        Polls local AeroLink readiness independently. If the launcher helper is
+        still running when AeroLink is already ready, the owned helper is
+        terminated after a grace period. On timeout the owned helper is terminated
+        and the attempt fails with step/PID/log details.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        $Run,
+        [scriptblock]$LocalReadyTest,
+        [scriptblock]$HelperLauncher,
+        [scriptblock]$HelperStopper,
+        [int]$TimeoutSeconds = 900,
+        [int]$PollIntervalSeconds = 3,
+        [int]$GraceSeconds = 5
+    )
+    if ($null -eq $LocalReadyTest) { $LocalReadyTest = { param($C) Test-AeroLinkRemoteDemoLocalReady -Config $C } }
+    if ($null -eq $HelperLauncher) { $HelperLauncher = { param($C, $R) Start-AeroLinkRemoteDemoProductionHelper -Config $C -Run $R } }
+    if ($null -eq $HelperStopper) { $HelperStopper = { param($C, $R, $ProcessId) Stop-AeroLinkRemoteDemoOwnedProcess -ProcessId $ProcessId } }
+
+    $local = & $LocalReadyTest $Config
+    if ($local.Ready) {
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Local AeroLink already ready; launcher helper not needed."
+        return [pscustomobject]@{ Healthy = $true; HelperUsed = $false; ProcessId = $null; Step = 'production-launcher'; Detail = $local.Detail; LogPath = (Join-Path $Config.LogsPath 'remote-demo.log') }
+    }
+
+    $helper = & $HelperLauncher $Config $Run
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Production launcher helper started (PID $($helper.Id), step production-launcher, stdout $($helper.StdOutPath), stderr $($helper.StdErrPath))."
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $helperExited = $false
+    $local = $null
+    do {
+        Start-Sleep -Seconds $PollIntervalSeconds
+        $helper.Refresh()
+        if ($helper.HasExited -and -not $helperExited) {
+            $helperExited = $true
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Production launcher helper exited with code $($helper.ExitCode)."
+        }
+        $local = & $LocalReadyTest $Config
+    } while (-not $local.Ready -and (Get-Date) -lt $deadline)
+
+    if ($local.Ready) {
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Local AeroLink became ready: $($local.Detail)"
+        Start-Sleep -Seconds $GraceSeconds
+        if (-not $helper.HasExited) {
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Terminating owned production-launcher helper PID $($helper.Id) because AeroLink is independently ready."
+            & $HelperStopper $Config $Run $helper.Id
+        }
+        return [pscustomobject]@{ Healthy = $true; HelperUsed = $true; ProcessId = $helper.Id; Step = 'production-launcher'; Detail = $local.Detail; LogPath = (Join-Path $Config.LogsPath 'remote-demo.log') }
+    }
+
+    if (-not $helper.HasExited) {
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Production launcher helper PID $($helper.Id) exceeded $TimeoutSeconds seconds; terminating the owned helper."
+        & $HelperStopper $Config $Run $helper.Id
+    }
+    $detail = if ($helperExited) {
+        "Production launcher exited with code $($helper.ExitCode) but AeroLink never became ready within $TimeoutSeconds seconds. Step: production-launcher. Helper PID: $($helper.Id). Logs: $($helper.StdOutPath), $($helper.StdErrPath), $(Join-Path $Config.LogsPath 'remote-demo.log')"
+    }
+    else {
+        "Production launcher helper PID $($helper.Id) exceeded $TimeoutSeconds seconds and was terminated; AeroLink never became ready. Step: production-launcher. Logs: $($helper.StdOutPath), $($helper.StdErrPath), $(Join-Path $Config.LogsPath 'remote-demo.log')"
+    }
+    return [pscustomobject]@{ Healthy = $false; HelperUsed = $true; ProcessId = $helper.Id; Step = 'production-launcher'; Detail = $detail; LogPath = (Join-Path $Config.LogsPath 'remote-demo.log') }
+}
+
+function Start-AeroLinkRemoteDemoNgrok {
+    <#
+      .SYNOPSIS Starts the protected ngrok tunnel for one recovery attempt.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        $Run
+    )
+    $logDirectory = $Config.LogsPath
+    if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
+    if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
+    $stdout = Join-Path $logDirectory 'ngrok.stdout.log'
+    $stderr = Join-Path $logDirectory 'ngrok.stderr.log'
+    $argumentLine = ((Get-AeroLinkRemoteDemoNgrokArguments -Config $Config) | ForEach-Object {
+        if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
+    }) -join ' '
+    return Start-Process -FilePath $Config.NgrokExecutable -ArgumentList $argumentLine -WindowStyle Hidden `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
 }
 
 function Start-AeroLinkRemoteDemo {
@@ -281,36 +605,69 @@ function Start-AeroLinkRemoteDemo {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Config,
-        [switch]$Scheduled
+        [switch]$Scheduled,
+        [scriptblock]$PostgresReadyTest,
+        [scriptblock]$PostgresHelperLauncher,
+        [scriptblock]$PostgresHelperStopper,
+        [scriptblock]$LocalReadyTest,
+        [scriptblock]$ProductionHelperLauncher,
+        [scriptblock]$ProductionHelperStopper,
+        [scriptblock]$NgrokLauncher,
+        [scriptblock]$PublicProbe,
+        [int]$PostgresRecoveryTimeoutSeconds = 300,
+        [int]$ProductionTimeoutSeconds = 900,
+        [int]$NgrokProtectionWaitSeconds = 120
     )
 
-    Write-AeroLinkRemoteDemoLog -Config $Config -Message 'Remote demo start requested.'
+    $run = New-AeroLinkRemoteDemoRun -Scheduled:$Scheduled
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Remote demo start requested.'
+    if ($null -eq $LocalReadyTest) { $LocalReadyTest = { param($C) Test-AeroLinkRemoteDemoLocalReady -Config $C } }
 
-    $local = Test-AeroLinkRemoteDemoLocalReady -Config $Config
+    $local = & $LocalReadyTest $Config
     if (-not $local.Ready) {
-        Write-AeroLinkRemoteDemoLog -Config $Config -Message 'Local AeroLink not ready; invoking the production launcher.'
-        & (Join-Path $Config.AeroLinkRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
-        $local = Test-AeroLinkRemoteDemoLocalReady -Config $Config
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Local AeroLink not ready; starting/confirming PostgreSQL with a bounded recovery window.'
+        $postgres = Start-AeroLinkRemoteDemoPostgres -Config $Config -Run $run `
+            -ReadyTest $PostgresReadyTest -HelperLauncher $PostgresHelperLauncher -HelperStopper $PostgresHelperStopper `
+            -RecoveryTimeoutSeconds $PostgresRecoveryTimeoutSeconds
+        if (-not $postgres.Healthy) {
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($postgres.Detail)"
+            throw "AEROLINK REMOTE DEMO NOT READY: $($postgres.Detail)"
+        }
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "PostgreSQL ready: $($postgres.Detail)"
+        $launcher = Invoke-AeroLinkProductionLauncher -Config $Config -Run $run `
+            -LocalReadyTest $LocalReadyTest -HelperLauncher $ProductionHelperLauncher -HelperStopper $ProductionHelperStopper `
+            -TimeoutSeconds $ProductionTimeoutSeconds
+        if (-not $launcher.Healthy) {
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($launcher.Detail)"
+            throw "AEROLINK REMOTE DEMO NOT READY: $($launcher.Detail)"
+        }
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production AeroLink ready: $($launcher.Detail)"
+        $local = & $LocalReadyTest $Config
         if (-not $local.Ready) {
-            throw "AeroLink did not become locally ready; refusing to expose the public endpoint. $($local.Detail)"
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'AEROLINK REMOTE DEMO NOT READY: local AeroLink readiness lost after launcher.'
+            throw 'AEROLINK REMOTE DEMO NOT READY: local AeroLink readiness lost after launcher.'
         }
     }
-    Write-AeroLinkRemoteDemoLog -Config $Config -Message "Local AeroLink ready: $($local.Detail)"
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Local AeroLink ready: $($local.Detail)"
 
     if (-not (Test-Path -LiteralPath $Config.NgrokExecutable -PathType Leaf)) {
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: ngrok executable missing $($Config.NgrokExecutable)."
         throw "Configured ngrok executable not found: $($Config.NgrokExecutable)"
     }
     if (-not (Test-Path -LiteralPath $Config.TrafficPolicyPath -PathType Leaf)) {
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: traffic policy missing $($Config.TrafficPolicyPath)."
         throw "Configured ngrok Traffic Policy not found: $($Config.TrafficPolicyPath)"
     }
 
     $processes = Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
     if (@($processes.Mismatched).Count -gt 0) {
         $mismatchPids = (@($processes.Mismatched) | ForEach-Object { $_.ProcessId }) -join ', '
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: unexpected ngrok process(es) PID $mismatchPids."
         throw "An unexpected ngrok process (PID $mismatchPids) does not match the AeroLink remote-demo contract. Refusing to start or stop it."
     }
 
-    $probe = Test-AeroLinkRemoteDemoPublicProtection -Config $Config
+    if ($null -eq $PublicProbe) { $PublicProbe = { param($C) Test-AeroLinkRemoteDemoPublicProtection -Config $C } }
+    $probe = & $PublicProbe $Config
     $decision = Get-AeroLinkRemoteDemoStartDecision `
         -LocalReady $local.Ready `
         -OwnedProcessPresent (@($processes.Owned).Count -gt 0) `
@@ -318,44 +675,35 @@ function Start-AeroLinkRemoteDemo {
         -ProbeStatusCode $probe.StatusCode
 
     if ($decision.Decision -eq 'AlreadyReady') {
-        Write-AeroLinkRemoteDemoLog -Config $Config -Message 'Remote demo already ready; no new processes started.'
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Remote demo already ready; no new processes started.'
         return [pscustomobject]@{ Ready = $true; PublicUrl = $Config.PublicUrl; Detail = $decision.Message }
     }
     if ($decision.Decision -ne 'CanStart') {
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($decision.Message)"
         throw $decision.Message
     }
 
-    Write-AeroLinkRemoteDemoLog -Config $Config -Message 'Starting the protected ngrok tunnel.'
-    $logDirectory = $Config.LogsPath
-    if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
-    if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
-    $stdout = Join-Path $logDirectory 'ngrok.stdout.log'
-    $stderr = Join-Path $logDirectory 'ngrok.stderr.log'
-
-    $argumentLine = ((Get-AeroLinkRemoteDemoNgrokArguments -Config $Config) | ForEach-Object {
-        if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
-    }) -join ' '
-    $launched = Start-Process -FilePath $Config.NgrokExecutable `
-        -ArgumentList $argumentLine `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $stdout `
-        -RedirectStandardError $stderr `
-        -PassThru
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Starting the protected ngrok tunnel.'
+    if ($null -eq $NgrokLauncher) { $NgrokLauncher = { param($C, $R) Start-AeroLinkRemoteDemoNgrok -Config $C -Run $R } }
+    $launched = & $NgrokLauncher $Config $run
 
     $probeResult = $null
-    for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    $ngrokDeadline = (Get-Date).AddSeconds($NgrokProtectionWaitSeconds)
+    do {
         Start-Sleep -Milliseconds 1000
         $alive = Get-Process -Id $launched.Id -ErrorAction SilentlyContinue
         if (-not $alive) {
-            $tail = Get-Content -LiteralPath $stderr -Tail 15 -ErrorAction SilentlyContinue
+            $tail = Get-Content -LiteralPath (Join-Path $Config.LogsPath 'ngrok.stderr.log') -Tail 15 -ErrorAction SilentlyContinue
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: ngrok exited before becoming protected. $($tail -join ' ')"
             throw "The ngrok tunnel exited before becoming protected. $($tail -join ' ')"
         }
-        $probeResult = Test-AeroLinkRemoteDemoPublicProtection -Config $Config
+        $probeResult = & $PublicProbe $Config
         if ($probeResult.Protected) { break }
-    }
+    } while ((Get-Date) -lt $ngrokDeadline)
 
     if (-not $probeResult.Protected) {
         Stop-Process -Id $launched.Id -Force -ErrorAction SilentlyContinue
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: just-started tunnel not protected (expected 401, got $($probeResult.StatusCode)); torn down."
         throw "The just-started tunnel was not protected (expected 401, got $($probeResult.StatusCode)). It was torn down; nothing was left exposed."
     }
 
@@ -367,14 +715,16 @@ function Start-AeroLinkRemoteDemo {
         TrafficPolicyPath = $Config.TrafficPolicyPath
         StartedAt = (Get-Date).ToUniversalTime().ToString('o')
     }
+    if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
     $state | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $Config.StatePath 'remote-demo-state.json') -Encoding UTF8
 
-    $localAfter = Test-AeroLinkRemoteDemoLocalReady -Config $Config
+    $localAfter = & $LocalReadyTest $Config
     if (-not $localAfter.Ready) {
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: local AeroLink readiness lost after tunnel start."
         throw "The tunnel is protected but local AeroLink readiness was lost. $($localAfter.Detail)"
     }
 
-    Write-AeroLinkRemoteDemoLog -Config $Config -Message "Protected tunnel ready (PID $($launched.Id))."
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO READY; protected tunnel PID $($launched.Id); $($probeResult.Detail)"
     return [pscustomobject]@{ Ready = $true; PublicUrl = $Config.PublicUrl; Detail = $probeResult.Detail }
 }
 
@@ -586,6 +936,14 @@ Export-ModuleMember -Function `
     Get-AeroLinkRemoteDemoNgrokProcess, `
     Test-AeroLinkRemoteDemoPublicProtection, `
     Test-AeroLinkRemoteDemoLocalReady, `
+    New-AeroLinkRemoteDemoRun, `
+    Test-AeroLinkRemoteDemoPostgresReady, `
+    Start-AeroLinkRemoteDemoPostgres, `
+    Start-AeroLinkRemoteDemoPostgresHelper, `
+    Stop-AeroLinkRemoteDemoOwnedProcess, `
+    Start-AeroLinkRemoteDemoProductionHelper, `
+    Invoke-AeroLinkProductionLauncher, `
+    Start-AeroLinkRemoteDemoNgrok, `
     Get-AeroLinkRemoteDemoStartDecision, `
     Write-AeroLinkRemoteDemoLog, `
     Start-AeroLinkRemoteDemo, `

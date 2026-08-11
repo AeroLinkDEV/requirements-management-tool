@@ -40,11 +40,20 @@ $configureConfig = [pscustomobject]@{
 switch ($Action) {
     'Start' {
         $config = Get-AeroLinkRemoteDemoConfig
-        $result = Start-AeroLinkRemoteDemo -Config $config -Scheduled:$Scheduled
-        Write-Host 'AEROLINK REMOTE DEMO READY'
-        Write-Host "Public URL: $($result.PublicUrl)"
-        Write-Host $result.Detail
-        exit 0
+        try {
+            $result = Start-AeroLinkRemoteDemo -Config $config -Scheduled:$Scheduled
+            Write-Host 'AEROLINK REMOTE DEMO READY'
+            Write-Host "Public URL: $($result.PublicUrl)"
+            Write-Host $result.Detail
+            exit 0
+        }
+        catch {
+            $failureRun = New-AeroLinkRemoteDemoRun -Scheduled:$Scheduled
+            Write-AeroLinkRemoteDemoLog -Config $config -Run $failureRun -Message "AEROLINK REMOTE DEMO NOT READY: $($_.Exception.Message)"
+            Write-Host 'AEROLINK REMOTE DEMO NOT READY' -ForegroundColor Red
+            Write-Host $_.Exception.Message
+            exit 1
+        }
     }
     'Stop' {
         $config = Get-AeroLinkRemoteDemoConfig
