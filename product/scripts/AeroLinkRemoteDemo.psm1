@@ -265,7 +265,7 @@ function Write-AeroLinkRemoteDemoLog {
     )
     $logDirectory = $Config.LogsPath
     if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
-    $line = "$(Get-Date).ToUniversalTime().ToString('o') $Message"
+    $line = "$((Get-Date).ToUniversalTime().ToString('o')) $Message"
     Add-Content -LiteralPath (Join-Path $logDirectory 'remote-demo.log') -Value $line -Encoding UTF8
 }
 
@@ -587,6 +587,7 @@ Export-ModuleMember -Function `
     Test-AeroLinkRemoteDemoPublicProtection, `
     Test-AeroLinkRemoteDemoLocalReady, `
     Get-AeroLinkRemoteDemoStartDecision, `
+    Write-AeroLinkRemoteDemoLog, `
     Start-AeroLinkRemoteDemo, `
     Stop-AeroLinkRemoteDemo, `
     Get-AeroLinkRemoteDemoTaskXml, `
