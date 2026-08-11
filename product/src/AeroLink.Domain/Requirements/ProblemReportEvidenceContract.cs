@@ -6,10 +6,10 @@ using System.Text.Json.Serialization;
 namespace AeroLink.Domain.Requirements;
 
 /// <summary>
-/// The single deterministic evidence shape for a Problem Report. Every public value on the aggregate is
-/// deliberately committed: authored content, identity, assignment, lifecycle, authority and event timing.
-/// A future aggregate field therefore has to be classified by updating this contract and its completeness
-/// test instead of silently falling out of history.
+/// The single deterministic evidence shape for a Problem Report. Every controlled public value on the aggregate
+/// is deliberately committed: authored content, identity, assignment, lifecycle, authority and event timing.
+/// Derived persistence indexes are explicitly classified by the completeness test instead. A future aggregate
+/// field therefore has to be classified instead of silently falling out of history.
 /// </summary>
 public sealed record ProblemReportEvidenceSnapshot
 {

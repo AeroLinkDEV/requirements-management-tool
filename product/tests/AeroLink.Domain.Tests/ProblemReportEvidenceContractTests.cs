@@ -16,16 +16,20 @@ public sealed class ProblemReportEvidenceContractTests
             .Where(property => property.Name is not nameof(ProblemReportEvidenceSnapshot.Contract)
                 and not nameof(ProblemReportEvidenceSnapshot.SchemaVersion))
             .Select(property => property.Name).Order(StringComparer.Ordinal).ToArray();
+        var derivedIndexFields = new[] { nameof(ProblemReport.NumberSequence) };
 
-        Assert.Equal(aggregateFields, evidenceFields);
+        Assert.Equal(aggregateFields, evidenceFields.Concat(derivedIndexFields)
+            .Order(StringComparer.Ordinal).ToArray());
 
         using var json = JsonDocument.Parse(ProblemReportEvidenceContract.Serialize(NewReport()));
         Assert.Equal(ProblemReportEvidenceContract.Contract, json.RootElement.GetProperty("contract").GetString());
         Assert.Equal(ProblemReportEvidenceContract.SchemaVersion,
             json.RootElement.GetProperty("schemaVersion").GetInt32());
-        foreach (var field in aggregateFields)
+        foreach (var field in evidenceFields)
             Assert.True(json.RootElement.TryGetProperty(JsonNamingPolicy.CamelCase.ConvertName(field), out _),
                 $"Problem Report field {field} is absent from immutable evidence.");
+        Assert.False(json.RootElement.TryGetProperty("numberSequence", out _),
+            "The derived paging index must not change the controlled evidence contract.");
     }
 
     [Fact]

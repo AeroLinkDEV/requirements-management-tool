@@ -128,16 +128,39 @@ public static class ProblemReportEndpoints
         if (blockersOnly == true) query = query.Where(x => x.IsReleaseBlocker);
         if (!string.IsNullOrWhiteSpace(search)) { var term = search.Trim().ToLower(); query = query.Where(x => x.ReportNumber.ToLower().Contains(term) || x.Title.ToLower().Contains(term) || x.Problem.ToLower().Contains(term) || x.RootCause.ToLower().Contains(term)); }
         var now = DateTimeOffset.UtcNow;
-        var waiverRows = await db.ReadinessWaivers.AsNoTracking().Where(x => x.ProjectId == projectId
-            && x.BlockerType == "ProblemReportReleaseBlocker").ToListAsync(ct);
-        var matching = await query.ToListAsync(ct);
-        if (blockersOnly == true)
-            matching = matching.Where(report => !waiverRows.Any(waiver => waiver.IsActiveFor(report, now))).ToList();
-        var size = Math.Clamp(pageSize ?? 10, 1, 200); var current = Math.Max(page ?? 1, 1); var total = matching.Count;
-        var items = matching.OrderBy(x => IdentifierAllocator.Sequence(x.ReportNumber)).ThenBy(x => x.Revision).Skip((current - 1) * size).Take(size).ToList();
-        var activeWaiverIds = items.Where(report => waiverRows.Any(waiver => waiver.IsActiveFor(report, now)))
-            .Select(report => report.Id).ToHashSet();
-        return Results.Ok(new { page = current, pageSize = size, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)size), items = items.Select(x => Summary(x, activeWaiverIds.Contains(x.Id))) });
+        // SQLite does not translate DateTimeOffset ordering/comparison. Resolve only the independent waiver
+        // candidates first, then use their bounded ID set in the authoritative count/page predicate. This
+        // never materializes the Project's Problem Report population before Skip/Take.
+        var waiverRows = await db.ReadinessWaivers.AsNoTracking().Where(waiver => waiver.ProjectId == projectId
+            && waiver.BlockerType == "ProblemReportReleaseBlocker" && waiver.Provenance == "ServerAuthorized"
+            && waiver.RevokedAt == null).ToListAsync(ct);
+        var activeWaiverRows = waiverRows.Where(waiver => waiver.IsActive(now)).ToList();
+        var activeWaivedIds = Array.Empty<Guid>();
+        if (activeWaiverRows.Count > 0)
+        {
+            var blockerIds = activeWaiverRows.Select(waiver => waiver.BlockerId).Distinct().ToArray();
+            var waiverReports = await db.ProblemReports.AsNoTracking().Where(report =>
+                report.ProjectId == projectId && blockerIds.Contains(report.Id)).ToListAsync(ct);
+            activeWaivedIds = waiverReports.Where(report => activeWaiverRows.Any(waiver =>
+                waiver.IsActiveFor(report, now))).Select(report => report.Id).ToArray();
+        }
+        var matching = query.Select(report => new
+        {
+            Report = report,
+            Waived = activeWaivedIds.Contains(report.Id),
+        });
+        if (blockersOnly == true) matching = matching.Where(row => !row.Waived);
+
+        var size = Math.Clamp(pageSize ?? 10, 1, 200);
+        var requestedPage = Math.Max(page ?? 1, 1);
+        var total = await matching.CountAsync(ct);
+        var totalPages = (int)Math.Ceiling(total / (double)size);
+        var current = Math.Min(requestedPage, Math.Max(totalPages, 1));
+        var items = await matching.OrderBy(row => row.Report.NumberSequence)
+            .ThenBy(row => row.Report.Revision).ThenBy(row => row.Report.Id)
+            .Skip((current - 1) * size).Take(size).ToListAsync(ct);
+        return Results.Ok(new { page = current, pageSize = size, totalCount = total, totalPages,
+            items = items.Select(row => Summary(row.Report, row.Waived)) });
     }
 
     private static async Task<IResult> DashboardAsync(Guid projectId, Guid? targetReleaseId, bool? targetUnassigned, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
