@@ -1,3 +1,5 @@
+using System.Data;
+using System.Data.Common;
 using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
@@ -206,16 +208,68 @@ public static class ProblemReportEndpoints
             && !string.Equals(http.UserAccount().UserName, report.ReportedBy, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(http.UserAccount().UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase)
             && !waivers.Any(item => item.IsActiveFor(report, DateTimeOffset.UtcNow));
+        var programId = await db.Projects.AsNoTracking().Where(item => item.Id == report.ProjectId)
+            .Select(item => item.ProgramId).SingleAsync(ct);
+        var ownerAuthority = await ProblemReportOwnerStatusAsync(report.ResponsibleEngineerId, programId, db, ct);
+        var actor = http.UserAccount();
+        var canRecoverOwner = !ownerAuthority.Eligible && !actor.IsAdministrator
+            && await HasProblemReportOwnerRecoveryAuthorityAsync(actor.Id, programId, db, ct);
         return Results.Ok(Detail(report, await LinkViewsAsync(report, links, db, ct), revisions,
             candidates.OrderByDescending(x => x.ReportRevision).ThenByDescending(x => x.Sequence),
-            new { canApproveSqaClosure, canApproveReleaseWaiver, releaseWaiverAuthority = waiverAuthority }, waivers));
+            new
+            {
+                canApproveSqaClosure,
+                canApproveReleaseWaiver,
+                releaseWaiverAuthority = waiverAuthority,
+                ownerEligible = ownerAuthority.Eligible,
+                ownerAuthorityException = ownerAuthority.Eligible ? null : "The assigned owner no longer has accountable Problem Report authority in this Program.",
+                canReassignOwner = string.Equals(actor.UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase) || canRecoverOwner,
+                canRecoverOwner,
+            }, waivers));
     }
 
-    private static async Task<IResult> ReassignAsync(Guid id, ReassignRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> ReassignAsync(Guid id, ReassignRequest request, HttpContext http,
+        AeroLinkDbContext db, CancellationToken ct)
     {
-        var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.UserName == request.ResponsibleEngineerId && x.State == AccountState.Active, ct);
-        if (account is null) return Results.BadRequest(new { error = "The selected responsible engineer is not an active account." });
-        return await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ResponsibleEngineerReassigned", (report, actor, now) => report.Reassign(actor.UserName, request.ResponsibleEngineerId, now));
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (report is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
+        if (request.ExpectedVersion is not null && request.ExpectedVersion != report.Version)
+            return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = report.Version });
+
+        var programId = await db.Projects.AsNoTracking().Where(item => item.Id == report.ProjectId)
+            .Select(item => item.ProgramId).SingleAsync(ct);
+        var actor = http.UserAccount();
+        var ownerAuthority = await ProblemReportOwnerStatusAsync(report.ResponsibleEngineerId, programId, db, ct);
+        var supervisoryRecovery = !ownerAuthority.Eligible
+            && !actor.IsAdministrator
+            && await HasProblemReportOwnerRecoveryAuthorityAsync(actor.Id, programId, db, ct);
+        if (!string.Equals(actor.UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase)
+            && !supervisoryRecovery)
+            return Results.Json(new { error = "Only the current responsible engineer, or authorized supervision when that owner is no longer eligible, can reassign this Problem Report.", code = "pr_owner_reassignment_forbidden" }, statusCode: StatusCodes.Status403Forbidden);
+
+        var requestedOwner = request.ResponsibleEngineerId.Trim().ToLowerInvariant();
+        var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.UserName == requestedOwner, ct);
+        if (account is null || account.State != AccountState.Active)
+            return Results.BadRequest(new { error = "The selected responsible engineer is not an available active account.", code = "pr_owner_account_unavailable" });
+        var targetAuthority = await ProblemReportOwnerStatusAsync(account.UserName, programId, db, ct);
+        if (!targetAuthority.ProgramMember)
+            return Results.BadRequest(new { error = "The selected responsible engineer is not a member of this Program.", code = "pr_owner_program_membership_required" });
+        if (!targetAuthority.Eligible)
+            return Results.BadRequest(new { error = "The selected Program member does not have accountable Problem Report owner authority.", code = "pr_owner_authority_required" });
+
+        try
+        {
+            var result = await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ResponsibleEngineerReassigned",
+                (item, currentActor, now) => item.Reassign(currentActor.UserName, account.UserName, now, supervisoryRecovery));
+            await transaction.CommitAsync(ct);
+            return result;
+        }
+        catch (Exception exception) when (exception is DbUpdateException or DbException)
+        {
+            return Results.Conflict(new { error = "Problem Report ownership authority changed concurrently. Refresh before reassigning.", code = "pr_owner_authority_changed" });
+        }
     }
 
     private static async Task<IResult> RetargetAsync(Guid id, RetargetRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
@@ -561,6 +615,28 @@ public static class ProblemReportEndpoints
             ProgramRole.SoftwareQualityAnalyst, DateTimeOffset.UtcNow, ct);
     }
 
+    private static async Task<ProblemReportOwnerStatus> ProblemReportOwnerStatusAsync(string userName,
+        Guid programId, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var account = await db.UserAccounts.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.UserName == userName, ct);
+        if (account is null || account.State != AccountState.Active)
+            return new(false, false);
+        var roles = await db.ProgramMemberships.AsNoTracking()
+            .Where(item => item.UserId == account.Id && item.ProgramId == programId)
+            .Select(item => item.Role).ToListAsync(ct);
+        return new(roles.Count > 0, ProblemReportOwnerAuthority.IsEligible(roles));
+    }
+
+    private static async Task<bool> HasProblemReportOwnerRecoveryAuthorityAsync(Guid userId, Guid programId,
+        AeroLinkDbContext db, CancellationToken ct)
+    {
+        var roles = await db.ProgramMemberships.AsNoTracking()
+            .Where(item => item.UserId == userId && item.ProgramId == programId)
+            .Select(item => item.Role).ToListAsync(ct);
+        return ProblemReportOwnerAuthority.CanRecover(roles);
+    }
+
     private static async Task<string?> CurrentReleaseWaiverAuthorityAsync(ProblemReport report,
         AuthenticatedUser actor, AeroLinkDbContext db, IdentityService identity, DateTimeOffset now,
         CancellationToken ct)
@@ -758,6 +834,7 @@ public static class ProblemReportEndpoints
     private sealed record RevokeReleaseWaiverRequest(long? ExpectedVersion, string Reason);
     private sealed record LinkRequest(long? ExpectedVersion, string ArtifactType, Guid ArtifactId, string Relationship);
     private sealed record ReassignRequest(long? ExpectedVersion, string ResponsibleEngineerId);
+    private sealed record ProblemReportOwnerStatus(bool ProgramMember, bool Eligible);
     private sealed record RetargetRequest(long? ExpectedVersion, Guid TargetReleaseId);
     private sealed record VersionRequest(long? ExpectedVersion);
 }
