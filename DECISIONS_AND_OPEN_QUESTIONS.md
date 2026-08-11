@@ -1795,6 +1795,24 @@ Future entries use:
   authoritatively refused from new baseline selection, and route to the exact successor rather than a guessed
   same-release row.
 
+### DEC-108 - A Duplicate Problem Report Points Directly to One Canonical Project Root
+
+- **Date:** 2026-08-11
+- **Status:** Accepted; implemented by #455
+- **Decision:** A new Duplicate disposition names exactly one existing Problem Report in the same Project. The
+  target is a non-Duplicate canonical root, not another Duplicate, and a report already representing an inbound
+  duplicate cannot itself become Duplicate. Reopening retains the prior relationship as history; it does not
+  permit a second current-looking target to be appended. Open, in-work, and non-Duplicate terminal reports may
+  serve as the root because Duplicate means the anomaly is represented by that controlled record, not that the
+  root has reached a particular lifecycle conclusion.
+- **Rationale:** Arbitrary chains make the controlling record depend on traversal order and permit cycles,
+  dangling targets, and cross-Project conclusions. A direct root is deterministic, independently auditable, and
+  does not force an obsolete target-state restriction onto legitimate anomaly consolidation.
+- **Consequences:** The authoritative disposition command validates the target and graph inside a serializable
+  atomic unit with the state, link, and revision write. Legacy dangling, cross-Project, branching, chained, and
+  cyclic relationships remain immutable and are exposed through a versioned diagnostic status for deliberate
+  reconciliation; they are never silently normalized or rewritten.
+
 ## Lessons Learned
 
 Findings that cost real time, recorded so they cost it once. These are about how the work is done rather than
