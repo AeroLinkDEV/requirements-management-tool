@@ -28,6 +28,7 @@ export default function ProblemReportPicker({ api, projectId, scope, releaseId, 
   const [query,setQuery] = useState('')
   const [page,setPage] = useState(1)
   const [totalCount,setTotalCount] = useState(0)
+  const [totalPages,setTotalPages] = useState(0)
   const [busy,setBusy] = useState(false)
   const [error, setError] = useState('')
   const userSelected = useRef(new Set<string>())
@@ -41,6 +42,7 @@ export default function ProblemReportPicker({ api, projectId, scope, releaseId, 
     setPage(1)
     setReports([])
     setTotalCount(0)
+    setTotalPages(0)
   }, [projectId, query, releaseId, scope])
 
   useEffect(() => {
@@ -71,6 +73,7 @@ export default function ProblemReportPicker({ api, projectId, scope, releaseId, 
           const items = (value.items ?? []) as ProblemReportOption[]
           setReports(current => page === 1 ? items : [...current, ...items.filter(item => !current.some(existing => existing.id === item.id))])
           setTotalCount(value.totalCount ?? items.length)
+          setTotalPages(value.totalPages ?? (items.length ? 1 : 0))
           setRemembered(current=>({...current,...Object.fromEntries(items.map(item=>[item.id,item]))}))
         })
         .catch(reason => {
@@ -109,13 +112,15 @@ export default function ProblemReportPicker({ api, projectId, scope, releaseId, 
     ...Object.values(remembered).filter(report=>pinnedIds.has(report.id)),
     ...reports.filter(report=>!pinnedIds.has(report.id) && isCandidate(report)),
   ],[isCandidate,pinnedIds,reports,remembered])
-  const hasMore = reports.filter(isCandidate).length < totalCount
+  const loadedCandidates = reports.filter(isCandidate).length
+  const hasMore = page < totalPages
 
   return <fieldset className="problemReportPicker">
     <legend>{legend}</legend>
     <label className="problemReportSearch"><span>Find controlled PR</span><input type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search PR number, title, problem, or root cause"/></label>
     {error && <span role="alert">{error}</span>}
     {busy&&<span role="status">Searching problem reports…</span>}
+    {!error&&totalCount>0&&<small className="problemReportMatchCount">Showing {loadedCandidates} of {totalCount} matching PRs</small>}
     {!busy&&!error&&!visible.length && <span>{query.trim()?'No problem reports match this search.':scope === 'target-build'?'No PRs are recorded for this build.':'No PRs are recorded for this Project.'}</span>}
     {visible.map(report => {
       const historical = !isCandidate(report)

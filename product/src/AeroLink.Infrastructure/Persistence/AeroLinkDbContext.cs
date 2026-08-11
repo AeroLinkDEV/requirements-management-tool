@@ -959,7 +959,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Severity).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Priority).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Disposition).HasConversion<string>().HasMaxLength(30); b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
             // By name, so adding a kind later costs nothing in the database.
             b.Property(x => x.Type).HasConversion<string>().HasMaxLength(40);
-            b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ReportNumber }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.State, x.Severity }); b.HasIndex(x => new { x.ProjectId, x.IsReleaseBlocker });
+            b.Property(x => x.NumberSequence).IsRequired(); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ReportNumber }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.NumberSequence, x.Revision, x.Id }); b.HasIndex(x => new { x.ProjectId, x.State, x.Severity }); b.HasIndex(x => new { x.ProjectId, x.IsReleaseBlocker });
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ProblemReportRevision>(b =>

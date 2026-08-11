@@ -173,6 +173,7 @@ public sealed class ProblemReport
     {
         if (projectId == Guid.Empty) throw new DomainException("A problem-report project is required.");
         Id = Guid.NewGuid(); ProjectId = projectId; ReportNumber = Required(reportNumber, "A problem-report number is required.");
+        NumberSequence = ProblemReportNumber.Sequence(ReportNumber);
         Title = Required(title, "A problem-report title is required."); Problem = Required(problem, "A problem statement is required.");
         Analysis = analysis?.Trim() ?? ""; ReportedBy = Required(reportedBy, "A problem-report owner is required.");
         Classification = Required(classification, "A problem-report classification is required."); Severity = severity; Priority = priority;
@@ -187,6 +188,7 @@ public sealed class ProblemReport
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public string ReportNumber { get; private set; } = "";
+    public int NumberSequence { get; private set; }
     public int Revision { get; private set; }
     public string DisplayNumber => $"{ReportNumber}.{Revision:D2}";
     public string Title { get; private set; } = "";

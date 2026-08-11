@@ -9,4 +9,5 @@
 .problemReportPicker label i{font-size:12px;font-style:normal;color:var(--ink-500)}
 .problemReportPicker input{width:24px!important;height:24px;margin:0}
 .problemReportPicker .problemReportHistorical{background:var(--warning-50,#fff8e8)}
+.problemReportPicker .problemReportMatchCount{margin:0 0 8px;color:var(--ink-500);font-size:12px}
 .problemReportPicker .problemReportMore{margin:12px 0 0}

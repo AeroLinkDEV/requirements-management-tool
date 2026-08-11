@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -306,7 +307,8 @@ public sealed class SecurityBoundaryTests
 }
 
 internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool allowDemoAccounts = false,
-    string? showcaseTemplate = null, string? staticFilesRoot = null) : WebApplicationFactory<Program>
+    string? showcaseTemplate = null, string? staticFilesRoot = null,
+    DbCommandInterceptor? commandInterceptor = null) : WebApplicationFactory<Program>
 {
     public const string BootstrapSecret = "test-bootstrap-secret-0123456789-abcdef";
     public const string AdministratorPassword = "Bootstrap-Admin!2026";
@@ -356,9 +358,11 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
             services.RemoveAll<AeroLinkDbContext>();
             services.RemoveAll<DbContextOptions<AeroLinkDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<AeroLinkDbContext>>();
-            services.AddDbContext<AeroLinkDbContext>(options => options
-                .UseSqlite(ConnectionString)
-                .AddInterceptors(new SaveRaceInterceptor()));
+            services.AddDbContext<AeroLinkDbContext>(options =>
+            {
+                options.UseSqlite(ConnectionString).AddInterceptors(new SaveRaceInterceptor());
+                if (commandInterceptor is not null) options.AddInterceptors(commandInterceptor);
+            });
         });
     }
 
