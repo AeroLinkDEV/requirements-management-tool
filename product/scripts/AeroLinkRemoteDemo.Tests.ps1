@@ -157,6 +157,18 @@ $parsed = $null
 try { $parsed = [xml]$savedText } catch { }
 Assert-True ($null -ne $parsed -and $parsed.Task.Triggers.LogonTrigger -ne $null) 'Task XML file must parse as well-formed task XML.'
 
+# Operator log lines must carry a parseable ISO-8601 (round-trip) timestamp.
+$logConfig = [pscustomobject]@{ LogsPath = Join-Path $tempRoot 'log-test' }
+Write-AeroLinkRemoteDemoLog -Config $logConfig -Message 'log-format-probe'
+$logLine = Get-Content -LiteralPath (Join-Path $logConfig.LogsPath 'remote-demo.log') | Select-Object -First 1
+$timestampText = ($logLine -split ' ', 2)[0]
+$parsedTimestamp = $null
+try {
+    $parsedTimestamp = [datetime]::Parse($timestampText, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+} catch { }
+Assert-True ($null -ne $parsedTimestamp) "Operator log timestamp must parse as ISO-8601; got '$timestampText'."
+Assert-True ($logLine -match 'log-format-probe') 'Operator log line must contain the message.'
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Remote-demo operator regression FAILED ($($failures.Count) failure(s))." -ForegroundColor Red
