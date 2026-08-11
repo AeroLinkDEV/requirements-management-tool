@@ -24,7 +24,8 @@ public sealed class ProblemReportVerificationApiTests
         Guid EqualCorrectionTimeExecutionId,
         Guid WrongBuildExecutionId, Guid FailedExecutionId, Guid BlockedExecutionId, Guid WrongProjectExecutionId);
 
-    private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
+    private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory,
+        string reportedBy = "admin", string responsibleEngineerId = "admin")
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -51,7 +52,8 @@ public sealed class ProblemReportVerificationApiTests
             TestProcedureState.Approved, "test", start, effectiveBaselineId: targetBaseline.Id);
 
         var originFailure = Execution(project.Id, failedRevision.Id, originBuild.Id, null, TestOutcome.Fail, start, originRelease.Id);
-        var report = Report(project.Id, targetRelease.Id, "PR-04490", start.AddMinutes(1));
+        var report = Report(project.Id, targetRelease.Id, "PR-04490", start.AddMinutes(1),
+            reportedBy, responsibleEngineerId);
         ProgressToVerifying(report, start.AddMinutes(5));
         var manual = Report(project.Id, targetRelease.Id, "PR-04491", start.AddMinutes(1));
         ProgressToVerifying(manual, start.AddMinutes(5));
@@ -71,11 +73,22 @@ public sealed class ProblemReportVerificationApiTests
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), start);
         var engineer = new UserAccount("closure.engineer", "Closure Engineer", "closure.engineer@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), start);
+        var approver = new UserAccount("closure.approver", "Closure Approver", "closure.approver@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), start);
+        var configurationManager = new UserAccount("closure.cm", "Closure Configuration Manager", "closure.cm@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), start);
+        var programManager = new UserAccount("closure.manager", "Closure Program Manager", "closure.manager@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), start);
         var wrongProject = Execution(otherProject.Id, targetRevision.Id, targetBuild.Id, originFailure.Id, TestOutcome.Pass, start.AddMinutes(10), targetRelease.Id);
 
         db.AddRange(program, project, otherProject, originRelease, targetRelease, wrongRelease, quality, engineer,
+            approver, configurationManager, programManager,
             new ProgramMembership(quality.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "test.setup", start),
+            new ProgramMembership(quality.Id, program.Id, ProgramRole.Reviewer, "test.setup", start),
             new ProgramMembership(engineer.Id, program.Id, ProgramRole.Engineer, "test.setup", start),
+            new ProgramMembership(approver.Id, program.Id, ProgramRole.Approver, "test.setup", start),
+            new ProgramMembership(configurationManager.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", start),
+            new ProgramMembership(programManager.Id, program.Id, ProgramRole.ProgramManager, "test.setup", start),
             originBaseline, targetBaseline, wrongBaseline, originBuild, targetBuild, wrongBuild,
             procedure, failedRevision, targetRevision, otherProcedure, otherRevision,
             originFailure, report, manual, wrongProcedure, noRetest, historical, equalCorrectionTime, wrongBuildExecution, failed, blocked, wrongProject,
@@ -115,7 +128,9 @@ public sealed class ProblemReportVerificationApiTests
         await RejectAsync(client, fixture.ReportId, fixture.ReportVersion, fixture.FailedExecutionId, "pr_verification_not_pass");
         await RejectAsync(client, fixture.ReportId, fixture.ReportVersion, fixture.BlockedExecutionId, "pr_verification_not_pass");
         await RejectAsync(client, fixture.ManualReportId, fixture.ManualReportVersion, fixture.NoRetestExecutionId, "pr_verification_scope_unknown");
-        using (var closure = await client.PostAsJsonAsync($"/api/problem-reports/{fixture.ManualReportId}/closure/approve", new
+        using var quality = factory.CreateClient();
+        await LoginAsync(quality, "closure.quality");
+        using (var closure = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ManualReportId}/closure/approve", new
         {
             expectedVersion = fixture.ManualReportVersion
         }))
@@ -241,8 +256,10 @@ public sealed class ProblemReportVerificationApiTests
         var package = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}/closure-package");
         Assert.Equal(approvedCandidateId, package.GetProperty("snapshot").GetProperty("id").GetGuid());
         Assert.Equal("FrozenAtApproval", package.GetProperty("snapshot").GetProperty("packageProvenance").GetString());
+        Assert.Equal("SoftwareQualityAnalyst", package.GetProperty("snapshot").GetProperty("approvalAuthority").GetString());
         var firstPackageHash = package.GetProperty("snapshot").GetProperty("closurePackageHash").GetString();
         Assert.Equal("closure.quality", package.GetProperty("package").GetProperty("closure").GetProperty("approvedBy").GetString());
+        Assert.Equal("SoftwareQualityAnalyst", package.GetProperty("package").GetProperty("closure").GetProperty("authority").GetString());
         Assert.Contains(package.GetProperty("package").GetProperty("history").EnumerateArray(), revision =>
             revision.GetProperty("eventType").GetString() == "ClosureApproved");
         var frozenPackage = package.GetProperty("package").GetRawText();
@@ -395,9 +412,104 @@ public sealed class ProblemReportVerificationApiTests
         Assert.Equal(64, frozen.GetProperty("closurePackageHash").GetString()!.Length);
     }
 
-    private static async Task<(Guid ExecutionId, long ReportVersion)> SelectCandidateAsync(HttpClient client,
-        Fixture fixture, Guid buildId, Guid? targetReleaseId)
+    [Fact]
+    public async Task Closure_requires_live_Software_Quality_authority_and_never_uses_generic_or_administrator_power()
     {
+        using var factory = new AeroLinkApiFactory();
+        using var administrator = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(administrator);
+        var fixture = await SeedAsync(factory);
+        var candidate = await SelectCandidateAsync(administrator, fixture, fixture.TargetBuildId, targetReleaseId: null);
+
+        foreach (var userName in new[] { "closure.approver", "closure.cm", "closure.manager", "closure.engineer" })
+        {
+            using var unauthorized = factory.CreateClient();
+            await LoginAsync(unauthorized, userName);
+            var detail = await unauthorized.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+            Assert.False(detail.GetProperty("capabilities").GetProperty("canApproveSqaClosure").GetBoolean());
+            using var response = await unauthorized.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
+                new { expectedVersion = candidate.ReportVersion });
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+
+        using (var administratorAttempt = await administrator.PostAsJsonAsync(
+            $"/api/problem-reports/{fixture.ReportId}/closure/approve",
+            new { expectedVersion = candidate.ReportVersion }))
+            Assert.Equal(HttpStatusCode.Forbidden, administratorAttempt.StatusCode);
+
+        using var quality = factory.CreateClient();
+        await LoginAsync(quality, "closure.quality");
+        var authorized = await quality.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+        Assert.True(authorized.GetProperty("capabilities").GetProperty("canApproveSqaClosure").GetBoolean());
+
+        Guid qualityId;
+        Guid programId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            qualityId = await db.UserAccounts.Where(item => item.UserName == "closure.quality").Select(item => item.Id).SingleAsync();
+            var delegatorId = await db.UserAccounts.Where(item => item.UserName == "closure.manager").Select(item => item.Id).SingleAsync();
+            programId = await db.Projects.Where(item => item.Id == fixture.ProjectId).Select(item => item.ProgramId).SingleAsync();
+            await db.ProgramMemberships.Where(item => item.UserId == qualityId && item.ProgramId == programId
+                && item.Role == ProgramRole.SoftwareQualityAnalyst).ExecuteDeleteAsync();
+            var now = DateTimeOffset.UtcNow;
+            db.RoleDelegations.Add(new RoleDelegation(programId, delegatorId, qualityId,
+                ProgramRole.SoftwareQualityAnalyst, now.AddHours(-2), now.AddHours(-1),
+                "Expired quality coverage retained for audit.", "test.setup", now.AddHours(-3)));
+            await db.SaveChangesAsync();
+        }
+
+        var revoked = await quality.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+        Assert.False(revoked.GetProperty("capabilities").GetProperty("canApproveSqaClosure").GetBoolean());
+        using (var revokedAttempt = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
+            new { expectedVersion = candidate.ReportVersion }))
+            Assert.Equal(HttpStatusCode.Forbidden, revokedAttempt.StatusCode);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.ProgramMemberships.Add(new ProgramMembership(qualityId, programId,
+                ProgramRole.SoftwareQualityAnalyst, "test.restore", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        var restored = await quality.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+        Assert.True(restored.GetProperty("capabilities").GetProperty("canApproveSqaClosure").GetBoolean());
+        using var closed = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
+            new { expectedVersion = candidate.ReportVersion });
+        Assert.Equal(HttpStatusCode.OK, closed.StatusCode);
+        var package = await quality.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}/closure-package");
+        Assert.Equal("SoftwareQualityAnalyst", package.GetProperty("snapshot").GetProperty("approvalAuthority").GetString());
+        Assert.Equal("SoftwareQualityAnalyst", package.GetProperty("package").GetProperty("closure").GetProperty("authority").GetString());
+        Assert.Equal("IndependentSqaClosure", package.GetProperty("package").GetProperty("closure").GetProperty("authorityMeaning").GetString());
+    }
+
+    [Theory]
+    [InlineData("closure.quality", "admin")]
+    [InlineData("admin", "closure.quality")]
+    public async Task Software_Quality_closure_remains_independent_from_reporter_and_responsible_engineer(
+        string reportedBy, string responsibleEngineerId)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var administrator = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(administrator);
+        var fixture = await SeedAsync(factory, reportedBy, responsibleEngineerId);
+        using var quality = factory.CreateClient();
+        await LoginAsync(quality, "closure.quality");
+        var candidate = await SelectCandidateAsync(administrator, fixture, fixture.TargetBuildId,
+            targetReleaseId: null, verificationClient: responsibleEngineerId == "closure.quality" ? quality : administrator);
+
+        var detail = await quality.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+        Assert.False(detail.GetProperty("capabilities").GetProperty("canApproveSqaClosure").GetBoolean());
+        using var response = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
+            new { expectedVersion = candidate.ReportVersion });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    private static async Task<(Guid ExecutionId, long ReportVersion)> SelectCandidateAsync(HttpClient client,
+        Fixture fixture, Guid buildId, Guid? targetReleaseId, HttpClient? verificationClient = null)
+    {
+        verificationClient ??= client;
         var releaseId = targetReleaseId ?? (await client.GetFromJsonAsync<JsonElement>(
             $"/api/problem-reports/{fixture.ReportId}")).GetProperty("targetReleaseId").GetGuid();
         using var recorded = await client.PostAsJsonAsync("/api/test-executions", new
@@ -415,9 +527,9 @@ public sealed class ProblemReportVerificationApiTests
         });
         Assert.Equal(HttpStatusCode.Created, recorded.StatusCode);
         var executionId = (await recorded.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
-        var version = (await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}"))
+        var version = (await verificationClient.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}"))
             .GetProperty("version").GetInt64();
-        using var verified = await client.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/verify",
+        using var verified = await verificationClient.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/verify",
             new { expectedVersion = version, testExecutionId = executionId });
         Assert.Equal(HttpStatusCode.OK, verified.StatusCode);
         return (executionId, (await verified.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64());
@@ -440,16 +552,18 @@ public sealed class ProblemReportVerificationApiTests
         Assert.Equal(code, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
     }
 
-    private static ProblemReport Report(Guid projectId, Guid releaseId, string number, DateTimeOffset now) =>
-        new(projectId, number, "Verification chain", "Closure must use corrective evidence.", "", "admin", now,
-            targetReleaseId: releaseId, responsibleEngineerId: "admin");
+    private static ProblemReport Report(Guid projectId, Guid releaseId, string number, DateTimeOffset now,
+        string reportedBy = "admin", string responsibleEngineerId = "admin") =>
+        new(projectId, number, "Verification chain", "Closure must use corrective evidence.", "", reportedBy, now,
+            targetReleaseId: releaseId, responsibleEngineerId: responsibleEngineerId);
 
     private static void ProgressToVerifying(ProblemReport report, DateTimeOffset now)
     {
-        report.ReadyForSccb("admin", now.AddMinutes(-3));
+        var owner = report.ResponsibleEngineerId;
+        report.ReadyForSccb(owner, now.AddMinutes(-3));
         report.OpenBySccb("sccb", now.AddMinutes(-2));
-        report.BeginInvestigation("admin", "Root cause", "Cause", "Effect", "", now.AddMinutes(-1));
-        report.ProposeResolution("admin", "Correct and retest.", now);
+        report.BeginInvestigation(owner, "Root cause", "Cause", "Effect", "", now.AddMinutes(-1));
+        report.ProposeResolution(owner, "Correct and retest.", now);
     }
 
     private static TestExecution Execution(Guid projectId, Guid revisionId, Guid? buildId, Guid? retestOf,

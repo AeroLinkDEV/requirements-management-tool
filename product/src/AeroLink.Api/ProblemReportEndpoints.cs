@@ -155,7 +155,8 @@ public static class ProblemReportEndpoints
         return Results.Ok(permitted.Select(Summary));
     }
 
-    private static async Task<IResult> DetailAsync(Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> DetailAsync(Guid id, HttpContext http, AeroLinkDbContext db,
+        IdentityService identity, CancellationToken ct)
     {
         var report = await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
@@ -163,8 +164,13 @@ public static class ProblemReportEndpoints
         var revisions = (await db.ProblemReportRevisions.AsNoTracking().Where(x => x.ProblemReportId == id).ToListAsync(ct)).OrderByDescending(x => x.OccurredAt).ToList();
         var candidates = await db.ProblemReportClosureCandidates.AsNoTracking()
             .Where(x => x.ProblemReportId == id).ToListAsync(ct);
+        var canApproveSqaClosure = report.State == ProblemReportState.AwaitingSqaClosure
+            && await HasCurrentSqaClosureAuthorityAsync(report, http, db, identity, ct)
+            && !string.Equals(http.UserAccount().UserName, report.ReportedBy, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(http.UserAccount().UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase);
         return Results.Ok(Detail(report, await LinkViewsAsync(report, links, db, ct), revisions,
-            candidates.OrderByDescending(x => x.ReportRevision).ThenByDescending(x => x.Sequence)));
+            candidates.OrderByDescending(x => x.ReportRevision).ThenByDescending(x => x.Sequence),
+            new { canApproveSqaClosure }));
     }
 
     private static async Task<IResult> ReassignAsync(Guid id, ReassignRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
@@ -240,7 +246,7 @@ public static class ProblemReportEndpoints
     private static async Task<IResult> ApproveClosureAsync(Guid id, ClosureApprovalRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
-        if (!await http.HasProjectRoleAsync(db, identity, report.ProjectId, ct, ProgramRole.SoftwareQualityAnalyst, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Approver)) return Results.Forbid();
+        if (!await HasCurrentSqaClosureAuthorityAsync(report, http, db, identity, ct)) return Results.Forbid();
         if (report.State == ProblemReportState.AwaitingSqaClosure
             && report.ResolutionVerificationExecutionId is { } currentExecutionId)
         {
@@ -265,7 +271,8 @@ public static class ProblemReportEndpoints
             (item, user, now) => item.ApproveClosure(user.UserName, user.Id, now),
             afterMutation: async (item, user, now, _, closureRevision, token) =>
                 await new ProblemReportClosureCandidateService(db).FreezeForApprovalAsync(item,
-                    candidateDecision.Candidate!, closureRevision, user.UserName, user.Id, now, token));
+                    candidateDecision.Candidate!, closureRevision, user.UserName, user.Id,
+                    ProgramRole.SoftwareQualityAnalyst.ToString(), now, token));
     }
 
     private static async Task<IResult> DispositionAsync(Guid id, DispositionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
@@ -334,7 +341,8 @@ public static class ProblemReportEndpoints
             generatorVersion = "AeroLink-3.0",
             snapshot = new { candidate.Id, candidate.ReportRevision, candidate.SchemaVersion,
                 candidate.PackageProvenance, candidate.ClosurePackageHash, candidate.ApprovedByAccountId,
-                candidate.ApprovedBy, candidate.ApprovedAt },
+                candidate.ApprovedBy, candidate.ApprovedAt,
+                approvalAuthority = ClosureApprovalAuthority(candidate.ClosurePackageJson) },
             package = JsonSerializer.Deserialize<JsonElement>(candidate.ClosurePackageJson),
         });
     }
@@ -410,14 +418,15 @@ public static class ProblemReportEndpoints
     private static object Summary(ProblemReport x) => new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = x.State.ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), type = x.Type.ToString(), x.Classification, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.IsReleaseBlocker, waived = !string.IsNullOrWhiteSpace(x.WaiverRationale), x.UpdatedAt, x.Version };
     private static object Detail(ProblemReport x, IEnumerable<ProblemReportLinkView> links,
         IEnumerable<ProblemReportRevision> revisions,
-        IEnumerable<ProblemReportClosureCandidate>? closureCandidates = null)
+        IEnumerable<ProblemReportClosureCandidate>? closureCandidates = null,
+        object? capabilities = null)
     {
         var materializedLinks = links.ToList();
         var approvedCorrectiveActions = materializedLinks.Where(link => link.TrustedControlledEvidence && link.Relationship == ProblemReportRelationshipPolicy.ApprovedCorrectiveAction).Select(LinkResponse).ToList();
         var testEvidence = materializedLinks.Where(link => link.TrustedControlledEvidence
             && link.Relationship == ProblemReportRelationshipPolicy.ResolutionVerification
             && link.ArtifactId == x.ResolutionVerificationExecutionId).Select(LinkResponse).ToList();
-        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.CorrectiveAction, x.Workaround, type = x.Type.ToString(), x.SystemAircraftImpact, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.WaiverRationale, x.WaivedBy, x.WaivedAt, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotHash, x.OccurredAt }) };
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.CorrectiveAction, x.Workaround, type = x.Type.ToString(), x.SystemAircraftImpact, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.WaiverRationale, x.WaivedBy, x.WaivedAt, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), capabilities, links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotHash, x.OccurredAt }) };
     }
 
     private static object CandidateResponse(ProblemReportClosureCandidate candidate) => new
@@ -439,7 +448,32 @@ public static class ProblemReportEndpoints
         candidate.ApprovedAt,
         candidate.PackageProvenance,
         candidate.ClosurePackageHash,
+        approvalAuthority = ClosureApprovalAuthority(candidate.ClosurePackageJson),
     };
+
+    private static async Task<bool> HasCurrentSqaClosureAuthorityAsync(ProblemReport report, HttpContext http,
+        AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+    {
+        var actor = http.UserAccount();
+        if (actor.IsAdministrator) return false;
+        var programId = await db.Projects.AsNoTracking().Where(item => item.Id == report.ProjectId)
+            .Select(item => (Guid?)item.ProgramId).SingleOrDefaultAsync(ct);
+        return programId is not null && await identity.HasRoleAsync(actor.Id, programId.Value,
+            ProgramRole.SoftwareQualityAnalyst, DateTimeOffset.UtcNow, ct);
+    }
+
+    private static string? ClosureApprovalAuthority(string packageJson)
+    {
+        if (string.IsNullOrWhiteSpace(packageJson)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(packageJson);
+            return document.RootElement.TryGetProperty("closure", out var closure)
+                && closure.TryGetProperty("authority", out var authority)
+                ? authority.GetString() : null;
+        }
+        catch (JsonException) { return null; }
+    }
 
     private static object LinkResponse(ProblemReportLinkView link) => new { link.ArtifactType, link.ArtifactId, link.Identifier, link.Relationship, link.AddedBy, link.AddedAt };
 
