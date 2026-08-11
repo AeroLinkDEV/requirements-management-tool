@@ -1010,7 +1010,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           <form onSubmit={event => { event.preventDefault(); void linkReports(linkingProblemReports) }}>
             <p className="eyebrow">CONTROLLED TRACEABILITY</p>
             <h2>Link PRs to {linkingProblemReports.displayNumber}</h2>
-            <ProblemReportPicker api={api} projectId={projectId} releaseId={releaseId}
+            <ProblemReportPicker api={api} projectId={projectId} scope="target-build" releaseId={releaseId}
               selected={problemReportIds} locked={(linkingProblemReports.problemReports ?? []).map(report => report.id)}
               onChange={setProblemReportIds} legend="PRs verified by this TCR" />
             <div className="decisionActions">

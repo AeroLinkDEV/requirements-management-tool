@@ -476,7 +476,7 @@ export default function ChangeRequestEditor({
             <RichCaseField api={api} projectId={projectId} label="Solution" value={solutionRich} onChange={setSolutionRich}
               placeholder="What controlled outcome is proposed?" required={false} />
           </div>
-          <ProblemReportPicker api={api} projectId={projectId} releaseId={releaseId}
+          <ProblemReportPicker api={api} projectId={projectId} scope="target-build" releaseId={releaseId}
             selected={problemReportIds} onChange={setProblemReportIds}
             legend={`PRs driving this ${abbreviation} (optional)`} />
         </section>

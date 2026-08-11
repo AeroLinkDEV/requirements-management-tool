@@ -5,5 +5,8 @@
 .problemReportPicker .problemReportSearch input{width:100%!important;height:auto;margin:0;padding:9px 11px;border:1px solid var(--line);border-radius:7px;background:white}
 .problemReportPicker label{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:9px;margin:0;padding:9px 4px;border-top:1px solid var(--line);font-weight:400;cursor:pointer}
 .problemReportPicker label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-600)}
+.problemReportPicker label span small{display:block;margin-top:3px;white-space:normal;color:var(--warning-700,#8a4b08);font-weight:650}
 .problemReportPicker label i{font-size:12px;font-style:normal;color:var(--ink-500)}
 .problemReportPicker input{width:24px!important;height:24px;margin:0}
+.problemReportPicker .problemReportHistorical{background:var(--warning-50,#fff8e8)}
+.problemReportPicker .problemReportMore{margin:12px 0 0}

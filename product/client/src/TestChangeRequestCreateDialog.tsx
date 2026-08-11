@@ -132,7 +132,7 @@ export default function TestChangeRequestCreateDialog({ api, projectId, releaseI
             ))}
         </fieldset>
 
-        <ProblemReportPicker api={api} projectId={projectId} releaseId={releaseId}
+        <ProblemReportPicker api={api} projectId={projectId} scope="target-build" releaseId={releaseId}
           selected={problemReportIds} onChange={setProblemReportIds}
           legend={`PRs driving this ${label} TCR (optional)`} />
 

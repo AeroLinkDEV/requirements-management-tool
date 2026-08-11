@@ -1080,7 +1080,7 @@ export default function ChangeRequestWorkspace({
                 placeholder="What controlled outcome is proposed?" required={false}
                 onChange={(value) => setDraft((current) => ({ ...current, solutionRich: value, solution: toPlainText(value) }))} />
             </div>
-            <ProblemReportPicker api={api} projectId={scr.projectId} releaseId={scr.targetReleaseId}
+            <ProblemReportPicker api={api} projectId={scr.projectId} scope="target-build" releaseId={scr.targetReleaseId}
               selected={problemReportIds} onChange={setProblemReportIds}
               legend={`PRs driving this ${artifactAcronym(scr.displayNumber, "changeRequest")} (optional)`} />
           </section>
