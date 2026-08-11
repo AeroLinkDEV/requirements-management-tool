@@ -36,6 +36,7 @@ public static class ProblemReportEndpoints
         group.MapPost("/{id:guid}/verify", VerifyAsync);
         group.MapPost("/{id:guid}/closure/approve", ApproveClosureAsync);
         group.MapPost("/{id:guid}/disposition", DispositionAsync);
+        group.MapGet("/{id:guid}/duplicate-candidates", DuplicateCandidatesAsync);
         group.MapPost("/{id:guid}/reopen", ReopenAsync);
         group.MapPost("/{id:guid}/blocker", BlockerAsync);
         group.MapPost("/{id:guid}/release-waiver", ApproveReleaseWaiverAsync);
@@ -420,7 +421,17 @@ public static class ProblemReportEndpoints
             });
         }
     }
-    private static async Task<IResult> ReopenAsync(Guid id, ReopenRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ProblemReportReopened", (report, actor, now) => report.Reopen(actor.UserName, request.Rationale, now));
+    private static async Task<IResult> DuplicateCandidatesAsync(Guid id, string? search, HttpContext http,
+        AeroLinkDbContext db, CancellationToken ct)
+    {
+        var report = await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, ct);
+        if (report is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
+        var candidates = await new ProblemReportDuplicateDispositionPolicy(db)
+            .EligibleTargetsAsync(report, search, 50, ct);
+        return Results.Ok(new { items = candidates.Select(item => Summary(item)), totalCount = candidates.Count });
+    }
+    private static async Task<IResult> ReopenAsync(Guid id, ReopenRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ProblemReportReopened", (report, actor, now) => report.Reopen(actor.UserName, request.Rationale, now), detail: request.Rationale);
     private static async Task<IResult> BlockerAsync(Guid id, BlockerRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(request.WaiverRationale))
@@ -536,14 +547,16 @@ public static class ProblemReportEndpoints
     }
 
     private static async Task<IResult> ChangeAsync(Guid id, long? expectedVersion, HttpContext http, AeroLinkDbContext db, CancellationToken ct, string eventType, Action<ProblemReport, AuthenticatedUser, DateTimeOffset> action, Func<AuthenticatedUser, DateTimeOffset, ProblemReportLink>? link = null,
-        Func<ProblemReport, AuthenticatedUser, DateTimeOffset, ProblemReportLink?, ProblemReportRevision, CancellationToken, Task>? afterMutation = null)
+        Func<ProblemReport, AuthenticatedUser, DateTimeOffset, ProblemReportLink?, ProblemReportRevision, CancellationToken, Task>? afterMutation = null,
+        string? detail = null)
     {
         var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
-        return await ChangeAsync(report, expectedVersion, http, db, ct, eventType, action, link, afterMutation);
+        return await ChangeAsync(report, expectedVersion, http, db, ct, eventType, action, link, afterMutation, detail);
     }
 
     private static async Task<IResult> ChangeAsync(ProblemReport report, long? expectedVersion, HttpContext http, AeroLinkDbContext db, CancellationToken ct, string eventType, Action<ProblemReport, AuthenticatedUser, DateTimeOffset> action, Func<AuthenticatedUser, DateTimeOffset, ProblemReportLink>? link = null,
-        Func<ProblemReport, AuthenticatedUser, DateTimeOffset, ProblemReportLink?, ProblemReportRevision, CancellationToken, Task>? afterMutation = null)
+        Func<ProblemReport, AuthenticatedUser, DateTimeOffset, ProblemReportLink?, ProblemReportRevision, CancellationToken, Task>? afterMutation = null,
+        string? detail = null)
     {
         if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
         if (expectedVersion is not null && expectedVersion != report.Version) return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = report.Version });
@@ -554,7 +567,7 @@ public static class ProblemReportEndpoints
             action(report, actor, now);
             ProblemReportLink? createdLink = null;
             if (link is not null) { createdLink = link(actor, now); db.ProblemReportLinks.Add(createdLink); }
-            var revision = AddRevision(db, report, eventType, actor.UserName, now);
+            var revision = AddRevision(db, report, eventType, actor.UserName, now, detail);
             if (wasAwaitingClosure && report.ResolutionVerificationExecutionId is null)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
                     eventType, now, ct);
@@ -565,11 +578,11 @@ public static class ProblemReportEndpoints
         catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "This problem report was updated concurrently. Refresh before continuing.", code = "stale_version" }); }
     }
 
-    private static ProblemReportRevision AddRevision(AeroLinkDbContext db, ProblemReport report, string eventType, string actor, DateTimeOffset now)
+    private static ProblemReportRevision AddRevision(AeroLinkDbContext db, ProblemReport report, string eventType, string actor, DateTimeOffset now, string? detail = null)
     {
         // One evidence shape for every change, whether it arrives here or through a controlled checkout.
         var snapshot = ProblemReportControlledEditingAdapter.EvidenceSnapshot(report);
-        var revision = new ProblemReportRevision(report.Id, report.Revision, eventType, actor, report.CanonicalHash(), snapshot, now);
+        var revision = new ProblemReportRevision(report.Id, report.Revision, eventType, actor, report.CanonicalHash(), snapshot, now, detail: detail);
         db.ProblemReportRevisions.Add(revision); return revision;
     }
 
