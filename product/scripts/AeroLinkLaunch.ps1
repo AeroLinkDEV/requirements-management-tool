@@ -15,6 +15,7 @@
 # than a divergence between two files. Where it did not, it is settled here and said so.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
 
 function Test-HttpEndpoint {
     <#
@@ -147,10 +148,19 @@ function Assert-AeroLinkPostgres {
     $catalogue = Join-Path $ProductRoot '.local\postgresql\pgsql\share\postgres.bki'
     if (-not (Test-Path $catalogue)) {
         Write-Host '      PostgreSQL is not installed on this machine yet. Installing it once (about 320 MB).' -ForegroundColor Yellow
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Setup-Postgres.ps1')
-        if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL could not be installed. The output above says why.' }
+        $setup = Invoke-AeroLinkChildScript -ScriptPath (Join-Path $PSScriptRoot 'Setup-Postgres.ps1') `
+            -StandardOutput (Join-Path $ProductRoot '.local\logs\setup-postgres.stdout.log') `
+            -StandardError (Join-Path $ProductRoot '.local\logs\setup-postgres.stderr.log') `
+            -TimeoutSeconds 900 -StepName 'Setup-Postgres.ps1'
+        if ($setup.ExitCode -ne 0) { throw "PostgreSQL could not be installed: $($setup.Detail)" }
         return
     }
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Start-Postgres.ps1')
-    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL could not be started.' }
+    # Bounded, file-redirected child invocation: the postmaster must never inherit
+    # this process's stdio pipes (the #483 scheduled-task hang) and the wait must
+    # never be indefinite (crash recovery is bounded inside Start-Postgres.ps1).
+    $start = Invoke-AeroLinkChildScript -ScriptPath (Join-Path $PSScriptRoot 'Start-Postgres.ps1') `
+        -StandardOutput (Join-Path $ProductRoot '.local\logs\postgres-start.stdout.log') `
+        -StandardError (Join-Path $ProductRoot '.local\logs\postgres-start.stderr.log') `
+        -TimeoutSeconds 420 -StepName 'Start-Postgres.ps1'
+    if ($start.ExitCode -ne 0) { throw "PostgreSQL could not be started: $($start.Detail)" }
 }
