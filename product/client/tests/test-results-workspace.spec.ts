@@ -132,6 +132,7 @@ test('a procedure shows every run against this build, and a failure can be retes
   await record.getByLabel('Configuration under test').fill('FMS rig 2, data set B')
   await record.getByLabel('Determination', { exact: true }).fill(failure)
   await record.getByLabel('Evidence reference').fill('rig2/oceanic-fail.log')
+  const failureTime = await record.getByLabel('Execution time').inputValue()
   await record.getByRole('button', { name: 'Record determination' }).click()
   await expect(record).toHaveCount(0, { timeout: 30_000 })
 
@@ -144,6 +145,8 @@ test('a procedure shows every run against this build, and a failure can be retes
   const answer = `Sequencing held after the correction ${Date.now()}`
   await failed.getByRole('button', { name: 'Retest this run' }).click()
   const retest = page.getByRole('dialog', { name: new RegExp(`Record a result for ${escaped}`) })
+  const retestTime = await retest.getByLabel('Execution time').inputValue()
+  expect(new Date(retestTime).getTime()).toBeGreaterThan(new Date(failureTime).getTime())
   await retest.getByLabel('Configuration under test').fill('FMS rig 2, corrected build')
   await retest.getByLabel('Determination', { exact: true }).fill(answer)
   await retest.getByLabel('Evidence reference').fill('rig2/oceanic-retest.log')

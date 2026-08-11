@@ -29,9 +29,9 @@ type SetProcedure = {
  * outcome they picked. "Pass" is a verdict; the determination is the reasoning behind it, and a release
  * reconstructed years later needs the second one.
  */
-const localWallTimeNow = () => {
-  const now = new Date(), pad = (value: number) => String(value).padStart(2, '0')
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+const localWallTime = (instant = new Date()) => {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${instant.getFullYear()}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}T${pad(instant.getHours())}:${pad(instant.getMinutes())}:${pad(instant.getSeconds())}`
 }
 type TestSet = { id: string; discipline: TestDiscipline; releaseId: string; version: number; procedures: SetProcedure[] }
 type Execution = {
@@ -116,6 +116,17 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   // corrective action does: it answers a named failure, not "whatever happened last".
   const [supersedesExecutionId, setSupersedesExecutionId] = useState<string>()
   const [corrective, setCorrective] = useState<CorrectiveAction>()
+
+  const openRecording = (procedure: SetProcedure, predecessorId?: string | null) => {
+    setOutcome('Pass')
+    setSupersedesExecutionId(predecessorId ?? undefined)
+    setRecording(procedure)
+  }
+  const recordingTime = () => {
+    const predecessor = executions.find(run => run.id === supersedesExecutionId)
+    const successorFloor = predecessor ? new Date(predecessor.executedAt).getTime() + 1_000 : 0
+    return localWallTime(new Date(Math.max(Date.now(), successorFloor)))
+  }
 
   // One ticket per loader, not one for the page. Sharing a counter between two independent loaders makes
   // each cancel the other: the candidate search runs on mount behind a debounce, bumps the count, and the
@@ -278,7 +289,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
             if (readOnly) return <span className="correctiveHint">This build is released. Its results are read-only.</span>
             const target = set?.procedures.find(x => x.procedureRevisionId === corrective.procedureRevisionId)
             if (!target) return <span className="correctiveHint">Add {corrective.procedureNumber ?? 'the procedure'} to this build&apos;s test set below, then record its result.</span>
-            return <button type="button" disabled={busy} onClick={() => { setOutcome('Pass'); setSupersedesExecutionId(corrective.executionId); setRecording(target) }}>Record successor execution →</button>
+            return <button type="button" disabled={busy} onClick={() => openRecording(target, corrective.executionId)}>Record successor execution →</button>
           })()}
         </section>
       )}
@@ -317,7 +328,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
             <div className="testSetRowActions">
               {!readOnly && (canTest
                 ? (
-                  <button type="button" disabled={busy} onClick={() => { setOutcome("Pass"); setRecording(procedure) }}>
+                  <button type="button" disabled={busy} onClick={() => openRecording(procedure, procedure.latestExecutionId)}>
                     {procedure.latestOutcome ? 'Record retest' : 'Record result'}
                   </button>
                 )
@@ -356,7 +367,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
                       {run.evidence.length > 0 && <span className="runEvidence">{run.evidence.length} evidence file{run.evidence.length === 1 ? '' : 's'}</span>}
                       {run.retestOfExecutionId && <span className="runEvidence">retest</span>}
                       {canTest && run.outcome !== 'Pass' && (
-                        <button type="button" className="quiet" disabled={busy} onClick={() => { setOutcome('Pass'); setSupersedesExecutionId(run.id); setRecording(procedure) }}>Retest this run</button>
+                        <button type="button" className="quiet" disabled={busy} onClick={() => openRecording(procedure, run.id)}>Retest this run</button>
                       )}
                     </li>
                   ))}
@@ -435,7 +446,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
               <input value={`${user.displayName} (${user.userName})`} readOnly aria-readonly="true" />
             </label>
             <label>Execution time
-              <input type="datetime-local" name="executedAt" step="1" aria-describedby="execution-time-help" defaultValue={localWallTimeNow()} required />
+              <input type="datetime-local" name="executedAt" step="1" aria-describedby="execution-time-help" defaultValue={recordingTime()} required />
               {/* The field is a wall clock and the record is an instant. Saying which zone the wall clock is
                   in is the difference between a reader trusting the time and having to work it out. */}
               <small id="execution-time-help">Local time, {Intl.DateTimeFormat().resolvedOptions().timeZone}. Stored as an exact instant.</small>
@@ -445,7 +456,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
             <label>Evidence reference{outcome === "Blocked" ? " (optional)" : ""}<input name="evidenceReference" placeholder="Where the recorded evidence lives" required={outcome !== "Blocked"} /></label>
             <div className="recordResultActions">
               <button type="submit" disabled={busy}>Record determination</button>
-              <button type="button" className="quiet" disabled={busy} onClick={() => setRecording(undefined)}>Cancel</button>
+              <button type="button" className="quiet" disabled={busy} onClick={() => { setRecording(undefined); setSupersedesExecutionId(undefined) }}>Cancel</button>
             </div>
           </form>
         </div>
