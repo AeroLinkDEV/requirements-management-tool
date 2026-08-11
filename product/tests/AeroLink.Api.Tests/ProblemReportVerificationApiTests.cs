@@ -250,14 +250,24 @@ public sealed class ProblemReportVerificationApiTests
         Assert.Equal(2, cycles.Count);
         Assert.Equal("Approved", cycles[0].GetProperty("state").GetString());
         Assert.Equal("Invalidated", cycles[1].GetProperty("state").GetString());
+        Assert.Equal(ProblemReportEvidenceContract.SchemaVersion,
+            cycles[0].GetProperty("reportSnapshotSchemaVersion").GetInt32());
         Assert.NotEqual(cycles[0].GetProperty("manifestHash").GetString(), cycles[1].GetProperty("manifestHash").GetString());
 
         var approvedCandidateId = cycles[0].GetProperty("id").GetGuid();
         var package = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}/closure-package");
         Assert.Equal(approvedCandidateId, package.GetProperty("snapshot").GetProperty("id").GetGuid());
+        Assert.Equal(ProblemReportEvidenceContract.SchemaVersion,
+            package.GetProperty("snapshot").GetProperty("reportSnapshotSchemaVersion").GetInt32());
         Assert.Equal("FrozenAtApproval", package.GetProperty("snapshot").GetProperty("packageProvenance").GetString());
         Assert.Equal("SoftwareQualityAnalyst", package.GetProperty("snapshot").GetProperty("approvalAuthority").GetString());
         var firstPackageHash = package.GetProperty("snapshot").GetProperty("closurePackageHash").GetString();
+        Assert.Equal(ProblemReportEvidenceContract.SchemaVersion,
+            package.GetProperty("package").GetProperty("reportSnapshotSchemaVersion").GetInt32());
+        Assert.Equal(ProblemReportEvidenceContract.SchemaVersion,
+            package.GetProperty("package").GetProperty("candidate").GetProperty("reportSnapshotSchemaVersion").GetInt32());
+        Assert.Equal(ProblemReportEvidenceContract.SchemaVersion,
+            package.GetProperty("package").GetProperty("closure").GetProperty("reportSnapshotSchemaVersion").GetInt32());
         Assert.Equal("closure.quality", package.GetProperty("package").GetProperty("closure").GetProperty("approvedBy").GetString());
         Assert.Equal("SoftwareQualityAnalyst", package.GetProperty("package").GetProperty("closure").GetProperty("authority").GetString());
         Assert.Contains(package.GetProperty("package").GetProperty("history").EnumerateArray(), revision =>
@@ -273,6 +283,7 @@ public sealed class ProblemReportVerificationApiTests
             Assert.DoesNotContain("materially revised correction", persistedFirst.ReportSnapshotJson);
             var persistedApproved = await db.ProblemReportClosureCandidates.AsNoTracking()
                 .SingleAsync(item => item.Id == approvedCandidateId);
+            Assert.Equal(ProblemReportEvidenceContract.SchemaVersion, persistedApproved.ReportSnapshotSchemaVersion);
             Assert.False(string.IsNullOrWhiteSpace(persistedApproved.ClosurePackageJson));
             db.ProblemReports.Add(new ProblemReport(fixture.ProjectId, $"PR-UNRELATED-{Guid.NewGuid():N}",
                 "Unrelated activity", "Must not alter a frozen package.", "", "admin", DateTimeOffset.UtcNow));

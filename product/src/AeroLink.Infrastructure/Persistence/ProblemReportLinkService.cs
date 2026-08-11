@@ -133,8 +133,9 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
         foreach (var report in reports)
         {
             report.BeginImplementation(actor, now, automatic: true);
-            var snapshot = JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision, report.DisplayNumber, report.Title, report.ResponsibleEngineerId, report.TargetReleaseId, state = report.State.ToString(), report.Version });
-            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, "ImplementationStartedByLinkedChangeRequest", actor, report.CanonicalHash(), snapshot, now));
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
+                "ImplementationStartedByLinkedChangeRequest", actor, report.CanonicalHash(),
+                report.CanonicalSnapshot(), now));
         }
     }
 

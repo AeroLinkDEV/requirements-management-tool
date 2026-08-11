@@ -60,7 +60,7 @@ public sealed class ProblemReportTests
         var candidate = new ProblemReportClosureCandidate(Guid.NewGuid(), 0, 1, 1, 7,
             "{\"report\":true}", new string('a', 64), Guid.NewGuid(), "{\"execution\":true}",
             new string('b', 64), "{\"links\":[]}", new string('c', 64), new string('d', 64),
-            "verification.engineer", Now);
+            "verification.engineer", Now, reportSnapshotSchemaVersion: 1);
 
         candidate.Invalidate("verification.engineer", "DetailsCheckedIn", Now.AddMinutes(1));
         Assert.Throws<DomainException>(() =>

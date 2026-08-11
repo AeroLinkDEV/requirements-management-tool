@@ -124,7 +124,8 @@ public sealed class ProblemReportLinkServiceTests
             report.RecordResolutionVerification("engineer", executionId, now.AddMinutes(5));
             var candidate = new ProblemReportClosureCandidate(report.Id, report.Revision, 1, 1,
                 report.Version, "{}", new string('a', 64), executionId, "{}", new string('b', 64),
-                "{}", new string('c', 64), new string('d', 64), "engineer", now.AddMinutes(5));
+                "{}", new string('c', 64), new string('d', 64), "engineer", now.AddMinutes(5),
+                reportSnapshotSchemaVersion: 1);
             var change = new SystemChangeRequest("SRCR-00461", 0, project.Id, release.Id,
                 "Correct closure link", "P", "A", "S", "change.engineer", now);
             db.AddRange(program, project, release, report, candidate, change);

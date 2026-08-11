@@ -189,11 +189,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             if (!await db.ProblemReportLinks.AnyAsync(x => x.ProblemReportId == report.Id && x.ArtifactType == "Release" && x.Relationship == ProblemReportRelationshipPolicy.BuildScope, ct))
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(report.Id, "Release", active.Id,
                     ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow, "system.workspace", now));
-            var snapshot = JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision,
-                report.DisplayNumber, report.Title, report.ResponsibleEngineerId, report.TargetReleaseId,
-                state = report.State.ToString(), report.Version });
             db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, "TargetBuildReconciled",
-                "system.workspace", report.CanonicalHash(), snapshot, now));
+                "system.workspace", report.CanonicalHash(), report.CanonicalSnapshot(), now));
             reconciled++;
         }
         return $"Scoped {reconciled} active problem report(s) to Build {active.Version}; terminal history was preserved.";

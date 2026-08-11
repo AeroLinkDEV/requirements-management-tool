@@ -964,7 +964,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<ProblemReportRevision>(b =>
         {
-            b.ToTable("problem_report_revisions"); b.HasKey(x => x.Id); b.Property(x => x.EventType).HasMaxLength(80).IsRequired(); b.Property(x => x.Actor).HasMaxLength(100).IsRequired(); b.Property(x => x.SnapshotHash).HasMaxLength(64).IsRequired(); b.Property(x => x.SnapshotJson).IsRequired();
+            b.ToTable("problem_report_revisions"); b.HasKey(x => x.Id); b.Property(x => x.EventType).HasMaxLength(80).IsRequired(); b.Property(x => x.Actor).HasMaxLength(100).IsRequired(); b.Property(x => x.SnapshotHash).HasMaxLength(64).IsRequired(); b.Property(x => x.SnapshotJson).IsRequired(); b.Property(x => x.SnapshotSchemaVersion).IsRequired();
             b.HasIndex(x => new { x.ProblemReportId, x.OccurredAt }); b.HasIndex(x => new { x.ProblemReportId, x.Revision, x.EventType }); b.HasOne<ProblemReport>().WithMany().HasForeignKey(x => x.ProblemReportId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ProblemReportLink>(b =>
@@ -975,6 +975,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<ProblemReportClosureCandidate>(b =>
         {
             b.ToTable("problem_report_closure_candidates"); b.HasKey(x => x.Id);
+            b.Property(x => x.ReportSnapshotSchemaVersion).IsRequired();
             b.Property(x => x.ReportSnapshotJson).IsRequired(); b.Property(x => x.ReportSnapshotHash).HasMaxLength(64).IsRequired();
             b.Property(x => x.VerificationEvidenceJson).IsRequired(); b.Property(x => x.VerificationEvidenceHash).HasMaxLength(64).IsRequired();
             b.Property(x => x.LinksManifestJson).IsRequired(); b.Property(x => x.LinksManifestHash).HasMaxLength(64).IsRequired();
