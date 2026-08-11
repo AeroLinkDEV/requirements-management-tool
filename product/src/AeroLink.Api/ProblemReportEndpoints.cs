@@ -36,6 +36,8 @@ public static class ProblemReportEndpoints
         group.MapPost("/{id:guid}/disposition", DispositionAsync);
         group.MapPost("/{id:guid}/reopen", ReopenAsync);
         group.MapPost("/{id:guid}/blocker", BlockerAsync);
+        group.MapPost("/{id:guid}/release-waiver", ApproveReleaseWaiverAsync);
+        group.MapPost("/{id:guid}/release-waiver/{waiverId:guid}/revoke", RevokeReleaseWaiverAsync);
         group.MapPost("/{id:guid}/links", LinkAsync);
         group.MapGet("/{id:guid}/closure-package", ClosurePackageAsync);
         return app;
@@ -119,11 +121,19 @@ public static class ProblemReportEndpoints
         if (priority is not null) query = query.Where(x => x.Priority == priority);
         if (type is not null) query = query.Where(x => x.Type == type);
         if (!string.IsNullOrWhiteSpace(owner)) { var normalizedOwner = owner.Trim().ToLower(); query = query.Where(x => x.ResponsibleEngineerId.ToLower().Contains(normalizedOwner)); }
-        if (blockersOnly == true) query = query.Where(x => x.IsReleaseBlocker && string.IsNullOrEmpty(x.WaiverRationale));
+        if (blockersOnly == true) query = query.Where(x => x.IsReleaseBlocker);
         if (!string.IsNullOrWhiteSpace(search)) { var term = search.Trim().ToLower(); query = query.Where(x => x.ReportNumber.ToLower().Contains(term) || x.Title.ToLower().Contains(term) || x.Problem.ToLower().Contains(term) || x.RootCause.ToLower().Contains(term)); }
-        var size = Math.Clamp(pageSize ?? 10, 1, 200); var current = Math.Max(page ?? 1, 1); var matching = await query.ToListAsync(ct); var total = matching.Count;
+        var now = DateTimeOffset.UtcNow;
+        var waiverRows = await db.ReadinessWaivers.AsNoTracking().Where(x => x.ProjectId == projectId
+            && x.BlockerType == "ProblemReportReleaseBlocker").ToListAsync(ct);
+        var matching = await query.ToListAsync(ct);
+        if (blockersOnly == true)
+            matching = matching.Where(report => !waiverRows.Any(waiver => waiver.IsActiveFor(report, now))).ToList();
+        var size = Math.Clamp(pageSize ?? 10, 1, 200); var current = Math.Max(page ?? 1, 1); var total = matching.Count;
         var items = matching.OrderBy(x => IdentifierAllocator.Sequence(x.ReportNumber)).ThenBy(x => x.Revision).Skip((current - 1) * size).Take(size).ToList();
-        return Results.Ok(new { page = current, pageSize = size, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)size), items = items.Select(Summary) });
+        var activeWaiverIds = items.Where(report => waiverRows.Any(waiver => waiver.IsActiveFor(report, now)))
+            .Select(report => report.Id).ToHashSet();
+        return Results.Ok(new { page = current, pageSize = size, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)size), items = items.Select(x => Summary(x, activeWaiverIds.Contains(x.Id))) });
     }
 
     private static async Task<IResult> DashboardAsync(Guid projectId, Guid? targetReleaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
@@ -135,14 +145,18 @@ public static class ProblemReportEndpoints
         if (targetReleaseId is not null)
             query = query.Where(x => db.ProblemReportLinks.Any(link => link.ProblemReportId == x.Id && link.ArtifactType == "Release" && link.ArtifactId == targetReleaseId));
         var reports = await query.ToListAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        var waiverRows = await db.ReadinessWaivers.AsNoTracking().Where(x => x.ProjectId == projectId
+            && x.BlockerType == "ProblemReportReleaseBlocker").ToListAsync(ct);
+        bool IsWaived(ProblemReport report) => waiverRows.Any(waiver => waiver.IsActiveFor(report, now));
         var active = reports.Where(x => x.State is ProblemReportState.Draft or ProblemReportState.ReadyForSccb or ProblemReportState.Open or ProblemReportState.Implementing or ProblemReportState.Verifying or ProblemReportState.AwaitingSqaClosure or ProblemReportState.Deferred).ToList();
         return Results.Ok(new
         {
             generatedAt = DateTimeOffset.UtcNow,
-            summary = new { total = reports.Count, active = active.Count, closureAwaitingApproval = reports.Count(x => x.State == ProblemReportState.AwaitingSqaClosure), closed = reports.Count(x => x.State == ProblemReportState.Closed), releaseBlockers = reports.Count(x => x.IsReleaseBlocker && string.IsNullOrEmpty(x.WaiverRationale)), waivedBlockers = reports.Count(x => x.IsReleaseBlocker && !string.IsNullOrEmpty(x.WaiverRationale)) },
+            summary = new { total = reports.Count, active = active.Count, closureAwaitingApproval = reports.Count(x => x.State == ProblemReportState.AwaitingSqaClosure), closed = reports.Count(x => x.State == ProblemReportState.Closed), releaseBlockers = reports.Count(x => x.IsReleaseBlocker && !IsWaived(x)), waivedBlockers = reports.Count(x => x.IsReleaseBlocker && IsWaived(x)) },
             bySeverity = reports.GroupBy(x => x.Severity).OrderBy(x => x.Key).Select(x => new { severity = x.Key.ToString(), count = x.Count() }),
             byState = reports.GroupBy(x => x.State).OrderBy(x => x.Key).Select(x => new { state = x.Key.ToString(), count = x.Count() }),
-            attention = active.OrderByDescending(x => x.IsReleaseBlocker).ThenByDescending(x => x.Severity).ThenBy(x => x.CreatedAt).Take(12).Select(Summary)
+            attention = active.OrderByDescending(x => x.IsReleaseBlocker).ThenByDescending(x => x.Severity).ThenBy(x => x.CreatedAt).Take(12).Select(x => Summary(x, IsWaived(x)))
         });
     }
 
@@ -152,7 +166,7 @@ public static class ProblemReportEndpoints
         var links = await db.ProblemReportLinks.AsNoTracking().Where(x => x.ArtifactType == canonicalType && x.ArtifactId == artifactId).ToListAsync(ct);
         var ids = links.Select(x => x.ProblemReportId).Distinct().ToList(); var reports = await db.ProblemReports.AsNoTracking().Where(x => ids.Contains(x.Id)).ToListAsync(ct);
         var permitted = new List<ProblemReport>(); foreach (var report in reports) if (await http.HasProjectAccessAsync(db, report.ProjectId, ct)) permitted.Add(report);
-        return Results.Ok(permitted.Select(Summary));
+        return Results.Ok(permitted.Select(x => Summary(x)));
     }
 
     private static async Task<IResult> DetailAsync(Guid id, HttpContext http, AeroLinkDbContext db,
@@ -164,13 +178,26 @@ public static class ProblemReportEndpoints
         var revisions = (await db.ProblemReportRevisions.AsNoTracking().Where(x => x.ProblemReportId == id).ToListAsync(ct)).OrderByDescending(x => x.OccurredAt).ToList();
         var candidates = await db.ProblemReportClosureCandidates.AsNoTracking()
             .Where(x => x.ProblemReportId == id).ToListAsync(ct);
+        var waivers = (await db.ReadinessWaivers.AsNoTracking().Where(x => x.ProjectId == report.ProjectId
+            && x.BlockerType == "ProblemReportReleaseBlocker" && x.BlockerId == report.Id).ToListAsync(ct))
+            .OrderByDescending(x => x.CreatedAt).ToList();
         var canApproveSqaClosure = report.State == ProblemReportState.AwaitingSqaClosure
             && await HasCurrentSqaClosureAuthorityAsync(report, http, db, identity, ct)
             && !string.Equals(http.UserAccount().UserName, report.ReportedBy, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(http.UserAccount().UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase);
+        var waiverAuthority = await CurrentReleaseWaiverAuthorityAsync(report, http.UserAccount(), db, identity,
+            DateTimeOffset.UtcNow, ct);
+        var canApproveReleaseWaiver = report.IsReleaseBlocker
+            && report.State is not (ProblemReportState.Closed or ProblemReportState.Duplicate
+                or ProblemReportState.CannotReproduce or ProblemReportState.NoFaultFound
+                or ProblemReportState.AcceptedRisk or ProblemReportState.Rejected)
+            && waiverAuthority is not null
+            && !string.Equals(http.UserAccount().UserName, report.ReportedBy, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(http.UserAccount().UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase)
+            && !waivers.Any(item => item.IsActiveFor(report, DateTimeOffset.UtcNow));
         return Results.Ok(Detail(report, await LinkViewsAsync(report, links, db, ct), revisions,
             candidates.OrderByDescending(x => x.ReportRevision).ThenByDescending(x => x.Sequence),
-            new { canApproveSqaClosure }));
+            new { canApproveSqaClosure, canApproveReleaseWaiver, releaseWaiverAuthority = waiverAuthority }, waivers));
     }
 
     private static async Task<IResult> ReassignAsync(Guid id, ReassignRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
@@ -283,7 +310,56 @@ public static class ProblemReportEndpoints
         return result;
     }
     private static async Task<IResult> ReopenAsync(Guid id, ReopenRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ProblemReportReopened", (report, actor, now) => report.Reopen(actor.UserName, request.Rationale, now));
-    private static async Task<IResult> BlockerAsync(Guid id, BlockerRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, request.IsReleaseBlocker ? "ReleaseBlockerRaised" : "ReleaseBlockerCleared", (report, actor, now) => report.SetReleaseBlocker(actor.UserName, request.IsReleaseBlocker, request.WaiverRationale ?? "", now));
+    private static async Task<IResult> BlockerAsync(Guid id, BlockerRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(request.WaiverRationale))
+            return Results.BadRequest(new { error = "A release-blocker waiver requires a separate independent approval.", code = "pr_waiver_separate_approval_required" });
+        return await ChangeAsync(id, request.ExpectedVersion, http, db, ct,
+            request.IsReleaseBlocker ? "ReleaseBlockerRaised" : "ReleaseBlockerCleared",
+            (report, actor, now) => report.SetReleaseBlocker(actor.UserName, request.IsReleaseBlocker, now));
+    }
+
+    private static async Task<IResult> ApproveReleaseWaiverAsync(Guid id, ReleaseWaiverRequest request,
+        HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+    {
+        var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
+        var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
+        var authority = await CurrentReleaseWaiverAuthorityAsync(report, actor, db, identity, now, ct);
+        if (authority is null) return Results.Forbid();
+        if (string.Equals(actor.UserName, report.ReportedBy, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(actor.UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new { error = "The reporter or responsible engineer cannot independently approve this release waiver.", code = "pr_waiver_independence_required" });
+        var existingWaivers = await db.ReadinessWaivers.AsNoTracking().Where(x => x.ProjectId == report.ProjectId
+            && x.BlockerType == "ProblemReportReleaseBlocker" && x.BlockerId == report.Id).ToListAsync(ct);
+        if (existingWaivers.Any(item => item.IsActiveFor(report, now)))
+            return Results.Conflict(new { error = "This release blocker already has an active controlled waiver.", code = "pr_waiver_already_active" });
+        return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ReleaseBlockerWaiverApproved",
+            (item, user, decisionAt) => item.RecordReleaseWaiverDecision(user.UserName, decisionAt),
+            afterMutation: (item, user, decisionAt, _, _, _) =>
+            {
+                db.ReadinessWaivers.Add(new ReadinessWaiver(item.ProjectId, "ProblemReportReleaseBlocker",
+                    item.Id, item.Revision, item.ReleaseBlockerVersion, request.Rationale, user.Id, user.UserName, authority,
+                    "IndependentProblemReportReleaseWaiver", request.ExpiresAt, user.UserName, decisionAt));
+                return Task.CompletedTask;
+            });
+    }
+
+    private static async Task<IResult> RevokeReleaseWaiverAsync(Guid id, Guid waiverId,
+        RevokeReleaseWaiverRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
+        CancellationToken ct)
+    {
+        var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
+        var waiver = await db.ReadinessWaivers.SingleOrDefaultAsync(x => x.Id == waiverId
+            && x.ProjectId == report.ProjectId && x.BlockerType == "ProblemReportReleaseBlocker"
+            && x.BlockerId == report.Id, ct); if (waiver is null) return Results.NotFound();
+        var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
+        if (await CurrentReleaseWaiverAuthorityAsync(report, actor, db, identity, now, ct) is null) return Results.Forbid();
+        if (!waiver.IsActiveFor(report, now)) return Results.Conflict(new { error = "Only the current active waiver can be revoked.", code = "pr_waiver_not_active" });
+        return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ReleaseBlockerWaiverRevoked",
+            (item, user, decisionAt) => item.RecordReleaseWaiverDecision(user.UserName, decisionAt),
+            afterMutation: (item, user, decisionAt, _, _, _) =>
+            { waiver.Revoke(user.UserName, request.Reason, decisionAt); return Task.CompletedTask; });
+    }
 
     private static async Task<IResult> LinkAsync(Guid id, LinkRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
@@ -415,19 +491,29 @@ public static class ProblemReportEndpoints
         _ => artifactType.Trim()
     };
 
-    private static object Summary(ProblemReport x) => new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = x.State.ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), type = x.Type.ToString(), x.Classification, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.IsReleaseBlocker, waived = !string.IsNullOrWhiteSpace(x.WaiverRationale), x.UpdatedAt, x.Version };
+    private static object Summary(ProblemReport x, bool waived = false) => new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = x.State.ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), type = x.Type.ToString(), x.Classification, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
     private static object Detail(ProblemReport x, IEnumerable<ProblemReportLinkView> links,
         IEnumerable<ProblemReportRevision> revisions,
         IEnumerable<ProblemReportClosureCandidate>? closureCandidates = null,
-        object? capabilities = null)
+        object? capabilities = null,
+        IEnumerable<ReadinessWaiver>? releaseWaivers = null)
     {
         var materializedLinks = links.ToList();
         var approvedCorrectiveActions = materializedLinks.Where(link => link.TrustedControlledEvidence && link.Relationship == ProblemReportRelationshipPolicy.ApprovedCorrectiveAction).Select(LinkResponse).ToList();
         var testEvidence = materializedLinks.Where(link => link.TrustedControlledEvidence
             && link.Relationship == ProblemReportRelationshipPolicy.ResolutionVerification
             && link.ArtifactId == x.ResolutionVerificationExecutionId).Select(LinkResponse).ToList();
-        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.CorrectiveAction, x.Workaround, type = x.Type.ToString(), x.SystemAircraftImpact, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.WaiverRationale, x.WaivedBy, x.WaivedAt, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), capabilities, links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotHash, x.OccurredAt }) };
+        var now = DateTimeOffset.UtcNow; var waiverHistory = (releaseWaivers ?? []).ToList();
+        var activeWaiver = waiverHistory.FirstOrDefault(item => item.IsActiveFor(x, now));
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.CorrectiveAction, x.Workaround, type = x.Type.ToString(), x.SystemAircraftImpact, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), capabilities, links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotHash, x.OccurredAt }) };
     }
+
+    private static object WaiverResponse(ReadinessWaiver item, ProblemReport report, DateTimeOffset now) => new
+    {
+        item.Id, item.BlockerRevision, item.BlockerVersion, item.Rationale, item.ApprovedByAccountId,
+        item.ApprovedBy, item.ApprovalAuthority, item.SignatureMeaning, item.Provenance, item.CreatedAt,
+        item.ExpiresAt, item.RevokedAt, item.RevokedBy, item.RevocationReason, active = item.IsActiveFor(report, now),
+    };
 
     private static object CandidateResponse(ProblemReportClosureCandidate candidate) => new
     {
@@ -460,6 +546,23 @@ public static class ProblemReportEndpoints
             .Select(item => (Guid?)item.ProgramId).SingleOrDefaultAsync(ct);
         return programId is not null && await identity.HasRoleAsync(actor.Id, programId.Value,
             ProgramRole.SoftwareQualityAnalyst, DateTimeOffset.UtcNow, ct);
+    }
+
+    private static async Task<string?> CurrentReleaseWaiverAuthorityAsync(ProblemReport report,
+        AuthenticatedUser actor, AeroLinkDbContext db, IdentityService identity, DateTimeOffset now,
+        CancellationToken ct)
+    {
+        if (actor.IsAdministrator) return null;
+        var programId = await db.Projects.AsNoTracking().Where(item => item.Id == report.ProjectId)
+            .Select(item => (Guid?)item.ProgramId).SingleOrDefaultAsync(ct);
+        if (programId is null) return null;
+        if (await identity.HasRoleAsync(actor.Id, programId.Value, ProgramRole.SoftwareQualityAnalyst, now, ct))
+            return ProgramRole.SoftwareQualityAnalyst.ToString();
+        if (await identity.HasRoleAsync(actor.Id, programId.Value, ProgramRole.ConfigurationManager, now, ct))
+            return ProgramRole.ConfigurationManager.ToString();
+        if (await identity.HasRoleAsync(actor.Id, programId.Value, ProgramRole.ProgramManager, now, ct))
+            return ProgramRole.ProgramManager.ToString();
+        return null;
     }
 
     private static string? ClosureApprovalAuthority(string packageJson)
@@ -638,6 +741,8 @@ public static class ProblemReportEndpoints
     private sealed record DispositionRequest(long? ExpectedVersion, ProblemReportDisposition Disposition, string Rationale, Guid? DuplicateOfId);
     private sealed record ReopenRequest(long? ExpectedVersion, string Rationale);
     private sealed record BlockerRequest(long? ExpectedVersion, bool IsReleaseBlocker, string? WaiverRationale);
+    private sealed record ReleaseWaiverRequest(long? ExpectedVersion, string Rationale, DateTimeOffset ExpiresAt);
+    private sealed record RevokeReleaseWaiverRequest(long? ExpectedVersion, string Reason);
     private sealed record LinkRequest(long? ExpectedVersion, string ArtifactType, Guid ArtifactId, string Relationship);
     private sealed record ReassignRequest(long? ExpectedVersion, string ResponsibleEngineerId);
     private sealed record RetargetRequest(long? ExpectedVersion, Guid TargetReleaseId);

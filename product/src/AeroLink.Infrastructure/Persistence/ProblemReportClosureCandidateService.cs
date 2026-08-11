@@ -24,7 +24,7 @@ public sealed record ProblemReportClosureCandidateDecision(
 public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
 {
     public const int SchemaVersion = 1;
-    public const int ClosurePackageSchemaVersion = 2;
+    public const int ClosurePackageSchemaVersion = 3;
 
     public async Task<ProblemReportClosureCandidate> CreateAsync(ProblemReport report,
         TestExecution execution, ProblemReportLink resolutionLink, string actor, DateTimeOffset now,
@@ -127,6 +127,9 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         var revisions = await db.ProblemReportRevisions.AsNoTracking()
             .Where(item => item.ProblemReportId == report.Id).ToListAsync(ct);
         if (revisions.All(item => item.Id != closureRevision.Id)) revisions.Add(closureRevision);
+        var releaseWaivers = await db.ReadinessWaivers.AsNoTracking().Where(item => item.ProjectId == report.ProjectId
+            && item.BlockerType == "ProblemReportReleaseBlocker" && item.BlockerId == report.Id).ToListAsync(ct);
+        var activeReleaseWaiver = releaseWaivers.FirstOrDefault(item => item.IsActiveFor(report, now));
         var finalReportJson = ReportSnapshot(report);
         var packageJson = JsonSerializer.Serialize(new
         {
@@ -172,6 +175,19 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
             {
                 linksManifestJson = candidate.LinksManifestJson,
                 linksManifestHash = candidate.LinksManifestHash,
+            },
+            releaseWaiver = activeReleaseWaiver is null ? null : new
+            {
+                activeReleaseWaiver.Id,
+                activeReleaseWaiver.BlockerRevision,
+                activeReleaseWaiver.BlockerVersion,
+                activeReleaseWaiver.Rationale,
+                activeReleaseWaiver.ApprovedByAccountId,
+                activeReleaseWaiver.ApprovedBy,
+                activeReleaseWaiver.ApprovalAuthority,
+                activeReleaseWaiver.SignatureMeaning,
+                activeReleaseWaiver.CreatedAt,
+                activeReleaseWaiver.ExpiresAt,
             },
             history = revisions.OrderBy(item => item.OccurredAt).ThenBy(item => item.Id).Select(item => new
             {
@@ -222,6 +238,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         report.DispositionRationale,
         report.ResolutionVerificationExecutionId,
         report.IsReleaseBlocker,
+        report.ReleaseBlockerVersion,
         report.WaiverRationale,
         report.WaivedBy,
         report.WaivedAt,

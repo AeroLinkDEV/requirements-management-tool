@@ -718,7 +718,7 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
         type = item.Type.ToString(), workaround = item.Workaround,
         disposition = item.Disposition?.ToString(), dispositionRationale = item.DispositionRationale,
         resolutionVerificationExecutionId = item.ResolutionVerificationExecutionId,
-        isReleaseBlocker = item.IsReleaseBlocker, waiverRationale = item.WaiverRationale,
+        isReleaseBlocker = item.IsReleaseBlocker, releaseBlockerVersion = item.ReleaseBlockerVersion, waiverRationale = item.WaiverRationale,
         state = item.State.ToString(), version = versionOverride ?? item.Version
     });
     /// <summary>
@@ -726,7 +726,7 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
     /// endpoints so a correction made under checkout is recorded exactly like every other change, rather
     /// than in a shape of its own that a reader would have to interpret differently.
     /// </summary>
-    public static string EvidenceSnapshot(ProblemReport report) => JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision, report.DisplayNumber, report.Title, report.Problem, report.ProblemRich, report.AdditionalInformation, report.AdditionalInformationRich, report.Analysis, report.ReportedBy, report.ResponsibleEngineerId, report.TargetReleaseId, report.Classification, severity = report.Severity.ToString(), priority = report.Priority.ToString(), report.Origin, report.AffectedConfiguration, report.RootCause, report.Effects, report.CorrectiveAction, report.SystemAircraftImpact, report.ImpactAssessmentJson, disposition = report.Disposition?.ToString(), report.DispositionRationale, report.ResolutionVerificationExecutionId, report.ClosureApprovedByName, report.ClosureApprovedAt, report.IsReleaseBlocker, report.WaiverRationale, report.WaivedBy, state = report.State.ToString(), report.Version });
+    public static string EvidenceSnapshot(ProblemReport report) => JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision, report.DisplayNumber, report.Title, report.Problem, report.ProblemRich, report.AdditionalInformation, report.AdditionalInformationRich, report.Analysis, report.ReportedBy, report.ResponsibleEngineerId, report.TargetReleaseId, report.Classification, severity = report.Severity.ToString(), priority = report.Priority.ToString(), report.Origin, report.AffectedConfiguration, report.RootCause, report.Effects, report.CorrectiveAction, report.SystemAircraftImpact, report.ImpactAssessmentJson, disposition = report.Disposition?.ToString(), report.DispositionRationale, report.ResolutionVerificationExecutionId, report.ClosureApprovedByName, report.ClosureApprovedAt, report.IsReleaseBlocker, report.ReleaseBlockerVersion, report.WaiverRationale, report.WaivedBy, state = report.State.ToString(), report.Version });
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var item = (ProblemReport)artifact.Aggregate; var draft = JsonSerializer.Deserialize<ProblemDraft>(draftJson, Options) ?? throw new JsonException("The latest problem-report draft is empty.");

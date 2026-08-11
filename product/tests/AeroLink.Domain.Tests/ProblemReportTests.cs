@@ -98,13 +98,37 @@ public sealed class ProblemReportTests
     }
 
     [Fact]
-    public void A_release_blocker_can_be_waived_with_attributable_rationale()
+    public void A_responsible_engineer_can_mark_a_blocker_but_cannot_create_waiver_evidence()
     {
         var report = NewReport();
-        report.SetReleaseBlocker("verification.engineer", true, "Safety board accepted temporary operational limitation.", Now);
+        report.SetReleaseBlocker("verification.engineer", true, Now);
         Assert.True(report.IsReleaseBlocker);
-        Assert.Equal("verification.engineer", report.WaivedBy);
-        Assert.NotEmpty(report.WaiverRationale);
+        Assert.True(report.ReleaseBlockerVersion > 0);
+        Assert.Empty(report.WaivedBy);
+        Assert.Empty(report.WaiverRationale);
+    }
+
+    [Fact]
+    public void A_controlled_waiver_expires_and_cannot_carry_into_a_reopened_revision()
+    {
+        var report = NewReport();
+        report.SetReleaseBlocker("verification.engineer", true, Now);
+        report.RecordReleaseWaiverDecision("independent.quality", Now.AddMinutes(1));
+        var waiver = new ReadinessWaiver(report.ProjectId, "ProblemReportReleaseBlocker", report.Id,
+            report.Revision, report.ReleaseBlockerVersion, "Temporary bounded release decision.", Guid.NewGuid(),
+            "independent.quality", "SoftwareQualityAnalyst", "IndependentProblemReportReleaseWaiver",
+            Now.AddHours(1), "independent.quality", Now.AddMinutes(1));
+        Assert.True(waiver.IsActiveFor(report, Now.AddMinutes(2)));
+        Assert.False(waiver.IsActiveFor(report, Now.AddHours(2)));
+
+        report.ReadyForSccb("verification.engineer", Now.AddMinutes(2));
+        report.OpenBySccb("change.board", Now.AddMinutes(3));
+        report.ApplyDisposition("verification.engineer", ProblemReportDisposition.AcceptedRisk,
+            "Closed under the original bounded decision.", null, Now.AddMinutes(4));
+        report.Reopen("verification.engineer", "The known problem recurred.", Now.AddMinutes(5));
+        Assert.False(waiver.IsActiveFor(report, Now.AddMinutes(6)));
+        Assert.True(report.IsReleaseBlocker);
+        Assert.NotEqual(waiver.BlockerVersion, report.ReleaseBlockerVersion);
     }
 
     [Fact]
@@ -135,7 +159,7 @@ public sealed class ProblemReportTests
         Assert.Equal(release, report.TargetReleaseId);
         Assert.Equal("software.lead", report.ResponsibleEngineerId);
         Assert.Contains("SystemRequirements", report.ImpactAssessmentJson);
-        Assert.Throws<DomainException>(() => report.SetReleaseBlocker("verification.engineer", true, "", Now));
+        Assert.Throws<DomainException>(() => report.SetReleaseBlocker("verification.engineer", true, Now));
     }
 
     [Fact]

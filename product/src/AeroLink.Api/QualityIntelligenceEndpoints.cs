@@ -19,7 +19,18 @@ public static class QualityIntelligenceEndpoints
     private static async Task<IResult> CreateObjectiveAsync(CreateQualityObjectiveRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
     {if(!await Authorized(request.ProjectId,http,db,identity,ct))return Results.Forbid();try{using var _=JsonDocument.Parse(request.TargetJson);var item=new QualityLifecycleObjective(request.ProjectId,request.Code,request.Title,request.TargetJson,request.EvidenceExpectation,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.QualityLifecycleObjectives.Add(item);await db.SaveChangesAsync(ct);return Results.Created($"/api/quality/objectives/{item.Id}",new{item.Id,item.Code});}catch(JsonException){return Results.BadRequest(new{error="Objective targets must be valid JSON."});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}catch(DbUpdateException){return Results.Conflict(new{error="An objective with this code already exists."});}}
     private static async Task<IResult> CreateWaiverAsync(CreateReadinessWaiverRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
-    {if(!await Authorized(request.ProjectId,http,db,identity,ct))return Results.Forbid();try{var item=new ReadinessWaiver(request.ProjectId,request.BlockerType,request.BlockerId,request.Rationale,request.ApprovedBy,request.ExpiresAt,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.ReadinessWaivers.Add(item);await db.SaveChangesAsync(ct);return Results.Created($"/api/quality/waivers/{item.Id}",new{item.Id,item.ExpiresAt});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}}
+    {
+        var actor=http.UserAccount();var now=DateTimeOffset.UtcNow;
+        var programId=await db.Projects.Where(x=>x.Id==request.ProjectId).Select(x=>(Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
+        if(programId is null)return Results.NotFound();
+        var authority=actor.IsAdministrator?ProgramRole.Administrator.ToString():
+            await identity.HasRoleAsync(actor.Id,programId.Value,ProgramRole.SoftwareQualityAnalyst,now,ct)?ProgramRole.SoftwareQualityAnalyst.ToString():
+            await identity.HasRoleAsync(actor.Id,programId.Value,ProgramRole.ConfigurationManager,now,ct)?ProgramRole.ConfigurationManager.ToString():
+            await identity.HasRoleAsync(actor.Id,programId.Value,ProgramRole.ProgramManager,now,ct)?ProgramRole.ProgramManager.ToString():null;
+        if(authority is null)return Results.Forbid();
+        try{var item=new ReadinessWaiver(request.ProjectId,request.BlockerType,request.BlockerId,0,0,
+            request.Rationale,actor.Id,actor.UserName,authority,"ReadinessWaiverApproval",request.ExpiresAt,
+            actor.UserName,now);db.ReadinessWaivers.Add(item);await db.SaveChangesAsync(ct);return Results.Created($"/api/quality/waivers/{item.Id}",new{item.Id,item.ApprovedBy,item.ApprovalAuthority,item.ExpiresAt});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}}
     private static async Task<IResult> IndexEvidenceAsync(IndexCertificationEvidenceRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
     {if(!await Authorized(request.ProjectId,http,db,identity,ct))return Results.Forbid();try{var item=new CertificationEvidenceIndexEntry(request.ProjectId,request.ObjectiveCode,request.ArtifactType,request.ArtifactId,request.EvidenceHash,request.ClaimBoundary,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.CertificationEvidenceIndex.Add(item);await db.SaveChangesAsync(ct);return Results.Created($"/api/quality/evidence-index/{item.Id}",new{item.Id,item.EvidenceHash});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}catch(DbUpdateException){return Results.Conflict(new{error="This evidence is already indexed for the objective."});}}
     private static async Task<IResult> ExportAsync(CreateQualityExportRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,EvidenceFileStore store,CancellationToken ct)
@@ -39,6 +50,6 @@ public static class QualityIntelligenceEndpoints
     private static Task<bool> Authorized(Guid projectId,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>http.HasProjectRoleAsync(db,identity,projectId,ct,ProgramRole.ConfigurationManager,ProgramRole.ProgramManager,ProgramRole.Administrator);
 }
 public sealed record CreateQualityObjectiveRequest(Guid ProjectId,string Code,string Title,string TargetJson,string EvidenceExpectation);
-public sealed record CreateReadinessWaiverRequest(Guid ProjectId,string BlockerType,Guid BlockerId,string Rationale,string ApprovedBy,DateTimeOffset ExpiresAt);
+public sealed record CreateReadinessWaiverRequest(Guid ProjectId,string BlockerType,Guid BlockerId,string Rationale,DateTimeOffset ExpiresAt);
 public sealed record IndexCertificationEvidenceRequest(Guid ProjectId,string ObjectiveCode,string ArtifactType,Guid ArtifactId,string EvidenceHash,string ClaimBoundary);
 public sealed record CreateQualityExportRequest(Guid ProjectId,string? IdempotencyKey);
