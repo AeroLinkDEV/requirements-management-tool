@@ -20,6 +20,8 @@ Three launchers, for three different purposes.
 
 **Showing AeroLink to somebody:** double-click [`START_AEROLINK_PRODUCTION.bat`](START_AEROLINK_PRODUCTION.bat). It builds the website and serves it from the API on one origin at `http://127.0.0.1:5080`, which is how an on-premises install runs and the only path that exercises the built client.
 
+**Protected remote demo:** double-click [`START_AEROLINK_REMOTE_DEMO.bat`](START_AEROLINK_REMOTE_DEMO.bat) after configuring `%LOCALAPPDATA%\AeroLink\RemoteDemo\remote-demo.config.psd1`. It reuses the production launcher, opens a policy-backed outbound ngrok tunnel, and proves the public endpoint returns 401 before printing READY. See [docs/REMOTE_DEMO_OPERATOR.md](docs/REMOTE_DEMO_OPERATOR.md) for the full operator surface and security posture.
+
 **Letting colleagues open it from their own machines:** double-click [`START_AEROLINK_SHARED.bat`](START_AEROLINK_SHARED.bat). Same build, listening on every network interface instead of loopback, and it prints the `http://<this-machine>:5080` address to hand out. Windows Firewall drops inbound connections on that port until an administrator allows it in, once per machine; the launcher checks and prints the command if it is missing. Sharing is opt-in because the same run prints a known administrator password, loads demonstration data, and carries everything over plain HTTP.
 
 **Working on AeroLink:** double-click [`START_AEROLINK.bat`](START_AEROLINK.bat). It starts or verifies PostgreSQL, the API, and the Vite development server; waits for the API to report the database reachable; opens `http://127.0.0.1:5173`; and writes diagnostic logs under `product/.local/logs/`.

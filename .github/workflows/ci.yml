@@ -208,6 +208,13 @@ jobs:
           & ./product/scripts/AeroLinkMigrationPosture.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Migration-posture diagnostics regression failed.' }
 
+      - name: Validate the remote-demo operator contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkRemoteDemo.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Remote-demo operator regression failed.' }
+
       # This job is a required gate, so it must never pass without having proved something. Every step above is
       # conditional, and a combination of conditions that skipped all of them still reported success — a green
       # tick that had run no test, no build and no type-check. The classifier now avoids selecting nothing, and
