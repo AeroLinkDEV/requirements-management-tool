@@ -727,7 +727,7 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
     /// than in a shape of its own that a reader would have to interpret differently.
     /// </summary>
     public static string EvidenceSnapshot(ProblemReport report) => JsonSerializer.Serialize(new { report.Id, report.ProjectId, report.ReportNumber, report.Revision, report.DisplayNumber, report.Title, report.Problem, report.ProblemRich, report.AdditionalInformation, report.AdditionalInformationRich, report.Analysis, report.ReportedBy, report.ResponsibleEngineerId, report.TargetReleaseId, report.Classification, severity = report.Severity.ToString(), priority = report.Priority.ToString(), report.Origin, report.AffectedConfiguration, report.RootCause, report.Effects, report.CorrectiveAction, report.SystemAircraftImpact, report.ImpactAssessmentJson, disposition = report.Disposition?.ToString(), report.DispositionRationale, report.ResolutionVerificationExecutionId, report.ClosureApprovedByName, report.ClosureApprovedAt, report.IsReleaseBlocker, report.WaiverRationale, report.WaivedBy, state = report.State.ToString(), report.Version });
-    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
+    public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor, bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var item = (ProblemReport)artifact.Aggregate; var draft = JsonSerializer.Deserialize<ProblemDraft>(draftJson, Options) ?? throw new JsonException("The latest problem-report draft is empty.");
         // Identity is checked, never applied. The report number, its project, who raised it and who is
@@ -737,6 +737,7 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
             || !string.Equals(draft.ReportedBy?.Trim(), item.ReportedBy, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(draft.ResponsibleEngineerId?.Trim() ?? item.ResponsibleEngineerId, item.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("The controlled problem-report identity cannot change.");
+        var wasAwaitingClosure = item.State == ProblemReportState.AwaitingSqaClosure;
         item.UpdateDetails(administratorAuthority ? item.ResponsibleEngineerId : actor,
             draft.Title ?? "", draft.Problem ?? "", draft.ProblemRich ?? "",
             draft.AdditionalInformation ?? "", draft.AdditionalInformationRich ?? "", draft.Analysis ?? "",
@@ -745,7 +746,9 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
             ParseEnum(draft.Type, item.Type), draft.Workaround);
         db.ProblemReportRevisions.Add(new ProblemReportRevision(item.Id, item.Revision, "DetailsCheckedIn",
             actor, item.CanonicalHash(), EvidenceSnapshot(item), now));
-        return Task.CompletedTask;
+        if (wasAwaitingClosure)
+            await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(item, actor,
+                "DetailsCheckedIn", now, ct);
     }
     private static T ParseEnum<T>(string? value, T fallback) where T : struct, Enum =>
         Enum.TryParse<T>(value, ignoreCase: true, out var parsed) ? parsed : fallback;

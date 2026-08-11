@@ -53,6 +53,9 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
         var selectedIds = selected.ToHashSet();
         if (existingIds.SetEquals(selectedIds)) return;
 
+        foreach (var removedReportId in existingIds.Except(selectedIds))
+            await InvalidateForControlledLinkChangeAsync(removedReportId, actor,
+                "ProposedCorrectiveActionRemoved", now, ct);
         db.ProblemReportLinks.RemoveRange(existing.Where(link => !selectedIds.Contains(link.ProblemReportId)));
         await AddLinksAsync("ChangeRequest", request.Id, ProblemReportRelationshipPolicy.ProposedCorrectiveAction,
             ProblemReportRelationshipProducer.ChangeRequestWorkflow, selectedIds.Except(existingIds), actor, now, ct);
@@ -101,9 +104,24 @@ public sealed class ProblemReportLinkService(AeroLinkDbContext db)
                 link.ProblemReportId == reportId && link.ArtifactType == artifactType
                 && link.ArtifactId == artifactId && link.Relationship == relationship, ct);
             if (!alreadyTracked && !alreadySaved)
+            {
+                await InvalidateForControlledLinkChangeAsync(reportId, actor,
+                    $"{relationship}Linked", now, ct);
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(reportId, artifactType,
                     artifactId, relationship, producer, actor, now));
+            }
         }
+    }
+
+    private async Task InvalidateForControlledLinkChangeAsync(Guid reportId, string actor,
+        string operation, DateTimeOffset now, CancellationToken ct)
+    {
+        var tracked = db.ChangeTracker.Entries<ProblemReport>()
+            .Select(entry => entry.Entity).SingleOrDefault(report => report.Id == reportId);
+        var report = tracked ?? await db.ProblemReports.SingleOrDefaultAsync(item => item.Id == reportId, ct);
+        if (report?.InvalidateClosureVerification(actor, now) == true)
+            await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor,
+                operation, now, ct);
     }
 
     private async Task StartImplementationForOpenReportsAsync(IEnumerable<Guid> reportIds, string actor, DateTimeOffset now, CancellationToken ct)

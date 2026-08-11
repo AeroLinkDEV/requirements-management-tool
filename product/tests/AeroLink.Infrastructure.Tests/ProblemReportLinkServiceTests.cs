@@ -99,4 +99,54 @@ public sealed class ProblemReportLinkServiceTests
             if (File.Exists(path)) File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task A_controlled_corrective_link_change_invalidates_the_pending_closure_candidate_atomically()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-pr-closure-link-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("PR closure links", "PRCL");
+            var project = new ProjectRecord(program.Id, "FMS", "FMS");
+            var release = new SoftwareRelease(project.Id, "1.6", false);
+            var report = new ProblemReport(project.Id, "PR-00461", "Closure link basis",
+                "The corrective link set must stay exact.", "", "engineer", now, targetReleaseId: release.Id);
+            report.ReadyForSccb("engineer", now.AddMinutes(1));
+            report.OpenBySccb("sccb", now.AddMinutes(2));
+            report.BeginInvestigation("engineer", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));
+            report.ProposeResolution("engineer", "Correct it", now.AddMinutes(4));
+            var executionId = Guid.NewGuid();
+            report.RecordResolutionVerification("engineer", executionId, now.AddMinutes(5));
+            var candidate = new ProblemReportClosureCandidate(report.Id, report.Revision, 1, 1,
+                report.Version, "{}", new string('a', 64), executionId, "{}", new string('b', 64),
+                "{}", new string('c', 64), new string('d', 64), "engineer", now.AddMinutes(5));
+            var change = new SystemChangeRequest("SRCR-00461", 0, project.Id, release.Id,
+                "Correct closure link", "P", "A", "S", "change.engineer", now);
+            db.AddRange(program, project, release, report, candidate, change);
+            await db.SaveChangesAsync();
+
+            await new ProblemReportLinkService(db).LinkChangeRequestAsync(change.Id, [report.Id],
+                "change.engineer", now.AddMinutes(6), default);
+            await db.SaveChangesAsync();
+
+            Assert.Equal(ProblemReportState.Verifying, report.State);
+            Assert.Null(report.ResolutionVerificationExecutionId);
+            Assert.Equal(ProblemReportClosureCandidateState.Invalidated, candidate.State);
+            Assert.Equal("ProposedCorrectiveActionLinked", candidate.InvalidationReason);
+            Assert.Single(await db.ProblemReportRevisions.Where(item => item.ProblemReportId == report.Id
+                && item.EventType == "ClosureVerificationInvalidatedByChange").ToListAsync());
+            Assert.Contains(await db.ProblemReportLinks.Where(item => item.ProblemReportId == report.Id).ToListAsync(),
+                item => item.Relationship == ProblemReportRelationshipPolicy.ProposedCorrectiveAction);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 }
