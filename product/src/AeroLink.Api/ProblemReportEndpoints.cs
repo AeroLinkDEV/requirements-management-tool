@@ -214,6 +214,7 @@ public static class ProblemReportEndpoints
         var actor = http.UserAccount();
         var canRecoverOwner = !ownerAuthority.Eligible && !actor.IsAdministrator
             && await HasProblemReportOwnerRecoveryAuthorityAsync(actor.Id, programId, db, ct);
+        var duplicateDiagnostic = await new ProblemReportDuplicateDispositionPolicy(db).DiagnoseAsync(report, ct);
         return Results.Ok(Detail(report, await LinkViewsAsync(report, links, db, ct), revisions,
             candidates.OrderByDescending(x => x.ReportRevision).ThenByDescending(x => x.Sequence),
             new
@@ -225,7 +226,7 @@ public static class ProblemReportEndpoints
                 ownerAuthorityException = ownerAuthority.Eligible ? null : "The assigned owner no longer has accountable Problem Report authority in this Program.",
                 canReassignOwner = string.Equals(actor.UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase) || canRecoverOwner,
                 canRecoverOwner,
-            }, waivers));
+            }, waivers, duplicateDiagnostic));
     }
 
     private static async Task<IResult> ReassignAsync(Guid id, ReassignRequest request, HttpContext http,
@@ -369,10 +370,55 @@ public static class ProblemReportEndpoints
 
     private static async Task<IResult> DispositionAsync(Guid id, DispositionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
-        var result = await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "DispositionRecorded", (report, actor, now) => report.ApplyDisposition(actor.UserName, request.Disposition, request.Rationale, request.DuplicateOfId, now),
-            link: request.DuplicateOfId is null ? null : (actor, now) => ProblemReportRelationshipPolicy.CreateControlled(id, "ProblemReport", request.DuplicateOfId.Value,
-                ProblemReportRelationshipPolicy.DuplicateOf, ProblemReportRelationshipProducer.DispositionWorkflow, actor.UserName, now));
-        return result;
+        if (request.Disposition != ProblemReportDisposition.Duplicate)
+        {
+            var ordinaryReport = await db.ProblemReports.SingleOrDefaultAsync(item => item.Id == id, ct);
+            if (ordinaryReport is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, ordinaryReport.ProjectId, ct)) return Results.Forbid();
+            if (request.ExpectedVersion is not null && request.ExpectedVersion != ordinaryReport.Version)
+                return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = ordinaryReport.Version });
+            if (request.DuplicateOfId is not null)
+                return Results.BadRequest(new { error = "Only a Duplicate disposition may name another Problem Report.", code = "pr_duplicate_target_unexpected" });
+            return await ChangeAsync(ordinaryReport, request.ExpectedVersion, http, db, ct, "DispositionRecorded",
+                (item, actor, now) => item.ApplyDisposition(actor.UserName, request.Disposition,
+                    request.Rationale, null, now));
+        }
+
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        var report = await db.ProblemReports.SingleOrDefaultAsync(item => item.Id == id, ct);
+        if (report is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
+        if (request.ExpectedVersion is not null && request.ExpectedVersion != report.Version)
+            return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = report.Version });
+
+        if (request.DuplicateOfId is null || request.DuplicateOfId == Guid.Empty)
+            return Results.BadRequest(new { error = "A Duplicate disposition requires a canonical Problem Report target.", code = "pr_duplicate_target_required" });
+        var decision = await new ProblemReportDuplicateDispositionPolicy(db)
+            .ValidateAsync(report, request.DuplicateOfId.Value, ct);
+        if (!decision.Accepted)
+            return Results.BadRequest(new { error = decision.Error, code = decision.Code });
+
+        try
+        {
+            var result = await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "DispositionRecorded",
+                (item, actor, now) => item.ApplyDisposition(actor.UserName, request.Disposition, request.Rationale,
+                    request.DuplicateOfId, now),
+                link: request.DuplicateOfId is null ? null : (actor, now) =>
+                    ProblemReportRelationshipPolicy.CreateControlled(id, "ProblemReport", request.DuplicateOfId.Value,
+                        ProblemReportRelationshipPolicy.DuplicateOf,
+                        ProblemReportRelationshipProducer.DispositionWorkflow, actor.UserName, now));
+            if (result is IStatusCodeHttpResult { StatusCode: >= 400 }) return result;
+            await transaction.CommitAsync(ct);
+            return result;
+        }
+        catch (Exception exception) when (exception is DbUpdateException or DbException)
+        {
+            return Results.Conflict(new
+            {
+                error = "The Problem Report duplicate graph changed concurrently. Refresh before recording the disposition.",
+                code = "pr_duplicate_concurrent_change",
+            });
+        }
     }
     private static async Task<IResult> ReopenAsync(Guid id, ReopenRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ProblemReportReopened", (report, actor, now) => report.Reopen(actor.UserName, request.Rationale, now));
     private static async Task<IResult> BlockerAsync(Guid id, BlockerRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
@@ -562,7 +608,8 @@ public static class ProblemReportEndpoints
         IEnumerable<ProblemReportRevision> revisions,
         IEnumerable<ProblemReportClosureCandidate>? closureCandidates = null,
         object? capabilities = null,
-        IEnumerable<ReadinessWaiver>? releaseWaivers = null)
+        IEnumerable<ReadinessWaiver>? releaseWaivers = null,
+        ProblemReportDuplicateDiagnostic? duplicateDiagnostic = null)
     {
         var materializedLinks = links.ToList();
         var approvedCorrectiveActions = materializedLinks.Where(link => link.TrustedControlledEvidence && link.Relationship == ProblemReportRelationshipPolicy.ApprovedCorrectiveAction).Select(LinkResponse).ToList();
@@ -571,7 +618,7 @@ public static class ProblemReportEndpoints
             && link.ArtifactId == x.ResolutionVerificationExecutionId).Select(LinkResponse).ToList();
         var now = DateTimeOffset.UtcNow; var waiverHistory = (releaseWaivers ?? []).ToList();
         var activeWaiver = waiverHistory.FirstOrDefault(item => item.IsActiveFor(x, now));
-        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.CorrectiveAction, x.Workaround, type = x.Type.ToString(), x.SystemAircraftImpact, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotSchemaVersion, x.SnapshotHash, x.SnapshotJson, x.OccurredAt }) };
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.CorrectiveAction, x.Workaround, type = x.Type.ToString(), x.SystemAircraftImpact, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, duplicateDiagnostic, links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.SnapshotSchemaVersion, x.SnapshotHash, x.SnapshotJson, x.OccurredAt }) };
     }
 
     private static object WaiverResponse(ReadinessWaiver item, ProblemReport report, DateTimeOffset now) => new
