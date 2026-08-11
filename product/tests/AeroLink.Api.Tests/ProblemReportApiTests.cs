@@ -291,7 +291,9 @@ public sealed class ProblemReportApiTests
         Assert.Equal(HttpStatusCode.OK, proposal.StatusCode);
 
         using var close = await client.PostAsJsonAsync($"/api/problem-reports/{id}/closure/approve", new { expectedVersion = version + 1 });
-        Assert.Equal(HttpStatusCode.BadRequest, close.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, close.StatusCode);
+        Assert.Equal("pr_closure_candidate_missing",
+            (await close.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
         Assert.Equal("Verifying", detail.GetProperty("state").GetString());
         Assert.True(detail.GetProperty("revisions").GetArrayLength() >= 3);

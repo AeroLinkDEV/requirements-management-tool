@@ -169,4 +169,55 @@ test("a corrective action opens Test Results, names the report, and survives a r
   expect(detail.state).toBe('AwaitingSqaClosure')
   expect(detail.testEvidence).toHaveLength(1)
   expect(detail.testEvidence[0].artifactId).toBe(detail.resolutionVerificationExecutionId)
+
+  // A controlled correction cannot inherit the Pass selected above. The page returns to Verifying, names
+  // why, removes the SQA action, and retains the first selection only as history.
+  const reportAddress = new URL(`${root}/problem-reports/${raised.report.id}`, page.url()).toString()
+  await page.goto(reportAddress, { waitUntil: 'load' })
+  await expect(page.locator('.prState')).toHaveText('Awaiting SQA Closure', { timeout: 30_000 })
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
+  await editor.getByLabel('Corrective-action narrative').fill('The corrected scheduler and guard are both required before closure.')
+  await editor.getByLabel('Root cause', { exact: true }).fill('The scheduler and missing guard combined to produce the failure.')
+  await editor.getByRole('button', { name: 'Check in' }).click()
+  await expect(editor).toHaveCount(0, { timeout: 30_000 })
+  await expect(page.locator('.prState')).toHaveText('Verifying')
+  await expect(page.getByRole('status')).toContainText('Closure verification invalidated')
+  await expect(page.getByRole('status')).toContainText('Record a new passing successor result')
+  await expect(page.getByRole('button', { name: /Approve independent SQA closure/ })).toHaveCount(0)
+  await page.getByRole('button', { name: /History/ }).click()
+  await expect(page.locator('.prTimeline').getByText('Closure Verification Invalidated By Change')).toBeVisible()
+
+  // Transfer the in-work record to the seeded test engineer while it already requires verification. The
+  // new owner records the second exact candidate; an independent seeded SQA account then closes that one.
+  let changed = await (await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}`)).json()
+  const reassigned = await page.request.post(`${apiBase}/api/problem-reports/${raised.report.id}/owner`, {
+    data: { expectedVersion: changed.version, responsibleEngineerId: 'test.engineer' },
+  })
+  expect(reassigned.ok(), await reassigned.text()).toBeTruthy()
+
+  await page.context().clearCookies()
+  await login(page, 'test.engineer', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await page.goto(reportAddress, { waitUntil: 'load' })
+  await page.getByRole('button', { name: /Select closure-supporting test result/ }).click()
+  await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: /Record successor execution/ }).click()
+  const secondRecord = page.getByRole('dialog', { name: /Record a result for/ })
+  await secondRecord.getByLabel('Configuration under test').fill('FMS corrected scheduler rig')
+  await secondRecord.getByLabel('Determination', { exact: true }).fill('The revised closure candidate satisfies the effective procedure.')
+  await secondRecord.getByLabel('Evidence reference').fill('controlled://browser/pr-reverified-successor')
+  await secondRecord.getByRole('button', { name: 'Record determination' }).click()
+  await expect(page.getByText(/selected as PR closure evidence/)).toBeVisible({ timeout: 30_000 })
+
+  await page.context().clearCookies()
+  await login(page, 'quality.analyst', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await page.goto(reportAddress, { waitUntil: 'load' })
+  await expect(page.locator('.prState')).toHaveText('Awaiting SQA Closure', { timeout: 30_000 })
+  await page.getByRole('button', { name: /Approve independent SQA closure/ }).click()
+  await expect(page.locator('.prState')).toHaveText('Closed')
+  await page.getByRole('button', { name: /History/ }).click()
+  await expect(page.locator('.prTimeline').getByText('Closure Verification Invalidated By Change')).toBeVisible()
+  await expect(page.locator('.prTimeline').getByText('Closure Approved')).toBeVisible()
 });

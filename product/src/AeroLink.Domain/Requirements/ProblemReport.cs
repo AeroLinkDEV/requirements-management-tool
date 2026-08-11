@@ -24,6 +24,85 @@ public enum ProblemReportSeverity { Critical, High, Major, Minor, Trivial }
 public enum ProblemReportType { Documentation, Code, Test, Other }
 public enum ProblemReportPriority { Urgent, High, Normal, Low }
 public enum ProblemReportDisposition { Fixed, Duplicate, CannotReproduce, NoFaultFound, Deferred, AcceptedRisk, Rejected }
+public enum ProblemReportClosureCandidateState { Pending, Invalidated, Approved }
+
+/// <summary>
+/// The exact closure basis selected for independent SQA review. A candidate is never rewritten: a
+/// closure-significant change invalidates it, and re-verification creates a new sequence.
+/// </summary>
+public sealed class ProblemReportClosureCandidate
+{
+    private ProblemReportClosureCandidate() { }
+    public ProblemReportClosureCandidate(Guid problemReportId, int reportRevision, int sequence,
+        int schemaVersion, long reportVersion, string reportSnapshotJson, string reportSnapshotHash,
+        Guid verificationExecutionId, string verificationEvidenceJson, string verificationEvidenceHash,
+        string linksManifestJson, string linksManifestHash, string manifestHash,
+        string selectedBy, DateTimeOffset selectedAt)
+    {
+        if (problemReportId == Guid.Empty || verificationExecutionId == Guid.Empty)
+            throw new DomainException("A closure candidate requires its Problem Report and verification execution.");
+        if (sequence < 1 || schemaVersion < 1 || reportVersion < 1)
+            throw new DomainException("A closure candidate requires a valid sequence, schema, and Problem Report version.");
+        Id = Guid.NewGuid(); ProblemReportId = problemReportId; ReportRevision = reportRevision;
+        Sequence = sequence; SchemaVersion = schemaVersion; ReportVersion = reportVersion;
+        ReportSnapshotJson = Required(reportSnapshotJson); ReportSnapshotHash = Hash(reportSnapshotHash);
+        VerificationExecutionId = verificationExecutionId;
+        VerificationEvidenceJson = Required(verificationEvidenceJson); VerificationEvidenceHash = Hash(verificationEvidenceHash);
+        LinksManifestJson = Required(linksManifestJson); LinksManifestHash = Hash(linksManifestHash);
+        ManifestHash = Hash(manifestHash); SelectedBy = Required(selectedBy); SelectedAt = selectedAt;
+        State = ProblemReportClosureCandidateState.Pending;
+    }
+
+    public Guid Id { get; private set; }
+    public Guid ProblemReportId { get; private set; }
+    public int ReportRevision { get; private set; }
+    public int Sequence { get; private set; }
+    public int SchemaVersion { get; private set; }
+    public long ReportVersion { get; private set; }
+    public string ReportSnapshotJson { get; private set; } = "";
+    public string ReportSnapshotHash { get; private set; } = "";
+    public Guid VerificationExecutionId { get; private set; }
+    public string VerificationEvidenceJson { get; private set; } = "";
+    public string VerificationEvidenceHash { get; private set; } = "";
+    public string LinksManifestJson { get; private set; } = "";
+    public string LinksManifestHash { get; private set; } = "";
+    public string ManifestHash { get; private set; } = "";
+    public string SelectedBy { get; private set; } = "";
+    public DateTimeOffset SelectedAt { get; private set; }
+    public ProblemReportClosureCandidateState State { get; private set; }
+    public string InvalidatedBy { get; private set; } = "";
+    public DateTimeOffset? InvalidatedAt { get; private set; }
+    public string InvalidationReason { get; private set; } = "";
+    public Guid? ApprovedByAccountId { get; private set; }
+    public string ApprovedBy { get; private set; } = "";
+    public DateTimeOffset? ApprovedAt { get; private set; }
+
+    public void Invalidate(string actor, string reason, DateTimeOffset now)
+    {
+        if (State != ProblemReportClosureCandidateState.Pending) return;
+        State = ProblemReportClosureCandidateState.Invalidated;
+        InvalidatedBy = Required(actor); InvalidationReason = Required(reason); InvalidatedAt = now;
+    }
+
+    public void Approve(string actor, Guid actorAccountId, DateTimeOffset now)
+    {
+        if (State != ProblemReportClosureCandidateState.Pending)
+            throw new DomainException("Only the current pending closure candidate can be approved.");
+        State = ProblemReportClosureCandidateState.Approved;
+        ApprovedBy = Required(actor); ApprovedByAccountId = actorAccountId == Guid.Empty ? null : actorAccountId;
+        ApprovedAt = now;
+    }
+
+    private static string Required(string? value) => string.IsNullOrWhiteSpace(value)
+        ? throw new DomainException("Problem Report closure-candidate evidence is required.") : value.Trim();
+    private static string Hash(string? value)
+    {
+        var hash = Required(value).ToLowerInvariant();
+        if (hash.Length != 64 || hash.Any(character => !Uri.IsHexDigit(character)))
+            throw new DomainException("A closure-candidate SHA-256 hash is required.");
+        return hash;
+    }
+}
 
 /// <summary>Immutable lifecycle record.  This is deliberately separate from edit-session snapshots so that
 /// significant engineering decisions remain discoverable after a checkout has expired or been discarded.</summary>
@@ -134,7 +213,7 @@ public sealed class ProblemReport
 
     public void UpdateDraft(string title, string problem, string analysis, DateTimeOffset now)
     {
-        EnsureEditable(); Title = Required(title, "A problem-report title is required."); Problem = Required(problem, "A problem statement is required.");
+        EnsureEditable(); InvalidateClosureVerificationForChange(); Title = Required(title, "A problem-report title is required."); Problem = Required(problem, "A problem statement is required.");
         Analysis = analysis?.Trim() ?? ""; Touch(now);
     }
 
@@ -144,7 +223,7 @@ public sealed class ProblemReport
         ProblemReportSeverity severity, ProblemReportPriority priority, DateTimeOffset now,
         ProblemReportType? type = null, string? workaround = null)
     {
-        EnsureResponsible(actor); EnsureEditable();
+        EnsureResponsible(actor); EnsureEditable(); InvalidateClosureVerificationForChange();
         if (type is not null) Type = type.Value;
         if (workaround is not null) Workaround = workaround.Trim();
         Title = Required(title, "A problem-report title is required."); Problem = Required(problem, "A problem statement is required.");
@@ -157,20 +236,20 @@ public sealed class ProblemReport
 
     public void Reassign(string actor, string responsibleEngineerId, DateTimeOffset now)
     {
-        EnsureResponsible(actor); EnsureNotTerminal();
+        EnsureResponsible(actor); EnsureNotTerminal(); InvalidateClosureVerificationForChange();
         ResponsibleEngineerId = Required(responsibleEngineerId, "A responsible engineer is required."); Touch(now);
     }
 
     public void Retarget(string actor, Guid targetReleaseId, DateTimeOffset now)
     {
-        EnsureResponsible(actor); EnsureNotTerminal();
+        EnsureResponsible(actor); EnsureNotTerminal(); InvalidateClosureVerificationForChange();
         if (targetReleaseId == Guid.Empty) throw new DomainException("A target build is required.");
         TargetReleaseId = targetReleaseId; Touch(now);
     }
 
     public void RecordContextLink(string actor, DateTimeOffset now)
     {
-        EnsureResponsible(actor); EnsureNotTerminal(); Touch(now);
+        EnsureResponsible(actor); EnsureNotTerminal(); InvalidateClosureVerificationForChange(); Touch(now);
     }
 
     public void ReadyForSccb(string actor, DateTimeOffset now)
@@ -226,7 +305,7 @@ public sealed class ProblemReport
 
     public void ApplyDisposition(string actor, ProblemReportDisposition disposition, string rationale, Guid? duplicateOfId, DateTimeOffset now)
     {
-        EnsureResponsible(actor); EnsureNotTerminal(); DispositionRationale = Required(rationale, "A disposition rationale is required."); Disposition = disposition;
+        EnsureResponsible(actor); EnsureNotTerminal(); InvalidateClosureVerificationForChange(); DispositionRationale = Required(rationale, "A disposition rationale is required."); Disposition = disposition;
         State = disposition switch
         {
             ProblemReportDisposition.Fixed => throw new DomainException("Use proposed resolution and verified closure for a fixed problem report."),
@@ -243,7 +322,7 @@ public sealed class ProblemReport
 
     public void SetReleaseBlocker(string actor, bool isBlocker, string waiverRationale, DateTimeOffset now)
     {
-        EnsureResponsible(actor); IsReleaseBlocker = isBlocker;
+        EnsureResponsible(actor); InvalidateClosureVerificationForChange(); IsReleaseBlocker = isBlocker;
         if (!isBlocker) { WaiverRationale = ""; WaivedBy = ""; WaivedAt = null; }
         else if (!string.IsNullOrWhiteSpace(waiverRationale)) { WaiverRationale = waiverRationale.Trim(); WaivedBy = actor; WaivedAt = now; }
         Touch(now);
@@ -272,7 +351,19 @@ public sealed class ProblemReport
         AffectedConfiguration, RootCause, Effects, Containment, CorrectiveAction, SystemAircraftImpact, ImpactAssessmentJson, Disposition,
         DispositionRationale, ResolutionVerificationExecutionId, State, IsReleaseBlocker, WaiverRationale, Version);
     public string CanonicalHash() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(CanonicalSnapshot()))).ToLowerInvariant();
+    public bool InvalidateClosureVerification(string actor, DateTimeOffset now)
+    {
+        Required(actor, "An invalidation actor is required.");
+        if (State != ProblemReportState.AwaitingSqaClosure) return false;
+        InvalidateClosureVerificationForChange(); Touch(now); return true;
+    }
     private void Touch(DateTimeOffset now) { UpdatedAt = now; Version++; }
+    private void InvalidateClosureVerificationForChange()
+    {
+        if (State != ProblemReportState.AwaitingSqaClosure) return;
+        ResolutionVerificationExecutionId = null;
+        State = ProblemReportState.Verifying;
+    }
     private void EnsureResponsible(string actor) { if (!string.Equals(actor, ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase)) throw new DomainException("Only the responsible engineer can perform this action."); }
     /// <summary>
     /// Editable unless the report is finished. A report is corrected while the work it describes is in

@@ -4,6 +4,7 @@
 .prCreateFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .prFlow .draftState { align-self: start; }
 .problemReportsPage[data-read-only="true"] .prFlow{display:none}
+.prClosureInvalidated{flex:1 1 100%;display:flex;flex-direction:column;gap:3px;padding:12px 14px;border:1px solid #d8a93b;border-radius:10px;background:#fff8e8;color:#6d4d05}.prClosureInvalidated span{font-size:.86rem}
 
 .prLinks button.artifactReferenceCard{display:flex;align-items:center;gap:10px;width:100%;padding:9px;border:0;border-top:1px solid #edf1f5;background:#fff;color:inherit;text-align:left;cursor:pointer}.prLinks button.artifactReferenceCard:hover,.prLinks button.artifactReferenceCard:focus-visible{background:#f2f7fc}.prLinks .artifactReferenceCard em,.prLinks .artifactUnavailable em{margin-left:auto;color:#2f6f9d;font-size:11px;font-style:normal;font-weight:750}.prLinks .artifactUnavailable em{color:#8a6d49}
 

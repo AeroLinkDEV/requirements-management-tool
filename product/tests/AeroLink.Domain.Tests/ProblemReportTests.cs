@@ -38,6 +38,40 @@ public sealed class ProblemReportTests
     }
 
     [Fact]
+    public void Closure_significant_change_returns_the_report_to_verification_without_erasing_history_identity()
+    {
+        var report = ReadyForClosure();
+        var selectedExecution = report.ResolutionVerificationExecutionId;
+
+        report.UpdateDetails("verification.engineer", report.Title, report.Problem, "", "", "", "Revised analysis",
+            "Revised root cause", "Revised corrective action", "Revised aircraft impact", "{}",
+            ProblemReportSeverity.Critical, ProblemReportPriority.Urgent, Now.AddMinutes(1),
+            ProblemReportType.Code, "Use the guarded operating mode.");
+
+        Assert.Equal(ProblemReportState.Verifying, report.State);
+        Assert.Null(report.ResolutionVerificationExecutionId);
+        Assert.NotEqual(Guid.Empty, selectedExecution);
+        Assert.Equal("Revised corrective action", report.CorrectiveAction);
+    }
+
+    [Fact]
+    public void Closure_candidate_is_immutable_and_records_invalidation_or_approval_as_attributable_state()
+    {
+        var candidate = new ProblemReportClosureCandidate(Guid.NewGuid(), 0, 1, 1, 7,
+            "{\"report\":true}", new string('a', 64), Guid.NewGuid(), "{\"execution\":true}",
+            new string('b', 64), "{\"links\":[]}", new string('c', 64), new string('d', 64),
+            "verification.engineer", Now);
+
+        candidate.Invalidate("verification.engineer", "DetailsCheckedIn", Now.AddMinutes(1));
+        Assert.Throws<DomainException>(() =>
+            candidate.Approve("quality.engineer", Guid.NewGuid(), Now.AddMinutes(2)));
+
+        Assert.Equal(ProblemReportClosureCandidateState.Invalidated, candidate.State);
+        Assert.Equal("DetailsCheckedIn", candidate.InvalidationReason);
+        Assert.Null(candidate.ApprovedAt);
+    }
+
+    [Fact]
     public void Reopen_retains_history_by_advancing_the_controlled_revision()
     {
         var report = ReadyForClosure(); report.ApproveClosure("configuration.manager", Guid.NewGuid(), Now);
