@@ -64,7 +64,8 @@ public sealed class ProblemReportTests
 
         candidate.Invalidate("verification.engineer", "DetailsCheckedIn", Now.AddMinutes(1));
         Assert.Throws<DomainException>(() =>
-            candidate.Approve("quality.engineer", Guid.NewGuid(), Now.AddMinutes(2)));
+            candidate.Approve("quality.engineer", Guid.NewGuid(), Now.AddMinutes(2),
+                "{\"package\":true}", new string('e', 64)));
 
         Assert.Equal(ProblemReportClosureCandidateState.Invalidated, candidate.State);
         Assert.Equal("DetailsCheckedIn", candidate.InvalidationReason);

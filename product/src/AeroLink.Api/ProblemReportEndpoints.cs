@@ -232,7 +232,7 @@ public static class ProblemReportEndpoints
         return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ResolutionVerified", (item, actor, now) => item.RecordResolutionVerification(actor.UserName, execution.Id, now),
             link: (actor, now) => ProblemReportRelationshipPolicy.CreateControlled(report.Id, "TestExecution", execution.Id,
                 ProblemReportRelationshipPolicy.ResolutionVerification, ProblemReportRelationshipProducer.ResolutionVerificationWorkflow, actor.UserName, now),
-            afterMutation: async (item, actor, now, resolutionLink, token) =>
+            afterMutation: async (item, actor, now, resolutionLink, _, token) =>
                 await new ProblemReportClosureCandidateService(db).CreateAsync(item, execution,
                     resolutionLink!, actor.UserName, now, token));
     }
@@ -263,11 +263,9 @@ public static class ProblemReportEndpoints
             return Results.Conflict(new { error = verificationDecision.Error, code = verificationDecision.Code });
         return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ClosureApproved",
             (item, user, now) => item.ApproveClosure(user.UserName, user.Id, now),
-            afterMutation: (item, user, now, _, _) =>
-            {
-                candidateDecision.Candidate!.Approve(user.UserName, user.Id, now);
-                return Task.CompletedTask;
-            });
+            afterMutation: async (item, user, now, _, closureRevision, token) =>
+                await new ProblemReportClosureCandidateService(db).FreezeForApprovalAsync(item,
+                    candidateDecision.Candidate!, closureRevision, user.UserName, user.Id, now, token));
     }
 
     private static async Task<IResult> DispositionAsync(Guid id, DispositionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
@@ -308,29 +306,48 @@ public static class ProblemReportEndpoints
         catch (DbUpdateException) { return Results.Conflict(new { error = "That problem-report link already exists." }); }
     }
 
-    private static async Task<IResult> ClosurePackageAsync(Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> ClosurePackageAsync(Guid id, Guid? candidateId, HttpContext http,
+        AeroLinkDbContext db, CancellationToken ct)
     {
         var report = await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
-        if (report.State != ProblemReportState.Closed) return Results.Conflict(new { error = "A controlled closure package is available only after independent closure approval." });
-        var links = await db.ProblemReportLinks.AsNoTracking().Where(x => x.ProblemReportId == id).OrderBy(x => x.ArtifactType).ThenBy(x => x.ArtifactId).ToListAsync(ct);
-        var revisions = (await db.ProblemReportRevisions.AsNoTracking().Where(x => x.ProblemReportId == id).ToListAsync(ct)).OrderBy(x => x.OccurredAt).ToList();
-        var approvedCandidates = await db.ProblemReportClosureCandidates.AsNoTracking()
-            .Where(item => item.ProblemReportId == id && item.ReportRevision == report.Revision
-                && item.State == ProblemReportClosureCandidateState.Approved).ToListAsync(ct);
-        var approvedCandidate = approvedCandidates.OrderByDescending(item => item.Sequence).FirstOrDefault();
-        return Results.Ok(new { packageType = "ProblemReportClosurePackage", generatedAt = DateTimeOffset.UtcNow, generatorVersion = "AeroLink-3.0", closureCandidate = approvedCandidate is null ? null : CandidateResponse(approvedCandidate), report = Detail(report, await LinkViewsAsync(report, links, db, ct), revisions, approvedCandidates), sourceHash = report.CanonicalHash(), manifest = new { report.DisplayNumber, report.Version, revisionEvidenceCount = revisions.Count, linkCount = links.Count, closureCandidateId = approvedCandidate?.Id, closureCandidateManifestHash = approvedCandidate?.ManifestHash } });
+        var candidates = await db.ProblemReportClosureCandidates.AsNoTracking()
+            .Where(item => item.ProblemReportId == id
+                && (item.State == ProblemReportClosureCandidateState.Approved
+                    || item.State == ProblemReportClosureCandidateState.LegacyUnavailable)).ToListAsync(ct);
+        var candidate = candidateId is { } selectedId
+            ? candidates.SingleOrDefault(item => item.Id == selectedId)
+            : candidates.OrderByDescending(item => item.ReportRevision).ThenByDescending(item => item.Sequence).FirstOrDefault();
+        if (candidate is null)
+        {
+            if (report.State == ProblemReportState.Closed)
+                return Results.Conflict(new { error = "This legacy closure predates frozen package evidence; an exact historical package cannot be fabricated.", code = "pr_closure_package_legacy_unfrozen", provenance = "LegacyClosureNotFrozen", report.Id, report.Revision, report.ClosureApprovedByName, report.ClosureApprovedAt });
+            return Results.Conflict(new { error = "No independently approved closure package exists for this Problem Report.", code = "pr_closure_package_missing" });
+        }
+        if (candidate.State == ProblemReportClosureCandidateState.LegacyUnavailable
+            || string.IsNullOrWhiteSpace(candidate.ClosurePackageJson))
+            return Results.Conflict(new { error = "This legacy closure predates frozen package evidence; an exact historical package cannot be fabricated.", code = "pr_closure_package_legacy_unfrozen", provenance = "LegacyClosureNotFrozen", candidate.Id, candidate.ReportRevision, candidate.ApprovedBy, candidate.ApprovedAt });
+        return Results.Ok(new
+        {
+            packageType = "ProblemReportClosurePackage",
+            generatedAt = DateTimeOffset.UtcNow,
+            generatorVersion = "AeroLink-3.0",
+            snapshot = new { candidate.Id, candidate.ReportRevision, candidate.SchemaVersion,
+                candidate.PackageProvenance, candidate.ClosurePackageHash, candidate.ApprovedByAccountId,
+                candidate.ApprovedBy, candidate.ApprovedAt },
+            package = JsonSerializer.Deserialize<JsonElement>(candidate.ClosurePackageJson),
+        });
     }
 
     private static async Task<IResult> ChangeAsync(Guid id, long? expectedVersion, HttpContext http, AeroLinkDbContext db, CancellationToken ct, string eventType, Action<ProblemReport, AuthenticatedUser, DateTimeOffset> action, Func<AuthenticatedUser, DateTimeOffset, ProblemReportLink>? link = null,
-        Func<ProblemReport, AuthenticatedUser, DateTimeOffset, ProblemReportLink?, CancellationToken, Task>? afterMutation = null)
+        Func<ProblemReport, AuthenticatedUser, DateTimeOffset, ProblemReportLink?, ProblemReportRevision, CancellationToken, Task>? afterMutation = null)
     {
         var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
         return await ChangeAsync(report, expectedVersion, http, db, ct, eventType, action, link, afterMutation);
     }
 
     private static async Task<IResult> ChangeAsync(ProblemReport report, long? expectedVersion, HttpContext http, AeroLinkDbContext db, CancellationToken ct, string eventType, Action<ProblemReport, AuthenticatedUser, DateTimeOffset> action, Func<AuthenticatedUser, DateTimeOffset, ProblemReportLink>? link = null,
-        Func<ProblemReport, AuthenticatedUser, DateTimeOffset, ProblemReportLink?, CancellationToken, Task>? afterMutation = null)
+        Func<ProblemReport, AuthenticatedUser, DateTimeOffset, ProblemReportLink?, ProblemReportRevision, CancellationToken, Task>? afterMutation = null)
     {
         if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
         if (expectedVersion is not null && expectedVersion != report.Version) return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = report.Version });
@@ -341,22 +358,23 @@ public static class ProblemReportEndpoints
             action(report, actor, now);
             ProblemReportLink? createdLink = null;
             if (link is not null) { createdLink = link(actor, now); db.ProblemReportLinks.Add(createdLink); }
-            AddRevision(db, report, eventType, actor.UserName, now);
+            var revision = AddRevision(db, report, eventType, actor.UserName, now);
             if (wasAwaitingClosure && report.ResolutionVerificationExecutionId is null)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
                     eventType, now, ct);
-            if (afterMutation is not null) await afterMutation(report, actor, now, createdLink, ct);
+            if (afterMutation is not null) await afterMutation(report, actor, now, createdLink, revision, ct);
             await db.SaveChangesAsync(ct); return Results.Ok(new { id = report.Id, displayNumber = report.DisplayNumber, state = report.State.ToString(), version = report.Version, snapshotHash = report.CanonicalHash() });
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "This problem report was updated concurrently. Refresh before continuing.", code = "stale_version" }); }
     }
 
-    private static void AddRevision(AeroLinkDbContext db, ProblemReport report, string eventType, string actor, DateTimeOffset now)
+    private static ProblemReportRevision AddRevision(AeroLinkDbContext db, ProblemReport report, string eventType, string actor, DateTimeOffset now)
     {
         // One evidence shape for every change, whether it arrives here or through a controlled checkout.
         var snapshot = ProblemReportControlledEditingAdapter.EvidenceSnapshot(report);
-        db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, eventType, actor, report.CanonicalHash(), snapshot, now));
+        var revision = new ProblemReportRevision(report.Id, report.Revision, eventType, actor, report.CanonicalHash(), snapshot, now);
+        db.ProblemReportRevisions.Add(revision); return revision;
     }
 
     private static async Task<bool> LinkExistsInProjectAsync(string artifactType, Guid artifactId, Guid projectId, AeroLinkDbContext db, CancellationToken ct) => artifactType.Trim().ToLowerInvariant() switch
@@ -419,6 +437,8 @@ public static class ProblemReportEndpoints
         candidate.InvalidationReason,
         candidate.ApprovedBy,
         candidate.ApprovedAt,
+        candidate.PackageProvenance,
+        candidate.ClosurePackageHash,
     };
 
     private static object LinkResponse(ProblemReportLinkView link) => new { link.ArtifactType, link.ArtifactId, link.Identifier, link.Relationship, link.AddedBy, link.AddedAt };

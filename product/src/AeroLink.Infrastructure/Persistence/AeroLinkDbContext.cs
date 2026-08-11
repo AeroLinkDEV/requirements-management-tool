@@ -981,6 +981,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ManifestHash).HasMaxLength(64).IsRequired(); b.Property(x => x.SelectedBy).HasMaxLength(100).IsRequired();
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.InvalidatedBy).HasMaxLength(100);
             b.Property(x => x.InvalidationReason).HasMaxLength(1000); b.Property(x => x.ApprovedBy).HasMaxLength(100);
+            b.Property(x => x.PackageProvenance).HasMaxLength(40).IsRequired(); b.Property(x => x.ClosurePackageJson).IsRequired();
+            b.Property(x => x.ClosurePackageHash).HasMaxLength(64).IsRequired();
             b.HasIndex(x => new { x.ProblemReportId, x.ReportRevision, x.Sequence }).IsUnique();
             b.HasIndex(x => new { x.ProblemReportId, x.State }); b.HasIndex(x => x.ManifestHash);
             b.HasOne<ProblemReport>().WithMany().HasForeignKey(x => x.ProblemReportId).OnDelete(DeleteBehavior.Restrict);
