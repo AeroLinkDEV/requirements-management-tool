@@ -914,7 +914,24 @@ public static class VerificationEndpoints
             }
             if (request.SoftwareBuildId is not null && await db.ReleaseCampaigns.AsNoTracking().AnyAsync(x => x.SoftwareBuildId == request.SoftwareBuildId && x.State == ReleaseCampaignState.InReview, ct))
                 return Results.Conflict(new { error = "The release package is frozen while approval is in progress.", code = "release_package_frozen" });
-            if (request.RetestOfExecutionId is not null && !await db.TestExecutions.AnyAsync(x => x.Id == request.RetestOfExecutionId && x.ProcedureRevisionId == request.ProcedureRevisionId, ct)) return Results.BadRequest(new { error = "A retest must reference an earlier execution of the same procedure revision." });
+            if (request.RetestOfExecutionId is { } predecessorId)
+            {
+                var predecessor = await (from execution in db.TestExecutions.AsNoTracking()
+                                         join priorRevision in db.TestProcedureRevisions.AsNoTracking()
+                                             on execution.ProcedureRevisionId equals priorRevision.Id
+                                         where execution.Id == predecessorId
+                                         select new { Execution = execution, priorRevision.ProcedureId })
+                    .SingleOrDefaultAsync(ct);
+                if (predecessor is null || predecessor.Execution.ProjectId != request.ProjectId)
+                    return Results.BadRequest(new { error = "A retest must reference an execution in the same Project.", code = "retest_target_invalid" });
+                // A corrective build can carry the approved successor revision of the procedure that failed.
+                // The stable procedure identity is the lineage; demanding the obsolete exact revision would
+                // make a legitimate revised corrective test impossible to record.
+                if (predecessor.ProcedureId != procedure.Id)
+                    return Results.BadRequest(new { error = "A retest must reference an earlier execution in the same controlled procedure lineage.", code = "retest_procedure_mismatch" });
+                if (predecessor.Execution.ExecutedAt >= request.ExecutedAt)
+                    return Results.BadRequest(new { error = "A retest cannot predate the execution it supersedes.", code = "retest_not_successor" });
+            }
             try { var execution = new TestExecution(request.ProjectId, request.ProcedureRevisionId, request.SoftwareBuildId, request.RetestOfExecutionId,
                 request.Outcome, http.UserAccount().UserName, request.Configuration, request.Determination, request.EvidenceReference, request.ExecutedAt, DateTimeOffset.UtcNow, executionReleaseId);
                 db.TestExecutions.Add(execution); await db.SaveChangesAsync(ct); return Results.Created($"/api/test-executions/{execution.Id}", new { execution.Id, outcome = execution.Outcome.ToString() }); }

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -38,7 +39,9 @@ public sealed class CorrectiveActionRoutingApiTests
         var program = new ProgramRecord("Corrective Program", "CRP");
         var project = new ProjectRecord(program.Id, "Software", "Corrective Software");
         var release = new SoftwareRelease(project.Id, "1.0", false);
-        db.AddRange(program, project, release);
+        var baseline = new CandidateBaseline("SW-09.01", 0, project.Id, release.Id, null,
+            "Corrective baseline", "cm", now);
+        db.AddRange(program, project, release, baseline);
 
         var reports = new List<ProblemReport>();
         Guid Raise(TestProcedureLevel level, string number, string procedureNumber)
@@ -46,13 +49,15 @@ public sealed class CorrectiveActionRoutingApiTests
             var procedure = new TestProcedure(project.Id, procedureNumber, $"{level} behaviour", "test.author", now, level);
             // Approved as materialisation writes it, on the authority of the package that carried the change.
             var revision = new TestProcedureRevision(procedure.Id, 1, "Objective", "Preconditions", "Steps", "Expected",
-                TestProcedureState.Approved, "test.author", now);
+                TestProcedureState.Approved, "test.author", now, effectiveBaselineId: baseline.Id);
             var execution = new TestExecution(project.Id, revision.Id, null, null, TestOutcome.Fail, "test.engineer",
                 "Rig", "Observed output did not satisfy the expected result.", "evidence/fail.json", now, now);
             var report = new ProblemReport(project.Id, number, $"{level} failure", "Problem", "Analysis", "reporter", now,
-                "Verification failure", ProblemReportSeverity.Major, ProblemReportPriority.High, "Test execution", "Config");
+                "Verification failure", ProblemReportSeverity.Major, ProblemReportPriority.High, "Test execution", "Config",
+                targetReleaseId: release.Id);
             db.AddRange(procedure, revision, execution, report);
             db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, "TestExecution", execution.Id, "OriginatingFailure", "reporter", now));
+            db.BaselineTestProcedures.Add(new BaselineTestProcedureSelection(baseline.Id, procedure.Id, revision.Id));
             reports.Add(report);
             return report.Id;
         }
@@ -70,6 +75,10 @@ public sealed class CorrectiveActionRoutingApiTests
         db.Add(account);
         db.Add(new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
         await db.SaveChangesAsync();
+        await db.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(update => update
+            .SetProperty(x => x.RequirementsMaterializedAt, now)
+            .SetProperty(x => x.TestProceduresMaterializedAt, now)
+            .SetProperty(x => x.TestProceduresHash, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
 
         return new Fixture(project.Id, systemReport, softwareReport, unlinked.Id, "SYSTP-00000901", "LLRTP-00000901");
     }

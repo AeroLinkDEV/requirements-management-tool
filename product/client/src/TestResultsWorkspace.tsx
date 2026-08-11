@@ -31,7 +31,7 @@ type SetProcedure = {
  */
 const localWallTimeNow = () => {
   const now = new Date(), pad = (value: number) => String(value).padStart(2, '0')
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
 }
 type TestSet = { id: string; discipline: TestDiscipline; releaseId: string; version: number; procedures: SetProcedure[] }
 type Execution = {
@@ -114,7 +114,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   const [showRuns, setShowRuns] = useState('')
   // Set when a retest supersedes a specific earlier run rather than simply the latest one, which is what a
   // corrective action does: it answers a named failure, not "whatever happened last".
-  const [supersedes, setSupersedes] = useState<Execution>()
+  const [supersedesExecutionId, setSupersedesExecutionId] = useState<string>()
   const [corrective, setCorrective] = useState<CorrectiveAction>()
 
   // One ticket per loader, not one for the page. Sharing a counter between two independent loaders makes
@@ -212,7 +212,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
         // A retest names the run it supersedes, so a failure and its remedy stay attached to each other.
         // When a specific earlier run was chosen it is that one, not merely the latest — a corrective action
         // answers a named failure.
-        retestOfExecutionId: supersedes?.id ?? procedure.latestExecutionId ?? null,
+        retestOfExecutionId: supersedesExecutionId ?? procedure.latestExecutionId ?? null,
         outcome: form.get('outcome'),
         configuration: form.get('configuration'),
         determination,
@@ -233,7 +233,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
       }
     }
     setRecording(undefined)
-    setSupersedes(undefined)
+    setSupersedesExecutionId(undefined)
     if (!correctiveProblemReportId || corrective?.procedureRevisionId !== procedure.procedureRevisionId || form.get('outcome') !== 'Pass')
       setSaved(`Recorded against ${procedure.displayNumber}.`)
   }, 'The result could not be recorded.')
@@ -278,8 +278,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
             if (readOnly) return <span className="correctiveHint">This build is released. Its results are read-only.</span>
             const target = set?.procedures.find(x => x.procedureRevisionId === corrective.procedureRevisionId)
             if (!target) return <span className="correctiveHint">Add {corrective.procedureNumber ?? 'the procedure'} to this build&apos;s test set below, then record its result.</span>
-            const failed = executions.find(x => x.id === corrective.executionId)
-            return <button type="button" disabled={busy} onClick={() => { setOutcome('Pass'); setSupersedes(failed); setRecording(target) }}>Record successor execution →</button>
+            return <button type="button" disabled={busy} onClick={() => { setOutcome('Pass'); setSupersedesExecutionId(corrective.executionId); setRecording(target) }}>Record successor execution →</button>
           })()}
         </section>
       )}
@@ -357,7 +356,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
                       {run.evidence.length > 0 && <span className="runEvidence">{run.evidence.length} evidence file{run.evidence.length === 1 ? '' : 's'}</span>}
                       {run.retestOfExecutionId && <span className="runEvidence">retest</span>}
                       {canTest && run.outcome !== 'Pass' && (
-                        <button type="button" className="quiet" disabled={busy} onClick={() => { setOutcome('Pass'); setSupersedes(run); setRecording(procedure) }}>Retest this run</button>
+                        <button type="button" className="quiet" disabled={busy} onClick={() => { setOutcome('Pass'); setSupersedesExecutionId(run.id); setRecording(procedure) }}>Retest this run</button>
                       )}
                     </li>
                   ))}
@@ -436,7 +435,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
               <input value={`${user.displayName} (${user.userName})`} readOnly aria-readonly="true" />
             </label>
             <label>Execution time
-              <input type="datetime-local" name="executedAt" aria-describedby="execution-time-help" defaultValue={localWallTimeNow()} required />
+              <input type="datetime-local" name="executedAt" step="1" aria-describedby="execution-time-help" defaultValue={localWallTimeNow()} required />
               {/* The field is a wall clock and the record is an instant. Saying which zone the wall clock is
                   in is the difference between a reader trusting the time and having to work it out. */}
               <small id="execution-time-help">Local time, {Intl.DateTimeFormat().resolvedOptions().timeZone}. Stored as an exact instant.</small>
