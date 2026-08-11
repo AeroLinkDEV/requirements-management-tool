@@ -154,7 +154,7 @@ public static class ProblemReportEndpoints
         var waiverRows = await db.ReadinessWaivers.AsNoTracking().Where(x => x.ProjectId == projectId
             && x.BlockerType == "ProblemReportReleaseBlocker").ToListAsync(ct);
         bool IsWaived(ProblemReport report) => waiverRows.Any(waiver => waiver.IsActiveFor(report, now));
-        var active = reports.Where(x => x.State is ProblemReportState.Draft or ProblemReportState.ReadyForSccb or ProblemReportState.Open or ProblemReportState.Implementing or ProblemReportState.Verifying or ProblemReportState.AwaitingSqaClosure or ProblemReportState.Deferred).ToList();
+        var active = reports.Where(x => ProblemReportLifecycle.IsActiveWork(x.State)).ToList();
         return Results.Ok(new
         {
             generatedAt = DateTimeOffset.UtcNow,
