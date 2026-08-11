@@ -245,9 +245,11 @@ public sealed class ProblemReport
         Severity = severity; Priority = priority;
     }
 
-    public void Reassign(string actor, string responsibleEngineerId, DateTimeOffset now)
+    public void Reassign(string actor, string responsibleEngineerId, DateTimeOffset now, bool supervisoryRecovery = false)
     {
-        EnsureResponsible(actor); EnsureNotTerminal(); InvalidateClosureVerificationForChange();
+        if (!supervisoryRecovery) EnsureResponsible(actor);
+        else Required(actor, "A supervisory recovery actor is required.");
+        EnsureNotTerminal(); InvalidateClosureVerificationForChange();
         ResponsibleEngineerId = Required(responsibleEngineerId, "A responsible engineer is required."); Touch(now);
     }
 

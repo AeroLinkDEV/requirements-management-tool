@@ -50,6 +50,36 @@ public static class ProgramRoleAuthority
     public static IReadOnlyList<ProgramRole> Satisfying(ProgramRole required) =>
         required == ProgramRole.Engineer ? [ProgramRole.Engineer, .. EngineeringAuthority] : [required];
 }
+
+/// <summary>
+/// The Program authority that may hold accountable ownership of a Problem Report.
+///
+/// Verification-origin reports are deliberately included: a Test Engineer or Test Lead can raise and work
+/// the anomaly they found. Assurance-only and approval-only roles are deliberately absent. Recovery is a
+/// separate supervisory authority so losing an owner never turns Program Manager into ordinary engineering
+/// ownership or leaves the controlled record stranded.
+/// </summary>
+public static class ProblemReportOwnerAuthority
+{
+    public const string DirectoryAuthority = "ProblemReportOwner";
+
+    private static readonly ProgramRole[] EligibleRoles =
+    [
+        .. ProgramRoleAuthority.Satisfying(ProgramRole.Engineer),
+        ProgramRole.TestEngineer,
+        ProgramRole.TestLead,
+    ];
+
+    private static readonly ProgramRole[] RecoveryRoles =
+    [
+        ProgramRole.ProjectEngineeringLead,
+        ProgramRole.EngineeringManager,
+        ProgramRole.ProgramManager,
+    ];
+
+    public static bool IsEligible(IEnumerable<ProgramRole> roles) => roles.Any(EligibleRoles.Contains);
+    public static bool CanRecover(IEnumerable<ProgramRole> roles) => roles.Any(RecoveryRoles.Contains);
+}
 public enum ExternalIdentityProtocol { OpenIdConnect, Saml2 }
 
 public sealed class ExternalIdentityProvider

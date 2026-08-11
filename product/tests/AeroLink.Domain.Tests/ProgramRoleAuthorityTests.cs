@@ -49,4 +49,34 @@ public sealed class ProgramRoleAuthorityTests
     [InlineData(ProgramRole.TestLead)]
     public void Every_other_authority_is_satisfied_only_by_itself(ProgramRole role)
         => Assert.Equal([role], ProgramRoleAuthority.Satisfying(role));
+
+    [Theory]
+    [InlineData(ProgramRole.Engineer)]
+    [InlineData(ProgramRole.SystemEngineer)]
+    [InlineData(ProgramRole.SoftwareEngineer)]
+    [InlineData(ProgramRole.SystemEngineeringLead)]
+    [InlineData(ProgramRole.SoftwareEngineeringLead)]
+    [InlineData(ProgramRole.ProjectEngineeringLead)]
+    [InlineData(ProgramRole.EngineeringManager)]
+    [InlineData(ProgramRole.TestEngineer)]
+    [InlineData(ProgramRole.TestLead)]
+    public void Engineering_and_verification_engineering_roles_can_own_problem_reports(ProgramRole role)
+        => Assert.True(ProblemReportOwnerAuthority.IsEligible([role]));
+
+    [Theory]
+    [InlineData(ProgramRole.Reviewer)]
+    [InlineData(ProgramRole.Approver)]
+    [InlineData(ProgramRole.ConfigurationManager)]
+    [InlineData(ProgramRole.ProgramManager)]
+    [InlineData(ProgramRole.SoftwareQualityAnalyst)]
+    [InlineData(ProgramRole.Airworthiness)]
+    public void Oversight_and_approval_only_roles_cannot_hold_problem_report_ownership(ProgramRole role)
+        => Assert.False(ProblemReportOwnerAuthority.IsEligible([role]));
+
+    [Theory]
+    [InlineData(ProgramRole.ProjectEngineeringLead)]
+    [InlineData(ProgramRole.EngineeringManager)]
+    [InlineData(ProgramRole.ProgramManager)]
+    public void Explicit_supervision_can_recover_an_ineligible_problem_report_owner(ProgramRole role)
+        => Assert.True(ProblemReportOwnerAuthority.CanRecover([role]));
 }
