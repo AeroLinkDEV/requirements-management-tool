@@ -17,7 +17,20 @@ public sealed record ReopenVerificationImpactRequest(string Rationale);
 public sealed record IncludeChangeRequestRequest(Guid ChangeRequestId, long? ExpectedVersion = null);
 public sealed record CreateTestChangeRequestRequest(TestChangeReviewDiscipline Discipline, Guid[] ChangeRequestIds,
     Guid[]? ProblemReportIds = null, string Title = "", string Problem = "", string Analysis = "",
-    string Solution = "", string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null);
+    string Solution = "", string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null,
+    /// <summary>
+    /// The procedure decisions authored alongside the case, saved with the package in one act.
+    ///
+    /// A change request is created together with the requirement changes it proposes; a package created
+    /// without its procedure decisions would be the same proposal in two halves, the second of which somebody
+    /// has to remember to write. Optional, because a package may still be raised and worked afterwards.
+    /// </summary>
+    CreateTestProcedureChangeRequest[]? ProcedureChanges = null);
+
+/// <summary>One proposed procedure decision, as the authoring page states it before the package exists.</summary>
+public sealed record CreateTestProcedureChangeRequest(string BaseNumber, int Revision, TestProcedureLevel Level,
+    TestProcedureChangeKind Kind, string Title, string Objective, string Preconditions, string Steps,
+    string ExpectedResult, string Rationale, Guid[]? DrivingRequirementRevisionIds = null);
 public sealed record WriteTestChangeRequestCaseRequest(string Title, string Problem, string Analysis,
     string Solution, string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null,
     long? ExpectedVersion = null);
@@ -1190,6 +1203,14 @@ public static class VerificationImpactEndpoints
                     review.IncludeChangeRequest(actor, extra.Id, extra.DisplayNumber, now);
                 review.WriteCase(actor, request.Title, request.Problem, request.Analysis, request.Solution, now,
                     request.ProblemRich, request.AnalysisRich, request.SolutionRich);
+                // Authored with the case and saved with it, the way a change request is created together with
+                // the requirement changes it proposes. The domain refuses a decision that is not well formed,
+                // so a malformed one fails the whole create rather than leaving a half-written package behind.
+                foreach (var change in request.ProcedureChanges ?? [])
+                    review.AddProcedureChange(actor, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
+                        change.Level, change.Kind, change.Title, change.Objective, change.Preconditions,
+                        change.Steps, change.ExpectedResult, change.Rationale,
+                        JsonSerializer.Serialize(change.DrivingRequirementRevisionIds ?? [])), now);
                 // DEC-102: raising the package is itself taking it on. The engineer who built it holds it,
                 // so it appears in My Work and can be worked without a meaningless "Take it on" step.
                 review.Assign(actor, actor, now);

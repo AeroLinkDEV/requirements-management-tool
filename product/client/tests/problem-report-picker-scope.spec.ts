@@ -67,8 +67,10 @@ test('build-specific PR pickers preserve the explicit target while the Project d
   await page.goto(`${root}/system-verification/coverage`)
   await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: '+ New System Test Change Request' }).click()
-  const tcrDialog = page.getByRole('dialog', { name: 'Raise a System test change request' })
-  const tcrPicker = tcrDialog.locator('.problemReportPicker')
+  // The authoring page, not a dialog — raising a package is the same act as raising a change request.
+  await expect(page.getByRole('heading', { name: 'Create System Test Change Request', level: 1 }))
+    .toBeVisible({ timeout: 30_000 })
+  const tcrPicker = page.locator('[data-tcr-editor] .problemReportPicker')
   await tcrPicker.getByRole('searchbox', { name: 'Find controlled PR' }).fill(otherTitle)
   await expect(tcrPicker.getByText(otherTitle)).toHaveCount(0)
   await expect.poll(() => pickerRequests.some(url => url.searchParams.get('search') === otherTitle

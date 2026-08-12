@@ -77,27 +77,48 @@ test('an engineer raises a System test change request with its case from the Cha
   await page.getByRole('link', { name: 'System Test Change Requests' }).click()
   await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
 
+  // A page, not a pop-up: raising a package is the same act as raising a change request, and its counterpart
+  // has always been a page.
   await page.getByRole('button', { name: '+ New System Test Change Request' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Raise a System test change request' })
-  await expect(dialog).toBeVisible()
+  const editor = page.locator('[data-tcr-editor]')
+  await expect(page.getByRole('heading', { name: 'Create System Test Change Request', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await expect(page).toHaveURL(/\/system-verification\/change-requests\/new$/)
+  // The same two numbered stages the requirements editor shows. Addressed as headings, because each stage
+  // name appears twice on the page — once in the progress rail and once on the card it points at.
+  await expect(editor.getByRole('heading', { name: 'Change case', level: 2 })).toBeVisible()
+  await expect(editor.getByRole('heading', { name: 'Procedure changes', level: 2 })).toBeVisible()
 
-  await dialog.getByLabel('Title').fill('Verify the TCR authoring behavior as one package')
-  await dialog.getByLabel('Problem').fill('The approved change introduces behavior with no procedure.')
-  await dialog.getByLabel('Analysis').fill('The behavior spans one procedure boundary and belongs together.')
-  await dialog.getByLabel('Solution').fill('Raise one SYSTCR and write the procedure it needs.')
+  await editor.getByLabel('Title').fill('Verify the TCR authoring behavior as one package')
+  await editor.getByLabel('Problem').fill('The approved change introduces behavior with no procedure.')
+  await editor.getByLabel('Analysis').fill('The behavior spans one procedure boundary and belongs together.')
+  await editor.getByLabel('Solution').fill('Raise one SYSTCR and write the procedure it needs.')
 
-  const sourceCheckbox = dialog.getByRole('checkbox', { name: new RegExp(seeded.sourceNumber.replace('.', '\\.')) })
+  const sourceCheckbox = editor.getByRole('checkbox', { name: new RegExp(seeded.sourceNumber.replace('.', '\\.')) })
   await expect(sourceCheckbox).toBeVisible()
   await sourceCheckbox.check()
 
-  const reportSearch = dialog.getByRole('searchbox', { name: 'Find controlled PR' })
+  const reportSearch = editor.getByRole('searchbox', { name: 'Find controlled PR' })
   await reportSearch.fill(seeded.report.title.slice(-12))
-  const reportChoice = dialog.getByRole('checkbox', { name: new RegExp(seeded.report.displayNumber.replace('.', '\\.')) })
+  const reportChoice = editor.getByRole('checkbox', { name: new RegExp(seeded.report.displayNumber.replace('.', '\\.')) })
   await expect(reportChoice).toBeVisible()
   await reportChoice.check()
 
-  await dialog.getByRole('button', { name: 'Raise SYSTCR' }).click()
-  await expect(page.locator('.workspaceSaved')).toContainText('raised.', { timeout: 30_000 })
+  // Stage two: a procedure decision authored on the page and saved with the package, exactly as a change
+  // request is created together with the requirement changes it proposes.
+  await editor.getByRole('button', { name: '+ Add a procedure decision' }).click()
+  const proposal = editor.locator('[data-procedure-proposal="0"]')
+  await expect(proposal).toBeVisible()
+  await proposal.getByLabel('Procedure number').fill('SYSTP-009901')
+  await proposal.getByLabel('Title').fill('Verify oceanic sequencing under the new behaviour')
+  await proposal.getByLabel('Objective').fill('Show the sequencing holds across the transition.')
+  await proposal.getByLabel('Steps').fill('Exercise the changed behaviour on the rig.')
+  await proposal.getByLabel('Expected result').fill('The sequencing is observed to hold.')
+  await proposal.getByLabel('Rationale').fill('The approved change introduces behaviour with no procedure.')
+
+  // An incomplete decision holds the package back rather than being silently dropped on save.
+  await expect(editor.getByRole('button', { name: 'Raise SYSTCR' })).toBeEnabled()
+
+  await editor.getByRole('button', { name: 'Raise SYSTCR' }).click()
 
   // The package opens onto its workspace so the engineer can start its procedure decisions.
   const workspace = page.getByRole('dialog', { name: /procedure decisions/ })
