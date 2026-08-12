@@ -42,6 +42,8 @@ public static class DependencyInjection
         services.AddHostedService<NotificationDispatchWorker>();
         services.AddSingleton<EvidenceFileStore>();
         services.AddScoped<ManagedDocumentFileService>();
+        services.AddSingleton<IManagedDocumentStorageFaultInjector, NoManagedDocumentStorageFaultInjector>();
+        services.AddScoped<ManagedDocumentStorageCoordinator>();
         services.AddScoped<ManagedDocumentIntegrityService>();
         services.AddScoped<ManagedDocumentShowcaseSeeder>();
         services.AddHostedService<ManagedDocumentIntegrityWorker>();

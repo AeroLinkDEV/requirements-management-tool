@@ -118,6 +118,37 @@ incident with append-only audit evidence. The Project integrity-scan endpoint an
 verification contract to every managed-document attachment. These Project-document incidents do not implicitly
 block an unrelated software build.
 
+## Failure-atomic storage and recovery
+
+Document creation, successor creation, connector check-in, and release-candidate preparation use one bounded
+staging protocol. AeroLink validates authority, revision/session state, expected version, source hash, comments,
+and file profile before reserving permanent object identities. It then records a durable operation key, payload
+hash, Pending state, expected size/hash/object manifest, and planned response. Staged objects are promoted by
+atomic same-volume moves inside the serializable metadata commit window. The operation becomes Available only
+after every attachment row, lifecycle transition, check-in/event row, and object is committed.
+
+The release DOCX and PDF are one candidate set with one operation ID and manifest; neither is exposed as a
+candidate unless both metadata rows and both exact objects commit. Same-key/same-payload retries return the
+original result and cannot create another working version or candidate set. Reusing the key for different
+content or intent returns a conflict. Document creation requires the caller to supply that one-use operation
+key; AeroLink never infers retry identity from document content, so two intentional documents with equal
+business fields remain distinct when their keys differ.
+
+Known failures roll back metadata and move any staged or promoted object into `_quarantine` before reporting the
+operation RolledBack. The Project storage-reconciliation endpoint, also run by the periodic integrity worker,
+fences Pending operations behind a conservative 30-minute lease so it cannot seize a live request. A known
+failed request explicitly surrenders that lease; otherwise only expired operations are treated as interrupted.
+Reconciliation is idempotent: a complete referenced set is verified and finalized; an unreferenced
+set is quarantined and rolled back; a partial candidate/attachment set, dangling editable revision, missing file,
+or hash mismatch opens a deduplicated critical operational alert and remains RepairRequired. Reports identify
+operation IDs and quarantined keys. Operations and health use the configured evidence root and never infer a
+software-build freeze.
+
+An authorized responsible owner, Configuration Manager, Program Manager, or Project Engineering Lead may
+withdraw only a Draft or Returned revision with its expected version and a reason. Withdrawal closes active
+checkouts, revokes connector grants, retains and marks controlled attachments withdrawn, and appends document and
+security-audit evidence. In Review, Released, and Superseded revisions remain immutable.
+
 ## Operational notes
 
 Managed document binaries use the existing controlled evidence store and are included with the PostgreSQL

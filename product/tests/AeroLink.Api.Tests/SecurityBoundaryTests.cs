@@ -314,7 +314,8 @@ public sealed class SecurityBoundaryTests
 
 internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool allowDemoAccounts = false,
     string? showcaseTemplate = null, string? staticFilesRoot = null,
-    DbCommandInterceptor? commandInterceptor = null) : WebApplicationFactory<Program>
+    DbCommandInterceptor? commandInterceptor = null,
+    IManagedDocumentStorageFaultInjector? storageFaultInjector = null) : WebApplicationFactory<Program>
 {
     public const string BootstrapSecret = "test-bootstrap-secret-0123456789-abcdef";
     public const string AdministratorPassword = "Bootstrap-Admin!2026";
@@ -369,6 +370,11 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
                 options.UseSqlite(ConnectionString).AddInterceptors(new SaveRaceInterceptor());
                 if (commandInterceptor is not null) options.AddInterceptors(commandInterceptor);
             });
+            if (storageFaultInjector is not null)
+            {
+                services.RemoveAll<IManagedDocumentStorageFaultInjector>();
+                services.AddSingleton(storageFaultInjector);
+            }
         });
     }
 

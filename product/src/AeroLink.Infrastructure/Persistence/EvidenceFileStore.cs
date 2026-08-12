@@ -6,6 +6,8 @@ namespace AeroLink.Infrastructure.Persistence;
 
 public sealed record StoredEvidence(string OriginalFileName, string ContentType, long Size, string Sha256, string StorageKey);
 public sealed record RestoredEvidence(string? QuarantineKey);
+public sealed record StagedEvidence(string OriginalFileName, string ContentType, long Size, string Sha256,
+    string StagingKey, string StorageKey);
 
 public sealed class EvidenceIntegrityException(string code, string message, Exception? innerException = null)
     : IOException(message, innerException)
@@ -27,23 +29,72 @@ public sealed class EvidenceFileStore
     public string RootPath => _root;
     public async Task<StoredEvidence> StoreAsync(Stream source, string originalFileName, string contentType, CancellationToken ct)
     {
-        var safeName = Path.GetFileName(originalFileName); if (string.IsNullOrWhiteSpace(safeName)) throw new InvalidOperationException("A valid evidence filename is required.");
-        EnsureNoReparsePoints(_root);
-        var temp = Path.Combine(_root, $"upload-{Guid.NewGuid():N}.tmp"); long size = 0; string hash;
+        var staged = await StageAsync(source, Guid.NewGuid(), "object", originalFileName, contentType, ct);
         try
         {
-            await using (var output = File.Create(temp))
+            await PromoteAsync(staged, ct);
+            return new(staged.OriginalFileName, staged.ContentType, staged.Size, staged.Sha256, staged.StorageKey);
+        }
+        catch { Delete(staged.StagingKey); throw; }
+    }
+
+    public async Task<StagedEvidence> StageAsync(Stream source, Guid operationId, string slot,
+        string originalFileName, string contentType, CancellationToken ct)
+    {
+        var safeName = Path.GetFileName(originalFileName); if (string.IsNullOrWhiteSpace(safeName)) throw new InvalidOperationException("A valid evidence filename is required.");
+        var safeSlot = new string((slot ?? "object").Where(char.IsLetterOrDigit).ToArray());
+        if (safeSlot.Length == 0) safeSlot = "object";
+        EnsureNoReparsePoints(_root);
+        var stagingKey = $"_staging/{operationId:N}/{safeSlot}-{Guid.NewGuid():N}.stage";
+        var stagingPath = Resolve(stagingKey); Directory.CreateDirectory(Path.GetDirectoryName(stagingPath)!);
+        long size = 0; string hash;
+        try
+        {
+            await using (var output = new FileStream(stagingPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920,
+                FileOptions.Asynchronous | FileOptions.SequentialScan | FileOptions.WriteThrough))
             using (var sha = SHA256.Create())
             {
                 var buffer = new byte[81920]; int read;
-                while ((read = await source.ReadAsync(buffer, ct)) > 0) { size += read; if (size > 100 * 1024 * 1024) throw new InvalidOperationException("Evidence files are limited to 100 MB."); sha.TransformBlock(buffer, 0, read, null, 0); await output.WriteAsync(buffer.AsMemory(0, read), ct); }
-                sha.TransformFinalBlock([], 0, 0); hash = Convert.ToHexString(sha.Hash!).ToLowerInvariant();
+                while ((read = await source.ReadAsync(buffer, ct)) > 0)
+                {
+                    size += read; if (size > 100 * 1024 * 1024) throw new InvalidOperationException("Evidence files are limited to 100 MB.");
+                    sha.TransformBlock(buffer, 0, read, null, 0); await output.WriteAsync(buffer.AsMemory(0, read), ct);
+                }
+                await output.FlushAsync(ct); sha.TransformFinalBlock([], 0, 0); hash = Convert.ToHexString(sha.Hash!).ToLowerInvariant();
             }
-            var key = $"{hash[..2]}/{hash}-{Guid.NewGuid():N}{Path.GetExtension(safeName).ToLowerInvariant()}"; var destination = Resolve(key); EnsureNoReparsePoints(destination); Directory.CreateDirectory(Path.GetDirectoryName(destination)!); File.Move(temp, destination);
-            return new(safeName, contentType ?? "application/octet-stream", size, hash, key);
+            if (size == 0) throw new InvalidOperationException("Evidence files cannot be empty.");
+            var finalKey = $"{hash[..2]}/{hash}-{Guid.NewGuid():N}{Path.GetExtension(safeName).ToLowerInvariant()}";
+            return new(safeName, contentType ?? "application/octet-stream", size, hash, stagingKey, finalKey);
         }
-        finally { if (File.Exists(temp)) File.Delete(temp); }
+        catch { if (File.Exists(stagingPath)) File.Delete(stagingPath); throw; }
     }
+
+    public async Task PromoteAsync(StagedEvidence staged, CancellationToken ct)
+    {
+        var source = Resolve(staged.StagingKey); var destination = Resolve(staged.StorageKey);
+        EnsureNoReparsePoints(source); EnsureNoReparsePoints(destination); ct.ThrowIfCancellationRequested();
+        if (File.Exists(destination))
+        {
+            await using var verified = await OpenVerifiedReadAsync(staged.StorageKey, staged.Size, staged.Sha256, ct);
+            if (File.Exists(source)) File.Delete(source); return;
+        }
+        if (!File.Exists(source)) throw new EvidenceIntegrityException("staged_missing", "The staged evidence object is missing.");
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!); File.Move(source, destination);
+        await using var promoted = await OpenVerifiedReadAsync(staged.StorageKey, staged.Size, staged.Sha256, ct);
+    }
+
+    public string? Quarantine(string storageKey, Guid operationId, string reason)
+    {
+        var source = Resolve(storageKey); if (!File.Exists(source)) return null;
+        var safeReason = new string((reason ?? "reconcile").Where(char.IsLetterOrDigit).Take(30).ToArray());
+        var key = $"_quarantine/storage-{operationId:N}-{safeReason}-{Guid.NewGuid():N}-{Path.GetFileName(source)}";
+        var destination = Resolve(key); Directory.CreateDirectory(Path.GetDirectoryName(destination)!); File.Move(source, destination); return key;
+    }
+
+    public IReadOnlyList<string> EnumerateStagedKeys() => Directory.Exists(Resolve("_staging"))
+        ? Directory.EnumerateFiles(Resolve("_staging"), "*.stage", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(_root, path).Replace(Path.DirectorySeparatorChar, '/')).ToList()
+        : [];
     public Stream OpenRead(string storageKey) => File.OpenRead(Resolve(storageKey));
     public async Task<FileStream> OpenVerifiedReadAsync(string storageKey, long expectedSize, string expectedSha256, CancellationToken ct)
     {
