@@ -268,18 +268,35 @@ public static class WorkspaceEndpoints
             });
         });
 
-        app.MapGet("/api/directory", async (Guid? programId, Guid? projectId, string? search, int? limit, string? authority, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/directory", async (Guid? programId, Guid? projectId, string? search, int? limit, string? authority, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var selectedProgram = programId ?? (projectId is null ? null : await db.Projects.Where(x=>x.Id==projectId).Select(x=>(Guid?)x.ProgramId).SingleOrDefaultAsync(ct));
             if(selectedProgram is null)return Results.BadRequest(new{error="Choose a Program or Project directory context."});
-            if(!string.IsNullOrWhiteSpace(authority)&&!string.Equals(authority,ProblemReportOwnerAuthority.DirectoryAuthority,StringComparison.Ordinal))
+            if(!string.IsNullOrWhiteSpace(authority)
+                && !string.Equals(authority,ProblemReportOwnerAuthority.DirectoryAuthority,StringComparison.Ordinal)
+                && !string.Equals(authority,ManagedDocumentAssignmentPolicy.DirectoryAuthority,StringComparison.Ordinal))
                 return Results.BadRequest(new{error="The requested directory authority is not supported.",code="directory_authority_unsupported"});
+            if(string.Equals(authority,ManagedDocumentAssignmentPolicy.DirectoryAuthority,StringComparison.Ordinal)&&projectId is null)
+                return Results.BadRequest(new{error="Managed-document author eligibility requires a Project directory context.",code="project_context_required"});
             var actor=http.UserAccount();if(!actor.IsAdministrator&&!actor.Programs.Any(x=>x.ProgramId==selectedProgram.Value))return Results.Forbid();
             var members = await (from membership in db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == selectedProgram && x.EndedAt == null)
                                  join user in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active) on membership.UserId equals user.Id
                                  select new { user.Id, user.UserName, user.DisplayName, user.Email, role = membership.Role }).ToListAsync(ct);
+            HashSet<string>? managedDocumentAuthors = null;
+            if (string.Equals(authority, ManagedDocumentAssignmentPolicy.DirectoryAuthority, StringComparison.Ordinal))
+            {
+                managedDocumentAuthors = await ManagedDocumentAssignmentPolicy.EligibleUserNamesAsync(db, identity, projectId!.Value, DateTimeOffset.UtcNow, ct);
+                var existingIds = members.Select(x => x.Id).ToHashSet();
+                var delegated = await (from delegation in db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == selectedProgram && x.Role == ProgramRole.Engineer && x.RevokedAt == null)
+                                       join user in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active) on delegation.DelegateUserId equals user.Id
+                                       where !existingIds.Contains(user.Id)
+                                       select new { user.Id, user.UserName, user.DisplayName, user.Email, role = ProgramRole.Engineer }).ToListAsync(ct);
+                members.AddRange(delegated.Where(x => managedDocumentAuthors.Contains(x.UserName)));
+            }
             var people=members.GroupBy(x => new { x.Id, x.UserName, x.DisplayName, x.Email })
-                .Where(x=>string.IsNullOrWhiteSpace(authority)||ProblemReportOwnerAuthority.IsEligible(x.Select(r=>r.role)))
+                .Where(x=>string.IsNullOrWhiteSpace(authority)
+                    || string.Equals(authority,ProblemReportOwnerAuthority.DirectoryAuthority,StringComparison.Ordinal)&&ProblemReportOwnerAuthority.IsEligible(x.Select(r=>r.role))
+                    || string.Equals(authority,ManagedDocumentAssignmentPolicy.DirectoryAuthority,StringComparison.Ordinal)&&managedDocumentAuthors!.Contains(x.Key.UserName))
                 .Select(x => {var roles=x.Select(r=>r.role.ToString()).Order().ToList();return new{x.Key.Id,x.Key.UserName,x.Key.DisplayName,x.Key.Email,title=DirectoryTitles.For(x.Key.UserName,roles),roles};});
             var q=search?.Trim()??"";
             if(q.Length>0)people=people.Where(x=>x.DisplayName.Contains(q,StringComparison.OrdinalIgnoreCase)||x.UserName.Contains(q,StringComparison.OrdinalIgnoreCase)||x.Email.Contains(q,StringComparison.OrdinalIgnoreCase)||x.title.Contains(q,StringComparison.OrdinalIgnoreCase)||x.roles.Any(r=>r.Contains(q,StringComparison.OrdinalIgnoreCase)));

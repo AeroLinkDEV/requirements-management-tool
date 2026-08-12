@@ -151,6 +151,8 @@ public sealed class ManagedDocumentApiTests
                 new RoleDelegation(scope.ProgramId, lead.Id, delegated.Id, ProgramRole.Engineer, now.AddMinutes(-1), now.AddDays(1), "Temporary document authoring coverage.", "admin", now));
             await db.SaveChangesAsync();
         }
+        var delegatedDirectory = await administrator.GetFromJsonAsync<JsonElement>($"/api/directory?projectId={scope.ProjectId}&authority=ManagedDocumentAuthor&search=delegated.author");
+        Assert.Contains(delegatedDirectory.EnumerateArray(), person => person.GetProperty("userName").GetString() == "delegated.author");
         foreach (var invalidOwner in new[] { "missing.person", "inactive.author", "other.author", "admin" })
         {
             using var invalid = await administrator.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SQAP", documentType = "Software Quality Assurance Plan", title = "Invalid assignment", ownerId = invalidOwner, formalChangeSummary = "Must not persist." });

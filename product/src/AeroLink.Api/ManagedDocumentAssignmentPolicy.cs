@@ -11,6 +11,8 @@ namespace AeroLink.Api;
 /// </summary>
 internal static class ManagedDocumentAssignmentPolicy
 {
+    public const string DirectoryAuthority = "ManagedDocumentAuthor";
+
     public static async Task<bool> IsEligibleAsync(AeroLinkDbContext db, IdentityService identity, Guid projectId,
         string? userName, DateTimeOffset now, CancellationToken ct)
     {
