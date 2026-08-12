@@ -163,9 +163,9 @@ type Workspace = {
  */
 const API = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://127.0.0.1:5080" : "");
 
-function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, context, density, onNavigate, onSearch, onDisplay, onExitBuild, onSignOut }:{
+function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, context, projectWide, density, onNavigate, onSearch, onDisplay, onExitBuild, onSignOut }:{
   user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;
-  artifactKind:string;density:WorkspaceDensity;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
+  artifactKind:string;projectWide:boolean;density:WorkspaceDensity;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
 }) {
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
@@ -178,7 +178,8 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
     // Fetched on hover or keyboard focus, so the workspace's code is usually already here by the time the
     // click is. Both events, because a keyboard user never hovers anything.
     const warm = () => viewCode[target]?.warm();
-    return <a href={context ? routePath(context,target,area,undefined,kind) : "#"} className={`${topLevel?"navSectionLink ":""}${activeItem?"active":""}`.trim()} aria-label={accessibleLabel} aria-current={activeItem?"page":undefined} onPointerEnter={warm} onFocus={warm} onClick={event=>{event.preventDefault();onNavigate(target,area,undefined,kind)}}>
+    const linkContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);
+    return <a href={linkContext ? routePath(linkContext,target,area,undefined,kind) : "#"} className={`${topLevel?"navSectionLink ":""}${activeItem?"active":""}`.trim()} aria-label={accessibleLabel} aria-current={activeItem?"page":undefined} onPointerEnter={warm} onFocus={warm} onClick={event=>{event.preventDefault();onNavigate(target,area,undefined,kind)}}>
       <i aria-hidden="true">{icon}</i><span>{topLevel?label.toUpperCase():label}</span>
     </a>;
   };
@@ -202,9 +203,9 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
             person, says "Build 1.6". Three type sizes competing in one small card did not help either, so the
             standing "BUILD" label goes and the name carries it. The formal identifier stays reachable on
             hover and in the accessible name, because it is what a configuration record is filed under. */}
-        <div className="activeBuildIdentity" aria-label={`Active build ${release?.version} (${officialBuild})`} title={officialBuild}>
-          <strong>Build {release?.version}</strong>
-          <span>{release?.isReleased ? "Released · read-only" : "In work"}</span>
+        <div className="activeBuildIdentity" aria-label={projectWide?"Project-wide documentation":`Active build ${release?.version} (${officialBuild})`} title={projectWide?"Independent of software-build lifecycle":officialBuild}>
+          <strong>{projectWide?"Project documentation":`Build ${release?.version}`}</strong>
+          <span>{projectWide?"Project-wide":release?.isReleased ? "Released · read-only" : "In work"}</span>
         </div>
         <button type="button" className="exitBuild" onClick={onExitBuild}>← Back to Software Builds</button>
       </div>
@@ -272,7 +273,8 @@ function App() {
       const routedProgram=initialRoute.programId?next.find(x=>x.program.id===initialRoute.programId):undefined;
       const routedProject=initialRoute.projectId?routedProgram?.projects.find(x=>x.project.id===initialRoute.projectId):undefined;
       const routedRelease=initialRoute.releaseId?routedProject?.releases.find(x=>x.id===initialRoute.releaseId):undefined;
-      if((initialRoute.programId||initialRoute.projectId||initialRoute.releaseId)&&(!routedProgram||!routedProject||!routedRelease))setView("notFound");
+      const projectOnlyRoute=initialRoute.view==="managedDocuments";
+      if((initialRoute.programId||initialRoute.projectId||initialRoute.releaseId)&&(!routedProgram||!routedProject||(!projectOnlyRoute&&!routedRelease)))setView("notFound");
       // A Project named in the path wins over the first one that happens to exist. The two pages above a
       // build carry no program or release in their URL, so without this a reload of one of them keeps the
       // path while quietly showing a different Project's records.
@@ -285,6 +287,7 @@ function App() {
       // with no builds — the import practice one — would otherwise become the default the moment it sorted
       // ahead, and every page that reads the selected Project would quietly describe an empty Program.
       const program=routedProgram??namedProgram??next.find(x=>x.projects.some(y=>y.releases.length))??next[0],project=routedProject??namedProject??program?.projects[0],release=routedRelease??[...(project?.releases??[])].reverse().find(x=>!x.isReleased)??project?.releases.at(-1);
+      if(initialRoute.view==="managedDocuments"&&initialRoute.releaseId&&routedProgram&&routedProject)history.replaceState({},"",routePath({programId:routedProgram.program.id,projectId:routedProject.project.id,releaseId:initialRoute.releaseId},"managedDocuments","system",initialRoute.artifactId));
       setActiveId((current) => namedProgram?.program.id ?? (next.some(x=>x.program.id===current)?current:program?.program.id||""));
       setSelectedProjectId((current)=>namedProject?.project.id ?? (program?.projects.some(x=>x.project.id===current)?current:project?.project.id||""));
       setSelectedReleaseId((current)=>project?.releases.some(x=>x.id===current)?current:release?.id||"");
@@ -428,7 +431,7 @@ function App() {
       </div>
     );
   const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
-  const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");if(context){const path=routePath(context,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+  const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
   const linkPendingAssessment=async(changeRequestId:string)=>{
     if(!pendingAssessmentLink)return true
     try{await apiRequest(`${API}/api/downstream-assessments/${pendingAssessmentLink.assessmentId}/change-requests`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({changeRequestId})});setPendingAssessmentLink(undefined);return true}
@@ -493,11 +496,11 @@ function App() {
   // Rendered beside Software Builds rather than inside a build workspace, because an import does not belong
   // to a build — it creates one. There is no build to have entered when this page is what you need.
   if(view==="baselineImports"&&project)return <BaselineImportCenter user={user} api={API} projectId={project.project.id} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onSignOut={signOut}/>;
-  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} density={density} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
+  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} projectWide={view==="managedDocuments"} density={density} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
   const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Change Requests",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
-  const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b><span>Build {release?.version}</span><b aria-hidden="true">›</b><strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
+  const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b>{view!=="managedDocuments"&&<><span>Build {release?.version}</span><b aria-hidden="true">›</b></>}<strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{view==="managedDocuments"?"Project-wide":release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
   const palette=context?<CommandPalette api={API} context={context} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
   const experience=<ExperienceControls open={displayOpen} density={density} motion={motion} onDensityChange={next=>{setDensity(next);setToast(`${next==='compact'?'Compact':'Comfortable'} density applied`)}} onMotionChange={next=>{setMotion(next);setToast(`${next==='reduced'?'Reduced':'Purposeful'} motion applied`)}} onClose={()=>setDisplayOpen(false)}/>;
   const feedback=toast?<div className="experienceToast" role="status" aria-live="polite"><span>✓</span><b>{toast}</b></div>:null;
@@ -708,18 +711,15 @@ function App() {
         )}
       />
     );
-  if (view === "managedDocuments" && project && release)
+  if (view === "managedDocuments" && project)
     return inShell(
       <ManagedDocumentationCenter
         api={API}
         projectId={project.project.id}
-        releaseId={release.id}
-        releaseVersion={release.version}
-        readOnly={release.isReleased}
         user={user}
         initialDocumentId={selectedArtifactId || undefined}
         onSelected={(id)=>navigate("managedDocuments","system",id,undefined,true)}
-        onBack={() => navigate("dashboard")}
+        onBack={exitBuild}
       />
     );
   if (view === "problemReports" && project)

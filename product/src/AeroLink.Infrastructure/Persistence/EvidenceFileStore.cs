@@ -37,6 +37,7 @@ public sealed class EvidenceFileStore
     }
     public Stream OpenRead(string storageKey) => File.OpenRead(Resolve(storageKey));
     public bool Exists(string storageKey) => File.Exists(Resolve(storageKey));
+    public long GetSize(string storageKey) => new FileInfo(Resolve(storageKey)).Length;
     public async Task<string> ComputeSha256Async(string storageKey, CancellationToken ct)
     {
         await using var stream = File.OpenRead(Resolve(storageKey));

@@ -76,6 +76,8 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   // creates one. There is no build to have entered when this page is the thing you need.
   if (parts.length === 3 && parts[0] === "projects" && parts[2] === "imported-baselines")
     return { view: "baselineImports", discipline: "system", projectSlug: decoded(parts[1]) };
+  if (parts[0] === "programs" && parts[2] === "projects" && parts[4] === "documentation-center" && parts.length <= 6)
+    return { programId: decoded(parts[1]), projectId: decoded(parts[3]), view: "managedDocuments", discipline: "system", artifactId: decoded(parts[5]) };
   if (parts[0] !== "programs" || parts[2] !== "projects" || parts[4] !== "releases")
     return { view: "notFound", discipline: "system" };
 
@@ -210,7 +212,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
       return `${root}/${discipline === "software" ? "software" : "systems"}/documents`;
     }
     case "problemReports": return `${root}/problem-reports${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
-    case "managedDocuments": return `${root}/documentation-center${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
+    case "managedDocuments": return `/programs/${context.programId}/projects/${context.projectId}/documentation-center${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
     case "code": return `${root}/code`;
     case "lifecycle": return artifactId ? `${root}/traceability/${encodeURIComponent(artifactId)}` : `${root}/traceability`;
     case "planning": return `${root}/release-planning`;

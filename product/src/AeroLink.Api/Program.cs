@@ -183,7 +183,9 @@ app.Use(async (context, next) =>
         {context.Response.StatusCode=StatusCodes.Status403Forbidden;await context.Response.WriteAsJsonAsync(new{error="You are not authorized to enter this build.",code="build_context_forbidden"});return;}
         if(context.Request.Query.TryGetValue("projectId",out var contextProject)&&Guid.TryParse(contextProject.FirstOrDefault(),out var requestedProject)&&requestedProject!=selectedBuild.ProjectId)
         {context.Response.StatusCode=StatusCodes.Status409Conflict;await context.Response.WriteAsJsonAsync(new{error="The request addresses a different project than the active build.",code="build_project_mismatch"});return;}
-        if(context.Request.Query.TryGetValue("releaseId",out var contextRelease)&&Guid.TryParse(contextRelease.FirstOrDefault(),out var requestedRelease)&&requestedRelease!=selectedBuild.Id)
+        var projectScopedManagedDocumentRequest=path.StartsWith("/api/managed-documents",StringComparison.OrdinalIgnoreCase)
+            ||path.StartsWith("/api/document-connector",StringComparison.OrdinalIgnoreCase);
+        if(!projectScopedManagedDocumentRequest&&context.Request.Query.TryGetValue("releaseId",out var contextRelease)&&Guid.TryParse(contextRelease.FirstOrDefault(),out var requestedRelease)&&requestedRelease!=selectedBuild.Id)
         {context.Response.StatusCode=StatusCodes.Status409Conflict;await context.Response.WriteAsJsonAsync(new{error="The request addresses a different build than the active workspace.",code="build_context_mismatch"});return;}
         activeBuildId=selectedBuild.Id;
 
@@ -199,6 +201,9 @@ app.Use(async (context, next) =>
         // qualify only when the authoritative request/session identifies a Problem Report. A forged query
         // parameter therefore cannot turn editing for a build-owned artifact into a Project-scoped mutation.
         var projectScopedProblemReportMutation=path.StartsWith("/api/problem-reports",StringComparison.OrdinalIgnoreCase);
+        // Managed Documentation Center records are Project-scoped. A build header may remain while a user
+        // follows a legacy deep link, but it cannot make the Project document or its connector workflow read-only.
+        var projectScopedManagedDocumentMutation=projectScopedManagedDocumentRequest;
         if(!projectScopedProblemReportMutation&&path.Equals("/api/controlled-editing/checkout",StringComparison.OrdinalIgnoreCase)
             &&context.Request.Method=="POST")
         {
@@ -220,7 +225,7 @@ app.Use(async (context, next) =>
                 &&await db.ArtifactEditSessions.AsNoTracking().AnyAsync(session=>session.Id==editSessionId
                     &&session.ArtifactType=="ProblemReport",context.RequestAborted);
         }
-        var unsafeBuildMutation=!portsAnotherProgramIn&&!projectScopedProblemReportMutation
+        var unsafeBuildMutation=!portsAnotherProgramIn&&!projectScopedProblemReportMutation&&!projectScopedManagedDocumentMutation
             &&context.Request.Method is not ("GET" or "HEAD" or "OPTIONS" or "TRACE")
             &&primaryMutationPrefixes.Any(prefix=>path.StartsWith(prefix,StringComparison.OrdinalIgnoreCase));
         if(selectedBuild.IsReleased&&unsafeBuildMutation)

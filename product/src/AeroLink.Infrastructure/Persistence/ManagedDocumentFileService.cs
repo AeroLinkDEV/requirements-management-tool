@@ -12,6 +12,7 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
     public const string DocxContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     public const string PdfContentType = "application/pdf";
     public const int MaximumDocumentBytes = 100 * 1024 * 1024;
+    public const string SuccessorTransformationProfile = "aerolink-managed-document-successor-v1";
 
     public async Task<byte[]> ReadDocxAsync(Stream input, string fileName, bool requireDraftWatermark, CancellationToken ct)
     {
@@ -87,7 +88,7 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
 
     public static byte[] PrepareNextRevisionDraft(byte[] bytes, string documentNumber, int previousRevision, int nextRevision)
     {
-        ValidateDocx(bytes, requireDraftWatermark: true);
+        ValidateReleaseDocx(bytes);
         using var output = new MemoryStream();
         output.Write(bytes);
         output.Position = 0;
@@ -98,19 +99,39 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
             ReplaceEntryText(archive, "word/document.xml", xml =>
             {
                 xml = xml.Replace($"{documentNumber}  |  REVISION {previous}", $"{documentNumber}  |  REVISION {next}", StringComparison.Ordinal);
-                var controlLabel = "<w:t xml:space=\"preserve\">Revision</w:t>";
-                var labelIndex = xml.IndexOf(controlLabel, StringComparison.Ordinal);
-                if (labelIndex < 0) return xml;
-                var previousValue = $"<w:t xml:space=\"preserve\">{previous}</w:t>";
-                var nextValue = $"<w:t xml:space=\"preserve\">{next}</w:t>";
-                var valueIndex = xml.IndexOf(previousValue, labelIndex + controlLabel.Length, StringComparison.Ordinal);
-                return valueIndex < 0 ? xml : string.Concat(xml.AsSpan(0, valueIndex), nextValue, xml.AsSpan(valueIndex + previousValue.Length));
+                xml = ReplaceLabeledValue(xml, "Revision", previous, next);
+                return ReplaceLabeledValue(xml, "Status", "Released", "Draft");
             });
-            ReplaceEntryText(archive, "word/footer1.xml", xml => xml.Replace($"{documentNumber} Rev {previous} |", $"{documentNumber} Rev {next} |", StringComparison.Ordinal));
+            foreach (var footer in archive.Entries.Where(x => x.FullName.StartsWith("word/footer", StringComparison.OrdinalIgnoreCase) && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).Select(x => x.FullName).ToList())
+                ReplaceEntryText(archive, footer, xml => xml.Replace($"{documentNumber} Rev {previous} | Released |", $"{documentNumber} Rev {next} | Draft |", StringComparison.Ordinal));
+            foreach (var header in archive.Entries.Where(x => x.FullName.StartsWith("word/header", StringComparison.OrdinalIgnoreCase) && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).Select(x => x.FullName).ToList())
+                ReplaceEntryText(archive, header, AddDraftWatermark);
         }
         var result = output.ToArray();
         ValidateDocx(result, requireDraftWatermark: true);
         return result;
+    }
+
+    private const string DraftWatermarkXml = "<w:r><w:rPr><w:noProof/></w:rPr><w:pict><v:shape id=\"AeroLinkWatermark\" o:spid=\"_x0000_s2049\" type=\"#_x0000_t136\" style=\"position:absolute;margin-left:0;margin-top:0;width:468pt;height:117pt;rotation:315;z-index:-251658752;mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin\" o:allowincell=\"f\" fillcolor=\"#c8d0d8\" stroked=\"f\"><v:textpath style=\"font-family:&quot;Calibri&quot;;font-size:1pt\" string=\"DRAFT\"/><v:fill opacity=\".45\"/></v:shape></w:pict></w:r>";
+
+    private static string AddDraftWatermark(string xml)
+    {
+        if (xml.Contains("AeroLinkWatermark", StringComparison.Ordinal)) return xml;
+        var rootStart = xml.IndexOf("<w:hdr", StringComparison.Ordinal); var rootEnd = rootStart < 0 ? -1 : xml.IndexOf('>', rootStart);
+        if (rootEnd < 0) return xml;
+        if (!xml[rootStart..rootEnd].Contains("xmlns:v=", StringComparison.Ordinal)) { xml = xml.Insert(rootEnd, " xmlns:v=\"urn:schemas-microsoft-com:vml\""); rootEnd = xml.IndexOf('>', rootStart); }
+        if (!xml[rootStart..rootEnd].Contains("xmlns:o=", StringComparison.Ordinal)) xml = xml.Insert(rootEnd, " xmlns:o=\"urn:schemas-microsoft-com:office:office\"");
+        var paragraphProperties = xml.IndexOf("</w:pPr>", StringComparison.Ordinal);
+        return paragraphProperties >= 0 ? xml.Insert(paragraphProperties + "</w:pPr>".Length, DraftWatermarkXml) : xml.Replace("<w:p>", "<w:p>" + DraftWatermarkXml, StringComparison.Ordinal);
+    }
+
+    private static string ReplaceLabeledValue(string xml, string label, string previous, string next)
+    {
+        var controlLabel = $"<w:t xml:space=\"preserve\">{label}</w:t>"; var labelIndex = xml.IndexOf(controlLabel, StringComparison.Ordinal);
+        if (labelIndex < 0) return xml;
+        var previousValue = $"<w:t xml:space=\"preserve\">{previous}</w:t>"; var nextValue = $"<w:t xml:space=\"preserve\">{next}</w:t>";
+        var valueIndex = xml.IndexOf(previousValue, labelIndex + controlLabel.Length, StringComparison.Ordinal);
+        return valueIndex < 0 ? xml : string.Concat(xml.AsSpan(0, valueIndex), nextValue, xml.AsSpan(valueIndex + previousValue.Length));
     }
 
     public async Task<ControlledAttachment> StoreAsync(Guid projectId, Guid documentId, Guid revisionId,

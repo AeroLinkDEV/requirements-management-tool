@@ -36,7 +36,7 @@ public sealed class ManagedDocumentFileTests
     [Fact]
     public void Starting_the_next_revision_updates_current_control_metadata_but_preserves_history()
     {
-        var original = ProfessionalPublicationRenderer.Render(Publication("Draft", "DRAFT", "00"), "docx", "SDP-000001.00").Content;
+        var original = ProfessionalPublicationRenderer.Render(Publication("Released", null, "00"), "docx", "SDP-000001.00").Content;
 
         var updated = ManagedDocumentFileService.PrepareNextRevisionDraft(original, "SDP-000001", 0, 1);
         using var archive = new System.IO.Compression.ZipArchive(new MemoryStream(updated), System.IO.Compression.ZipArchiveMode.Read);
@@ -47,8 +47,24 @@ public sealed class ManagedDocumentFileTests
         Assert.Contains("<w:t xml:space=\"preserve\">Revision</w:t>", documentXml);
         Assert.Contains("<w:t xml:space=\"preserve\">01</w:t>", documentXml);
         Assert.Contains("SDP-000001 Rev 01 |", footerXml);
+        Assert.Contains("| Draft |", footerXml);
         Assert.Contains("<w:t xml:space=\"preserve\">00</w:t>", documentXml);
         Assert.True(ManagedDocumentFileService.ContainsDraftWatermark(updated));
+    }
+
+    [Fact]
+    public void Starting_a_successor_adds_valid_watermark_namespaces_to_a_clean_word_header()
+    {
+        var original = ProfessionalPublicationRenderer.Render(Publication("Released", null, "00"), "docx", "SDP-000001.00").Content;
+        using var buffer = new MemoryStream(); buffer.Write(original); buffer.Position = 0;
+        using (var archive = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Update, true))
+        {
+            var header = archive.GetEntry("word/header1.xml")!; string xml; using (var reader = new StreamReader(header.Open())) xml = reader.ReadToEnd();
+            header.Delete(); var replacement = archive.CreateEntry("word/header1.xml"); using var writer = new StreamWriter(replacement.Open()); writer.Write(xml.Replace(" xmlns:v=\"urn:schemas-microsoft-com:vml\"", "").Replace(" xmlns:o=\"urn:schemas-microsoft-com:office:office\"", ""));
+        }
+        var updated = ManagedDocumentFileService.PrepareNextRevisionDraft(buffer.ToArray(), "SDP-000001", 0, 1);
+        using var result = new System.IO.Compression.ZipArchive(new MemoryStream(updated), System.IO.Compression.ZipArchiveMode.Read);
+        _ = System.Xml.Linq.XDocument.Parse(Read(result, "word/header1.xml"));
     }
 
     [Theory]

@@ -45,7 +45,11 @@ AeroLink artifact revisioning versions controlled engineering content. Candidate
 approved revisions into a build; `/baselines` is the supported Configuration Management surface for candidate work and legacy procedure-manifest bootstrap. Generated DOCX/PDF outputs and release packages record their source baseline,
 template revision, and content hashes.
 
-Documentation Center adds one more controlled boundary without attempting to recreate Word in a browser. A
+Documentation Center adds one more controlled boundary without attempting to recreate Word in a browser. These
+externally authored records are Project-wide aggregates: a stable document has one continuous formal revision
+lineage, one current released head, and at most one active successor, independent of software-build lifecycle.
+Build links are contextual traceability, while generated requirements and procedure publications remain
+build-scoped and retain exact baseline/effectivity behavior. A
 small per-user Windows connector redeems a one-use, short-lived grant for one document revision, downloads the
 exact current DOCX, opens Microsoft Word, maintains an exclusive lease, and returns a new immutable working
 version with a required comment. Draft DOCX files must retain the faint Draft watermark in every section. At the

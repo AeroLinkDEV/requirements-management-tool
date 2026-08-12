@@ -65,6 +65,18 @@ test('legacy context-free change-request routes remain loadable until detail can
     .toMatchObject({ view: 'scr', discipline: 'system', artifactId: 'legacy-a' })
 })
 
+test('Documentation Center has a canonical Project route while legacy build routes remain readable', () => {
+  const canonical = '/programs/program-a/projects/project-a/documentation-center'
+  expect(routePath(context, 'managedDocuments')).toBe(canonical)
+  expect(routePath(context, 'managedDocuments', 'system', 'document-a')).toBe(`${canonical}/document-a`)
+  expect(parseRoute(canonical)).toMatchObject({ view: 'managedDocuments', programId: 'program-a', projectId: 'project-a' })
+  expect(parseRoute(canonical).releaseId).toBeUndefined()
+  expect(parseRoute(`${canonical}/document-a`)).toMatchObject({ view: 'managedDocuments', artifactId: 'document-a' })
+  expect(parseRoute(`${canonical}/document-a`).releaseId).toBeUndefined()
+  expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/documentation-center/document-a'))
+    .toMatchObject({ view: 'managedDocuments', artifactId: 'document-a', releaseId: 'release-a' })
+})
+
 /**
  * The six verification pages, and the corrective action that hangs off one of them.
  *
