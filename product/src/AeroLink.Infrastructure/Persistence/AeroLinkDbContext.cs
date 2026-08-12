@@ -397,6 +397,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ApproverId).HasMaxLength(100).IsRequired();
             b.Property(x => x.ApproverName).HasMaxLength(200).IsRequired();
             b.Property(x => x.StageName).HasMaxLength(120);
+            b.Property(x => x.StageKind).HasConversion<string>().HasMaxLength(20).HasDefaultValue(ReviewStageKind.Review);
             b.Property(x => x.Authority).HasMaxLength(40);
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.HasIndex(x => new { x.ReviewCycleId, x.Position }).IsUnique();
@@ -923,6 +924,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("review_workflow_stages"); b.HasKey(x => x.Id);
             b.Property(x => x.Name).HasMaxLength(120).IsRequired();
             b.Property(x => x.RequiredRole).HasConversion<string>().HasMaxLength(40);
+            // Stored by name, and defaulted to Review rather than the enum's zero value by coincidence: every
+            // stage recorded before this existed was a content review, and the default has to say so on
+            // purpose (LES-004).
+            b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20).HasDefaultValue(ReviewStageKind.Review);
             b.HasIndex(x => new { x.WorkflowId, x.Position }).IsUnique();
         });
         modelBuilder.Entity<NotificationDelivery>(b =>

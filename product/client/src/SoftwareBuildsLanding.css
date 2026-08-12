@@ -27,6 +27,7 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .projectOverviewButton,
 .importedBaselinesButton,
 .personnelButton,
+.approvalConfigurationButton,
 .buildDetailsHelper button {
   min-height: 39px;
   border: 1px solid #cfd9e3;
