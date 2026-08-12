@@ -59,8 +59,28 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
         // an engineer, and every place that asks for Engineer has to accept them.
         var accepted = ProgramRoleAuthority.Satisfying(role).Select(x => x.ToString()).ToList();
         if (user.Programs.Any(x => x.ProgramId == programId && x.Roles.Any(accepted.Contains))) return true;
+        if (await IsStandingBackupAsync(user.Id, programId, role, ct)) return true;
         var delegations = await db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == programId && x.DelegateUserId == user.Id && x.Role == role && x.RevokedAt == null).ToListAsync(ct);
         return delegations.Any(x => x.StartsAt <= now && x.EndsAt > now);
+    }
+
+    /// <summary>
+    /// Whether somebody may act in a role because the project named them the backup for it.
+    ///
+    /// Deliberately unbounded in time: a backup stands until it is removed, so unlike a delegation there is no
+    /// interval to test. The backup must still be a current member of the project — naming somebody who has
+    /// since left must not keep letting them sign.
+    /// </summary>
+    private async Task<bool> IsStandingBackupAsync(Guid userId, Guid programId, ProgramRole role, CancellationToken ct)
+    {
+        var backedRoles = await db.ProjectRoleBackups.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.BackupUserId == userId && x.RemovedAt == null)
+            .Select(x => x.Role)
+            .ToListAsync(ct);
+        if (backedRoles.Count == 0) return false;
+        if (!backedRoles.Any(ProgramRoleAuthority.Satisfying(role).Contains)) return false;
+        return await db.ProgramMemberships.AsNoTracking()
+            .AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null, ct);
     }
     public async Task<bool> HasRoleAsync(Guid userId, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)
     {
@@ -70,13 +90,15 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
         // The same implication as the overload above. Two copies of this check exist and both are reached
         // from live authorization paths, so a rule applied to only one of them is a rule that holds by luck.
         var accepted = ProgramRoleAuthority.Satisfying(role);
-        if (await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == userId && x.ProgramId == programId && accepted.Contains(x.Role), ct)) return true;
+        if (await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && accepted.Contains(x.Role), ct)) return true;
+        if (await IsStandingBackupAsync(userId, programId, role, ct)) return true;
         var delegations = await db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == programId && x.DelegateUserId == userId && x.Role == role && x.RevokedAt == null).ToListAsync(ct);
         return delegations.Any(x => x.StartsAt <= now && x.EndsAt > now);
     }
     private async Task<AuthenticatedUser> MapAsync(UserAccount user, DateTimeOffset now, CancellationToken ct)
     {
-        var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.UserId == user.Id).ToListAsync(ct);
+        // Ended memberships are retained as history and must never reach a session's authority set.
+        var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.UserId == user.Id && x.EndedAt == null).ToListAsync(ct);
         var programs = memberships.GroupBy(x => x.ProgramId).Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList())).ToList();
         return new(user.Id, user.UserName, user.DisplayName, user.Email, user.UserName == SystemAdministratorUserName, programs, user.MustChangePassword);
     }

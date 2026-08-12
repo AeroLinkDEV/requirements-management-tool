@@ -26,6 +26,7 @@ body:has(.buildsLandingPage) { min-width: 0; }
 
 .projectOverviewButton,
 .importedBaselinesButton,
+.personnelButton,
 .buildDetailsHelper button {
   min-height: 39px;
   border: 1px solid #cfd9e3;
@@ -38,8 +39,10 @@ body:has(.buildsLandingPage) { min-width: 0; }
   cursor: pointer;
 }
 .projectOverviewButton:hover,
+.personnelButton:hover,
 .importedBaselinesButton:hover { border-color: #8da5bc; color: #173e61; }
 .importedBaselinesButton:focus-visible,
+.personnelButton:focus-visible,
 .projectOverviewButton:focus-visible,
 .softwareBuildCard button:focus-visible { outline: 3px solid #2c95cc; outline-offset: 3px; }
 

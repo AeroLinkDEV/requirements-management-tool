@@ -274,7 +274,7 @@ public static class WorkspaceEndpoints
             if(!string.IsNullOrWhiteSpace(authority)&&!string.Equals(authority,ProblemReportOwnerAuthority.DirectoryAuthority,StringComparison.Ordinal))
                 return Results.BadRequest(new{error="The requested directory authority is not supported.",code="directory_authority_unsupported"});
             var actor=http.UserAccount();if(!actor.IsAdministrator&&!actor.Programs.Any(x=>x.ProgramId==selectedProgram.Value))return Results.Forbid();
-            var members = await (from membership in db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == selectedProgram)
+            var members = await (from membership in db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == selectedProgram && x.EndedAt == null)
                                  join user in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active) on membership.UserId equals user.Id
                                  select new { user.Id, user.UserName, user.DisplayName, user.Email, role = membership.Role }).ToListAsync(ct);
             var people=members.GroupBy(x => new { x.Id, x.UserName, x.DisplayName, x.Email })

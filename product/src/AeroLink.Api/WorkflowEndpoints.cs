@@ -128,7 +128,7 @@ public static class WorkflowEndpoints
             if (workflow is null) return Results.Ok(new { required = false });
 
             var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => x.ProgramId).SingleAsync(ct);
-            var eligible = await (from membership in db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == programId)
+            var eligible = await (from membership in db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == programId && x.EndedAt == null)
                                   join account in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active)
                                       on membership.UserId equals account.Id
                                   select new { account.UserName, account.DisplayName, membership.Role }).ToListAsync(ct);
@@ -195,7 +195,7 @@ public static class WorkflowEndpoints
         var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
         if (programId is null || userIds.Count == 0) return [];
         var memberships = await db.ProgramMemberships.AsNoTracking()
-            .Where(x => x.ProgramId == programId && userIds.Contains(x.UserId))
+            .Where(x => x.ProgramId == programId && x.EndedAt == null && userIds.Contains(x.UserId))
             .Select(x => new { x.UserId, x.Role }).ToListAsync(ct);
         return userIds.ToDictionary(
             id => id,
@@ -219,7 +219,7 @@ public static class WorkflowEndpoints
             .SingleOrDefaultAsync(ct);
         if (programId is null) return null;
         var roles = await db.ProgramMemberships.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.UserId == userId)
+            .Where(x => x.ProgramId == programId && x.UserId == userId && x.EndedAt == null)
             .Select(x => x.Role).ToListAsync(ct);
         if (roles.Contains(ProgramRole.Administrator)) return ProgramRole.Administrator;
         return roles.Contains(requiredRole) ? requiredRole : null;

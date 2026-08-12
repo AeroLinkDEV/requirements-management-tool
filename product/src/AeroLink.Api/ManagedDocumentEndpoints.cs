@@ -179,7 +179,7 @@ public static class ManagedDocumentEndpoints
         var accounts = await db.UserAccounts.AsNoTracking().Where(x => (x.UserName == request.TechnicalReviewerId || x.UserName == request.FinalApproverId) && x.State == AccountState.Active).ToListAsync(ct); if (accounts.Count != 2) return Results.BadRequest(new { error = "Select two active AeroLink users for document review." });
         var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
         var technicalId = accounts.Single(x => x.UserName == request.TechnicalReviewerId).Id; var finalId = accounts.Single(x => x.UserName == request.FinalApproverId).Id;
-        var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == programId && (x.UserId == technicalId || x.UserId == finalId)).ToListAsync(ct);
+        var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == programId && x.EndedAt == null && (x.UserId == technicalId || x.UserId == finalId)).ToListAsync(ct);
         var technicalRoles = new[] { ProgramRole.Reviewer, ProgramRole.Approver, ProgramRole.SystemEngineeringLead, ProgramRole.SoftwareEngineeringLead, ProgramRole.ProjectEngineeringLead, ProgramRole.EngineeringManager };
         var finalRoles = new[] { ProgramRole.SoftwareQualityAnalyst, ProgramRole.ConfigurationManager, ProgramRole.Approver, ProgramRole.ProgramManager };
         if (!memberships.Any(x => x.UserId == technicalId && technicalRoles.Contains(x.Role))) return Results.BadRequest(new { error = "The technical reviewer needs review or engineering-lead authority in this Program." });
