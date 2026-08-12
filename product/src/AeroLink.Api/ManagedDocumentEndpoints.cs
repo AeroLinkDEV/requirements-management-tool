@@ -257,6 +257,7 @@ public static class ManagedDocumentEndpoints
     {
         var document = await db.ManagedDocuments.SingleOrDefaultAsync(x => x.Id == id, ct); if (document is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, document.ProjectId, ct) || !await http.HasProjectRoleAsync(db, identity, document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
+        if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 1000) return Results.BadRequest(new { error = "Provide a reassignment reason of 1000 characters or fewer." });
         if (!await ManagedDocumentAssignmentPolicy.IsEligibleAsync(db, identity, document.ProjectId, request.AssigneeId, DateTimeOffset.UtcNow, ct)) return Results.BadRequest(new { error = "The new document steward must be an active authorized member or delegate in this Program." });
         try
         {
@@ -276,6 +277,7 @@ public static class ManagedDocumentEndpoints
     {
         var data = await RevisionDataAsync(db, revisionId, ct); if (data is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct) || !await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
+        if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 1000) return Results.BadRequest(new { error = "Provide a reassignment reason of 1000 characters or fewer." });
         if (!await ManagedDocumentAssignmentPolicy.IsEligibleAsync(db, identity, data.Document.ProjectId, request.AssigneeId, DateTimeOffset.UtcNow, ct)) return Results.BadRequest(new { error = "The responsible revision owner must be an active authorized member or delegate in this Program." });
         try
         {

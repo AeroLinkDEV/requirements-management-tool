@@ -43,16 +43,33 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                 nullable: false,
                 defaultValue: "");
 
-            // The legacy OwnerId values are retained verbatim and become the best
-            // available initial stewardship/responsibility evidence. Creation actors
-            // were not stored separately, so mark them from the same retained value;
-            // later assignments are append-only and do not rewrite this backfill.
+            // The legacy OwnerId values are retained verbatim as stewardship and
+            // responsibility. The first retained check-in is better evidence of who
+            // actually initiated a revision than its mutable legacy owner; use it for
+            // immutable authorship when available and fall back without inventing data.
             migrationBuilder.Sql(
                 """
                 UPDATE managed_documents
                 SET "StewardId" = "OwnerId", "CreatedBy" = "OwnerId";
                 UPDATE managed_document_revisions
                 SET "ResponsibleOwnerId" = "OwnerId", "InitiatedBy" = "OwnerId";
+                UPDATE managed_document_revisions revision
+                SET "InitiatedBy" = first_check_in."ActorId"
+                FROM (
+                    SELECT DISTINCT ON ("RevisionId") "RevisionId", "ActorId"
+                    FROM managed_document_check_ins
+                    ORDER BY "RevisionId", "WorkingVersion", "OccurredAt", "Id"
+                ) first_check_in
+                WHERE first_check_in."RevisionId" = revision."Id";
+                UPDATE managed_documents document
+                SET "CreatedBy" = first_check_in."ActorId"
+                FROM (
+                    SELECT DISTINCT ON (revision."DocumentId") revision."DocumentId", check_in."ActorId"
+                    FROM managed_document_revisions revision
+                    JOIN managed_document_check_ins check_in ON check_in."RevisionId" = revision."Id"
+                    ORDER BY revision."DocumentId", revision."Revision", check_in."WorkingVersion", check_in."OccurredAt", check_in."Id"
+                ) first_check_in
+                WHERE first_check_in."DocumentId" = document."Id";
                 """);
 
             migrationBuilder.CreateTable(
