@@ -630,6 +630,7 @@ public static class VerificationEndpoints
         // in the database, because a page of twenty-five that costs a full table read is not paging.
         app.MapGet("/api/test-procedures", async (Guid projectId, Guid? releaseId, string? search, string? scope, string? state,
             string? owner, string? outcome, Guid? requirementRevisionId, string? sort, int? page, int? pageSize, string? ids,
+            Guid? documentId, Guid? sectionId,
             HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             // This endpoint read a Project's controlled procedures without checking the caller was in it.
@@ -650,6 +651,17 @@ public static class VerificationEndpoints
             else if(string.Equals(scope,"Software",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.HighLevel||x.Level==TestProcedureLevel.LowLevel);
             else if(string.Equals(scope,"HighLevelSoftware",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.HighLevel);
             else if(string.Equals(scope,"LowLevelSoftware",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.Level==TestProcedureLevel.LowLevel);
+            // Narrowing to one document, or to one section of it, is what the rail does when a reader picks an
+            // entry — the same act as picking a specification on the requirements side.
+            if (documentId is not null || sectionId is not null)
+            {
+                var placed = db.TestProcedureDocumentNodes.AsNoTracking()
+                    .Where(x => x.ProcedureId != null && x.Type == TestProcedureDocumentNodeType.Procedure);
+                if (documentId is not null) placed = placed.Where(x => x.DocumentId == documentId);
+                if (sectionId is not null) placed = placed.Where(x => x.ParentId == sectionId);
+                var placedIds = await placed.Select(x => x.ProcedureId!.Value).ToListAsync(ct);
+                source = source.Where(x => placedIds.Contains(x.Id));
+            }
             // Eligibility is Project plus the selected build's exact procedure manifest plus discipline.
             // Hydration of an already selected exact procedure runs against this scoped source without the
             // search predicate, so a selection beyond the current result page stays reachable.
@@ -794,8 +806,70 @@ public static class VerificationEndpoints
                     // value stays on legacy revisions as the honest record of who was once named.
                     requirementCount = latest is null ? 0 : coverage.Count(c => c.ProcedureRevisionId == latest.Id), lastOutcome = lastRun?.Outcome.ToString(), lastExecutedAt = lastRun?.ExecutedAt }; })
                 .ToList();
+            // Carried on the list response rather than fetched separately, exactly as the requirements
+            // workspace carries its own: the views are part of what this list offers, and a second request
+            // for them would show a worklist rail that arrives after the worklist.
+            var actorId = http.UserAccount().Id;
+            var views = await db.SavedProcedureViews.AsNoTracking()
+                .Where(x => x.ProjectId == projectId && (x.OwnerId == actorId || x.IsShared))
+                .OrderBy(x => x.Name)
+                .Select(x => new { x.Id, x.Name, x.QueryJson, x.ColumnsJson, x.IsShared, owned = x.OwnerId == actorId })
+                .ToListAsync(ct);
             return Results.Ok(new { page = currentPage, pageSize = size, totalCount, totalPages = (int)Math.Ceiling(totalCount / (double)size),
-                items = projected });
+                views, items = projected });
+        });
+
+        app.MapPost("/api/test-procedures/views", async (CreateSavedViewRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, request.ProjectId, ct)) return Results.Forbid();
+            var name = (request.Name ?? "").Trim();
+            if (name.Length == 0) return Results.BadRequest(new { error = "A saved view needs a name.", code = "saved_view_name_required" });
+            // Validated before storage, not on the way out. A view is a worklist somebody else opens, so a
+            // field this Explorer cannot apply or a column it cannot show must never reach the record.
+            var contract = ProcedureSavedViewContract.Normalize(request.QueryJson, request.ColumnsJson);
+            if (!contract.Valid) return Results.BadRequest(new { error = contract.Error, code = "saved_view_contract_invalid" });
+            var owner = http.UserAccount().Id;
+            if (await db.SavedProcedureViews.AnyAsync(x => x.ProjectId == request.ProjectId && x.OwnerId == owner && x.Name == name, ct))
+                return Results.Conflict(new { error = $"You already have a saved view named '{name}'. Rename it, or update the existing one.", code = "saved_view_duplicate_name" });
+            var view = new SavedProcedureView(request.ProjectId, owner, name, contract.QueryJson, contract.ColumnsJson, request.IsShared, DateTimeOffset.UtcNow);
+            db.SavedProcedureViews.Add(view);
+            try { await db.SaveChangesAsync(ct); return Results.Created($"/api/test-procedures/views/{view.Id}", new { view.Id }); }
+            catch (DbUpdateException) { return Results.Conflict(new { error = "A saved view with that name already exists.", code = "saved_view_duplicate_name" }); }
+        });
+
+        // Owner-only, and answered as Not Found rather than Forbidden for somebody else's view: a shared view
+        // is readable, and confirming that a particular id exists but is not yours is more than a reader of a
+        // shared list needs to know.
+        app.MapPut("/api/test-procedures/views/{id:guid}", async (Guid id, UpdateSavedViewRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var owner = http.UserAccount().Id;
+            var view = await db.SavedProcedureViews.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == owner, ct);
+            if (view is null) return Results.NotFound();
+            var now = DateTimeOffset.UtcNow;
+            if (request.Name is not null)
+            {
+                var name = request.Name.Trim();
+                if (name.Length == 0) return Results.BadRequest(new { error = "A saved view needs a name.", code = "saved_view_name_required" });
+                if (!string.Equals(name, view.Name, StringComparison.Ordinal) && await db.SavedProcedureViews.AnyAsync(x => x.ProjectId == view.ProjectId && x.OwnerId == owner && x.Name == name && x.Id != id, ct))
+                    return Results.Conflict(new { error = $"You already have a saved view named '{name}'.", code = "saved_view_duplicate_name" });
+                view.Rename(name, now);
+            }
+            if (request.IsShared is not null) view.SetShared(request.IsShared.Value, now);
+            if (request.QueryJson is not null || request.ColumnsJson is not null)
+            {
+                var contract = ProcedureSavedViewContract.Normalize(request.QueryJson ?? view.QueryJson, request.ColumnsJson ?? view.ColumnsJson);
+                if (!contract.Valid) return Results.BadRequest(new { error = contract.Error, code = "saved_view_contract_invalid" });
+                view.Replace(contract.QueryJson, contract.ColumnsJson, now);
+            }
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { view.Id, view.Name, view.IsShared, view.QueryJson, view.ColumnsJson });
+        });
+
+        app.MapDelete("/api/test-procedures/views/{id:guid}", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var view = await db.SavedProcedureViews.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == http.UserAccount().Id, ct);
+            if (view is null) return Results.NotFound();
+            db.Remove(view); await db.SaveChangesAsync(ct); return Results.NoContent();
         });
 
         // No procedure-level approval route. The test change request carrying this procedure is what gets

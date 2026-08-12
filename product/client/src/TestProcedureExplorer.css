@@ -84,3 +84,94 @@
 .traceCoverageBadge{font-style:normal;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
 .traceCoverageBadge.confirmed{background:#e7f4ec;color:#146c43}
 .traceCoverageBadge.suspect{background:#fdf3e2;color:#8a5a00}
+
+/* Parity with the Requirements Explorer: a rail that groups by the document a procedure is written into, a
+   result count on the search, and a columned table rather than a flat list. Procedures had no container
+   until they were given one, which is why this rail could not exist before. */
+.procedureExplorerSplit { display: grid; grid-template-columns: 232px minmax(0, 1fr) minmax(0, 380px); gap: 14px; align-items: start; }
+.procedureExplorerSplit:not(:has(.procedureInspector)) { grid-template-columns: 232px minmax(0, 1fr); }
+
+.procedureDocumentRail { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px; }
+.procedureDocumentRail h2 {
+  font: var(--weight-bold) var(--text-xs)/1.4 var(--font-body); letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-500); margin: 2px 4px 8px;
+}
+.railDocument { margin-top: 6px; }
+.railEntry, .railSection {
+  display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
+  border-radius: var(--radius-sm); padding: 7px 9px; font: inherit; color: var(--ink-700);
+}
+.railEntry b { display: block; font: var(--weight-strong) var(--text-control)/1.3 var(--font-body); color: var(--ink-900); }
+.railEntry small { display: block; font-size: var(--text-xs); color: var(--ink-500); }
+.railEntry:hover, .railSection:hover { background: var(--surface-subtle); }
+.railEntry.selected, .railSection.selected { background: var(--teal-100); box-shadow: inset 3px 0 0 var(--teal-700); }
+.railSection { padding-left: 20px; font-size: var(--text-sm); display: flex; justify-content: space-between; gap: 8px; }
+.railSection i { font-style: normal; color: var(--ink-500); font-variant-numeric: tabular-nums; }
+.railEmpty { margin: 6px 4px; font-size: var(--text-xs); color: var(--ink-500); }
+
+.procedureFind { position: relative; }
+.procedureFind .resultCount {
+  position: absolute; right: 8px; bottom: 7px; background: var(--surface-subtle); border: 1px solid var(--line);
+  border-radius: var(--radius-pill); padding: 1px 9px; font: var(--weight-strong) var(--text-xs) var(--font-body);
+  color: var(--ink-500); font-variant-numeric: tabular-nums;
+}
+.procedureFilters .clear, .procedureFilters .pageSizeControl { align-self: flex-end; }
+.procedureFilters .clear {
+  min-height: 36px; padding: 8px 14px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--surface); color: var(--teal-700); font: var(--weight-strong) var(--text-control) var(--font-body); cursor: pointer;
+}
+.procedureFilters .clear:disabled { opacity: .5; cursor: not-allowed; }
+.procedureFilters .pageSizeControl span { font-size: var(--text-xs); color: var(--ink-500); }
+
+.procedureTable { width: 100%; border-collapse: collapse; font-size: var(--text-control); }
+.procedureTable th {
+  text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--surface-subtle);
+  font: var(--weight-bold) var(--text-xs) var(--font-body); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-500);
+}
+.procedureTable td { padding: 10px 12px; border-bottom: 1px solid #eef2f6; color: var(--ink-700); vertical-align: middle; }
+.procedureTable tr:last-child td { border-bottom: none; }
+.procedureTable tr.selected { background: var(--teal-100); }
+.procedureOpen { background: none; border: none; padding: 0; text-align: left; cursor: pointer; font: inherit; }
+.procedureOpen b { display: block; color: var(--teal-700); font-weight: var(--weight-strong); }
+.procedureOpen span { display: block; color: var(--ink-900); }
+.procedureCountCell { font-variant-numeric: tabular-nums; }
+.procedureState {
+  display: inline-flex; border-radius: var(--radius-pill); padding: 2px 9px;
+  font: var(--weight-bold) var(--text-xs) var(--font-body); background: #eef1f6; color: var(--ink-500);
+}
+.procedureState.approved { background: var(--teal-100); color: var(--teal-700); }
+.procedureState.inreview { background: #fdf1dc; color: #8a5a12; }
+
+/* Saved views sit below the documents in the same column, as their own panel rather than inside the
+   documents landmark. The rows themselves are styled by the requirements workspace stylesheet this Explorer
+   already imports, so only the panel and the form for creating one are new here. */
+.procedureRailColumn { display: grid; gap: 12px; align-items: start; }
+.savedViewsPanel {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-md); padding: 10px;
+}
+.saveViewOpen {
+  width: 100%; margin-top: 6px; padding: 7px 9px; cursor: pointer; background: none;
+  border: 1px dashed var(--line); border-radius: var(--radius-sm);
+  font: var(--weight-strong) var(--text-xs) var(--font-body); color: var(--ink-700);
+}
+.saveViewOpen:hover { background: var(--surface-subtle); border-color: var(--teal-700); color: var(--teal-700); }
+.saveViewForm { display: grid; gap: 8px; margin-top: 8px; }
+.saveViewForm > label > span { display: block; font-size: var(--text-xs); color: var(--ink-500); margin-bottom: 3px; }
+.saveViewForm input[type="text"], .saveViewForm input:not([type]) {
+  width: 100%; padding: 6px 8px; font: inherit; color: var(--ink-900);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface);
+}
+.saveViewShare { display: flex; align-items: center; gap: 7px; font-size: var(--text-xs); color: var(--ink-700); }
+.saveViewShare span { margin: 0; }
+.saveViewActions { display: flex; gap: 6px; }
+.saveViewActions button {
+  flex: 1; padding: 6px 8px; cursor: pointer; border-radius: var(--radius-sm);
+  font: var(--weight-strong) var(--text-xs) var(--font-body); border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink-700);
+}
+.saveViewActions button[type="submit"] { background: var(--teal-700); border-color: var(--teal-700); color: #fff; }
+
+@media (max-width: 1100px) {
+  .procedureExplorerSplit, .procedureExplorerSplit:not(:has(.procedureInspector)) { grid-template-columns: 1fr; }
+}

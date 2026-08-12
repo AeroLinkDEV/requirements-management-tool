@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
-import { stateLabel } from './presentation'
+import { procedureTargetsFor, stateLabel } from './presentation'
+import DocumentActions from './DocumentActions'
 import { loadCoverage, type Coverage } from './verificationCoverage'
 import type { TestDiscipline } from './TestResultsWorkspace'
 // The requirements explorer's stylesheet, imported rather than copied. Browsing a controlled artifact is the
@@ -27,6 +28,9 @@ type Procedure = {
   preconditions?: string
   steps?: string
   expectedResult?: string
+  /// The most recent run's outcome, already projected by the listing endpoint.
+  lastOutcome?: string
+  lastExecutedAt?: string
 }
 type Revision = {
   id: string; displayNumber: string; revision: number; title: string
@@ -41,7 +45,19 @@ type History = {
   id: string; baseNumber: string; title: string; titleIsExact?: boolean; titleIsLegacy?: boolean
   titleNote?: string; ownerId: string; createdAt: string; revisions: Revision[]
 }
-type Page = { page: number; pageSize: number; totalCount: number; totalPages: number; items: Procedure[] }
+/// A named worklist over this library, owned by whoever saved it and optionally shared.
+type SavedView = { id: string; name: string; queryJson: string; columnsJson: string; isShared: boolean; owned: boolean }
+type Page = { page: number; pageSize: number; totalCount: number; totalPages: number; views: SavedView[]; items: Procedure[] }
+/// The document a discipline's procedures are written into, and the sections inside it.
+type ProcedureDocument = {
+  id: string
+  documentNumber: string
+  title: string
+  level: string
+  description: string
+  procedureCount: number
+  sections: { id: string; heading: string; position: number; procedureCount: number }[]
+}
 type Comment = {
   id: string; body: string; state: string; createdBy: string; createdAt: string; disposition?: string
 }
@@ -113,9 +129,11 @@ const disciplineLabel = (discipline: TestDiscipline) =>
  * from it, while a procedure's shows the requirements that drive it. A procedure exists because something has
  * to be verified.
  */
-export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, released,
-  onOpenRequirementRevision }: {
+export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, releaseVersion,
+  released, onOpenRequirementRevision }: {
   api: string; projectId: string; releaseId: string; discipline: TestDiscipline; buildName: string
+  /** The build's own version, which the document actions name. `buildName` is the display label, not this. */
+  releaseVersion: string
   released: boolean
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
 }) {
@@ -129,6 +147,17 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [procedureState, setProcedureState] = useState(opening.get('procedureState') ?? '')
   const [procedureOutcome, setProcedureOutcome] = useState(opening.get('procedureOutcome') ?? '')
   const [page, setPage] = useState(Number(opening.get('procedurePage') ?? '1') || 1)
+  // Rows, the document rail's selection and the saved view are all part of the address, so a filtered
+  // worklist survives a reload and the back button — the same contract the requirements Explorer keeps.
+  const [pageSize, setPageSize] = useState(Number(opening.get('procedureRows') ?? '25') || 25)
+  const [documentId, setDocumentId] = useState(opening.get('procedureDocument') ?? '')
+  const [sectionId, setSectionId] = useState(opening.get('procedureSection') ?? '')
+  const [documents, setDocuments] = useState<ProcedureDocument[]>([])
+  const [showSaveView, setShowSaveView] = useState(false)
+  // The applied view is in the address too, so "here is the worklist I mean" is a link somebody can send.
+  const [viewId, setViewId] = useState(opening.get('procedureView') ?? '')
+  const initialViewId = useRef(opening.get('procedureView') ?? '').current
+  const appliedInitialView = useRef(false)
   const lastDiscreteState = useRef<string | null>(null)
   const [selectedId, setSelectedId] = useState(opening.get('procedureId') ?? '')
   const [tab, setTab] = useState<Tab>(() => {
@@ -163,7 +192,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       const response = await fetch(
         `${api}/api/test-procedures?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}` +
         `&search=${encodeURIComponent(query)}&state=${procedureState}&outcome=${procedureOutcome}` +
-        `&page=${page}&pageSize=25`)
+        (documentId ? `&documentId=${documentId}` : '') +
+        (sectionId ? `&sectionId=${sectionId}` : '') +
+        `&page=${page}&pageSize=${pageSize}`)
       if (!response.ok) throw new Error(String(response.status))
       const paged = await response.json()
       if (mine !== listTicket.current) return
@@ -172,8 +203,99 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       if (mine !== listTicket.current) return
       setError(operationError(problem, 'The procedure library could not be loaded.'))
     }
-  }, [api, projectId, releaseId, scope, query, procedureState, procedureOutcome, page])
+  }, [api, projectId, releaseId, scope, query, procedureState, procedureOutcome, page, pageSize, documentId, sectionId])
+
+  // The documents this discipline's procedures are written into. Read once per project and scope: the rail
+  // is structure, not a result set, and re-reading it on every keystroke would make it flicker.
+  useEffect(() => {
+    let active = true
+    fetch(`${api}/api/projects/${projectId}/test-procedure-documents?scope=${scope}`)
+      .then(response => response.ok ? response.json() : [])
+      .then((value: ProcedureDocument[]) => { if (active) setDocuments(value) })
+      .catch(() => { if (active) setDocuments([]) })
+    return () => { active = false }
+  }, [api, projectId, scope])
   useEffect(() => { void load() }, [load])
+
+  /**
+   * Saved view lifecycle, the same contract the requirements workspace keeps. The server is the authority —
+   * it answers Not Found for a view that is not yours — so these read the failure the API reports rather
+   * than deciding locally who may do what.
+   */
+  const mutateView = async (view: SavedView, method: 'PUT' | 'DELETE', body?: unknown) => {
+    setError('')
+    try {
+      await apiRequest(`${api}/api/test-procedures/views/${view.id}`, {
+        method,
+        ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+      })
+      await load()
+    } catch (reason) {
+      setError(operationError(reason, 'The saved view could not be updated.'))
+    }
+  }
+  const renameView = async (view: SavedView) => {
+    const name = prompt('Rename saved view', view.name)
+    if (name === null || name.trim() === '' || name.trim() === view.name) return
+    await mutateView(view, 'PUT', { name: name.trim() })
+  }
+  const shareView = (view: SavedView, isShared: boolean) => mutateView(view, 'PUT', { isShared })
+  const deleteView = async (view: SavedView) => {
+    if (!confirm(`Delete the saved view "${view.name}"? Anyone holding its link will no longer be able to open it.`)) return
+    await mutateView(view, 'DELETE')
+  }
+  const applyView = useCallback((view: SavedView) => {
+    try {
+      const saved = JSON.parse(view.queryJson)
+      setQuery(saved.search || '')
+      setProcedureState(saved.state || '')
+      setProcedureOutcome(saved.outcome || '')
+      setDocumentId(saved.documentId || '')
+      setSectionId(saved.sectionId || '')
+      setViewId(view.id)
+      setPage(1)
+    } catch {
+      setError('Saved view configuration is invalid.')
+    }
+  }, [])
+  // A link to a saved view opens that worklist, once. Re-applying it on every list refresh would undo the
+  // reader's own filtering the moment they changed anything.
+  useEffect(() => {
+    if (appliedInitialView.current || !initialViewId || !data?.views.length) return
+    const view = data.views.find(x => x.id === initialViewId)
+    if (!view) return
+    appliedInitialView.current = true
+    applyView(view)
+  }, [data?.views, initialViewId, applyView])
+
+  const saveView = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const fields = new FormData(event.currentTarget)
+    setError('')
+    try {
+      await apiRequest(`${api}/api/test-procedures/views`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          name: fields.get('name'),
+          isShared: fields.has('shared'),
+          queryJson: JSON.stringify({
+            search: query,
+            state: procedureState,
+            outcome: procedureOutcome,
+            documentId,
+            sectionId,
+          }),
+          columnsJson: '["identifier","level","verifies","latestResult","state"]',
+        }),
+      })
+      setShowSaveView(false)
+      await load()
+    } catch (reason) {
+      setError(operationError(reason, 'The saved view could not be created.'))
+    }
+  }
 
   // The worklist is in the address, so it can be reloaded, shared and stepped back through.
   useEffect(() => {
@@ -184,9 +306,13 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     apply('procedureState', procedureState)
     apply('procedureOutcome', procedureOutcome)
     apply('procedurePage', page > 1 ? String(page) : '')
+    apply('procedureRows', pageSize === 25 ? '' : String(pageSize))
+    apply('procedureDocument', documentId)
+    apply('procedureSection', sectionId)
+    apply('procedureView', viewId)
     // Seeded from what the address already says, so the reader's first change after a reload still earns a
     // history entry rather than being mistaken for arrival.
-    const discrete = `${procedureState}|${procedureOutcome}|${page}`
+    const discrete = `${procedureState}|${procedureOutcome}|${page}|${pageSize}|${documentId}|${sectionId}|${viewId}`
     if (lastDiscreteState.current === null) lastDiscreteState.current = discrete
     if (params.toString() === before) return
     const next = `${location.pathname}${params.toString() ? `?${params}` : ''}`
@@ -198,7 +324,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     // window.history explicitly: this component has its own `history` — the revision history of a procedure —
     // and the bare name resolves to that, which throws rather than navigating.
     if (push) window.history.pushState({}, '', next); else window.history.replaceState({}, '', next)
-  }, [query, procedureState, procedureOutcome, page])
+  }, [query, procedureState, procedureOutcome, page, pageSize, documentId, sectionId, viewId])
 
   // The browser's own navigation must move the list, not just the address bar.
   useEffect(() => {
@@ -208,6 +334,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setProcedureState(params.get('procedureState') ?? '')
       setProcedureOutcome(params.get('procedureOutcome') ?? '')
       setPage(Number(params.get('procedurePage') ?? '1') || 1)
+      setPageSize(Number(params.get('procedureRows') ?? '25') || 25)
+      setDocumentId(params.get('procedureDocument') ?? '')
+      setSectionId(params.get('procedureSection') ?? '')
+      setViewId(params.get('procedureView') ?? '')
       const seeded = params.get('procedureTab')
       setTab(seeded === 'trace' || seeded === 'history' || seeded === 'discussion' ? seeded : 'details')
     }
@@ -367,6 +497,17 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     </header>
     {error && <div className="workspaceError" role="alert">{error}</div>}
 
+    {/* The document these procedures are written into, offered where they are read — the same place, shape
+        and rule the requirements Explorer uses. Which one you get follows the build: approved for a released
+        one, a stamped draft for an in-work one. */}
+    <DocumentActions
+      api={api}
+      projectId={projectId}
+      release={{ id: releaseId, version: releaseVersion, isReleased: released }}
+      targets={procedureTargetsFor(discipline)}
+      heading={released ? `Approved documents for ${releaseVersion}` : `Draft documents for ${releaseVersion}`}
+    />
+
     <div className="explorerTabs" role="tablist" aria-label="Test procedure views">
       <button type="button" role="tab" aria-selected={pageTab === 'procedures'}
         className={pageTab === 'procedures' ? 'active' : ''}
@@ -457,7 +598,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       <label className="procedureFind">
         <span>Find a procedure</span>
         <input value={query} onChange={event => { setQuery(event.target.value); setPage(1) }}
-          placeholder="Number or title" />
+          placeholder="Search any identifier fragment or title…" />
+        {/* The count belongs on the search, where the requirements Explorer puts it: a filtered list whose
+            size you cannot see is a list you cannot trust you have read all of. */}
+        <b className="resultCount">{(data?.totalCount ?? 0).toLocaleString()} found</b>
       </label>
       <label>
         <span>Procedure state</span>
@@ -477,24 +621,157 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           <option value="Blocked">Blocked</option>
         </select>
       </label>
+      <button type="button" className="clear"
+        disabled={!query && !procedureState && !procedureOutcome && !documentId && !sectionId && !viewId}
+        onClick={() => {
+          setViewId('')
+          setQuery(''); setProcedureState(''); setProcedureOutcome('')
+          setDocumentId(''); setSectionId(''); setPage(1)
+        }}>
+        Clear
+      </button>
+      <label className="pageSizeControl">
+        <span>Rows</span>
+        <select aria-label="Rows per page" value={pageSize}
+          onChange={event => { setPageSize(Number(event.target.value)); setPage(1) }}>
+          <option value={25}>25</option>
+          <option value={50}>50</option>
+          <option value={100}>100</option>
+        </select>
+      </label>
     </div>
 
     <div className="procedureExplorerSplit">
+      {/* The documents these procedures are written into, in the place and shape the requirements Explorer
+          puts its specifications. Procedures had no container until they were given one; this is the rail
+          that was impossible before. */}
+      <div className="procedureRailColumn">
+      <nav className="procedureDocumentRail" aria-label="Test procedure documents">
+        <h2>Documents</h2>
+        <button type="button" className={!documentId && !sectionId ? 'railEntry selected' : 'railEntry'}
+          aria-pressed={!documentId && !sectionId}
+          onClick={() => { setDocumentId(''); setSectionId(''); setPage(1) }}>
+          <b>All procedures</b>
+          <small>{(data?.totalCount ?? 0).toLocaleString()} in this build</small>
+        </button>
+        {documents.map(document => (
+          <div key={document.id} className="railDocument">
+            <button type="button" data-document={document.documentNumber}
+              className={documentId === document.id && !sectionId ? 'railEntry selected' : 'railEntry'}
+              aria-pressed={documentId === document.id && !sectionId}
+              onClick={() => { setDocumentId(document.id); setSectionId(''); setPage(1) }}>
+              <b>{document.documentNumber}</b>
+              <small>{document.procedureCount} · {document.title}</small>
+            </button>
+            {document.sections.map(section => (
+              <button type="button" key={section.id} className={sectionId === section.id ? 'railSection selected' : 'railSection'}
+                aria-pressed={sectionId === section.id}
+                onClick={() => { setDocumentId(document.id); setSectionId(section.id); setPage(1) }}>
+                {section.heading} <i>{section.procedureCount}</i>
+              </button>
+            ))}
+          </div>
+        ))}
+        {documents.length === 0 && (
+          <p className="railEmpty">No procedure document for this discipline yet.</p>
+        )}
+      </nav>
+
+      {/* Saved views, in the place and shape the requirements Explorer keeps them. Owners can tidy their
+          own; non-owners see a shared view and no controls, which is the same authority the server enforces
+          rather than a second opinion about it.
+          Beside the documents rather than inside it: a navigation landmark announced as "Test procedure
+          documents" should not also contain a form for naming worklists. */}
+      <section className="savedViewsPanel" aria-label="Saved views">
+        <details className="savedViews">
+          <summary>
+            <b>Saved views</b>
+            <span>{data?.views.length ?? 0}</span>
+          </summary>
+          <div>
+            {data?.views.map(view => (
+              <div className="savedViewRow" key={view.id}>
+                <button type="button" data-saved-view={view.name} onClick={() => applyView(view)}>
+                  <i>{view.isShared ? '◉' : '○'}</i>
+                  <div>
+                    <b>{view.name}</b>
+                    <small>{view.isShared ? 'Shared' : 'Personal'}</small>
+                  </div>
+                </button>
+                {view.owned && (
+                  <div className="savedViewActions">
+                    <button type="button" title="Rename this view" onClick={() => renameView(view)}>Rename</button>
+                    <button type="button" title={view.isShared ? 'Make personal' : 'Share with authorized'}
+                      onClick={() => shareView(view, !view.isShared)}>
+                      {view.isShared ? 'Unshare' : 'Share'}
+                    </button>
+                    <button type="button" title="Delete this view" onClick={() => deleteView(view)}>Delete</button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {data?.views.length === 0 && <p className="railEmpty">No saved views yet.</p>}
+            {showSaveView ? (
+              <form className="saveViewForm" onSubmit={saveView}>
+                <label>
+                  <span>Name this worklist</span>
+                  <input name="name" required maxLength={200} placeholder="Failed since the last build" />
+                </label>
+                <label className="saveViewShare">
+                  <input type="checkbox" name="shared" />
+                  <span>Share with everyone on this project</span>
+                </label>
+                <div className="saveViewActions">
+                  <button type="submit">Save view</button>
+                  <button type="button" onClick={() => setShowSaveView(false)}>Cancel</button>
+                </div>
+              </form>
+            ) : (
+              <button type="button" className="saveViewOpen" onClick={() => setShowSaveView(true)}>
+                Save this view
+              </button>
+            )}
+          </div>
+        </details>
+      </section>
+      </div>
+
       <section className="procedureList" aria-label="Test procedures">
         {procedures.length === 0
-          ? <p className="procedureEmpty">{query || procedureState || procedureOutcome
+          ? <p className="procedureEmpty">{query || procedureState || procedureOutcome || documentId || sectionId
             ? 'No procedure matches that. Clear the search or the filters to see the rest.'
             : `This build has no controlled ${disciplineLabel(discipline).toLowerCase()} procedures yet.`}</p>
-          : procedures.map(procedure => (
-            <button type="button" key={procedure.id}
-              className={`procedureRow ${procedure.id === selectedId ? 'selected' : ''}`}
-              aria-pressed={procedure.id === selectedId}
-              onClick={() => open(procedure)}>
-              <b>{procedure.displayNumber}</b>
-              <span>{procedure.title}</span>
-              <small>{procedure.state} · verifies {procedure.requirementCount}</small>
-            </button>
-          ))}
+          : (
+            <table className="procedureTable">
+              <thead>
+                <tr>
+                  <th scope="col">Identifier &amp; title</th>
+                  <th scope="col">Level</th>
+                  <th scope="col">Verifies</th>
+                  <th scope="col">Latest result</th>
+                  <th scope="col">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {procedures.map(procedure => (
+                  <tr key={procedure.id} data-procedure={procedure.displayNumber}
+                    className={procedure.id === selectedId ? 'selected' : undefined}>
+                    <td>
+                      <button type="button" className="procedureOpen" aria-pressed={procedure.id === selectedId}
+                        onClick={() => open(procedure)}>
+                        <b>{procedure.displayNumber}</b>
+                        <span>{procedure.title}</span>
+                      </button>
+                    </td>
+                    <td>{disciplineLabel(discipline)}</td>
+                    <td className="procedureCountCell">{procedure.requirementCount}</td>
+                    <td>{procedure.lastOutcome ?? 'Not run'}</td>
+                    <td><span className={`procedureState ${procedure.state.toLowerCase()}`}>{procedure.state}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         <div className="pager">
           <button disabled={(data?.page ?? 1) <= 1} onClick={() => setPage(x => x - 1)}>← Previous</button>
           <span>

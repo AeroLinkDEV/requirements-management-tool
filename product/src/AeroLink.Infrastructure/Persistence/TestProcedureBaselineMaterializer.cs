@@ -106,6 +106,16 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
         var hash = TestProcedureManifest.Hash(manifestEntries);
         baseline.MarkTestProceduresMaterialized(actorId, hash, current.Count, now);
         await db.SaveChangesAsync(ct);
+
+        // A procedure that exists but is written into no document is one the Explorer cannot show under any
+        // document, and a section count that is quietly wrong. A requirement is authored into SYSRD, HLRD or
+        // LLRD as part of becoming one; a procedure becomes one here, so it is filed here.
+        //
+        // After the save above rather than before it, because the placement reads the procedures back from
+        // the database — and still inside the transaction, so a procedure and its place in a document are
+        // committed together or not at all.
+        await new TestProcedureDocumentBootstrap(db).EnsureForProjectAsync(baseline.ProjectId, ct);
+        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return new TestProcedureMaterializationResult(hash, current.Count, created, coverageLinks, settled);
     }
