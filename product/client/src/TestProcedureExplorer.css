@@ -15,10 +15,10 @@
 
 .procedureList{display:flex;flex-direction:column;border:1px solid var(--line,#d9e2ec);border-radius:10px;
   background:var(--card,#fff);overflow:hidden}
-.procedureRow{display:grid;grid-template-columns:minmax(140px,auto) minmax(0,1fr) auto;gap:10px;align-items:baseline;
-  padding:9px 12px;border:0;border-top:1px solid #eef2f7;background:transparent;text-align:left;
-  font:inherit;cursor:pointer}
-.procedureRow:first-child{border-top:0}
+/* A procedure row is a table row now, not a three-column grid. The class name is kept because it is what a
+   row has always been called — the journeys reach a procedure through it — but the flat-list layout it used
+   to carry is gone, and `display:grid` on a <tr> would take the row out of the table it belongs to. */
+.procedureRow{cursor:pointer}
 .procedureRow:hover{background:#f5f9ff}
 .procedureRow.selected{background:#f2f7ff;box-shadow:inset 3px 0 0 #3178c6}
 .procedureRow b{color:#17314f;font-size:13.5px}

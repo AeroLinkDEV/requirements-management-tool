@@ -754,8 +754,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
               </thead>
               <tbody>
                 {procedures.map(procedure => (
+                  // `procedureRow` is kept on the table row. It is the hook the procedure journeys have
+                  // always selected a row by — bounded rendering, deep links and the trace all reach a
+                  // procedure through it — and the list becoming a table is a change of presentation, not of
+                  // what a row is.
+                  // The whole row opens the procedure, as it did when the row was itself a button. Anywhere
+                  // in a record's row is where people click; the identifier cell keeps its own button so the
+                  // row is still reachable and operable from the keyboard.
                   <tr key={procedure.id} data-procedure={procedure.displayNumber}
-                    className={procedure.id === selectedId ? 'selected' : undefined}>
+                    onClick={() => open(procedure)}
+                    className={`procedureRow${procedure.id === selectedId ? ' selected' : ''}`}>
                     <td>
                       <button type="button" className="procedureOpen" aria-pressed={procedure.id === selectedId}
                         onClick={() => open(procedure)}>
