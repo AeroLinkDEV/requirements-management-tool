@@ -1,6 +1,7 @@
 using AeroLink.Domain.Common;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace AeroLink.Domain.Documents;
 
@@ -102,6 +103,9 @@ public sealed class ManagedDocumentRevision
     public string SnapshotHash { get; private set; } = "";
     public string SubmittedFormalSummaryHash { get; private set; } = "";
     public long? SubmittedFormalSummaryVersion { get; private set; }
+    public string SubmittedRelationshipManifest { get; private set; } = "";
+    public string SubmittedRelationshipManifestHash { get; private set; } = "";
+    public int RelationshipManifestVersion { get; private set; }
     public string ReleaseManifestHash { get; private set; } = "";
     public string ReturnReason { get; private set; } = "";
     public string? SubmittedBy { get; private set; }
@@ -123,7 +127,8 @@ public sealed class ManagedDocumentRevision
         ReleaseManifestHash = ""; UpdatedAt = now; Version++;
     }
 
-    public int SubmitForReview(string actor, string snapshotHash, IReadOnlyList<ManagedDocumentReviewer> reviewers, DateTimeOffset now)
+    public int SubmitForReview(string actor, string snapshotHash, IReadOnlyList<ManagedDocumentReviewer> reviewers, DateTimeOffset now,
+        string relationshipManifest = "[]", string relationshipManifestHash = "", int relationshipManifestVersion = 1)
     {
         EnsureEditable();
         if (CurrentWorkingAttachmentId is null) throw new DomainException("Check in a Word working copy before submitting this revision.");
@@ -137,6 +142,10 @@ public sealed class ManagedDocumentRevision
             _reviewSteps.Add(new ManagedDocumentReviewStep(Id, cycle, index, reviewers[index], index == 0));
         SnapshotHash = Required(snapshotHash, "A review snapshot hash is required.").ToLowerInvariant();
         SubmittedFormalSummaryHash = FormalSummaryHash; SubmittedFormalSummaryVersion = FormalSummaryVersion;
+        SubmittedRelationshipManifest = Required(relationshipManifest, "A relationship manifest is required.");
+        SubmittedRelationshipManifestHash = string.IsNullOrWhiteSpace(relationshipManifestHash) && relationshipManifest == "[]"
+            ? Hash(relationshipManifest) : Required(relationshipManifestHash, "A relationship manifest hash is required.").ToLowerInvariant();
+        RelationshipManifestVersion = relationshipManifestVersion > 0 ? relationshipManifestVersion : throw new DomainException("A relationship manifest version is required.");
         SubmittedBy = Required(actor, "A submitting actor is required.").ToLowerInvariant(); SubmittedAt = now;
         State = ManagedDocumentState.InReview; ReturnReason = ""; UpdatedAt = now; Version++; return cycle;
     }
@@ -195,6 +204,17 @@ public sealed class ManagedDocumentRevision
         FormalChangeSummary = Bounded(formalChangeSummary, 4000, "A formal change summary is required.", "A formal change summary cannot exceed 4000 characters.");
         FormalSummaryHash = Hash(FormalChangeSummary); FormalSummaryVersion++; FormalSummaryProvenance = "Authoritative";
         SnapshotHash = ""; SubmittedFormalSummaryHash = ""; SubmittedFormalSummaryVersion = null;
+        SubmittedRelationshipManifest = ""; SubmittedRelationshipManifestHash = ""; RelationshipManifestVersion = 0;
+        UpdatedAt = now; Version++;
+    }
+
+    public void RecordRelationshipChange(long expectedVersion, DateTimeOffset now)
+    {
+        EnsureEditable();
+        if (Version != expectedVersion) throw new DomainException("The document revision changed after this page loaded. Refresh and try again.");
+        SnapshotHash = ""; SubmittedFormalSummaryHash = ""; SubmittedFormalSummaryVersion = null;
+        SubmittedRelationshipManifest = ""; SubmittedRelationshipManifestHash = ""; RelationshipManifestVersion = 0;
+        ReleaseCandidateDocxAttachmentId = null; ReleaseCandidatePdfAttachmentId = null; ReleaseManifestHash = "";
         UpdatedAt = now; Version++;
     }
 
@@ -348,16 +368,96 @@ public sealed class ManagedDocumentLink
 {
     private ManagedDocumentLink() { }
     public ManagedDocumentLink(Guid revisionId, string artifactType, Guid artifactId, string displayNumber, string relationship, string actor, DateTimeOffset now)
-    { Id = Guid.NewGuid(); RevisionId = revisionId; ArtifactType = Required(artifactType); ArtifactId = artifactId; DisplayNumber = Required(displayNumber).ToUpperInvariant(); Relationship = Required(relationship); CreatedBy = actor.ToLowerInvariant(); CreatedAt = now; }
+        : this(revisionId, artifactType, artifactId, displayNumber, "", "", Guid.Empty, null, "", "", relationship, actor, now, 0, "LegacyClientSupplied") { }
+    public ManagedDocumentLink(Guid revisionId, string artifactType, Guid artifactId, string displayNumber, string title,
+        string targetState, Guid targetProjectId, Guid? targetReleaseId, string targetReleaseVersion, string deepLink,
+        string relationship, string actor, DateTimeOffset now, int policyVersion = ManagedDocumentRelationshipPolicy.CurrentVersion,
+        string provenance = "CanonicalServerResolved")
+    {
+        Id = Guid.NewGuid(); RevisionId = revisionId; ArtifactType = Required(artifactType); ArtifactId = artifactId;
+        DisplayNumber = Bounded(displayNumber, 80, "A canonical target identifier is required."); CanonicalTitle = Bounded(title, 500, "A canonical target title is required.", policyVersion == 0);
+        TargetState = Bounded(targetState, 80, "A canonical target state is required.", policyVersion == 0); TargetProjectId = targetProjectId;
+        TargetReleaseId = targetReleaseId; TargetReleaseVersion = targetReleaseVersion?.Trim() ?? "";
+        DeepLink = Bounded(deepLink, 1000, "A canonical target link is required.", policyVersion == 0);
+        Relationship = ManagedDocumentRelationshipPolicy.Validate(ArtifactType, relationship, policyVersion);
+        PolicyVersion = policyVersion; Provenance = Required(provenance); IsCurrent = true;
+        CreatedBy = Required(actor).ToLowerInvariant(); CreatedAt = now;
+    }
     public Guid Id { get; private set; }
     public Guid RevisionId { get; private set; }
     public string ArtifactType { get; private set; } = "";
     public Guid ArtifactId { get; private set; }
     public string DisplayNumber { get; private set; } = "";
+    public string CanonicalTitle { get; private set; } = "";
+    public string TargetState { get; private set; } = "";
+    public Guid TargetProjectId { get; private set; }
+    public Guid? TargetReleaseId { get; private set; }
+    public string TargetReleaseVersion { get; private set; } = "";
+    public string DeepLink { get; private set; } = "";
     public string Relationship { get; private set; } = "";
+    public int PolicyVersion { get; private set; }
+    public string Provenance { get; private set; } = "";
+    public bool IsCurrent { get; private set; }
+    public Guid? SupersededByLinkId { get; private set; }
+    public string SupersedeReason { get; private set; } = "";
+    public string? SupersededBy { get; private set; }
+    public DateTimeOffset? SupersededAt { get; private set; }
     public string CreatedBy { get; private set; } = "";
     public DateTimeOffset CreatedAt { get; private set; }
+    public void Supersede(string actor, string reason, DateTimeOffset now, Guid? replacementId = null)
+    {
+        if (!IsCurrent) throw new DomainException("This document relationship has already been superseded.");
+        SupersedeReason = Bounded(reason, 1000, "A relationship correction reason is required.");
+        IsCurrent = false; SupersededBy = Required(actor).ToLowerInvariant(); SupersededAt = now; SupersededByLinkId = replacementId;
+    }
     private static string Required(string? value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A document relationship value is required.") : value.Trim();
+    private static string Bounded(string? value, int maximum, string error, bool allowEmpty = false)
+    { var result = value?.Trim() ?? ""; if (!allowEmpty && result.Length == 0) throw new DomainException(error); return result.Length > maximum ? throw new DomainException(error) : result; }
+}
+
+public static class ManagedDocumentRelationshipPolicy
+{
+    public const int CurrentVersion = 1;
+    private static readonly IReadOnlyDictionary<string, string[]> Allowed = new Dictionary<string, string[]>(StringComparer.Ordinal)
+    {
+        ["ChangeRequest"] = ["MotivatedBy", "ImplementsChange"],
+        ["TestChangeRequest"] = ["VerificationImpact"],
+        ["ProblemReport"] = ["AddressesProblem", "AffectedBy"],
+        ["Release"] = ["RelatedBuild", "AppliesToMilestone"]
+    };
+
+    public static string CanonicalType(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "changerequest" or "change-request" or "srcr" or "hlrcr" or "llrcr" => "ChangeRequest",
+        "testchangerequest" or "test-change-request" or "tcr" => "TestChangeRequest",
+        "problemreport" or "problem-report" or "pr" => "ProblemReport",
+        "release" or "build" => "Release",
+        _ => throw new DomainException("Choose a supported lifecycle artifact type.")
+    };
+
+    public static IReadOnlyList<string> Relationships(string artifactType) => Allowed.TryGetValue(CanonicalType(artifactType), out var values)
+        ? values : throw new DomainException("Choose a supported lifecycle artifact type.");
+
+    public static string Validate(string artifactType, string? relationship, int policyVersion = CurrentVersion)
+    {
+        var value = relationship?.Trim() ?? "";
+        if (policyVersion == 0) return Required(value);
+        if (value.Length > 80 || !Allowed.TryGetValue(CanonicalType(artifactType), out var values) || !values.Contains(value, StringComparer.Ordinal))
+            throw new DomainException("Choose a supported relationship for this lifecycle artifact type.");
+        return value;
+    }
+
+    public static (string Json, string Hash) Manifest(IEnumerable<ManagedDocumentLink> links)
+    {
+        var entries = links.Where(x => x.IsCurrent).OrderBy(x => x.ArtifactType, StringComparer.Ordinal)
+            .ThenBy(x => x.DisplayNumber, StringComparer.Ordinal).ThenBy(x => x.ArtifactId).ThenBy(x => x.Relationship, StringComparer.Ordinal)
+            .Select(x => new { x.ArtifactType, x.ArtifactId, x.DisplayNumber, x.CanonicalTitle, x.TargetState, x.TargetProjectId,
+                x.TargetReleaseId, x.TargetReleaseVersion, x.Relationship, x.PolicyVersion, x.Provenance, x.DeepLink }).ToArray();
+        var json = JsonSerializer.Serialize(entries); return (json, Hash(json));
+    }
+
+    private static string Required(string? value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A document relationship value is required.") : value.Trim();
+    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 }
 
 public sealed class ManagedDocumentEvent

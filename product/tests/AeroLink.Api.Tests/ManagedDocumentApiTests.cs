@@ -2,10 +2,12 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,6 +15,107 @@ namespace AeroLink.Api.Tests;
 
 public sealed class ManagedDocumentApiTests
 {
+    [Fact]
+    public async Task Relationships_are_canonical_authorized_project_scoped_review_bound_and_hashed()
+    {
+        using var factory = new AeroLinkApiFactory(); using var administrator = factory.CreateClient(); await ProblemReportApiTests.BootstrapAndLoginAsync(administrator);
+        var scope = await SeedProjectAsync(factory); Guid releasedChangeId, activeChangeId, foreignChangeId, reportId, testChangeId;
+        using (var serviceScope = factory.Services.CreateScope())
+        {
+            var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var now = DateTimeOffset.UtcNow;
+            var releasedChange = new SystemChangeRequest("SRCR-04940", 0, scope.ProjectId, scope.ReleasedId, "Released-build canonical change", "P", "A", "S", "software.author", now);
+            var activeChange = new SystemChangeRequest("HLRCR-04941", 0, scope.ProjectId, scope.ActiveReleaseId, "Active-build canonical change", "P", "A", "S", "software.author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+            var report = new ProblemReport(scope.ProjectId, "PR-04940", "Canonical anomaly", "Problem", "Analysis", "software.author", now, targetReleaseId: scope.ActiveReleaseId);
+            var testChange = new TestChangeReview(scope.ProjectId, scope.ReleasedId, releasedChange.Id, TestChangeReviewDiscipline.System, releasedChange.DisplayNumber, now, "SYSTCR-04940");
+            var otherProgram = new ProgramRecord("Other documents program", $"OD{Guid.NewGuid():N}"[..12]); var otherProject = new ProjectRecord(otherProgram.Id, "Other project", "Isolation"); var otherRelease = new SoftwareRelease(otherProject.Id, "9.9", false);
+            var foreignChange = new SystemChangeRequest("SRCR-04942", 0, otherProject.Id, otherRelease.Id, "Foreign change", "P", "A", "S", "outsider", now);
+            var configuration = new UserAccount("configuration.manager", "Casey Morgan", "configuration@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var delegated = new UserAccount("delegated.configuration", "Devon Reed", "delegated@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var engineer = new UserAccount("plain.engineer", "Parker Gray", "engineer@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(releasedChange, activeChange, report, testChange, otherProgram, otherProject, otherRelease, foreignChange, configuration, delegated, engineer,
+                new ProgramMembership(configuration.Id, scope.ProgramId, ProgramRole.ConfigurationManager, "admin", now),
+                new ProgramMembership(delegated.Id, scope.ProgramId, ProgramRole.SoftwareEngineer, "admin", now),
+                new ProgramMembership(engineer.Id, scope.ProgramId, ProgramRole.SoftwareEngineer, "admin", now),
+                new RoleDelegation(scope.ProgramId, configuration.Id, delegated.Id, ProgramRole.ConfigurationManager, now.AddMinutes(-1), now.AddDays(1), "Relationship control coverage.", "admin", now)); await db.SaveChangesAsync();
+            releasedChangeId = releasedChange.Id; activeChangeId = activeChange.Id; foreignChangeId = foreignChange.Id; reportId = report.Id; testChangeId = testChange.Id;
+        }
+        using var created = await administrator.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SCMP", documentType = "Software Configuration Management Plan", title = "Relationship-controlled plan", ownerId = "software.author", formalChangeSummary = "Control lifecycle relationships." });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode); var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>(); var documentId = createdBody.GetProperty("id").GetGuid(); var revisionId = createdBody.GetProperty("revisionId").GetGuid();
+        var initial = await administrator.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var initialVersion = initial.GetProperty("revisions")[0].GetProperty("version").GetInt64();
+
+        using var adminBypass = await administrator.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = "ChangeRequest", artifactId = releasedChangeId, displayNumber = "SRCR-99999.99", relationship = "MotivatedBy", expectedVersion = initialVersion });
+        Assert.Equal(HttpStatusCode.Forbidden, adminBypass.StatusCode);
+        using var engineerClient = factory.CreateClient(); using (var engineerLogin = await engineerClient.PostAsJsonAsync("/api/auth/login", new { userName = "plain.engineer", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, engineerLogin.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(engineerClient);
+        using var engineerBypass = await engineerClient.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = "ChangeRequest", artifactId = releasedChangeId, relationship = "MotivatedBy", expectedVersion = initialVersion }); Assert.Equal(HttpStatusCode.Forbidden, engineerBypass.StatusCode);
+
+        using var owner = factory.CreateClient(); using (var login = await owner.PostAsJsonAsync("/api/auth/login", new { userName = "software.author", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(owner);
+        using var invalidMeaning = await owner.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = "ChangeRequest", artifactId = releasedChangeId, relationship = "Governing input", expectedVersion = initialVersion });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidMeaning.StatusCode);
+        using var foreign = await owner.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = "ChangeRequest", artifactId = foreignChangeId, relationship = "MotivatedBy", expectedVersion = initialVersion });
+        Assert.Equal(HttpStatusCode.BadRequest, foreign.StatusCode);
+
+        using var first = await owner.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = "srcr", artifactId = releasedChangeId, displayNumber = "SRCR-99999.99", relationship = "MotivatedBy", expectedVersion = initialVersion });
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode); var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("SRCR-04940.00", firstBody.GetProperty("displayNumber").GetString()); Assert.Equal("Released-build canonical change", firstBody.GetProperty("canonicalTitle").GetString()); Assert.Equal(scope.ReleasedId, firstBody.GetProperty("targetReleaseId").GetGuid());
+        var versionAfterFirst = (await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}")).GetProperty("revisions")[0].GetProperty("version").GetInt64();
+        using var delegatedClient = factory.CreateClient(); using (var delegatedLogin = await delegatedClient.PostAsJsonAsync("/api/auth/login", new { userName = "delegated.configuration", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, delegatedLogin.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(delegatedClient);
+        using var second = await delegatedClient.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = "ChangeRequest", artifactId = activeChangeId, relationship = "ImplementsChange", expectedVersion = versionAfterFirst });
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+
+        var linked = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var linkedRevision = linked.GetProperty("revisions")[0]; var links = linkedRevision.GetProperty("links").EnumerateArray().ToList();
+        Assert.Equal(2, links.Count(x => x.GetProperty("isCurrent").GetBoolean()));
+        Assert.Contains(links, x => x.GetProperty("targetReleaseId").GetGuid() == scope.ReleasedId && x.GetProperty("targetReleaseVersion").GetString() == "1.5");
+        Assert.Contains(links, x => x.GetProperty("targetReleaseId").GetGuid() == scope.ActiveReleaseId && x.GetProperty("targetReleaseVersion").GetString() == "1.6");
+
+        using var configurationClient = factory.CreateClient(); using (var configurationLogin = await configurationClient.PostAsJsonAsync("/api/auth/login", new { userName = "configuration.manager", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, configurationLogin.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(configurationClient);
+        using var corrected = await configurationClient.PatchAsJsonAsync($"/api/managed-documents/{documentId}/links/{firstBody.GetProperty("id").GetGuid()}", new { artifactType = "ChangeRequest", artifactId = releasedChangeId, relationship = "ImplementsChange", reason = "Correct the typed direction before review.", expectedVersion = linkedRevision.GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.OK, corrected.StatusCode);
+        linked = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); linkedRevision = linked.GetProperty("revisions")[0]; links = linkedRevision.GetProperty("links").EnumerateArray().ToList();
+        Assert.Equal(2, links.Count(x => x.GetProperty("isCurrent").GetBoolean())); Assert.Single(links, x => !x.GetProperty("isCurrent").GetBoolean() && x.GetProperty("supersedeReason").GetString() == "Correct the typed direction before review.");
+
+        foreach (var relationship in new[]
+        {
+            new { Type = "ProblemReport", Id = reportId, Meaning = "AddressesProblem" },
+            new { Type = "TestChangeRequest", Id = testChangeId, Meaning = "VerificationImpact" },
+            new { Type = "Release", Id = scope.ActiveReleaseId, Meaning = "RelatedBuild" }
+        })
+        {
+            using var added = await owner.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = relationship.Type, artifactId = relationship.Id, relationship = relationship.Meaning, expectedVersion = linkedRevision.GetProperty("version").GetInt64() });
+            Assert.Equal(HttpStatusCode.Created, added.StatusCode); linked = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); linkedRevision = linked.GetProperty("revisions")[0];
+        }
+        links = linkedRevision.GetProperty("links").EnumerateArray().ToList(); Assert.Equal(5, links.Count(x => x.GetProperty("isCurrent").GetBoolean()));
+        Assert.Contains(links, x => x.GetProperty("artifactType").GetString() == "ProblemReport" && x.GetProperty("deepLink").GetString()!.EndsWith($"/problem-reports/{reportId}"));
+        Assert.Contains(links, x => x.GetProperty("artifactType").GetString() == "TestChangeRequest" && x.GetProperty("deepLink").GetString()!.EndsWith($"/coverage/{testChangeId}"));
+
+        using var submitted = await owner.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new { technicalReviewerId = "software.lead", finalApproverId = "quality.analyst" }); Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        var reviewed = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var reviewedRevision = reviewed.GetProperty("revisions")[0];
+        Assert.Equal(64, reviewedRevision.GetProperty("submittedRelationshipManifestHash").GetString()!.Length); Assert.Contains("SRCR-04940.00", reviewedRevision.GetProperty("submittedRelationshipManifest").GetString()); var firstSnapshotHash = reviewedRevision.GetProperty("snapshotHash").GetString();
+        using var postReview = await owner.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = "Release", artifactId = scope.ActiveReleaseId, relationship = "RelatedBuild", expectedVersion = reviewedRevision.GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.Conflict, postReview.StatusCode);
+        var afterBlocked = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); Assert.Equal(5, afterBlocked.GetProperty("revisions")[0].GetProperty("links").EnumerateArray().Count(x => x.GetProperty("isCurrent").GetBoolean()));
+
+        using var technical = factory.CreateClient(); using (var technicalLogin = await technical.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, technicalLogin.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(technical);
+        using var returned = await technical.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/return", new { password = AeroLinkApiFactory.MemberPassword, meaning = "Relationship evidence requires correction.", rationale = "Add the milestone meaning before resubmission." }); Assert.Equal(HttpStatusCode.OK, returned.StatusCode);
+        var returnedDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var returnedRevision = returnedDetail.GetProperty("revisions")[0];
+        using var correctedAfterReturn = await owner.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = "Release", artifactId = scope.ReleasedId, relationship = "AppliesToMilestone", expectedVersion = returnedRevision.GetProperty("version").GetInt64() }); Assert.Equal(HttpStatusCode.Created, correctedAfterReturn.StatusCode);
+        var changed = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); Assert.Equal("", changed.GetProperty("revisions")[0].GetProperty("snapshotHash").GetString());
+        using var resubmitted = await owner.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new { technicalReviewerId = "software.lead", finalApproverId = "quality.analyst" }); Assert.Equal(HttpStatusCode.OK, resubmitted.StatusCode);
+        var resubmittedDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); Assert.NotEqual(firstSnapshotHash, resubmittedDetail.GetProperty("revisions")[0].GetProperty("snapshotHash").GetString());
+
+        using (var serviceScope = factory.Services.CreateScope())
+        {
+            var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var account = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.UserAccounts.Where(x => x.UserName == "software.author"));
+            var memberships = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToListAsync(db.ProgramMemberships.Where(x => x.UserId == account.Id && x.ProgramId == scope.ProgramId && x.EndedAt == null));
+            foreach (var membership in memberships) membership.End("admin", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        var endedOwnerDetail = await administrator.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+        Assert.False(endedOwnerDetail.GetProperty("revisions")[0].GetProperty("canManageRelationships").GetBoolean());
+        using var endedOwnerBypass = await owner.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = "Release", artifactId = scope.ActiveReleaseId, relationship = "RelatedBuild", expectedVersion = resubmittedDetail.GetProperty("revisions")[0].GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.Forbidden, endedOwnerBypass.StatusCode);
+    }
+
     [Fact]
     public async Task Project_document_can_create_checkout_and_check_in_without_build_context()
     {
@@ -243,7 +346,7 @@ public sealed class ManagedDocumentApiTests
         using var candidateRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/release-candidate") { Content = candidateForm }; candidateRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var candidate = await quality.SendAsync(candidateRequest); Assert.Equal(HttpStatusCode.OK, candidate.StatusCode); var candidateBody = await candidate.Content.ReadFromJsonAsync<JsonElement>();
         using var release = await quality.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/approve", new { password = AeroLinkApiFactory.MemberPassword, meaning = "I authorize this exact controlled release.", rationale = "Exact DOCX/PDF candidate and formal scope are conforming." }); Assert.Equal(HttpStatusCode.OK, release.StatusCode);
 
-        var detail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var revision = detail.GetProperty("revisions")[0]; var expectedManifest = ManagedDocumentFileService.Sha256(System.Text.Encoding.UTF8.GetBytes($"{candidateBody.GetProperty("docxSha256").GetString()}:{candidateBody.GetProperty("pdfSha256").GetString()}:{revision.GetProperty("formalSummaryHash").GetString()}:{revision.GetProperty("formalSummaryVersion").GetInt64()}"));
+        var detail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var revision = detail.GetProperty("revisions")[0]; var expectedManifest = ManagedDocumentFileService.Sha256(System.Text.Encoding.UTF8.GetBytes($"managed-document-release-v2:{candidateBody.GetProperty("docxSha256").GetString()}:{candidateBody.GetProperty("pdfSha256").GetString()}:{revision.GetProperty("formalSummaryHash").GetString()}:{revision.GetProperty("formalSummaryVersion").GetInt64()}:{revision.GetProperty("submittedRelationshipManifestHash").GetString()}"));
         Assert.Equal(expectedManifest, revision.GetProperty("releaseManifestHash").GetString());
         Assert.All(revision.GetProperty("attachments").EnumerateArray().Where(item => item.GetProperty("id").GetGuid() == revision.GetProperty("releasedDocxAttachmentId").GetGuid() || item.GetProperty("id").GetGuid() == revision.GetProperty("releasedPdfAttachmentId").GetGuid()), item => Assert.Contains("Formal revision scope v1", item.GetProperty("description").GetString()));
         Assert.Contains(detail.GetProperty("signatures").EnumerateArray(), item => item.GetProperty("action").GetString() == "Approve" && item.GetProperty("contentHash").GetString() == revision.GetProperty("snapshotHash").GetString());

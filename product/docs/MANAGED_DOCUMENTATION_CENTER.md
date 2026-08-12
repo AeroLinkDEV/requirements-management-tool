@@ -64,9 +64,25 @@ document work.
 
 ## Lifecycle links
 
-An in-work revision can select and link existing change requests, Problem Reports, Test Change Requests, and
-builds from across the Project. AeroLink validates that the selected record belongs to the same Project, stores the relationship and
-actor, and retains it with the exact document revision.
+An authorized revision owner or Project configuration authority can link existing change requests, Problem
+Reports, Test Change Requests, and builds from across the Project while a revision is Draft or Returned. The
+browser supplies only the target type, target ID, and a typed meaning allowed for that target. AeroLink resolves
+the canonical number, title, current state, Project, build provenance, and deep link server-side; browser labels
+are never evidence. Ordinary engineers and global administrators without explicit Project document authority
+cannot mutate the set.
+
+The supported meanings are versioned and bounded: `MotivatedBy` or `ImplementsChange` for change requests,
+`VerificationImpact` for TCRs, `AddressesProblem` or `AffectedBy` for Problem Reports, and `RelatedBuild` or
+`AppliesToMilestone` for builds. Same-Project records from different builds are valid traceability and retain
+their real build/version metadata, but never select document effectivity. Cross-Project and type/meaning
+mismatches fail before mutation.
+
+Every add, correction, or supersession is optimistic-concurrency checked. Correction retains the prior row,
+reason, actor, time, and replacement identity rather than deleting evidence. In Review, Released, and
+Superseded relationship sets are immutable. Submission serializes the active canonical links in a deterministic
+order and binds that manifest hash into the technical review snapshot. Release-candidate hashing binds the same
+submitted manifest into the final DOCX/PDF release manifest, so a relationship change after return necessarily
+requires a new submission and signatures over a new snapshot.
 
 ## Desktop connector
 
@@ -101,6 +117,11 @@ cannot truthfully claim that the retained text was the original formal revision 
 attachment is recovered as check-in evidence using its existing attachment ID, version, actor, timestamp, base
 link, and hashes. Legacy connector session and operation-token values that were never stored remain explicitly
 unknown rather than being fabricated.
+
+The controlled-relationship migration leaves historical labels and review/signature hashes exactly as stored.
+It marks those rows `LegacyClientSupplied`, derives only Project and build provenance already provable through
+existing foreign keys, and does not fabricate a relationship manifest for a review that never captured one.
+New submissions use the versioned canonical relationship evidence contract.
 
 ## Stewardship, responsibility, and authorship
 

@@ -60,6 +60,19 @@ test('problem reports and configuration baselines are active while retired produ
     expect(parseRoute(`${root}/artifacts/${kind}/record-a`)).toMatchObject({ view: 'notFound' })
 })
 
+test('controlled document TCR links open the exact package in its build and discipline', () => {
+  const root = '/programs/program-a/projects/project-a/releases/release-a'
+  for (const [discipline, kind, branch] of [
+    ['systemTest', undefined, 'system-verification'],
+    ['softwareTest', 'HighLevel', 'software-verification/hlr'],
+    ['softwareTest', 'LowLevel', 'software-verification/llr'],
+  ] as const) {
+    const path = routePath(context, 'testingCoverage', discipline, 'tcr-a', kind)
+    expect(path).toBe(`${root}/${branch}/coverage/tcr-a`)
+    expect(parseRoute(path)).toMatchObject({ view: 'testingCoverage', artifactId: 'tcr-a', ...(kind ? { artifactKind: kind } : {}) })
+  }
+})
+
 test('legacy context-free change-request routes remain loadable until detail canonicalizes them', () => {
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/change-requests/legacy-a'))
     .toMatchObject({ view: 'scr', discipline: 'system', artifactId: 'legacy-a' })

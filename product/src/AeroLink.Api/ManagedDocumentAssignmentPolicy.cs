@@ -41,4 +41,23 @@ internal static class ManagedDocumentAssignmentPolicy
             if (await IsEligibleAsync(db, identity, projectId, name, now, ct)) eligible.Add(name);
         return eligible;
     }
+
+    /// <summary>Controlled document authority without the global-administrator shortcut.</summary>
+    public static async Task<bool> HasExplicitAuthorityAsync(AeroLinkDbContext db, Guid projectId,
+        AuthenticatedUser actor, DateTimeOffset now, CancellationToken ct, params ProgramRole[] roles)
+    {
+        if (actor.UserName == IdentityService.SystemAdministratorUserName) return false;
+        var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
+        if (programId is null) return false;
+        foreach (var role in roles)
+        {
+            var accepted = ProgramRoleAuthority.Satisfying(role).ToList();
+            if (await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.ProgramId == programId && x.UserId == actor.Id && x.EndedAt == null && accepted.Contains(x.Role), ct)) return true;
+            var delegations = await db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == programId && x.DelegateUserId == actor.Id && accepted.Contains(x.Role) && x.RevokedAt == null).ToListAsync(ct);
+            if (delegations.Any(x => x.StartsAt <= now && x.EndsAt > now)) return true;
+            var backup = await db.ProjectRoleBackups.AsNoTracking().AnyAsync(x => x.ProgramId == programId && x.BackupUserId == actor.Id && x.RemovedAt == null && accepted.Contains(x.Role), ct);
+            if (backup && await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.ProgramId == programId && x.UserId == actor.Id && x.EndedAt == null, ct)) return true;
+        }
+        return false;
+    }
 }

@@ -160,7 +160,7 @@ function ExistingCoverage({ item, coverage }: { item: ImpactItem; coverage?: Cov
  * change request is approved, so nothing goes unnoticed; an engineer can also raise one deliberately when a
  * set of changes is best tested together.
  */
-export default function TestingCoverageWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, programId, user, onOpenRequirementRevision }: {
+export default function TestingCoverageWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, programId, user, initialReviewId, onOpenRequirementRevision }: {
   api: string
   projectId: string
   releaseId: string
@@ -169,6 +169,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   readOnly: boolean
   programId: string
   user: AuthUser
+  initialReviewId?: string
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
 }) {
   // Authority is per Program, and it is the server that enforces it. Reflecting it here is about not offering
@@ -311,6 +312,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   }, [api, projectId, releaseId, discipline])
 
   useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    if (initialReviewId && requests.some(request => request.id === initialReviewId)) setAuthoring(initialReviewId)
+  }, [initialReviewId, requests])
 
   // A project/release/discipline transition must never leave the previous scope's picker context visible
   // while the new scope is loading. Reset every picker-owned state deliberately; the loaders repopulate it.
