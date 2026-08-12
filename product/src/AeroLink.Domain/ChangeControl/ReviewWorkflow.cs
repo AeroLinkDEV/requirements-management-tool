@@ -27,7 +27,20 @@ public enum ReviewSubject
 }
 
 /// <summary>
-/// One stage of a team's review procedure: who has to sign, and in what authority.
+/// What a signature on a stage means.
+///
+/// A review examines the content: is this correct, complete, and fit for what it claims. An approval sits
+/// above that and acknowledges the artifact is done and being released. The same person may do either on
+/// different artifacts, so this is a property of the stage rather than of the people.
+///
+/// Recorded because the two were previously indistinguishable — every step's authority was stamped with the
+/// literal string "Reviewer" — and an electronic signature is required to carry a meaning of its own. Two
+/// signatures that read identically cannot later say which of them authorised the release.
+/// </summary>
+public enum ReviewStageKind { Review, Approval }
+
+/// <summary>
+/// One stage of a team's review procedure: who has to sign, in what authority, and what their signature means.
 ///
 /// A stage names an authority rather than a person. "Verification lead" survives somebody changing jobs;
 /// a named individual does not, and a workflow that has to be rewritten every time somebody moves teams is
@@ -37,7 +50,8 @@ public sealed class ReviewWorkflowStage
 {
     private ReviewWorkflowStage() { }
 
-    internal ReviewWorkflowStage(Guid workflowId, int position, string name, ProgramRole requiredRole)
+    internal ReviewWorkflowStage(Guid workflowId, int position, string name, ProgramRole requiredRole,
+        ReviewStageKind kind = ReviewStageKind.Review)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new DomainException("A review stage needs a name.");
         Id = Guid.NewGuid();
@@ -45,6 +59,7 @@ public sealed class ReviewWorkflowStage
         Position = position;
         Name = name.Trim();
         RequiredRole = requiredRole;
+        Kind = kind;
     }
 
     public Guid Id { get; private set; }
@@ -52,6 +67,12 @@ public sealed class ReviewWorkflowStage
     public int Position { get; private set; }
     public string Name { get; private set; } = "";
     public ProgramRole RequiredRole { get; private set; }
+    /// <summary>
+    /// Defaults to <see cref="ReviewStageKind.Review"/>, which is what every stage recorded before this
+    /// existed actually was: the step stamped its authority as "Reviewer" and nothing distinguished a release
+    /// acknowledgement from a content examination. Teams mark their approval stages when they next revise.
+    /// </summary>
+    public ReviewStageKind Kind { get; private set; }
 }
 
 /// <summary>
@@ -96,7 +117,7 @@ public sealed class ReviewWorkflow
         CreatedBy = actorId.Trim();
         CreatedAt = now;
         for (var index = 0; index < stages.Count; index++)
-            _stages.Add(new ReviewWorkflowStage(Id, index, stages[index].Name, stages[index].RequiredRole));
+            _stages.Add(new ReviewWorkflowStage(Id, index, stages[index].Name, stages[index].RequiredRole, stages[index].Kind));
     }
 
     public Guid Id { get; private set; }
@@ -142,11 +163,11 @@ public sealed class ReviewWorkflow
     /// <summary>The stage requirements, in order, as the review cycle needs to see them.</summary>
     public ReviewWorkflowSpecification Specification() =>
         new(Id, LogicalId, Name, Version, Mode,
-            _stages.OrderBy(x => x.Position).Select(x => new ReviewStageRequirement(x.Position, x.Name, x.RequiredRole)).ToList());
+            _stages.OrderBy(x => x.Position).Select(x => new ReviewStageRequirement(x.Position, x.Name, x.RequiredRole, x.Kind)).ToList());
 }
 
-public sealed record ReviewWorkflowStageDraft(string Name, ProgramRole RequiredRole);
-public sealed record ReviewStageRequirement(int Position, string Name, ProgramRole RequiredRole);
+public sealed record ReviewWorkflowStageDraft(string Name, ProgramRole RequiredRole, ReviewStageKind Kind = ReviewStageKind.Review);
+public sealed record ReviewStageRequirement(int Position, string Name, ProgramRole RequiredRole, ReviewStageKind Kind = ReviewStageKind.Review);
 
 /// <summary>
 /// What a review must satisfy, passed to the change request at submission.

@@ -11,7 +11,7 @@ public sealed class ApprovalStep
 {
     private ApprovalStep() { }
     internal ApprovalStep(Guid reviewCycleId, int position, string approverId, string approverName, bool active,
-        string stageName = "")
+        string stageName = "", ReviewStageKind stageKind = ReviewStageKind.Review)
     {
         Id = Guid.NewGuid();
         ReviewCycleId = reviewCycleId;
@@ -21,6 +21,7 @@ public sealed class ApprovalStep
         // The stage this signature answers, when the review follows a recorded procedure. An approval that
         // records only a name and a position cannot later be read as "the verification lead signed".
         StageName = stageName.Trim();
+        StageKind = stageKind;
         Authority = "Reviewer";
         State = active ? ApprovalStepState.Active : ApprovalStepState.Pending;
     }
@@ -31,6 +32,11 @@ public sealed class ApprovalStep
     public string ApproverId { get; private set; } = string.Empty;
     public string ApproverName { get; private set; } = string.Empty;
     public string StageName { get; private set; } = string.Empty;
+    /// <summary>
+    /// Whether this signature examined the content or authorised the release. Frozen on the step, like the
+    /// authority beside it, so the record stays readable after the procedure behind it is revised.
+    /// </summary>
+    public ReviewStageKind StageKind { get; private set; }
     public string Authority { get; private set; } = string.Empty;
     public ApprovalStepState State { get; private set; }
     public DateTimeOffset? DecidedAt { get; private set; }
@@ -96,7 +102,8 @@ public sealed class ReviewCycle
         {
             var step = new ApprovalStep(Id, index, approvers[index].UserId, approvers[index].Name,
                 Mode == ReviewMode.Parallel || index == 0,
-                workflow is null ? "" : workflow.Stages[index].Name);
+                workflow is null ? "" : workflow.Stages[index].Name,
+                workflow is null ? ReviewStageKind.Review : workflow.Stages[index].Kind);
             step.Replace(approvers[index].UserId, approvers[index].Name, approvers[index].Role);
             _steps.Add(step);
         }

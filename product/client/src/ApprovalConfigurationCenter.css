@@ -1,0 +1,87 @@
+/* What each artifact requires before release, and whether anybody can actually sign it. The right-hand
+   column is the point of the page: a procedure that names a position nobody holds looks perfectly healthy
+   until somebody submits work under it. */
+
+.approvalConfigPage { min-height: 100vh; background: var(--canvas); }
+.approvalConfigMain { max-width: 1240px; margin: 0 auto; padding: 26px 28px 64px; }
+
+.approvalConfigBreadcrumb { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--ink-500); margin-bottom: 16px; }
+.approvalConfigBreadcrumb button { background: none; border: none; padding: 0; font: inherit; color: var(--teal-700); font-weight: var(--weight-strong); cursor: pointer; }
+.approvalConfigBreadcrumb button:hover { text-decoration: underline; }
+.approvalConfigBreadcrumb strong { color: var(--ink-900); font-weight: var(--weight-strong); }
+
+.approvalConfigHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+.approvalConfigHeading h1 { font-family: var(--font-display); font-size: var(--text-title); font-weight: var(--weight-bold); letter-spacing: -.02em; margin: 0 0 6px; color: var(--ink-900); }
+.approvalConfigHeading p { margin: 0; color: var(--ink-500); font-size: var(--text-control); max-width: 72ch; }
+.approvalConfigActions button {
+  min-height: 36px; padding: 8px 15px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--surface); color: var(--teal-700); font: var(--weight-strong) var(--text-control) var(--font-body); cursor: pointer; white-space: nowrap;
+}
+.approvalConfigActions button:hover { background: var(--surface-subtle); }
+
+.approvalConfigError, .approvalConfigAlarm { border-radius: var(--radius-sm); padding: 11px 14px; font-size: var(--text-control); margin: 0 0 18px; }
+.approvalConfigError { background: #fce9eb; border: 1px solid #eccfd3; color: #8f2f3d; }
+.approvalConfigAlarm { background: #fce9eb; border: 1px solid #eccfd3; color: #8f2f3d; }
+.approvalConfigAlarm strong { font-weight: var(--weight-bold); }
+.approvalConfigLoading { color: var(--ink-500); font-size: var(--text-control); }
+
+.approvalConfigLayout { display: grid; grid-template-columns: 288px 1fr; gap: 16px; align-items: start; }
+
+.artifactList { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+.artifactList h2 {
+  font-family: var(--font-body); font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: .07em;
+  text-transform: uppercase; color: var(--ink-500); margin: 0; padding: 11px 14px;
+  background: var(--surface-subtle); border-bottom: 1px solid var(--line);
+}
+.artifactList ul { list-style: none; margin: 0; padding: 0; }
+.artifactList li { border-bottom: 1px solid #eef2f6; }
+.artifactList button {
+  width: 100%; text-align: left; background: none; border: none; cursor: pointer;
+  padding: 11px 14px; display: flex; flex-direction: column; gap: 5px; font: inherit;
+}
+.artifactList button:hover { background: var(--surface-subtle); }
+.artifactList button.selected { background: var(--teal-100); box-shadow: inset 3px 0 0 var(--teal-700); }
+.artifactName { font-size: var(--text-control); font-weight: var(--weight-strong); color: var(--ink-900); }
+.artifactMeta { font-size: var(--text-xs); color: var(--ink-500); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.artifactListNote { margin: 0; padding: 11px 14px; font-size: var(--text-xs); color: var(--ink-500); border-top: 1px solid var(--line); background: var(--surface-subtle); }
+
+.pill { display: inline-flex; align-items: center; border-radius: var(--radius-pill); padding: 2px 9px; font-size: var(--text-xs); font-weight: var(--weight-bold); }
+.pill.active { background: var(--teal-100); color: var(--teal-700); }
+.pill.blocked { background: #fce9eb; color: #8f2f3d; }
+.pill.muted { background: #eef1f6; color: var(--ink-500); }
+.pill.review { background: var(--teal-100); color: var(--teal-700); }
+.pill.approval { background: #e9edf7; color: #35407e; }
+.pill.large { font-size: var(--text-sm); padding: 5px 12px; }
+
+.procedurePanel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 18px 20px; }
+.procedureHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.procedureHeader h2, .procedureEmpty h2 { font-family: var(--font-display); font-size: var(--text-xl); font-weight: var(--weight-bold); margin: 0 0 3px; color: var(--ink-900); }
+.procedureHeader p { margin: 0; font-size: var(--text-sm); color: var(--ink-500); }
+.procedureEmpty p { margin: 8px 0 0; font-size: var(--text-control); color: var(--ink-500); max-width: 68ch; }
+
+.stageTable { width: 100%; border-collapse: collapse; font-size: var(--text-control); }
+.stageTable th {
+  font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-500); text-align: left; padding: 10px 12px 8px; border-bottom: 1px solid var(--line);
+}
+.stageTable td { padding: 12px; border-bottom: 1px solid #eef2f6; color: var(--ink-700); vertical-align: middle; }
+.stageTable tr:last-child td { border-bottom: none; }
+.stageNumberCell { width: 40px; color: var(--ink-500); font-variant-numeric: tabular-nums; }
+.stageNameCell { font-weight: var(--weight-strong); color: var(--ink-900); }
+.stageTable tr.blockingStage { background: #fffafa; }
+.stageTable td.nobody { color: #8f2f3d; font-weight: var(--weight-strong); }
+
+.stageKindNote { margin: 14px 0 0; font-size: var(--text-xs); color: var(--ink-500); max-width: 76ch; }
+.stageKindNote strong { color: var(--ink-700); font-weight: var(--weight-strong); }
+
+.blockingNotice {
+  margin-top: 14px; background: #fce9eb; border: 1px solid #eccfd3; border-radius: var(--radius-sm);
+  padding: 11px 13px; display: flex; gap: 10px; align-items: flex-start; color: #8f2f3d;
+}
+.blockingNotice span { font-weight: var(--weight-bold); }
+.blockingNotice p { margin: 0; font-size: var(--text-control); }
+
+@media (max-width: 900px) {
+  .approvalConfigLayout { grid-template-columns: 1fr; }
+  .approvalConfigHeading { flex-direction: column; }
+}

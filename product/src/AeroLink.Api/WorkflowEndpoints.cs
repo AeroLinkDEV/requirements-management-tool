@@ -41,7 +41,7 @@ public static class WorkflowEndpoints
                 return Results.Forbid();
             try
             {
-                var stages = request.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole)).ToList();
+                var stages = request.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind)).ToList();
                 var workflow = new ReviewWorkflow(request.ProjectId, request.Name, request.AppliesTo, request.Mode,
                     stages, http.UserAccount().UserName, DateTimeOffset.UtcNow);
                 db.ReviewWorkflows.Add(workflow);
@@ -89,7 +89,7 @@ public static class WorkflowEndpoints
             {
                 // The prior version stays exactly as it was. A completed review has to remain explainable by
                 // the procedure it was actually judged against.
-                var stages = request.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole)).ToList();
+                var stages = request.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind)).ToList();
                 var next = current.Revise(request.Name, request.Mode, stages, http.UserAccount().UserName, DateTimeOffset.UtcNow);
                 db.ReviewWorkflows.Add(next);
                 await db.SaveChangesAsync(ct);
@@ -252,11 +252,12 @@ public static class WorkflowEndpoints
         x.ActivatedAt,
         x.RetiredAt,
         stages = x.Stages.OrderBy(s => s.Position)
-            .Select(s => new { s.Position, s.Name, requiredRole = s.RequiredRole.ToString() }),
+            .Select(s => new { s.Position, s.Name, requiredRole = s.RequiredRole.ToString(), kind = s.Kind.ToString() }),
     };
 }
 
-public sealed record ReviewWorkflowStageRequest(string Name, ProgramRole RequiredRole);
+public sealed record ReviewWorkflowStageRequest(string Name, ProgramRole RequiredRole,
+    ReviewStageKind Kind = ReviewStageKind.Review);
 public sealed record CreateReviewWorkflowRequest(Guid ProjectId, string Name, ReviewSubject AppliesTo,
     ReviewMode Mode, List<ReviewWorkflowStageRequest> Stages);
 public sealed record ReviseReviewWorkflowRequest(string Name, ReviewMode Mode, List<ReviewWorkflowStageRequest> Stages);
