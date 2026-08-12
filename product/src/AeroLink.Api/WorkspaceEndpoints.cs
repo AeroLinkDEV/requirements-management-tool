@@ -268,18 +268,35 @@ public static class WorkspaceEndpoints
             });
         });
 
-        app.MapGet("/api/directory", async (Guid? programId, Guid? projectId, string? search, int? limit, string? authority, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/directory", async (Guid? programId, Guid? projectId, string? search, int? limit, string? authority, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var selectedProgram = programId ?? (projectId is null ? null : await db.Projects.Where(x=>x.Id==projectId).Select(x=>(Guid?)x.ProgramId).SingleOrDefaultAsync(ct));
             if(selectedProgram is null)return Results.BadRequest(new{error="Choose a Program or Project directory context."});
-            if(!string.IsNullOrWhiteSpace(authority)&&!string.Equals(authority,ProblemReportOwnerAuthority.DirectoryAuthority,StringComparison.Ordinal))
+            if(!string.IsNullOrWhiteSpace(authority)
+                && !string.Equals(authority,ProblemReportOwnerAuthority.DirectoryAuthority,StringComparison.Ordinal)
+                && !string.Equals(authority,ManagedDocumentAssignmentPolicy.DirectoryAuthority,StringComparison.Ordinal))
                 return Results.BadRequest(new{error="The requested directory authority is not supported.",code="directory_authority_unsupported"});
+            if(string.Equals(authority,ManagedDocumentAssignmentPolicy.DirectoryAuthority,StringComparison.Ordinal)&&projectId is null)
+                return Results.BadRequest(new{error="Managed-document author eligibility requires a Project directory context.",code="project_context_required"});
             var actor=http.UserAccount();if(!actor.IsAdministrator&&!actor.Programs.Any(x=>x.ProgramId==selectedProgram.Value))return Results.Forbid();
             var members = await (from membership in db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == selectedProgram && x.EndedAt == null)
                                  join user in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active) on membership.UserId equals user.Id
                                  select new { user.Id, user.UserName, user.DisplayName, user.Email, role = membership.Role }).ToListAsync(ct);
+            HashSet<string>? managedDocumentAuthors = null;
+            if (string.Equals(authority, ManagedDocumentAssignmentPolicy.DirectoryAuthority, StringComparison.Ordinal))
+            {
+                managedDocumentAuthors = await ManagedDocumentAssignmentPolicy.EligibleUserNamesAsync(db, identity, projectId!.Value, DateTimeOffset.UtcNow, ct);
+                var existingIds = members.Select(x => x.Id).ToHashSet();
+                var delegated = await (from delegation in db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == selectedProgram && x.Role == ProgramRole.Engineer && x.RevokedAt == null)
+                                       join user in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active) on delegation.DelegateUserId equals user.Id
+                                       where !existingIds.Contains(user.Id)
+                                       select new { user.Id, user.UserName, user.DisplayName, user.Email, role = ProgramRole.Engineer }).ToListAsync(ct);
+                members.AddRange(delegated.Where(x => managedDocumentAuthors.Contains(x.UserName)));
+            }
             var people=members.GroupBy(x => new { x.Id, x.UserName, x.DisplayName, x.Email })
-                .Where(x=>string.IsNullOrWhiteSpace(authority)||ProblemReportOwnerAuthority.IsEligible(x.Select(r=>r.role)))
+                .Where(x=>string.IsNullOrWhiteSpace(authority)
+                    || string.Equals(authority,ProblemReportOwnerAuthority.DirectoryAuthority,StringComparison.Ordinal)&&ProblemReportOwnerAuthority.IsEligible(x.Select(r=>r.role))
+                    || string.Equals(authority,ManagedDocumentAssignmentPolicy.DirectoryAuthority,StringComparison.Ordinal)&&managedDocumentAuthors!.Contains(x.Key.UserName))
                 .Select(x => {var roles=x.Select(r=>r.role.ToString()).Order().ToList();return new{x.Key.Id,x.Key.UserName,x.Key.DisplayName,x.Key.Email,title=DirectoryTitles.For(x.Key.UserName,roles),roles};});
             var q=search?.Trim()??"";
             if(q.Length>0)people=people.Where(x=>x.DisplayName.Contains(q,StringComparison.OrdinalIgnoreCase)||x.UserName.Contains(q,StringComparison.OrdinalIgnoreCase)||x.Email.Contains(q,StringComparison.OrdinalIgnoreCase)||x.title.Contains(q,StringComparison.OrdinalIgnoreCase)||x.roles.Any(r=>r.Contains(q,StringComparison.OrdinalIgnoreCase)));
@@ -290,7 +307,7 @@ public static class WorkspaceEndpoints
                 .ThenBy(x=>x.DisplayName).Take(Math.Clamp(limit??50,1,200)));
         });
 
-        app.MapGet("/api/my-work", async (Guid? projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/my-work", async (Guid? projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
             var activeScrSteps = await (from step in db.ApprovalSteps.AsNoTracking().Where(x => x.ApproverId == actor.UserName && x.State == ApprovalStepState.Active)
@@ -328,7 +345,7 @@ public static class WorkspaceEndpoints
             // description is the formal revision scope, never the most recent check-in note.
             var managedOwnerWork = (await (from revision in db.ManagedDocumentRevisions.AsNoTracking()
                                             join document in db.ManagedDocuments.AsNoTracking() on revision.DocumentId equals document.Id
-                                            where revision.OwnerId == actor.UserName
+                                            where revision.ResponsibleOwnerId == actor.UserName
                                                 && (revision.State == ManagedDocumentState.Draft || revision.State == ManagedDocumentState.Returned)
                                                 && (projectId == null || document.ProjectId == projectId)
                                             select new { id = document.Id, type = "Project document to complete", artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, title = revision.FormalChangeSummary, priority = revision.State == ManagedDocumentState.Returned ? "High" : "Normal", dueAt = revision.UpdatedAt.AddDays(10), ageDays = (int)(now - revision.UpdatedAt).TotalDays, route = "managedDocuments", discipline = "project" }).ToListAsync(ct)).OrderBy(x => x.dueAt).ToList();
@@ -337,8 +354,18 @@ public static class WorkspaceEndpoints
                                              join document in db.ManagedDocuments.AsNoTracking() on revision.DocumentId equals document.Id
                                              where projectId == null || document.ProjectId == projectId
                                              select new { id = document.Id, type = "Project document review", artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, title = revision.FormalChangeSummary, priority = "High", dueAt = revision.SubmittedAt!.Value.AddDays(5), ageDays = (int)(now - revision.SubmittedAt!.Value).TotalDays, route = "managedDocuments", discipline = "project" }).ToListAsync(ct)).OrderBy(x => x.dueAt).ToList();
-            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(assignedTestWork).Concat(managedOwnerWork).Concat(managedReviewWork).ToList();
-            return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count + managedReviewWork.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now) + managedOwnerWork.Count(x => x.dueAt < now) + managedReviewWork.Count(x => x.dueAt < now), drafts = authoredDrafts.Count + managedOwnerWork.Count }, tasks });
+            var managedRecoveryWork = new List<object>();
+            if (projectId is not null && await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead))
+            {
+                var eligibleUsers = await ManagedDocumentAssignmentPolicy.EligibleUserNamesAsync(db, identity, projectId.Value, now, ct);
+                var recoveryCandidates = await (from revision in db.ManagedDocumentRevisions.AsNoTracking()
+                                                join document in db.ManagedDocuments.AsNoTracking() on revision.DocumentId equals document.Id
+                                                where document.ProjectId == projectId.Value && (revision.State == ManagedDocumentState.Draft || revision.State == ManagedDocumentState.Returned)
+                                                select new { id = document.Id, owner = revision.ResponsibleOwnerId, artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, dueAt = revision.UpdatedAt }).ToListAsync(ct);
+                managedRecoveryWork = recoveryCandidates.Where(x => !eligibleUsers.Contains(x.owner)).Select(x => (object)new { x.id, type = "Project document owner recovery", x.artifact, title = "Reassign disabled or departed owner: " + x.owner, priority = "High", x.dueAt, ageDays = (int)(now - x.dueAt).TotalDays, route = "managedDocuments", discipline = "project" }).ToList();
+            }
+            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(assignedTestWork).Concat(managedOwnerWork).Concat(managedReviewWork).Concat(managedRecoveryWork).ToList();
+            return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count + managedReviewWork.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now) + managedOwnerWork.Count(x => x.dueAt < now) + managedReviewWork.Count(x => x.dueAt < now) + managedRecoveryWork.Count, drafts = authoredDrafts.Count + managedOwnerWork.Count }, tasks });
         });
 
         // Notifications and Jira emitted paths such as /systems/change-requests/{id}. The client router

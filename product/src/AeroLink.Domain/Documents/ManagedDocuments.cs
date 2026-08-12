@@ -14,7 +14,7 @@ public sealed class ManagedDocument
 {
     private ManagedDocument() { }
     public ManagedDocument(Guid projectId, string documentNumber, string acronym, string documentType, string title,
-        string ownerId, DateTimeOffset now)
+        string ownerId, DateTimeOffset now, string? createdBy = null)
     {
         var normalizedAcronym = Required(acronym, "A document acronym is required.").ToUpperInvariant();
         var normalizedNumber = ArtifactNumber.ValidateBase(documentNumber);
@@ -22,7 +22,8 @@ public sealed class ManagedDocument
             throw new DomainException("The controlled document number must begin with its acronym.");
         Id = Guid.NewGuid(); ProjectId = projectId; DocumentNumber = normalizedNumber; Acronym = normalizedAcronym;
         DocumentType = Required(documentType, "A document type is required."); Title = Required(title, "A document title is required.");
-        OwnerId = Required(ownerId, "A document owner is required.").ToLowerInvariant(); CreatedAt = UpdatedAt = now; Version = 1;
+        OwnerId = Required(ownerId, "A document steward is required.").ToLowerInvariant(); StewardId = OwnerId;
+        CreatedBy = Required(createdBy ?? ownerId, "A document creator is required.").ToLowerInvariant(); CreatedAt = UpdatedAt = now; Version = 1;
     }
 
     public Guid Id { get; private set; }
@@ -32,12 +33,22 @@ public sealed class ManagedDocument
     public string DocumentType { get; private set; } = "";
     public string Title { get; private set; } = "";
     public string OwnerId { get; private set; } = "";
+    public string StewardId { get; private set; } = "";
+    public string CreatedBy { get; private set; } = "";
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; }
 
-    public void Update(string title, string ownerId, DateTimeOffset now)
-    { Title = Required(title, "A document title is required."); OwnerId = Required(ownerId, "A document owner is required.").ToLowerInvariant(); UpdatedAt = now; Version++; }
+    public void UpdateTitle(string title, DateTimeOffset now)
+    { Title = Required(title, "A document title is required."); UpdatedAt = now; Version++; }
+
+    public string ReassignSteward(string stewardId, long expectedVersion, DateTimeOffset now)
+    {
+        if (Version != expectedVersion) throw new DomainException("The managed document changed after this page loaded. Refresh and try again.");
+        var next = Required(stewardId, "A document steward is required.").ToLowerInvariant(); var prior = StewardId;
+        if (next == prior) throw new DomainException("Select a different document steward.");
+        StewardId = next; UpdatedAt = now; Version++; return prior;
+    }
 
     private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
 }
@@ -50,7 +61,7 @@ public sealed class ManagedDocumentRevision
     public ManagedDocumentRevision(Guid documentId, int revision, string ownerId,
         string changeSummary, DateTimeOffset now, Guid? parentRevisionId = null,
         Guid? parentReleasedDocxAttachmentId = null, string? parentReleasedDocxSha256 = null,
-        string? transformationProfile = null)
+        string? transformationProfile = null, string? initiatedBy = null)
     {
         if (revision < 0) throw new DomainException("Document revisions cannot be negative.");
         if (revision == 0 && (parentRevisionId is not null || parentReleasedDocxAttachmentId is not null || parentReleasedDocxSha256 is not null))
@@ -64,6 +75,7 @@ public sealed class ManagedDocumentRevision
         ParentRevisionId = parentRevisionId; ParentReleasedDocxAttachmentId = parentReleasedDocxAttachmentId;
         ParentReleasedDocxSha256 = parentReleasedDocxSha256?.Trim().ToLowerInvariant();
         TransformationProfile = transformationProfile?.Trim() ?? "";
+        ResponsibleOwnerId = OwnerId; InitiatedBy = Required(initiatedBy ?? ownerId, "A revision initiator is required.").ToLowerInvariant();
         State = ManagedDocumentState.Draft; CreatedAt = UpdatedAt = now; Version = 1;
     }
 
@@ -75,6 +87,8 @@ public sealed class ManagedDocumentRevision
     public string? ParentReleasedDocxSha256 { get; private set; }
     public string TransformationProfile { get; private set; } = "";
     public string OwnerId { get; private set; } = "";
+    public string ResponsibleOwnerId { get; private set; } = "";
+    public string InitiatedBy { get; private set; } = "";
     public string FormalChangeSummary { get; private set; } = "";
     public string FormalSummaryHash { get; private set; } = "";
     public long FormalSummaryVersion { get; private set; }
@@ -116,7 +130,7 @@ public sealed class ManagedDocumentRevision
         if (reviewers.Count < 2) throw new DomainException("Document release requires a technical reviewer and an independent final approver.");
         if (reviewers.Select(x => x.UserId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != reviewers.Count)
             throw new DomainException("A document reviewer cannot appear twice in one review cycle.");
-        if (reviewers.Any(x => string.Equals(x.UserId, actor, StringComparison.OrdinalIgnoreCase) || string.Equals(x.UserId, OwnerId, StringComparison.OrdinalIgnoreCase)))
+        if (reviewers.Any(x => string.Equals(x.UserId, actor, StringComparison.OrdinalIgnoreCase) || string.Equals(x.UserId, ResponsibleOwnerId, StringComparison.OrdinalIgnoreCase)))
             throw new DomainException("The document author cannot approve their own revision.");
         var cycle = CurrentReviewCycle + 1;
         for (var index = 0; index < reviewers.Count; index++)
@@ -184,6 +198,15 @@ public sealed class ManagedDocumentRevision
         UpdatedAt = now; Version++;
     }
 
+    public string ReassignResponsibleOwner(string ownerId, long expectedVersion, DateTimeOffset now)
+    {
+        EnsureEditable();
+        if (Version != expectedVersion) throw new DomainException("The document revision changed after this page loaded. Refresh and try again.");
+        var next = Required(ownerId, "A responsible revision owner is required.").ToLowerInvariant(); var prior = ResponsibleOwnerId;
+        if (next == prior) throw new DomainException("Select a different responsible revision owner.");
+        ResponsibleOwnerId = next; UpdatedAt = now; Version++; return prior;
+    }
+
     private ManagedDocumentReviewStep ActiveStep() => _reviewSteps.SingleOrDefault(x => x.Cycle == CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active)
         ?? throw new DomainException("This document review has no active stage.");
     private void EnsureEditable() { if (State is not (ManagedDocumentState.Draft or ManagedDocumentState.Returned)) throw new DomainException("Only a Draft or returned document revision can be edited."); }
@@ -192,6 +215,55 @@ public sealed class ManagedDocumentRevision
     private static string Bounded(string? value, int maximum, string requiredError, string lengthError)
     { var result = Required(value, requiredError); return result.Length > maximum ? throw new DomainException(lengthError) : result; }
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+}
+
+/// <summary>Immutable attribution of one contributor to the exact submitted review cycle.</summary>
+public sealed class ManagedDocumentReviewContributor
+{
+    private ManagedDocumentReviewContributor() { }
+    public ManagedDocumentReviewContributor(Guid revisionId, int reviewCycle, string contributorId, string evidenceHash, DateTimeOffset capturedAt, string provenance = "AuthoritativeSubmissionSnapshot")
+    {
+        Id = Guid.NewGuid(); RevisionId = revisionId; ReviewCycle = reviewCycle;
+        ContributorId = Required(contributorId, "A contributor is required.").ToLowerInvariant();
+        EvidenceHash = Required(evidenceHash, "Contributor evidence requires a hash.").ToLowerInvariant(); CapturedAt = capturedAt;
+        Provenance = Required(provenance, "Contributor evidence provenance is required.");
+    }
+    public Guid Id { get; private set; }
+    public Guid RevisionId { get; private set; }
+    public int ReviewCycle { get; private set; }
+    public string ContributorId { get; private set; } = "";
+    public string EvidenceHash { get; private set; } = "";
+    public DateTimeOffset CapturedAt { get; private set; }
+    public string Provenance { get; private set; } = "";
+    private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
+}
+
+/// <summary>Append-only evidence of an explicit stewardship or revision-responsibility transfer.</summary>
+public sealed class ManagedDocumentAssignment
+{
+    private ManagedDocumentAssignment() { }
+    public ManagedDocumentAssignment(Guid documentId, Guid? revisionId, string assignmentType, string priorAssigneeId,
+        string newAssigneeId, string assignedBy, string reason, DateTimeOffset effectiveAt)
+    {
+        Id = Guid.NewGuid(); DocumentId = documentId; RevisionId = revisionId;
+        AssignmentType = Required(assignmentType, "An assignment type is required.");
+        PriorAssigneeId = Required(priorAssigneeId, "A prior assignee is required.").ToLowerInvariant();
+        NewAssigneeId = Required(newAssigneeId, "A new assignee is required.").ToLowerInvariant();
+        AssignedBy = Required(assignedBy, "An assigning actor is required.").ToLowerInvariant();
+        Reason = Bounded(reason, 1000, "A reassignment reason is required.", "A reassignment reason cannot exceed 1000 characters."); EffectiveAt = effectiveAt;
+    }
+    public Guid Id { get; private set; }
+    public Guid DocumentId { get; private set; }
+    public Guid? RevisionId { get; private set; }
+    public string AssignmentType { get; private set; } = "";
+    public string PriorAssigneeId { get; private set; } = "";
+    public string NewAssigneeId { get; private set; } = "";
+    public string AssignedBy { get; private set; } = "";
+    public string Reason { get; private set; } = "";
+    public DateTimeOffset EffectiveAt { get; private set; }
+    private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
+    private static string Bounded(string? value, int maximum, string requiredError, string lengthError)
+    { var result = Required(value, requiredError); return result.Length > maximum ? throw new DomainException(lengthError) : result; }
 }
 
 /// <summary>Immutable evidence for one accepted managed-document working version.</summary>
