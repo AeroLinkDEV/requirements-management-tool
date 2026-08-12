@@ -91,10 +91,22 @@ public sealed class ProgramRoleAuthorityTests
     [Theory]
     [InlineData(ProgramRole.SystemTestEngineer)]
     [InlineData(ProgramRole.SoftwareTestEngineer)]
-    [InlineData(ProgramRole.SystemTestLead)]
-    [InlineData(ProgramRole.SoftwareTestLead)]
     public void Every_verification_job_title_satisfies_a_request_for_a_test_engineer(ProgramRole role)
         => Assert.Contains(role, ProgramRoleAuthority.Satisfying(ProgramRole.TestEngineer));
+
+    /// <summary>
+    /// Leading verification is not doing it.
+    ///
+    /// `TestLead` holds distribution authority: impact items land with the lead, who assigns them to an
+    /// individual `TestEngineer`. Making a lead satisfy a request for a test engineer merges two jobs the
+    /// model separates on purpose, and changes who verification work routes to.
+    /// </summary>
+    [Theory]
+    [InlineData(ProgramRole.TestLead)]
+    [InlineData(ProgramRole.SystemTestLead)]
+    [InlineData(ProgramRole.SoftwareTestLead)]
+    public void A_test_lead_does_not_satisfy_a_request_for_a_test_engineer(ProgramRole role)
+        => Assert.DoesNotContain(role, ProgramRoleAuthority.Satisfying(ProgramRole.TestEngineer));
 
     [Theory]
     [InlineData(ProgramRole.SystemTestLead)]

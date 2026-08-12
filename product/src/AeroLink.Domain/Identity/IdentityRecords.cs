@@ -89,11 +89,18 @@ public static class ProgramRoleAuthority
         ProgramRole.SystemTestLead, ProgramRole.SoftwareTestLead, ProgramRole.ProjectEngineeringLead
     ];
 
-    /// <summary>Verification titles that name their discipline, and still answer to the ones that do not.</summary>
+    /// <summary>
+    /// Verification titles that name their discipline, and still answer to the one that does not.
+    ///
+    /// The leads are deliberately absent. `TestLead` holds distribution authority over verification work —
+    /// impact items land with the lead, who assigns them to an individual `TestEngineer` — so the two are
+    /// different jobs rather than a general and a precise name for the same one. Folding the leads in here
+    /// makes every "is this a test engineer" question also true of the person who assigns to them, which
+    /// silently changes who verification work routes to.
+    /// </summary>
     private static readonly ProgramRole[] TestAuthority =
     [
-        ProgramRole.SystemTestEngineer, ProgramRole.SoftwareTestEngineer,
-        ProgramRole.TestLead, ProgramRole.SystemTestLead, ProgramRole.SoftwareTestLead
+        ProgramRole.SystemTestEngineer, ProgramRole.SoftwareTestEngineer
     ];
 
     private static readonly ProgramRole[] TestLeadAuthority =
@@ -132,6 +139,7 @@ public static class ProblemReportOwnerAuthority
     [
         .. ProgramRoleAuthority.Satisfying(ProgramRole.Engineer),
         .. ProgramRoleAuthority.Satisfying(ProgramRole.TestEngineer),
+        .. ProgramRoleAuthority.Satisfying(ProgramRole.TestLead),
     ];
 
     private static readonly ProgramRole[] RecoveryRoles =
