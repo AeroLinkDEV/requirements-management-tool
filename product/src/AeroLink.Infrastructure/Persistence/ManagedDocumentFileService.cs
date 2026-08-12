@@ -104,6 +104,7 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
             });
             foreach (var footer in archive.Entries.Where(x => x.FullName.StartsWith("word/footer", StringComparison.OrdinalIgnoreCase) && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).Select(x => x.FullName).ToList())
                 ReplaceEntryText(archive, footer, xml => xml.Replace($"{documentNumber} Rev {previous} | Released |", $"{documentNumber} Rev {next} | Draft |", StringComparison.Ordinal));
+            EnsureDraftHeader(archive);
             foreach (var header in archive.Entries.Where(x => x.FullName.StartsWith("word/header", StringComparison.OrdinalIgnoreCase) && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).Select(x => x.FullName).ToList())
                 ReplaceEntryText(archive, header, AddDraftWatermark);
         }
@@ -113,6 +114,51 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
     }
 
     private const string DraftWatermarkXml = "<w:r><w:rPr><w:noProof/></w:rPr><w:pict><v:shape id=\"AeroLinkWatermark\" o:spid=\"_x0000_s2049\" type=\"#_x0000_t136\" style=\"position:absolute;margin-left:0;margin-top:0;width:468pt;height:117pt;rotation:315;z-index:-251658752;mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin\" o:allowincell=\"f\" fillcolor=\"#c8d0d8\" stroked=\"f\"><v:textpath style=\"font-family:&quot;Calibri&quot;;font-size:1pt\" string=\"DRAFT\"/><v:fill opacity=\".45\"/></v:shape></w:pict></w:r>";
+
+    private static void EnsureDraftHeader(ZipArchive archive)
+    {
+        if (archive.Entries.Any(x => x.FullName.StartsWith("word/header", StringComparison.OrdinalIgnoreCase) && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))) return;
+
+        const string headerName = "word/headerAeroLink.xml";
+        const string relationshipId = "rIdAeroLinkDraftHeader";
+        WriteEntryText(archive, headerName, $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\"><w:p>{DraftWatermarkXml}</w:p></w:hdr>");
+
+        XNamespace contentType = "http://schemas.openxmlformats.org/package/2006/content-types";
+        UpdateXmlEntry(archive, "[Content_Types].xml", document =>
+        {
+            document.Root!.Add(new XElement(contentType + "Override",
+                new XAttribute("PartName", "/" + headerName),
+                new XAttribute("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml")));
+        });
+
+        XNamespace packageRelationship = "http://schemas.openxmlformats.org/package/2006/relationships";
+        var relationshipsName = "word/_rels/document.xml.rels";
+        if (archive.GetEntry(relationshipsName) is null)
+            WriteEntryText(archive, relationshipsName, $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"{packageRelationship}\"/>");
+        UpdateXmlEntry(archive, relationshipsName, document =>
+        {
+            if (document.Root!.Elements(packageRelationship + "Relationship").Any(x => string.Equals((string?)x.Attribute("Id"), relationshipId, StringComparison.Ordinal)))
+                throw new DomainException("The Word document already uses AeroLink's reserved draft-header relationship identifier.");
+            document.Root.Add(new XElement(packageRelationship + "Relationship",
+                new XAttribute("Id", relationshipId),
+                new XAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"),
+                new XAttribute("Target", "headerAeroLink.xml")));
+        });
+
+        XNamespace word = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        XNamespace officeRelationship = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        UpdateXmlEntry(archive, "word/document.xml", document =>
+        {
+            var sections = document.Descendants(word + "sectPr").ToList();
+            if (sections.Count == 0)
+            {
+                var body = document.Descendants(word + "body").SingleOrDefault() ?? throw new DomainException("The Word document is missing its body.");
+                var section = new XElement(word + "sectPr"); body.Add(section); sections.Add(section);
+            }
+            foreach (var section in sections.Where(x => !x.Elements(word + "headerReference").Any(y => string.Equals((string?)y.Attribute(word + "type"), "default", StringComparison.OrdinalIgnoreCase))))
+                section.AddFirst(new XElement(word + "headerReference", new XAttribute(word + "type", "default"), new XAttribute(officeRelationship + "id", relationshipId)));
+        });
+    }
 
     private static string AddDraftWatermark(string xml)
     {
@@ -170,6 +216,20 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
         var replacement = archive.CreateEntry(entryName, CompressionLevel.Optimal);
         using var writer = new StreamWriter(replacement.Open(), new UTF8Encoding(false));
         writer.Write(updated);
+    }
+
+    private static void UpdateXmlEntry(ZipArchive archive, string entryName, Action<XDocument> transform)
+    {
+        var entry = archive.GetEntry(entryName) ?? throw new DomainException("The Word document is missing required package metadata.");
+        var document = XDocument.Parse(ReadText(entry), LoadOptions.PreserveWhitespace); transform(document);
+        WriteEntryText(archive, entryName, document.ToString(SaveOptions.DisableFormatting));
+    }
+
+    private static void WriteEntryText(ZipArchive archive, string entryName, string content)
+    {
+        archive.GetEntry(entryName)?.Delete();
+        var replacement = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+        using var writer = new StreamWriter(replacement.Open(), new UTF8Encoding(false)); writer.Write(content);
     }
 
     private static async Task<byte[]> ReadLimitedAsync(Stream input, CancellationToken ct)

@@ -104,11 +104,8 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                 UPDATE managed_document_revisions child
                 SET "ParentRevisionId" = parent."Id",
-                    "ParentReleasedDocxAttachmentId" = parent."ReleasedDocxAttachmentId",
-                    "ParentReleasedDocxSha256" = attachment."Sha256",
-                    "TransformationProfile" = 'legacy-lineage-import-v1'
+                    "TransformationProfile" = 'legacy-working-source-unverified-v1'
                 FROM managed_document_revisions parent
-                JOIN controlled_attachments attachment ON attachment."Id" = parent."ReleasedDocxAttachmentId"
                 WHERE child."DocumentId" = parent."DocumentId"
                   AND child."Revision" = parent."Revision" + 1
                   AND child."Revision" > 0;

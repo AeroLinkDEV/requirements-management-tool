@@ -289,8 +289,8 @@ function App() {
       // ahead, and every page that reads the selected Project would quietly describe an empty Program.
       const program=routedProgram??namedProgram??next.find(x=>x.projects.some(y=>y.releases.length))??next[0],project=routedProject??namedProject??program?.projects[0],release=routedRelease??[...(project?.releases??[])].reverse().find(x=>!x.isReleased)??project?.releases.at(-1);
       if(initialRoute.view==="managedDocuments"&&initialRoute.releaseId&&routedProgram&&routedProject)history.replaceState({},"",routePath({programId:routedProgram.program.id,projectId:routedProject.project.id,releaseId:initialRoute.releaseId},"managedDocuments","system",initialRoute.artifactId));
-      setActiveId((current) => namedProgram?.program.id ?? (next.some(x=>x.program.id===current)?current:program?.program.id||""));
-      setSelectedProjectId((current)=>namedProject?.project.id ?? (program?.projects.some(x=>x.project.id===current)?current:project?.project.id||""));
+      setActiveId((current) => routedProgram?.program.id ?? namedProgram?.program.id ?? (next.some(x=>x.program.id===current)?current:program?.program.id||""));
+      setSelectedProjectId((current)=>routedProject?.project.id ?? namedProject?.project.id ?? (program?.projects.some(x=>x.project.id===current)?current:project?.project.id||""));
       setSelectedReleaseId((current)=>project?.releases.some(x=>x.id===current)?current:release?.id||"");
       setConnected(true);
     } catch {
@@ -465,7 +465,7 @@ function App() {
     try { await fetch(`${API}/api/auth/logout`,{method:"POST"}) } catch { /* the session is gone either way */ }
     setUser(null);
   };
-  const buildsPath=routePath(context??{programId:"",projectId:"",releaseId:""},"builds");
+  const buildsPath=projectAreaPath(projectSlugOf(project?.project.name??""),"builds");
   const showProjects=()=>{setView("projects");history.pushState({},"","/projects")};
   const exitBuild=()=>{setPaletteOpen(false);setDisplayOpen(false);setView("builds");setSelectedArtifactId("");setSelectedArtifactKind("");setSelectedScrId("");history.pushState({},"",buildsPath)};
   /**
@@ -725,7 +725,7 @@ function App() {
         user={user}
         initialDocumentId={selectedArtifactId || undefined}
         onSelected={(id)=>navigate("managedDocuments","system",id,undefined,true)}
-        onBack={exitBuild}
+        onBack={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}}
       />
     );
   if (view === "problemReports" && project)

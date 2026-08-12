@@ -80,4 +80,6 @@ The migration from the former build-scoped model copies prior target-build and b
 for historical explanation only and never drive current effectivity. Existing attachment IDs, hashes,
 signatures, actors, timestamps, review history, and audit events are not rewritten. If legacy data contains more
 than one released head or more than one active successor, the API reports reconciliation required and refuses to
-silently choose a branch.
+silently choose a branch. A legacy successor retains its formal parent revision identity, but its source
+attachment/hash remain unset and its transformation profile is `legacy-working-source-unverified-v1`: the former
+implementation copied a working attachment, so migration must not falsely claim the released DOCX was its source.
