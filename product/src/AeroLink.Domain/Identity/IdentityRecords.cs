@@ -530,8 +530,10 @@ public sealed class RoleDelegation
 public sealed class ElectronicSignature
 {
     private ElectronicSignature() { }
-    public ElectronicSignature(Guid userId, string userName, string displayName, Guid programId, string artifactType, Guid artifactId, string artifactRevision, string action, string meaning, string contentHash, string ipAddress, DateTimeOffset now, string authority = "")
-    { Id = Guid.NewGuid(); UserId = userId; UserName = userName; DisplayName = displayName; ProgramId = programId; ArtifactType = artifactType; ArtifactId = artifactId; ArtifactRevision = artifactRevision; Action = action; Meaning = meaning; ContentHash = contentHash; IpAddress = ipAddress; SignedAt = now; Authority = authority.Trim(); }
+    public ElectronicSignature(Guid userId, string userName, string displayName, Guid programId, string artifactType, Guid artifactId, string artifactRevision, string action, string meaning, string contentHash, string ipAddress, DateTimeOffset now, string authority = "",
+        Guid? reviewStepId = null, int? reviewCycle = null, int? reviewStepPosition = null, string rationale = "",
+        string authoritySource = "", Guid? workflowId = null, int? workflowVersion = null, Guid? authoritySourceId = null)
+    { Id = Guid.NewGuid(); UserId = userId; UserName = userName; DisplayName = displayName; ProgramId = programId; ArtifactType = artifactType; ArtifactId = artifactId; ArtifactRevision = artifactRevision; Action = action; Meaning = meaning; ContentHash = contentHash; IpAddress = ipAddress; SignedAt = now; Authority = authority.Trim(); ReviewStepId = reviewStepId; ReviewCycle = reviewCycle; ReviewStepPosition = reviewStepPosition; Rationale = rationale.Trim(); AuthoritySource = authoritySource.Trim(); AuthoritySourceId = authoritySourceId; WorkflowId = workflowId; WorkflowVersion = workflowVersion; }
     public Guid Id { get; private set; }
     public Guid UserId { get; private set; }
     public string UserName { get; private set; } = "";
@@ -543,6 +545,14 @@ public sealed class ElectronicSignature
     public string Action { get; private set; } = "";
     /// <summary>The frozen review-stage authority exercised by this signature, when applicable.</summary>
     public string Authority { get; private set; } = "";
+    public string AuthoritySource { get; private set; } = "";
+    public Guid? AuthoritySourceId { get; private set; }
+    public Guid? WorkflowId { get; private set; }
+    public int? WorkflowVersion { get; private set; }
+    public Guid? ReviewStepId { get; private set; }
+    public int? ReviewCycle { get; private set; }
+    public int? ReviewStepPosition { get; private set; }
+    public string Rationale { get; private set; } = "";
     public string Meaning { get; private set; } = "";
     public string ContentHash { get; private set; } = "";
     public string IpAddress { get; private set; } = "";

@@ -68,7 +68,9 @@ public sealed class ArtifactEditSession
     public string? ClosedReason { get; private set; }
     public long Version { get; private set; }
     public void Save(string draftJson, long expectedVersion, DateTimeOffset now,int leaseMinutes=15) { EnsureActive(expectedVersion,now); DraftJson = draftJson; UpdatedAt = now;ExpiresAt=now.AddMinutes(leaseMinutes); Version++; }
-    public void Heartbeat(long expectedVersion,DateTimeOffset now,int leaseMinutes=15){EnsureActive(expectedVersion,now);UpdatedAt=now;ExpiresAt=now.AddMinutes(leaseMinutes);Version++;}
+    // Lease renewal deliberately does not advance the finalize token. The EF concurrency check on Version
+    // still prevents a heartbeat from updating a session after a concurrent close wins.
+    public void Heartbeat(long expectedVersion,DateTimeOffset now,int leaseMinutes=15){EnsureActive(expectedVersion,now);UpdatedAt=now;ExpiresAt=now.AddMinutes(leaseMinutes);}
     public void Close(EditSessionState state, long expectedVersion, DateTimeOffset now,string? actor=null,string? reason=null) { EnsureActive(expectedVersion,now); State = state; UpdatedAt = now; ClosedAt = now;ClosedBy=actor;ClosedReason=reason?.Trim();LockKey=null; Version++; }
     public void Expire(DateTimeOffset now){if(State!=EditSessionState.Active||ExpiresAt>now)return;State=EditSessionState.Expired;UpdatedAt=now;ClosedAt=now;ClosedReason="Inactive lock lease expired.";LockKey=null;Version++;}
     public void ForceUnlock(string actor,string reason,DateTimeOffset now){if(State!=EditSessionState.Active)throw new DomainException("Only an active edit session can be force-unlocked.");if(string.IsNullOrWhiteSpace(reason))throw new DomainException("A forced-unlock reason is required.");State=EditSessionState.ForceUnlocked;UpdatedAt=now;ClosedAt=now;ClosedBy=actor;ClosedReason=reason.Trim();LockKey=null;Version++;}

@@ -87,7 +87,7 @@ public sealed class ManagedDocumentApiTests
         Assert.Contains(links, x => x.GetProperty("artifactType").GetString() == "ProblemReport" && x.GetProperty("deepLink").GetString()!.EndsWith($"/problem-reports/{reportId}"));
         Assert.Contains(links, x => x.GetProperty("artifactType").GetString() == "TestChangeRequest" && x.GetProperty("deepLink").GetString()!.EndsWith($"/coverage/{testChangeId}"));
 
-        using var submitted = await owner.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new { technicalReviewerId = "software.lead", finalApproverId = "quality.analyst" }); Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        using var submitted = await SubmitAsync(owner, documentId, revisionId, "software.lead", "quality.analyst"); Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
         var reviewed = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var reviewedRevision = reviewed.GetProperty("revisions")[0];
         Assert.Equal(64, reviewedRevision.GetProperty("submittedRelationshipManifestHash").GetString()!.Length); Assert.Contains("SRCR-04940.00", reviewedRevision.GetProperty("submittedRelationshipManifest").GetString()); var firstSnapshotHash = reviewedRevision.GetProperty("snapshotHash").GetString();
         using var postReview = await owner.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = "Release", artifactId = scope.ActiveReleaseId, relationship = "RelatedBuild", expectedVersion = reviewedRevision.GetProperty("version").GetInt64() });
@@ -95,11 +95,11 @@ public sealed class ManagedDocumentApiTests
         var afterBlocked = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); Assert.Equal(5, afterBlocked.GetProperty("revisions")[0].GetProperty("links").EnumerateArray().Count(x => x.GetProperty("isCurrent").GetBoolean()));
 
         using var technical = factory.CreateClient(); using (var technicalLogin = await technical.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, technicalLogin.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(technical);
-        using var returned = await technical.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/return", new { password = AeroLinkApiFactory.MemberPassword, meaning = "Relationship evidence requires correction.", rationale = "Add the milestone meaning before resubmission." }); Assert.Equal(HttpStatusCode.OK, returned.StatusCode);
+        using var returned = await DecideAsync(technical, documentId, revisionId, "return", "Relationship evidence requires correction.", "Add the milestone meaning before resubmission."); Assert.Equal(HttpStatusCode.OK, returned.StatusCode);
         var returnedDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var returnedRevision = returnedDetail.GetProperty("revisions")[0];
         using var correctedAfterReturn = await owner.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new { revisionId, artifactType = "Release", artifactId = scope.ReleasedId, relationship = "AppliesToMilestone", expectedVersion = returnedRevision.GetProperty("version").GetInt64() }); Assert.Equal(HttpStatusCode.Created, correctedAfterReturn.StatusCode);
         var changed = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); Assert.Equal("", changed.GetProperty("revisions")[0].GetProperty("snapshotHash").GetString());
-        using var resubmitted = await owner.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new { technicalReviewerId = "software.lead", finalApproverId = "quality.analyst" }); Assert.Equal(HttpStatusCode.OK, resubmitted.StatusCode);
+        using var resubmitted = await SubmitAsync(owner, documentId, revisionId, "software.lead", "quality.analyst"); Assert.Equal(HttpStatusCode.OK, resubmitted.StatusCode);
         var resubmittedDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); Assert.NotEqual(firstSnapshotHash, resubmittedDetail.GetProperty("revisions")[0].GetProperty("snapshotHash").GetString());
 
         using (var serviceScope = factory.Services.CreateScope())
@@ -130,10 +130,12 @@ public sealed class ManagedDocumentApiTests
         using var redeemed = await client.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(ticket)}", null); Assert.Equal(HttpStatusCode.OK, redeemed.StatusCode); var grant = await redeemed.Content.ReadFromJsonAsync<JsonElement>();
         var grantId = grant.GetProperty("id").GetGuid(); var token = grant.GetProperty("accessToken").GetString()!; var version = grant.GetProperty("sessionVersion").GetInt64();
         using var download = new HttpRequestMessage(HttpMethod.Get, $"/api/document-connector/{grantId}/download"); download.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var downloaded = await client.SendAsync(download); Assert.Equal(HttpStatusCode.OK, downloaded.StatusCode); var word = await downloaded.Content.ReadAsByteArrayAsync(); ManagedDocumentFileService.ValidateDocx(word, true);
+        using (var heartbeatRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/heartbeat") { Content = JsonContent.Create(new { expectedVersion = version }) }) { heartbeatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var heartbeat = await client.SendAsync(heartbeatRequest); Assert.Equal(HttpStatusCode.OK, heartbeat.StatusCode); var heartbeatBody = await heartbeat.Content.ReadFromJsonAsync<JsonElement>(); Assert.Equal(version, heartbeatBody.GetProperty("version").GetInt64()); }
         using (var blankForm = new MultipartFormDataContent()) { blankForm.Add(new StringContent(" "), "comment"); blankForm.Add(new StringContent(version.ToString()), "expectedVersion"); var blankFile = new ByteArrayContent(word); blankFile.Headers.ContentType = new(ManagedDocumentFileService.DocxContentType); blankForm.Add(blankFile, "file", "SDP-000001.00.docx"); using var blankRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/check-in") { Content = blankForm }; blankRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var blank = await client.SendAsync(blankRequest); Assert.Equal(HttpStatusCode.BadRequest, blank.StatusCode); }
         using (var oversizedForm = new MultipartFormDataContent()) { oversizedForm.Add(new StringContent(new string('x', 4001)), "comment"); oversizedForm.Add(new StringContent(version.ToString()), "expectedVersion"); var oversizedFile = new ByteArrayContent(word); oversizedFile.Headers.ContentType = new(ManagedDocumentFileService.DocxContentType); oversizedForm.Add(oversizedFile, "file", "SDP-000001.00.docx"); using var oversizedRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/check-in") { Content = oversizedForm }; oversizedRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var oversized = await client.SendAsync(oversizedRequest); Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode); }
-        using var form = new MultipartFormDataContent(); form.Add(new StringContent("Added build and code-traceability responsibilities."), "comment"); form.Add(new StringContent(version.ToString()), "expectedVersion"); var file = new ByteArrayContent(word); file.Headers.ContentType = new(ManagedDocumentFileService.DocxContentType); form.Add(file, "file", "SDP-000001.00.docx");
-        using var checkin = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/check-in") { Content = form }; checkin.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var checkedIn = await client.SendAsync(checkin); Assert.Equal(HttpStatusCode.OK, checkedIn.StatusCode);
+        using var checkedIn = await SendCheckInAsync(client, grantId, token, version, "Added build and code-traceability responsibilities.", word); Assert.Equal(HttpStatusCode.OK, checkedIn.StatusCode); var checkedInJson = await checkedIn.Content.ReadAsStringAsync();
+        using var retriedCheckIn = await SendCheckInAsync(client, grantId, token, version, "Added build and code-traceability responsibilities.", word); Assert.Equal(HttpStatusCode.OK, retriedCheckIn.StatusCode); Assert.Equal(checkedInJson, await retriedCheckIn.Content.ReadAsStringAsync());
+        using var conflictingCheckIn = await SendCheckInAsync(client, grantId, token, version, "Different comment under the completed connector grant.", word); Assert.Equal(HttpStatusCode.Conflict, conflictingCheckIn.StatusCode);
 
         using var detailResponse = await client.GetAsync($"/api/managed-documents/{documentId}"); Assert.True(detailResponse.IsSuccessStatusCode, await detailResponse.Content.ReadAsStringAsync()); var detail = await detailResponse.Content.ReadFromJsonAsync<JsonElement>(); var revision = detail.GetProperty("revisions")[0]; var attachments = revision.GetProperty("attachments").EnumerateArray().ToList(); Assert.Equal(2, attachments.Count); Assert.Contains(attachments, item => item.GetProperty("version").GetInt32() == 2 && item.GetProperty("state").GetString() == "Active");
         Assert.Equal("Initial controlled draft.", revision.GetProperty("formalChangeSummary").GetString());
@@ -143,7 +145,7 @@ public sealed class ManagedDocumentApiTests
         Assert.Equal("Created the initial controlled Word template.", checkIns[0].GetProperty("comment").GetString());
         Assert.Equal("Added build and code-traceability responsibilities.", checkIns[1].GetProperty("comment").GetString());
         Assert.Equal(attachments.Single(x => x.GetProperty("version").GetInt32() == 2).GetProperty("sha256").GetString(), checkIns[1].GetProperty("resultSha256").GetString());
-        using var submitted = await client.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new { technicalReviewerId = "software.lead", finalApproverId = "quality.analyst" });
+        using var submitted = await SubmitAsync(client, documentId, revisionId, "software.lead", "quality.analyst");
         Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
         using var verificationScope = factory.Services.CreateScope(); var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         Assert.Equal(2, await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.CountAsync(verificationDb.ManagedDocumentReviewSteps.Where(x => x.RevisionId == revisionId)));
@@ -197,7 +199,7 @@ public sealed class ManagedDocumentApiTests
         var myWork = await authorClient.GetFromJsonAsync<JsonElement>($"/api/my-work?projectId={scope.ProjectId}&releaseId={scope.ReleasedId}");
         Assert.Contains(myWork.GetProperty("tasks").EnumerateArray(), item => item.GetProperty("route").GetString() == "managedDocuments" && item.GetProperty("title").GetString() == "Reconcile the exact approved lifecycle evidence.");
 
-        using var submitted = await client.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new { technicalReviewerId = "software.lead", finalApproverId = "quality.analyst" });
+        using var submitted = await SubmitAsync(client, documentId, revisionId, "software.lead", "quality.analyst");
         Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
         using var blocked = await client.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/formal-summary", new { formalChangeSummary = "Review bypass.", reason = "Must be refused.", expectedVersion = correction.GetProperty("version").GetInt64() + 1 });
         Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
@@ -314,9 +316,9 @@ public sealed class ManagedDocumentApiTests
         }
         using var transfer = await administrator.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/responsible-owner", new { assigneeId = "software.lead", reason = "Transfer completion responsibility without erasing the contributor.", expectedVersion = revisionVersion }); Assert.Equal(HttpStatusCode.OK, transfer.StatusCode);
         using var lead = factory.CreateClient(); using (var login = await lead.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(lead);
-        using var refused = await lead.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new { technicalReviewerId = "software.author", finalApproverId = "quality.analyst" });
+        using var refused = await SubmitAsync(lead, documentId, revisionId, "software.author", "quality.analyst");
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-        using var accepted = await lead.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new { technicalReviewerId = "system.reviewer", finalApproverId = "quality.analyst" });
+        using var accepted = await SubmitAsync(lead, documentId, revisionId, "system.reviewer", "quality.analyst");
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
         var detail = await lead.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var contributors = detail.GetProperty("revisions")[0].GetProperty("reviewContributors").EnumerateArray().ToList();
         Assert.Contains(contributors, item => item.GetProperty("contributorId").GetString() == "software.author" && item.GetProperty("provenance").GetString() == "AuthoritativeSubmissionSnapshot");
@@ -330,10 +332,10 @@ public sealed class ManagedDocumentApiTests
         using var factory = new AeroLinkApiFactory(); using var owner = factory.CreateClient(); await ProblemReportApiTests.BootstrapAndLoginAsync(owner); var scope = await SeedProjectAsync(factory);
         using var created = await owner.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SDP", documentType = "Software Development Plan", title = "Signed project plan", ownerId = "software.author", changeSummary = "Authorize the exact formal lifecycle scope." });
         var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>(); var documentId = createdBody.GetProperty("id").GetGuid(); var revisionId = createdBody.GetProperty("revisionId").GetGuid();
-        using var submitted = await owner.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new { technicalReviewerId = "software.lead", finalApproverId = "quality.analyst" }); Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        using var submitted = await SubmitAsync(owner, documentId, revisionId, "software.lead", "quality.analyst"); Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
 
         using var technical = factory.CreateClient(); using (var login = await technical.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(technical);
-        using var technicalApproval = await technical.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/approve", new { password = AeroLinkApiFactory.MemberPassword, meaning = "I confirm the technical review is complete.", rationale = "Formal scope and exact working snapshot are technically complete." }); Assert.Equal(HttpStatusCode.OK, technicalApproval.StatusCode);
+        using var technicalApproval = await DecideAsync(technical, documentId, revisionId, "approve", "I confirm the technical review is complete.", "Formal scope and exact working snapshot are technically complete."); Assert.Equal(HttpStatusCode.OK, technicalApproval.StatusCode);
         var afterTechnical = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var technicalVersion = afterTechnical.GetProperty("revisions")[0].GetProperty("version").GetInt64();
         using var technicalEdit = await owner.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/formal-summary", new { formalChangeSummary = "Forbidden after approval.", reason = "Must fail.", expectedVersion = technicalVersion }); Assert.Equal(HttpStatusCode.Conflict, technicalEdit.StatusCode);
 
@@ -344,7 +346,9 @@ public sealed class ManagedDocumentApiTests
         var docx = ProfessionalPublicationRenderer.Render(publication, "docx", "SDP-000001.00"); var pdf = ProfessionalPublicationRenderer.Render(publication, "pdf", "SDP-000001.00");
         using var candidateForm = new MultipartFormDataContent(); candidateForm.Add(new StringContent(sessionVersion.ToString()), "expectedVersion"); var docxPart = new ByteArrayContent(docx.Content); docxPart.Headers.ContentType = new(docx.ContentType); candidateForm.Add(docxPart, "docx", docx.FileName); var pdfPart = new ByteArrayContent(pdf.Content); pdfPart.Headers.ContentType = new(pdf.ContentType); candidateForm.Add(pdfPart, "pdf", pdf.FileName);
         using var candidateRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/release-candidate") { Content = candidateForm }; candidateRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var candidate = await quality.SendAsync(candidateRequest); Assert.Equal(HttpStatusCode.OK, candidate.StatusCode); var candidateBody = await candidate.Content.ReadFromJsonAsync<JsonElement>();
-        using var release = await quality.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/approve", new { password = AeroLinkApiFactory.MemberPassword, meaning = "I authorize this exact controlled release.", rationale = "Exact DOCX/PDF candidate and formal scope are conforming." }); Assert.Equal(HttpStatusCode.OK, release.StatusCode);
+        using var candidateRetryForm = new MultipartFormDataContent(); candidateRetryForm.Add(new StringContent(sessionVersion.ToString()), "expectedVersion"); var retryDocxPart = new ByteArrayContent(docx.Content); retryDocxPart.Headers.ContentType = new(docx.ContentType); candidateRetryForm.Add(retryDocxPart, "docx", docx.FileName); var retryPdfPart = new ByteArrayContent(pdf.Content); retryPdfPart.Headers.ContentType = new(pdf.ContentType); candidateRetryForm.Add(retryPdfPart, "pdf", pdf.FileName);
+        using var candidateRetryRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/release-candidate") { Content = candidateRetryForm }; candidateRetryRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var candidateRetry = await quality.SendAsync(candidateRetryRequest); Assert.Equal(HttpStatusCode.OK, candidateRetry.StatusCode); var candidateRetryBody = await candidateRetry.Content.ReadFromJsonAsync<JsonElement>(); Assert.Equal(candidateBody.GetProperty("manifestHash").GetString(), candidateRetryBody.GetProperty("manifestHash").GetString());
+        using var release = await DecideAsync(quality, documentId, revisionId, "approve", "I authorize this exact controlled release.", "Exact DOCX/PDF candidate and formal scope are conforming."); Assert.Equal(HttpStatusCode.OK, release.StatusCode);
 
         var detail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var revision = detail.GetProperty("revisions")[0]; var expectedManifest = ManagedDocumentFileService.Sha256(System.Text.Encoding.UTF8.GetBytes($"managed-document-release-v2:{candidateBody.GetProperty("docxSha256").GetString()}:{candidateBody.GetProperty("pdfSha256").GetString()}:{revision.GetProperty("formalSummaryHash").GetString()}:{revision.GetProperty("formalSummaryVersion").GetInt64()}:{revision.GetProperty("submittedRelationshipManifestHash").GetString()}"));
         Assert.Equal(expectedManifest, revision.GetProperty("releaseManifestHash").GetString());
@@ -401,6 +405,137 @@ public sealed class ManagedDocumentApiTests
         Assert.Single(requests, x => x.StatusCode == HttpStatusCode.Conflict);
         using var verificationScope = factory.Services.CreateScope(); var db = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         Assert.Equal(2, await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.CountAsync(db.ManagedDocumentRevisions.Where(x => x.DocumentId == seeded.DocumentId)));
+    }
+
+    [Fact]
+    public async Task Review_decisions_bind_exact_intent_and_retry_idempotently()
+    {
+        using var factory = new AeroLinkApiFactory(); using var owner = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(owner); var scope = await SeedProjectAsync(factory);
+        using var created = await owner.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SVP", documentType = "Software Verification Plan", title = "Exact review intent", ownerId = "software.author", formalChangeSummary = "Qualify exact review intent." });
+        var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>(); var documentId = createdBody.GetProperty("id").GetGuid(); var revisionId = createdBody.GetProperty("revisionId").GetGuid();
+        using var submitted = await SubmitAsync(owner, documentId, revisionId, "software.lead", "quality.analyst"); Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        var submittedDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var submittedRevision = submittedDetail.GetProperty("revisions")[0];
+        var technicalStep = submittedRevision.GetProperty("reviewSteps").EnumerateArray().Single(x => x.GetProperty("state").GetString() == "Active");
+        Assert.Equal("TechnicalDocumentReview", technicalStep.GetProperty("requiredAuthority").GetString());
+        Assert.Equal("SoftwareEngineeringLead", technicalStep.GetProperty("grantedAuthority").GetString());
+        Assert.Equal("DirectMembership", technicalStep.GetProperty("authoritySource").GetString());
+        Assert.NotEqual(Guid.Empty, technicalStep.GetProperty("authoritySourceId").GetGuid());
+        Assert.Equal(Guid.Parse("89d7b639-96f1-4fd4-970a-8a0db066c493"), technicalStep.GetProperty("workflowId").GetGuid());
+        Assert.Equal("FrozenAtAssignment;ActiveAccountAtSigning", technicalStep.GetProperty("authorityPolicy").GetString());
+
+        using var technical = factory.CreateClient(); using (var login = await technical.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(technical);
+        using var concurrentTechnical = factory.CreateClient(); using (var login = await concurrentTechnical.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(concurrentTechnical);
+        var operationKey = Guid.NewGuid().ToString("N"); var decision = DecisionPayload(submittedRevision, technicalStep, operationKey, "Technical approval", "The exact submitted hashes and formal scope are acceptable.");
+        var concurrent = await Task.WhenAll(technical.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/approve", decision), concurrentTechnical.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/approve", decision));
+        Assert.All(concurrent, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode)); var firstJson = await concurrent[0].Content.ReadAsStringAsync(); Assert.Equal(firstJson, await concurrent[1].Content.ReadAsStringAsync());
+        foreach (var response in concurrent) response.Dispose();
+        using var retry = await technical.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/approve", decision); Assert.Equal(HttpStatusCode.OK, retry.StatusCode); Assert.Equal(firstJson, await retry.Content.ReadAsStringAsync());
+        decision["rationale"] = "Different intent under a reused key.";
+        using var conflictingRetry = await technical.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/approve", decision); Assert.Equal(HttpStatusCode.Conflict, conflictingRetry.StatusCode);
+        decision["operationKey"] = Guid.NewGuid().ToString("N"); decision["rationale"] = "The exact submitted hashes and formal scope are acceptable.";
+        using var stale = await technical.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/approve", decision); Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var finalDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+        var signatures = finalDetail.GetProperty("signatures").EnumerateArray().Where(x => x.GetProperty("action").GetString() == "Approve").ToList(); Assert.Single(signatures);
+        Assert.Equal(technicalStep.GetProperty("authoritySourceId").GetGuid(), signatures[0].GetProperty("authoritySourceId").GetGuid());
+        Assert.Equal("Technical approval", signatures[0].GetProperty("meaning").GetString()); Assert.Equal("The exact submitted hashes and formal scope are acceptable.", signatures[0].GetProperty("rationale").GetString());
+    }
+
+    [Fact]
+    public async Task Delegated_authority_is_frozen_at_assignment_but_disabled_signers_fail_closed()
+    {
+        using var factory = new AeroLinkApiFactory(); using var owner = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(owner); var scope = await SeedProjectAsync(factory); Guid delegationId; Guid delegateAccountId;
+        using (var serviceScope = factory.Services.CreateScope())
+        {
+            var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var now = DateTimeOffset.UtcNow;
+            var account = new UserAccount("delegated.reviewer", "Delegated Reviewer", "delegated.review@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var membership = new ProgramMembership(account.Id, scope.ProgramId, ProgramRole.SoftwareEngineer, "admin", now);
+            var principal = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.UserAccounts.Where(x => x.UserName == "software.lead"));
+            var delegation = new RoleDelegation(scope.ProgramId, principal.Id, account.Id, ProgramRole.Reviewer, now.AddMinutes(-1), now.AddHours(1), "Controlled document review delegation.", "admin", now);
+            db.AddRange(account, membership, delegation); await db.SaveChangesAsync(); delegationId = delegation.Id; delegateAccountId = account.Id;
+        }
+        using var created = await owner.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "ICD", documentType = "Interface Control Document", title = "Delegated review", ownerId = "software.author", formalChangeSummary = "Exercise delegated authority." });
+        var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>(); var documentId = createdBody.GetProperty("id").GetGuid(); var revisionId = createdBody.GetProperty("revisionId").GetGuid();
+        using var submitted = await SubmitAsync(owner, documentId, revisionId, "delegated.reviewer", "quality.analyst"); Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        var detail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var revision = detail.GetProperty("revisions")[0]; var step = revision.GetProperty("reviewSteps").EnumerateArray().Single(x => x.GetProperty("state").GetString() == "Active");
+        Assert.Equal("ActiveDelegation", step.GetProperty("authoritySource").GetString()); Assert.Equal(delegationId, step.GetProperty("authoritySourceId").GetGuid());
+        using (var serviceScope = factory.Services.CreateScope()) { var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var delegation = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.RoleDelegations.Where(x => x.Id == delegationId)); delegation.Revoke(DateTimeOffset.UtcNow); await db.SaveChangesAsync(); }
+        using var reviewer = factory.CreateClient(); using (var login = await reviewer.PostAsJsonAsync("/api/auth/login", new { userName = "delegated.reviewer", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(reviewer);
+        using var approved = await reviewer.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/approve", DecisionPayload(revision, step, Guid.NewGuid().ToString("N"), "Delegated technical approval", "Authority was valid and frozen when this review step was assigned.")); Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+
+        using var secondCreated = await owner.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SAS", documentType = "Software Accomplishment Summary", title = "Disabled signer", ownerId = "software.author", formalChangeSummary = "Fail closed for disabled signer." });
+        var secondBody = await secondCreated.Content.ReadFromJsonAsync<JsonElement>(); var secondDocumentId = secondBody.GetProperty("id").GetGuid(); var secondRevisionId = secondBody.GetProperty("revisionId").GetGuid();
+        using (var serviceScope = factory.Services.CreateScope()) { var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var account = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.UserAccounts.Where(x => x.Id == delegateAccountId)); var principal = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.UserAccounts.Where(x => x.UserName == "software.lead")); db.RoleDelegations.Add(new(scope.ProgramId, principal.Id, account.Id, ProgramRole.Reviewer, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1), "Second controlled assignment.", "admin", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(); }
+        using var secondSubmitted = await SubmitAsync(owner, secondDocumentId, secondRevisionId, "delegated.reviewer", "quality.analyst"); Assert.Equal(HttpStatusCode.OK, secondSubmitted.StatusCode);
+        var secondDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{secondDocumentId}"); var secondRevision = secondDetail.GetProperty("revisions")[0]; var secondStep = secondRevision.GetProperty("reviewSteps").EnumerateArray().Single(x => x.GetProperty("state").GetString() == "Active");
+        using (var serviceScope = factory.Services.CreateScope()) { var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var account = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.UserAccounts.Where(x => x.Id == delegateAccountId)); account.Disable(DateTimeOffset.UtcNow); await db.SaveChangesAsync(); }
+        using var disabled = await reviewer.PostAsJsonAsync($"/api/managed-documents/revisions/{secondRevisionId}/review/approve", DecisionPayload(secondRevision, secondStep, Guid.NewGuid().ToString("N"), "Must not sign", "Disabled accounts cannot exercise even frozen authority.")); Assert.Equal(HttpStatusCode.Unauthorized, disabled.StatusCode);
+    }
+
+    private static async Task<HttpResponseMessage> SubmitAsync(HttpClient client, Guid documentId, Guid revisionId, string technicalReviewerId, string finalApproverId)
+    {
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+        var revision = detail.GetProperty("revisions").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == revisionId);
+        var workingId = revision.GetProperty("currentWorkingAttachmentId").GetGuid();
+        var working = revision.GetProperty("attachments").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == workingId);
+        return await client.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new
+        {
+            technicalReviewerId,
+            finalApproverId,
+            expectedVersion = revision.GetProperty("version").GetInt64(),
+            expectedWorkingAttachmentId = workingId,
+            expectedWorkingSha256 = working.GetProperty("sha256").GetString(),
+            expectedFormalSummaryVersion = revision.GetProperty("formalSummaryVersion").GetInt64(),
+            expectedFormalSummaryHash = revision.GetProperty("formalSummaryHash").GetString(),
+            expectedRelationshipManifestHash = revision.GetProperty("currentRelationshipManifestHash").GetString(),
+            operationKey = Guid.NewGuid().ToString("N")
+        });
+    }
+
+    private static async Task<HttpResponseMessage> SendCheckInAsync(HttpClient client, Guid grantId, string token, long expectedVersion, string comment, byte[] content)
+    {
+        var form = new MultipartFormDataContent(); form.Add(new StringContent(comment), "comment"); form.Add(new StringContent(expectedVersion.ToString()), "expectedVersion");
+        var file = new ByteArrayContent(content); file.Headers.ContentType = new(ManagedDocumentFileService.DocxContentType); form.Add(file, "file", "SDP-000001.00.docx");
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/check-in") { Content = form }; request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> DecideAsync(HttpClient client, Guid documentId, Guid revisionId, string action, string meaning, string rationale)
+    {
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+        var revision = detail.GetProperty("revisions").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == revisionId);
+        var step = revision.GetProperty("reviewSteps").EnumerateArray().Single(x => x.GetProperty("state").GetString() == "Active");
+        Guid? NullableGuid(string property) => revision.GetProperty(property).ValueKind == JsonValueKind.Null ? null : revision.GetProperty(property).GetGuid();
+        return await client.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/{action}", new
+        {
+            password = AeroLinkApiFactory.MemberPassword,
+            meaning,
+            rationale,
+            expectedVersion = revision.GetProperty("version").GetInt64(),
+            expectedCycle = revision.GetProperty("currentReviewCycle").GetInt32(),
+            expectedStepId = step.GetProperty("id").GetGuid(),
+            expectedStepVersion = step.GetProperty("version").GetInt64(),
+            expectedSnapshotHash = revision.GetProperty("snapshotHash").GetString(),
+            expectedCandidateDocxAttachmentId = NullableGuid("releaseCandidateDocxAttachmentId"),
+            expectedCandidatePdfAttachmentId = NullableGuid("releaseCandidatePdfAttachmentId"),
+            expectedCandidateManifestHash = revision.GetProperty("releaseManifestHash").GetString(),
+            operationKey = Guid.NewGuid().ToString("N")
+        });
+    }
+
+    private static Dictionary<string, object?> DecisionPayload(JsonElement revision, JsonElement step, string operationKey, string meaning, string rationale)
+    {
+        Guid? NullableGuid(string property) => revision.GetProperty(property).ValueKind == JsonValueKind.Null ? null : revision.GetProperty(property).GetGuid();
+        return new()
+        {
+            ["password"] = AeroLinkApiFactory.MemberPassword, ["meaning"] = meaning, ["rationale"] = rationale,
+            ["expectedVersion"] = revision.GetProperty("version").GetInt64(), ["expectedCycle"] = revision.GetProperty("currentReviewCycle").GetInt32(),
+            ["expectedStepId"] = step.GetProperty("id").GetGuid(), ["expectedStepVersion"] = step.GetProperty("version").GetInt64(),
+            ["expectedSnapshotHash"] = revision.GetProperty("snapshotHash").GetString(), ["expectedCandidateDocxAttachmentId"] = NullableGuid("releaseCandidateDocxAttachmentId"),
+            ["expectedCandidatePdfAttachmentId"] = NullableGuid("releaseCandidatePdfAttachmentId"), ["expectedCandidateManifestHash"] = revision.GetProperty("releaseManifestHash").GetString(),
+            ["operationKey"] = operationKey
+        };
     }
 
     private static async Task<Guid> SeedProjectWithoutBuildsAsync(AeroLinkApiFactory factory)

@@ -8,7 +8,11 @@ namespace AeroLink.Domain.Documents;
 public enum ManagedDocumentState { Draft, InReview, Returned, Released, Superseded, Withdrawn }
 public enum ManagedDocumentReviewStepState { Pending, Active, Approved, Returned }
 
-public sealed record ManagedDocumentReviewer(string UserId, string Name, string StageName);
+public sealed record ManagedDocumentReviewer(string UserId, string Name, string StageName,
+    string RequiredAuthority = "LegacyUnspecified", string GrantedAuthority = "LegacyUnspecified",
+    string AuthoritySource = "LegacyUnspecified", Guid? AuthoritySourceId = null, Guid? WorkflowId = null,
+    string WorkflowName = "Legacy managed-document review", int WorkflowVersion = 0,
+    string AuthorityPolicy = "LegacyUnspecified");
 
 /// <summary>A stable project document such as SDP-000001, independent of any one formal revision.</summary>
 public sealed class ManagedDocument
@@ -139,7 +143,7 @@ public sealed class ManagedDocumentRevision
             throw new DomainException("The document author cannot approve their own revision.");
         var cycle = CurrentReviewCycle + 1;
         for (var index = 0; index < reviewers.Count; index++)
-            _reviewSteps.Add(new ManagedDocumentReviewStep(Id, cycle, index, reviewers[index], index == 0));
+            _reviewSteps.Add(new ManagedDocumentReviewStep(Id, cycle, index, reviewers[index], index == 0, now));
         SnapshotHash = Required(snapshotHash, "A review snapshot hash is required.").ToLowerInvariant();
         SubmittedFormalSummaryHash = FormalSummaryHash; SubmittedFormalSummaryVersion = FormalSummaryVersion;
         SubmittedRelationshipManifest = Required(relationshipManifest, "A relationship manifest is required.");
@@ -164,15 +168,22 @@ public sealed class ManagedDocumentRevision
         UpdatedAt = now; Version++;
     }
 
-    public bool Approve(string actor, string rationale, DateTimeOffset now)
+    public bool Approve(string actor, Guid expectedStepId, int expectedCycle, long expectedRevisionVersion,
+        long expectedStepVersion, string expectedSnapshotHash, Guid? expectedCandidateDocxAttachmentId,
+        Guid? expectedCandidatePdfAttachmentId, string? expectedCandidateManifestHash, string rationale, DateTimeOffset now)
     {
         EnsureInReview(); var step = ActiveStep();
+        EnsureDecisionIntent(step, expectedStepId, expectedCycle, expectedRevisionVersion, expectedStepVersion, expectedSnapshotHash);
         if (!string.Equals(step.ApproverId, actor, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("Only the active document reviewer can approve this stage.");
         var cycleSteps = _reviewSteps.Where(x => x.Cycle == CurrentReviewCycle).OrderBy(x => x.Position).ToList();
         var final = step.Position == cycleSteps[^1].Position;
         if (final && (ReleaseCandidateDocxAttachmentId is null || ReleaseCandidatePdfAttachmentId is null || string.IsNullOrWhiteSpace(ReleaseManifestHash)))
             throw new DomainException("Prepare the exact DOCX and PDF release candidate before final approval.");
+        if (final && (expectedCandidateDocxAttachmentId != ReleaseCandidateDocxAttachmentId
+            || expectedCandidatePdfAttachmentId != ReleaseCandidatePdfAttachmentId
+            || !string.Equals(expectedCandidateManifestHash, ReleaseManifestHash, StringComparison.OrdinalIgnoreCase)))
+            throw new DomainException("The release candidate changed after this page loaded. Refresh and review the exact candidate before signing.");
         step.Approve(Required(rationale, "An approval rationale is required."), now);
         if (!final) cycleSteps.Single(x => x.Position == step.Position + 1).Activate();
         else
@@ -183,14 +194,31 @@ public sealed class ManagedDocumentRevision
         UpdatedAt = now; Version++; return final;
     }
 
-    public void Return(string actor, string reason, DateTimeOffset now)
+    /// <summary>Trusted domain-fixture path; production API decisions use the exact-intent overload above.</summary>
+    public bool Approve(string actor, string rationale, DateTimeOffset now)
+    {
+        var step = ActiveStep();
+        return Approve(actor, step.Id, CurrentReviewCycle, Version, step.Version, SnapshotHash,
+            ReleaseCandidateDocxAttachmentId, ReleaseCandidatePdfAttachmentId, ReleaseManifestHash, rationale, now);
+    }
+
+    public void Return(string actor, Guid expectedStepId, int expectedCycle, long expectedRevisionVersion,
+        long expectedStepVersion, string expectedSnapshotHash, string reason, DateTimeOffset now)
     {
         EnsureInReview(); var step = ActiveStep();
+        EnsureDecisionIntent(step, expectedStepId, expectedCycle, expectedRevisionVersion, expectedStepVersion, expectedSnapshotHash);
         if (!string.Equals(step.ApproverId, actor, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("Only the active document reviewer can return this revision.");
         var explanation = Required(reason, "A return rationale is required."); step.Return(explanation, now);
         State = ManagedDocumentState.Returned; ReturnReason = explanation; ReleaseCandidateDocxAttachmentId = null;
         ReleaseCandidatePdfAttachmentId = null; ReleaseManifestHash = ""; UpdatedAt = now; Version++;
+    }
+
+    /// <summary>Trusted domain-fixture path; production API decisions use the exact-intent overload above.</summary>
+    public void Return(string actor, string reason, DateTimeOffset now)
+    {
+        var step = ActiveStep();
+        Return(actor, step.Id, CurrentReviewCycle, Version, step.Version, SnapshotHash, reason, now);
     }
 
     public void Supersede(DateTimeOffset now)
@@ -229,6 +257,13 @@ public sealed class ManagedDocumentRevision
 
     private ManagedDocumentReviewStep ActiveStep() => _reviewSteps.SingleOrDefault(x => x.Cycle == CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active)
         ?? throw new DomainException("This document review has no active stage.");
+    private void EnsureDecisionIntent(ManagedDocumentReviewStep step, Guid expectedStepId, int expectedCycle,
+        long expectedRevisionVersion, long expectedStepVersion, string expectedSnapshotHash)
+    {
+        if (Version != expectedRevisionVersion || CurrentReviewCycle != expectedCycle || step.Id != expectedStepId
+            || step.Version != expectedStepVersion || !string.Equals(SnapshotHash, expectedSnapshotHash?.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("The document review advanced after this page loaded. Refresh and review the current evidence before signing.");
+    }
     private void EnsureEditable() { if (State is not (ManagedDocumentState.Draft or ManagedDocumentState.Returned)) throw new DomainException("Only a Draft or returned document revision can be edited."); }
     private void EnsureInReview() { if (State != ManagedDocumentState.InReview) throw new DomainException("This document revision is not in review."); }
     private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
@@ -326,11 +361,18 @@ public sealed class ManagedDocumentCheckIn
 public sealed class ManagedDocumentReviewStep
 {
     private ManagedDocumentReviewStep() { }
-    internal ManagedDocumentReviewStep(Guid revisionId, int cycle, int position, ManagedDocumentReviewer reviewer, bool active)
+    internal ManagedDocumentReviewStep(Guid revisionId, int cycle, int position, ManagedDocumentReviewer reviewer, bool active, DateTimeOffset assignedAt)
     {
         Id = Guid.NewGuid(); RevisionId = revisionId; Cycle = cycle; Position = position;
         ApproverId = Required(reviewer.UserId).ToLowerInvariant(); ApproverName = Required(reviewer.Name);
         StageName = Required(reviewer.StageName); State = active ? ManagedDocumentReviewStepState.Active : ManagedDocumentReviewStepState.Pending;
+        RequiredAuthority = Required(reviewer.RequiredAuthority); GrantedAuthority = Required(reviewer.GrantedAuthority);
+        AuthoritySource = Required(reviewer.AuthoritySource); AuthoritySourceId = reviewer.AuthoritySourceId; WorkflowId = reviewer.WorkflowId;
+        WorkflowName = Required(reviewer.WorkflowName);
+        WorkflowVersion = reviewer.WorkflowVersion > 0 || reviewer.AuthoritySource == "LegacyUnspecified"
+            ? reviewer.WorkflowVersion
+            : throw new DomainException("A document review workflow version is required.");
+        AuthorityPolicy = Required(reviewer.AuthorityPolicy); AssignedAt = assignedAt; Version = 1;
     }
     public Guid Id { get; private set; }
     public Guid RevisionId { get; private set; }
@@ -339,13 +381,44 @@ public sealed class ManagedDocumentReviewStep
     public string ApproverId { get; private set; } = "";
     public string ApproverName { get; private set; } = "";
     public string StageName { get; private set; } = "";
+    public string RequiredAuthority { get; private set; } = "LegacyUnspecified";
+    public string GrantedAuthority { get; private set; } = "LegacyUnspecified";
+    public string AuthoritySource { get; private set; } = "LegacyUnspecified";
+    public Guid? AuthoritySourceId { get; private set; }
+    public Guid? WorkflowId { get; private set; }
+    public string WorkflowName { get; private set; } = "Legacy managed-document review";
+    public int WorkflowVersion { get; private set; }
+    public string AuthorityPolicy { get; private set; } = "LegacyUnspecified";
+    public DateTimeOffset? AssignedAt { get; private set; }
+    public long Version { get; private set; }
     public ManagedDocumentReviewStepState State { get; private set; }
     public string Rationale { get; private set; } = "";
     public DateTimeOffset? DecidedAt { get; private set; }
-    internal void Activate() => State = ManagedDocumentReviewStepState.Active;
-    internal void Approve(string rationale, DateTimeOffset now) { State = ManagedDocumentReviewStepState.Approved; Rationale = rationale; DecidedAt = now; }
-    internal void Return(string rationale, DateTimeOffset now) { State = ManagedDocumentReviewStepState.Returned; Rationale = rationale; DecidedAt = now; }
+    internal void Activate() { State = ManagedDocumentReviewStepState.Active; Version++; }
+    internal void Approve(string rationale, DateTimeOffset now) { State = ManagedDocumentReviewStepState.Approved; Rationale = rationale; DecidedAt = now; Version++; }
+    internal void Return(string rationale, DateTimeOffset now) { State = ManagedDocumentReviewStepState.Returned; Rationale = rationale; DecidedAt = now; Version++; }
     private static string Required(string? value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A document review-step value is required.") : value.Trim();
+}
+
+/// <summary>One durable result for a caller supplied one-use review operation key.</summary>
+public sealed class ManagedDocumentOperation
+{
+    private ManagedDocumentOperation() { }
+    public ManagedDocumentOperation(Guid revisionId, string operationType, string operationKey,
+        string payloadHash, string resultJson, DateTimeOffset completedAt)
+    {
+        Id = Guid.NewGuid(); RevisionId = revisionId; OperationType = Required(operationType);
+        OperationKey = Required(operationKey); PayloadHash = Required(payloadHash).ToLowerInvariant();
+        ResultJson = Required(resultJson); CompletedAt = completedAt;
+    }
+    public Guid Id { get; private set; }
+    public Guid RevisionId { get; private set; }
+    public string OperationType { get; private set; } = "";
+    public string OperationKey { get; private set; } = "";
+    public string PayloadHash { get; private set; } = "";
+    public string ResultJson { get; private set; } = "";
+    public DateTimeOffset CompletedAt { get; private set; }
+    private static string Required(string? value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A managed-document operation value is required.") : value.Trim();
 }
 
 /// <summary>Historical provenance retained from the former build-scoped document model. It never selects document effectivity.</summary>
