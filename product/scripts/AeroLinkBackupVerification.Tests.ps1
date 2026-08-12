@@ -16,4 +16,5 @@ try{
  Add-Content -LiteralPath $archive -Value 'corruption' -NoNewline
  try{& (Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1') -BackupArchive $archive|Out-Null;throw 'A corrupted relocated archive was accepted.'}catch{if($_.Exception.Message -notlike '*hash mismatch*'){throw}}
  [pscustomobject]@{Passed=$true;RelocatedArchive=$archive;ReferencedAttachments=$verified.ReferencedAttachments;CorruptionRejected=$true}
+ $global:LASTEXITCODE=0
 }finally{if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}}

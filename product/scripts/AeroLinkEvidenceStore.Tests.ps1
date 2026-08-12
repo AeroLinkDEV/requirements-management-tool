@@ -38,6 +38,7 @@ try {
     $default = Get-AeroLinkEvidenceRoot -ProductRoot $productRoot
     if ([string]::IsNullOrWhiteSpace($default) -or -not [IO.Path]::IsPathRooted($default)) { throw 'The default evidence root was not resolved canonically.' }
     [pscustomobject]@{ Passed=$true; ReferencedAttachments=$result.ReferencedAttachments; ReferencedObjects=$result.ReferencedObjects; UnreferencedObjects=$result.UnreferencedObjects.Count; CustomRoot=$root; DefaultRoot=$default }
+    $global:LASTEXITCODE = 0
 }
 finally {
     Remove-Item Env:\Evidence__Root -ErrorAction SilentlyContinue
