@@ -209,6 +209,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Configured evidence backup regression failed.' }
           & ./product/scripts/AeroLinkBackupVerification.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Portable backup verification regression failed.' }
+          & ./product/scripts/AeroLinkRestoreContract.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Restore activation contract regression failed.' }
 
       - name: Validate the migration-posture diagnostics contract
         shell: powershell

@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1') -Force
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$copyRoot = Join-Path ([IO.Path]::GetTempPath()) ('AeroLink long-path copy ' + [Guid]::NewGuid().ToString('N'))
 $root = Join-Path ([IO.Path]::GetTempPath()) ("AeroLink evidence Ω spaces " + [Guid]::NewGuid().ToString('N'))
 
 function Expect-Failure([scriptblock]$Action, [string]$Pattern) {
@@ -22,6 +23,12 @@ try {
     )
     $result = Test-AeroLinkAttachmentInventory -Inventory $inventory -EvidenceRoot $root
     if ($result.ReferencedAttachments -ne 2 -or $result.ReferencedObjects -ne 2 -or $result.UnreferencedObjects.Count -ne 1) { throw 'Inventory counts did not preserve duplicate hashes and report the orphan separately.' }
+    $longRelative = (('segment-' + ('x' * 52) + '\') * 3) + 'retained-evidence.docx'
+    $longSource = Join-Path $copyRoot 'source'; $longDestination = Join-Path $copyRoot 'destination'
+    $longPath = Join-Path $longSource $longRelative; [IO.Directory]::CreateDirectory('\\?\' + (Split-Path $longPath -Parent)) | Out-Null
+    [IO.File]::WriteAllBytes(('\\?\' + $longPath), $bytes)
+    Copy-AeroLinkEvidenceTree -Source $longSource -Destination $longDestination
+    if (-not [IO.File]::Exists(('\\?\' + (Join-Path $longDestination $longRelative)))) { throw 'The supported long-path evidence copy did not preserve the object.' }
 
     $missing = @($inventory | ForEach-Object { $_.PSObject.Copy() }); $missing[0].StorageKey = 'aa/missing.docx'
     Expect-Failure { Test-AeroLinkAttachmentInventory -Inventory $missing -EvidenceRoot $root } 'missing'
@@ -43,4 +50,5 @@ try {
 finally {
     Remove-Item Env:\Evidence__Root -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+    if ([IO.Directory]::Exists($copyRoot)) { [IO.Directory]::Delete(('\\?\' + $copyRoot), $true) }
 }

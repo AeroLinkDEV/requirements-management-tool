@@ -153,6 +153,20 @@ Run `BACKUP_AEROLINK.bat`. The output under `product/.local/backups` contains a 
 
 Run `VERIFY_AEROLINK_BACKUP.bat <absolute-or-repository-backup-zip>`. Verification supports an intentionally relocated ZIP when its adjacent sidecar travels with it, checks the sidecar, rejects unsafe ZIP, manifest, and storage-key paths, verifies every declared file, and independently reconciles every attachment inventory row to the archived evidence size/hash. Orphan objects are reported separately and cannot substitute for a missing referenced object.
 
+`Restore-AeroLink.ps1` restores into a shadow database and incoming evidence directory first. It requires the
+signed attachment inventory to match the restored database, verifies every object, and starts a loopback-only,
+token-authenticated read-only AeroLink process against that exact database/root. Every retained managed-document
+attachment is downloaded through its production API route and independently size/hash checked. Production is
+activated only after this passes: the current database and evidence root are renamed as a retained rollback pair,
+the verified shadow pair is moved into place, and download/inventory checks run again before AeroLink restarts.
+Any failure through activation or restart stops the service and restores the prior database/evidence pair. The
+retained pair is deliberately not deleted automatically; an operator dispositions it only after the restored
+deployment completes its site acceptance period.
+
+For an isolated drill, use a database name containing `restore`, `validation`, or `test`; its evidence target must
+remain under `product\.local\restore-validation`. `AeroLinkRestoreQualification.Tests.ps1` exercises the
+destructive activation/fault matrix only on disposable PostgreSQL and refuses persistent port 54329.
+
 ### Automatic daily backup
 
 For the current single-workstation installation, run `SCHEDULE_AEROLINK_BACKUP.bat` once. It registers the
