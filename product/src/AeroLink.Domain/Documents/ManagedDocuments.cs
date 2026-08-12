@@ -1,4 +1,6 @@
 using AeroLink.Domain.Common;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace AeroLink.Domain.Documents;
 
@@ -57,7 +59,8 @@ public sealed class ManagedDocumentRevision
             throw new DomainException("A successor revision requires the exact released parent DOCX evidence.");
         Id = Guid.NewGuid(); DocumentId = documentId; Revision = revision;
         OwnerId = Required(ownerId, "A document-revision owner is required.").ToLowerInvariant();
-        ChangeSummary = Required(changeSummary, "A document revision requires a change summary.");
+        FormalChangeSummary = Bounded(changeSummary, 4000, "A document revision requires a formal change summary.", "A formal change summary cannot exceed 4000 characters.");
+        FormalSummaryHash = Hash(FormalChangeSummary); FormalSummaryVersion = 1; FormalSummaryProvenance = "Authoritative";
         ParentRevisionId = parentRevisionId; ParentReleasedDocxAttachmentId = parentReleasedDocxAttachmentId;
         ParentReleasedDocxSha256 = parentReleasedDocxSha256?.Trim().ToLowerInvariant();
         TransformationProfile = transformationProfile?.Trim() ?? "";
@@ -72,7 +75,10 @@ public sealed class ManagedDocumentRevision
     public string? ParentReleasedDocxSha256 { get; private set; }
     public string TransformationProfile { get; private set; } = "";
     public string OwnerId { get; private set; } = "";
-    public string ChangeSummary { get; private set; } = "";
+    public string FormalChangeSummary { get; private set; } = "";
+    public string FormalSummaryHash { get; private set; } = "";
+    public long FormalSummaryVersion { get; private set; }
+    public string FormalSummaryProvenance { get; private set; } = "Authoritative";
     public ManagedDocumentState State { get; private set; }
     public Guid? CurrentWorkingAttachmentId { get; private set; }
     public Guid? ReleaseCandidateDocxAttachmentId { get; private set; }
@@ -80,6 +86,8 @@ public sealed class ManagedDocumentRevision
     public Guid? ReleasedDocxAttachmentId { get; private set; }
     public Guid? ReleasedPdfAttachmentId { get; private set; }
     public string SnapshotHash { get; private set; } = "";
+    public string SubmittedFormalSummaryHash { get; private set; } = "";
+    public long? SubmittedFormalSummaryVersion { get; private set; }
     public string ReleaseManifestHash { get; private set; } = "";
     public string ReturnReason { get; private set; } = "";
     public string? SubmittedBy { get; private set; }
@@ -92,12 +100,10 @@ public sealed class ManagedDocumentRevision
     public IReadOnlyCollection<ManagedDocumentReviewStep> ReviewSteps => _reviewSteps.AsReadOnly();
     public int CurrentReviewCycle => _reviewSteps.Count == 0 ? 0 : _reviewSteps.Max(x => x.Cycle);
 
-    public void RecordCheckIn(Guid attachmentId, string actor, string changeSummary, DateTimeOffset now)
+    public void RecordCheckIn(Guid attachmentId, DateTimeOffset now)
     {
         EnsureEditable();
         CurrentWorkingAttachmentId = attachmentId;
-        ChangeSummary = Required(changeSummary, "A check-in comment is required.");
-        OwnerId = Required(actor, "A check-in actor is required.").ToLowerInvariant();
         if (State == ManagedDocumentState.Returned) State = ManagedDocumentState.Draft;
         ReturnReason = ""; ReleaseCandidateDocxAttachmentId = null; ReleaseCandidatePdfAttachmentId = null;
         ReleaseManifestHash = ""; UpdatedAt = now; Version++;
@@ -116,6 +122,7 @@ public sealed class ManagedDocumentRevision
         for (var index = 0; index < reviewers.Count; index++)
             _reviewSteps.Add(new ManagedDocumentReviewStep(Id, cycle, index, reviewers[index], index == 0));
         SnapshotHash = Required(snapshotHash, "A review snapshot hash is required.").ToLowerInvariant();
+        SubmittedFormalSummaryHash = FormalSummaryHash; SubmittedFormalSummaryVersion = FormalSummaryVersion;
         SubmittedBy = Required(actor, "A submitting actor is required.").ToLowerInvariant(); SubmittedAt = now;
         State = ManagedDocumentState.InReview; ReturnReason = ""; UpdatedAt = now; Version++; return cycle;
     }
@@ -166,11 +173,62 @@ public sealed class ManagedDocumentRevision
     public void Supersede(DateTimeOffset now)
     { if (State != ManagedDocumentState.Released) throw new DomainException("Only a released revision can be superseded."); State = ManagedDocumentState.Superseded; UpdatedAt = now; Version++; }
 
+    public void ReviseFormalSummary(string formalChangeSummary, string reason, long expectedVersion, DateTimeOffset now)
+    {
+        EnsureEditable();
+        if (Version != expectedVersion) throw new DomainException("The document revision changed after this page loaded. Refresh and try again.");
+        _ = Bounded(reason, 1000, "A formal-summary correction reason is required.", "A formal-summary correction reason cannot exceed 1000 characters.");
+        FormalChangeSummary = Bounded(formalChangeSummary, 4000, "A formal change summary is required.", "A formal change summary cannot exceed 4000 characters.");
+        FormalSummaryHash = Hash(FormalChangeSummary); FormalSummaryVersion++; FormalSummaryProvenance = "Authoritative";
+        SnapshotHash = ""; SubmittedFormalSummaryHash = ""; SubmittedFormalSummaryVersion = null;
+        UpdatedAt = now; Version++;
+    }
+
     private ManagedDocumentReviewStep ActiveStep() => _reviewSteps.SingleOrDefault(x => x.Cycle == CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active)
         ?? throw new DomainException("This document review has no active stage.");
     private void EnsureEditable() { if (State is not (ManagedDocumentState.Draft or ManagedDocumentState.Returned)) throw new DomainException("Only a Draft or returned document revision can be edited."); }
     private void EnsureInReview() { if (State != ManagedDocumentState.InReview) throw new DomainException("This document revision is not in review."); }
     private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
+    private static string Bounded(string? value, int maximum, string requiredError, string lengthError)
+    { var result = Required(value, requiredError); return result.Length > maximum ? throw new DomainException(lengthError) : result; }
+    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+}
+
+/// <summary>Immutable evidence for one accepted managed-document working version.</summary>
+public sealed class ManagedDocumentCheckIn
+{
+    private ManagedDocumentCheckIn() { }
+    public ManagedDocumentCheckIn(Guid revisionId, Guid workingAttachmentId, int workingVersion, string actorId,
+        string comment, Guid? baseAttachmentId, string? baseSha256, string resultSha256,
+        Guid? supersededAttachmentId, Guid? connectorSessionId, string operationId, DateTimeOffset occurredAt,
+        string? returnResolutionNote = null)
+    {
+        if (workingVersion < 1) throw new DomainException("A managed-document working version must be positive.");
+        Id = Guid.NewGuid(); RevisionId = revisionId; WorkingAttachmentId = workingAttachmentId; WorkingVersion = workingVersion;
+        ActorId = Required(actorId, "A check-in actor is required.").ToLowerInvariant();
+        Comment = Bounded(comment, 4000, "A check-in comment is required.", "A check-in comment cannot exceed 4000 characters."); BaseAttachmentId = baseAttachmentId;
+        BaseSha256 = baseSha256?.Trim().ToLowerInvariant(); ResultSha256 = Required(resultSha256, "A check-in result hash is required.").ToLowerInvariant();
+        SupersededAttachmentId = supersededAttachmentId; ConnectorSessionId = connectorSessionId;
+        OperationId = Required(operationId, "A check-in operation identifier is required."); OccurredAt = occurredAt;
+        ReturnResolutionNote = string.IsNullOrWhiteSpace(returnResolutionNote) ? null : Bounded(returnResolutionNote, 4000, "A return-resolution note is required.", "A return-resolution note cannot exceed 4000 characters.");
+    }
+    public Guid Id { get; private set; }
+    public Guid RevisionId { get; private set; }
+    public Guid WorkingAttachmentId { get; private set; }
+    public int WorkingVersion { get; private set; }
+    public string ActorId { get; private set; } = "";
+    public string Comment { get; private set; } = "";
+    public Guid? BaseAttachmentId { get; private set; }
+    public string? BaseSha256 { get; private set; }
+    public string ResultSha256 { get; private set; } = "";
+    public Guid? SupersededAttachmentId { get; private set; }
+    public Guid? ConnectorSessionId { get; private set; }
+    public string OperationId { get; private set; } = "";
+    public DateTimeOffset OccurredAt { get; private set; }
+    public string? ReturnResolutionNote { get; private set; }
+    private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
+    private static string Bounded(string? value, int maximum, string requiredError, string lengthError)
+    { var result = Required(value, requiredError); return result.Length > maximum ? throw new DomainException(lengthError) : result; }
 }
 
 public sealed class ManagedDocumentReviewStep

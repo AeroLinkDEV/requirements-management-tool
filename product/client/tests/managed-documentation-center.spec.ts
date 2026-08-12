@@ -3,7 +3,7 @@ import { apiBase, apiLogin, login } from './auth'
 
 test('managed Word documents remain one Project-wide register across build navigation', async ({ page }) => {
   test.setTimeout(240_000)
-  await login(page)
+  await login(page, 'software.author')
 
   await page.getByRole('link', { name: 'Documentation Center' }).click()
   await expect(page).toHaveURL(/\/programs\/[0-9a-f-]+\/projects\/[0-9a-f-]+\/documentation-center$/)
@@ -16,6 +16,18 @@ test('managed Word documents remain one Project-wide register across build navig
   await page.reload({ waitUntil: 'load' })
   await expect(page.getByRole('heading', { name: 'FMS Software Development Plan' })).toBeVisible()
   await expect(page.locator('.mdIdentity').getByText(/Draft SDP-000001\.01/)).toBeVisible()
+
+  await expect(page.getByText('Add GitLab merge-request traceability and desktop connector responsibilities.')).toBeVisible()
+  await page.getByRole('button', { name: 'Edit formal scope' }).click()
+  const summaryEditor = page.locator('.mdInlineForm')
+  await summaryEditor.getByLabel('Formal revision scope').fill('Add GitLab traceability and preserve immutable check-in evidence.')
+  await summaryEditor.getByLabel('Reason for correction').fill('Clarify the controlled formal scope before review.')
+  await summaryEditor.getByRole('button', { name: 'Record formal scope correction' }).click()
+  await expect(page.getByText(/formal revision scope for SDP-000001\.01 was revised/i)).toBeVisible()
+  await page.reload({ waitUntil: 'load' })
+  await expect(page.getByText('Add GitLab traceability and preserve immutable check-in evidence.')).toBeVisible()
+  await page.getByRole('button', { name: 'Versions' }).click()
+  await expect(page.getByText('Most recent checked-in draft.')).toBeVisible()
 
   await page.getByRole('button', { name: 'Review & release' }).click()
   await expect(page.getByRole('heading', { name: 'Electronic signatures for SDP-000001.01' })).toBeVisible()
