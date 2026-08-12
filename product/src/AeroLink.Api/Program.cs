@@ -290,6 +290,7 @@ app.MapEditSessionEndpoints();
 app.MapAdministrationEndpoints();
 app.MapPersonnelEndpoints();
 app.MapApprovalConfigurationEndpoints();
+app.MapTestProcedureDocumentEndpoints();
 
 // Modules that already lived in their own files. Three of these register further modules of their own:
 // Operations brings external identity and verification impact, Integration brings controlled editing and

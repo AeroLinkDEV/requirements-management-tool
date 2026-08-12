@@ -43,7 +43,10 @@ public static class WorkspaceEndpoints
         // The practice Program is seeded here as well as at boot, because a demonstration database is seeded
         // at boot while the journeys seed through this endpoint. Before the identities, which grant the demo
         // directory membership of every Program that exists by then.
-        app.MapPost("/api/showcase/seed", async (HttpContext http,FmsShowcaseSeeder seeder, ImportPracticeSeeder practice, IdentitySeeder identities, ManagedDocumentShowcaseSeeder documents, EnterpriseRequirementsService workspace, IConfiguration configuration, CancellationToken ct) => {if(!http.UserAccount().IsAdministrator)return Results.Forbid();if(!configuration.GetValue<bool>("Identity:SeedDemoAccounts"))return Results.NotFound();var result=await seeder.EnsureSeededAsync(ct); await practice.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); await workspace.SynchronizeProjectAsync(result.ProjectId,"system.workspace",ct); await documents.EnsureSeededAsync(ct); return Results.Ok(result); });
+        // The procedure documents are ensured last, after every seeder that can create a Project or a
+        // procedure: seeding through this endpoint happens long after the startup bootstrap ran, so nothing
+        // it creates would be written into a document until the next restart.
+        app.MapPost("/api/showcase/seed", async (HttpContext http,FmsShowcaseSeeder seeder, ImportPracticeSeeder practice, IdentitySeeder identities, ManagedDocumentShowcaseSeeder documents, EnterpriseRequirementsService workspace, TestProcedureDocumentBootstrap procedureDocuments, IConfiguration configuration, CancellationToken ct) => {if(!http.UserAccount().IsAdministrator)return Results.Forbid();if(!configuration.GetValue<bool>("Identity:SeedDemoAccounts"))return Results.NotFound();var result=await seeder.EnsureSeededAsync(ct); await practice.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); await workspace.SynchronizeProjectAsync(result.ProjectId,"system.workspace",ct); await documents.EnsureSeededAsync(ct); await procedureDocuments.EnsureAllAsync(ct); return Results.Ok(result); });
 
         // What the showcase upgrade has and has not applied to this installation, and whether the invariants
         // it is meant to guarantee actually hold. An upgrade that reports success is not the same as a
@@ -61,12 +64,14 @@ public static class WorkspaceEndpoints
 
         // The repair command for an existing local showcase: apply any outstanding steps and report what
         // changed. Safe to run repeatedly, and safe to run again after an interrupted attempt.
-        app.MapPost("/api/showcase/upgrade", async (HttpContext http, AeroLinkDbContext db, FmsShowcaseSeeder seeder, CancellationToken ct) =>
+        app.MapPost("/api/showcase/upgrade", async (HttpContext http, AeroLinkDbContext db, FmsShowcaseSeeder seeder, TestProcedureDocumentBootstrap procedureDocuments, CancellationToken ct) =>
         {
             if (!http.UserAccount().IsAdministrator) return Results.Forbid();
             var program = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == FmsShowcaseSeeder.ProgramCode, ct);
             if (program is null) return Results.NotFound(new { error = "No showcase Program is installed.", code = "showcase_absent" });
             var applied = await seeder.UpgradeAsync(program.Id, ct);
+            // An upgrade step can add procedures, and a procedure in no document is invisible to the rail.
+            await procedureDocuments.EnsureAllAsync(ct);
             var invariants = await seeder.CheckInvariantsAsync(program.Id, ct);
             return Results.Ok(new { applied, healthy = invariants.All(x => x.Holds), invariants });
         });
@@ -77,7 +82,7 @@ public static class WorkspaceEndpoints
             return Results.Ok(await db.Programs.AsNoTracking().Where(p=>allowed==null||allowed.Contains(p.Id)).Select(p => new { p.Id, p.Name, p.Code }).ToListAsync(ct));
         });
 
-        app.MapPost("/api/workspaces", async (CreateWorkspaceRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/workspaces", async (CreateWorkspaceRequest request, HttpContext http, AeroLinkDbContext db, TestProcedureDocumentBootstrap procedureDocuments, CancellationToken ct) =>
         {
             if(!http.UserAccount().IsAdministrator)return Results.Forbid();
             if (await db.Programs.AnyAsync(x => x.Code == request.ProgramCode.Trim().ToUpper(), ct))
@@ -89,6 +94,11 @@ public static class WorkspaceEndpoints
                 var release = new SoftwareRelease(project.Id, request.InitialRelease, request.InitialReleaseIsReleased);
                 db.AddRange(program, project, release);
                 var actor = http.UserAccount(); db.ProgramMemberships.Add(new ProgramMembership(actor.Id, program.Id, ProgramRole.Administrator, actor.UserName, DateTimeOffset.UtcNow));
+                await db.SaveChangesAsync(ct);
+                // Every Project has its three test procedure documents from the moment it exists. The startup
+                // bootstrap backfills projects created before this existed; it cannot help a project created
+                // after it ran, and the Explorer's document rail would be empty until the next restart.
+                await procedureDocuments.EnsureForProjectAsync(project.Id, ct);
                 await db.SaveChangesAsync(ct);
                 return Results.Created($"/api/programs/{program.Id}", ApiMap.Workspace(program, project, release));
             }

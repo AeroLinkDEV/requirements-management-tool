@@ -48,8 +48,8 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db)
             var document = existing.FirstOrDefault(x => x.Level == level);
             if (document is null)
             {
-                // Numbered per project, like a requirements document: the first System test procedures
-                // document in any project is SYSTD-000001, because it is the first one in that project.
+                // Numbered across the installation rather than within the project — see NextNumberAsync. The
+                // number is the document's name, so a project's document is not necessarily SYSTD-000001.
                 document = new TestProcedureDocument(projectId, $"{acronym}-{await NextNumberAsync(acronym, ct):D6}",
                     title, level, $"Controlled {title.ToLowerInvariant()} for this project.", "system.bootstrap", now);
                 db.TestProcedureDocuments.Add(document);
@@ -103,16 +103,18 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db)
     private async Task PlaceUnfiledProceduresAsync(Guid projectId, TestProcedureLevel level,
         TestProcedureDocument document, TestProcedureDocumentNode section, DateTimeOffset now, CancellationToken ct)
     {
-        var filed = await db.TestProcedureDocumentNodes.AsNoTracking()
-            .Where(x => x.ProcedureId != null)
-            .Select(x => x.ProcedureId!.Value)
-            .ToListAsync(ct);
-        var filedSet = filed.ToHashSet();
-        var unfiled = await db.TestProcedures.AsNoTracking()
+        var candidates = await db.TestProcedures.AsNoTracking()
             .Where(x => x.ProjectId == projectId && x.Level == level)
             .OrderBy(x => x.BaseNumber)
             .Select(x => x.Id)
             .ToListAsync(ct);
+        // Restricted to this level's procedures rather than reading every filed node in the installation.
+        // This runs on every materialisation now, not once at boot, so what it costs is what a test change
+        // request costs to approve.
+        var filedSet = (await db.TestProcedureDocumentNodes.AsNoTracking()
+            .Where(x => x.ProcedureId != null && candidates.Contains(x.ProcedureId!.Value))
+            .Select(x => x.ProcedureId!.Value)
+            .ToListAsync(ct)).ToHashSet();
 
         // Positions continue after whatever is already in the section, so a re-run appends rather than
         // colliding with the unique (document, parent, position) index.
@@ -122,7 +124,7 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db)
             .ToListAsync(ct);
         var next = taken.DefaultIfEmpty(-1).Max() + 1;
 
-        foreach (var procedureId in unfiled)
+        foreach (var procedureId in candidates)
         {
             if (filedSet.Contains(procedureId)) continue;
             db.TestProcedureDocumentNodes.Add(new TestProcedureDocumentNode(document.Id, section.Id, next++,

@@ -1940,6 +1940,48 @@ Future entries use:
     than inventing one. `ProcedureSourceSnapshot` is a record of change requests; the package itself carries
     what it was raised from.
 
+### DEC-114 - A Procedure Is Written Into a Document When It Becomes One, Not at the Next Restart
+
+- **Date:** 2026-08-12
+- **Status:** Accepted
+- **Decision:** Every Project has three test procedure documents (SYSTD, HLRTD, LLRTD) from the moment it
+  exists, and every procedure is written into one at the moment it becomes a controlled revision.
+  `TestProcedureDocumentBootstrap` remains the backfill for what already existed; it is no longer the only
+  thing that files anything.
+- **Rationale:** The bootstrap ran once, at startup. A Project created afterwards had no documents, and a
+  procedure materialised afterwards was in no document — present in the list, under no heading in the rail,
+  and uncounted in every section total. A requirement is authored into SYSRD, HLRD or LLRD as part of becoming
+  one; a procedure had no equivalent moment, so it was given the one it already has.
+- **Consequences:**
+  - Filed in `TestProcedureBaselineMaterializer` after its save and inside its transaction, because the
+    placement reads the procedures back from the database — a procedure and its place in a document are
+    committed together or not at all.
+  - Ensured at `POST /api/workspaces` for a new Project, and after the seeders at `POST /api/showcase/seed`
+    and `POST /api/showcase/upgrade`, which run long after startup. Each site was read on its own terms
+    ([LES-009](#les-009---a-rule-moved-is-not-the-same-rule-and-look-alike-call-sites-are-not-alike)).
+  - Document numbers run across the installation, not within a Project: two documents answering to
+    SYSTD-000001 would make a reference ambiguous. A Project's HLR document is therefore **not** necessarily
+    HLRTD-000001, and nothing may assume it is.
+
+### DEC-115 - A Saved Procedure View Is a Separate Contract From a Saved Requirement View
+
+- **Date:** 2026-08-12
+- **Status:** Accepted
+- **Decision:** Saved worklists over the test procedure library are their own record and their own validated
+  contract (`SavedProcedureView`, `ProcedureSavedViewContract`), parallel to the requirements pair rather than
+  shared with it.
+- **Rationale:** The two lists are not the same list. A requirements view carries `verification`, `tag` and
+  `specificationId`; a procedure view carries `outcome` and the document it is written into. A shared contract
+  would accept either set on both sides, so a view could be saved against one list and silently do nothing on
+  the other — which is the exact failure the requirements contract was written to prevent.
+- **Consequences:**
+  - Validated and normalized at the boundary on create **and** on update, because a view is a worklist
+    somebody else opens; a field the Explorer cannot apply must be refused when written, not ignored when read.
+  - Owner-only lifecycle, answering Not Found rather than Forbidden for somebody else's view: confirming that
+    an id exists but is not yours is more than a reader of a shared list needs to know.
+  - Carried on the `/api/test-procedures` list response rather than fetched separately, as the requirements
+    workspace carries its own.
+
 ## Lessons Learned
 
 Findings that cost real time, recorded so they cost it once. These are about how the work is done rather than

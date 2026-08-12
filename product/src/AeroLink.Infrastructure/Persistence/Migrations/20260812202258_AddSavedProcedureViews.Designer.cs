@@ -3,6 +3,7 @@ using System;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    partial class AeroLinkDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260812202258_AddSavedProcedureViews")]
+    partial class AddSavedProcedureViews
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1587,78 +1590,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.HasIndex("DocumentId", "State");
 
                     b.ToTable("managed_document_revisions", (string)null);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentStorageOperation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ActorId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Detail")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<Guid>("DocumentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ObjectManifestJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("OperationKey")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("OperationType")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<string>("PayloadHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ResultJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("RevisionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "OperationType", "OperationKey")
-                        .IsUnique();
-
-                    b.HasIndex("ProjectId", "State", "UpdatedAt");
-
-                    b.ToTable("managed_document_storage_operations", (string)null);
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Identity.ElectronicSignature", b =>
@@ -7686,15 +7617,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("ParentRevisionId")
                         .OnDelete(DeleteBehavior.Restrict);
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Documents.ManagedDocumentStorageOperation", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Programs.ProjectRecord", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Identity.ExternalGroupRoleMapping", b =>

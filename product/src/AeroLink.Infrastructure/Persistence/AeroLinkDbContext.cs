@@ -79,6 +79,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<SpecificationNode> SpecificationNodes => Set<SpecificationNode>();
     public DbSet<TestProcedureDocument> TestProcedureDocuments => Set<TestProcedureDocument>();
     public DbSet<TestProcedureDocumentNode> TestProcedureDocumentNodes => Set<TestProcedureDocumentNode>();
+    public DbSet<SavedProcedureView> SavedProcedureViews => Set<SavedProcedureView>();
     public DbSet<RequirementRevisionProfile> RequirementRevisionProfiles => Set<RequirementRevisionProfile>();
     public DbSet<RequirementRevisionTag> RequirementRevisionTags => Set<RequirementRevisionTag>();
     public DbSet<ArtifactComment> ArtifactComments => Set<ArtifactComment>();
@@ -883,6 +884,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<ArtifactComment>(b =>
         {
             b.ToTable("artifact_comments"); b.HasKey(x=>x.Id); b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired(); b.Property(x=>x.Body).HasMaxLength(8000).IsRequired(); b.Property(x=>x.MentionsJson).IsRequired(); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.ResolvedBy).HasMaxLength(100); b.Property(x=>x.Disposition).HasMaxLength(4000); b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.CreatedAt}); b.HasOne<ArtifactComment>().WithMany().HasForeignKey(x=>x.ParentCommentId).OnDelete(DeleteBehavior.Restrict);
+        });
+        // The same shape and the same constraints as its requirements counterpart below: one view per name
+        // per owner per project, so a repeat name is refused rather than becoming the second of two views
+        // nobody could tell apart.
+        modelBuilder.Entity<SavedProcedureView>(b =>
+        {
+            b.ToTable("saved_procedure_views"); b.HasKey(x=>x.Id); b.Property(x=>x.Name).HasMaxLength(200).IsRequired(); b.Property(x=>x.QueryJson).IsRequired(); b.Property(x=>x.ColumnsJson).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.OwnerId,x.Name}).IsUnique(); b.HasOne<UserAccount>().WithMany().HasForeignKey(x=>x.OwnerId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<SavedRequirementView>(b =>
         {

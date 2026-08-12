@@ -662,6 +662,7 @@ function App() {
           ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
         buildName={`Build ${release.version}`}
+        releaseVersion={release.version}
         released={release.isReleased}
         onOpenRequirementRevision={openRequirementRevision}
       />
