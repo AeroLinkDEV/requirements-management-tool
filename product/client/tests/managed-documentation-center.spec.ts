@@ -148,6 +148,42 @@ test('review signature dialog exposes and submits the exact frozen intent', asyn
   await expect(page.getByText('Rationale: The formal scope, working file, and relationship manifest are acceptable.')).toBeVisible()
 })
 
+test('an integrity-blocked revision is explicit and cannot launch or submit from the browser', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  const showcase = await showcaseSeed(request)
+  await apiLogin(request, 'software.author')
+  const suffix = Date.now().toString().slice(-6)
+  const createdResponse = await request.post(`${apiBase}/api/managed-documents`, { data: {
+    projectId: showcase.projectId,
+    acronym: 'IBP',
+    documentType: 'Integrity Block Plan',
+    title: `Integrity block ${suffix}`,
+    ownerId: 'software.author',
+    formalChangeSummary: 'Make a retained-file integrity incident visible and fail closed.',
+  } })
+  expect(createdResponse.ok(), await createdResponse.text()).toBeTruthy()
+  const created = await createdResponse.json()
+  await page.route(`**/api/managed-documents/${created.id}`, async route => {
+    const response = await route.fetch()
+    const detail = await response.json()
+    const revision = detail.revisions.find((item:{id:string}) => item.id === created.revisionId)
+    revision.integrityBlocked = true
+    revision.integrityFailures = [{
+      attachmentId: revision.currentWorkingAttachmentId,
+      detail: 'Attachment failed hash_mismatch; immutable metadata was not changed.',
+      openedAt: new Date().toISOString(),
+    }]
+    await route.fulfill({ response, json: detail })
+  })
+
+  await login(page, 'software.author', { openProject: false })
+  await page.goto(`/programs/${showcase.programId}/projects/${showcase.projectId}/documentation-center/${created.id}`)
+  const block = page.getByRole('alert').filter({ hasText: 'Controlled file integrity block' })
+  await expect(block).toContainText('failed hash_mismatch')
+  await expect(page.getByRole('button', { name: 'Open in Word' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Submit for review' })).toBeDisabled()
+})
+
 test('configuration authority can explicitly reassign document stewardship in the browser', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)

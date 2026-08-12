@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Win32;
 
@@ -27,7 +28,7 @@ internal static class Program
     }
 }
 
-internal sealed record Redemption(Guid Id, string AccessToken, string Mode, string DocumentNumber, string Title, DateTimeOffset ExpiresAt, long SessionVersion);
+internal sealed record Redemption(Guid Id, string AccessToken, string Mode, string DocumentNumber, string Title, DateTimeOffset ExpiresAt, long SessionVersion, Guid SourceAttachmentId, long SourceSize, string SourceSha256);
 internal sealed record Heartbeat(long Version, DateTimeOffset ExpiresAt);
 
 internal sealed class ConnectorForm : Form
@@ -63,7 +64,25 @@ internal sealed class ConnectorForm : Form
         var client = new HttpClient { BaseAddress = origin, Timeout = TimeSpan.FromMinutes(3) }; using var response = await client.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(ticket)}", null); await EnsureAsync(response);
         var grant = await response.Content.ReadFromJsonAsync<Redemption>(JsonOptions) ?? throw new InvalidOperationException("AeroLink returned an incomplete connector grant."); client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", grant.AccessToken);
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AeroLink", "DocumentConnector", "working"); Directory.CreateDirectory(root); var path = Path.Combine(root, SafeFileName(grant.DocumentNumber) + ".docx");
-        await using (var output = File.Create(path)) { using var download = await client.GetAsync($"/api/document-connector/{grant.Id}/download", HttpCompletionOption.ResponseHeadersRead); await EnsureAsync(download); await download.Content.CopyToAsync(output); }
+        var temporaryPath = path + $".{Guid.NewGuid():N}.download";
+        try
+        {
+            await using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                using var download = await client.GetAsync($"/api/document-connector/{grant.Id}/download", HttpCompletionOption.ResponseHeadersRead); await EnsureAsync(download);
+                await download.Content.CopyToAsync(output);
+            }
+            var info = new FileInfo(temporaryPath);
+            if (info.Length != grant.SourceSize) throw new InvalidOperationException("The downloaded controlled document size does not match the connector grant. Word was not opened.");
+            await using (var input = new FileStream(temporaryPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                var actualHash = Convert.ToHexString(await SHA256.HashDataAsync(input)).ToLowerInvariant();
+                if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actualHash), Convert.FromHexString(grant.SourceSha256)))
+                    throw new InvalidOperationException("The downloaded controlled document hash does not match the connector grant. Word was not opened.");
+            }
+            File.Move(temporaryPath, path, true);
+        }
+        finally { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
         return new ConnectorForm(client, grant, path);
     }
 

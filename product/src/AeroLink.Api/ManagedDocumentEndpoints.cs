@@ -21,6 +21,8 @@ public static class ManagedDocumentEndpoints
         group.MapGet("/link-options", LinkOptionsAsync);
         group.MapPost("", CreateAsync);
         group.MapGet("/attachments/{attachmentId:guid}", DownloadAttachmentAsync);
+        group.MapPost("/attachments/{attachmentId:guid}/restore", RestoreAttachmentAsync);
+        group.MapPost("/projects/{projectId:guid}/integrity/scan", ScanIntegrityAsync);
         group.MapGet("/{id:guid}", DetailAsync);
         group.MapPost("/{id:guid}/revisions", StartRevisionAsync);
         group.MapPost("/{id:guid}/links", AddLinkAsync);
@@ -75,6 +77,15 @@ public static class ManagedDocumentEndpoints
         var revisions = (await db.ManagedDocumentRevisions.AsNoTracking().Where(x => x.DocumentId == id).Include(x => x.ReviewSteps).ToListAsync(ct)).OrderByDescending(x => x.Revision).ToList();
         var revisionIds = revisions.Select(x => x.Id).ToList();
         var attachments = await db.ControlledAttachments.AsNoTracking().Where(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == id).ToListAsync(ct);
+        var integritySignals = await db.OperationalAlerts.AsNoTracking().Where(x => x.ProjectId == document.ProjectId
+            && x.State != OperationalAlertState.Resolved && x.Signal.StartsWith("managed-document-integrity:"))
+            .Select(x => new { x.Signal, x.Detail, x.OpenedAt }).ToListAsync(ct);
+        var integrityFailures = integritySignals.Select(x => new
+        {
+            AttachmentId = Guid.TryParseExact(x.Signal["managed-document-integrity:".Length..], "N", out var parsed) ? parsed : Guid.Empty,
+            x.Detail,
+            x.OpenedAt
+        }).Where(x => x.AttachmentId != Guid.Empty).ToList();
         var links = (await db.ManagedDocumentLinks.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId)).ToListAsync(ct)).OrderBy(x => x.CreatedAt).ToList();
         var buildProvenance = await (from provenance in db.ManagedDocumentBuildProvenance.AsNoTracking() join release in db.Releases.AsNoTracking() on provenance.ReleaseId equals release.Id where provenance.DocumentId == id select new { provenance.ReleaseId, release.Version, provenance.RevisionId, provenance.Source, provenance.RecordedBy, provenance.RecordedAt, meaning = "Legacy build association retained as provenance only" }).ToListAsync(ct);
         var active = (await ActiveSessionsAsync(db, [id], ct)).SingleOrDefault();
@@ -96,6 +107,8 @@ public static class ManagedDocumentEndpoints
             revisions = revisions.Select(revision => new
             {
                 revision.Id, revision.Revision, revision.ParentRevisionId, revision.ParentReleasedDocxAttachmentId, revision.ParentReleasedDocxSha256, revision.TransformationProfile, displayNumber = $"{document.DocumentNumber}.{revision.Revision:D2}", revision.OwnerId, revision.ResponsibleOwnerId, revision.InitiatedBy, revision.FormalChangeSummary, revision.FormalSummaryHash, revision.FormalSummaryVersion, revision.FormalSummaryProvenance, canReviseFormalSummary = revision.State is ManagedDocumentState.Draft or ManagedDocumentState.Returned && (string.Equals(revision.ResponsibleOwnerId, actor.UserName, StringComparison.OrdinalIgnoreCase) || canCorrectFormalScopeByRole), canReassignResponsibleOwner = revision.State is ManagedDocumentState.Draft or ManagedDocumentState.Returned && canCorrectFormalScopeByRole, canManageRelationships = revision.State is ManagedDocumentState.Draft or ManagedDocumentState.Returned && ((activeResponsibleOwner && string.Equals(revision.ResponsibleOwnerId, actor.UserName, StringComparison.OrdinalIgnoreCase)) || canManageRelationshipByRole), state = revision.State.ToString(), revision.CurrentWorkingAttachmentId, revision.ReleaseCandidateDocxAttachmentId, revision.ReleaseCandidatePdfAttachmentId, revision.ReleasedDocxAttachmentId, revision.ReleasedPdfAttachmentId, revision.SnapshotHash, revision.CurrentReviewCycle, revision.SubmittedFormalSummaryHash, revision.SubmittedFormalSummaryVersion, revision.SubmittedRelationshipManifest, revision.SubmittedRelationshipManifestHash, revision.RelationshipManifestVersion, revision.ReleaseManifestHash, revision.ReturnReason, revision.SubmittedBy, revision.SubmittedAt, revision.ReleasedBy, revision.ReleasedAt, revision.CreatedAt, revision.UpdatedAt, revision.Version,
+                integrityBlocked = integrityFailures.Any(failure => attachments.Any(attachment => attachment.RevisionId == revision.Id && attachment.Id == failure.AttachmentId)),
+                integrityFailures = integrityFailures.Where(failure => attachments.Any(attachment => attachment.RevisionId == revision.Id && attachment.Id == failure.AttachmentId)),
                 currentRelationshipManifestHash = ManagedDocumentRelationshipPolicy.Manifest(links.Where(x => x.RevisionId == revision.Id).ToList()).Hash,
                 reviewSteps = revision.ReviewSteps.OrderBy(x => x.Cycle).ThenBy(x => x.Position).Select(x => new { x.Id, x.Cycle, x.Position, x.StageName, x.ApproverId, x.ApproverName, x.RequiredAuthority, x.GrantedAuthority, x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowName, x.WorkflowVersion, x.AuthorityPolicy, x.AssignedAt, x.Version, state = x.State.ToString(), x.Rationale, x.DecidedAt }),
                 attachments = attachments.Where(x => x.RevisionId == revision.Id).OrderByDescending(x => x.UploadedAt).Select(Attachment),
@@ -136,24 +149,30 @@ public static class ManagedDocumentEndpoints
         catch (DbUpdateException) { return Results.Conflict(new { error = "A document number was allocated concurrently. Retry the create request." }); }
     }
 
-    private static async Task<IResult> StartRevisionAsync(Guid id, StartManagedDocumentRevisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, EvidenceFileStore store, CancellationToken ct)
+    private static async Task<IResult> StartRevisionAsync(Guid id, StartManagedDocumentRevisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
         var document = await db.ManagedDocuments.SingleOrDefaultAsync(x => x.Id == id, ct); if (document is null) return Results.NotFound();
         if (!await http.HasProjectRoleAsync(db, identity, document.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         var actor = http.UserAccount(); var ownerId = request.OwnerId ?? actor.UserName;
         if (!await ManagedDocumentAssignmentPolicy.IsEligibleAsync(db, identity, document.ProjectId, ownerId, DateTimeOffset.UtcNow, ct)) return Results.BadRequest(new { error = actor.IsAdministrator && request.OwnerId is null ? "Select an active authorized Program author as responsible revision owner; administrator status is not document-authoring authority." : "The responsible revision owner must be an active authorized member or delegate in this Program." });
-        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         if (await db.ManagedDocumentRevisions.AnyAsync(x => x.DocumentId == id && (x.State == ManagedDocumentState.Draft || x.State == ManagedDocumentState.InReview || x.State == ManagedDocumentState.Returned), ct)) return Results.Conflict(new { error = "Complete or withdraw the existing in-work revision before starting another." });
         var released = await db.ManagedDocumentRevisions.Where(x => x.DocumentId == id && x.State == ManagedDocumentState.Released).ToListAsync(ct);
         if (released.Count != 1) return Results.Conflict(new { error = released.Count == 0 ? "Release the initial revision before starting a successor." : "This document has multiple released heads and requires controlled lineage reconciliation.", code = "document_lineage_reconciliation_required" });
         var prior = released[0];
         if (prior.ReleasedDocxAttachmentId is null) return Results.Conflict(new { error = "The released head has no immutable released DOCX source.", code = "document_lineage_reconciliation_required" });
         var priorAttachment = await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == prior.ReleasedDocxAttachmentId && x.RevisionId == prior.Id, ct);
-        if (priorAttachment is null || !store.Exists(priorAttachment.StorageKey) || priorAttachment.Size != store.GetSize(priorAttachment.StorageKey) || !string.Equals(await store.ComputeSha256Async(priorAttachment.StorageKey, ct), priorAttachment.Sha256, StringComparison.OrdinalIgnoreCase))
-            return Results.Conflict(new { error = "The immutable released parent DOCX is missing or failed size/hash verification.", code = "document_parent_integrity_failure" });
+        if (priorAttachment is null) return Results.Conflict(new { error = "The immutable released parent DOCX metadata is missing.", code = "document_lineage_reconciliation_required" });
+        FileStream verifiedParent;
+        try { verifiedParent = await integrity.OpenVerifiedAsync(priorAttachment, actor.UserName, ct); }
+        catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
+        await using var input = verifiedParent;
+        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+        if (await db.ManagedDocumentRevisions.AnyAsync(x => x.DocumentId == id && (x.State == ManagedDocumentState.Draft || x.State == ManagedDocumentState.InReview || x.State == ManagedDocumentState.Returned), ct)) return Results.Conflict(new { error = "Complete or withdraw the existing in-work revision before starting another." });
+        if (!await db.ManagedDocumentRevisions.AnyAsync(x => x.Id == prior.Id && x.State == ManagedDocumentState.Released && x.ReleasedDocxAttachmentId == priorAttachment.Id, ct))
+            return Results.Conflict(new { error = "The released parent changed while it was being verified. Refresh and retry.", code = "document_parent_changed" });
         var now = DateTimeOffset.UtcNow; var revision = new ManagedDocumentRevision(id, prior.Revision + 1, ownerId, request.FormalChangeSummary ?? request.ChangeSummary ?? "", now, prior.Id, priorAttachment.Id, priorAttachment.Sha256, ManagedDocumentFileService.SuccessorTransformationProfile, actor.UserName);
         db.ManagedDocumentRevisions.Add(revision);
-        await using var input = store.OpenRead(priorAttachment.StorageKey); using var copy = new MemoryStream(); await input.CopyToAsync(copy, ct);
+        using var copy = new MemoryStream(); await input.CopyToAsync(copy, ct);
         byte[] nextDraft;
         try { nextDraft = ManagedDocumentFileService.PrepareNextRevisionDraft(copy.ToArray(), document.DocumentNumber, prior.Revision, revision.Revision); }
         catch (DomainException ex) { return Results.Conflict(new { error = ex.Message, code = "document_parent_transform_failure" }); }
@@ -168,40 +187,42 @@ public static class ManagedDocumentEndpoints
         }
         catch (DbUpdateException)
         {
-            store.Delete(attachment.StorageKey);
+            files.Delete(attachment.StorageKey);
             return Results.Conflict(new { error = "Another request started the active successor revision first. Refresh the document.", code = "document_successor_conflict" });
         }
         catch
         {
-            store.Delete(attachment.StorageKey);
+            files.Delete(attachment.StorageKey);
             throw;
         }
     }
 
-    private static async Task<IResult> CheckoutAsync(Guid revisionId, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+    private static async Task<IResult> CheckoutAsync(Guid revisionId, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
         var data = await RevisionDataAsync(db, revisionId, ct); if (data is null) return Results.NotFound();
         if (!await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         if (data.Revision.State is not (ManagedDocumentState.Draft or ManagedDocumentState.Returned)) return Results.Conflict(new { error = "Only a Draft or returned revision can be checked out." });
         var actor = http.UserAccount(); if (actor.UserName != data.Revision.ResponsibleOwnerId && !actor.IsAdministrator) return Results.Forbid();
-        return await CreateGrantAsync(data, "edit", actor.UserName, http, db, ct);
+        return await CreateGrantAsync(data, "edit", actor.UserName, http, db, integrity, ct);
     }
 
-    private static async Task<IResult> PrepareReleaseAsync(Guid revisionId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> PrepareReleaseAsync(Guid revisionId, HttpContext http, AeroLinkDbContext db, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
         var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
         var active = data.Revision.ReviewSteps.SingleOrDefault(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active);
         var finalPosition = data.Revision.ReviewSteps.Where(x => x.Cycle == data.Revision.CurrentReviewCycle).Select(x => x.Position).DefaultIfEmpty(-1).Max(); var actor = http.UserAccount();
         if (data.Revision.State != ManagedDocumentState.InReview || active is null || active.Position != finalPosition || active.ApproverId != actor.UserName) return Results.Conflict(new { error = "Release preparation is available only to the active final approver after technical review." });
-        return await CreateGrantAsync(data, "release", actor.UserName, http, db, ct);
+        return await CreateGrantAsync(data, "release", actor.UserName, http, db, integrity, ct);
     }
 
-    private static async Task<IResult> CreateGrantAsync(RevisionData data, string mode, string actor, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> CreateGrantAsync(RevisionData data, string mode, string actor, HttpContext http, AeroLinkDbContext db, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow; var sessions = await db.ArtifactEditSessions.Where(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == data.Document.Id && x.IsExclusive && x.State == EditSessionState.Active).ToListAsync(ct);
         foreach (var expired in sessions.Where(x => x.ExpiresAt <= now)) expired.Expire(now); var active = sessions.FirstOrDefault(x => x.State == EditSessionState.Active);
         if (active is not null) return Results.Conflict(new { error = active.UserName == actor ? "You already have this document open in the desktop connector." : $"{active.UserName} has this document checked out.", code = "exclusive_lock", holder = active.UserName, active.ExpiresAt });
         var attachment = data.Revision.CurrentWorkingAttachmentId is null ? null : await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == data.Revision.CurrentWorkingAttachmentId, ct); if (attachment is null) return Results.Conflict(new { error = "Check in a controlled Word working copy before opening the connector." });
+        try { await integrity.VerifyAsync(attachment, actor, ct); }
+        catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
         var session = new ArtifactEditSession(data.Document.ProjectId, "ManagedDocument", data.Document.Id, data.Revision.Id, attachment.Sha256, "{}", actor, now, true, 120);
         var launchToken = Token(); var grant = new DocumentConnectorGrant(data.Document.ProjectId, data.Document.Id, data.Revision.Id, session.Id, actor, mode, Hash(launchToken), now);
         db.ArtifactEditSessions.Add(session); db.DocumentConnectorGrants.Add(grant); db.ManagedDocumentEvents.Add(new(data.Document.Id, mode == "edit" ? "DocumentCheckedOut" : "ReleasePreparationOpened", actor, mode == "edit" ? $"Checked out {data.Document.DocumentNumber}.{data.Revision.Revision:D2} for exclusive editing." : $"Opened exact release-candidate preparation for {data.Document.DocumentNumber}.{data.Revision.Revision:D2}.", now)); await db.SaveChangesAsync(ct);
@@ -209,7 +230,7 @@ public static class ManagedDocumentEndpoints
         return Results.Ok(new { grantId = grant.Id, sessionId = session.Id, session.ExpiresAt, launchUri, mode, holder = actor });
     }
 
-    private static async Task<IResult> SubmitAsync(Guid revisionId, SubmitManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> SubmitAsync(Guid revisionId, SubmitManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
         var operationError = ValidateOperationKey(request.OperationKey); if (operationError is not null) return operationError;
         var payloadHash = OperationPayloadHash($"Submit:{http.UserAccount().UserName}", request);
@@ -237,6 +258,8 @@ public static class ManagedDocumentEndpoints
         try
         {
             var attachment = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == data.Revision.CurrentWorkingAttachmentId, ct);
+            try { await integrity.VerifyAsync(attachment, actor.UserName, ct); }
+            catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
             var relationshipEvidence = ManagedDocumentRelationshipPolicy.Manifest(await db.ManagedDocumentLinks.AsNoTracking().Where(x => x.RevisionId == revisionId).ToListAsync(ct));
             if (!string.Equals(attachment.Sha256, request.ExpectedWorkingSha256, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(relationshipEvidence.Hash, request.ExpectedRelationshipManifestHash, StringComparison.OrdinalIgnoreCase))
@@ -320,7 +343,7 @@ public static class ManagedDocumentEndpoints
         catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "The document revision changed after this page loaded. Refresh and try again." }); }
     }
 
-    private static async Task<IResult> ApproveAsync(Guid revisionId, DocumentReviewDecisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+    private static async Task<IResult> ApproveAsync(Guid revisionId, DocumentReviewDecisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
         var inputError = ValidateReviewDecision(request); if (inputError is not null) return inputError;
         var payloadHash = OperationPayloadHash($"Approve:{http.UserAccount().UserName}", ReviewDecisionPayload(request));
@@ -332,6 +355,22 @@ public static class ManagedDocumentEndpoints
         {
             var step = data.Revision.ReviewSteps.SingleOrDefault(x => x.Id == request.ExpectedStepId);
             if (step is null) return ReviewConflict("stale_review_intent", "The review step changed after this page loaded. Refresh before acting.", data.Revision);
+            var attachmentsToVerify = new List<Guid>();
+            if (data.Revision.CurrentWorkingAttachmentId is Guid workingId) attachmentsToVerify.Add(workingId);
+            var isFinalStep = step.Position == data.Revision.ReviewSteps.Where(x => x.Cycle == step.Cycle).Max(x => x.Position);
+            if (isFinalStep)
+            {
+                if (data.Revision.ReleaseCandidateDocxAttachmentId is Guid docxId) attachmentsToVerify.Add(docxId);
+                if (data.Revision.ReleaseCandidatePdfAttachmentId is Guid pdfId) attachmentsToVerify.Add(pdfId);
+            }
+            var controlledFiles = await db.ControlledAttachments.AsNoTracking().Where(x => attachmentsToVerify.Contains(x.Id)).ToListAsync(ct);
+            if (controlledFiles.Count != attachmentsToVerify.Distinct().Count())
+                return Results.Conflict(new { error = "The controlled review evidence metadata is incomplete.", code = "document_integrity_blocked" });
+            foreach (var attachment in controlledFiles)
+            {
+                try { await integrity.VerifyAsync(attachment, actor.UserName, ct); }
+                catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
+            }
             var now = DateTimeOffset.UtcNow;
             var final = data.Revision.Approve(actor.UserName, request.ExpectedStepId, request.ExpectedCycle, request.ExpectedVersion,
                 request.ExpectedStepVersion, request.ExpectedSnapshotHash, request.ExpectedCandidateDocxAttachmentId,
@@ -354,7 +393,7 @@ public static class ManagedDocumentEndpoints
         { db.ChangeTracker.Clear(); return await OperationResultAsync(db, revisionId, "Approve", request.OperationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The decision operation key was used concurrently.", code = "operation_key_conflict" }); }
     }
 
-    private static async Task<IResult> ReturnAsync(Guid revisionId, DocumentReviewDecisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+    private static async Task<IResult> ReturnAsync(Guid revisionId, DocumentReviewDecisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
         var inputError = ValidateReviewDecision(request); if (inputError is not null) return inputError;
         var payloadHash = OperationPayloadHash($"Return:{http.UserAccount().UserName}", ReviewDecisionPayload(request));
@@ -366,6 +405,11 @@ public static class ManagedDocumentEndpoints
         {
             var step = data.Revision.ReviewSteps.SingleOrDefault(x => x.Id == request.ExpectedStepId);
             if (step is null) return ReviewConflict("stale_review_intent", "The review step changed after this page loaded. Refresh before acting.", data.Revision);
+            if (data.Revision.CurrentWorkingAttachmentId is not Guid workingId) return Results.Conflict(new { error = "The submitted working evidence metadata is missing.", code = "document_integrity_blocked" });
+            var working = await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == workingId, ct);
+            if (working is null) return Results.Conflict(new { error = "The submitted working evidence metadata is missing.", code = "document_integrity_blocked" });
+            try { await integrity.VerifyAsync(working, actor.UserName, ct); }
+            catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
             var contentHash = data.Revision.SnapshotHash; var now = DateTimeOffset.UtcNow;
             data.Revision.Return(actor.UserName, request.ExpectedStepId, request.ExpectedCycle, request.ExpectedVersion, request.ExpectedStepVersion, request.ExpectedSnapshotHash, request.Rationale, now);
             var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
@@ -466,19 +510,49 @@ public static class ManagedDocumentEndpoints
         return Results.BadRequest(new { error = "Choose a supported lifecycle artifact type." });
     }
 
-    private static async Task<IResult> DownloadAttachmentAsync(Guid attachmentId, HttpContext http, AeroLinkDbContext db, EvidenceFileStore store, CancellationToken ct)
-    { var attachment = await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == attachmentId && x.ArtifactType == "ManagedDocument", ct); if (attachment is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, attachment.ProjectId, ct)) return Results.Forbid(); if (!store.Exists(attachment.StorageKey)) return Results.NotFound(); return Results.File(store.OpenRead(attachment.StorageKey), attachment.ContentType, attachment.OriginalFileName, enableRangeProcessing: true); }
+    private static async Task<IResult> DownloadAttachmentAsync(Guid attachmentId, HttpContext http, AeroLinkDbContext db, ManagedDocumentIntegrityService integrity, CancellationToken ct)
+    {
+        var attachment = await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == attachmentId && x.ArtifactType == "ManagedDocument", ct);
+        if (attachment is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, attachment.ProjectId, ct)) return Results.Forbid();
+        try { return Results.File(await integrity.OpenVerifiedAsync(attachment, http.UserAccount().UserName, ct), attachment.ContentType, attachment.OriginalFileName, enableRangeProcessing: true); }
+        catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
+    }
+
+    private static async Task<IResult> ScanIntegrityAsync(Guid projectId, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentIntegrityService integrity, CancellationToken ct)
+    {
+        if (!await http.HasProjectRoleAsync(db, identity, projectId, ct, ProgramRole.ConfigurationManager, ProgramRole.SoftwareQualityAnalyst, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
+        var result = await integrity.ScanProjectAsync(projectId, http.UserAccount().UserName, ct);
+        return Results.Ok(new { result.Checked, result.Healthy, result.Failed, result.FailedAttachmentIds, scannedAt = DateTimeOffset.UtcNow });
+    }
+
+    private static async Task<IResult> RestoreAttachmentAsync(Guid attachmentId, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentIntegrityService integrity, CancellationToken ct)
+    {
+        var attachment = await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == attachmentId && x.ArtifactType == "ManagedDocument", ct);
+        if (attachment is null) return Results.NotFound();
+        if (!await http.HasProjectRoleAsync(db, identity, attachment.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.SoftwareQualityAnalyst, ProgramRole.ProgramManager)) return Results.Forbid();
+        var form = await http.Request.ReadFormAsync(ct); var file = form.Files.GetFile("file"); var reason = form["reason"].ToString();
+        if (file is null) return Results.BadRequest(new { error = "Select the verified recovery object." });
+        try
+        {
+            await using var source = file.OpenReadStream();
+            var quarantineKey = await integrity.RestoreAsync(attachment, source, http.UserAccount().UserName, reason, ct);
+            return Results.Ok(new { attachment.Id, attachment.Sha256, attachment.Size, quarantineKey, recoveredAt = DateTimeOffset.UtcNow });
+        }
+        catch (ManagedDocumentIntegrityFailure ex) { return Results.BadRequest(new { error = ex.Message, code = ex.Code, ex.AttachmentId }); }
+        catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message, code = "document_recovery_conflict" }); }
+    }
 
     private static async Task<IResult> RedeemAsync(string launchToken, AeroLinkDbContext db, CancellationToken ct)
-    { var now = DateTimeOffset.UtcNow; var grant = await db.DocumentConnectorGrants.SingleOrDefaultAsync(x => x.LaunchTokenHash == Hash(launchToken), ct); if (grant is null) return Results.Unauthorized(); try { var accessToken = Token(); grant.Redeem(Hash(accessToken), now); var session = await db.ArtifactEditSessions.SingleAsync(x => x.Id == grant.EditSessionId, ct); await db.SaveChangesAsync(ct); var document = await db.ManagedDocuments.AsNoTracking().SingleAsync(x => x.Id == grant.DocumentId, ct); var revision = await db.ManagedDocumentRevisions.AsNoTracking().SingleAsync(x => x.Id == grant.RevisionId, ct); return Results.Ok(new { grant.Id, accessToken, grant.Mode, documentNumber = $"{document.DocumentNumber}.{revision.Revision:D2}", document.Title, expiresAt = grant.ExpiresAt, sessionVersion = session.Version }); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); } }
+    { var now = DateTimeOffset.UtcNow; var grant = await db.DocumentConnectorGrants.SingleOrDefaultAsync(x => x.LaunchTokenHash == Hash(launchToken), ct); if (grant is null) return Results.Unauthorized(); try { var accessToken = Token(); grant.Redeem(Hash(accessToken), now); var session = await db.ArtifactEditSessions.SingleAsync(x => x.Id == grant.EditSessionId, ct); var document = await db.ManagedDocuments.AsNoTracking().SingleAsync(x => x.Id == grant.DocumentId, ct); var revision = await db.ManagedDocumentRevisions.AsNoTracking().SingleAsync(x => x.Id == grant.RevisionId, ct); var attachment = revision.CurrentWorkingAttachmentId is null ? null : await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == revision.CurrentWorkingAttachmentId, ct); if (attachment is null) return Results.Conflict(new { error = "The connector source attachment is missing.", code = "document_integrity_blocked" }); await db.SaveChangesAsync(ct); return Results.Ok(new { grant.Id, accessToken, grant.Mode, documentNumber = $"{document.DocumentNumber}.{revision.Revision:D2}", document.Title, expiresAt = grant.ExpiresAt, sessionVersion = session.Version, sourceAttachmentId = attachment.Id, sourceSize = attachment.Size, sourceSha256 = attachment.Sha256 }); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); } }
 
-    private static async Task<IResult> ConnectorDownloadAsync(Guid grantId, HttpContext http, AeroLinkDbContext db, EvidenceFileStore store, CancellationToken ct)
-    { var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error; var revision = await db.ManagedDocumentRevisions.AsNoTracking().SingleAsync(x => x.Id == auth.Grant!.RevisionId, ct); if (revision.CurrentWorkingAttachmentId is null) return Results.NotFound(); var attachment = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == revision.CurrentWorkingAttachmentId, ct); return Results.File(store.OpenRead(attachment.StorageKey), attachment.ContentType, attachment.OriginalFileName, enableRangeProcessing: true); }
+    private static async Task<IResult> ConnectorDownloadAsync(Guid grantId, HttpContext http, AeroLinkDbContext db, ManagedDocumentIntegrityService integrity, CancellationToken ct)
+    { var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error; var grant = auth.Grant!; var revision = await db.ManagedDocumentRevisions.AsNoTracking().SingleAsync(x => x.Id == grant.RevisionId, ct); if (revision.CurrentWorkingAttachmentId is null) return Results.Conflict(new { error = "The connector source attachment metadata is missing.", code = "document_integrity_blocked" }); var attachment = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == revision.CurrentWorkingAttachmentId, ct); try { return Results.File(await integrity.OpenVerifiedAsync(attachment, grant.UserName, ct), attachment.ContentType, attachment.OriginalFileName, enableRangeProcessing: true); } catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); } }
 
     private static async Task<IResult> ConnectorHeartbeatAsync(Guid grantId, ConnectorVersionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     { var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error; try { var now = DateTimeOffset.UtcNow; auth.Session!.Heartbeat(request.ExpectedVersion, now, 120); auth.Grant!.Extend(now); await db.SaveChangesAsync(ct); return Results.Ok(new { auth.Session.Version, auth.Session.ExpiresAt }); } catch (DomainException ex) { return Results.Conflict(new { error = ex.Message, code = "stale_connector_session" }); } catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "The connector session was finalized while its lease was being renewed.", code = "stale_connector_session" }); } }
 
-    private static async Task<IResult> ConnectorCheckInAsync(Guid grantId, HttpContext http, AeroLinkDbContext db, ManagedDocumentFileService files, CancellationToken ct)
+    private static async Task<IResult> ConnectorCheckInAsync(Guid grantId, HttpContext http, AeroLinkDbContext db, ManagedDocumentFileService files, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
         var grant = await ConnectorGrantByTokenAsync(grantId, http, db, ct); if (grant is null) return Results.Unauthorized();
         if (grant.Mode != "edit") return Results.BadRequest(new { error = "This connector session is for release preparation, not draft check-in." });
@@ -498,6 +572,8 @@ public static class ManagedDocumentEndpoints
             var data = await RevisionDataAsync(db, grant.RevisionId, ct); if (data is null) return Results.NotFound();
             var current = data.Revision.CurrentWorkingAttachmentId is null ? null : await db.ControlledAttachments.SingleOrDefaultAsync(x => x.Id == data.Revision.CurrentWorkingAttachmentId, ct);
             if (current is null || !string.Equals(current.Sha256, auth.Session!.BaseSnapshotHash, StringComparison.OrdinalIgnoreCase)) return Results.Conflict(new { error = "The checked-in source changed after this checkout. No file was overwritten.", code = "document_snapshot_conflict" });
+            try { await integrity.VerifyAsync(current, grant.UserName, ct); }
+            catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
             var version = await db.ControlledAttachments.CountAsync(x => x.LogicalId == data.Revision.Id, ct) + 1; var now = DateTimeOffset.UtcNow;
             var returnResolution = data.Revision.State == ManagedDocumentState.Returned ? comment : null;
             var next = await files.StoreAsync(data.Document.ProjectId, data.Document.Id, data.Revision.Id, data.Revision.Id, version, "Working Word document", comment, upload.FileName, ManagedDocumentFileService.DocxContentType, content, current.Id, grant.UserName, now, ct);
@@ -515,7 +591,7 @@ public static class ManagedDocumentEndpoints
         { db.ChangeTracker.Clear(); return await OperationResultAsync(db, grant.RevisionId, "ConnectorCheckIn", operationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The connector operation completed concurrently.", code = "operation_key_conflict" }); }
     }
 
-    private static async Task<IResult> ConnectorReleaseCandidateAsync(Guid grantId, HttpContext http, AeroLinkDbContext db, ManagedDocumentFileService files, CancellationToken ct)
+    private static async Task<IResult> ConnectorReleaseCandidateAsync(Guid grantId, HttpContext http, AeroLinkDbContext db, ManagedDocumentFileService files, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
         var grant = await ConnectorGrantByTokenAsync(grantId, http, db, ct); if (grant is null) return Results.Unauthorized();
         if (grant.Mode != "release") return Results.BadRequest(new { error = "This connector session is for draft editing, not release preparation." });
@@ -532,6 +608,11 @@ public static class ManagedDocumentEndpoints
             if (grant.RevokedAt is not null) return Results.Conflict(new { error = "That connector grant completed with a different release-candidate set.", code = "operation_key_reused" });
             var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error;
             var data = await RevisionDataAsync(db, grant.RevisionId, ct, true); if (data is null) return Results.NotFound(); var now = DateTimeOffset.UtcNow;
+            if (data.Revision.CurrentWorkingAttachmentId is not Guid workingId) return Results.Conflict(new { error = "The reviewed working evidence metadata is missing.", code = "document_integrity_blocked" });
+            var working = await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == workingId, ct);
+            if (working is null) return Results.Conflict(new { error = "The reviewed working evidence metadata is missing.", code = "document_integrity_blocked" });
+            try { await integrity.VerifyAsync(working, grant.UserName, ct); }
+            catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
             var summaryMetadata = $"Formal revision scope v{data.Revision.FormalSummaryVersion} ({data.Revision.FormalSummaryHash}): {data.Revision.FormalChangeSummary}";
             var docxAttachment = await files.StoreAsync(data.Document.ProjectId, data.Document.Id, data.Revision.Id, Guid.NewGuid(), 1, "Release candidate DOCX", summaryMetadata, docxUpload.FileName, ManagedDocumentFileService.DocxContentType, docx, null, grant.UserName, now, ct);
             var pdfAttachment = await files.StoreAsync(data.Document.ProjectId, data.Document.Id, data.Revision.Id, Guid.NewGuid(), 1, "Release candidate PDF", summaryMetadata, pdfUpload.FileName, ManagedDocumentFileService.PdfContentType, pdf, null, grant.UserName, now, ct);
@@ -568,7 +649,7 @@ public static class ManagedDocumentEndpoints
     private static async Task<RevisionData?> RevisionDataAsync(AeroLinkDbContext db, Guid revisionId, CancellationToken ct, bool includeReviews = false)
     { var query = db.ManagedDocumentRevisions.AsQueryable(); if (includeReviews) query = query.Include(x => x.ReviewSteps); var revision = await query.SingleOrDefaultAsync(x => x.Id == revisionId, ct); if (revision is null) return null; var document = await db.ManagedDocuments.SingleAsync(x => x.Id == revision.DocumentId, ct); return new(document, revision); }
 
-    private static object Attachment(ControlledAttachment x) => new { x.Id, x.LogicalId, x.Version, x.Label, x.Description, x.OriginalFileName, x.ContentType, x.Size, x.Sha256, state = x.State.ToString(), x.UploadedBy, x.UploadedAt, downloadUrl = $"/api/managed-documents/attachments/{x.Id}" };
+    private static object Attachment(ControlledAttachment x) => new { x.Id, x.LogicalId, x.Version, x.Label, x.Description, x.OriginalFileName, x.ContentType, x.Size, x.Sha256, state = x.State.ToString(), x.UploadedBy, x.UploadedAt, x.IntegrityVerifiedAt, downloadUrl = $"/api/managed-documents/attachments/{x.Id}" };
     private static ManagedDocumentSummary Summary(ManagedDocument document, IReadOnlyList<ManagedDocumentRevision> revisions, ArtifactEditSession? session)
     { var releasedHeads = revisions.Where(x => x.State == ManagedDocumentState.Released).ToList(); var released = releasedHeads.Count == 1 ? releasedHeads[0] : null; var inWorkHeads = revisions.Where(x => x.State is ManagedDocumentState.Draft or ManagedDocumentState.InReview or ManagedDocumentState.Returned).ToList(); var inWork = inWorkHeads.Count == 1 ? inWorkHeads[0] : null; var reconciliationRequired = releasedHeads.Count > 1 || inWorkHeads.Count > 1; return new(document.Id, document.DocumentNumber, document.Acronym, document.DocumentType, document.Title, document.StewardId, inWork?.ResponsibleOwnerId, released is null ? "None" : $"{document.DocumentNumber}.{released.Revision:D2}", reconciliationRequired ? "ReconciliationRequired" : released?.State.ToString() ?? "NotReleased", inWork is null ? null : $"{document.DocumentNumber}.{inWork.Revision:D2}", reconciliationRequired ? "ReconciliationRequired" : inWork?.State.ToString() ?? "None", inWork is null ? null : session?.UserName, inWork is null ? null : session?.ExpiresAt, reconciliationRequired, document.UpdatedAt); }
 
@@ -661,6 +742,13 @@ public static class ManagedDocumentEndpoints
     private static bool IsManagedDocumentOperationKeyConflict(DbUpdateException ex) =>
         ex.ToString().Contains("managed_document_operations", StringComparison.OrdinalIgnoreCase)
         && (ex.ToString().Contains("unique", StringComparison.OrdinalIgnoreCase) || ex.ToString().Contains("23505", StringComparison.OrdinalIgnoreCase));
+    private static IResult IntegrityFailure(ManagedDocumentIntegrityFailure failure) => Results.Json(new
+    {
+        error = failure.Message,
+        code = "document_integrity_blocked",
+        reason = failure.Code,
+        failure.AttachmentId
+    }, statusCode: StatusCodes.Status409Conflict);
     private static IResult ReviewConflict(string code, string error, ManagedDocumentRevision revision) => Results.Conflict(new
     {
         error, code, current = new { revision.Version, cycle = revision.CurrentReviewCycle, revision.SnapshotHash, revision.SubmittedFormalSummaryHash, revision.SubmittedFormalSummaryVersion, revision.SubmittedRelationshipManifestHash, revision.ReleaseCandidateDocxAttachmentId, revision.ReleaseCandidatePdfAttachmentId, revision.ReleaseManifestHash }
