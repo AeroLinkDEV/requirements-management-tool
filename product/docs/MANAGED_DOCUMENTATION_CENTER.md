@@ -130,3 +130,28 @@ The document steward owns long-term Project accountability. The responsible revi
 Creating a document or successor validates the selected assignee as an active account with current Program authoring authority or a valid delegation before any row or file is created. Global administrator status is not document-authoring authority, so an administrator must explicitly select an eligible Program author. Ordinary and privileged check-ins never transfer responsibility. Configuration Management, the Program Manager, or the Project Engineering Lead can explicitly reassign stewardship or Draft/Returned revision responsibility using a different eligible assignee, required reason, and expected version. AeroLink retains old/new assignee, assigning actor, reason, effective time, notification, and append-only document and security-audit evidence. Disabled or departed responsible owners appear in the authorized My Work recovery queue.
 
 Submission freezes the attributable contributor set from accepted check-ins for that exact review cycle. A responsibility transfer therefore cannot make a prior content contributor independently eligible to review unchanged work. Legacy stewardship and responsibility preserve their respective retained owner fields; creator and initiator use the earliest retained check-in actor where available and fall back to those owner fields without changing historical check-in evidence. Where old review-cycle contributors can only be inferred from retained check-ins, their provenance is visibly `LegacyInferredFromRetainedCheckIns` rather than represented as contemporary proof.
+
+## Review authority and exact decision intent
+
+Each newly assigned review step records the required authority, authority actually exercised, exact direct
+membership/delegation/standing-backup source row, workflow identity and version, assignment time, and policy.
+Technical review accepts the configured reviewer and engineering-lead authorities. Final release authorization
+accepts SQA, Configuration Management, approval, or Program authority. An explicitly identified administrator
+substitution is retained as such; administrator privilege is never silently described as SQA. Future, expired,
+or revoked delegations cannot create a review assignment.
+
+The policy is `FrozenAtAssignment;ActiveAccountAtSigning`: authority is evaluated and frozen when the stage is
+assigned, so later membership or delegation changes do not rewrite or invalidate that historical assignment.
+The exact assignee must still have an active AeroLink account and confirm their password when signing. Signature
+meaning and engineering rationale are separately required, bounded fields. The signature retains the exact
+cycle, step, frozen authority source, workflow version, and submitted or release-candidate hash. Historical
+steps and signatures for which those facts were never stored remain visibly `LegacyUnspecified` or blank; the
+migration does not manufacture modern authority evidence.
+
+Submission and review commands carry the exact revision version, working attachment/hash, formal-summary
+version/hash, relationship-manifest hash, cycle, step ID/version, submitted snapshot hash, and—at final
+release—the exact DOCX/PDF candidate IDs and combined manifest. A caller-supplied one-use operation key makes a
+same-intent retry return the original result while rejecting reuse for different intent. Stale tabs and
+concurrent decisions return a stable conflict without a second signature or notification. Connector heartbeat
+renews only the lease and no longer changes the finalize token, so a slow check-in or release upload is not made
+stale merely by a healthy heartbeat; database concurrency still prevents renewal after finalization wins.

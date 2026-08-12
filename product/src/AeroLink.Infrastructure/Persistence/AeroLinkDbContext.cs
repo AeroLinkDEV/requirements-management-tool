@@ -137,6 +137,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ManagedDocumentReviewContributor> ManagedDocumentReviewContributors => Set<ManagedDocumentReviewContributor>();
     public DbSet<ManagedDocumentAssignment> ManagedDocumentAssignments => Set<ManagedDocumentAssignment>();
     public DbSet<ManagedDocumentReviewStep> ManagedDocumentReviewSteps => Set<ManagedDocumentReviewStep>();
+    public DbSet<ManagedDocumentOperation> ManagedDocumentOperations => Set<ManagedDocumentOperation>();
     public DbSet<ManagedDocumentBuildProvenance> ManagedDocumentBuildProvenance => Set<ManagedDocumentBuildProvenance>();
     public DbSet<ManagedDocumentLink> ManagedDocumentLinks => Set<ManagedDocumentLink>();
     public DbSet<ManagedDocumentEvent> ManagedDocumentEvents => Set<ManagedDocumentEvent>();
@@ -784,7 +785,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<ElectronicSignature>(b =>
         {
-            b.ToTable("electronic_signatures"); b.HasKey(x => x.Id); b.Property(x => x.UserName).HasMaxLength(100).IsRequired(); b.Property(x => x.DisplayName).HasMaxLength(200).IsRequired(); b.Property(x => x.ArtifactType).HasMaxLength(60).IsRequired(); b.Property(x => x.ArtifactRevision).HasMaxLength(80).IsRequired(); b.Property(x => x.Action).HasMaxLength(80).IsRequired(); b.Property(x => x.Authority).HasMaxLength(40).IsRequired(); b.Property(x => x.Meaning).HasMaxLength(1000).IsRequired(); b.Property(x => x.ContentHash).HasMaxLength(64).IsRequired(); b.Property(x => x.IpAddress).HasMaxLength(100); b.HasIndex(x => new { x.ArtifactType, x.ArtifactId, x.SignedAt }); b.HasIndex(x => new { x.UserId, x.SignedAt });
+            b.ToTable("electronic_signatures"); b.HasKey(x => x.Id); b.Property(x => x.UserName).HasMaxLength(100).IsRequired(); b.Property(x => x.DisplayName).HasMaxLength(200).IsRequired(); b.Property(x => x.ArtifactType).HasMaxLength(60).IsRequired(); b.Property(x => x.ArtifactRevision).HasMaxLength(80).IsRequired(); b.Property(x => x.Action).HasMaxLength(80).IsRequired(); b.Property(x => x.Authority).HasMaxLength(80).IsRequired(); b.Property(x => x.AuthoritySource).HasMaxLength(80).IsRequired(); b.Property(x => x.Meaning).HasMaxLength(1000).IsRequired(); b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired(); b.Property(x => x.ContentHash).HasMaxLength(64).IsRequired(); b.Property(x => x.IpAddress).HasMaxLength(100); b.HasIndex(x => new { x.ArtifactType, x.ArtifactId, x.SignedAt }); b.HasIndex(x => new { x.UserId, x.SignedAt });
         });
         modelBuilder.Entity<SecurityAuditEvent>(b =>
         {
@@ -1139,7 +1140,17 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("managed_document_review_steps"); b.HasKey(x => x.Id);
             b.Property(x => x.ApproverId).HasMaxLength(100).IsRequired(); b.Property(x => x.ApproverName).HasMaxLength(200).IsRequired();
             b.Property(x => x.StageName).HasMaxLength(120).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.RequiredAuthority).HasMaxLength(80).IsRequired(); b.Property(x => x.GrantedAuthority).HasMaxLength(80).IsRequired();
+            b.Property(x => x.AuthoritySource).HasMaxLength(80).IsRequired(); b.Property(x => x.WorkflowName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.AuthorityPolicy).HasMaxLength(80).IsRequired(); b.Property(x => x.Version).IsConcurrencyToken();
             b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired(); b.HasIndex(x => new { x.RevisionId, x.Cycle, x.Position }).IsUnique();
+        });
+        modelBuilder.Entity<ManagedDocumentOperation>(b =>
+        {
+            b.ToTable("managed_document_operations"); b.HasKey(x => x.Id); b.Property(x => x.OperationType).HasMaxLength(40).IsRequired();
+            b.Property(x => x.OperationKey).HasMaxLength(100).IsRequired(); b.Property(x => x.PayloadHash).HasMaxLength(64).IsRequired(); b.Property(x => x.ResultJson).HasMaxLength(4000).IsRequired();
+            b.HasIndex(x => new { x.RevisionId, x.OperationType, x.OperationKey }).IsUnique();
+            b.HasOne<ManagedDocumentRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ManagedDocumentBuildProvenance>(b =>
         {

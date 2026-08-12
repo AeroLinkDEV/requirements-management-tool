@@ -95,6 +95,59 @@ test('managed Word documents remain one Project-wide register across build navig
   await expect(page.locator('.mdList').getByText(/\.01 · (Draft|In Review|Returned)/)).toHaveCount(4)
 })
 
+test('review signature dialog exposes and submits the exact frozen intent', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  const showcase = await showcaseSeed(request)
+  await apiLogin(request, 'software.author')
+  const suffix = Date.now().toString().slice(-6)
+  const createdResponse = await request.post(`${apiBase}/api/managed-documents`, { data: {
+    projectId: showcase.projectId,
+    acronym: 'RIP',
+    documentType: 'Review Integrity Plan',
+    title: `Exact review intent ${suffix}`,
+    ownerId: 'software.author',
+    formalChangeSummary: 'Bind the browser decision to exact controlled evidence.',
+  } })
+  expect(createdResponse.ok(), await createdResponse.text()).toBeTruthy()
+  const created = await createdResponse.json()
+  const detailResponse = await request.get(`${apiBase}/api/managed-documents/${created.id}`)
+  expect(detailResponse.ok(), await detailResponse.text()).toBeTruthy()
+  const detail = await detailResponse.json()
+  const revision = detail.revisions.find((item:{id:string}) => item.id === created.revisionId)
+  const working = revision.attachments.find((item:{id:string}) => item.id === revision.currentWorkingAttachmentId)
+  const submitResponse = await request.post(`${apiBase}/api/managed-documents/revisions/${revision.id}/submit`, { data: {
+    technicalReviewerId: 'software.lead',
+    finalApproverId: 'quality.analyst',
+    expectedVersion: revision.version,
+    expectedWorkingAttachmentId: working.id,
+    expectedWorkingSha256: working.sha256,
+    expectedFormalSummaryVersion: revision.formalSummaryVersion,
+    expectedFormalSummaryHash: revision.formalSummaryHash,
+    expectedRelationshipManifestHash: revision.currentRelationshipManifestHash,
+    operationKey: crypto.randomUUID(),
+  } })
+  expect(submitResponse.ok(), await submitResponse.text()).toBeTruthy()
+
+  await login(page, 'software.lead', { openProject: false })
+  await page.goto(`/programs/${showcase.programId}/projects/${showcase.projectId}/documentation-center/${created.id}`)
+  await page.getByRole('button', { name: 'Review & release' }).click()
+  await page.getByRole('button', { name: 'Approve stage' }).click()
+  const evidence = page.getByRole('status').filter({ hasText: 'Exact signature intent' })
+  await expect(evidence).toContainText('cycle 1 · step 1 v1')
+  await expect(evidence).toContainText('Reviewer via Direct Membership')
+  await expect(evidence.getByText(/Snapshot [0-9a-f]{12}/)).toBeVisible()
+  const dialog = page.getByRole('dialog', { name: 'Documentation Center action' })
+  await dialog.getByLabel('Meaning').fill('I confirm this exact submitted snapshot is technically complete.')
+  await dialog.getByLabel('Rationale').fill('The formal scope, working file, and relationship manifest are acceptable.')
+  await dialog.getByLabel('Password').fill('AeroLink!2026')
+  await dialog.getByRole('button', { name: 'Sign and approve' }).click()
+  await expect(page.getByText(/was approved/)).toBeVisible()
+  await page.reload({ waitUntil: 'load' })
+  await page.getByRole('button', { name: 'Review & release' }).click()
+  await expect(page.getByText('I confirm this exact submitted snapshot is technically complete.')).toBeVisible()
+  await expect(page.getByText('Rationale: The formal scope, working file, and relationship manifest are acceptable.')).toBeVisible()
+})
+
 test('configuration authority can explicitly reassign document stewardship in the browser', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)

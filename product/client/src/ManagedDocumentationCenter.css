@@ -594,6 +594,25 @@
   place-items: center;
   padding: 20px;
 }
+.mdDecisionEvidence {
+  position: fixed;
+  z-index: 1001;
+  top: 24px;
+  right: 24px;
+  width: min(320px, calc(100vw - 48px));
+  display: grid;
+  gap: 5px;
+  padding: 14px 16px;
+  border: 1px solid #8bc8bf;
+  border-radius: 10px;
+  background: #f4fbfa;
+  box-shadow: 0 12px 35px #0b1d2c40;
+  color: #163f3a;
+}
+.mdDecisionEvidence code,
+.mdDecisionEvidence small {
+  overflow-wrap: anywhere;
+}
 .mdModalCard {
   position: relative;
   width: min(540px, 100%);

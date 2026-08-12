@@ -35,7 +35,8 @@ public sealed class EnterpriseHardeningTests
     {
         var now=DateTimeOffset.UtcNow;var session=new ArtifactEditSession(Guid.NewGuid(),"SCR",Guid.NewGuid(),null,"a".PadLeft(64,'a'),"{}","author",now,true,10);
         Assert.True(session.IsExclusive);Assert.NotNull(session.LockKey);Assert.Equal(now.AddMinutes(10),session.ExpiresAt);
-        session.Heartbeat(1,now.AddMinutes(2),15);Assert.Equal(2,session.Version);Assert.Equal(now.AddMinutes(17),session.ExpiresAt);
+        session.Heartbeat(1,now.AddMinutes(2),15);Assert.Equal(1,session.Version);Assert.Equal(now.AddMinutes(17),session.ExpiresAt);
+        session.Heartbeat(1,now.AddMinutes(3),15);Assert.Equal(1,session.Version);Assert.Equal(now.AddMinutes(18),session.ExpiresAt);
         session.ForceUnlock("configuration.manager","Abandoned checkout blocks review.",now.AddMinutes(3));
         Assert.Equal(EditSessionState.ForceUnlocked,session.State);Assert.Null(session.LockKey);Assert.Equal("configuration.manager",session.ClosedBy);Assert.Equal("Abandoned checkout blocks review.",session.ClosedReason);
     }

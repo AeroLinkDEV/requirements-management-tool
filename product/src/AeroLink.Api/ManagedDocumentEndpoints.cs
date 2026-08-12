@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using AeroLink.Api;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.ChangeControl;
@@ -94,15 +95,16 @@ public static class ManagedDocumentEndpoints
             lockInfo = active is null ? null : new { active.Id, active.UserName, active.OpenedAt, active.UpdatedAt, active.ExpiresAt }, buildProvenance,
             revisions = revisions.Select(revision => new
             {
-                revision.Id, revision.Revision, revision.ParentRevisionId, revision.ParentReleasedDocxAttachmentId, revision.ParentReleasedDocxSha256, revision.TransformationProfile, displayNumber = $"{document.DocumentNumber}.{revision.Revision:D2}", revision.OwnerId, revision.ResponsibleOwnerId, revision.InitiatedBy, revision.FormalChangeSummary, revision.FormalSummaryHash, revision.FormalSummaryVersion, revision.FormalSummaryProvenance, canReviseFormalSummary = revision.State is ManagedDocumentState.Draft or ManagedDocumentState.Returned && (string.Equals(revision.ResponsibleOwnerId, actor.UserName, StringComparison.OrdinalIgnoreCase) || canCorrectFormalScopeByRole), canReassignResponsibleOwner = revision.State is ManagedDocumentState.Draft or ManagedDocumentState.Returned && canCorrectFormalScopeByRole, canManageRelationships = revision.State is ManagedDocumentState.Draft or ManagedDocumentState.Returned && ((activeResponsibleOwner && string.Equals(revision.ResponsibleOwnerId, actor.UserName, StringComparison.OrdinalIgnoreCase)) || canManageRelationshipByRole), state = revision.State.ToString(), revision.CurrentWorkingAttachmentId, revision.ReleasedDocxAttachmentId, revision.ReleasedPdfAttachmentId, revision.SnapshotHash, revision.SubmittedFormalSummaryHash, revision.SubmittedFormalSummaryVersion, revision.SubmittedRelationshipManifest, revision.SubmittedRelationshipManifestHash, revision.RelationshipManifestVersion, revision.ReleaseManifestHash, revision.ReturnReason, revision.SubmittedBy, revision.SubmittedAt, revision.ReleasedBy, revision.ReleasedAt, revision.CreatedAt, revision.UpdatedAt, revision.Version,
-                reviewSteps = revision.ReviewSteps.OrderBy(x => x.Cycle).ThenBy(x => x.Position).Select(x => new { x.Id, x.Cycle, x.Position, x.StageName, x.ApproverId, x.ApproverName, state = x.State.ToString(), x.Rationale, x.DecidedAt }),
+                revision.Id, revision.Revision, revision.ParentRevisionId, revision.ParentReleasedDocxAttachmentId, revision.ParentReleasedDocxSha256, revision.TransformationProfile, displayNumber = $"{document.DocumentNumber}.{revision.Revision:D2}", revision.OwnerId, revision.ResponsibleOwnerId, revision.InitiatedBy, revision.FormalChangeSummary, revision.FormalSummaryHash, revision.FormalSummaryVersion, revision.FormalSummaryProvenance, canReviseFormalSummary = revision.State is ManagedDocumentState.Draft or ManagedDocumentState.Returned && (string.Equals(revision.ResponsibleOwnerId, actor.UserName, StringComparison.OrdinalIgnoreCase) || canCorrectFormalScopeByRole), canReassignResponsibleOwner = revision.State is ManagedDocumentState.Draft or ManagedDocumentState.Returned && canCorrectFormalScopeByRole, canManageRelationships = revision.State is ManagedDocumentState.Draft or ManagedDocumentState.Returned && ((activeResponsibleOwner && string.Equals(revision.ResponsibleOwnerId, actor.UserName, StringComparison.OrdinalIgnoreCase)) || canManageRelationshipByRole), state = revision.State.ToString(), revision.CurrentWorkingAttachmentId, revision.ReleaseCandidateDocxAttachmentId, revision.ReleaseCandidatePdfAttachmentId, revision.ReleasedDocxAttachmentId, revision.ReleasedPdfAttachmentId, revision.SnapshotHash, revision.CurrentReviewCycle, revision.SubmittedFormalSummaryHash, revision.SubmittedFormalSummaryVersion, revision.SubmittedRelationshipManifest, revision.SubmittedRelationshipManifestHash, revision.RelationshipManifestVersion, revision.ReleaseManifestHash, revision.ReturnReason, revision.SubmittedBy, revision.SubmittedAt, revision.ReleasedBy, revision.ReleasedAt, revision.CreatedAt, revision.UpdatedAt, revision.Version,
+                currentRelationshipManifestHash = ManagedDocumentRelationshipPolicy.Manifest(links.Where(x => x.RevisionId == revision.Id).ToList()).Hash,
+                reviewSteps = revision.ReviewSteps.OrderBy(x => x.Cycle).ThenBy(x => x.Position).Select(x => new { x.Id, x.Cycle, x.Position, x.StageName, x.ApproverId, x.ApproverName, x.RequiredAuthority, x.GrantedAuthority, x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowName, x.WorkflowVersion, x.AuthorityPolicy, x.AssignedAt, x.Version, state = x.State.ToString(), x.Rationale, x.DecidedAt }),
                 attachments = attachments.Where(x => x.RevisionId == revision.Id).OrderByDescending(x => x.UploadedAt).Select(Attachment),
                 links = links.Where(x => x.RevisionId == revision.Id).Select(x => new { x.Id, x.ArtifactType, x.ArtifactId, x.DisplayNumber, x.CanonicalTitle, x.TargetState, x.TargetProjectId, x.TargetReleaseId, x.TargetReleaseVersion, x.DeepLink, x.Relationship, x.PolicyVersion, x.Provenance, x.IsCurrent, x.SupersededByLinkId, x.SupersedeReason, x.SupersededBy, x.SupersededAt, x.CreatedBy, x.CreatedAt })
                 , checkIns = checkIns.Where(x => x.RevisionId == revision.Id).Select(x => new { x.Id, x.WorkingAttachmentId, x.WorkingVersion, x.ActorId, x.Comment, x.BaseAttachmentId, x.BaseSha256, x.ResultSha256, x.SupersededAttachmentId, x.ConnectorSessionId, x.OperationId, x.OccurredAt, x.ReturnResolutionNote })
                 , reviewContributors = contributors.Where(x => x.RevisionId == revision.Id).Select(x => new { x.Id, x.ReviewCycle, x.ContributorId, x.EvidenceHash, x.CapturedAt, x.Provenance })
             }),
             assignments = assignments.Select(x => new { x.Id, x.RevisionId, x.AssignmentType, x.PriorAssigneeId, x.NewAssigneeId, x.AssignedBy, x.Reason, x.EffectiveAt }),
-            signatures = signatures.Select(x => new { x.Id, x.UserName, x.DisplayName, x.ArtifactRevision, x.Action, x.Meaning, x.ContentHash, x.SignedAt }),
+            signatures = signatures.Select(x => new { x.Id, x.UserName, x.DisplayName, x.ArtifactRevision, x.Action, x.Authority, x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowVersion, x.ReviewStepId, x.ReviewCycle, x.ReviewStepPosition, x.Meaning, x.Rationale, x.ContentHash, x.SignedAt, isLegacyAuthority = string.IsNullOrWhiteSpace(x.Authority) }),
             audit = audits.Select(x => new { x.Id, x.EventType, x.ActorId, x.Detail, x.OccurredAt })
         });
     }
@@ -209,17 +211,23 @@ public static class ManagedDocumentEndpoints
 
     private static async Task<IResult> SubmitAsync(Guid revisionId, SubmitManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
+        var operationError = ValidateOperationKey(request.OperationKey); if (operationError is not null) return operationError;
+        var payloadHash = OperationPayloadHash($"Submit:{http.UserAccount().UserName}", request);
         var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
         var actor = http.UserAccount(); if (actor.UserName != data.Revision.ResponsibleOwnerId && !actor.IsAdministrator) return Results.Forbid();
+        var priorOperation = await OperationResultAsync(db, revisionId, "Submit", request.OperationKey, payloadHash, ct); if (priorOperation is not null) return priorOperation;
+        if (data.Revision.Version != request.ExpectedVersion || data.Revision.CurrentWorkingAttachmentId != request.ExpectedWorkingAttachmentId
+            || data.Revision.FormalSummaryVersion != request.ExpectedFormalSummaryVersion
+            || !string.Equals(data.Revision.FormalSummaryHash, request.ExpectedFormalSummaryHash, StringComparison.OrdinalIgnoreCase))
+            return ReviewConflict("submission_evidence_changed", "The document changed after this page loaded. Refresh and review the exact working evidence before submitting.", data.Revision);
         if (await db.ArtifactEditSessions.AnyAsync(x => x.ArtifactId == data.Document.Id && x.ArtifactType == "ManagedDocument" && x.State == EditSessionState.Active, ct)) return Results.Conflict(new { error = "Check in or discard the active desktop checkout before submitting." });
         var accounts = await db.UserAccounts.AsNoTracking().Where(x => (x.UserName == request.TechnicalReviewerId || x.UserName == request.FinalApproverId) && x.State == AccountState.Active).ToListAsync(ct); if (accounts.Count != 2) return Results.BadRequest(new { error = "Select two active AeroLink users for document review." });
         var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
-        var technicalId = accounts.Single(x => x.UserName == request.TechnicalReviewerId).Id; var finalId = accounts.Single(x => x.UserName == request.FinalApproverId).Id;
-        var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == programId && x.EndedAt == null && (x.UserId == technicalId || x.UserId == finalId)).ToListAsync(ct);
-        var technicalRoles = new[] { ProgramRole.Reviewer, ProgramRole.Approver, ProgramRole.SystemEngineeringLead, ProgramRole.SoftwareEngineeringLead, ProgramRole.ProjectEngineeringLead, ProgramRole.EngineeringManager };
-        var finalRoles = new[] { ProgramRole.SoftwareQualityAnalyst, ProgramRole.ConfigurationManager, ProgramRole.Approver, ProgramRole.ProgramManager };
-        if (!memberships.Any(x => x.UserId == technicalId && technicalRoles.Contains(x.Role))) return Results.BadRequest(new { error = "The technical reviewer needs review or engineering-lead authority in this Program." });
-        if (!memberships.Any(x => x.UserId == finalId && finalRoles.Contains(x.Role))) return Results.BadRequest(new { error = "The final approver needs SQA, configuration, approval, or Program authority." });
+        var now = DateTimeOffset.UtcNow; var technicalAccount = accounts.Single(x => x.UserName == request.TechnicalReviewerId); var finalAccount = accounts.Single(x => x.UserName == request.FinalApproverId);
+        var technicalAuthority = await ManagedDocumentReviewAuthority.ResolveTechnicalAsync(db, programId, technicalAccount, now, ct);
+        var finalAuthority = await ManagedDocumentReviewAuthority.ResolveFinalAsync(db, programId, finalAccount, now, ct);
+        if (technicalAuthority is null) return Results.BadRequest(new { error = "The technical reviewer needs current review or engineering-lead authority in this Program." });
+        if (finalAuthority is null) return Results.BadRequest(new { error = "The final approver needs current SQA, configuration, approval, Program, or authorized administrator-substitution authority." });
         var acceptedCheckIns = await db.ManagedDocumentCheckIns.AsNoTracking().Where(x => x.RevisionId == revisionId).ToListAsync(ct);
         var contributionEvidence = acceptedCheckIns.GroupBy(x => x.ActorId, StringComparer.OrdinalIgnoreCase)
             .Select(group => new { ContributorId = group.Key, EvidenceHash = group.OrderByDescending(x => x.WorkingVersion).First().ResultSha256 }).ToList();
@@ -228,19 +236,30 @@ public static class ManagedDocumentEndpoints
             return Results.BadRequest(new { error = "A contributor to this exact submitted snapshot cannot serve as an independent reviewer." });
         try
         {
-            var attachment = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == data.Revision.CurrentWorkingAttachmentId, ct); var now = DateTimeOffset.UtcNow;
+            var attachment = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == data.Revision.CurrentWorkingAttachmentId, ct);
             var relationshipEvidence = ManagedDocumentRelationshipPolicy.Manifest(await db.ManagedDocumentLinks.AsNoTracking().Where(x => x.RevisionId == revisionId).ToListAsync(ct));
+            if (!string.Equals(attachment.Sha256, request.ExpectedWorkingSha256, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(relationshipEvidence.Hash, request.ExpectedRelationshipManifestHash, StringComparison.OrdinalIgnoreCase))
+                return ReviewConflict("submission_evidence_changed", "The working file or relationship manifest changed after this page loaded. Refresh before submitting.", data.Revision);
             var snapshotHash = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"managed-document-review-v2:{attachment.Sha256}:{data.Revision.FormalSummaryHash}:{data.Revision.FormalSummaryVersion}:{relationshipEvidence.Hash}"));
-            var cycle = data.Revision.SubmitForReview(actor.UserName, snapshotHash, [new(request.TechnicalReviewerId, accounts.Single(x => x.UserName == request.TechnicalReviewerId).DisplayName, "Technical review"), new(request.FinalApproverId, accounts.Single(x => x.UserName == request.FinalApproverId).DisplayName, "SQA / configuration release authorization")], now, relationshipEvidence.Json, relationshipEvidence.Hash);
+            ManagedDocumentReviewer Reviewer(UserAccount account, string stage, ManagedDocumentAuthorityEvidence evidence) => new(account.UserName, account.DisplayName, stage,
+                evidence.RequiredAuthority, evidence.GrantedAuthority.ToString(), evidence.Source, evidence.SourceId, ManagedDocumentReviewAuthority.PolicyId,
+                ManagedDocumentReviewAuthority.PolicyName, ManagedDocumentReviewAuthority.PolicyVersion, ManagedDocumentReviewAuthority.FrozenPolicy);
+            var cycle = data.Revision.SubmitForReview(actor.UserName, snapshotHash, [Reviewer(technicalAccount, "Technical review", technicalAuthority), Reviewer(finalAccount, "SQA / configuration release authorization", finalAuthority)], now, relationshipEvidence.Json, relationshipEvidence.Hash);
             db.ManagedDocumentReviewSteps.AddRange(data.Revision.ReviewSteps.Where(x => x.Cycle == cycle));
             foreach (var contribution in contributionEvidence)
                 db.ManagedDocumentReviewContributors.Add(new(revisionId, cycle, contribution.ContributorId, contribution.EvidenceHash, now));
             if (!contributionEvidence.Any(x => string.Equals(x.ContributorId, data.Revision.InitiatedBy, StringComparison.OrdinalIgnoreCase)))
                 db.ManagedDocumentReviewContributors.Add(new(revisionId, cycle, data.Revision.InitiatedBy, snapshotHash, now));
             db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentSubmitted", actor.UserName, $"Submitted {data.Document.DocumentNumber}.{data.Revision.Revision:D2} for independent review.", now)); db.UserNotifications.Add(new(data.Document.ProjectId, request.TechnicalReviewerId, "DocumentReviewActivated", $"Review {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Technical document review is ready.", $"managed-document:{data.Document.Id}", data.Document.Id, now));
-            await db.SaveChangesAsync(ct); return Results.Ok(new { state = data.Revision.State.ToString(), data.Revision.Version });
+            var resultJson = JsonSerializer.Serialize(new { state = data.Revision.State.ToString(), data.Revision.Version, cycle, snapshotHash });
+            db.ManagedDocumentOperations.Add(new(revisionId, "Submit", request.OperationKey, payloadHash, resultJson, now));
+            await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return await OperationResultAsync(db, revisionId, "Submit", request.OperationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The document changed while it was being submitted. Refresh before trying again.", code = "stale_revision" }); }
+        catch (DbUpdateException ex) when (IsManagedDocumentOperationKeyConflict(ex))
+        { db.ChangeTracker.Clear(); return await OperationResultAsync(db, revisionId, "Submit", request.OperationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The submission operation key was used concurrently.", code = "operation_key_conflict" }); }
     }
 
     private static async Task<IResult> ReviseFormalSummaryAsync(Guid revisionId, ReviseManagedDocumentFormalSummaryRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
@@ -303,26 +322,64 @@ public static class ManagedDocumentEndpoints
 
     private static async Task<IResult> ApproveAsync(Guid revisionId, DocumentReviewDecisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
+        var inputError = ValidateReviewDecision(request); if (inputError is not null) return inputError;
+        var payloadHash = OperationPayloadHash($"Approve:{http.UserAccount().UserName}", ReviewDecisionPayload(request));
         var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid(); var actor = http.UserAccount();
+        if (!await db.UserAccounts.AsNoTracking().AnyAsync(x => x.Id == actor.Id && x.State == AccountState.Active, ct)) return Results.Forbid();
         if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+        var priorOperation = await OperationResultAsync(db, revisionId, "Approve", request.OperationKey, payloadHash, ct); if (priorOperation is not null) return priorOperation;
         try
         {
-            var now = DateTimeOffset.UtcNow; var final = data.Revision.Approve(actor.UserName, request.Rationale, now); var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct); var contentHash = final ? data.Revision.ReleaseManifestHash : data.Revision.SnapshotHash;
-            db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ManagedDocument", data.Document.Id, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", final ? "Release" : "Approve", request.Meaning, contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now)); db.ManagedDocumentEvents.Add(new(data.Document.Id, final ? "DocumentReleased" : "DocumentReviewApproved", actor.UserName, final ? $"Released {data.Document.DocumentNumber}.{data.Revision.Revision:D2} as the exact approved DOCX/PDF pair." : $"Approved the active review stage for {data.Document.DocumentNumber}.{data.Revision.Revision:D2}.", now));
+            var step = data.Revision.ReviewSteps.SingleOrDefault(x => x.Id == request.ExpectedStepId);
+            if (step is null) return ReviewConflict("stale_review_intent", "The review step changed after this page loaded. Refresh before acting.", data.Revision);
+            var now = DateTimeOffset.UtcNow;
+            var final = data.Revision.Approve(actor.UserName, request.ExpectedStepId, request.ExpectedCycle, request.ExpectedVersion,
+                request.ExpectedStepVersion, request.ExpectedSnapshotHash, request.ExpectedCandidateDocxAttachmentId,
+                request.ExpectedCandidatePdfAttachmentId, request.ExpectedCandidateManifestHash, request.Rationale, now);
+            var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct); var contentHash = final ? data.Revision.ReleaseManifestHash : data.Revision.SnapshotHash;
+            db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ManagedDocument", data.Document.Id, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", final ? "Release" : "Approve", request.Meaning.Trim(), contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, step.GrantedAuthority, step.Id, step.Cycle, step.Position, request.Rationale, step.AuthoritySource, step.WorkflowId, step.WorkflowVersion, step.AuthoritySourceId)); db.ManagedDocumentEvents.Add(new(data.Document.Id, final ? "DocumentReleased" : "DocumentReviewApproved", actor.UserName, final ? $"Released {data.Document.DocumentNumber}.{data.Revision.Revision:D2} as the exact approved DOCX/PDF pair under {step.GrantedAuthority} authority ({step.AuthoritySource})." : $"Approved {step.StageName} for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} under {step.GrantedAuthority} authority ({step.AuthoritySource}).", now));
             if (final)
             {
                 var older = await db.ManagedDocumentRevisions.Where(x => x.DocumentId == data.Document.Id && x.Id != data.Revision.Id && x.State == ManagedDocumentState.Released).ToListAsync(ct); foreach (var prior in older.Where(x => x.Revision < data.Revision.Revision)) prior.Supersede(now);
             }
             else { var next = data.Revision.ReviewSteps.Single(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active); db.UserNotifications.Add(new(data.Document.ProjectId, next.ApproverId, "DocumentReviewActivated", $"Review {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Final document release review is ready.", $"managed-document:{data.Document.Id}", data.Document.Id, now)); }
-            await db.SaveChangesAsync(ct); return Results.Ok(new { final, state = data.Revision.State.ToString(), data.Revision.Version });
+            var resultJson = JsonSerializer.Serialize(new { final, state = data.Revision.State.ToString(), data.Revision.Version, reviewStepId = step.Id, cycle = step.Cycle, authority = step.GrantedAuthority, authoritySource = step.AuthoritySource, contentHash });
+            db.ManagedDocumentOperations.Add(new(revisionId, "Approve", request.OperationKey, payloadHash, resultJson, now));
+            await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");
         }
+        catch (DomainException ex) when (IsStaleReview(ex)) { return ReviewConflict("stale_review_intent", ex.Message, data.Revision); }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return await OperationResultAsync(db, revisionId, "Approve", request.OperationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The review advanced while this decision was being recorded. Refresh before acting.", code = "stale_review_intent" }); }
+        catch (DbUpdateException ex) when (IsManagedDocumentOperationKeyConflict(ex))
+        { db.ChangeTracker.Clear(); return await OperationResultAsync(db, revisionId, "Approve", request.OperationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The decision operation key was used concurrently.", code = "operation_key_conflict" }); }
     }
 
     private static async Task<IResult> ReturnAsync(Guid revisionId, DocumentReviewDecisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
-        var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid(); var actor = http.UserAccount(); if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
-        try { var now = DateTimeOffset.UtcNow; data.Revision.Return(actor.UserName, request.Rationale, now); var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ManagedDocument", data.Document.Id, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Return", request.Meaning, data.Revision.SnapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now)); db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentReturned", actor.UserName, $"Returned {data.Document.DocumentNumber}.{data.Revision.Revision:D2}: {request.Rationale}", now)); db.UserNotifications.Add(new(data.Document.ProjectId, data.Revision.ResponsibleOwnerId, "DocumentReturned", $"Returned {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", request.Rationale, $"managed-document:{data.Document.Id}", data.Document.Id, now)); await db.SaveChangesAsync(ct); return Results.Ok(new { state = data.Revision.State.ToString(), data.Revision.Version }); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        var inputError = ValidateReviewDecision(request); if (inputError is not null) return inputError;
+        var payloadHash = OperationPayloadHash($"Return:{http.UserAccount().UserName}", ReviewDecisionPayload(request));
+        var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid(); var actor = http.UserAccount();
+        if (!await db.UserAccounts.AsNoTracking().AnyAsync(x => x.Id == actor.Id && x.State == AccountState.Active, ct)) return Results.Forbid();
+        if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+        var priorOperation = await OperationResultAsync(db, revisionId, "Return", request.OperationKey, payloadHash, ct); if (priorOperation is not null) return priorOperation;
+        try
+        {
+            var step = data.Revision.ReviewSteps.SingleOrDefault(x => x.Id == request.ExpectedStepId);
+            if (step is null) return ReviewConflict("stale_review_intent", "The review step changed after this page loaded. Refresh before acting.", data.Revision);
+            var contentHash = data.Revision.SnapshotHash; var now = DateTimeOffset.UtcNow;
+            data.Revision.Return(actor.UserName, request.ExpectedStepId, request.ExpectedCycle, request.ExpectedVersion, request.ExpectedStepVersion, request.ExpectedSnapshotHash, request.Rationale, now);
+            var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
+            db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ManagedDocument", data.Document.Id, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Return", request.Meaning.Trim(), contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, step.GrantedAuthority, step.Id, step.Cycle, step.Position, request.Rationale, step.AuthoritySource, step.WorkflowId, step.WorkflowVersion, step.AuthoritySourceId));
+            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentReturned", actor.UserName, $"Returned {data.Document.DocumentNumber}.{data.Revision.Revision:D2} from {step.StageName} under {step.GrantedAuthority} authority ({step.AuthoritySource}): {request.Rationale.Trim()}", now)); db.UserNotifications.Add(new(data.Document.ProjectId, data.Revision.ResponsibleOwnerId, "DocumentReturned", $"Returned {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", request.Rationale.Trim(), $"managed-document:{data.Document.Id}", data.Document.Id, now));
+            var resultJson = JsonSerializer.Serialize(new { state = data.Revision.State.ToString(), data.Revision.Version, reviewStepId = step.Id, cycle = step.Cycle, authority = step.GrantedAuthority, authoritySource = step.AuthoritySource, contentHash });
+            db.ManagedDocumentOperations.Add(new(revisionId, "Return", request.OperationKey, payloadHash, resultJson, now));
+            await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");
+        }
+        catch (DomainException ex) when (IsStaleReview(ex)) { return ReviewConflict("stale_review_intent", ex.Message, data.Revision); }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return await OperationResultAsync(db, revisionId, "Return", request.OperationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The review advanced while this decision was being recorded. Refresh before acting.", code = "stale_review_intent" }); }
+        catch (DbUpdateException ex) when (IsManagedDocumentOperationKeyConflict(ex))
+        { db.ChangeTracker.Clear(); return await OperationResultAsync(db, revisionId, "Return", request.OperationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The decision operation key was used concurrently.", code = "operation_key_conflict" }); }
     }
 
     private static async Task<IResult> ForceUnlockAsync(Guid revisionId, ForceUnlockManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
@@ -419,39 +476,77 @@ public static class ManagedDocumentEndpoints
     { var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error; var revision = await db.ManagedDocumentRevisions.AsNoTracking().SingleAsync(x => x.Id == auth.Grant!.RevisionId, ct); if (revision.CurrentWorkingAttachmentId is null) return Results.NotFound(); var attachment = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == revision.CurrentWorkingAttachmentId, ct); return Results.File(store.OpenRead(attachment.StorageKey), attachment.ContentType, attachment.OriginalFileName, enableRangeProcessing: true); }
 
     private static async Task<IResult> ConnectorHeartbeatAsync(Guid grantId, ConnectorVersionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
-    { var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error; try { var now = DateTimeOffset.UtcNow; auth.Session!.Heartbeat(request.ExpectedVersion, now, 120); auth.Grant!.Extend(now); await db.SaveChangesAsync(ct); return Results.Ok(new { auth.Session.Version, auth.Session.ExpiresAt }); } catch (DomainException ex) { return Results.Conflict(new { error = ex.Message }); } }
+    { var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error; try { var now = DateTimeOffset.UtcNow; auth.Session!.Heartbeat(request.ExpectedVersion, now, 120); auth.Grant!.Extend(now); await db.SaveChangesAsync(ct); return Results.Ok(new { auth.Session.Version, auth.Session.ExpiresAt }); } catch (DomainException ex) { return Results.Conflict(new { error = ex.Message, code = "stale_connector_session" }); } catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "The connector session was finalized while its lease was being renewed.", code = "stale_connector_session" }); } }
 
     private static async Task<IResult> ConnectorCheckInAsync(Guid grantId, HttpContext http, AeroLinkDbContext db, ManagedDocumentFileService files, CancellationToken ct)
     {
-        var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error;
-        if (auth.Grant!.Mode != "edit") return Results.BadRequest(new { error = "This connector session is for release preparation, not draft check-in." });
+        var grant = await ConnectorGrantByTokenAsync(grantId, http, db, ct); if (grant is null) return Results.Unauthorized();
+        if (grant.Mode != "edit") return Results.BadRequest(new { error = "This connector session is for release preparation, not draft check-in." });
         var form = await http.Request.ReadFormAsync(ct); var upload = form.Files.GetFile("file"); var comment = form["comment"].ToString().Trim();
         if (upload is null) return Results.BadRequest(new { error = "Choose the edited Word document to check in." });
         if (!long.TryParse(form["expectedVersion"], out var expectedVersion)) return Results.BadRequest(new { error = "The connector session version is required." });
         if (comment.Length == 0) return Results.BadRequest(new { error = "A check-in comment is required." });
         if (comment.Length > 4000) return Results.BadRequest(new { error = "A check-in comment cannot exceed 4000 characters." });
+        var payloadHash = ""; var operationKey = $"connector-check-in:{grant.Id}";
         try
         {
-            var data = await RevisionDataAsync(db, auth.Grant.RevisionId, ct); if (data is null) return Results.NotFound();
             await using var source = upload.OpenReadStream(); var content = await files.ReadDocxAsync(source, upload.FileName, true, ct);
+            payloadHash = OperationPayloadHash("ConnectorCheckIn", new { expectedVersion, comment, sha256 = ManagedDocumentFileService.Sha256(content) });
+            var priorOperation = await OperationResultAsync(db, grant.RevisionId, "ConnectorCheckIn", operationKey, payloadHash, ct); if (priorOperation is not null) return priorOperation;
+            if (grant.RevokedAt is not null) return Results.Conflict(new { error = "That connector grant completed with different check-in intent.", code = "operation_key_reused" });
+            var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error;
+            var data = await RevisionDataAsync(db, grant.RevisionId, ct); if (data is null) return Results.NotFound();
             var current = data.Revision.CurrentWorkingAttachmentId is null ? null : await db.ControlledAttachments.SingleOrDefaultAsync(x => x.Id == data.Revision.CurrentWorkingAttachmentId, ct);
             if (current is null || !string.Equals(current.Sha256, auth.Session!.BaseSnapshotHash, StringComparison.OrdinalIgnoreCase)) return Results.Conflict(new { error = "The checked-in source changed after this checkout. No file was overwritten.", code = "document_snapshot_conflict" });
             var version = await db.ControlledAttachments.CountAsync(x => x.LogicalId == data.Revision.Id, ct) + 1; var now = DateTimeOffset.UtcNow;
             var returnResolution = data.Revision.State == ManagedDocumentState.Returned ? comment : null;
-            var next = await files.StoreAsync(data.Document.ProjectId, data.Document.Id, data.Revision.Id, data.Revision.Id, version, "Working Word document", comment, upload.FileName, ManagedDocumentFileService.DocxContentType, content, current.Id, auth.Grant.UserName, now, ct);
+            var next = await files.StoreAsync(data.Document.ProjectId, data.Document.Id, data.Revision.Id, data.Revision.Id, version, "Working Word document", comment, upload.FileName, ManagedDocumentFileService.DocxContentType, content, current.Id, grant.UserName, now, ct);
             current.Supersede(); db.ControlledAttachments.Add(next); data.Revision.RecordCheckIn(next.Id, now);
-            db.ManagedDocumentCheckIns.Add(new(data.Revision.Id, next.Id, version, auth.Grant.UserName, comment, current.Id, current.Sha256, next.Sha256, current.Id, auth.Session.Id, $"connector-check-in:{auth.Grant.Id}", now, returnResolution));
-            auth.Session.Close(EditSessionState.Committed, expectedVersion, now, auth.Grant.UserName, comment); auth.Grant.Revoke(now);
-            db.ManagedDocumentEvents.Add(new(data.Document.Id, returnResolution is null ? "DocumentCheckedIn" : "DocumentReturnResolved", auth.Grant.UserName, returnResolution is null ? $"Checked in {data.Document.DocumentNumber}.{data.Revision.Revision:D2} working version {version}: {comment}" : $"Resolved the returned review for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} in working version {version}: {comment}", now));
-            await db.SaveChangesAsync(ct); return Results.Ok(new { attachmentId = next.Id, next.Sha256, workingVersion = version, documentVersion = data.Revision.Version });
+            db.ManagedDocumentCheckIns.Add(new(data.Revision.Id, next.Id, version, grant.UserName, comment, current.Id, current.Sha256, next.Sha256, current.Id, auth.Session.Id, operationKey, now, returnResolution));
+            auth.Session.Close(EditSessionState.Committed, expectedVersion, now, grant.UserName, comment); grant.Revoke(now);
+            db.ManagedDocumentEvents.Add(new(data.Document.Id, returnResolution is null ? "DocumentCheckedIn" : "DocumentReturnResolved", grant.UserName, returnResolution is null ? $"Checked in {data.Document.DocumentNumber}.{data.Revision.Revision:D2} working version {version}: {comment}" : $"Resolved the returned review for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} in working version {version}: {comment}", now));
+            var resultJson = JsonSerializer.Serialize(new { attachmentId = next.Id, next.Sha256, workingVersion = version, documentVersion = data.Revision.Version });
+            db.ManagedDocumentOperations.Add(new(data.Revision.Id, "ConnectorCheckIn", operationKey, payloadHash, resultJson, now));
+            await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return await OperationResultAsync(db, grant.RevisionId, "ConnectorCheckIn", operationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The connector session was finalized concurrently.", code = "stale_connector_session" }); }
+        catch (DbUpdateException ex) when (IsManagedDocumentOperationKeyConflict(ex))
+        { db.ChangeTracker.Clear(); return await OperationResultAsync(db, grant.RevisionId, "ConnectorCheckIn", operationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The connector operation completed concurrently.", code = "operation_key_conflict" }); }
     }
 
     private static async Task<IResult> ConnectorReleaseCandidateAsync(Guid grantId, HttpContext http, AeroLinkDbContext db, ManagedDocumentFileService files, CancellationToken ct)
     {
-        var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error; if (auth.Grant!.Mode != "release") return Results.BadRequest(new { error = "This connector session is for draft editing, not release preparation." }); var form = await http.Request.ReadFormAsync(ct); var docxUpload = form.Files.GetFile("docx"); var pdfUpload = form.Files.GetFile("pdf"); if (docxUpload is null || pdfUpload is null) return Results.BadRequest(new { error = "The exact clean DOCX and PDF release renditions are both required." }); if (!long.TryParse(form["expectedVersion"], out var expectedVersion)) return Results.BadRequest(new { error = "The connector session version is required." });
-        try { await using var docxStream = docxUpload.OpenReadStream(); var docx = await files.ReadDocxAsync(docxStream, docxUpload.FileName, false, ct); ManagedDocumentFileService.ValidateReleaseDocx(docx); await using var pdfStream = pdfUpload.OpenReadStream(); using var pdfBuffer = new MemoryStream(); await pdfStream.CopyToAsync(pdfBuffer, ct); var pdf = pdfBuffer.ToArray(); ManagedDocumentFileService.ValidatePdf(pdf); var data = await RevisionDataAsync(db, auth.Grant.RevisionId, ct, true); if (data is null) return Results.NotFound(); var now = DateTimeOffset.UtcNow; var summaryMetadata = $"Formal revision scope v{data.Revision.FormalSummaryVersion} ({data.Revision.FormalSummaryHash}): {data.Revision.FormalChangeSummary}"; var docxAttachment = await files.StoreAsync(data.Document.ProjectId, data.Document.Id, data.Revision.Id, Guid.NewGuid(), 1, "Release candidate DOCX", summaryMetadata, docxUpload.FileName, ManagedDocumentFileService.DocxContentType, docx, null, auth.Grant.UserName, now, ct); var pdfAttachment = await files.StoreAsync(data.Document.ProjectId, data.Document.Id, data.Revision.Id, Guid.NewGuid(), 1, "Release candidate PDF", summaryMetadata, pdfUpload.FileName, ManagedDocumentFileService.PdfContentType, pdf, null, auth.Grant.UserName, now, ct); var manifest = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"managed-document-release-v2:{docxAttachment.Sha256}:{pdfAttachment.Sha256}:{data.Revision.FormalSummaryHash}:{data.Revision.FormalSummaryVersion}:{data.Revision.SubmittedRelationshipManifestHash}")); db.ControlledAttachments.AddRange(docxAttachment, pdfAttachment); data.Revision.RecordReleaseCandidate(docxAttachment.Id, pdfAttachment.Id, manifest, auth.Grant.UserName, now); auth.Session!.Close(EditSessionState.Committed, expectedVersion, now, auth.Grant.UserName, "Prepared exact DOCX and PDF release candidate."); auth.Grant.Revoke(now); db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentReleaseCandidatePrepared", auth.Grant.UserName, $"Prepared the exact DOCX/PDF release candidate for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} with formal summary {data.Revision.FormalSummaryHash} v{data.Revision.FormalSummaryVersion} and relationship manifest {data.Revision.SubmittedRelationshipManifestHash}.", now)); await db.SaveChangesAsync(ct); return Results.Ok(new { manifestHash = manifest, docxSha256 = docxAttachment.Sha256, pdfSha256 = pdfAttachment.Sha256, formalSummaryHash = data.Revision.FormalSummaryHash, formalSummaryVersion = data.Revision.FormalSummaryVersion, relationshipManifestHash = data.Revision.SubmittedRelationshipManifestHash }); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        var grant = await ConnectorGrantByTokenAsync(grantId, http, db, ct); if (grant is null) return Results.Unauthorized();
+        if (grant.Mode != "release") return Results.BadRequest(new { error = "This connector session is for draft editing, not release preparation." });
+        var form = await http.Request.ReadFormAsync(ct); var docxUpload = form.Files.GetFile("docx"); var pdfUpload = form.Files.GetFile("pdf");
+        if (docxUpload is null || pdfUpload is null) return Results.BadRequest(new { error = "The exact clean DOCX and PDF release renditions are both required." });
+        if (!long.TryParse(form["expectedVersion"], out var expectedVersion)) return Results.BadRequest(new { error = "The connector session version is required." });
+        var payloadHash = ""; var operationKey = $"connector-release-candidate:{grant.Id}";
+        try
+        {
+            await using var docxStream = docxUpload.OpenReadStream(); var docx = await files.ReadDocxAsync(docxStream, docxUpload.FileName, false, ct); ManagedDocumentFileService.ValidateReleaseDocx(docx);
+            await using var pdfStream = pdfUpload.OpenReadStream(); using var pdfBuffer = new MemoryStream(); await pdfStream.CopyToAsync(pdfBuffer, ct); var pdf = pdfBuffer.ToArray(); ManagedDocumentFileService.ValidatePdf(pdf);
+            payloadHash = OperationPayloadHash("ConnectorReleaseCandidate", new { expectedVersion, docxSha256 = ManagedDocumentFileService.Sha256(docx), pdfSha256 = ManagedDocumentFileService.Sha256(pdf) });
+            var priorOperation = await OperationResultAsync(db, grant.RevisionId, "ConnectorReleaseCandidate", operationKey, payloadHash, ct); if (priorOperation is not null) return priorOperation;
+            if (grant.RevokedAt is not null) return Results.Conflict(new { error = "That connector grant completed with a different release-candidate set.", code = "operation_key_reused" });
+            var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error;
+            var data = await RevisionDataAsync(db, grant.RevisionId, ct, true); if (data is null) return Results.NotFound(); var now = DateTimeOffset.UtcNow;
+            var summaryMetadata = $"Formal revision scope v{data.Revision.FormalSummaryVersion} ({data.Revision.FormalSummaryHash}): {data.Revision.FormalChangeSummary}";
+            var docxAttachment = await files.StoreAsync(data.Document.ProjectId, data.Document.Id, data.Revision.Id, Guid.NewGuid(), 1, "Release candidate DOCX", summaryMetadata, docxUpload.FileName, ManagedDocumentFileService.DocxContentType, docx, null, grant.UserName, now, ct);
+            var pdfAttachment = await files.StoreAsync(data.Document.ProjectId, data.Document.Id, data.Revision.Id, Guid.NewGuid(), 1, "Release candidate PDF", summaryMetadata, pdfUpload.FileName, ManagedDocumentFileService.PdfContentType, pdf, null, grant.UserName, now, ct);
+            var manifest = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"managed-document-release-v2:{docxAttachment.Sha256}:{pdfAttachment.Sha256}:{data.Revision.FormalSummaryHash}:{data.Revision.FormalSummaryVersion}:{data.Revision.SubmittedRelationshipManifestHash}"));
+            db.ControlledAttachments.AddRange(docxAttachment, pdfAttachment); data.Revision.RecordReleaseCandidate(docxAttachment.Id, pdfAttachment.Id, manifest, grant.UserName, now);
+            auth.Session!.Close(EditSessionState.Committed, expectedVersion, now, grant.UserName, "Prepared exact DOCX and PDF release candidate."); grant.Revoke(now);
+            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentReleaseCandidatePrepared", grant.UserName, $"Prepared the exact DOCX/PDF release candidate for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} with formal summary {data.Revision.FormalSummaryHash} v{data.Revision.FormalSummaryVersion} and relationship manifest {data.Revision.SubmittedRelationshipManifestHash}.", now));
+            var resultJson = JsonSerializer.Serialize(new { manifestHash = manifest, docxSha256 = docxAttachment.Sha256, pdfSha256 = pdfAttachment.Sha256, formalSummaryHash = data.Revision.FormalSummaryHash, formalSummaryVersion = data.Revision.FormalSummaryVersion, relationshipManifestHash = data.Revision.SubmittedRelationshipManifestHash });
+            db.ManagedDocumentOperations.Add(new(data.Revision.Id, "ConnectorReleaseCandidate", operationKey, payloadHash, resultJson, now));
+            await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");
+        }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return await OperationResultAsync(db, grant.RevisionId, "ConnectorReleaseCandidate", operationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The connector session was finalized concurrently.", code = "stale_connector_session" }); }
+        catch (DbUpdateException ex) when (IsManagedDocumentOperationKeyConflict(ex))
+        { db.ChangeTracker.Clear(); return await OperationResultAsync(db, grant.RevisionId, "ConnectorReleaseCandidate", operationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The connector operation completed concurrently.", code = "operation_key_conflict" }); }
     }
 
     private static async Task<IResult> ConnectorDiscardAsync(Guid grantId, ConnectorDiscardRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
@@ -459,6 +554,13 @@ public static class ManagedDocumentEndpoints
 
     private static async Task<ConnectorAuth> ConnectorAuthAsync(Guid grantId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     { var bearer = http.Request.Headers.Authorization.ToString(); if (!bearer.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return new(null, null, Results.Unauthorized()); var grant = await db.DocumentConnectorGrants.SingleOrDefaultAsync(x => x.Id == grantId, ct); if (grant is null || !grant.IsAccessValid(DateTimeOffset.UtcNow) || !FixedEquals(grant.AccessTokenHash!, Hash(bearer[7..].Trim()))) return new(null, null, Results.Unauthorized()); var session = await db.ArtifactEditSessions.SingleOrDefaultAsync(x => x.Id == grant.EditSessionId, ct); if (session is null || session.State != EditSessionState.Active || session.ExpiresAt <= DateTimeOffset.UtcNow) return new(grant, session, Results.Json(new { error = "The desktop checkout has expired." }, statusCode: 409)); return new(grant, session, null); }
+
+    private static async Task<DocumentConnectorGrant?> ConnectorGrantByTokenAsync(Guid grantId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var bearer = http.Request.Headers.Authorization.ToString(); if (!bearer.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null;
+        var grant = await db.DocumentConnectorGrants.SingleOrDefaultAsync(x => x.Id == grantId, ct);
+        return grant?.AccessTokenHash is not null && FixedEquals(grant.AccessTokenHash, Hash(bearer[7..].Trim())) ? grant : null;
+    }
 
     private static async Task<List<ArtifactEditSession>> ActiveSessionsAsync(AeroLinkDbContext db, IReadOnlyCollection<Guid> documentIds, CancellationToken ct)
     { var now = DateTimeOffset.UtcNow; var sessions = await db.ArtifactEditSessions.Where(x => x.ArtifactType == "ManagedDocument" && documentIds.Contains(x.ArtifactId) && x.State == EditSessionState.Active).ToListAsync(ct); foreach (var expired in sessions.Where(x => x.ExpiresAt <= now)) expired.Expire(now); if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(ct); return sessions.Where(x => x.State == EditSessionState.Active).ToList(); }
@@ -524,6 +626,45 @@ public static class ManagedDocumentEndpoints
         new(revisionId, target.ArtifactType, target.ArtifactId, target.DisplayNumber, target.Title, target.State, target.ProjectId,
             target.ReleaseId, target.ReleaseVersion, target.DeepLink, relationship, actor, now);
     private static object LinkResult(ManagedDocumentLink link) => new { link.Id, link.ArtifactType, link.ArtifactId, link.DisplayNumber, link.CanonicalTitle, link.TargetState, link.TargetProjectId, link.TargetReleaseId, link.TargetReleaseVersion, link.DeepLink, link.Relationship, link.PolicyVersion, link.Provenance, link.IsCurrent, link.CreatedBy, link.CreatedAt };
+    private static IResult? ValidateOperationKey(string? value) => string.IsNullOrWhiteSpace(value) || value.Trim().Length > 100
+        ? Results.BadRequest(new { error = "A one-use operation key of 100 characters or fewer is required.", code = "operation_key_required" }) : null;
+    private static IResult? ValidateReviewDecision(DocumentReviewDecisionRequest request)
+    {
+        var operation = ValidateOperationKey(request.OperationKey); if (operation is not null) return operation;
+        if (string.IsNullOrWhiteSpace(request.Meaning) || request.Meaning.Trim().Length > 1000)
+            return Results.BadRequest(new { error = "Provide an explicit signature meaning of 1000 characters or fewer.", code = "signature_meaning_required" });
+        if (string.IsNullOrWhiteSpace(request.Rationale) || request.Rationale.Trim().Length > 4000)
+            return Results.BadRequest(new { error = "Provide an engineering rationale of 4000 characters or fewer.", code = "signature_rationale_required" });
+        if (request.ExpectedStepId == Guid.Empty || request.ExpectedCycle < 1 || request.ExpectedStepVersion < 1 || request.ExpectedVersion < 1 || string.IsNullOrWhiteSpace(request.ExpectedSnapshotHash))
+            return Results.BadRequest(new { error = "The exact review version, cycle, step, and snapshot evidence are required.", code = "review_intent_required" });
+        return null;
+    }
+    private static bool IsStaleReview(DomainException ex) => ex.Message.Contains("after this page loaded", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.StartsWith("The release candidate changed", StringComparison.OrdinalIgnoreCase);
+    private static string OperationPayloadHash(string operationType, object request) =>
+        ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"managed-document-operation-v1:{operationType}:{JsonSerializer.Serialize(request)}"));
+    private static object ReviewDecisionPayload(DocumentReviewDecisionRequest request) => new
+    {
+        request.Meaning, request.Rationale, request.ExpectedVersion, request.ExpectedCycle, request.ExpectedStepId,
+        request.ExpectedStepVersion, request.ExpectedSnapshotHash, request.ExpectedCandidateDocxAttachmentId,
+        request.ExpectedCandidatePdfAttachmentId, request.ExpectedCandidateManifestHash, request.OperationKey
+    };
+    private static async Task<IResult?> OperationResultAsync(AeroLinkDbContext db, Guid revisionId, string operationType,
+        string operationKey, string payloadHash, CancellationToken ct)
+    {
+        var prior = await db.ManagedDocumentOperations.AsNoTracking().SingleOrDefaultAsync(x => x.RevisionId == revisionId && x.OperationType == operationType && x.OperationKey == operationKey, ct);
+        if (prior is null) return null;
+        return string.Equals(prior.PayloadHash, payloadHash, StringComparison.OrdinalIgnoreCase)
+            ? Results.Content(prior.ResultJson, "application/json")
+            : Results.Conflict(new { error = "That operation key was already used for different review intent.", code = "operation_key_reused" });
+    }
+    private static bool IsManagedDocumentOperationKeyConflict(DbUpdateException ex) =>
+        ex.ToString().Contains("managed_document_operations", StringComparison.OrdinalIgnoreCase)
+        && (ex.ToString().Contains("unique", StringComparison.OrdinalIgnoreCase) || ex.ToString().Contains("23505", StringComparison.OrdinalIgnoreCase));
+    private static IResult ReviewConflict(string code, string error, ManagedDocumentRevision revision) => Results.Conflict(new
+    {
+        error, code, current = new { revision.Version, cycle = revision.CurrentReviewCycle, revision.SnapshotHash, revision.SubmittedFormalSummaryHash, revision.SubmittedFormalSummaryVersion, revision.SubmittedRelationshipManifestHash, revision.ReleaseCandidateDocxAttachmentId, revision.ReleaseCandidatePdfAttachmentId, revision.ReleaseManifestHash }
+    });
     private static string Token() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     private static bool FixedEquals(string expected, string actual) => CryptographicOperations.FixedTimeEquals(Convert.FromHexString(expected), Convert.FromHexString(actual));
@@ -536,10 +677,15 @@ public static class ManagedDocumentEndpoints
 
 public sealed record CreateManagedDocumentRequest(Guid ProjectId, string Acronym, string DocumentType, string Title, string? OwnerId, string? FormalChangeSummary, string? ChangeSummary = null);
 public sealed record StartManagedDocumentRevisionRequest(string? FormalChangeSummary, string? ChangeSummary = null, string? OwnerId = null);
-public sealed record SubmitManagedDocumentRequest(string TechnicalReviewerId, string FinalApproverId);
+public sealed record SubmitManagedDocumentRequest(string TechnicalReviewerId, string FinalApproverId, long ExpectedVersion,
+    Guid ExpectedWorkingAttachmentId, string ExpectedWorkingSha256, long ExpectedFormalSummaryVersion,
+    string ExpectedFormalSummaryHash, string ExpectedRelationshipManifestHash, string OperationKey);
 public sealed record ReviseManagedDocumentFormalSummaryRequest(string FormalChangeSummary, string Reason, long ExpectedVersion);
 public sealed record ReassignManagedDocumentRequest(string AssigneeId, string Reason, long ExpectedVersion);
-public sealed record DocumentReviewDecisionRequest(string Password, string Meaning, string Rationale);
+public sealed record DocumentReviewDecisionRequest(string Password, string Meaning, string Rationale, long ExpectedVersion,
+    int ExpectedCycle, Guid ExpectedStepId, long ExpectedStepVersion, string ExpectedSnapshotHash,
+    Guid? ExpectedCandidateDocxAttachmentId, Guid? ExpectedCandidatePdfAttachmentId,
+    string? ExpectedCandidateManifestHash, string OperationKey);
 public sealed record ForceUnlockManagedDocumentRequest(string Reason);
 public sealed record ManagedDocumentLinkRequest(Guid RevisionId, string ArtifactType, Guid ArtifactId, string? DisplayNumber, string Relationship, long ExpectedVersion);
 public sealed record CorrectManagedDocumentLinkRequest(string ArtifactType, Guid ArtifactId, string Relationship, string Reason, long ExpectedVersion);
