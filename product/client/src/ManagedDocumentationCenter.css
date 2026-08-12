@@ -624,6 +624,40 @@
   font-size: 12px;
   font-weight: 700;
 }
+.mdInlineForm {
+  margin: 0 26px 18px;
+  padding: 18px;
+  border: 1px solid #b8d8d3;
+  border-radius: 10px;
+  background: #f4fbfa;
+}
+.mdInlineForm h3,
+.mdInlineForm p {
+  margin: 0 0 10px;
+}
+.mdInlineForm label {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.mdInlineForm textarea {
+  display: block;
+  width: 100%;
+  min-height: 70px;
+  box-sizing: border-box;
+  margin-top: 5px;
+  border: 1px solid #cbd6df;
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+}
+.mdInlineForm > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
 .mdModalCard input,
 .mdModalCard select,
 .mdModalCard textarea {

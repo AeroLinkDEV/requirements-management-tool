@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Notifications;
 using AeroLink.Domain.Programs;
@@ -323,8 +324,21 @@ public static class WorkspaceEndpoints
                     route = "testingCoverage",
                     discipline = x.Discipline.ToString()
                 }).ToList();
-            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(assignedTestWork).ToList();
-            return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now), drafts = authoredDrafts.Count }, tasks });
+            // Project documents are intentionally independent of releaseId. Their actionable
+            // description is the formal revision scope, never the most recent check-in note.
+            var managedOwnerWork = (await (from revision in db.ManagedDocumentRevisions.AsNoTracking()
+                                            join document in db.ManagedDocuments.AsNoTracking() on revision.DocumentId equals document.Id
+                                            where revision.OwnerId == actor.UserName
+                                                && (revision.State == ManagedDocumentState.Draft || revision.State == ManagedDocumentState.Returned)
+                                                && (projectId == null || document.ProjectId == projectId)
+                                            select new { id = document.Id, type = "Project document to complete", artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, title = revision.FormalChangeSummary, priority = revision.State == ManagedDocumentState.Returned ? "High" : "Normal", dueAt = revision.UpdatedAt.AddDays(10), ageDays = (int)(now - revision.UpdatedAt).TotalDays, route = "managedDocuments", discipline = "project" }).ToListAsync(ct)).OrderBy(x => x.dueAt).ToList();
+            var managedReviewWork = (await (from step in db.ManagedDocumentReviewSteps.AsNoTracking().Where(x => x.ApproverId == actor.UserName && x.State == ManagedDocumentReviewStepState.Active)
+                                             join revision in db.ManagedDocumentRevisions.AsNoTracking() on step.RevisionId equals revision.Id
+                                             join document in db.ManagedDocuments.AsNoTracking() on revision.DocumentId equals document.Id
+                                             where projectId == null || document.ProjectId == projectId
+                                             select new { id = document.Id, type = "Project document review", artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, title = revision.FormalChangeSummary, priority = "High", dueAt = revision.SubmittedAt!.Value.AddDays(5), ageDays = (int)(now - revision.SubmittedAt!.Value).TotalDays, route = "managedDocuments", discipline = "project" }).ToListAsync(ct)).OrderBy(x => x.dueAt).ToList();
+            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(assignedTestWork).Concat(managedOwnerWork).Concat(managedReviewWork).ToList();
+            return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count + managedReviewWork.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now) + managedOwnerWork.Count(x => x.dueAt < now) + managedReviewWork.Count(x => x.dueAt < now), drafts = authoredDrafts.Count + managedOwnerWork.Count }, tasks });
         });
 
         // Notifications and Jira emitted paths such as /systems/change-requests/{id}. The client router
@@ -424,6 +438,12 @@ public static class WorkspaceEndpoints
             var procedureEffectivity=releaseId is null?null:await TestProcedureEffectivity.ForReleaseAsync(db,projectId,releaseId.Value,ct);
             items.AddRange(await db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.TargetReleaseId==releaseId)&&(x.BaseNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"change-request",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),x.Type==ChangeRequestType.Software?"software":"system",x.UpdatedAt)).ToListAsync(ct));
             items.AddRange(await db.ProblemReports.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||db.ProblemReportLinks.Any(link=>link.ProblemReportId==x.Id&&link.ArtifactType=="Release"&&link.ArtifactId==releaseId))&&(x.ReportNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q)||x.RootCause.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"problem-report",x.ReportNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),"assurance",x.UpdatedAt)).ToListAsync(ct));
+            items.AddRange(await (from document in db.ManagedDocuments.AsNoTracking().Where(x=>x.ProjectId==projectId)
+                                  join revision in db.ManagedDocumentRevisions.AsNoTracking() on document.Id equals revision.DocumentId
+                                  where document.DocumentNumber.ToLower().Contains(identifierQ)
+                                      ||document.Title.ToLower().Contains(q)
+                                      ||revision.FormalChangeSummary.ToLower().Contains(q)
+                                  select new SearchResultDto(document.Id,"managed-document",document.DocumentNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,document.Title+": "+revision.FormalChangeSummary,revision.State.ToString(),"project",revision.UpdatedAt)).Take(take).ToListAsync(ct));
             var requirementRows=effectiveBaselineId is not null
                 ? await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==effectiveBaselineId) on artifact.Id equals member.ArtifactId join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id where artifact.BaseNumber.ToLower().Contains(identifierQ)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct)
                 : await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)&&(artifact.BaseNumber.ToLower().Contains(identifierQ)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q)) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct);

@@ -34,12 +34,19 @@ Working-file versions are retained inside a formal revision and do not create ne
 2. AeroLink creates a faintly watermarked **Draft** DOCX. The word Draft is a state label, not a separate acronym.
 3. The owner selects **Open in Word**. The desktop connector obtains a short-lived, one-use grant, downloads the
    exact current source, holds an exclusive renewable checkout, and opens Word.
-4. The owner checks the Word file back in with a required comment or discards the checkout. Every checked-in
-   working version and SHA-256 hash remains retrievable.
-5. The owner submits the exact current snapshot to an independent technical reviewer and a different final SQA
+4. The owner checks the Word file back in with a required working-version comment or discards the checkout.
+   Check-in never changes the formal revision scope or revision owner. Every accepted check-in retains its actor,
+   time, base attachment/hash, resulting attachment/hash, superseded version, connector session when known, and
+   operation identifier as immutable evidence.
+5. The formal revision scope is defined once when the revision starts. While Draft or Returned, an authorized
+   owner or project authority may correct it through the explicit audited action with an optimistic-concurrency
+   version and reason. It cannot be changed while in review or after release.
+6. The owner submits the exact current working attachment plus the exact formal-summary hash and version to an independent technical reviewer and a different final SQA
    or configuration approver. The owner cannot fill either role.
-6. A return preserves the completed review evidence and creates a new review cycle after correction.
-7. At the final step, the connector removes the Draft watermark, relabels visible Draft state markers as
+7. A return preserves the completed review evidence and creates a new review cycle after correction.
+   The next accepted working version records its check-in comment and, separately, the return-resolution note;
+   the original reviewer rationale remains on the immutable review step.
+8. At the final step, the connector removes the Draft watermark, relabels visible Draft state markers as
    **Release Candidate**, and creates the exact DOCX/PDF pair. The API rejects any candidate that retains a
    Draft watermark or visible Draft state marker. The final electronic signature releases that immutable pair
    and records its combined manifest hash.
@@ -50,6 +57,10 @@ same way. AeroLink records the parent revision, released attachment, SHA-256, an
 Missing, corrupt, or ambiguous parent evidence fails closed. Build and release links are optional contextual
 traceability only: changing, releasing, or switching a software build never selects, duplicates, freezes, or
 hides these records. Generated requirements and procedure publications remain build-scoped.
+
+Project search and My Work use the formal revision scope when describing a managed-document revision. A
+selected software build may narrow genuinely build-owned records, but it never hides or relabels Project-wide
+document work.
 
 ## Lifecycle links
 
@@ -83,3 +94,10 @@ than one released head or more than one active successor, the API reports reconc
 silently choose a branch. A legacy successor retains its formal parent revision identity, but its source
 attachment/hash remain unset and its transformation profile is `legacy-working-source-unverified-v1`: the former
 implementation copied a working attachment, so migration must not falsely claim the released DOCX was its source.
+
+The formal-summary migration preserves the latest value of the legacy `ChangeSummary` column and records its
+SHA-256, but marks it `LegacyAmbiguousLatestValue`: the former check-in path overwrote that field, so migration
+cannot truthfully claim that the retained text was the original formal revision scope. Every historical working
+attachment is recovered as check-in evidence using its existing attachment ID, version, actor, timestamp, base
+link, and hashes. Legacy connector session and operation-token values that were never stored remain explicitly
+unknown rather than being fabricated.

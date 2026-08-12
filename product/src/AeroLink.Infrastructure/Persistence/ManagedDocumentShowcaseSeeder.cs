@@ -71,7 +71,10 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
         var draft = Render(document, revision, project, build, program, "Draft", "DRAFT", []);
         var draftAttachment = await files.StoreAsync(document.ProjectId, document.Id, revision.Id, revision.Id, 1,
             "Working Word document", "Initial checked-in working copy.", draft.FileName, draft.ContentType, draft.Content, null, revision.OwnerId, now, ct);
-        db.ControlledAttachments.Add(draftAttachment); revision.RecordCheckIn(draftAttachment.Id, revision.OwnerId, revision.ChangeSummary, now);
+        db.ControlledAttachments.Add(draftAttachment); revision.RecordCheckIn(draftAttachment.Id, now);
+        db.ManagedDocumentCheckIns.Add(new(revision.Id, draftAttachment.Id, 1, revision.OwnerId,
+            "Initial checked-in working copy.", null, null, draftAttachment.Sha256, null, null,
+            $"showcase-initial:{revision.Id:N}", now));
         var cycle = revision.SubmitForReview(revision.OwnerId, draftAttachment.Sha256,
         [
             new("software.lead", people["software.lead"].DisplayName, "Technical review"),
@@ -92,7 +95,7 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
         var releasePdf = await files.StoreAsync(document.ProjectId, document.Id, revision.Id, Guid.NewGuid(), 1,
             "Approved PDF", "Approved read-only rendition.", pdf.FileName, pdf.ContentType, pdf.Content, null, finalApproverId, now.AddHours(3), ct);
         db.ControlledAttachments.AddRange(releaseDocx, releasePdf);
-        var manifest = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes(releaseDocx.Sha256 + ":" + releasePdf.Sha256));
+        var manifest = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"{releaseDocx.Sha256}:{releasePdf.Sha256}:{revision.FormalSummaryHash}:{revision.FormalSummaryVersion}"));
         revision.RecordReleaseCandidate(releaseDocx.Id, releasePdf.Id, manifest, finalApproverId, now.AddHours(3));
         revision.Approve(finalApproverId, "SQA or assurance confirms the exact DOCX/PDF candidate and authorizes controlled release.", now.AddHours(3));
         db.ElectronicSignatures.AddRange(
@@ -108,7 +111,10 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
         var draft = Render(document, revision, project, build, program, "Draft", "DRAFT", []);
         var attachment = await files.StoreAsync(document.ProjectId, document.Id, revision.Id, revision.Id, 1,
             "Working Word document", "Most recent checked-in draft.", draft.FileName, draft.ContentType, draft.Content, null, revision.OwnerId, now, ct);
-        db.ControlledAttachments.Add(attachment); revision.RecordCheckIn(attachment.Id, revision.OwnerId, revision.ChangeSummary, now);
+        db.ControlledAttachments.Add(attachment); revision.RecordCheckIn(attachment.Id, now);
+        db.ManagedDocumentCheckIns.Add(new(revision.Id, attachment.Id, 1, revision.OwnerId,
+            "Most recent checked-in draft.", revision.ParentReleasedDocxAttachmentId, revision.ParentReleasedDocxSha256,
+            attachment.Sha256, null, null, $"showcase-successor:{revision.Id:N}", now));
         if (state is "InReview" or "Returned")
         {
             var cycle = revision.SubmitForReview(revision.OwnerId, attachment.Sha256,
@@ -131,11 +137,11 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
     private static ProfessionalPublication Publication(ManagedDocument document, ManagedDocumentRevision revision, string project,
         string build, string program, string status, string? watermark, IReadOnlyList<PublicationApproval> approvals)
     {
-        var fingerprint = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"{document.DocumentNumber}|{revision.Revision}|{revision.ChangeSummary}|{status}"));
+        var fingerprint = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"{document.DocumentNumber}|{revision.Revision}|{revision.FormalChangeSummary}|{status}"));
         return new ProfessionalPublication("AeroLink FMS", program, project, document.DocumentType, document.Title,
             "Controlled Project lifecycle document", document.DocumentNumber, revision.Revision.ToString("D2"), status, "Project-wide",
             "All software builds", revision.OwnerId, revision.UpdatedAt, fingerprint,
-            [("Document owner", revision.OwnerId), ("Applicability", "Project-wide; build links are contextual only"), ("Change summary", revision.ChangeSummary), ("Storage authority", "AeroLink Documentation Center")],
+            [("Document owner", revision.OwnerId), ("Applicability", "Project-wide; build links are contextual only"), ("Formal revision scope", revision.FormalChangeSummary), ("Storage authority", "AeroLink Documentation Center")],
             approvals, [(revision.Revision.ToString("D2"), status, revision.UpdatedAt.UtcDateTime.ToString("yyyy-MM-dd"), revision.OwnerId)],
             Sections(document, revision)) { Watermark = watermark };
     }
@@ -154,7 +160,7 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
          new("3.3", "Records", "Retained evidence", "AeroLink retains working check-ins, checkout ownership, review decisions, electronic signatures, SHA-256 hashes, approved renditions, Project applicability and linked lifecycle artifacts.", [("Audit", "Append-only event history")])]),
         new("4. Compliance and completion", "Completion is evaluated against objective evidence rather than document status alone.",
         [new("4.1", "Completion criteria", "Ready for release", "All planned content is complete; referenced items are resolved or dispositioned; reviewers are independent; the exact DOCX and PDF candidate hashes are recorded; and SQA release authorization is electronically signed.", [("Release condition", "All review stages approved")]),
-         new("4.2", "Change control", "Subsequent changes", "A change starts the single active successor revision for this Project document. Prior released revisions remain immutable and available from History.", [("Current change", revision.ChangeSummary)])])
+         new("4.2", "Change control", "Subsequent changes", "A change starts the single active successor revision for this Project document. Prior released revisions remain immutable and available from History.", [("Formal revision scope", revision.FormalChangeSummary)])])
     ];
 
     private static ElectronicSignature Signature(UserAccount user, Guid programId, ManagedDocument document, ManagedDocumentRevision revision,
