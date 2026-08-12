@@ -1907,15 +1907,38 @@ Future entries use:
     the package cannot currently be raised at all, because a test change request still requires an originating
     change request. Whether a Problem Report alone may originate one is recorded as an open question below.
 
-### Open question - May a Problem Report alone originate a test change request?
+### DEC-113 - A Problem Report May Originate a Test Change Request
 
-The owner's position is that it should: a PR is a legitimate driver of test work on its own. The domain
-currently refuses it — `TestChangeReview` requires a non-empty originating `ChangeRequestId`, its
-`SourceChangeRequestNumber` is required, `DisplayNumber` falls back to it, the covered-sources record always
-emits it as the originating entry, and the versioned case snapshot writes it. Allowing it is therefore a
-change to a controlled evidence contract rather than a validation tweak, and the open design question is what
-such a package is anchored to instead — most likely the Problem Report in the same originating slot, keeping
-"exactly one originating driver" true.
+- **Date:** 2026-08-12
+- **Status:** Accepted
+- **Decision:** A test change request is raised from **exactly one** originating driver, which is either an
+  approved change request at the package's own level ([DEC-112](#dec-112---a-test-change-request-answers-only-for-its-own-level))
+  or a **Problem Report**. Raised from nothing at all is refused. Approved change requests may still be folded
+  in afterwards.
+- **Rationale:** Test work is not only ever caused by a requirement change — an anomaly found in the field is
+  a legitimate reason to write, correct or withdraw a procedure. With DEC-112 in force, a build carrying no
+  approved change at the package's own level made that package impossible to raise at all.
+- **Consequences:**
+  - `ChangeRequestId` becomes nullable and `OriginatingProblemReportId` joins it; exactly one is set. The
+    Problem Report takes the originating slot rather than sitting beside a fabricated change request, so the
+    package still has one thing it was raised from — which its number, its covered-sources record and its
+    case snapshot all depend on. `TestChangeReview.FromProblemReport` is a separate factory, so every existing
+    construction site is untouched.
+  - **The case snapshot is hashed, and that hash is what an electronic signature recorded.** The Problem
+    Report origin is therefore written to the snapshot **only when present**, and the originating entry is
+    omitted rather than restructured — a package raised from a change request serialises byte-identically to
+    before, so every hash already recorded still verifies.
+  - **`CaseContractVersion` was deliberately not bumped.** It gates rules through `CaseContractVersion >=
+    CurrentCaseContractVersion`, so raising the current version would push every existing package below the
+    threshold and silently stop enforcing case completeness and the procedure-decision requirement on all of
+    them. A contract version that gates rules cannot be used as a serialisation marker.
+  - Nine call sites assumed an originating change request always exists — the impact service, the showcase
+    seeder, the provenance projection, the baseline materialiser and three API queries among them. Each was
+    read and answered on its own terms rather than swept
+    ([LES-009](#les-009---a-rule-moved-is-not-the-same-rule-and-look-alike-call-sites-are-not-alike)).
+  - A materialised procedure records no change-request source for a Problem Report-originated package, rather
+    than inventing one. `ProcedureSourceSnapshot` is a record of change requests; the package itself carries
+    what it was raised from.
 
 ## Lessons Learned
 

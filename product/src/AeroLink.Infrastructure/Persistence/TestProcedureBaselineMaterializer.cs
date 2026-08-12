@@ -293,11 +293,15 @@ private static TestProcedureRevision CreateRevision(Guid procedureId, TestProced
 
 private static string SourceSnapshotJson(TestChangeReview tcr)
 {
-    var sources = new[]
-        {
-            new ProcedureSourceSnapshot(
-                tcr.ChangeRequestId, tcr.SourceChangeRequestNumber, true),
-        }
+    // Only a package raised from a change request contributes an originating source. One raised from a
+    // Problem Report records no change-request origin here rather than inventing one — this snapshot is a
+    // record of the change requests a materialized procedure answers for, and there is none.
+    var sources = (tcr.ChangeRequestId is { } originating
+            ? new[]
+            {
+                new ProcedureSourceSnapshot(originating, tcr.SourceChangeRequestNumber, true),
+            }
+            : [])
         .Concat(tcr.AdditionalSources.Select(x => new ProcedureSourceSnapshot(
             x.ChangeRequestId, x.ChangeRequestNumber, false)))
         .DistinctBy(x => x.ChangeRequestId)

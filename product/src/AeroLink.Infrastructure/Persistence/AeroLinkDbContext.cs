@@ -606,7 +606,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasMany(x => x.ProcedureChanges).WithOne().HasForeignKey(x => x.TestChangeReviewId)
                 .OnDelete(DeleteBehavior.Cascade);
             b.Navigation(x => x.ProcedureChanges).UsePropertyAccessMode(PropertyAccessMode.Field);
+            // Required as a string but empty when the package was raised from a Problem Report instead —
+            // the column keeps its shape, and which origin a package has is told by the two id columns.
             b.Property(x => x.SourceChangeRequestNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.SourceProblemReportNumber).HasMaxLength(40).IsRequired();
+            b.HasIndex(x => x.OriginatingProblemReportId);
             b.Property(x => x.BaseNumber).HasMaxLength(40).IsRequired();
             // The case the package argues, sized as a change request's own. Empty on packages raised before
             // the fields existed and on those raised automatically, which nobody has written up yet.

@@ -148,7 +148,7 @@ public static class VerificationImpactEndpoints
                 .OrderBy(x => x.State).ThenBy(x => x.Discipline).ThenBy(x => x.CreatedAt)
                 .ToList();
             var reviewIds = reviews.Select(x => x.Id).ToList();
-            var changeRequestIds = reviews.Select(x => x.ChangeRequestId)
+            var changeRequestIds = reviews.Where(x => x.ChangeRequestId != null).Select(x => x.ChangeRequestId!.Value)
                 .Concat(reviews.SelectMany(x => x.AdditionalSources).Select(x => x.ChangeRequestId)).Distinct().ToList();
             var changeRequests = await db.SystemChangeRequests.AsNoTracking().Where(x => changeRequestIds.Contains(x.Id))
                 .ToDictionaryAsync(x => x.Id, x => x.Title, ct);
@@ -184,7 +184,9 @@ public static class VerificationImpactEndpoints
                     procedureDecisionCount = review.ProcedureChanges.Count,
                     // Every change request this package answers for, the one it was raised from first. A reader
                     // scanning the list needs to see that two changes are being tested together without opening it.
-                    coveredChangeRequests = new[] { new { id = review.ChangeRequestId, number = review.SourceChangeRequestNumber, title = changeRequests.GetValueOrDefault(review.ChangeRequestId) ?? "Source change request", originating = true } }
+                    coveredChangeRequests = (review.ChangeRequestId is { } originatingChangeRequest
+                            ? new[] { new { id = originatingChangeRequest, number = review.SourceChangeRequestNumber, title = changeRequests.GetValueOrDefault(originatingChangeRequest) ?? "Source change request", originating = true } }
+                            : [])
                         .Concat(review.AdditionalSources.OrderBy(x => x.ChangeRequestNumber)
                             .Select(x => new { id = x.ChangeRequestId, number = x.ChangeRequestNumber, title = changeRequests.GetValueOrDefault(x.ChangeRequestId) ?? "Source change request", originating = false })),
                     review.AssignedEngineerId,
@@ -1070,8 +1072,18 @@ public static class VerificationImpactEndpoints
             if (release.IsReleased) return Results.Conflict(new { error = "A released build takes no new test change requests." });
             if (!await http.HasProjectRoleAsync(db, identity, release.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
                 return Results.Forbid();
-            if (request.ChangeRequestIds.Length == 0)
-                return Results.BadRequest(new { error = "Name the change requests this package answers for." });
+            // Test work is not only ever caused by a requirement change: an anomaly found in the field is a
+            // legitimate reason to write, correct or withdraw a procedure, and a build may carry no approved
+            // change at this package's own level to hang it on. What a package cannot be is raised from
+            // nothing — it must say what concluded the work was required.
+            // Absent and empty mean the same thing here — the property is optional on the request.
+            var namedProblemReports = request.ProblemReportIds ?? [];
+            if (request.ChangeRequestIds.Length == 0 && namedProblemReports.Length == 0)
+                return Results.BadRequest(new
+                {
+                    error = "Name what this package answers for: an approved change request at its own level, or a Problem Report.",
+                    code = "test_change_request_needs_a_driver"
+                });
             if (string.IsNullOrWhiteSpace(request.Title))
                 return Results.BadRequest(new { error = "A manually raised test change request needs a title that says what it is for." });
 
@@ -1131,7 +1143,8 @@ public static class VerificationImpactEndpoints
             // review becomes this package, and the others are superseded rather than duplicated. History keeps
             // them; nothing is deleted.
             var pendingAutomatic = await db.TestChangeReviews
-                .Where(x => request.ChangeRequestIds.Contains(x.ChangeRequestId) && x.Discipline == request.Discipline
+                .Where(x => x.ChangeRequestId != null && request.ChangeRequestIds.Contains(x.ChangeRequestId.Value)
+                    && x.Discipline == request.Discipline
                     && x.State == TestChangeReviewState.Open && x.Outcome == TestChangeReviewOutcome.Pending)
                 .ToListAsync(ct);
 
@@ -1139,17 +1152,37 @@ public static class VerificationImpactEndpoints
             {
                 var now = DateTimeOffset.UtcNow;
                 var actor = http.UserAccount().UserName;
-                var first = changes[0];
-                // Raising one by hand is itself the conclusion that test work is required, so it is numbered
-                // immediately rather than waiting to be assessed by the person who just decided it. When the
-                // change already carries an unassessed automatic review, that review is the package — one
-                // row, one ChangeRequestId, one Revision, one answer.
-                var review = pendingAutomatic.SingleOrDefault(x => x.ChangeRequestId == first.Id);
-                if (review is null)
+                TestChangeReview review;
+                if (changes.Count == 0)
                 {
-                    review = new TestChangeReview(release.ProjectId, releaseId, first.Id, request.Discipline,
-                        first.DisplayNumber, now);
+                    // Raised from a Problem Report. The report takes the originating slot a change request
+                    // would have held, so the package still has exactly one thing it was raised from — which
+                    // is what its number, its covered-sources record and its case snapshot depend on.
+                    var originatingReport = await db.ProblemReports.AsNoTracking()
+                        .Where(x => x.Id == namedProblemReports[0])
+                        .Select(x => new { x.Id, x.ReportNumber, x.Revision }).SingleAsync(ct);
+                    review = TestChangeReview.FromProblemReport(release.ProjectId, releaseId, originatingReport.Id,
+                        request.Discipline, $"{originatingReport.ReportNumber}.{originatingReport.Revision:D2}", now);
                     db.TestChangeReviews.Add(review);
+                }
+                else
+                {
+                    var first = changes[0];
+                    // Raising one by hand is itself the conclusion that test work is required, so it is numbered
+                    // immediately rather than waiting to be assessed by the person who just decided it. When the
+                    // change already carries an unassessed automatic review, that review is the package — one
+                    // row, one ChangeRequestId, one Revision, one answer.
+                    var existing = pendingAutomatic.SingleOrDefault(x => x.ChangeRequestId == first.Id);
+                    if (existing is not null)
+                    {
+                        review = existing;
+                    }
+                    else
+                    {
+                        review = new TestChangeReview(release.ProjectId, releaseId, first.Id, request.Discipline,
+                            first.DisplayNumber, now);
+                        db.TestChangeReviews.Add(review);
+                    }
                 }
                 review.RecordTestChangeRequired(actor, now);
                 review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, request.Discipline, ct), now);
@@ -1261,10 +1294,11 @@ public static class VerificationImpactEndpoints
             var ids = changes.Select(x => x.Id).ToList();
 
             var concluded = await db.TestChangeReviews.AsNoTracking()
-                .Where(x => ids.Contains(x.ChangeRequestId) && x.Discipline == discipline
+                .Where(x => x.ChangeRequestId != null && ids.Contains(x.ChangeRequestId.Value)
+                    && x.Discipline == discipline
                     && x.State != TestChangeReviewState.Superseded
                     && (x.State != TestChangeReviewState.Open || x.Outcome != TestChangeReviewOutcome.Pending))
-                .GroupBy(x => x.ChangeRequestId)
+                .GroupBy(x => x.ChangeRequestId!.Value)
                 .ToDictionaryAsync(group => group.Key, group => group.First().DisplayNumber, ct);
             var claims = await db.TestChangeRequestClaims.AsNoTracking()
                 .Where(x => ids.Contains(x.ChangeRequestId))

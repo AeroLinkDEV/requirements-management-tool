@@ -46,7 +46,7 @@ public sealed class TestChangeRequestClaimTests
     {
         var package = Package();
         Assert.Empty(package.AdditionalSources);
-        Assert.Equal([package.ChangeRequestId], package.CoveredChangeRequestIds);
+        Assert.Equal([package.ChangeRequestId!.Value], package.CoveredChangeRequestIds);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class TestChangeRequestClaimTests
         var second = Guid.NewGuid();
         package.IncludeChangeRequest("test.engineer", second, "SRCR-00032", DateTimeOffset.UtcNow);
 
-        Assert.Equal([package.ChangeRequestId, second], package.CoveredChangeRequestIds);
+        Assert.Equal([package.ChangeRequestId!.Value, second], package.CoveredChangeRequestIds);
         var claim = package.AdditionalSources.Single();
         // Who folded it in and when: the decision to test two changes together is a judgement somebody made.
         Assert.Equal("test.engineer", claim.ClaimedBy);
@@ -68,7 +68,7 @@ public sealed class TestChangeRequestClaimTests
     {
         var package = Package();
         var error = Assert.Throws<DomainException>(() =>
-            package.IncludeChangeRequest("test.engineer", package.ChangeRequestId, "SRCR-00031", DateTimeOffset.UtcNow));
+            package.IncludeChangeRequest("test.engineer", package.ChangeRequestId!.Value, "SRCR-00031", DateTimeOffset.UtcNow));
         Assert.Contains("already covers it", error.Message);
     }
 
@@ -92,7 +92,7 @@ public sealed class TestChangeRequestClaimTests
 
         // Released for another package to claim: exclusivity would be a trap otherwise.
         Assert.Empty(package.AdditionalSources);
-        Assert.Equal([package.ChangeRequestId], package.CoveredChangeRequestIds);
+        Assert.Equal([package.ChangeRequestId!.Value], package.CoveredChangeRequestIds);
     }
 
     /// <summary>
