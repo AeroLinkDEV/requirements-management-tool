@@ -10,8 +10,9 @@
 .procedureFind{display:flex;flex-direction:column;gap:.35rem;max-width:420px;font-size:.8rem;font-weight:700}
 .procedureFind input{padding:.5rem .65rem;border:1px solid var(--line,#cbd7e6);border-radius:8px;font:inherit}
 
-.procedureExplorerSplit{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;align-items:start}
-@media(max-width:960px){.procedureExplorerSplit{grid-template-columns:1fr}}
+/* The split is defined once, below, where the document rail is accounted for. The two-column version this
+   file used to open with is dead: every rule it set is overridden there, and leaving both meant reading two
+   contradictory definitions of the same layout to work out which one the page actually uses. */
 
 .procedureList{display:flex;flex-direction:column;border:1px solid var(--line,#d9e2ec);border-radius:10px;
   background:var(--card,#fff);overflow:hidden}
@@ -88,8 +89,15 @@
 /* Parity with the Requirements Explorer: a rail that groups by the document a procedure is written into, a
    result count on the search, and a columned table rather than a flat list. Procedures had no container
    until they were given one, which is why this rail could not exist before. */
-.procedureExplorerSplit { display: grid; grid-template-columns: 232px minmax(0, 1fr) minmax(0, 380px); gap: 14px; align-items: start; }
-.procedureExplorerSplit:not(:has(.procedureInspector)) { grid-template-columns: 232px minmax(0, 1fr); }
+/* The inspector track is a fixed width, not `minmax(0, 380px)`. Below 1360px the inspector is `position:
+   fixed` and overlays the right of the window — a rule this Explorer inherits from the requirements
+   workspace — so a track sized by its content collapses to nothing and the list runs underneath the overlay.
+   The list then looks right but its right-hand side is not clickable: the pointer lands on the inspector.
+   A fixed track reserves the space whether the inspector is in flow or over it.
+
+   Gated on `.requirementInspector`, which is the class the inspector actually has. */
+.procedureExplorerSplit { display: grid; grid-template-columns: 232px minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+.procedureExplorerSplit:not(:has(.requirementInspector)) { grid-template-columns: 232px minmax(0, 1fr); }
 
 .procedureDocumentRail { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px; }
 .procedureDocumentRail h2 {
@@ -123,7 +131,17 @@
 .procedureFilters .clear:disabled { opacity: .5; cursor: not-allowed; }
 .procedureFilters .pageSizeControl span { font-size: var(--text-xs); color: var(--ink-500); }
 
-.procedureTable { width: 100%; border-collapse: collapse; font-size: var(--text-control); }
+/* `fixed` rather than the default `auto`. An auto table sizes to its content, so a long procedure title made
+   the table — and every row in it — wider than the column it lives in. The list clips the overflow, so it
+   looked right, but the row's box still reached under the inspector beside it: the pointer landed on the
+   inspector instead of the row, and clicking a procedure did nothing at ordinary window widths.
+   Fixed layout keeps a row inside its column, and long titles wrap instead of widening it. */
+.procedureTable { table-layout: fixed; width: 100%; border-collapse: collapse; font-size: var(--text-control); }
+.procedureTable th:nth-child(2), .procedureTable td:nth-child(2) { width: 15%; }
+.procedureTable th:nth-child(3), .procedureTable td:nth-child(3) { width: 9%; }
+.procedureTable th:nth-child(4), .procedureTable td:nth-child(4) { width: 16%; }
+.procedureTable th:nth-child(5), .procedureTable td:nth-child(5) { width: 15%; }
+.procedureTable td { overflow-wrap: anywhere; }
 .procedureTable th {
   text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--surface-subtle);
   font: var(--weight-bold) var(--text-xs) var(--font-body); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-500);

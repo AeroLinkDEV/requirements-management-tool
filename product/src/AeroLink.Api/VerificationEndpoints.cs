@@ -642,7 +642,9 @@ public static class VerificationEndpoints
             if(releaseId is not null)
             {
                 var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, projectId, releaseId.Value, ct);
-                if(effectivity is null)return Results.Ok(new{page=currentPage,pageSize=size,totalCount=0,totalPages=0,items=Array.Empty<object>()});
+                // `views` is part of this response's shape, so the empty answer carries it too. A reply that
+                // drops a field the caller reads is a reply that crashes the caller.
+                if(effectivity is null)return Results.Ok(new{page=currentPage,pageSize=size,totalCount=0,totalPages=0,views=Array.Empty<object>(),items=Array.Empty<object>()});
                 scopedRevisions = effectivity.RevisionByProcedure.ToDictionary(x => x.Key, x => x.Value);
                 var effectiveProcedureIds = scopedRevisions.Keys.ToList();
                 source=source.Where(x=>effectiveProcedureIds.Contains(x.Id));

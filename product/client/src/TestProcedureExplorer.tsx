@@ -47,7 +47,8 @@ type History = {
 }
 /// A named worklist over this library, owned by whoever saved it and optionally shared.
 type SavedView = { id: string; name: string; queryJson: string; columnsJson: string; isShared: boolean; owned: boolean }
-type Page = { page: number; pageSize: number; totalCount: number; totalPages: number; views: SavedView[]; items: Procedure[] }
+/** `views` is optional because the empty-build reply is a different object; read it through `savedViews`. */
+type Page = { page: number; pageSize: number; totalCount: number; totalPages: number; views?: SavedView[]; items: Procedure[] }
 /// The document a discipline's procedures are written into, and the sections inside it.
 type ProcedureDocument = {
   id: string
@@ -261,7 +262,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // A link to a saved view opens that worklist, once. Re-applying it on every list refresh would undo the
   // reader's own filtering the moment they changed anything.
   useEffect(() => {
-    if (appliedInitialView.current || !initialViewId || !data?.views.length) return
+    if (appliedInitialView.current || !initialViewId || !data?.views?.length) return
     const view = data.views.find(x => x.id === initialViewId)
     if (!view) return
     appliedInitialView.current = true
@@ -346,6 +347,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   }, [])
 
   const procedures = data?.items ?? []
+  // Read once, defensively. A build with no effective procedures answers with a deliberately empty page, and
+  // a rail that crashes the workspace because a field it wanted was absent takes the whole page down with it.
+  const savedViews = data?.views ?? []
   // Keyed on the page rather than the derived array, so the identity stays stable between renders. The
   // history and discussion effects watch this object, and a fresh one every render would refetch forever.
   const selected = useMemo(() => data?.items.find(x => x.id === selectedId), [data, selectedId])
@@ -686,10 +690,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         <details className="savedViews">
           <summary>
             <b>Saved views</b>
-            <span>{data?.views.length ?? 0}</span>
+            <span>{savedViews.length}</span>
           </summary>
           <div>
-            {data?.views.map(view => (
+            {savedViews.map(view => (
               <div className="savedViewRow" key={view.id}>
                 <button type="button" data-saved-view={view.name} onClick={() => applyView(view)}>
                   <i>{view.isShared ? '◉' : '○'}</i>
@@ -710,7 +714,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                 )}
               </div>
             ))}
-            {data?.views.length === 0 && <p className="railEmpty">No saved views yet.</p>}
+            {savedViews.length === 0 && <p className="railEmpty">No saved views yet.</p>}
             {showSaveView ? (
               <form className="saveViewForm" onSubmit={saveView}>
                 <label>
