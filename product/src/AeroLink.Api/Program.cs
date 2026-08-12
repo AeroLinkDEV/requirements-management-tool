@@ -100,6 +100,9 @@ await using (var scope = app.Services.CreateAsyncScope())
     if (builder.Configuration.GetValue<bool>("DemoData:Enabled"))
         await scope.ServiceProvider.GetRequiredService<ManagedDocumentShowcaseSeeder>().EnsureSeededAsync();
     await scope.ServiceProvider.GetRequiredService<EnterpriseWorkspaceSeeder>().EnsureAllAsync();
+    // Outside the demo-data guard: every Project has test procedure documents, not only a seeded showcase.
+    // Additive and idempotent — it creates what is absent and never moves a procedure somebody has filed.
+    await scope.ServiceProvider.GetRequiredService<TestProcedureDocumentBootstrap>().EnsureAllAsync();
 }
 
 // Whether this process also serves the built client, decided once at startup. Null means it does not, and
