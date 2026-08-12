@@ -89,7 +89,10 @@ try {
             & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $archive -TargetDatabase aerolink `
                 -EvidenceTarget $oldEvidence -PostgresPort $pgPort -PostgresBin $PostgresBin -ValidationApiPort (Get-FreePort) `
                 -AllowProductionRestore -Confirmation RESTORE-AEROLINK -DisposableQualification -FaultInjection $phase
-        } catch { if ($_.Exception.Message -like "*Injected restore fault at $phase*") { $rolledBack=$true } else { throw } }
+        } catch {
+            if ($_.Exception.Message -like '*Automatic rollback also failed*') { throw }
+            if ($_.Exception.Message -eq "Injected restore fault at $phase.") { $rolledBack=$true } else { throw }
+        }
         if(-not $rolledBack){throw "The production activation fault at $phase was not observed."}
         $marker=(& (Join-Path $PostgresBin 'psql.exe') -h 127.0.0.1 -p $pgPort -U postgres -d aerolink -tA -c 'SELECT value FROM restore_marker;').Trim()
         if($marker -ne 'original' -or -not(Test-Path -LiteralPath (Join-Path $oldEvidence 'original.txt'))){throw "Database/evidence rollback did not restore the original production pair after $phase."}

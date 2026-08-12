@@ -11,8 +11,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
-$apiProject = Join-Path $productRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
+$apiExecutable = Join-Path $productRoot 'src\AeroLink.Api\bin\Release\net10.0\AeroLink.Api.exe'
+if (-not (Test-Path -LiteralPath $apiExecutable -PathType Leaf)) { throw "The built Release API executable is required for restore validation: $apiExecutable" }
 if (-not $LogRoot) { $LogRoot = Join-Path $productRoot '.local\restore-validation\logs' }
 $logs = [IO.Path]::GetFullPath($LogRoot)
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
@@ -38,8 +38,10 @@ try {
         $previous[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
     }
-    $process = Start-Process -FilePath 'dotnet' -ArgumentList "run --no-launch-profile --project `"$apiProject`"" `
-        -WorkingDirectory $repositoryRoot -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
+    # Launch the application executable itself so the tracked process is the listener, not a
+    # dotnet-run parent whose child could survive cleanup and retain the validation port/database.
+    $process = Start-Process -FilePath $apiExecutable -WorkingDirectory (Split-Path $apiExecutable -Parent) `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
     $ready = $false
     for ($attempt = 0; $attempt -lt 120; $attempt++) {
         if ($process.HasExited) { break }
@@ -80,6 +82,14 @@ try {
     finally { if ($client) { $client.Dispose() }; if ($handler) { $handler.Dispose() } }
 }
 finally {
-    if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue; $process.WaitForExit(10000) | Out-Null }
-    foreach ($entry in $previous.GetEnumerator()) { [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process') }
+    try {
+        if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue; $process.WaitForExit(10000) | Out-Null }
+        for ($attempt = 0; $attempt -lt 40 -and (Get-NetTCPConnection -LocalPort $ApiPort -State Listen -ErrorAction SilentlyContinue); $attempt++) { Start-Sleep -Milliseconds 250 }
+        if (Get-NetTCPConnection -LocalPort $ApiPort -State Listen -ErrorAction SilentlyContinue) { throw "Restore-validation API port $ApiPort remained in use after process cleanup." }
+    }
+    finally {
+        # Production rollback/restart must never inherit the validation database, evidence root,
+        # token, or read-only mode, even when listener cleanup itself fails.
+        foreach ($entry in $previous.GetEnumerator()) { [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process') }
+    }
 }

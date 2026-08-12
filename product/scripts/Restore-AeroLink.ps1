@@ -50,7 +50,10 @@ function Stop-AeroLinkApplicationProcesses {
         foreach ($listener in @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)) {
             $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
             $command = "$($process.ExecutablePath) $($process.CommandLine)"
-            if ($command -notlike "*$productRoot*") { throw "Port $port belongs to an unrelated process. Refusing to stop PID $($listener.OwningProcess)." }
+            # An unrelated listener is outside this restore's authority. In normal production the
+            # pre-activation stop already removed AeroLink; never let another worktree/application
+            # prevent the database pair from being rolled back.
+            if ($command -notlike "*$productRoot*") { continue }
             Stop-Process -Id $listener.OwningProcess -Force
         }
     }
