@@ -45,6 +45,16 @@ function Rename-Database([string]$From, [string]$To) {
     [void](Invoke-Psql 'postgres' "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$From' AND pid <> pg_backend_pid();")
     [void](Invoke-Psql 'postgres' "ALTER DATABASE `"$From`" RENAME TO `"$To`";")
 }
+function Stop-AeroLinkApplicationProcesses {
+    foreach ($port in 5173,5080) {
+        foreach ($listener in @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)) {
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
+            $command = "$($process.ExecutablePath) $($process.CommandLine)"
+            if ($command -notlike "*$productRoot*") { throw "Port $port belongs to an unrelated process. Refusing to stop PID $($listener.OwningProcess)." }
+            Stop-Process -Id $listener.OwningProcess -Force
+        }
+    }
+}
 function Test-RestoredApi([string]$Database, [string]$Root, [object[]]$Inventory, [int]$Port) {
     $managed = @($Inventory | Where-Object { [string]$_.ArtifactType -eq 'ManagedDocument' })
     if ($managed.Count -eq 0) { return [pscustomobject]@{ Passed=$true; ManagedDocumentDownloads=0; DownloadedBytes=0 } }
@@ -139,7 +149,8 @@ catch {
     $originalPairAvailable = $production -and -not $originalDatabaseRenamed
     if ($production -and $originalDatabaseRenamed -and -not $activationPassed) {
         try {
-            if (-not $DisposableQualification) { & (Join-Path $PSScriptRoot 'Stop-AeroLink.ps1') }
+            # PostgreSQL must remain available for the compensating database renames.
+            Stop-AeroLinkApplicationProcesses
             if ($evidenceActivated -and (Test-Path -LiteralPath $resolvedTarget)) { Move-Item -LiteralPath $resolvedTarget -Destination (Join-Path (Split-Path $resolvedTarget -Parent) ("evidence-failed-restore-$token")) }
             if ($retained -and (Test-Path -LiteralPath $retained)) { Move-Item -LiteralPath $retained -Destination $resolvedTarget }
             if ($databaseActivated) { Rename-Database 'aerolink' $failedDatabase }
