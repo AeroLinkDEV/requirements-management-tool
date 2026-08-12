@@ -219,14 +219,16 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var superseded = 0;
         foreach (var legacy in reviews.Where(x => x.State != TestChangeReviewState.Superseded
             && x.Discipline != TestChangeReviewDiscipline.System
-            && sources.TryGetValue(x.ChangeRequestId, out var source) && source.Type == ChangeRequestType.System))
+            && x.ChangeRequestId is { } legacySourceId
+            && sources.TryGetValue(legacySourceId, out var source) && source.Type == ChangeRequestType.System))
         {
             var subjects = items.Where(x => x.TestChangeReviewId == legacy.Id).Select(x => x.SubjectDisplayNumber)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var successor = reviews.FirstOrDefault(candidate => candidate.Id != legacy.Id
                 && candidate.ReleaseId == legacy.ReleaseId && candidate.Discipline == legacy.Discipline
                 && candidate.State != TestChangeReviewState.Superseded
-                && sources.TryGetValue(candidate.ChangeRequestId, out var candidateSource) && candidateSource.Type == ChangeRequestType.Software
+                && candidate.ChangeRequestId is { } candidateSourceId
+                && sources.TryGetValue(candidateSourceId, out var candidateSource) && candidateSource.Type == ChangeRequestType.Software
                 && items.Any(item => item.TestChangeReviewId == candidate.Id && subjects.Contains(item.SubjectDisplayNumber)));
             if (successor is null) continue;
             legacy.Supersede(successor.Id,

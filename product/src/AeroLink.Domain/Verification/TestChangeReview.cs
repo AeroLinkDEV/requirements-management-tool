@@ -34,20 +34,51 @@ public sealed class TestChangeReview
     public TestChangeReview(Guid projectId, Guid releaseId, Guid changeRequestId,
         TestChangeReviewDiscipline discipline, string sourceChangeRequestNumber, DateTimeOffset now,
         string baseNumber = "", int revision = 0, int caseContractVersion = CurrentCaseContractVersion)
+        : this(projectId, releaseId, discipline, now, baseNumber, revision, caseContractVersion)
+    {
+        if (changeRequestId == Guid.Empty) throw new DomainException("A test change review requires its originating change request.");
+        ChangeRequestId = changeRequestId;
+        SourceChangeRequestNumber = Required(sourceChangeRequestNumber, "source change request number");
+    }
+
+    /// <summary>
+    /// A package raised from a Problem Report rather than from an approved change request.
+    ///
+    /// Test work is not only ever caused by a requirement change: an anomaly found in the field is a
+    /// legitimate reason to write, correct or withdraw a procedure, and there may be no change request at the
+    /// package's own level to hang it on. The Problem Report takes the originating slot the change request
+    /// would have occupied, so a package still has exactly one thing it was raised from — which is what its
+    /// number, its covered-sources record and its case snapshot all depend on.
+    ///
+    /// Approved change requests can still be folded in afterwards through <see cref="IncludeChangeRequest"/>.
+    /// </summary>
+    public static TestChangeReview FromProblemReport(Guid projectId, Guid releaseId, Guid problemReportId,
+        TestChangeReviewDiscipline discipline, string sourceProblemReportNumber, DateTimeOffset now,
+        string baseNumber = "", int revision = 0, int caseContractVersion = CurrentCaseContractVersion)
+    {
+        if (problemReportId == Guid.Empty)
+            throw new DomainException("A test change review raised from a Problem Report requires that report.");
+        var review = new TestChangeReview(projectId, releaseId, discipline, now, baseNumber, revision, caseContractVersion)
+        {
+            OriginatingProblemReportId = problemReportId,
+        };
+        review.SourceProblemReportNumber = Required(sourceProblemReportNumber, "source Problem Report number");
+        return review;
+    }
+
+    private TestChangeReview(Guid projectId, Guid releaseId, TestChangeReviewDiscipline discipline,
+        DateTimeOffset now, string baseNumber, int revision, int caseContractVersion)
     {
         Revision = revision;
         if (caseContractVersion < 0 || caseContractVersion > CurrentCaseContractVersion)
             throw new DomainException("A test change request requires a supported engineering-case contract version.");
         if (projectId == Guid.Empty) throw new DomainException("A test change review requires its Project.");
         if (releaseId == Guid.Empty) throw new DomainException("A test change review requires its software build.");
-        if (changeRequestId == Guid.Empty) throw new DomainException("A test change review requires its originating change request.");
         if (!Enum.IsDefined(discipline)) throw new DomainException("A test change review requires a known discipline.");
         Id = Guid.NewGuid();
         ProjectId = projectId;
         ReleaseId = releaseId;
-        ChangeRequestId = changeRequestId;
         Discipline = discipline;
-        SourceChangeRequestNumber = Required(sourceChangeRequestNumber, "source change request number");
         // Empty remains readable for databases created before controlled TCR numbering. The showcase
         // upgrade assigns those rows a real number without changing their identity or evidence.
         BaseNumber = baseNumber.Trim();
@@ -60,14 +91,25 @@ public sealed class TestChangeReview
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public Guid ReleaseId { get; private set; }
-    public Guid ChangeRequestId { get; private set; }
+    /// <summary>The approved change request this package was raised from, when it was raised from one.</summary>
+    public Guid? ChangeRequestId { get; private set; }
+    /// <summary>
+    /// The Problem Report it was raised from instead. Exactly one of this and <see cref="ChangeRequestId"/>
+    /// is set: a package always has one thing it was raised from, which is what its number, its
+    /// covered-sources record and its case snapshot depend on.
+    /// </summary>
+    public Guid? OriginatingProblemReportId { get; private set; }
+    public string SourceProblemReportNumber { get; private set; } = "";
+    /// <summary>What this package was raised from, whichever kind that was.</summary>
+    public string SourceDisplayNumber =>
+        ChangeRequestId is not null ? SourceChangeRequestNumber : SourceProblemReportNumber;
     public TestChangeReviewDiscipline Discipline { get; private set; }
     public string SourceChangeRequestNumber { get; private set; } = "";
     /// <summary>Its controlled number — SYSTCR, HLRTCR or LLRTCR — empty only for rows raised before it had one.</summary>
     public string BaseNumber { get; private set; } = "";
     /// <summary>Advances when an approved package is reopened for further test work against the same change.</summary>
     public int Revision { get; private set; }
-    public string DisplayNumber => string.IsNullOrEmpty(BaseNumber) ? SourceChangeRequestNumber : $"{BaseNumber}.{Revision:D2}";
+    public string DisplayNumber => string.IsNullOrEmpty(BaseNumber) ? SourceDisplayNumber : $"{BaseNumber}.{Revision:D2}";
     /// <summary>
     /// Change requests folded into this one beyond the change request it was raised from.
     ///
@@ -356,6 +398,17 @@ public sealed class TestChangeReview
             }
             writer.WriteEndArray();
 
+            // Written only when the package was raised from a Problem Report. A package raised from a change
+            // request therefore produces byte-identical JSON to the one it produced before this existed, so
+            // every hash already recorded against a signature still verifies.
+            if (OriginatingProblemReportId is { } originatingProblemReport)
+            {
+                writer.WriteStartObject("originatingProblemReport");
+                writer.WriteString("problemReportId", originatingProblemReport.ToString("D"));
+                writer.WriteString("displayNumber", SourceProblemReportNumber);
+                writer.WriteEndObject();
+            }
+
             writer.WriteStartArray("procedureChanges");
             foreach (var change in _procedureChanges
                          .OrderBy(x => x.BaseNumber, StringComparer.Ordinal)
@@ -438,8 +491,16 @@ public sealed class TestChangeReview
     /// order the caller happened to fold them in.
     /// </summary>
     private IEnumerable<(Guid ChangeRequestId, string DisplayNumber, bool Originating)> CoveredSourcesOrdered() =>
-        new[] { (ChangeRequestId, SourceChangeRequestNumber, true) }
-            .Concat(_additionalSources.Select(x => (x.ChangeRequestId, x.ChangeRequestNumber, false)))
+        // The originating entry appears only when the package was raised from a change request. A package
+        // raised from a Problem Report records that origin separately rather than fabricating a change
+        // request entry, and a package raised from a change request serializes exactly as it always has —
+        // which matters, because this snapshot is hashed and the hash is what a signature recorded.
+        (ChangeRequestId is { } originating
+            ? new (Guid ChangeRequestId, string DisplayNumber, bool Originating)[]
+                { (originating, SourceChangeRequestNumber, true) }
+            : [])
+            .Concat(_additionalSources.Select(x =>
+                (ChangeRequestId: x.ChangeRequestId, DisplayNumber: x.ChangeRequestNumber, Originating: false)))
             .OrderBy(x => x.ChangeRequestId.ToString("D"), StringComparer.Ordinal);
 
     private static IReadOnlyList<Guid> DrivingRequirementIds(string json)
@@ -609,7 +670,8 @@ public sealed class TestChangeReview
 
     /// <summary>Every change request this package answers for, including the one it was raised from.</summary>
     public IEnumerable<Guid> CoveredChangeRequestIds =>
-        new[] { ChangeRequestId }.Concat(_additionalSources.Select(x => x.ChangeRequestId));
+        (ChangeRequestId is { } originating ? new[] { originating } : [])
+            .Concat(_additionalSources.Select(x => x.ChangeRequestId));
 
     /// <summary>
     /// Advances an approved test change request to its next revision, as an approved change request advances
@@ -631,8 +693,13 @@ public sealed class TestChangeReview
         if (targetReleaseIsReleased)
             throw new DomainException(
                 "This test change request is incorporated in a released build and cannot be revised. Raise a new one against the in-work build.");
-        var next = new TestChangeReview(ProjectId, ReleaseId, ChangeRequestId, Discipline,
-            SourceChangeRequestNumber, now, BaseNumber, Revision + 1);
+        // The successor keeps whatever this package was raised from. A revision continues the same work
+        // against the same origin; it does not acquire a different one.
+        var next = ChangeRequestId is { } originating
+            ? new TestChangeReview(ProjectId, ReleaseId, originating, Discipline,
+                SourceChangeRequestNumber, now, BaseNumber, Revision + 1)
+            : FromProblemReport(ProjectId, ReleaseId, OriginatingProblemReportId!.Value, Discipline,
+                SourceProblemReportNumber, now, BaseNumber, Revision + 1);
         next.RecordTestChangeRequired(actorId, now);
         // The case carries forward exactly as a change request's does, so the engineer corrects the rationale
         // rather than retyping it. Packages that predate case authoring carry no fabricated case.

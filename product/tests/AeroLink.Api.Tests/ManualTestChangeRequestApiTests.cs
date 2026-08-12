@@ -176,6 +176,90 @@ public sealed class ManualTestChangeRequestApiTests
         Assert.Contains("LLRCR-00910", body);
     }
 
+    /// <summary>
+    /// An anomaly found in the field is a legitimate reason to write, correct or withdraw a procedure. A build
+    /// may also carry no approved change at the package's own level, in which case requiring one made the
+    /// package impossible to raise at all.
+    /// </summary>
+    [Fact]
+    public async Task A_problem_report_alone_can_raise_a_package()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "HighLevelSoftware", changeRequestIds = Array.Empty<Guid>(),
+                problemReportIds = new[] { fixture.ProblemReportId },
+                title = "Corrective verification for a reported anomaly",
+                problem = "P", analysis = "A", solution = "S" });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var id = created.GetProperty("id").GetGuid();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var review = await db.TestChangeReviews.AsNoTracking().SingleAsync(x => x.Id == id);
+
+        // Raised from the report, and from nothing else — the report holds the originating slot rather than
+        // being a decoration alongside an invented change request.
+        Assert.Null(review.ChangeRequestId);
+        Assert.Equal(fixture.ProblemReportId, review.OriginatingProblemReportId);
+        Assert.Equal("PR-00910.00", review.SourceProblemReportNumber);
+        Assert.Empty(review.CoveredChangeRequestIds);
+        // It is still a numbered controlled package.
+        Assert.StartsWith("HLRTCR-", review.DisplayNumber);
+    }
+
+    /// <summary>A package still has to say what concluded the work was required.</summary>
+    [Fact]
+    public async Task A_package_raised_from_nothing_at_all_is_refused()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "HighLevelSoftware", changeRequestIds = Array.Empty<Guid>(),
+                problemReportIds = Array.Empty<Guid>(),
+                title = "Package with no driver", problem = "P", analysis = "A", solution = "S" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("test_change_request_needs_a_driver", await response.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>
+    /// The evidence contract is a hashed snapshot, so a package raised from a change request has to serialize
+    /// exactly as it did before Problem Report origins existed — otherwise every hash already recorded
+    /// against a signature would stop verifying.
+    /// </summary>
+    [Fact]
+    public async Task A_change_request_origin_still_records_itself_as_the_originating_source()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Ordinary package", problem = "P", analysis = "A", solution = "S" });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var id = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var review = await db.TestChangeReviews.AsNoTracking().SingleAsync(x => x.Id == id);
+
+        Assert.Equal(fixture.FirstChangeId, review.ChangeRequestId);
+        Assert.Null(review.OriginatingProblemReportId);
+        Assert.Equal("", review.SourceProblemReportNumber);
+        Assert.Contains(fixture.FirstChangeId, review.CoveredChangeRequestIds);
+    }
+
     /// <summary>The matching level is accepted, so the refusal above is about the level and nothing else.</summary>
     [Fact]
     public async Task A_change_at_the_matching_level_raises_the_package()

@@ -77,7 +77,8 @@ public static class TestProcedureProvenanceProjection
             }).ToListAsync(ct);
 
         var changeIds = impacts.Select(x => x.ChangeRequestId)
-            .Concat(reviews.Select(x => x.ChangeRequestId))
+            // A package raised from a Problem Report contributes no change request to resolve.
+            .Concat(reviews.Where(x => x.ChangeRequestId != null).Select(x => x.ChangeRequestId!.Value))
             .Concat(claims.Select(x => x.ChangeRequestId))
             .Concat(snapshots.Values.SelectMany(x => x).Select(x => x.ChangeRequestId))
             .Distinct().ToList();
@@ -127,11 +128,16 @@ public static class TestProcedureProvenanceProjection
                 if (sources.Count == 0)
                 {
                     compatibility = true;
-                    sources = new[]
-                        {
-                            new ProcedureSourceSnapshot(sourceReview.ChangeRequestId,
-                                sourceReview.SourceChangeRequestNumber, true),
-                        }
+                    // The originating entry exists only when the package was raised from a change request.
+                    // A Problem Report origin contributes no change-request source rather than a fabricated
+                    // one; the package itself records what it was raised from.
+                    sources = (sourceReview.ChangeRequestId is { } originatingChangeRequest
+                            ? new[]
+                            {
+                                new ProcedureSourceSnapshot(originatingChangeRequest,
+                                    sourceReview.SourceChangeRequestNumber, true),
+                            }
+                            : [])
                         .Concat(claims.Where(x => x.TestChangeReviewId == sourceReview.Id)
                             .Select(x => new ProcedureSourceSnapshot(
                                 x.ChangeRequestId, x.ChangeRequestNumber, false)))

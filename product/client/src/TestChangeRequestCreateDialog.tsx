@@ -87,11 +87,15 @@ export default function TestChangeRequestCreateDialog({ api, projectId, releaseI
     }
   }
 
+  // A package must say what concluded the work was required, but that is not only ever a requirement change:
+  // an anomaly found in the field is a legitimate driver on its own, and a build may carry no approved change
+  // at this package's own level. Either kind of driver satisfies it; neither being present does not.
+  const hasDriver = selected.length > 0 || problemReportIds.length > 0
   const complete = title.trim().length > 0
     && toPlainText(problemRich).trim().length > 0
     && toPlainText(analysisRich).trim().length > 0
     && toPlainText(solutionRich).trim().length > 0
-    && selected.length > 0
+    && hasDriver
 
   return (
     <div className="downstreamDialogBackdrop" role="presentation">
@@ -137,7 +141,13 @@ export default function TestChangeRequestCreateDialog({ api, projectId, releaseI
 
         <ProblemReportPicker api={api} projectId={projectId} scope="target-build" releaseId={releaseId}
           selected={problemReportIds} onChange={setProblemReportIds}
-          legend={`PRs driving this ${label} TCR (optional)`} />
+          legend={`Problem Reports driving this ${label} TCR`} />
+        {!hasDriver && (
+          <p className="tcrDriverHint">
+            Name at least one driver — an approved {label} change request above, or a Problem Report. A package
+            has to say what concluded the test work was required.
+          </p>
+        )}
 
         <div className="downstreamDialogActions">
           <button type="button" className="quiet" disabled={busy} onClick={onClose}>Cancel</button>

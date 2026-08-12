@@ -17,6 +17,8 @@
 .tcrField input{padding:.7rem;border:1px solid #cbd7e6;border-radius:8px;font:inherit}
 .tcrCaseFields{display:grid;gap:.75rem;margin:1rem 0}
 .tcrSourceChoices{border:1px solid #d9e2ec;border-radius:10px;margin:1rem 0;padding:1rem}
+/* Says why the Raise button is not available yet, rather than leaving a disabled control unexplained. */
+.tcrDriverHint{margin:.5rem 0 0;font:400 12px "DM Sans",sans-serif;color:#8a5a12;background:#fdf1dc;border-radius:8px;padding:.5rem .65rem}
 .tcrSourceChoices legend{font:700 12px "DM Sans",sans-serif;color:#43516a;padding:0 .35rem}
 .tcrSourceChoices label{display:flex;align-items:flex-start;gap:.55rem;padding:.45rem 0;border-bottom:1px solid #edf1f6;color:#43516a}
 .tcrSourceChoices label:last-child{border-bottom:0}

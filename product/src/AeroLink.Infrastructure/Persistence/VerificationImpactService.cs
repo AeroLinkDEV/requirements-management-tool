@@ -60,7 +60,10 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
             .Where(x => x.ProjectId == request.ProjectId && x.BaseNumber == request.BaseNumber && x.Revision < request.Revision)
             .Select(x => x.Id).ToListAsync(ct);
         var priorReviews = await db.TestChangeReviews
-            .Where(x => priorRequestIds.Contains(x.ChangeRequestId) && x.State != TestChangeReviewState.Superseded)
+            // Prior packages raised from an earlier revision of this change request. A package raised from a
+            // Problem Report is not a prior review of any change request, so it is not one of these.
+            .Where(x => x.ChangeRequestId != null && priorRequestIds.Contains(x.ChangeRequestId.Value)
+                && x.State != TestChangeReviewState.Superseded)
             .ToListAsync(ct);
         var priorReviewIds = priorReviews.Select(x => x.Id).ToList();
         var priorItems = await db.VerificationImpactItems
