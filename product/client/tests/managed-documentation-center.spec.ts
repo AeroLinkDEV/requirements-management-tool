@@ -107,6 +107,7 @@ test('review signature dialog exposes and submits the exact frozen intent', asyn
     title: `Exact review intent ${suffix}`,
     ownerId: 'software.author',
     formalChangeSummary: 'Bind the browser decision to exact controlled evidence.',
+    operationKey: crypto.randomUUID(),
   } })
   expect(createdResponse.ok(), await createdResponse.text()).toBeTruthy()
   const created = await createdResponse.json()
@@ -160,6 +161,7 @@ test('an integrity-blocked revision is explicit and cannot launch or submit from
     title: `Integrity block ${suffix}`,
     ownerId: 'software.author',
     formalChangeSummary: 'Make a retained-file integrity incident visible and fail closed.',
+    operationKey: crypto.randomUUID(),
   } })
   expect(createdResponse.ok(), await createdResponse.text()).toBeTruthy()
   const created = await createdResponse.json()
@@ -226,6 +228,7 @@ test('configuration authority can explicitly reassign document stewardship in th
     title: `Stewardship transfer ${suffix}`,
     ownerId: 'software.lead',
     formalChangeSummary: 'Prove the controlled browser reassignment path.',
+    operationKey: crypto.randomUUID(),
   } })
   expect(createdResponse.ok(), await createdResponse.text()).toBeTruthy()
   const created = await createdResponse.json()
@@ -274,6 +277,7 @@ test('Documentation Center back navigation retains a non-showcase Project across
     title: `Navigation SQAP ${suffix}`,
     ownerId: 'software.author',
     changeSummary: 'Prove Project-specific back navigation.',
+    operationKey: crypto.randomUUID(),
   } })
   expect(created.ok(), await created.text()).toBeTruthy()
 
