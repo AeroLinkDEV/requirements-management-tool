@@ -188,7 +188,13 @@ public sealed class SecurityBoundaryTests
 
         using var verificationScope = factory.Services.CreateScope();
         var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        Assert.False(await verificationDb.ProgramMemberships.AnyAsync(x => x.UserId == delegateId && x.ProgramId == programId && x.Role == ProgramRole.Engineer));
+        // Ended rather than removed, which is what the delegation half of this test has always asserted about
+        // its own revocation. The membership row is retained so the roster can still say who held this and
+        // when; what must not survive is the authority (DEC-110).
+        var revoked = await verificationDb.ProgramMemberships.AsNoTracking()
+            .SingleAsync(x => x.UserId == delegateId && x.ProgramId == programId && x.Role == ProgramRole.Engineer);
+        Assert.NotNull(revoked.EndedAt);
+        Assert.False(await verificationDb.ProgramMemberships.AnyAsync(x => x.UserId == delegateId && x.ProgramId == programId && x.Role == ProgramRole.Engineer && x.EndedAt == null));
         Assert.NotNull((await verificationDb.RoleDelegations.AsNoTracking().SingleAsync(x => x.Id == delegationId)).RevokedAt);
         Assert.True(await verificationDb.SecurityAuditEvents.CountAsync(x => x.EventType == "RoleRevoked" || x.EventType == "DelegationRevoked") >= 2);
         Assert.NotEqual(Guid.Empty, delegatorId);
