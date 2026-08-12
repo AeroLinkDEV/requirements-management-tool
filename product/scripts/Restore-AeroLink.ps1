@@ -9,7 +9,7 @@ param(
     [switch]$DisposableQualification,
     [switch]$AllowProductionRestore,
     [string]$Confirmation,
-    [ValidateSet('','BeforeDatabaseRestore','AfterDatabaseRestore','AfterEvidenceCopy','AfterPreActivationValidation','AfterDatabaseActivation','AfterEvidenceActivation','AfterActivationValidation','BeforeRestart','AfterRestart')]
+    [ValidateSet('','BeforeDatabaseRestore','AfterDatabaseRestore','AfterEvidenceCopy','AfterPreActivationValidation','AfterOriginalDatabaseRename','AfterDatabaseActivation','AfterEvidenceActivation','AfterActivationValidation','BeforeRestart','AfterRestart')]
     [string]$FaultInjection = ''
 )
 
@@ -70,7 +70,7 @@ $restoreDatabase = if ($production) { "aerolink_restore_stage_$token" } else { $
 $oldDatabase = "aerolink_pre_restore_$token"
 $failedDatabase = "aerolink_failed_restore_$token"
 $resolvedTarget = $null; $incoming = $null; $retained = $null
-$databaseActivated = $false; $evidenceActivated = $false; $activationPassed = $false
+$originalDatabaseRenamed = $false; $databaseActivated = $false; $evidenceActivated = $false; $activationPassed = $false
 
 try {
     Expand-Archive -LiteralPath $archive -DestinationPath $temporary
@@ -111,7 +111,8 @@ try {
         $activationPassed = $true
     }
     else {
-        Rename-Database 'aerolink' $oldDatabase
+        Rename-Database 'aerolink' $oldDatabase; $originalDatabaseRenamed = $true
+        Invoke-Fault 'AfterOriginalDatabaseRename'
         Rename-Database $restoreDatabase 'aerolink'; $databaseActivated = $true
         Invoke-Fault 'AfterDatabaseActivation'
         if (Test-Path -LiteralPath $resolvedTarget) { $retained = Join-Path $parent ("evidence-pre-restore-$token"); Move-Item -LiteralPath $resolvedTarget -Destination $retained }
@@ -128,20 +129,20 @@ try {
         $activationPassed = $true
     }
 
-    $count = (Invoke-Psql $TargetDatabase 'SELECT COUNT(*) FROM "Programs";').Trim()
+    $count = (Invoke-Psql $TargetDatabase 'SELECT COUNT(*) FROM programs;').Trim()
     $verified = Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $resolvedTarget
     Write-Host "Restore verified in database '$TargetDatabase': $count Program record(s), $($verified.ReferencedAttachments) attachment row(s), $($verified.ReferencedObjects) object(s), $($verified.VerifiedBytes) byte(s), $($finalDownloads.ManagedDocumentDownloads) API download(s). Evidence root: $resolvedTarget" -ForegroundColor Green
     if ($production) { Write-Host "Rollback retained as database '$oldDatabase'$(if($retained){" and evidence '$retained'"})." -ForegroundColor Yellow }
 }
 catch {
     $failure = $_
-    $originalPairAvailable = $production -and -not $databaseActivated
-    if ($production -and $databaseActivated -and -not $activationPassed) {
+    $originalPairAvailable = $production -and -not $originalDatabaseRenamed
+    if ($production -and $originalDatabaseRenamed -and -not $activationPassed) {
         try {
             if (-not $DisposableQualification) { & (Join-Path $PSScriptRoot 'Stop-AeroLink.ps1') }
             if ($evidenceActivated -and (Test-Path -LiteralPath $resolvedTarget)) { Move-Item -LiteralPath $resolvedTarget -Destination (Join-Path (Split-Path $resolvedTarget -Parent) ("evidence-failed-restore-$token")) }
             if ($retained -and (Test-Path -LiteralPath $retained)) { Move-Item -LiteralPath $retained -Destination $resolvedTarget }
-            Rename-Database 'aerolink' $failedDatabase
+            if ($databaseActivated) { Rename-Database 'aerolink' $failedDatabase }
             Rename-Database $oldDatabase 'aerolink'
             $originalPairAvailable = $true
         }
