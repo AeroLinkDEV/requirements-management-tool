@@ -12,17 +12,31 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
     public const string DocxContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     public const string PdfContentType = "application/pdf";
     public const int MaximumDocumentBytes = 100 * 1024 * 1024;
+    public const int MaximumPdfBytes = 100 * 1024 * 1024;
     public const string SuccessorTransformationProfile = "aerolink-managed-document-successor-v1";
+    public const string ReleaseTransformationProfile = "aerolink-managed-document-release-v1";
+    public const string ReleaseTransformationVersion = "1";
+
+    private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    private static readonly XNamespace R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    private static readonly XNamespace PR = "http://schemas.openxmlformats.org/package/2006/relationships";
+    private static readonly XNamespace CT = "http://schemas.openxmlformats.org/package/2006/content-types";
 
     public async Task<byte[]> ReadDocxAsync(Stream input, string fileName, bool requireDraftWatermark, CancellationToken ct)
     {
         if (!string.Equals(Path.GetExtension(fileName), ".docx", StringComparison.OrdinalIgnoreCase))
             throw new DomainException("Documentation Center accepts macro-free Word .docx files only.");
-        var bytes = await ReadLimitedAsync(input, ct);
+        var bytes = await ReadLimitedAsync(input, MaximumDocumentBytes, "Word documents are limited to 100 MB.", ct);
         ValidateDocx(bytes, requireDraftWatermark);
         return bytes;
     }
 
+    /// <summary>
+    /// Package-safety validation plus, for Draft check-ins, proof that every header variant Word can
+    /// actually render carries the named, presentation-controlled DRAFT watermark. Package-entry string
+    /// matching is deliberately not used: orphan, hidden, alternate-text and unrelated shapes can never
+    /// satisfy the requirement, and unused parts can never fail it.
+    /// </summary>
     public static void ValidateDocx(byte[] bytes, bool requireDraftWatermark)
     {
         try
@@ -33,152 +47,391 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
                 throw new DomainException("The selected file is not a valid Word document.");
             if (archive.Entries.Any(entry => IsUnsafeEntry(entry.FullName)))
                 throw new DomainException("The Word package contains an unsafe path or macro-enabled content.");
-
             var contentTypes = ReadText(archive.GetEntry("[Content_Types].xml")!);
             if (contentTypes.Contains("macroEnabled", StringComparison.OrdinalIgnoreCase) ||
                 contentTypes.Contains("vbaProject", StringComparison.OrdinalIgnoreCase))
                 throw new DomainException("Macro-enabled Word documents are not accepted.");
-
-            var headers = archive.Entries.Where(entry => entry.FullName.StartsWith("word/header", StringComparison.OrdinalIgnoreCase)
-                && entry.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).ToList();
-            if (requireDraftWatermark && (headers.Count == 0 || headers.Any(header =>
-                    !ReadText(header).Contains("AeroLinkWatermark", StringComparison.Ordinal) ||
-                    !ReadText(header).Contains("DRAFT", StringComparison.OrdinalIgnoreCase))))
-                throw new DomainException("Every draft section must retain the faint DRAFT watermark. Reopen the AeroLink working copy and check it in again.");
         }
         catch (InvalidDataException)
         {
             throw new DomainException("The selected file is not a valid Word document.");
         }
+
+        if (!requireDraftWatermark) return;
+        var parts = WordDocumentStructure.ReadWordParts(bytes);
+        var resolution = WordDocumentStructure.ResolveHeaders(bytes);
+        foreach (var section in resolution.Sections)
+        {
+            foreach (var (variant, part) in section.RequiredVariants())
+            {
+                if (part is null)
+                    throw new DomainException($"Section {section.Index + 1} has no effective {variant} header, so its pages would render without the controlled DRAFT watermark.");
+                if (!WordDocumentStructure.PartHasControlledDraftWatermark(parts[part]))
+                    throw new DomainException($"Section {section.Index + 1} {variant} header is missing the controlled DRAFT watermark. Reopen the AeroLink working copy and check it in again.");
+            }
+        }
     }
 
-    public static void ValidatePdf(byte[] bytes)
+    /// <summary>Streams the PDF to memory while enforcing the explicit rendition limit before further allocation.</summary>
+    public static Task<byte[]> ReadPdfAsync(Stream input, CancellationToken ct) => ReadPdfAsync(input, MaximumPdfBytes, ct);
+
+    /// <summary>Streams the PDF to memory while enforcing the given explicit rendition limit before further allocation.</summary>
+    public static async Task<byte[]> ReadPdfAsync(Stream input, int maximumBytes, CancellationToken ct)
     {
-        if (bytes.Length < 5 || !Encoding.ASCII.GetString(bytes, 0, 5).Equals("%PDF-", StringComparison.Ordinal))
-            throw new DomainException("The release rendition is not a valid PDF file.");
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await input.ReadAsync(buffer, ct)) > 0)
+        {
+            if (output.Length + read > maximumBytes) throw new PdfRenditionTooLargeException();
+            await output.WriteAsync(buffer.AsMemory(0, read), ct);
+        }
+        if (output.Length == 0) throw new DomainException("The PDF rendition cannot be empty.");
+        return output.ToArray();
     }
 
+    /// <summary>
+    /// Requires a real .pdf file name, rejects path-like or control-character names, and normalizes the
+    /// extension to lowercase so no release attachment is ever retained or downloaded under another extension.
+    /// </summary>
+    public static string NormalizePdfFileName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new DomainException("The PDF rendition must carry a .pdf file name.");
+        var trimmed = name.Trim();
+        if (trimmed.IndexOfAny(['\\', '/']) >= 0 || trimmed.Contains("..", StringComparison.Ordinal) || trimmed.Any(char.IsControl))
+            throw new DomainException("The PDF rendition file name is not a safe single file name.");
+        if (!string.Equals(Path.GetExtension(trimmed), ".pdf", StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("The release rendition must be uploaded with a .pdf file name.");
+        return Path.GetFileName(Path.ChangeExtension(trimmed, ".pdf"));
+    }
+
+    /// <summary>True when any header variant Word actually renders carries the controlled DRAFT watermark.</summary>
     public static bool ContainsDraftWatermark(byte[] bytes)
     {
-        using var stream = new MemoryStream(bytes, false);
-        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, false);
-        return archive.Entries
-            .Where(entry => entry.FullName.StartsWith("word/header", StringComparison.OrdinalIgnoreCase) && entry.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
-            .Any(entry => { var text = ReadText(entry); return text.Contains("AeroLinkWatermark", StringComparison.Ordinal) && text.Contains("DRAFT", StringComparison.OrdinalIgnoreCase); });
+        var parts = WordDocumentStructure.ReadWordParts(bytes);
+        var resolution = WordDocumentStructure.ResolveHeaders(bytes);
+        return resolution.Sections.SelectMany(section => section.RequiredVariants())
+            .Any(variant => variant.Part is not null && WordDocumentStructure.PartHasControlledDraftWatermark(parts[variant.Part]));
     }
 
+    /// <summary>
+    /// Basic released-state validation: no controlled DRAFT watermark in any effective header and no
+    /// controlled status control that still reads Draft. This is the parent-source check used when a
+    /// successor Draft is started; candidate uploads additionally pass the exact reviewed-source gate.
+    /// </summary>
     public static void ValidateReleaseDocx(byte[] bytes)
     {
         ValidateDocx(bytes, requireDraftWatermark: false);
-        if (ContainsDraftWatermark(bytes))
-            throw new DomainException("The release DOCX still contains a DRAFT watermark.");
-
-        using var stream = new MemoryStream(bytes, false);
-        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, false);
-        var stillMarkedDraft = archive.Entries
-            .Where(entry => entry.FullName.Equals("word/document.xml", StringComparison.OrdinalIgnoreCase)
-                || entry.FullName.StartsWith("word/header", StringComparison.OrdinalIgnoreCase)
-                || entry.FullName.StartsWith("word/footer", StringComparison.OrdinalIgnoreCase))
-            .Where(entry => entry.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
-            .SelectMany(entry => XDocument.Parse(ReadText(entry)).Descendants())
-            .Any(element => element.Name.LocalName == "t" && element.Value.Trim().Equals("Draft", StringComparison.OrdinalIgnoreCase));
-        if (stillMarkedDraft)
-            throw new DomainException("The release DOCX still contains a visible Draft status marking. Prepare the release candidate again.");
+        var parts = WordDocumentStructure.ReadWordParts(bytes);
+        var resolution = WordDocumentStructure.ResolveHeaders(bytes);
+        foreach (var section in resolution.Sections)
+        {
+            foreach (var (variant, part) in section.RequiredVariants())
+            {
+                if (part is not null && WordDocumentStructure.PartHasControlledDraftWatermark(parts[part]))
+                    throw new DomainException($"Section {section.Index + 1} {variant} header still contains the controlled DRAFT watermark. Prepare the release candidate again.");
+            }
+        }
+        if (parts.Values.Any(WordDocumentStructure.PartHasControlledDraftStatus))
+            throw new DomainException("The release DOCX still contains a visible controlled Draft status marking. Prepare the release candidate again.");
     }
 
+    /// <summary>
+    /// The exact reviewed-source gate for a connector release candidate. The candidate must carry the
+    /// controlled Released status and the correct number/revision, contain no controlled watermark, and
+    /// have technical content (story text outside the named controls, embedded resources, relationships)
+    /// identical to the reviewed snapshot. Any other difference fails closed.
+    /// </summary>
+    public static ReleaseTransformationValidation ValidateReleaseTransformation(byte[] reviewedSource, byte[] candidate, string documentNumber, int revision)
+    {
+        try
+        {
+            ValidateDocx(candidate, requireDraftWatermark: false);
+        }
+        catch (DomainException ex)
+        {
+            return ReleaseTransformationValidation.Reject("invalid_release_candidate", ex.Message);
+        }
+
+        var fields = WordDocumentStructure.ControlledFields(candidate);
+        if (fields.Statuses.Count == 0 || fields.Statuses.Any(status => !status.Trim().Equals("Released", StringComparison.OrdinalIgnoreCase)))
+            return ReleaseTransformationValidation.Reject("invalid_released_status",
+                "Every controlled status field must read Released before the candidate can be signed.");
+        var expectedRevision = revision.ToString("D2");
+        if (fields.DocumentNumbers.Count == 0 || fields.DocumentNumbers.Any(number => !number.Trim().Equals(documentNumber, StringComparison.OrdinalIgnoreCase))
+            || fields.Revisions.Count == 0 || fields.Revisions.Any(value => !value.Trim().Equals(expectedRevision, StringComparison.OrdinalIgnoreCase)))
+            return ReleaseTransformationValidation.Reject("invalid_release_metadata",
+                "The release candidate carries the wrong controlled document number or formal revision.");
+
+        var parts = WordDocumentStructure.ReadWordParts(candidate);
+        var resolution = WordDocumentStructure.ResolveHeaders(candidate);
+        foreach (var section in resolution.Sections)
+        {
+            foreach (var (variant, part) in section.RequiredVariants())
+            {
+                if (part is null) continue;
+                if (WordDocumentStructure.PartHasControlledDraftWatermark(parts[part]))
+                    return ReleaseTransformationValidation.Reject("release_candidate_draft_watermark",
+                        $"Section {section.Index + 1} {variant} header still carries the controlled DRAFT watermark.");
+                if (WordDocumentStructure.PartHasControlledWatermarkShape(parts[part]))
+                    return ReleaseTransformationValidation.Reject("release_candidate_watermark_present",
+                        $"Section {section.Index + 1} {variant} header still contains the controlled watermark object.");
+            }
+        }
+
+        var reviewedFingerprint = WordDocumentStructure.TechnicalContentFingerprint(reviewedSource);
+        var candidateFingerprint = WordDocumentStructure.TechnicalContentFingerprint(candidate);
+        if (!string.Equals(reviewedFingerprint, candidateFingerprint, StringComparison.OrdinalIgnoreCase))
+            return ReleaseTransformationValidation.Reject("candidate_source_mismatch",
+                "The release DOCX changed reviewed content outside the controlled status and watermark fields. Prepare it again from the exact reviewed snapshot.");
+        return ReleaseTransformationValidation.Valid();
+    }
+
+    /// <summary>
+    /// The reference release transformation: only the named status controls become Released and the named
+    /// watermark objects are removed. Production releases use the Word connector, which performs the same
+    /// tagged operations through the Word object model; this OOXML implementation exists so the server-side
+    /// comparison can be tested against a deterministic, documented transform.
+    /// </summary>
+    public static byte[] ApplyReleaseMarking(byte[] reviewedDraft)
+    {
+        var fields = WordDocumentStructure.ControlledFields(reviewedDraft);
+        var documentNumber = fields.DocumentNumbers.FirstOrDefault(number => number.Length > 0) ?? "";
+        var revisionValue = fields.Revisions.FirstOrDefault(value => value.Length > 0) ?? "0";
+        var revision = int.TryParse(revisionValue, out var parsed) ? parsed : 0;
+        using var output = new MemoryStream();
+        output.Write(reviewedDraft);
+        output.Position = 0;
+        using (var archive = new ZipArchive(output, ZipArchiveMode.Update, true))
+        {
+            foreach (var entry in archive.Entries.Where(entry => IsStoryXmlEntry(entry.FullName)).Select(entry => entry.FullName).ToList())
+            {
+                ReplaceEntryText(archive, entry, xml =>
+                    WordDocumentStructure.RemoveControlledWatermarks(
+                        WordDocumentStructure.SetControlValueInXml(xml, WordDocumentStructure.StatusTag, "Released")));
+            }
+        }
+        var result = output.ToArray();
+        var validation = ValidateReleaseTransformation(reviewedDraft, result, documentNumber, revision);
+        if (!validation.IsValid) throw new DomainException(validation.Message);
+        return result;
+    }
+
+    /// <summary>
+    /// Turns a verified released DOCX into the next controlled Draft. New-model releases are updated through
+    /// their named controls only; legacy released documents produced by the pre-control renderer are upgraded
+    /// deterministically to the named-control structure. Historical evidence is never rewritten.
+    /// </summary>
     public static byte[] PrepareNextRevisionDraft(byte[] bytes, string documentNumber, int previousRevision, int nextRevision)
     {
         ValidateReleaseDocx(bytes);
+        var fields = WordDocumentStructure.ControlledFields(bytes);
+        var legacy = fields.Statuses.Count == 0;
         using var output = new MemoryStream();
         output.Write(bytes);
         output.Position = 0;
         using (var archive = new ZipArchive(output, ZipArchiveMode.Update, true))
         {
-            var previous = previousRevision.ToString("D2");
-            var next = nextRevision.ToString("D2");
-            ReplaceEntryText(archive, "word/document.xml", xml =>
-            {
-                xml = xml.Replace($"{documentNumber}  |  REVISION {previous}", $"{documentNumber}  |  REVISION {next}", StringComparison.Ordinal);
-                xml = ReplaceLabeledValue(xml, "Revision", previous, next);
-                return ReplaceLabeledValue(xml, "Status", "Released", "Draft");
-            });
-            foreach (var footer in archive.Entries.Where(x => x.FullName.StartsWith("word/footer", StringComparison.OrdinalIgnoreCase) && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).Select(x => x.FullName).ToList())
-                ReplaceEntryText(archive, footer, xml => xml.Replace($"{documentNumber} Rev {previous} | Released |", $"{documentNumber} Rev {next} | Draft |", StringComparison.Ordinal));
-            EnsureDraftHeader(archive);
-            foreach (var header in archive.Entries.Where(x => x.FullName.StartsWith("word/header", StringComparison.OrdinalIgnoreCase) && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).Select(x => x.FullName).ToList())
-                ReplaceEntryText(archive, header, AddDraftWatermark);
+            if (legacy)
+                UpgradeLegacyManagedDocument(archive, bytes, documentNumber, previousRevision, nextRevision);
+            else
+                UpgradeNewModelDraft(archive, bytes, documentNumber, nextRevision);
         }
         var result = output.ToArray();
         ValidateDocx(result, requireDraftWatermark: true);
         return result;
     }
 
-    private const string DraftWatermarkXml = "<w:r><w:rPr><w:noProof/></w:rPr><w:pict><v:shape id=\"AeroLinkWatermark\" o:spid=\"_x0000_s2049\" type=\"#_x0000_t136\" style=\"position:absolute;margin-left:0;margin-top:0;width:468pt;height:117pt;rotation:315;z-index:-251658752;mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin\" o:allowincell=\"f\" fillcolor=\"#c8d0d8\" stroked=\"f\"><v:textpath style=\"font-family:&quot;Calibri&quot;;font-size:1pt\" string=\"DRAFT\"/><v:fill opacity=\".45\"/></v:shape></w:pict></w:r>";
-
-    private static void EnsureDraftHeader(ZipArchive archive)
+    private static void UpgradeNewModelDraft(ZipArchive archive, byte[] originalBytes, string documentNumber, int nextRevision)
     {
-        if (archive.Entries.Any(x => x.FullName.StartsWith("word/header", StringComparison.OrdinalIgnoreCase) && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))) return;
+        foreach (var entry in archive.Entries.Where(entry => IsStoryXmlEntry(entry.FullName)).Select(entry => entry.FullName).ToList())
+        {
+            ReplaceEntryText(archive, entry, xml =>
+                WordDocumentStructure.SetControlValueInXml(
+                    WordDocumentStructure.SetControlValueInXml(
+                        WordDocumentStructure.SetControlValueInXml(xml, WordDocumentStructure.StatusTag, "Draft"),
+                        WordDocumentStructure.RevisionTag, nextRevision.ToString("D2")),
+                    WordDocumentStructure.DocumentNumberTag, documentNumber));
+        }
+        EnsureWatermarksInEffectiveHeaders(archive, originalBytes);
+    }
 
+    private static void UpgradeLegacyManagedDocument(ZipArchive archive, byte[] originalBytes, string documentNumber, int previousRevision, int nextRevision)
+    {
+        UpdateXmlEntry(archive, "word/document.xml", document => UpgradeLegacyDocumentBody(document, documentNumber, previousRevision, nextRevision));
+        foreach (var entry in archive.Entries.Where(entry => entry.FullName.StartsWith("word/footer", StringComparison.OrdinalIgnoreCase)
+            && entry.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).Select(entry => entry.FullName).ToList())
+        {
+            UpdateXmlEntry(archive, entry, footer => UpgradeLegacyFooter(footer, documentNumber, previousRevision, nextRevision));
+        }
+        EnsureWatermarksInEffectiveHeaders(archive, originalBytes);
+    }
+
+    private static void EnsureWatermarksInEffectiveHeaders(ZipArchive archive, byte[] originalBytes)
+    {
         const string headerName = "word/headerAeroLink.xml";
         const string relationshipId = "rIdAeroLinkDraftHeader";
-        WriteEntryText(archive, headerName, $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\"><w:p>{DraftWatermarkXml}</w:p></w:hdr>");
-
-        XNamespace contentType = "http://schemas.openxmlformats.org/package/2006/content-types";
-        UpdateXmlEntry(archive, "[Content_Types].xml", document =>
+        var resolution = WordDocumentStructure.ResolveHeaders(originalBytes);
+        var headerCreated = false;
+        foreach (var section in resolution.Sections)
         {
-            document.Root!.Add(new XElement(contentType + "Override",
-                new XAttribute("PartName", "/" + headerName),
-                new XAttribute("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml")));
-        });
+            foreach (var (variant, part) in section.RequiredVariants())
+            {
+                if (part is not null)
+                {
+                    ReplaceEntryText(archive, part, WordDocumentStructure.EnsureControlledDraftWatermark);
+                    continue;
+                }
+                if (!headerCreated)
+                {
+                    const string emptyHeader = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\"></w:hdr>";
+                    WriteEntryText(archive, headerName, WordDocumentStructure.EnsureControlledDraftWatermark(emptyHeader));
+                    UpdateXmlEntry(archive, "[Content_Types].xml", document =>
+                    {
+                        if (document.Root!.Elements(CT + "Override").Any(element =>
+                            string.Equals((string?)element.Attribute("PartName"), "/" + headerName, StringComparison.OrdinalIgnoreCase))) return;
+                        document.Root.Add(new XElement(CT + "Override",
+                            new XAttribute("PartName", "/" + headerName),
+                            new XAttribute("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml")));
+                    });
+                    var relationshipsName = "word/_rels/document.xml.rels";
+                    if (archive.GetEntry(relationshipsName) is null)
+                        WriteEntryText(archive, relationshipsName, $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"{PR}\"/>");
+                    UpdateXmlEntry(archive, relationshipsName, document =>
+                    {
+                        if (document.Root!.Elements(PR + "Relationship").Any(element =>
+                            string.Equals((string?)element.Attribute("Id"), relationshipId, StringComparison.Ordinal))) return;
+                        document.Root.Add(new XElement(PR + "Relationship",
+                            new XAttribute("Id", relationshipId),
+                            new XAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"),
+                            new XAttribute("Target", "headerAeroLink.xml")));
+                    });
+                    headerCreated = true;
+                }
+                AddHeaderReference(archive, section.Index, variant, relationshipId);
+            }
+        }
+    }
 
-        XNamespace packageRelationship = "http://schemas.openxmlformats.org/package/2006/relationships";
-        var relationshipsName = "word/_rels/document.xml.rels";
-        if (archive.GetEntry(relationshipsName) is null)
-            WriteEntryText(archive, relationshipsName, $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"{packageRelationship}\"/>");
-        UpdateXmlEntry(archive, relationshipsName, document =>
-        {
-            if (document.Root!.Elements(packageRelationship + "Relationship").Any(x => string.Equals((string?)x.Attribute("Id"), relationshipId, StringComparison.Ordinal)))
-                throw new DomainException("The Word document already uses AeroLink's reserved draft-header relationship identifier.");
-            document.Root.Add(new XElement(packageRelationship + "Relationship",
-                new XAttribute("Id", relationshipId),
-                new XAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"),
-                new XAttribute("Target", "headerAeroLink.xml")));
-        });
-
-        XNamespace word = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-        XNamespace officeRelationship = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    private static void AddHeaderReference(ZipArchive archive, int sectionIndex, string variant, string relationshipId)
+    {
         UpdateXmlEntry(archive, "word/document.xml", document =>
         {
-            var sections = document.Descendants(word + "sectPr").ToList();
-            if (sections.Count == 0)
+            var body = document.Descendants(W + "body").SingleOrDefault() ?? throw new DomainException("The Word document is missing its body.");
+            var sections = new List<XElement>();
+            foreach (var paragraph in body.Descendants(W + "p"))
             {
-                var body = document.Descendants(word + "body").SingleOrDefault() ?? throw new DomainException("The Word document is missing its body.");
-                var section = new XElement(word + "sectPr"); body.Add(section); sections.Add(section);
+                var nested = paragraph.Elements(W + "pPr").Elements(W + "sectPr").SingleOrDefault();
+                if (nested is not null) sections.Add(nested);
             }
-            foreach (var section in sections.Where(x => !x.Elements(word + "headerReference").Any(y => string.Equals((string?)y.Attribute(word + "type"), "default", StringComparison.OrdinalIgnoreCase))))
-                section.AddFirst(new XElement(word + "headerReference", new XAttribute(word + "type", "default"), new XAttribute(officeRelationship + "id", relationshipId)));
+            var bodySection = body.Elements(W + "sectPr").LastOrDefault();
+            if (bodySection is not null) sections.Add(bodySection);
+            var target = sections[sectionIndex];
+            if (!target.Elements(W + "headerReference").Any(reference =>
+                string.Equals((string?)reference.Attribute(W + "type"), variant, StringComparison.OrdinalIgnoreCase)))
+                target.AddFirst(new XElement(W + "headerReference",
+                    new XAttribute(W + "type", variant),
+                    new XAttribute(R + "id", relationshipId)));
         });
     }
 
-    private static string AddDraftWatermark(string xml)
+    private static void UpgradeLegacyDocumentBody(XDocument document, string documentNumber, int previousRevision, int nextRevision)
     {
-        if (xml.Contains("AeroLinkWatermark", StringComparison.Ordinal)) return xml;
-        var rootStart = xml.IndexOf("<w:hdr", StringComparison.Ordinal); var rootEnd = rootStart < 0 ? -1 : xml.IndexOf('>', rootStart);
-        if (rootEnd < 0) return xml;
-        if (!xml[rootStart..rootEnd].Contains("xmlns:v=", StringComparison.Ordinal)) { xml = xml.Insert(rootEnd, " xmlns:v=\"urn:schemas-microsoft-com:vml\""); rootEnd = xml.IndexOf('>', rootStart); }
-        if (!xml[rootStart..rootEnd].Contains("xmlns:o=", StringComparison.Ordinal)) xml = xml.Insert(rootEnd, " xmlns:o=\"urn:schemas-microsoft-com:office:office\"");
-        var paragraphProperties = xml.IndexOf("</w:pPr>", StringComparison.Ordinal);
-        return paragraphProperties >= 0 ? xml.Insert(paragraphProperties + "</w:pPr>".Length, DraftWatermarkXml) : xml.Replace("<w:p>", "<w:p>" + DraftWatermarkXml, StringComparison.Ordinal);
+        var body = document.Descendants(W + "body").SingleOrDefault() ?? throw new DomainException("The Word document is missing its body.");
+        foreach (var paragraph in body.Descendants(W + "p").ToList())
+        {
+            var style = (string?)paragraph.Descendants(W + "pStyle").FirstOrDefault()?.Attribute(W + "val");
+            var text = WordDocumentStructure.NormalizedPartText(paragraph.ToString());
+            if (style == "CoverNumber" && text == $"{documentNumber}  |  REVISION {previousRevision:D2}")
+            {
+                var nodes = new List<XNode>();
+                nodes.AddRange(SdtRun(WordDocumentStructure.DocumentNumberTag, documentNumber));
+                nodes.Add(Run("  |  REVISION "));
+                nodes.AddRange(SdtRun(WordDocumentStructure.RevisionTag, nextRevision.ToString("D2")));
+                paragraph.ReplaceNodes(nodes);
+            }
+            else if (style == "CoverStatus" && IsLegacyStatus(text))
+            {
+                paragraph.ReplaceNodes(SdtRun(WordDocumentStructure.StatusTag, "Draft", caps: true));
+            }
+        }
+
+        var table = body.Descendants(W + "tbl").FirstOrDefault();
+        if (table is null) return;
+        foreach (var row in table.Elements(W + "tr").ToList())
+        {
+            var cells = row.Elements(W + "tc").ToList();
+            if (cells.Count < 2) continue;
+            var label = WordDocumentStructure.NormalizedPartText(cells[0].ToString()).Trim();
+            var valueParagraph = cells[1].Descendants(W + "p").FirstOrDefault();
+            if (valueParagraph is null) continue;
+            switch (label)
+            {
+                case "Document number":
+                    valueParagraph.ReplaceNodes(SdtRun(WordDocumentStructure.DocumentNumberTag, documentNumber));
+                    break;
+                case "Revision":
+                    valueParagraph.ReplaceNodes(SdtRun(WordDocumentStructure.RevisionTag, nextRevision.ToString("D2")));
+                    break;
+                case "Status":
+                    valueParagraph.ReplaceNodes(SdtRun(WordDocumentStructure.StatusTag, "Draft"));
+                    break;
+            }
+        }
     }
 
-    private static string ReplaceLabeledValue(string xml, string label, string previous, string next)
+    private static void UpgradeLegacyFooter(XDocument footer, string documentNumber, int previousRevision, int nextRevision)
     {
-        var controlLabel = $"<w:t xml:space=\"preserve\">{label}</w:t>"; var labelIndex = xml.IndexOf(controlLabel, StringComparison.Ordinal);
-        if (labelIndex < 0) return xml;
-        var previousValue = $"<w:t xml:space=\"preserve\">{previous}</w:t>"; var nextValue = $"<w:t xml:space=\"preserve\">{next}</w:t>";
-        var valueIndex = xml.IndexOf(previousValue, labelIndex + controlLabel.Length, StringComparison.Ordinal);
-        return valueIndex < 0 ? xml : string.Concat(xml.AsSpan(0, valueIndex), nextValue, xml.AsSpan(valueIndex + previousValue.Length));
+        foreach (var paragraph in footer.Descendants(W + "p").ToList())
+        {
+            var text = WordDocumentStructure.NormalizedPartText(paragraph.ToString());
+            var marker = $"{documentNumber} Rev {previousRevision:D2} | ";
+            if (!text.StartsWith(marker, StringComparison.Ordinal)) continue;
+            var remainder = text[marker.Length..];
+            var pipe = remainder.IndexOf(" | ", StringComparison.Ordinal);
+            if (pipe < 0) continue;
+            var tail = remainder[pipe..];
+            var pageMarker = tail.LastIndexOf(" | Page", StringComparison.Ordinal);
+            if (pageMarker >= 0) tail = tail[..pageMarker] + " | Page ";
+            var field = paragraph.Elements(W + "fldSimple").FirstOrDefault();
+            var nodes = new List<XNode>();
+            nodes.AddRange(SdtRun(WordDocumentStructure.DocumentNumberTag, documentNumber));
+            nodes.Add(Run(" Rev "));
+            nodes.AddRange(SdtRun(WordDocumentStructure.RevisionTag, nextRevision.ToString("D2")));
+            nodes.Add(Run(" | "));
+            nodes.AddRange(SdtRun(WordDocumentStructure.StatusTag, "Draft"));
+            nodes.Add(Run(tail));
+            if (field is not null) nodes.Add(new XElement(field));
+            paragraph.ReplaceNodes(nodes);
+        }
     }
+
+    private static bool IsLegacyStatus(string text) =>
+        text.Equals("RELEASED", StringComparison.OrdinalIgnoreCase)
+        || text.Equals("RELEASE CANDIDATE", StringComparison.OrdinalIgnoreCase)
+        || text.Equals("RELEASED CANDIDATE", StringComparison.OrdinalIgnoreCase);
+
+    private static IEnumerable<XNode> SdtRun(string tag, string value, bool caps = false) =>
+        [new XElement(W + "sdt",
+            new XElement(W + "sdtPr", new XElement(W + "tag", new XAttribute(W + "val", tag))),
+            new XElement(W + "sdtContent", caps ? RunCaps(value) : Run(value)))];
+
+    private static XElement Run(string text) =>
+        new(W + "r", new XElement(W + "t", new XAttribute(XNamespace.Xml + "space", "preserve"), text));
+
+    private static XElement RunCaps(string text) =>
+        new(W + "r", new XElement(W + "rPr", new XElement(W + "caps")), new XElement(W + "t", new XAttribute(XNamespace.Xml + "space", "preserve"), text));
+
+    private static bool IsStoryXmlEntry(string name) =>
+        name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
+        && (name.Equals("word/document.xml", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("word/header", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("word/footer", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("word/footnotes.xml", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("word/endnotes.xml", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("word/comments.xml", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("word/glossary/document.xml", StringComparison.OrdinalIgnoreCase));
 
     public async Task<ControlledAttachment> StoreAsync(Guid projectId, Guid documentId, Guid revisionId,
         Guid logicalId, int version, string label, string description, string fileName, string contentType,
@@ -238,7 +491,8 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
     private static void UpdateXmlEntry(ZipArchive archive, string entryName, Action<XDocument> transform)
     {
         var entry = archive.GetEntry(entryName) ?? throw new DomainException("The Word document is missing required package metadata.");
-        var document = XDocument.Parse(ReadText(entry), LoadOptions.PreserveWhitespace); transform(document);
+        var document = XDocument.Parse(ReadText(entry), LoadOptions.PreserveWhitespace);
+        transform(document);
         WriteEntryText(archive, entryName, document.ToString(SaveOptions.DisableFormatting));
     }
 
@@ -246,21 +500,33 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
     {
         archive.GetEntry(entryName)?.Delete();
         var replacement = archive.CreateEntry(entryName, CompressionLevel.Optimal);
-        using var writer = new StreamWriter(replacement.Open(), new UTF8Encoding(false)); writer.Write(content);
+        using var writer = new StreamWriter(replacement.Open(), new UTF8Encoding(false));
+        writer.Write(content);
     }
 
-    private static async Task<byte[]> ReadLimitedAsync(Stream input, CancellationToken ct)
+    private static async Task<byte[]> ReadLimitedAsync(Stream input, int maximumBytes, string limitMessage, CancellationToken ct)
     {
         using var output = new MemoryStream();
         var buffer = new byte[81920];
         int read;
         while ((read = await input.ReadAsync(buffer, ct)) > 0)
         {
-            if (output.Length + read > MaximumDocumentBytes)
-                throw new DomainException("Word documents are limited to 100 MB.");
+            if (output.Length + read > maximumBytes) throw new DomainException(limitMessage);
             await output.WriteAsync(buffer.AsMemory(0, read), ct);
         }
         if (output.Length == 0) throw new DomainException("The Word document cannot be empty.");
         return output.ToArray();
     }
+}
+
+public sealed class PdfRenditionTooLargeException : IOException
+{
+    public PdfRenditionTooLargeException() : base("The PDF rendition exceeds the 100 MB release limit.") { }
+}
+
+public sealed record ReleaseTransformationValidation(bool IsValid, string Code, string Message)
+{
+    public static ReleaseTransformationValidation Valid() =>
+        new(true, "release_candidate_ok", "The release DOCX preserves the exact reviewed technical content and carries the controlled Released status.");
+    public static ReleaseTransformationValidation Reject(string code, string message) => new(false, code, message);
 }
