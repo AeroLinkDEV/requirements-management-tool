@@ -9,6 +9,7 @@ using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -149,6 +150,9 @@ public sealed class ManagedDocumentApiTests
         Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
         using var verificationScope = factory.Services.CreateScope(); var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         Assert.Equal(2, await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.CountAsync(verificationDb.ManagedDocumentReviewSteps.Where(x => x.RevisionId == revisionId)));
+        var storageOperations = await verificationDb.ManagedDocumentStorageOperations.Where(x => x.DocumentId == documentId).ToListAsync();
+        Assert.Equal(2, storageOperations.Count); Assert.All(storageOperations, item => Assert.Equal(ManagedDocumentStorageOperationState.Available, item.State));
+        Assert.Empty(verificationScope.ServiceProvider.GetRequiredService<EvidenceFileStore>().EnumerateStagedKeys());
     }
 
     [Fact]
@@ -428,6 +432,14 @@ public sealed class ManagedDocumentApiTests
         using var candidateRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/release-candidate") { Content = candidateForm }; candidateRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var candidate = await quality.SendAsync(candidateRequest); Assert.Equal(HttpStatusCode.OK, candidate.StatusCode); var candidateBody = await candidate.Content.ReadFromJsonAsync<JsonElement>();
         using var candidateRetryForm = new MultipartFormDataContent(); candidateRetryForm.Add(new StringContent(sessionVersion.ToString()), "expectedVersion"); var retryDocxPart = new ByteArrayContent(docx.Content); retryDocxPart.Headers.ContentType = new(docx.ContentType); candidateRetryForm.Add(retryDocxPart, "docx", docx.FileName); var retryPdfPart = new ByteArrayContent(pdf.Content); retryPdfPart.Headers.ContentType = new(pdf.ContentType); candidateRetryForm.Add(retryPdfPart, "pdf", pdf.FileName);
         using var candidateRetryRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/release-candidate") { Content = candidateRetryForm }; candidateRetryRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var candidateRetry = await quality.SendAsync(candidateRetryRequest); Assert.Equal(HttpStatusCode.OK, candidateRetry.StatusCode); var candidateRetryBody = await candidateRetry.Content.ReadFromJsonAsync<JsonElement>(); Assert.Equal(candidateBody.GetProperty("manifestHash").GetString(), candidateRetryBody.GetProperty("manifestHash").GetString());
+        using (var candidateScope = factory.Services.CreateScope())
+        {
+            var candidateDb = candidateScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var operation = await candidateDb.ManagedDocumentStorageOperations.SingleAsync(x => x.RevisionId == revisionId && x.OperationType == "ConnectorReleaseCandidate");
+            Assert.Equal(ManagedDocumentStorageOperationState.Available, operation.State);
+            Assert.Equal(2, JsonSerializer.Deserialize<List<ManagedDocumentStagedObject>>(operation.ObjectManifestJson)!.Count);
+            Assert.Equal(2, await candidateDb.ControlledAttachments.CountAsync(x => x.RevisionId == revisionId && (x.Label == "Release candidate DOCX" || x.Label == "Release candidate PDF")));
+        }
         var candidateDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var candidateRevision = candidateDetail.GetProperty("revisions")[0]; var candidatePdfId = candidateRevision.GetProperty("releaseCandidatePdfAttachmentId").GetGuid();
         using (var serviceScope = factory.Services.CreateScope())
         {
@@ -453,6 +465,106 @@ public sealed class ManagedDocumentApiTests
             Assert.Equal(releasedFile.GetProperty("sha256").GetString(), ManagedDocumentFileService.Sha256(downloaded));
         }
         using var releasedEdit = await owner.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/formal-summary", new { formalChangeSummary = "Forbidden after release.", reason = "Must fail.", expectedVersion = revision.GetProperty("version").GetInt64() }); Assert.Equal(HttpStatusCode.Conflict, releasedEdit.StatusCode);
+    }
+
+    [Fact]
+    public async Task Draft_and_returned_withdrawal_closes_checkouts_but_reviewed_and_released_revisions_fail_closed()
+    {
+        using var factory = new AeroLinkApiFactory(); using var administrator = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(administrator); var scope = await SeedProjectAsync(factory);
+        using var owner = factory.CreateClient();
+        using (var login = await owner.PostAsJsonAsync("/api/auth/login", new { userName = "software.author", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(owner);
+
+        using var created = await owner.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SVP", documentType = "Software Verification Plan", title = "Withdrawable plan", ownerId = "software.author", formalChangeSummary = "Initial controlled scope.", operationKey = "withdraw-draft" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode); var body = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var documentId = body.GetProperty("id").GetGuid(); var revisionId = body.GetProperty("revisionId").GetGuid();
+        using var checkout = await owner.PostAsync($"/api/managed-documents/revisions/{revisionId}/checkout", null); Assert.Equal(HttpStatusCode.OK, checkout.StatusCode);
+        var detail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var version = detail.GetProperty("revisions")[0].GetProperty("version").GetInt64();
+        using var withdrawn = await owner.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/withdraw", new { reason = "The Project no longer needs this initial issue.", expectedVersion = version });
+        Assert.Equal(HttpStatusCode.OK, withdrawn.StatusCode);
+        using (var scopeCheck = factory.Services.CreateScope())
+        {
+            var db = scopeCheck.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(ManagedDocumentState.Withdrawn, (await db.ManagedDocumentRevisions.SingleAsync(x => x.Id == revisionId)).State);
+            Assert.All(await db.ControlledAttachments.Where(x => x.RevisionId == revisionId).ToListAsync(), item => Assert.Equal(ControlledAttachmentState.Withdrawn, item.State));
+            Assert.All(await db.ArtifactEditSessions.Where(x => x.RevisionId == revisionId).ToListAsync(), item => Assert.Equal(EditSessionState.ForceUnlocked, item.State));
+            Assert.Contains(await db.ManagedDocumentEvents.Where(x => x.DocumentId == documentId).ToListAsync(), item => item.EventType == "DocumentRevisionWithdrawn");
+        }
+
+        using var reviewedCreate = await owner.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SQAP", documentType = "Software Quality Assurance Plan", title = "Reviewed plan", ownerId = "software.author", formalChangeSummary = "Review this exact scope.", operationKey = "withdraw-review" });
+        var reviewedBody = await reviewedCreate.Content.ReadFromJsonAsync<JsonElement>(); var reviewedDocumentId = reviewedBody.GetProperty("id").GetGuid(); var reviewedRevisionId = reviewedBody.GetProperty("revisionId").GetGuid();
+        using var submitted = await SubmitAsync(owner, reviewedDocumentId, reviewedRevisionId, "software.lead", "quality.analyst"); Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        var reviewedDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{reviewedDocumentId}");
+        using var blockedReview = await owner.PostAsJsonAsync($"/api/managed-documents/revisions/{reviewedRevisionId}/withdraw", new { reason = "Must not bypass review.", expectedVersion = reviewedDetail.GetProperty("revisions")[0].GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.BadRequest, blockedReview.StatusCode);
+
+        using var technical = factory.CreateClient(); using (var login = await technical.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(technical);
+        using var returned = await DecideAsync(technical, reviewedDocumentId, reviewedRevisionId, "return", "Return this revision.", "The controlled revision should be abandoned rather than corrected."); Assert.Equal(HttpStatusCode.OK, returned.StatusCode);
+        reviewedDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{reviewedDocumentId}");
+        using var returnedWithdraw = await owner.PostAsJsonAsync($"/api/managed-documents/revisions/{reviewedRevisionId}/withdraw", new { reason = "Withdraw the returned successor with history retained.", expectedVersion = reviewedDetail.GetProperty("revisions")[0].GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.OK, returnedWithdraw.StatusCode);
+
+        var released = await SeedReleasedDocumentAsync(factory, scope.ProjectId, "SAS");
+        long releasedVersion; using (var releasedScope = factory.Services.CreateScope()) releasedVersion = (await releasedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>().ManagedDocumentRevisions.AsNoTracking().SingleAsync(x => x.Id == released.RevisionId)).Version;
+        using var blockedReleased = await administrator.PostAsJsonAsync($"/api/managed-documents/revisions/{released.RevisionId}/withdraw", new { reason = "Released evidence is immutable.", expectedVersion = releasedVersion });
+        Assert.Equal(HttpStatusCode.BadRequest, blockedReleased.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("pending-recorded")]
+    [InlineData("object-staged-1")]
+    [InlineData("manifest-recorded")]
+    [InlineData("before-promote")]
+    [InlineData("object-promoted-1")]
+    [InlineData("metadata-saved")]
+    public async Task Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(string phase)
+    {
+        var injector = new OneShotStorageFaultInjector("DocumentCreate", phase);
+        using var factory = new AeroLinkApiFactory(storageFaultInjector: injector); using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client); var scope = await SeedProjectAsync(factory);
+        using var failed = await client.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId,
+            acronym = "ICD", documentType = "Interface Control Document", title = "Fault-injected document",
+            ownerId = "software.author", formalChangeSummary = "Atomic failure coverage.", operationKey = $"fault-{phase}" });
+        Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+
+        using var reconciled = await client.PostAsync($"/api/managed-documents/projects/{scope.ProjectId}/storage/reconcile", null);
+        Assert.Equal(HttpStatusCode.OK, reconciled.StatusCode);
+        using var verification = factory.Services.CreateScope(); var db = verification.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Empty(await db.ManagedDocuments.Where(x => x.ProjectId == scope.ProjectId).ToListAsync());
+        Assert.Empty(await db.ControlledAttachments.Where(x => x.ProjectId == scope.ProjectId && x.ArtifactType == "ManagedDocument").ToListAsync());
+        var operation = await db.ManagedDocumentStorageOperations.SingleAsync(x => x.OperationKey == $"fault-{phase}");
+        Assert.Equal(ManagedDocumentStorageOperationState.RolledBack, operation.State);
+        Assert.Empty(verification.ServiceProvider.GetRequiredService<EvidenceFileStore>().EnumerateStagedKeys());
+    }
+
+    [Fact]
+    public async Task Create_fault_after_metadata_commit_reconciles_to_available_and_retry_returns_the_same_result()
+    {
+        const string operationKey = "fault-after-metadata-commit";
+        var injector = new OneShotStorageFaultInjector("DocumentCreate", "before-available-recorded");
+        using var factory = new AeroLinkApiFactory(storageFaultInjector: injector);
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var scope = await SeedProjectAsync(factory);
+        var request = new { projectId = scope.ProjectId, acronym = "ICD", documentType = "Interface Control Document",
+            title = "Committed fault-injected document", ownerId = "software.author",
+            formalChangeSummary = "Post-commit recovery coverage.", operationKey };
+
+        using var failed = await client.PostAsJsonAsync("/api/managed-documents", request);
+        Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+        using var retried = await client.PostAsJsonAsync("/api/managed-documents", request);
+        Assert.Equal(HttpStatusCode.Created, retried.StatusCode);
+        var retriedResult = await retried.Content.ReadFromJsonAsync<JsonElement>();
+
+        using var verification = factory.Services.CreateScope();
+        var db = verification.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var document = Assert.Single(await db.ManagedDocuments.Where(x => x.ProjectId == scope.ProjectId).ToListAsync());
+        var operation = await db.ManagedDocumentStorageOperations.SingleAsync(x => x.OperationKey == operationKey);
+        Assert.Equal(ManagedDocumentStorageOperationState.Available, operation.State);
+        Assert.Equal(document.Id, retriedResult.GetProperty("id").GetGuid());
+        Assert.Single(await db.ControlledAttachments.Where(x => x.ProjectId == scope.ProjectId && x.ArtifactType == "ManagedDocument").ToListAsync());
+        Assert.Empty(verification.ServiceProvider.GetRequiredService<EvidenceFileStore>().EnumerateStagedKeys());
     }
 
     [Fact]
@@ -679,4 +791,15 @@ public sealed class ManagedDocumentApiTests
         db.AddRange(program, project, released, active, technical, quality, author, reviewer, new ProgramMembership(technical.Id, program.Id, ProgramRole.SoftwareEngineeringLead, "admin", now), new ProgramMembership(quality.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.SoftwareEngineer, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.Reviewer, "admin", now), new ProgramMembership(reviewer.Id, program.Id, ProgramRole.Reviewer, "admin", now)); await db.SaveChangesAsync(); return (program.Id, project.Id, released.Id, active.Id);
     }
     private static Dictionary<string,string> Query(Uri uri) => uri.Query.TrimStart('?').Split('&').Select(part => part.Split('=', 2)).ToDictionary(pair => pair[0], pair => Uri.UnescapeDataString(pair[1]));
+}
+
+internal sealed class OneShotStorageFaultInjector(string operationType, string phase) : IManagedDocumentStorageFaultInjector
+{
+    private int _triggered;
+    public Task CheckpointAsync(ManagedDocumentStorageOperation operation, string checkpoint, CancellationToken ct)
+    {
+        if (operation.OperationType == operationType && checkpoint == phase && Interlocked.Exchange(ref _triggered, 1) == 0)
+            throw new IOException($"Injected managed-document storage failure at {operationType}/{phase}.");
+        return Task.CompletedTask;
+    }
 }

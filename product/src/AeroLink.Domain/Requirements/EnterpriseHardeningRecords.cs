@@ -40,6 +40,7 @@ public sealed class ControlledAttachment
     public DateTimeOffset UploadedAt { get; private set; }
     public DateTimeOffset? IntegrityVerifiedAt { get; private set; }
     public void Supersede() { if (State == ControlledAttachmentState.Active) State = ControlledAttachmentState.Superseded; }
+    public void Withdraw() { if (State != ControlledAttachmentState.Withdrawn) State = ControlledAttachmentState.Withdrawn; }
     public void RecordIntegrityVerification(DateTimeOffset now) => IntegrityVerifiedAt = now;
     private static string Required(string value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A required attachment value is missing.") : value.Trim();
 }

@@ -201,6 +201,15 @@ jobs:
             throw 'The scheduled task no longer invokes the verified backup runner with retention.'
           }
 
+      - name: Validate configured evidence backup contracts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkEvidenceStore.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Configured evidence backup regression failed.' }
+          & ./product/scripts/AeroLinkBackupVerification.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Portable backup verification regression failed.' }
+
       - name: Validate the migration-posture diagnostics contract
         shell: powershell
         run: |

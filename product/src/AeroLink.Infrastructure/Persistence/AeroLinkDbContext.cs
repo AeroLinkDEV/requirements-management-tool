@@ -140,6 +140,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ManagedDocumentAssignment> ManagedDocumentAssignments => Set<ManagedDocumentAssignment>();
     public DbSet<ManagedDocumentReviewStep> ManagedDocumentReviewSteps => Set<ManagedDocumentReviewStep>();
     public DbSet<ManagedDocumentOperation> ManagedDocumentOperations => Set<ManagedDocumentOperation>();
+    public DbSet<ManagedDocumentStorageOperation> ManagedDocumentStorageOperations => Set<ManagedDocumentStorageOperation>();
     public DbSet<ManagedDocumentBuildProvenance> ManagedDocumentBuildProvenance => Set<ManagedDocumentBuildProvenance>();
     public DbSet<ManagedDocumentLink> ManagedDocumentLinks => Set<ManagedDocumentLink>();
     public DbSet<ManagedDocumentEvent> ManagedDocumentEvents => Set<ManagedDocumentEvent>();
@@ -1185,6 +1186,17 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.OperationKey).HasMaxLength(100).IsRequired(); b.Property(x => x.PayloadHash).HasMaxLength(64).IsRequired(); b.Property(x => x.ResultJson).HasMaxLength(4000).IsRequired();
             b.HasIndex(x => new { x.RevisionId, x.OperationType, x.OperationKey }).IsUnique();
             b.HasOne<ManagedDocumentRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ManagedDocumentStorageOperation>(b =>
+        {
+            b.ToTable("managed_document_storage_operations"); b.HasKey(x => x.Id);
+            b.Property(x => x.OperationType).HasMaxLength(40).IsRequired(); b.Property(x => x.OperationKey).HasMaxLength(100).IsRequired();
+            b.Property(x => x.PayloadHash).HasMaxLength(64).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.ObjectManifestJson).HasColumnType("text").IsRequired(); b.Property(x => x.ResultJson).HasColumnType("text").IsRequired();
+            b.Property(x => x.Detail).HasMaxLength(4000).IsRequired(); b.Property(x => x.ActorId).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.OperationType, x.OperationKey }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.State, x.UpdatedAt });
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ManagedDocumentBuildProvenance>(b =>
         {

@@ -22,10 +22,15 @@ public sealed class ManagedDocumentIntegrityWorker(
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-                var projectIds = await db.ManagedDocuments.AsNoTracking().Select(x => x.ProjectId).Distinct().ToListAsync(stoppingToken);
-                var integrity = scope.ServiceProvider.GetRequiredService<ManagedDocumentIntegrityService>();
+                var documentProjectIds = db.ManagedDocuments.AsNoTracking().Select(x => x.ProjectId);
+                var interruptedProjectIds = db.ManagedDocumentStorageOperations.AsNoTracking()
+                    .Where(x => x.State == AeroLink.Domain.Documents.ManagedDocumentStorageOperationState.Pending
+                        || x.State == AeroLink.Domain.Documents.ManagedDocumentStorageOperationState.RepairRequired)
+                    .Select(x => x.ProjectId);
+                var projectIds = await documentProjectIds.Union(interruptedProjectIds).ToListAsync(stoppingToken);
+                var reconciliation = scope.ServiceProvider.GetRequiredService<ManagedDocumentStorageCoordinator>();
                 foreach (var projectId in projectIds)
-                    await integrity.ScanProjectAsync(projectId, "system.integrity", stoppingToken);
+                    await reconciliation.ReconcileProjectAsync(projectId, "system.integrity", DateTimeOffset.UtcNow, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex) { logger.LogError(ex, "The periodic managed-document integrity scan failed."); }

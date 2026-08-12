@@ -191,6 +191,22 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
             stored.StorageKey, supersedesId, actor, now);
     }
 
+    public async Task<(ControlledAttachment Attachment, StagedEvidence Staged)> StageAsync(Guid operationId, string slot,
+        Guid projectId, Guid documentId, Guid revisionId, Guid logicalId, int version, string label,
+        string description, string fileName, string contentType, byte[] content, Guid? supersedesId,
+        string actor, DateTimeOffset now, CancellationToken ct)
+    {
+        await using var source = new MemoryStream(content, false);
+        var staged = await files.StageAsync(source, operationId, slot, fileName, contentType, ct);
+        var attachment = new ControlledAttachment(projectId, "ManagedDocument", documentId, revisionId, logicalId,
+            version, label, description, staged.OriginalFileName, staged.ContentType, staged.Size, staged.Sha256,
+            staged.StorageKey, supersedesId, actor, now);
+        return (attachment, staged);
+    }
+
+    public Task PromoteAsync(StagedEvidence staged, CancellationToken ct) => files.PromoteAsync(staged, ct);
+    public string? Quarantine(string storageKey, Guid operationId, string reason) => files.Quarantine(storageKey, operationId, reason);
+
     public static string Sha256(byte[] content) => Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
     public void Delete(string storageKey) => files.Delete(storageKey);
 

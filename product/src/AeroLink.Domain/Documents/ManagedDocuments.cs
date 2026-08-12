@@ -7,6 +7,7 @@ namespace AeroLink.Domain.Documents;
 
 public enum ManagedDocumentState { Draft, InReview, Returned, Released, Superseded, Withdrawn }
 public enum ManagedDocumentReviewStepState { Pending, Active, Approved, Returned }
+public enum ManagedDocumentStorageOperationState { Pending, Available, RolledBack, RepairRequired }
 
 public sealed record ManagedDocumentReviewer(string UserId, string Name, string StageName,
     string RequiredAuthority = "LegacyUnspecified", string GrantedAuthority = "LegacyUnspecified",
@@ -224,6 +225,16 @@ public sealed class ManagedDocumentRevision
     public void Supersede(DateTimeOffset now)
     { if (State != ManagedDocumentState.Released) throw new DomainException("Only a released revision can be superseded."); State = ManagedDocumentState.Superseded; UpdatedAt = now; Version++; }
 
+    public void Withdraw(string reason, long expectedVersion, DateTimeOffset now)
+    {
+        if (Version != expectedVersion) throw new DomainException("The document revision changed after this page loaded. Refresh and try again.");
+        if (State is not (ManagedDocumentState.Draft or ManagedDocumentState.Returned))
+            throw new DomainException("Only a Draft or returned document revision can be withdrawn.");
+        ReturnReason = Bounded(reason, 4000, "A withdrawal reason is required.", "A withdrawal reason cannot exceed 4000 characters.");
+        State = ManagedDocumentState.Withdrawn; ReleaseCandidateDocxAttachmentId = null;
+        ReleaseCandidatePdfAttachmentId = null; ReleaseManifestHash = ""; UpdatedAt = now; Version++;
+    }
+
     public void ReviseFormalSummary(string formalChangeSummary, string reason, long expectedVersion, DateTimeOffset now)
     {
         EnsureEditable();
@@ -419,6 +430,63 @@ public sealed class ManagedDocumentOperation
     public string ResultJson { get; private set; } = "";
     public DateTimeOffset CompletedAt { get; private set; }
     private static string Required(string? value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A managed-document operation value is required.") : value.Trim();
+}
+
+/// <summary>Durable recovery evidence for one filesystem plus metadata operation.</summary>
+public sealed class ManagedDocumentStorageOperation
+{
+    private ManagedDocumentStorageOperation() { }
+    public ManagedDocumentStorageOperation(Guid projectId, Guid documentId, Guid revisionId, string operationType,
+        string operationKey, string payloadHash, string actorId, DateTimeOffset now)
+    {
+        Id = Guid.NewGuid(); ProjectId = projectId; DocumentId = documentId; RevisionId = revisionId;
+        OperationType = Required(operationType); OperationKey = Required(operationKey);
+        PayloadHash = Required(payloadHash).ToLowerInvariant(); ActorId = Required(actorId).ToLowerInvariant();
+        State = ManagedDocumentStorageOperationState.Pending; ObjectManifestJson = "[]"; ResultJson = "";
+        Detail = "Staging controlled document objects."; CreatedAt = UpdatedAt = now;
+    }
+    public Guid Id { get; private set; }
+    public Guid ProjectId { get; private set; }
+    public Guid DocumentId { get; private set; }
+    public Guid RevisionId { get; private set; }
+    public string OperationType { get; private set; } = "";
+    public string OperationKey { get; private set; } = "";
+    public string PayloadHash { get; private set; } = "";
+    public ManagedDocumentStorageOperationState State { get; private set; }
+    public string ObjectManifestJson { get; private set; } = "[]";
+    public string ResultJson { get; private set; } = "";
+    public string Detail { get; private set; } = "";
+    public string ActorId { get; private set; } = "";
+    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
+    public DateTimeOffset? CompletedAt { get; private set; }
+
+    public void RecordManifest(string manifestJson, string plannedResultJson, DateTimeOffset now)
+    {
+        if (State != ManagedDocumentStorageOperationState.Pending) throw new DomainException("Only a pending storage operation can record staged objects.");
+        ObjectManifestJson = Required(manifestJson); ResultJson = Required(plannedResultJson);
+        Detail = "Controlled document objects are staged and awaiting atomic metadata commit."; UpdatedAt = now;
+    }
+    public void RecordFailure(string detail, DateTimeOffset now)
+    {
+        if (State != ManagedDocumentStorageOperationState.Pending) return;
+        Detail = Required(detail); UpdatedAt = now;
+    }
+    public void Complete(DateTimeOffset now)
+    {
+        ResultJson = Required(ResultJson); State = ManagedDocumentStorageOperationState.Available;
+        Detail = "Every controlled object and its metadata are available."; UpdatedAt = now; CompletedAt = now;
+    }
+    public void RollBack(string detail, DateTimeOffset now)
+    {
+        if (State == ManagedDocumentStorageOperationState.Available) throw new DomainException("An available storage operation cannot be rolled back.");
+        State = ManagedDocumentStorageOperationState.RolledBack; Detail = Required(detail); UpdatedAt = now; CompletedAt = now;
+    }
+    public void RequireRepair(string detail, DateTimeOffset now)
+    {
+        State = ManagedDocumentStorageOperationState.RepairRequired; Detail = Required(detail); UpdatedAt = now; CompletedAt = null;
+    }
+    private static string Required(string? value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A managed-document storage-operation value is required.") : value.Trim();
 }
 
 /// <summary>Historical provenance retained from the former build-scoped document model. It never selects document effectivity.</summary>

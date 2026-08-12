@@ -149,9 +149,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Prune-Lo
 
 ## Backup and verification
 
-Run `BACKUP_AEROLINK.bat`. The output under `product/.local/backups` contains a PostgreSQL custom-format dump, evidence, runtime configuration, `manifest.json`, and a ZIP SHA-256 sidecar. Retention defaults to 30 days.
+Run `BACKUP_AEROLINK.bat`. The output under `product/.local/backups` contains a PostgreSQL custom-format dump, the exact runtime-configured evidence root, runtime configuration, a database-derived attachment inventory, `manifest.json`, and a ZIP SHA-256 sidecar. `Evidence__Root` has environment precedence, then the active appsettings environment, then appsettings, then the LocalAppData default. Backup fails before publication if a referenced object is missing or does not match its size/SHA-256, if attachment metadata changes during capture, or if a pending/repair-required storage operation or partial candidate/released set exists. Retention defaults to 30 days.
 
-Run `VERIFY_AEROLINK_BACKUP.bat <absolute-or-repository-backup-zip>`. Verification accepts only archives in `product/.local/backups`, checks the sidecar, rejects unsafe ZIP and manifest paths, and verifies every declared file's size and hash.
+Run `VERIFY_AEROLINK_BACKUP.bat <absolute-or-repository-backup-zip>`. Verification supports an intentionally relocated ZIP when its adjacent sidecar travels with it, checks the sidecar, rejects unsafe ZIP, manifest, and storage-key paths, verifies every declared file, and independently reconciles every attachment inventory row to the archived evidence size/hash. Orphan objects are reported separately and cannot substitute for a missing referenced object.
 
 ### Automatic daily backup
 
@@ -188,7 +188,7 @@ organization-approved RPO/RTO.
 
 ## Isolated restore drill
 
-Run `RESTORE_AEROLINK.bat <backup-zip> aerolink_restore_validation`. The target name must contain `restore`, `validation`, or `test`. The command verifies the archive, recreates only that isolated database, restores evidence only below `product/.local/restore-validation`, and reports the restored Program count. It never selects `aerolink` by default.
+Run `RESTORE_AEROLINK.bat <backup-zip> aerolink_restore_validation`. The target name must contain `restore`, `validation`, or `test`. The command verifies the archive, recreates only that isolated database, binds validation to evidence below `product/.local/restore-validation`, compares the restored database inventory with the signed archive inventory, rejects pending/partial lifecycle state, and independently verifies every restored object before reporting Program, attachment, object, and byte counts. It never selects `aerolink` by default. Production restore resolves the same runtime evidence root as the API, retains the prior evidence directory and a pre-restore backup, and does not restart AeroLink unless full database-to-filesystem validation succeeds.
 
 Validate a pending migration on the restored copy with the design-time connection made explicit. Design-time
 EF commands fail closed: `AEROLINK_MIGRATIONS_CONNECTION` must be set, and the factory never falls back to the

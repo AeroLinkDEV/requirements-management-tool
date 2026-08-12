@@ -184,6 +184,34 @@ test('an integrity-blocked revision is explicit and cannot launch or submit from
   await expect(page.getByRole('button', { name: 'Submit for review' })).toBeDisabled()
 })
 
+test('a Draft revision can be withdrawn with retained history and survives refresh', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  const showcase = await showcaseSeed(request)
+  await apiLogin(request, 'software.author')
+  const suffix = Date.now().toString().slice(-6)
+  const createdResponse = await request.post(`${apiBase}/api/managed-documents`, { data: {
+    projectId: showcase.projectId,
+    acronym: 'WDP',
+    documentType: 'Withdrawal Demonstration Plan',
+    title: `Withdraw revision ${suffix}`,
+    ownerId: 'software.author',
+    formalChangeSummary: 'Prove controlled abandonment without deleting evidence.',
+    operationKey: `browser-withdraw-${suffix}`,
+  } })
+  expect(createdResponse.ok(), await createdResponse.text()).toBeTruthy()
+  const created = await createdResponse.json()
+
+  await login(page, 'software.author', { openProject: false })
+  await page.goto(`/programs/${showcase.programId}/projects/${showcase.projectId}/documentation-center/${created.id}`)
+  page.once('dialog', dialog => dialog.accept('The Project dispositioned this Draft before review.'))
+  await page.getByRole('button', { name: 'Withdraw revision', exact: true }).click()
+  await expect(page.getByText(/was withdrawn with its evidence retained/)).toBeVisible()
+  await page.reload({ waitUntil: 'load' })
+  await expect(page.getByText('The released head has no active successor revision.')).toBeVisible()
+  await page.getByRole('button', { name: /^audit$/i }).click()
+  await expect(page.getByText(/Document Revision Withdrawn/i)).toBeVisible()
+})
+
 test('configuration authority can explicitly reassign document stewardship in the browser', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)
