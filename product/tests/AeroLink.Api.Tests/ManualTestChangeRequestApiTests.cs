@@ -213,6 +213,91 @@ public sealed class ManualTestChangeRequestApiTests
         Assert.StartsWith("HLRTCR-", review.DisplayNumber);
     }
 
+    /// <summary>
+    /// Procedure decisions are saved with the package, the way a change request is created together with the
+    /// requirement changes it proposes. A package created without them would be one proposal in two halves,
+    /// the second of which somebody has to remember to write.
+    /// </summary>
+    [Fact]
+    public async Task Procedure_decisions_are_saved_with_the_package_that_proposes_them()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Oceanic sequencing verification",
+                problem = "P", analysis = "A", solution = "S",
+                procedureChanges = new[]
+                {
+                    new
+                    {
+                        baseNumber = "SYSTP-009801", revision = 0, level = "System", kind = "Introduce",
+                        title = "Verify oceanic sequencing", objective = "Show the sequencing holds.",
+                        preconditions = "The build is available.", steps = "Exercise the changed behaviour.",
+                        expectedResult = "The sequencing is observed to hold.",
+                        rationale = "The approved change introduces behaviour with no procedure.",
+                    },
+                },
+            });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var id = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var review = await db.TestChangeReviews.AsNoTracking().Include(x => x.ProcedureChanges)
+            .SingleAsync(x => x.Id == id);
+
+        var change = Assert.Single(review.ProcedureChanges);
+        Assert.Equal("SYSTP-009801", change.BaseNumber);
+        Assert.Equal(TestProcedureChangeKind.Introduce, change.Kind);
+        Assert.Equal("Verify oceanic sequencing", change.Title);
+    }
+
+    /// <summary>
+    /// A malformed decision fails the whole create rather than leaving a package behind with the bad half
+    /// silently dropped.
+    /// </summary>
+    [Fact]
+    public async Task A_malformed_procedure_decision_refuses_the_whole_package()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { fixture.FirstChangeId },
+                title = "Oceanic sequencing verification",
+                problem = "P", analysis = "A", solution = "S",
+                procedureChanges = new[]
+                {
+                    new
+                    {
+                        baseNumber = "", revision = 0, level = "System", kind = "Introduce",
+                        title = "", objective = "", preconditions = "", steps = "",
+                        expectedResult = "", rationale = "",
+                    },
+                },
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        // Nothing was written: no half-created package survives the refusal.
+        Assert.False(await db.TestChangeReviews.AsNoTracking()
+            .AnyAsync(x => x.Title == "Oceanic sequencing verification"));
+    }
+
     /// <summary>A package still has to say what concluded the work was required.</summary>
     [Fact]
     public async Task A_package_raised_from_nothing_at_all_is_refused()

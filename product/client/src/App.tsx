@@ -20,6 +20,7 @@ import SoftwareBuildsLanding from "./SoftwareBuildsLanding";
 import BaselineImportCenter from "./BaselineImportCenter";
 import PersonnelCenter from "./PersonnelCenter";
 import ApprovalConfigurationCenter from "./ApprovalConfigurationCenter";
+import TestChangeRequestEditor from "./TestChangeRequestEditor";
 // Eager, unlike the other fourteen workspaces. See the note above `lazyView`.
 import EnterpriseControlCenter from "./EnterpriseControlCenter";
 import { apiRequest, operationError, recordClientOperationFailure } from "./apiClient";
@@ -509,7 +510,7 @@ function App() {
   // belongs beside them rather than inside a build.
   if(view==="approvalConfiguration"&&project)return <ApprovalConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onSignOut={signOut}/>;
   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} projectWide={view==="managedDocuments"} density={density} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
-  const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Change Requests",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
+  const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Change Requests",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b>{view!=="managedDocuments"&&<><span>Build {release?.version}</span><b aria-hidden="true">›</b></>}<strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{view==="managedDocuments"?"Project-wide":release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
@@ -681,6 +682,25 @@ function App() {
         user={user}
         initialReviewId={selectedArtifactId}
         onOpenRequirementRevision={openRequirementRevision}
+        onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
+      />
+    );
+
+  // Raising a package is a page, exactly as raising a change request is.
+  if (view === "createTestChangeRequest" && project && release)
+    return inShell(
+      <TestChangeRequestEditor
+        user={user}
+        api={API}
+        projectId={project.project.id}
+        releaseId={release.id}
+        releaseVersion={release.version}
+        discipline={discipline === "softwareTest"
+          ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
+          : "System"}
+        onCancel={() => navigate("testingCoverage", discipline, undefined, selectedArtifactKind)}
+        // Lands on the package it just raised, the way saving a change-request draft opens the draft.
+        onRaised={(id) => navigate("testingCoverage", discipline, id, selectedArtifactKind)}
       />
     );
 

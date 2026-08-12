@@ -3,7 +3,6 @@ import { PersonName } from './People'
 import PersonPicker from './PersonPicker'
 import ProblemReportPicker, { type ProblemReportOption } from './ProblemReportPicker'
 import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
-import TestChangeRequestCreateDialog from './TestChangeRequestCreateDialog'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import { pickerSummary } from './pickerText'
@@ -163,7 +162,7 @@ function ExistingCoverage({ item, coverage }: { item: ImpactItem; coverage?: Cov
  * change request is approved, so nothing goes unnoticed; an engineer can also raise one deliberately when a
  * set of changes is best tested together.
  */
-export default function TestingCoverageWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, programId, user, initialReviewId, onOpenRequirementRevision }: {
+export default function TestingCoverageWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, programId, user, initialReviewId, onOpenRequirementRevision, onRaiseTestChangeRequest }: {
   api: string
   projectId: string
   releaseId: string
@@ -174,6 +173,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   user: AuthUser
   initialReviewId?: string
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
+  /// Opens the authoring page. Raising a package is a page, exactly as raising a change request is.
+  onRaiseTestChangeRequest: () => void
 }) {
   // Authority is per Program, and it is the server that enforces it. Reflecting it here is about not offering
   // somebody a control that will refuse them — an approval they cannot give is worse than no button at all.
@@ -205,7 +206,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const [saved, setSaved] = useState('')
   const [creating, setCreating] = useState(false)
   /** The deliberate TCR creation dialog, opened from the page header. */
-  const [creatingTcr, setCreatingTcr] = useState(false)
   const [canCreate, setCanCreate] = useState(false)
   // The package a proposal belongs to. A procedure change has to be carried by one, so authoring is only
   // reachable from a decision that names it.
@@ -329,7 +329,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
     setProcedureChoice(''); setProcedureError('')
     setEffectiveBaseline('')
     setCreating(false); setCreateError(''); setResolving(undefined)
-    setAuthoring(''); setCreatingTcr(false)
+    setAuthoring('')
   }, [projectId, releaseId, discipline])
 
   // The approved procedures a decision may name as already covering a requirement: bounded, server-searched
@@ -594,7 +594,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           <p>The {tcrAcronym(discipline)}s controlling {buildName}'s test procedures, and the approved changes waiting for one.</p>
         </div>
         {canCreate && (
-          <button type="button" className="newTcrAction" onClick={() => setCreatingTcr(true)}>
+          <button type="button" className="newTcrAction" onClick={onRaiseTestChangeRequest}>
             + New {tcrNewLabel(discipline)} Test Change Request
           </button>
         )}
@@ -1041,22 +1041,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       {/* The test change request itself: the room where procedures are created, modified and retired. It is
           the same drawer the requirements queue uses, from the same stylesheet, because it is the same kind of
           work asked of a different discipline. */}
-      {creatingTcr && (
-        <TestChangeRequestCreateDialog
-          api={api}
-          projectId={projectId}
-          releaseId={releaseId}
-          discipline={discipline}
-          onClose={() => setCreatingTcr(false)}
-          onCreated={(id, displayNumber) => {
-            setCreatingTcr(false)
-            setSaved(`${displayNumber} raised.`)
-            void load()
-            // The package opens onto its workspace so the engineer can start its procedure decisions.
-            setAuthoring(id)
-          }}
-        />
-      )}
 
       {authoring && (
         <TestChangeRequestWorkspace

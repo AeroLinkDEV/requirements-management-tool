@@ -1,6 +1,6 @@
 export type View =
   | "projects" | "builds" | "baselineImports" | "personnel" | "approvalConfiguration" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "testingCoverage" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
+  | "verification" | "testingCoverage" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
@@ -122,6 +122,14 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   // A results route may carry the problem report a corrective action came from, so refresh and back return
   // to the same remediation rather than to a generic workspace. It hangs off results rather than off the
   // branch root because recording the successor determination is the whole of what it asks for.
+  // Raising a package is a page, not a dialog, exactly as raising a change request is. A controlled proposal
+  // authored in a pop-up reads as a lesser thing than the one authored on a page, and it is not one.
+  if (path === "system-verification/change-requests/new")
+    return { ...base, view: "createTestChangeRequest", discipline: "systemTest" };
+  if (path === "software-verification/hlr/change-requests/new")
+    return { ...base, view: "createTestChangeRequest", discipline: "softwareTest", artifactKind: "HighLevel" };
+  if (path === "software-verification/llr/change-requests/new")
+    return { ...base, view: "createTestChangeRequest", discipline: "softwareTest", artifactKind: "LowLevel" };
   if (path === "system-verification/coverage") return { ...base, view: "testingCoverage", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "coverage" && tail[2]) return { ...base, view: "testingCoverage", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (path === "system-verification/procedures") return { ...base, view: "procedureExplorer", discipline: "systemTest" };
@@ -224,6 +232,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
     case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification`;
     case "testingCoverage": return `${root}/${verificationBranch(discipline, artifactKind)}/coverage${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
+    case "createTestChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/new`;
     case "procedureExplorer": return `${root}/${verificationBranch(discipline, artifactKind)}/procedures`;
     case "testResults": return `${root}/${verificationBranch(discipline, artifactKind)}/results${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
     case "documents": {
