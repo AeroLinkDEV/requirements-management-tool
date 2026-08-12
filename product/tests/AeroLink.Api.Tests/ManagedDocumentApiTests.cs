@@ -185,6 +185,13 @@ public sealed class ManagedDocumentApiTests
         Assert.Contains(detail.GetProperty("audit").EnumerateArray(), item => item.GetProperty("eventType").GetString() == "DocumentRevisionOwnerReassigned");
         using var auditScope = factory.Services.CreateScope(); var auditDb = auditScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         Assert.Equal(2, await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.CountAsync(auditDb.SecurityAuditEvents.Where(x => x.Target.Contains("SQAP-000001") && x.EventType.StartsWith("ManagedDocument"))));
+        Assert.Equal(2, await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.CountAsync(auditDb.UserNotifications.Where(x => x.ProjectId == scope.ProjectId && x.Recipient == "software.author" && x.ArtifactId == documentId)));
+        using var authorClient = factory.CreateClient(); using (var login = await authorClient.PostAsJsonAsync("/api/auth/login", new { userName = "software.author", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var authorWork = await authorClient.GetFromJsonAsync<JsonElement>($"/api/my-work?projectId={scope.ProjectId}");
+        Assert.Contains(authorWork.GetProperty("tasks").EnumerateArray(), item => item.GetProperty("id").GetGuid() == documentId && item.GetProperty("type").GetString() == "Project document to complete");
+        using var formerClient = factory.CreateClient(); using (var login = await formerClient.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var formerWork = await formerClient.GetFromJsonAsync<JsonElement>($"/api/my-work?projectId={scope.ProjectId}");
+        Assert.DoesNotContain(formerWork.GetProperty("tasks").EnumerateArray(), item => item.GetProperty("id").GetGuid() == documentId && item.GetProperty("type").GetString() == "Project document to complete");
     }
 
     [Fact]
@@ -210,6 +217,8 @@ public sealed class ManagedDocumentApiTests
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
         var detail = await lead.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var contributors = detail.GetProperty("revisions")[0].GetProperty("reviewContributors").EnumerateArray().ToList();
         Assert.Contains(contributors, item => item.GetProperty("contributorId").GetString() == "software.author" && item.GetProperty("provenance").GetString() == "AuthoritativeSubmissionSnapshot");
+        using var inReviewTransfer = await administrator.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/responsible-owner", new { assigneeId = "software.author", reason = "Must fail after submission.", expectedVersion = detail.GetProperty("revisions")[0].GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.Conflict, inReviewTransfer.StatusCode);
     }
 
     [Fact]
