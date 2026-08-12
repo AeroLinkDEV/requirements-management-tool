@@ -293,6 +293,21 @@
 .mdCheckout small {
   color: #7e6b46;
 }
+.mdIntegrityBlock {
+  margin: 16px 28px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid #fecdd3;
+  background: #fff1f2;
+  border-radius: 9px;
+  padding: 12px 14px;
+  color: #881337;
+}
+.mdIntegrityBlock span,
+.mdIntegrityBlock small {
+  line-height: 1.45;
+}
 .mdTabs {
   display: flex;
   gap: 20px;

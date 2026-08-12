@@ -192,6 +192,7 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
     }
 
     public static string Sha256(byte[] content) => Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+    public void Delete(string storageKey) => files.Delete(storageKey);
 
     private static bool IsUnsafeEntry(string name)
     {
