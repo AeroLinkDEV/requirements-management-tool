@@ -1,5 +1,5 @@
 export type View =
-  | "projects" | "builds" | "baselineImports" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
+  | "projects" | "builds" | "baselineImports" | "personnel" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
   | "verification" | "testingCoverage" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
@@ -78,6 +78,10 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
     return { view: "baselineImports", discipline: "system", projectSlug: decoded(parts[1]) };
   if (parts[0] === "programs" && parts[2] === "projects" && parts[4] === "documentation-center" && parts.length <= 6)
     return { programId: decoded(parts[1]), projectId: decoded(parts[3]), view: "managedDocuments", discipline: "system", artifactId: decoded(parts[5]) };
+  // Also above a build: who is on the Project, and what they are authorised to do, is the same across every
+  // build the Project has. A person is not added to 1.6 and withheld from 1.5.
+  if (parts.length === 3 && parts[0] === "projects" && parts[2] === "personnel")
+    return { view: "personnel", discipline: "system", projectSlug: decoded(parts[1]) };
   if (parts[0] !== "programs" || parts[2] !== "projects" || parts[4] !== "releases")
     return { view: "notFound", discipline: "system" };
 
@@ -169,8 +173,8 @@ export type RouteContext = { programId: string; projectId: string; releaseId: st
 export const projectSlugOf = (name: string) =>
   name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
-export const projectAreaPath = (slug: string, area: "builds" | "baselineImports") =>
-  `/projects/${slug}/${area === "builds" ? "builds" : "imported-baselines"}`;
+export const projectAreaPath = (slug: string, area: "builds" | "baselineImports" | "personnel") =>
+  `/projects/${slug}/${area === "builds" ? "builds" : area === "personnel" ? "personnel" : "imported-baselines"}`;
 
 export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
@@ -189,6 +193,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     // routePath call still lands somewhere real rather than on Not Found.
     case "builds": return projectAreaPath("fms-product-development", "builds");
     case "baselineImports": return projectAreaPath("fms-product-development", "baselineImports");
+    case "personnel": return projectAreaPath("fms-product-development", "personnel");
     case "dashboard": return `${root}/command-center`;
     case "mywork": return `${root}/my-work`;
     case "createSystemScr": return `${root}/systems/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;

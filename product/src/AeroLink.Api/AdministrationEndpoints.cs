@@ -18,7 +18,7 @@ public static class AdministrationEndpoints
         app.MapGet("/api/admin/users", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             if (!http.UserAccount().IsAdministrator) return Results.Forbid();
-            var users = await db.UserAccounts.AsNoTracking().OrderBy(x => x.DisplayName).ToListAsync(ct); var memberships = await db.ProgramMemberships.AsNoTracking().ToListAsync(ct);
+            var users = await db.UserAccounts.AsNoTracking().OrderBy(x => x.DisplayName).ToListAsync(ct); var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.EndedAt == null).ToListAsync(ct);
             return Results.Ok(users.Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, state = x.State.ToString(), x.LastLoginAt, x.CreatedAt, isGlobalAdministrator = x.UserName == IdentityService.SystemAdministratorUserName, memberships = memberships.Where(m => m.UserId == x.Id).Select(m => new { m.ProgramId, role = m.Role.ToString() }) }));
         });
 
@@ -32,7 +32,9 @@ public static class AdministrationEndpoints
         app.MapPost("/api/admin/users/{id:guid}/memberships", async (Guid id, GrantRoleRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid(); if (!await db.UserAccounts.AnyAsync(x => x.Id == id, ct) || !await db.Programs.AnyAsync(x => x.Id == request.ProgramId, ct)) return Results.NotFound();
-            if (await db.ProgramMemberships.AnyAsync(x => x.UserId == id && x.ProgramId == request.ProgramId && x.Role == request.Role, ct)) return Results.Conflict(new { error = "That Program role is already assigned." });
+            if (await db.ProgramMemberships.AnyAsync(x => x.UserId == id && x.ProgramId == request.ProgramId && x.Role == request.Role && x.EndedAt == null, ct)) return Results.Conflict(new { error = "That Program role is already assigned." });
+            if (SingularProgramRoles.IsSingular(request.Role) && await db.ProgramMemberships.AnyAsync(x => x.ProgramId == request.ProgramId && x.Role == request.Role && x.EndedAt == null, ct))
+                return Results.Conflict(new { error = $"{request.Role} is held by one person per project. End the current holder's role before assigning it." });
             db.ProgramMemberships.Add(new(id, request.ProgramId, request.Role, actor.UserName, DateTimeOffset.UtcNow));
             db.SecurityAuditEvents.Add(new("RoleGranted", actor.UserName, id.ToString(), "Success", $"Granted {request.Role} for program {request.ProgramId}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct); return Results.NoContent();
         });
@@ -40,8 +42,11 @@ public static class AdministrationEndpoints
         app.MapDelete("/api/admin/users/{id:guid}/memberships/{programId:guid}/{role}", async (Guid id, Guid programId, ProgramRole role, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid();
-            var membership = await db.ProgramMemberships.SingleOrDefaultAsync(x => x.UserId == id && x.ProgramId == programId && x.Role == role, ct); if (membership is null) return Results.NotFound();
-            db.ProgramMemberships.Remove(membership);
+            // Ended, not deleted: the roster has to be able to say who held this role during a period that has
+            // already passed, which a removed row cannot answer.
+            var membership = await db.ProgramMemberships.SingleOrDefaultAsync(x => x.UserId == id && x.ProgramId == programId && x.Role == role && x.EndedAt == null, ct); if (membership is null) return Results.NotFound();
+            membership.End(actor.UserName, DateTimeOffset.UtcNow);
+            await EndBackupsForEndedMembershipAsync(db, id, programId, membership.Id, actor.UserName, ct);
             db.SecurityAuditEvents.Add(new("RoleRevoked", actor.UserName, id.ToString(), "Success", $"Revoked {role} for program {programId}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow));
             await db.SaveChangesAsync(ct); return Results.NoContent();
         });
@@ -73,7 +78,7 @@ public static class AdministrationEndpoints
             var actor = http.UserAccount(); if (request.DelegatorUserId != actor.Id && !actor.IsAdministrator) return Results.Forbid(); if (request.DelegatorUserId == request.DelegateUserId) return Results.BadRequest(new { error = "A person cannot delegate a role to themselves." });
             var activeUsers=await db.UserAccounts.AsNoTracking().Where(x=>(x.Id==request.DelegatorUserId||x.Id==request.DelegateUserId)&&x.State==AccountState.Active).Select(x=>x.Id).ToListAsync(ct);
             if(activeUsers.Count!=2)return Results.BadRequest(new{error="Both delegation participants must be active AeroLink users."});
-            var members=await db.ProgramMemberships.AsNoTracking().Where(x=>x.ProgramId==request.ProgramId&&(x.UserId==request.DelegatorUserId||x.UserId==request.DelegateUserId)).Select(x=>x.UserId).Distinct().ToListAsync(ct);
+            var members=await db.ProgramMemberships.AsNoTracking().Where(x=>x.ProgramId==request.ProgramId&&x.EndedAt==null&&(x.UserId==request.DelegatorUserId||x.UserId==request.DelegateUserId)).Select(x=>x.UserId).Distinct().ToListAsync(ct);
             if(members.Count!=2)return Results.BadRequest(new{error="Both delegation participants must belong to the selected Program."});
             if(!await identity.HasRoleAsync(request.DelegatorUserId,request.ProgramId,request.Role,DateTimeOffset.UtcNow,ct))return Results.Forbid();
             try { var delegation = new RoleDelegation(request.ProgramId, request.DelegatorUserId, request.DelegateUserId, request.Role, request.StartsAt, request.EndsAt, request.Reason, actor.UserName, DateTimeOffset.UtcNow); db.RoleDelegations.Add(delegation); db.SecurityAuditEvents.Add(new("DelegationCreated", actor.UserName, request.DelegateUserId.ToString(), "Success", $"Delegated {request.Role} through {request.EndsAt:u}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct); return Results.Created($"/api/delegations/{delegation.Id}", new { delegation.Id }); }
@@ -127,5 +132,26 @@ public static class AdministrationEndpoints
 
         // Enterprise Requirements Workspace: configurable schemas, structured specifications,
         // collaboration, saved views, governed bulk operations, redlines, and onboarding.
+    }
+
+    /// <summary>
+    /// Stands down anybody's standing backups on a project once they no longer belong to it.
+    ///
+    /// Authority is already refused — <c>IdentityService</c> requires a current membership before honouring a
+    /// backup — but leaving the record standing would show a departed person as the named cover on the
+    /// Personnel page, which is exactly the reassurance nobody should be given. Only their last remaining role
+    /// ending removes them; losing one of several roles does not.
+    /// </summary>
+    internal static async Task EndBackupsForEndedMembershipAsync(AeroLinkDbContext db, Guid userId, Guid programId, Guid justEndedMembershipId, string actor, CancellationToken ct)
+    {
+        // The membership ended moments ago is tracked but unsaved, so a database query still sees it as
+        // current. It is excluded by identity rather than relying on the change tracker being flushed.
+        var stillAMember = await db.ProgramMemberships
+            .AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && x.Id != justEndedMembershipId, ct);
+        if (stillAMember) return;
+        var backups = await db.ProjectRoleBackups
+            .Where(x => x.ProgramId == programId && x.BackupUserId == userId && x.RemovedAt == null)
+            .ToListAsync(ct);
+        foreach (var backup in backups) backup.Remove(actor, DateTimeOffset.UtcNow);
     }
 }

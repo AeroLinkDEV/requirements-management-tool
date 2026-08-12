@@ -48,6 +48,7 @@ export default function SoftwareBuildsLanding({
   onOpenBuild,
   onProjectOverview,
   onImportedBaselines,
+  onPersonnel,
   onSignOut,
 }: {
   user: AuthUser;
@@ -55,6 +56,7 @@ export default function SoftwareBuildsLanding({
   onOpenBuild: (release: SelectableRelease) => void;
   onProjectOverview: () => void;
   onImportedBaselines: () => void;
+  onPersonnel: () => void;
   onSignOut: () => void;
 }) {
   const releaseByVersion = new Map(releases.map((release) => [release.version, release]));
@@ -74,6 +76,12 @@ export default function SoftwareBuildsLanding({
             <p>Select a build to explore or work on.</p>
           </div>
           <div className="buildsLandingActions">
+            {/* Alongside the import for the same reason: who is on the project, and what their position
+                authorises, is the same across every build it has. There is no build to have entered when the
+                question is who should be allowed in. */}
+            <button type="button" className="personnelButton" onClick={onPersonnel}>
+              Personnel
+            </button>
             {/* Sits here rather than in a build's navigation because an import does not belong to a build —
                 it creates one. Somebody porting a program in has no build to have entered yet. */}
             <button type="button" className="importedBaselinesButton" onClick={onImportedBaselines}>

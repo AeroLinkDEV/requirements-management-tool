@@ -706,7 +706,7 @@ public static class ProblemReportEndpoints
         if (account is null || account.State != AccountState.Active)
             return new(false, false);
         var roles = await db.ProgramMemberships.AsNoTracking()
-            .Where(item => item.UserId == account.Id && item.ProgramId == programId)
+            .Where(item => item.UserId == account.Id && item.ProgramId == programId && item.EndedAt == null)
             .Select(item => item.Role).ToListAsync(ct);
         return new(roles.Count > 0, ProblemReportOwnerAuthority.IsEligible(roles));
     }
@@ -715,7 +715,7 @@ public static class ProblemReportEndpoints
         AeroLinkDbContext db, CancellationToken ct)
     {
         var roles = await db.ProgramMemberships.AsNoTracking()
-            .Where(item => item.UserId == userId && item.ProgramId == programId)
+            .Where(item => item.UserId == userId && item.ProgramId == programId && item.EndedAt == null)
             .Select(item => item.Role).ToListAsync(ct);
         return ProblemReportOwnerAuthority.CanRecover(roles);
     }

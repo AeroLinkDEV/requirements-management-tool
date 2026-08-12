@@ -68,6 +68,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<UserMfaEnrollment> UserMfaEnrollments => Set<UserMfaEnrollment>();
     public DbSet<MfaRecoveryCode> MfaRecoveryCodes => Set<MfaRecoveryCode>();
     public DbSet<RoleDelegation> RoleDelegations => Set<RoleDelegation>();
+    public DbSet<ProjectRoleBackup> ProjectRoleBackups => Set<ProjectRoleBackup>();
     public DbSet<ElectronicSignature> ElectronicSignatures => Set<ElectronicSignature>();
     public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
     public DbSet<ExternalIdentityProvider> ExternalIdentityProviders => Set<ExternalIdentityProvider>();
@@ -746,8 +747,25 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<ProgramMembership>(b =>
         {
-            b.ToTable("program_memberships"); b.HasKey(x => x.Id); b.Property(x => x.Role).HasConversion<string>().HasMaxLength(40); b.Property(x => x.GrantedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x => new { x.UserId, x.ProgramId, x.Role }).IsUnique();
+            b.ToTable("program_memberships"); b.HasKey(x => x.Id); b.Property(x => x.Role).HasConversion<string>().HasMaxLength(40); b.Property(x => x.GrantedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.EndedBy).HasMaxLength(100).IsRequired();
+            // Unique among current memberships only. Ended rows are kept as history, and somebody who left and
+            // came back would collide with their own past on an unfiltered unique index.
+            b.HasIndex(x => new { x.UserId, x.ProgramId, x.Role }).IsUnique().HasFilter("\"EndedAt\" IS NULL");
+            b.HasIndex(x => new { x.ProgramId, x.EndedAt });
             b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict); b.HasOne<ProgramRecord>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProjectRoleBackup>(b =>
+        {
+            b.ToTable("project_role_backups"); b.HasKey(x => x.Id);
+            b.Property(x => x.Role).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.NamedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.RemovedBy).HasMaxLength(100).IsRequired();
+            // One standing backup per role per project, among those still standing.
+            b.HasIndex(x => new { x.ProgramId, x.Role }).IsUnique().HasFilter("\"RemovedAt\" IS NULL");
+            b.HasIndex(x => new { x.ProgramId, x.BackupUserId, x.RemovedAt });
+            b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.BackupUserId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ProgramRecord>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<UserMfaEnrollment>(b=>{b.ToTable("user_mfa_enrollments");b.HasKey(x=>x.Id);b.Property(x=>x.Secret).HasMaxLength(512).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>x.UserId).IsUnique();b.HasOne<UserAccount>().WithMany().HasForeignKey(x=>x.UserId).OnDelete(DeleteBehavior.Cascade);});
         modelBuilder.Entity<MfaRecoveryCode>(b=>{b.ToTable("mfa_recovery_codes");b.HasKey(x=>x.Id);b.Property(x=>x.CodeHash).HasMaxLength(64).IsRequired();b.HasIndex(x=>new{x.UserId,x.CodeHash}).IsUnique();b.HasOne<UserAccount>().WithMany().HasForeignKey(x=>x.UserId).OnDelete(DeleteBehavior.Cascade);});

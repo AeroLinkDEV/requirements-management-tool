@@ -24,7 +24,38 @@ public enum ProgramRole
 {
     Engineer, Reviewer, Approver, ConfigurationManager, TestEngineer, TestLead, ProgramManager, Administrator,
     SystemEngineer, SoftwareEngineer, SystemEngineeringLead, SoftwareEngineeringLead, ProjectEngineeringLead,
-    EngineeringManager, SoftwareQualityAnalyst, Airworthiness
+    EngineeringManager, SoftwareQualityAnalyst, Airworthiness,
+    // Verification split by discipline. `TestEngineer` and `TestLead` describe verification work without saying
+    // which side of the system it verifies, while review procedures have distinguished system test from
+    // high- and low-level software test since configurable workflows arrived. These four close that gap so a
+    // procedure can require the lead of the discipline it actually concerns. The undivided pair is retained:
+    // it is what every membership recorded before this existed still says, and `ProgramRoleAuthority` below
+    // makes the precise titles satisfy it.
+    SystemTestEngineer, SoftwareTestEngineer, SystemTestLead, SoftwareTestLead,
+    // The engineer accountable for a project, distinct from `ProjectEngineeringLead`, which is the lead of the
+    // engineering effort rather than a job somebody holds alongside a discipline.
+    ProjectEngineer,
+}
+
+/// <summary>
+/// A position that exactly one person holds on a project at a time.
+///
+/// The disciplines have many members and one lead; these have one holder and no membership beneath them. The
+/// distinction is enforced when a membership is granted, so "who is the System Engineering Lead" has one
+/// answer rather than however many people were granted the role.
+/// </summary>
+public static class SingularProgramRoles
+{
+    private static readonly ProgramRole[] Singular =
+    [
+        ProgramRole.ProjectEngineer, ProgramRole.ProgramManager, ProgramRole.EngineeringManager,
+        ProgramRole.ConfigurationManager, ProgramRole.ProjectEngineeringLead,
+        ProgramRole.SystemEngineeringLead, ProgramRole.SoftwareEngineeringLead,
+        ProgramRole.SystemTestLead, ProgramRole.SoftwareTestLead,
+    ];
+
+    public static bool IsSingular(ProgramRole role) => Singular.Contains(role);
+    public static IReadOnlyList<ProgramRole> All => Singular;
 }
 
 /// <summary>
@@ -43,12 +74,50 @@ public static class ProgramRoleAuthority
     private static readonly ProgramRole[] EngineeringAuthority =
     [
         ProgramRole.SystemEngineer, ProgramRole.SoftwareEngineer, ProgramRole.SystemEngineeringLead,
-        ProgramRole.SoftwareEngineeringLead, ProgramRole.ProjectEngineeringLead, ProgramRole.EngineeringManager
+        ProgramRole.SoftwareEngineeringLead, ProgramRole.ProjectEngineeringLead, ProgramRole.EngineeringManager,
+        ProgramRole.ProjectEngineer
+    ];
+
+    /// <summary>
+    /// Leading a discipline is authority, not a label. A lead reviews and approves work a member of the same
+    /// discipline cannot, so naming somebody the lead must not also require remembering to grant them the two
+    /// general control roles — which is how a lead ends up unable to sign the stage that names them.
+    /// </summary>
+    private static readonly ProgramRole[] LeadAuthority =
+    [
+        ProgramRole.SystemEngineeringLead, ProgramRole.SoftwareEngineeringLead,
+        ProgramRole.SystemTestLead, ProgramRole.SoftwareTestLead, ProgramRole.ProjectEngineeringLead
+    ];
+
+    /// <summary>
+    /// Verification titles that name their discipline, and still answer to the one that does not.
+    ///
+    /// The leads are deliberately absent. `TestLead` holds distribution authority over verification work —
+    /// impact items land with the lead, who assigns them to an individual `TestEngineer` — so the two are
+    /// different jobs rather than a general and a precise name for the same one. Folding the leads in here
+    /// makes every "is this a test engineer" question also true of the person who assigns to them, which
+    /// silently changes who verification work routes to.
+    /// </summary>
+    private static readonly ProgramRole[] TestAuthority =
+    [
+        ProgramRole.SystemTestEngineer, ProgramRole.SoftwareTestEngineer
+    ];
+
+    private static readonly ProgramRole[] TestLeadAuthority =
+    [
+        ProgramRole.SystemTestLead, ProgramRole.SoftwareTestLead
     ];
 
     /// <summary>Every role that satisfies a request for <paramref name="required"/>, including itself.</summary>
-    public static IReadOnlyList<ProgramRole> Satisfying(ProgramRole required) =>
-        required == ProgramRole.Engineer ? [ProgramRole.Engineer, .. EngineeringAuthority] : [required];
+    public static IReadOnlyList<ProgramRole> Satisfying(ProgramRole required) => required switch
+    {
+        ProgramRole.Engineer => [ProgramRole.Engineer, .. EngineeringAuthority],
+        ProgramRole.Reviewer => [ProgramRole.Reviewer, .. LeadAuthority],
+        ProgramRole.Approver => [ProgramRole.Approver, .. LeadAuthority],
+        ProgramRole.TestEngineer => [ProgramRole.TestEngineer, .. TestAuthority],
+        ProgramRole.TestLead => [ProgramRole.TestLead, .. TestLeadAuthority],
+        _ => [required],
+    };
 }
 
 /// <summary>
@@ -63,11 +132,14 @@ public static class ProblemReportOwnerAuthority
 {
     public const string DirectoryAuthority = "ProblemReportOwner";
 
+    // Verification authority is taken through `Satisfying` rather than named directly, so the titles that say
+    // which discipline they verify keep the ownership their undivided predecessor had. Naming them here one by
+    // one is how a System Test Engineer ends up unable to own the anomaly they just found.
     private static readonly ProgramRole[] EligibleRoles =
     [
         .. ProgramRoleAuthority.Satisfying(ProgramRole.Engineer),
-        ProgramRole.TestEngineer,
-        ProgramRole.TestLead,
+        .. ProgramRoleAuthority.Satisfying(ProgramRole.TestEngineer),
+        .. ProgramRoleAuthority.Satisfying(ProgramRole.TestLead),
     ];
 
     private static readonly ProgramRole[] RecoveryRoles =
@@ -318,6 +390,14 @@ public sealed class UserAccount
     private static string Required(string value, string name) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException($"{name} is required.") : value.Trim();
 }
 
+/// <summary>
+/// Somebody's standing on a project, and for how long they held it.
+///
+/// Ending a membership records when and by whom rather than deleting the row. A deleted membership takes with
+/// it the only answer to "who was the System Engineering Lead in March, and who could sign in their place" —
+/// a question an audit asks about a period that has already passed, long after the security event that
+/// recorded the revocation has scrolled away. Only an unended membership grants anything.
+/// </summary>
 public sealed class ProgramMembership
 {
     private ProgramMembership() { }
@@ -329,6 +409,66 @@ public sealed class ProgramMembership
     public ProgramRole Role { get; private set; }
     public string GrantedBy { get; private set; } = "";
     public DateTimeOffset GrantedAt { get; private set; }
+    public DateTimeOffset? EndedAt { get; private set; }
+    public string EndedBy { get; private set; } = "";
+
+    public bool IsActive => EndedAt is null;
+
+    public void End(string actor, DateTimeOffset now)
+    {
+        if (EndedAt is not null) return;
+        if (string.IsNullOrWhiteSpace(actor)) throw new ArgumentException("Ending a membership requires an attributable actor.", nameof(actor));
+        if (now < GrantedAt) throw new ArgumentOutOfRangeException(nameof(now), "A membership cannot end before it was granted.");
+        EndedAt = now;
+        EndedBy = actor.Trim();
+    }
+}
+
+/// <summary>
+/// Somebody who may act in a project role as though they held it, with no end date.
+///
+/// This is not <see cref="RoleDelegation"/>. A delegation is raised by the person holding the role, covers a
+/// stated interval, and expires on its own. A backup is named on the project and stands until it is removed:
+/// the holder does not have to be away, and nobody has to remember to arrange anything before a signature is
+/// needed. The two coexist because they answer different questions — "I am on leave until the 22nd" and "if
+/// I am not here, this is who acts".
+///
+/// A signature made on this authority still records that it was made as a backup rather than as the holder,
+/// because without an interval to explain it, that attribution is the only thing that later says why this
+/// name appears on this step.
+/// </summary>
+public sealed class ProjectRoleBackup
+{
+    private ProjectRoleBackup() { }
+
+    public ProjectRoleBackup(Guid programId, ProgramRole role, Guid backupUserId, string namedBy, DateTimeOffset now)
+    {
+        if (programId == Guid.Empty) throw new ArgumentException("programId is required.", nameof(programId));
+        if (backupUserId == Guid.Empty) throw new ArgumentException("backupUserId is required.", nameof(backupUserId));
+        if (!Enum.IsDefined(role)) throw new ArgumentOutOfRangeException(nameof(role));
+        if (string.IsNullOrWhiteSpace(namedBy)) throw new ArgumentException("Naming a backup requires an attributable actor.", nameof(namedBy));
+        Id = Guid.NewGuid(); ProgramId = programId; Role = role; BackupUserId = backupUserId;
+        NamedBy = namedBy.Trim(); NamedAt = now;
+    }
+
+    public Guid Id { get; private set; }
+    public Guid ProgramId { get; private set; }
+    public ProgramRole Role { get; private set; }
+    public Guid BackupUserId { get; private set; }
+    public string NamedBy { get; private set; } = "";
+    public DateTimeOffset NamedAt { get; private set; }
+    public DateTimeOffset? RemovedAt { get; private set; }
+    public string RemovedBy { get; private set; } = "";
+
+    public bool IsActive => RemovedAt is null;
+
+    public void Remove(string actor, DateTimeOffset now)
+    {
+        if (RemovedAt is not null) return;
+        if (string.IsNullOrWhiteSpace(actor)) throw new ArgumentException("Removing a backup requires an attributable actor.", nameof(actor));
+        RemovedAt = now;
+        RemovedBy = actor.Trim();
+    }
 }
 
 public sealed class UserSession

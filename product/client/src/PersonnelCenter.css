@@ -1,0 +1,132 @@
+/* Project personnel. Positions first, disciplines second, roster last — the order somebody reads them in when
+   they open the page to find out whether a signature is possible today. */
+
+.personnelPage { min-height: 100vh; background: var(--canvas); }
+.personnelMain { max-width: 1240px; margin: 0 auto; padding: 26px 28px 64px; }
+
+.personnelBreadcrumb { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--ink-500); margin-bottom: 16px; }
+.personnelBreadcrumb button { background: none; border: none; padding: 0; font: inherit; color: var(--teal-700); font-weight: var(--weight-strong); cursor: pointer; }
+.personnelBreadcrumb button:hover { text-decoration: underline; }
+.personnelBreadcrumb strong { color: var(--ink-900); font-weight: var(--weight-strong); }
+
+.personnelHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+.personnelHeading h1 { font-family: var(--font-display); font-size: var(--text-title); font-weight: var(--weight-bold); letter-spacing: -.02em; margin: 0 0 6px; color: var(--ink-900); }
+.personnelHeading p { margin: 0; color: var(--ink-500); font-size: var(--text-control); max-width: 66ch; }
+.personnelActions { display: flex; gap: 9px; flex-shrink: 0; }
+.personnelActions button, .backupPickerActions button, .addPersonActions button {
+  min-height: 36px; padding: 8px 15px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--surface); color: var(--teal-700); font: var(--weight-strong) var(--text-control) var(--font-body); cursor: pointer;
+}
+.personnelActions button:hover, .backupPickerActions button:hover, .addPersonActions button:hover { background: var(--surface-subtle); }
+.primaryAction { background: var(--teal-700) !important; border-color: var(--teal-700) !important; color: #fff !important; }
+.primaryAction:disabled { opacity: .5; cursor: not-allowed; }
+
+.personnelReadOnly, .personnelLoading { color: var(--ink-500); font-size: var(--text-control); margin: 0 0 18px; }
+.personnelError, .personnelNotice {
+  border-radius: var(--radius-sm); padding: 10px 14px; font-size: var(--text-control); margin: 0 0 18px;
+}
+.personnelError { background: #fce9eb; border: 1px solid #eccfd3; color: #8f2f3d; }
+.personnelNotice { background: var(--teal-100); border: 1px solid #bfe4dc; color: var(--teal-700); }
+
+.personnelSection { margin-bottom: 28px; }
+.personnelSection > header { margin-bottom: 12px; }
+.personnelSection h2 { font-family: var(--font-display); font-size: var(--text-xl); font-weight: var(--weight-bold); margin: 0 0 3px; color: var(--ink-900); }
+.personnelSection > header p { margin: 0; font-size: var(--text-sm); color: var(--ink-500); }
+
+.positionGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(238px, 1fr)); gap: 12px; }
+.disciplineWrap { position: relative; display: flex; }
+.disciplineWrap > .positionCard { flex: 1; }
+.disciplineTag {
+  position: absolute; top: -8px; right: 10px; background: var(--navy-800); color: #fff;
+  font-size: var(--text-xs); font-weight: var(--weight-strong); padding: 2px 9px; border-radius: var(--radius-pill);
+}
+
+.positionCard {
+  background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--teal-600);
+  border-radius: var(--radius-md); padding: 14px 15px 12px; display: flex; flex-direction: column; gap: 10px;
+}
+.positionCard.covered { border-top-color: #b4791c; }
+.positionCard.vacant { border-top-color: #b8404f; background: #fffafa; }
+.positionName { font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-500); }
+.positionHolder { display: flex; align-items: center; gap: 9px; }
+.positionWho { font-weight: var(--weight-strong); font-size: var(--text-control); color: var(--ink-900); line-height: 1.28; }
+.positionWho span { display: block; font-weight: var(--weight-body); font-size: var(--text-xs); color: var(--ink-500); }
+.positionWho.vacantWho { color: #8f2f3d; }
+.positionWho.vacantWho span { color: #b8404f; }
+.positionFoot { border-top: 1px dashed var(--line); padding-top: 9px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+.personAvatar {
+  width: 30px; height: 30px; border-radius: var(--radius-pill); flex-shrink: 0; display: grid; place-items: center;
+  font-size: var(--text-xs); font-weight: var(--weight-bold); color: #fff; background: var(--navy-800);
+}
+.personAvatar.vacant { background: #e3c8cc; color: #8f2f3d; }
+
+.statusPill { display: inline-flex; align-items: center; border-radius: var(--radius-pill); padding: 2px 9px; font-size: var(--text-xs); font-weight: var(--weight-bold); }
+.statusPill.active { background: var(--teal-100); color: var(--teal-700); }
+.statusPill.covered { background: #fdf1dc; color: #8a5a12; }
+.statusPill.muted { background: #eef1f6; color: var(--ink-500); }
+
+.linkAction { background: none; border: none; padding: 0; font: var(--weight-strong) var(--text-xs) var(--font-body); color: var(--teal-700); cursor: pointer; }
+.linkAction:hover { text-decoration: underline; }
+.linkAction:disabled { opacity: .5; cursor: not-allowed; }
+
+.backupPicker { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.backupPicker label { font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-500); }
+.backupPicker select, .addPersonField select {
+  border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px;
+  font-size: var(--text-control); color: var(--ink-900); background: var(--surface); width: 100%;
+}
+.backupPicker p { margin: 0; font-size: var(--text-xs); color: var(--ink-500); }
+.backupPickerActions { display: flex; gap: 8px; margin-top: 2px; }
+.backupPickerActions button { min-height: 30px; padding: 5px 11px; font-size: var(--text-sm); }
+
+.assuranceRow { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.assuranceCard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 14px 15px; display: flex; flex-direction: column; gap: 9px; }
+.assuranceCard.vacant { background: #fffafa; border-color: #eccfd3; }
+.assuranceCard ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.assuranceCard li { display: flex; align-items: center; gap: 9px; font-size: var(--text-control); color: var(--ink-900); font-weight: var(--weight-medium); }
+.assuranceEmpty { margin: 0; font-size: var(--text-sm); color: #8f2f3d; }
+
+.rosterTableWrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); overflow-x: auto; }
+.rosterTable { width: 100%; border-collapse: collapse; font-size: var(--text-control); }
+.rosterTable th {
+  background: var(--surface-subtle); color: var(--ink-500); font-size: var(--text-xs); letter-spacing: .07em;
+  text-transform: uppercase; font-weight: var(--weight-bold); padding: 10px 15px; text-align: left; border-bottom: 1px solid var(--line);
+}
+.rosterTable td { padding: 12px 15px; border-bottom: 1px solid #eef2f6; vertical-align: middle; color: var(--ink-700); }
+.rosterTable tr:last-child td { border-bottom: none; }
+.rosterTable tr.departed td { opacity: .62; }
+.rosterWho { display: flex; align-items: center; gap: 10px; }
+.rosterName { font-weight: var(--weight-strong); color: var(--ink-900); line-height: 1.25; }
+.rosterName span { display: block; font-weight: var(--weight-body); font-size: var(--text-xs); color: var(--ink-500); }
+.rosterDate { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.roleChips { display: flex; flex-wrap: wrap; gap: 5px; }
+.roleChip {
+  display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-xs); font-weight: var(--weight-strong);
+  padding: 2px 8px; border-radius: var(--radius-sm); background: #eef2f7; color: var(--ink-700); border: 1px solid #e2e8f0;
+}
+.roleChip.lead { background: var(--teal-100); color: var(--teal-700); border-color: #bfe4dc; }
+.roleChip.backup { background: #fdf1dc; color: #8a5a12; border-color: #f0dcb6; }
+.roleChip.ended { background: transparent; color: var(--ink-500); border-style: dashed; }
+.chipEnd { background: none; border: none; padding: 0 0 0 2px; font-size: var(--text-control); line-height: 1; color: inherit; opacity: .55; cursor: pointer; }
+.chipEnd:hover { opacity: 1; }
+.chipEnd:disabled { opacity: .3; cursor: not-allowed; }
+
+.addPersonPanel {
+  position: fixed; right: 24px; bottom: 24px; width: 380px; max-width: calc(100vw - 48px);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-soft); padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; z-index: 40;
+}
+.addPersonPanel h2 { font-family: var(--font-display); font-size: var(--text-lg); font-weight: var(--weight-bold); margin: 0; color: var(--ink-900); }
+.addPersonLede { margin: -8px 0 0; font-size: var(--text-sm); color: var(--ink-500); }
+.addPersonField { display: flex; flex-direction: column; gap: 6px; }
+.addPersonField label { font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-500); }
+.addPersonHint { margin: 0; font-size: var(--text-xs); color: var(--ink-500); }
+.addPersonWarning { margin: 0; font-size: var(--text-xs); color: #8a5a12; background: #fdf1dc; border-radius: var(--radius-sm); padding: 7px 9px; }
+.addPersonActions { display: flex; gap: 8px; }
+
+@media (max-width: 900px) {
+  .personnelHeading { flex-direction: column; }
+  .addPersonPanel { right: 12px; left: 12px; width: auto; }
+}

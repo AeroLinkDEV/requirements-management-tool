@@ -1829,6 +1829,61 @@ Future entries use:
   pre-contract events without exact routing evidence are retained conservatively rather than retroactively
   reinterpreted.
 
+### DEC-110 - A Project Staffs Itself, and a Lead Is a Position Rather Than a Label
+
+- **Date:** 2026-08-12
+- **Status:** Accepted
+- **Decision:** A Project has its own Personnel page, reached beside Software Builds rather than inside a
+  build. **Program Manager, Project Engineer, Project Engineering Lead and the Project-scoped Administrator**
+  may add somebody, end a position, and name a standing backup on their own Project. Granting `Administrator`
+  itself remains with the global account. Every other member reads the roster.
+- **Rationale:** Membership already meant access, and the roles were already there, but every route was gated
+  on `IsAdministrator` — which resolves to the single account named `admin` — and organised by user, so it
+  answered "which projects is this person on" and never "who is on this project". A Program Manager could not
+  see their own team.
+- **Consequences:**
+  - **A position is the job; leading it is a designation.** Somebody is a System Engineer, and one of them is
+    the System Engineering Lead. `SingularProgramRoles` names the nine positions exactly one person holds, and
+    a second grant is refused while the first is current.
+  - **Verification splits by discipline.** `SystemTestEngineer`, `SoftwareTestEngineer`, `SystemTestLead` and
+    `SoftwareTestLead` join the undivided `TestEngineer` and `TestLead`, which are retained because they are
+    what every membership recorded before this says. `ProgramRoleAuthority.Satisfying` makes the precise titles
+    answer requests for the general ones, so a more exact title still never removes capability
+    ([LES-009](#les-009---a-rule-moved-is-not-the-same-rule-and-look-alike-call-sites-are-not-alike)).
+  - **Leading carries review and approval authority.** A lead satisfies `Reviewer` and `Approver`; belonging
+    to the discipline does not. Before this, naming somebody the lead meant separately remembering to grant
+    both, and forgetting produced a lead unable to sign the stage that names their own position.
+  - **A membership ends; it is not deleted.** `EndedAt` and `EndedBy` are stamped and the row is kept, because
+    "who was the System Engineering Lead in March" is asked about a period that has already closed, long after
+    the security event recording the revocation has scrolled away. The uniqueness index is filtered to current
+    rows, so somebody who left and returned is not blocked by their own history.
+  - **Every read of `ProgramMemberships` that confers authority now excludes ended rows.** All nineteen call
+    sites were read individually rather than swept, including both copies of `HasRoleAsync` and the session
+    projection in `MapAsync`; seeding deliberately still counts ended rows, so re-seeding cannot resurrect a
+    membership somebody ended on purpose.
+
+### DEC-111 - A Standing Backup Acts as the Holder, With No Interval
+
+- **Date:** 2026-08-12
+- **Status:** Accepted
+- **Decision:** A Project may name one standing backup per position. The backup may review, approve and act in
+  that position **at any time**, with no date range and no requirement that the holder be away. It stands until
+  it is removed. `RoleDelegation` is retained unchanged for genuine dated handovers.
+- **Rationale:** The owner's rule is that a named backup can do what the main person does. A delegation cannot
+  express it: `RoleDelegation` refuses to exist without a start and end, and expires on its own. Requiring
+  somebody to arrange cover before each absence puts a step between a signature and the person authorised to
+  make it, which is how work stalls while its approver is unreachable.
+- **Consequences:**
+  - Backup is a property of the position, and `IdentityService.HasRoleAsync` gains a third source of authority
+    beside membership and delegation.
+  - **A backup must be a current member.** Naming somebody who later leaves must not keep letting them sign,
+    so the check requires an unended membership and the last role ending stands their backups down.
+  - The holder cannot be their own backup, which would report cover that does not exist.
+  - **This is deliberately weaker separation of duties than a dated delegation**, and was chosen knowing that:
+    two people can sign a position's stages permanently rather than during a stated absence. Signatures made on
+    this authority are expected to record that they were made as backup rather than as holder — with no
+    interval to explain the name, that attribution is the only thing that later says why.
+
 ## Lessons Learned
 
 Findings that cost real time, recorded so they cost it once. These are about how the work is done rather than
