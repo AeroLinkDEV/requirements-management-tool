@@ -101,3 +101,11 @@ cannot truthfully claim that the retained text was the original formal revision 
 attachment is recovered as check-in evidence using its existing attachment ID, version, actor, timestamp, base
 link, and hashes. Legacy connector session and operation-token values that were never stored remain explicitly
 unknown rather than being fabricated.
+
+## Stewardship, responsibility, and authorship
+
+The document steward owns long-term Project accountability. The responsible revision owner coordinates the active formal revision. The stable record creator, revision initiator, accepted check-in contributors, and temporary checkout holder are separate identities and are displayed separately.
+
+Creating a document or successor validates the selected assignee as an active account with current Program authoring authority or a valid delegation before any row or file is created. Global administrator status is not document-authoring authority, so an administrator must explicitly select an eligible Program author. Ordinary and privileged check-ins never transfer responsibility. Configuration Management, the Program Manager, or the Project Engineering Lead can explicitly reassign stewardship or Draft/Returned revision responsibility using a different eligible assignee, required reason, and expected version. AeroLink retains old/new assignee, assigning actor, reason, effective time, notification, and append-only document and security-audit evidence. Disabled or departed responsible owners appear in the authorized My Work recovery queue.
+
+Submission freezes the attributable contributor set from accepted check-ins for that exact review cycle. A responsibility transfer therefore cannot make a prior content contributor independently eligible to review unchanged work. Legacy steward, owner, creator, and initiator values are copied from the retained owner fields without changing historical check-in evidence. Where old review-cycle contributors can only be inferred from retained check-ins, their provenance is visibly `LegacyInferredFromRetainedCheckIns` rather than represented as contemporary proof.

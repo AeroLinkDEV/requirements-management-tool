@@ -66,21 +66,22 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
     private async Task SeedReleasedRevisionAsync(ManagedDocument document, ManagedDocumentRevision revision, string project,
         string build, Guid programId, string program, IReadOnlyDictionary<string, UserAccount> people, DateTimeOffset now, CancellationToken ct)
     {
-        var finalApproverId = revision.OwnerId == "quality.analyst" ? "assurance.reviewer" : "quality.analyst";
+        var finalApproverId = revision.ResponsibleOwnerId == "quality.analyst" ? "assurance.reviewer" : "quality.analyst";
         var finalApprover = people[finalApproverId];
         var draft = Render(document, revision, project, build, program, "Draft", "DRAFT", []);
         var draftAttachment = await files.StoreAsync(document.ProjectId, document.Id, revision.Id, revision.Id, 1,
-            "Working Word document", "Initial checked-in working copy.", draft.FileName, draft.ContentType, draft.Content, null, revision.OwnerId, now, ct);
+            "Working Word document", "Initial checked-in working copy.", draft.FileName, draft.ContentType, draft.Content, null, revision.ResponsibleOwnerId, now, ct);
         db.ControlledAttachments.Add(draftAttachment); revision.RecordCheckIn(draftAttachment.Id, now);
-        db.ManagedDocumentCheckIns.Add(new(revision.Id, draftAttachment.Id, 1, revision.OwnerId,
+        db.ManagedDocumentCheckIns.Add(new(revision.Id, draftAttachment.Id, 1, revision.ResponsibleOwnerId,
             "Initial checked-in working copy.", null, null, draftAttachment.Sha256, null, null,
             $"showcase-initial:{revision.Id:N}", now));
-        var cycle = revision.SubmitForReview(revision.OwnerId, draftAttachment.Sha256,
+        var cycle = revision.SubmitForReview(revision.ResponsibleOwnerId, draftAttachment.Sha256,
         [
             new("software.lead", people["software.lead"].DisplayName, "Technical review"),
             new(finalApproverId, finalApprover.DisplayName, "SQA / assurance release authorization")
         ], now.AddHours(1));
         db.ManagedDocumentReviewSteps.AddRange(revision.ReviewSteps.Where(x => x.Cycle == cycle));
+        db.ManagedDocumentReviewContributors.Add(new(revision.Id, cycle, revision.ResponsibleOwnerId, draftAttachment.Sha256, now.AddHours(1)));
         revision.Approve("software.lead", "Technical content is complete and consistent with the approved lifecycle.", now.AddHours(2));
 
         var approvals = new[]
@@ -110,23 +111,24 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
     {
         var draft = Render(document, revision, project, build, program, "Draft", "DRAFT", []);
         var attachment = await files.StoreAsync(document.ProjectId, document.Id, revision.Id, revision.Id, 1,
-            "Working Word document", "Most recent checked-in draft.", draft.FileName, draft.ContentType, draft.Content, null, revision.OwnerId, now, ct);
+            "Working Word document", "Most recent checked-in draft.", draft.FileName, draft.ContentType, draft.Content, null, revision.ResponsibleOwnerId, now, ct);
         db.ControlledAttachments.Add(attachment); revision.RecordCheckIn(attachment.Id, now);
-        db.ManagedDocumentCheckIns.Add(new(revision.Id, attachment.Id, 1, revision.OwnerId,
+        db.ManagedDocumentCheckIns.Add(new(revision.Id, attachment.Id, 1, revision.ResponsibleOwnerId,
             "Most recent checked-in draft.", revision.ParentReleasedDocxAttachmentId, revision.ParentReleasedDocxSha256,
             attachment.Sha256, null, null, $"showcase-successor:{revision.Id:N}", now));
         if (state is "InReview" or "Returned")
         {
-            var cycle = revision.SubmitForReview(revision.OwnerId, attachment.Sha256,
+            var cycle = revision.SubmitForReview(revision.ResponsibleOwnerId, attachment.Sha256,
             [
                 new("software.lead", people["software.lead"].DisplayName, "Technical review"),
                 new("quality.analyst", people["quality.analyst"].DisplayName, "SQA release authorization")
             ], now.AddHours(1));
             db.ManagedDocumentReviewSteps.AddRange(revision.ReviewSteps.Where(x => x.Cycle == cycle));
+            db.ManagedDocumentReviewContributors.Add(new(revision.Id, cycle, revision.ResponsibleOwnerId, attachment.Sha256, now.AddHours(1)));
             if (state == "Returned") revision.Return("software.lead", "Clarify the external data validity timing and identify the governing interface requirement.", now.AddHours(2));
         }
         Audit(document.Id, state == "Returned" ? "DocumentReturned" : state == "InReview" ? "DocumentSubmitted" : "DocumentCheckedIn",
-            state == "Returned" ? "software.lead" : revision.OwnerId, $"Project document {document.DocumentNumber}.{revision.Revision:D2} is {state}.", now.AddHours(2));
+            state == "Returned" ? "software.lead" : revision.ResponsibleOwnerId, $"Project document {document.DocumentNumber}.{revision.Revision:D2} is {state}.", now.AddHours(2));
         await db.SaveChangesAsync(ct);
     }
 
@@ -140,9 +142,9 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
         var fingerprint = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"{document.DocumentNumber}|{revision.Revision}|{revision.FormalChangeSummary}|{status}"));
         return new ProfessionalPublication("AeroLink FMS", program, project, document.DocumentType, document.Title,
             "Controlled Project lifecycle document", document.DocumentNumber, revision.Revision.ToString("D2"), status, "Project-wide",
-            "All software builds", revision.OwnerId, revision.UpdatedAt, fingerprint,
-            [("Document owner", revision.OwnerId), ("Applicability", "Project-wide; build links are contextual only"), ("Formal revision scope", revision.FormalChangeSummary), ("Storage authority", "AeroLink Documentation Center")],
-            approvals, [(revision.Revision.ToString("D2"), status, revision.UpdatedAt.UtcDateTime.ToString("yyyy-MM-dd"), revision.OwnerId)],
+            "All software builds", revision.ResponsibleOwnerId, revision.UpdatedAt, fingerprint,
+            [("Document steward", document.StewardId), ("Revision responsible owner", revision.ResponsibleOwnerId), ("Revision initiated by", revision.InitiatedBy), ("Applicability", "Project-wide; build links are contextual only"), ("Formal revision scope", revision.FormalChangeSummary), ("Storage authority", "AeroLink Documentation Center")],
+            approvals, [(revision.Revision.ToString("D2"), status, revision.UpdatedAt.UtcDateTime.ToString("yyyy-MM-dd"), revision.ResponsibleOwnerId)],
             Sections(document, revision)) { Watermark = watermark };
     }
 
@@ -153,7 +155,7 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
          new("1.2", "Scope", "Lifecycle scope", "Applies to airborne software planning, development, verification, configuration control and assurance activities performed for this Project.", [("Exclusions", "Aircraft installation approval and operator procedures")])]),
         new("2. References and responsibilities", "Referenced records are controlled separately; links in AeroLink identify the exact applicable records.",
         [new("2.1", "References", "Governing lifecycle data", "DO-178C objectives, approved project plans, controlled requirements, verification procedures, problem reports and change requests apply as identified by the project configuration.", [("Precedence", "Approved project and certification data")]),
-         new("2.2", "Responsibilities", "Lifecycle accountability", "The document owner maintains technical content. Independent reviewers evaluate correctness. Software Quality Assurance confirms conformity and authorizes release of the exact DOCX and PDF pair.", [("Author", revision.OwnerId), ("Final authority", "Software Quality Assurance")])]),
+         new("2.2", "Responsibilities", "Lifecycle accountability", "The responsible revision owner coordinates technical content. Independent reviewers evaluate correctness. Software Quality Assurance confirms conformity and authorizes release of the exact DOCX and PDF pair.", [("Responsible owner", revision.ResponsibleOwnerId), ("Final authority", "Software Quality Assurance")])]),
         new("3. Controlled process", "The process below is tailored to this document type and is configuration controlled.",
         [new("3.1", "Lifecycle", "Authoring and change control", Process(document.Acronym), [("Working format", "Macro-free Microsoft Word DOCX"), ("Released formats", "Immutable DOCX and approved PDF")]),
          new("3.2", "Verification", "Review and release", "A technical review evaluates accuracy, completeness, consistency and traceability. A separate final SQA review confirms the exact candidate files, electronic signatures and release evidence.", [("Independence", "The author cannot approve their own revision")]),

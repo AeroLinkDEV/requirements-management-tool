@@ -290,7 +290,7 @@ public static class WorkspaceEndpoints
                 .ThenBy(x=>x.DisplayName).Take(Math.Clamp(limit??50,1,200)));
         });
 
-        app.MapGet("/api/my-work", async (Guid? projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/my-work", async (Guid? projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
             var activeScrSteps = await (from step in db.ApprovalSteps.AsNoTracking().Where(x => x.ApproverId == actor.UserName && x.State == ApprovalStepState.Active)
@@ -328,7 +328,7 @@ public static class WorkspaceEndpoints
             // description is the formal revision scope, never the most recent check-in note.
             var managedOwnerWork = (await (from revision in db.ManagedDocumentRevisions.AsNoTracking()
                                             join document in db.ManagedDocuments.AsNoTracking() on revision.DocumentId equals document.Id
-                                            where revision.OwnerId == actor.UserName
+                                            where revision.ResponsibleOwnerId == actor.UserName
                                                 && (revision.State == ManagedDocumentState.Draft || revision.State == ManagedDocumentState.Returned)
                                                 && (projectId == null || document.ProjectId == projectId)
                                             select new { id = document.Id, type = "Project document to complete", artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, title = revision.FormalChangeSummary, priority = revision.State == ManagedDocumentState.Returned ? "High" : "Normal", dueAt = revision.UpdatedAt.AddDays(10), ageDays = (int)(now - revision.UpdatedAt).TotalDays, route = "managedDocuments", discipline = "project" }).ToListAsync(ct)).OrderBy(x => x.dueAt).ToList();
@@ -337,8 +337,18 @@ public static class WorkspaceEndpoints
                                              join document in db.ManagedDocuments.AsNoTracking() on revision.DocumentId equals document.Id
                                              where projectId == null || document.ProjectId == projectId
                                              select new { id = document.Id, type = "Project document review", artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, title = revision.FormalChangeSummary, priority = "High", dueAt = revision.SubmittedAt!.Value.AddDays(5), ageDays = (int)(now - revision.SubmittedAt!.Value).TotalDays, route = "managedDocuments", discipline = "project" }).ToListAsync(ct)).OrderBy(x => x.dueAt).ToList();
-            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(assignedTestWork).Concat(managedOwnerWork).Concat(managedReviewWork).ToList();
-            return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count + managedReviewWork.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now) + managedOwnerWork.Count(x => x.dueAt < now) + managedReviewWork.Count(x => x.dueAt < now), drafts = authoredDrafts.Count + managedOwnerWork.Count }, tasks });
+            var managedRecoveryWork = new List<object>();
+            if (projectId is not null && await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead))
+            {
+                var eligibleUsers = await ManagedDocumentAssignmentPolicy.EligibleUserNamesAsync(db, identity, projectId.Value, now, ct);
+                var recoveryCandidates = await (from revision in db.ManagedDocumentRevisions.AsNoTracking()
+                                                join document in db.ManagedDocuments.AsNoTracking() on revision.DocumentId equals document.Id
+                                                where document.ProjectId == projectId.Value && (revision.State == ManagedDocumentState.Draft || revision.State == ManagedDocumentState.Returned)
+                                                select new { id = document.Id, owner = revision.ResponsibleOwnerId, artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, dueAt = revision.UpdatedAt }).ToListAsync(ct);
+                managedRecoveryWork = recoveryCandidates.Where(x => !eligibleUsers.Contains(x.owner)).Select(x => (object)new { x.id, type = "Project document owner recovery", x.artifact, title = "Reassign disabled or departed owner: " + x.owner, priority = "High", x.dueAt, ageDays = (int)(now - x.dueAt).TotalDays, route = "managedDocuments", discipline = "project" }).ToList();
+            }
+            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(assignedTestWork).Concat(managedOwnerWork).Concat(managedReviewWork).Concat(managedRecoveryWork).ToList();
+            return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count + managedReviewWork.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now) + managedOwnerWork.Count(x => x.dueAt < now) + managedReviewWork.Count(x => x.dueAt < now) + managedRecoveryWork.Count, drafts = authoredDrafts.Count + managedOwnerWork.Count }, tasks });
         });
 
         // Notifications and Jira emitted paths such as /systems/change-requests/{id}. The client router

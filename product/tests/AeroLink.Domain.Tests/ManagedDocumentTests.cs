@@ -157,6 +157,22 @@ public sealed class ManagedDocumentTests
         Assert.Throws<DomainException>(() => new ManagedDocumentCheckIn(revisionId, attachmentId, 1, "software.author", new string('x', 4001), null, null, new string('a', 64), null, null, "operation", Now));
     }
 
+    [Fact]
+    public void Stewardship_and_revision_responsibility_are_distinct_versioned_assignments()
+    {
+        var document = new ManagedDocument(Guid.NewGuid(), "SDP-000001", "SDP", "Software Development Plan", "Plan", "program.manager", Now, "configuration.manager");
+        var revision = new ManagedDocumentRevision(document.Id, 0, "software.author", "Initial scope.", Now, initiatedBy: "configuration.manager");
+        var priorSteward = document.ReassignSteward("project.lead", document.Version, Now.AddMinutes(1));
+        var priorOwner = revision.ReassignResponsibleOwner("software.lead", revision.Version, Now.AddMinutes(1));
+
+        Assert.Equal("program.manager", priorSteward); Assert.Equal("project.lead", document.StewardId); Assert.Equal("configuration.manager", document.CreatedBy);
+        Assert.Equal("software.author", priorOwner); Assert.Equal("software.lead", revision.ResponsibleOwnerId); Assert.Equal("configuration.manager", revision.InitiatedBy);
+        Assert.Throws<DomainException>(() => revision.ReassignResponsibleOwner("software.author", revision.Version - 1, Now.AddMinutes(2)));
+        revision.RecordCheckIn(Guid.NewGuid(), Now.AddMinutes(2));
+        revision.SubmitForReview("software.lead", "snapshot", [new("system.reviewer", "Reviewer", "Technical"), new("quality.analyst", "Quality", "Final")], Now.AddMinutes(3));
+        Assert.Throws<DomainException>(() => revision.ReassignResponsibleOwner("software.author", revision.Version, Now.AddMinutes(4)));
+    }
+
     private static ManagedDocumentRevision NewCheckedInRevision()
     {
         var revision = Successor(Guid.NewGuid(), 1, "Project document update.");
