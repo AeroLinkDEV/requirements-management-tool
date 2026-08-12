@@ -76,9 +76,9 @@ test('An administrator can add somebody, and the position refuses a second holde
   await page.getByRole('button', { name: '+ Add person' }).click()
   await expect(page.getByRole('heading', { name: 'Add someone to this project' })).toBeVisible()
 
-  // Choosing a position that is already held says so before the request is made, naming who holds it —
-  // the page can answer that because a singular position resolves to one person.
-  const roleSelect = page.getByLabel('Position')
+  // Addressed by id rather than by label: the roster's "Position on this project" column header is an
+  // implicit label for every cell beneath it, so getByLabel('Position') is ambiguous on this page.
+  const roleSelect = page.locator('#add-person-role')
   await roleSelect.selectOption('SystemEngineeringLead')
   const holderWarning = page.locator('.addPersonWarning')
   if (await holderWarning.count()) {
