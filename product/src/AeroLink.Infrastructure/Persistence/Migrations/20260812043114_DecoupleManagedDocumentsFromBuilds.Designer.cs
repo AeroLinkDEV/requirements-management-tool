@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    [Migration("20260812032137_DecoupleManagedDocumentsFromBuilds")]
+    [Migration("20260812043114_DecoupleManagedDocumentsFromBuilds")]
     partial class DecoupleManagedDocumentsFromBuilds
     {
         /// <inheritdoc />
@@ -1438,6 +1438,14 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EndedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<DateTimeOffset>("GrantedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1459,12 +1467,59 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProgramId");
+                    b.HasIndex("ProgramId", "EndedAt");
 
                     b.HasIndex("UserId", "ProgramId", "Role")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"EndedAt\" IS NULL");
 
                     b.ToTable("program_memberships", (string)null);
+                });
+
+            modelBuilder.Entity("AeroLink.Domain.Identity.ProjectRoleBackup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BackupUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("NamedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("NamedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("ProgramId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("RemovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RemovedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BackupUserId");
+
+                    b.HasIndex("ProgramId", "Role")
+                        .IsUnique()
+                        .HasFilter("\"RemovedAt\" IS NULL");
+
+                    b.HasIndex("ProgramId", "BackupUserId", "RemovedAt");
+
+                    b.ToTable("project_role_backups", (string)null);
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Identity.RoleDelegation", b =>
@@ -6970,6 +7025,21 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.HasOne("AeroLink.Domain.Identity.UserAccount", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AeroLink.Domain.Identity.ProjectRoleBackup", b =>
+                {
+                    b.HasOne("AeroLink.Domain.Identity.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("BackupUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("AeroLink.Domain.Programs.ProgramRecord", null)
+                        .WithMany()
+                        .HasForeignKey("ProgramId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
