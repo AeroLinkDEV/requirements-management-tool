@@ -22,6 +22,13 @@ public sealed record ProfessionalPublication(string Product, string Program, str
     /// accident at a call that meant something else.
     /// </summary>
     public string? Watermark { get; init; }
+
+    /// <summary>
+    /// True for Documentation Center managed documents: document number, revision, status and the page
+    /// watermark are emitted as named AeroLink content controls so the controlled release transformation
+    /// can change exactly those structures. Generated build/baseline publications leave this off.
+    /// </summary>
+    public bool ControlledStatusControls { get; init; }
 }
 
 public static class ProfessionalPublicationRenderer
@@ -42,7 +49,16 @@ public static class ProfessionalPublicationRenderer
             Entry(zip, "word/styles.xml", Styles()); Entry(zip, "word/header1.xml", Header(publication)); Entry(zip, "word/footer1.xml", Footer(publication));
             var body = new StringBuilder();
             body.Append(P("CONTROLLED LIFECYCLE PUBLICATION", "CoverKicker")).Append(P(publication.Title, "CoverTitle")).Append(P(publication.Subtitle, "CoverSubtitle"));
-            body.Append(P(publication.DocumentNumber + "  |  REVISION " + publication.Revision, "CoverNumber")).Append(P(publication.Status.ToUpperInvariant(), "CoverStatus"));
+            if (publication.ControlledStatusControls)
+            {
+                body.Append(PRuns(Sdt(WordDocumentStructure.DocumentNumberTag, Run(publication.DocumentNumber))
+                    + Run("  |  REVISION ") + Sdt(WordDocumentStructure.RevisionTag, Run(publication.Revision)), "CoverNumber"));
+                body.Append(PRuns(Sdt(WordDocumentStructure.StatusTag, RunCaps(publication.Status)), "CoverStatus"));
+            }
+            else
+            {
+                body.Append(P(publication.DocumentNumber + "  |  REVISION " + publication.Revision, "CoverNumber")).Append(P(publication.Status.ToUpperInvariant(), "CoverStatus"));
+            }
             body.Append(P($"{publication.Product}  |  Release {publication.Release}", "CoverMeta")).Append(P($"{publication.Program}  |  {publication.Project}", "CoverMeta"));
             body.Append(P("APPROVALS RECORDED FOR THIS PUBLICATION", "CoverApprovalHeading"));
             var coverApprovals = publication.Approvals.Take(5).ToList();
@@ -54,7 +70,9 @@ public static class ProfessionalPublicationRenderer
             body.Append(P("Document Control", "Heading1"));
             var controlRows = new List<IReadOnlyList<string>> { new[] { "Document type", publication.DocumentType }, new[] { "Document number", publication.DocumentNumber }, new[] { "Revision", publication.Revision }, new[] { "Status", publication.Status }, new[] { "Release", publication.Release }, new[] { "Baseline", publication.Baseline }, new[] { "Prepared by", publication.PreparedBy }, new[] { "Generated", publication.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'") }, new[] { "Manifest SHA-256", publication.ManifestHash } };
             controlRows.AddRange(publication.Metadata.Select(x => (IReadOnlyList<string>)new[] { x.Label, x.Value }));
-            body.Append(Table(Array.Empty<string>(), controlRows, new[] { 2700, 6660 }, true));
+            body.Append(publication.ControlledStatusControls
+                ? ControlledDocumentControlTable(controlRows)
+                : Table(Array.Empty<string>(), controlRows, new[] { 2700, 6660 }, true));
             body.Append(P("Approval Register", "Heading2"));
             var approvalRows = publication.Approvals.Select(x => (IReadOnlyList<string>)new[] { x.Role, x.Name + " (" + x.UserId + ")", ApprovalDecision(x) }).ToList();
             if (approvalRows.Count == 0) approvalRows.Add(new[] { "Approval", "Not yet recorded", "Pending" });
@@ -82,14 +100,48 @@ public static class ProfessionalPublicationRenderer
         Style("Normal", "Normal", 22, "25364D", false, 0, 120, 300) + Style("CoverKicker", "Cover Kicker", 20, "168578", true, 1500, 160, 280) + Style("CoverTitle", "Cover Title", 60, "102A43", true, 0, 120, 280) + Style("CoverSubtitle", "Cover Subtitle", 28, "526274", false, 0, 360, 300) + Style("CoverNumber", "Cover Number", 24, "2E74B5", true, 0, 80, 280) + Style("CoverStatus", "Cover Status", 20, "7A5A00", true, 0, 300, 280) + Style("CoverMeta", "Cover Meta", 20, "526274", false, 0, 60, 280) + Style("CoverApprovalHeading", "Cover Approval Heading", 18, "168578", true, 560, 100, 280) + Style("CoverApproval", "Cover Approval", 18, "25364D", false, 0, 80, 280) + Style("CoverNotice", "Cover Notice", 16, "718096", true, 620, 0, 280) + Style("Heading1", "Heading 1", 32, "2E74B5", true, 360, 200, 300) + Style("Heading2", "Heading 2", 26, "2E74B5", true, 280, 140, 300) + Style("Heading3", "Heading 3", 24, "1F4D78", true, 200, 100, 300) + Style("Lead", "Lead", 22, "526274", false, 0, 180, 300) + Style("RecordTitle", "Record Title", 22, "25364D", true, 0, 80, 300) + Style("RecordMeta", "Record Meta", 18, "718096", false, 0, 80, 280) + Style("TableText", "Table Text", 18, "25364D", false, 0, 40, 260) + Style("TableHeader", "Table Header", 18, "102A43", true, 0, 40, 260) + Style("Callout", "Callout", 20, "25364D", false, 120, 120, 300, "F4F6F9") + "</w:styles>";
     private static string Style(string id, string name, int size, string color, bool bold, int before, int after, int line, string? fill = null) => $"<w:style w:type=\"paragraph\" w:styleId=\"{id}\"><w:name w:val=\"{name}\"/>{(id == "Normal" ? "" : "<w:basedOn w:val=\"Normal\"/>")}<w:pPr><w:spacing w:before=\"{before}\" w:after=\"{after}\" w:line=\"{line}\" w:lineRule=\"auto\"/>{(fill is null ? "" : $"<w:shd w:val=\"clear\" w:fill=\"{fill}\"/>")}</w:pPr><w:rPr><w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\"/><w:color w:val=\"{color}\"/><w:sz w:val=\"{size}\"/>{(bold ? "<w:b/>" : "")}</w:rPr></w:style>";
     private static string P(string text, string style, bool keepNext = false, bool pageBreakBefore = false) => $"<w:p><w:pPr><w:pStyle w:val=\"{style}\"/>{(keepNext ? "<w:keepNext/>" : "")}{(pageBreakBefore ? "<w:pageBreakBefore/>" : "")}</w:pPr><w:r><w:t xml:space=\"preserve\">{SecurityElement.Escape(text)}</w:t></w:r></w:p>";
+    private static string PRuns(string innerXml, string style, bool keepNext = false, bool pageBreakBefore = false) => $"<w:p><w:pPr><w:pStyle w:val=\"{style}\"/>{(keepNext ? "<w:keepNext/>" : "")}{(pageBreakBefore ? "<w:pageBreakBefore/>" : "")}</w:pPr>{innerXml}</w:p>";
+    private static string Run(string text) => $"<w:r><w:t xml:space=\"preserve\">{SecurityElement.Escape(text)}</w:t></w:r>";
+    private static string RunCaps(string text) => $"<w:r><w:rPr><w:caps/></w:rPr><w:t xml:space=\"preserve\">{SecurityElement.Escape(text)}</w:t></w:r>";
+    private static string Sdt(string tag, string innerXml) => $"<w:sdt><w:sdtPr><w:tag w:val=\"{tag}\"/></w:sdtPr><w:sdtContent>{innerXml}</w:sdtContent></w:sdt>";
     private static string PageBreak() => "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>";
     private static string Table(IReadOnlyList<string> headers, IReadOnlyList<IReadOnlyList<string>> rows, IReadOnlyList<int> widths, bool shadeFirstColumn)
     {
-        var body = new StringBuilder($"<w:tbl><w:tblPr><w:tblW w:w=\"9360\" w:type=\"dxa\"/><w:tblInd w:w=\"120\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:color=\"D7DEE7\"/><w:left w:val=\"single\" w:sz=\"4\" w:color=\"D7DEE7\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:color=\"D7DEE7\"/><w:right w:val=\"single\" w:sz=\"4\" w:color=\"D7DEE7\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"E5EAF0\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"E5EAF0\"/></w:tblBorders><w:tblCellMar><w:top w:w=\"100\" w:type=\"dxa\"/><w:start w:w=\"120\" w:type=\"dxa\"/><w:bottom w:w=\"100\" w:type=\"dxa\"/><w:end w:w=\"120\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>{string.Join("", widths.Select(x => $"<w:gridCol w:w=\"{x}\"/>"))}</w:tblGrid>");
+        var body = new StringBuilder(TableStart(widths));
         if (headers.Count > 0) body.Append(Row(headers, widths, true, false)); foreach (var row in rows) body.Append(Row(row, widths, false, shadeFirstColumn)); return body.Append("</w:tbl>").ToString();
     }
+    private static string TableStart(IReadOnlyList<int> widths) => $"<w:tbl><w:tblPr><w:tblW w:w=\"9360\" w:type=\"dxa\"/><w:tblInd w:w=\"120\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:color=\"D7DEE7\"/><w:left w:val=\"single\" w:sz=\"4\" w:color=\"D7DEE7\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:color=\"D7DEE7\"/><w:right w:val=\"single\" w:sz=\"4\" w:color=\"D7DEE7\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"E5EAF0\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"E5EAF0\"/></w:tblBorders><w:tblCellMar><w:top w:w=\"100\" w:type=\"dxa\"/><w:start w:w=\"120\" w:type=\"dxa\"/><w:bottom w:w=\"100\" w:type=\"dxa\"/><w:end w:w=\"120\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>{string.Join("", widths.Select(x => $"<w:gridCol w:w=\"{x}\"/>"))}</w:tblGrid>";
+    private static string ControlledDocumentControlTable(IReadOnlyList<IReadOnlyList<string>> rows)
+    {
+        var body = new StringBuilder(TableStart([2700, 6660]));
+        foreach (var row in rows) body.Append(ControlledRow(row));
+        return body.Append("</w:tbl>").ToString();
+    }
+    private static string ControlledRow(IReadOnlyList<string> cells)
+    {
+        var label = cells[0]; var value = cells[1];
+        var valueInner = label switch
+        {
+            "Document number" => Sdt(WordDocumentStructure.DocumentNumberTag, Run(value)),
+            "Revision" => Sdt(WordDocumentStructure.RevisionTag, Run(value)),
+            "Status" => Sdt(WordDocumentStructure.StatusTag, Run(value)),
+            _ => Run(value)
+        };
+        return "<w:tr>"
+            + $"<w:tc><w:tcPr><w:tcW w:w=\"2700\" w:type=\"dxa\"/><w:shd w:val=\"clear\" w:fill=\"E8EEF5\"/><w:vAlign w:val=\"center\"/></w:tcPr>{P(label, "TableHeader")}</w:tc>"
+            + $"<w:tc><w:tcPr><w:tcW w:w=\"6660\" w:type=\"dxa\"/><w:vAlign w:val=\"center\"/></w:tcPr>{PRuns(valueInner, "TableText")}</w:tc>"
+            + "</w:tr>";
+    }
     private static string Row(IReadOnlyList<string> cells, IReadOnlyList<int> widths, bool header, bool shadeFirstColumn) => "<w:tr>" + string.Join("", cells.Select((x, i) => $"<w:tc><w:tcPr><w:tcW w:w=\"{widths[i]}\" w:type=\"dxa\"/>{(header || shadeFirstColumn && i == 0 ? "<w:shd w:val=\"clear\" w:fill=\"E8EEF5\"/>" : "")}<w:vAlign w:val=\"center\"/></w:tcPr>{P(x, header || shadeFirstColumn && i == 0 ? "TableHeader" : "TableText")}</w:tc>")) + "</w:tr>";
-    private static string Header(ProfessionalPublication p) => $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\"><w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"168578\"/></w:pBdr></w:pPr>{DocxWatermark(p)}<w:r><w:rPr><w:b/><w:color w:val=\"102A43\"/><w:sz w:val=\"18\"/></w:rPr><w:t>{SecurityElement.Escape(p.Product)}  |  {SecurityElement.Escape(p.DocumentType.ToUpperInvariant())}</w:t></w:r></w:p></w:hdr>";
+    private static string Header(ProfessionalPublication p)
+    {
+        var watermark = DocxWatermark(p);
+        var watermarkBlock = watermark.Length == 0 ? ""
+            : p.ControlledStatusControls
+                ? $"<w:p><w:sdt><w:sdtPr><w:tag w:val=\"{WordDocumentStructure.WatermarkTag}\"/></w:sdtPr><w:sdtContent><w:p>{watermark}</w:p></w:sdtContent></w:sdt></w:p>"
+                : watermark;
+        return $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\">{watermarkBlock}<w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"168578\"/></w:pBdr></w:pPr><w:r><w:rPr><w:b/><w:color w:val=\"102A43\"/><w:sz w:val=\"18\"/></w:rPr><w:t>{SecurityElement.Escape(p.Product)}  |  {SecurityElement.Escape(p.DocumentType.ToUpperInvariant())}</w:t></w:r></w:p></w:hdr>";
+    }
 
     /// <summary>
     /// The watermark, as Word expects one: a VML shape anchored in the header.
@@ -106,7 +158,17 @@ public static class ProfessionalPublicationRenderer
         "mso-position-vertical-relative:margin\" o:allowincell=\"f\" fillcolor=\"#c8d0d8\" stroked=\"f\">" +
         $"<v:textpath style=\"font-family:&quot;Calibri&quot;;font-size:1pt\" string=\"{SecurityElement.Escape(p.Watermark)}\"/>" +
         "<v:fill opacity=\".45\"/></v:shape></w:pict></w:r>";
-    private static string Footer(ProfessionalPublication p) => $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:ftr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:color w:val=\"718096\"/><w:sz w:val=\"14\"/></w:rPr><w:t>{SecurityElement.Escape(p.DocumentNumber)} Rev {SecurityElement.Escape(p.Revision)} | {SecurityElement.Escape(p.Status)} | Manifest {p.ManifestHash[..Math.Min(12, p.ManifestHash.Length)]} | Page </w:t></w:r><w:fldSimple w:instr=\"PAGE\"><w:r><w:t>1</w:t></w:r></w:fldSimple></w:p></w:ftr>";
+    private static string Footer(ProfessionalPublication p)
+    {
+        var manifest = p.ManifestHash[..Math.Min(12, p.ManifestHash.Length)];
+        var inner = p.ControlledStatusControls
+            ? Sdt(WordDocumentStructure.DocumentNumberTag, FooterRun(p.DocumentNumber)) + FooterRun(" Rev ")
+                + Sdt(WordDocumentStructure.RevisionTag, FooterRun(p.Revision)) + FooterRun(" | ")
+                + Sdt(WordDocumentStructure.StatusTag, FooterRun(p.Status)) + FooterRun($" | Manifest {manifest} | Page ")
+            : FooterRun($"{p.DocumentNumber} Rev {p.Revision} | {p.Status} | Manifest {manifest} | Page ");
+        return $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:ftr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr>{inner}<w:fldSimple w:instr=\"PAGE\"><w:r><w:t>1</w:t></w:r></w:fldSimple></w:p></w:ftr>";
+    }
+    private static string FooterRun(string text) => $"<w:r><w:rPr><w:color w:val=\"718096\"/><w:sz w:val=\"14\"/></w:rPr><w:t xml:space=\"preserve\">{SecurityElement.Escape(text)}</w:t></w:r>";
     private static string ApprovalDecision(PublicationApproval approval) => approval.State + (approval.DecidedAt is null ? "" : " - " + approval.DecidedAt.Value.UtcDateTime.ToString("yyyy-MM-dd"));
     private static readonly DateTimeOffset DeterministicArchiveTime=new(2000,1,1,0,0,0,TimeSpan.Zero);
     private static void Entry(ZipArchive zip, string name, string content) { var entry = zip.CreateEntry(name, CompressionLevel.Optimal);entry.LastWriteTime=DeterministicArchiveTime; using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)); writer.Write(content); }
