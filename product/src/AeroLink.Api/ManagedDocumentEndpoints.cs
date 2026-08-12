@@ -60,7 +60,7 @@ public static class ManagedDocumentEndpoints
         return Results.Ok(new { total = ids.Count, released = revisions.Select(x => x.DocumentId).Distinct().Count(id => revisions.Any(x => x.DocumentId == id && x.State == ManagedDocumentState.Released)), inWork = revisions.Count(x => x.State is ManagedDocumentState.Draft or ManagedDocumentState.InReview or ManagedDocumentState.Returned), inReview = revisions.Count(x => x.State == ManagedDocumentState.InReview), returned = revisions.Count(x => x.State == ManagedDocumentState.Returned), checkedOut = active.Count });
     }
 
-    private static async Task<IResult> DetailAsync(Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> DetailAsync(Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         var document = await db.ManagedDocuments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (document is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, document.ProjectId, ct)) return Results.Forbid();
@@ -73,13 +73,16 @@ public static class ManagedDocumentEndpoints
         var audits = (await db.ManagedDocumentEvents.AsNoTracking().Where(x => x.DocumentId == id).ToListAsync(ct)).OrderByDescending(x => x.OccurredAt).ToList();
         var signatures = (await db.ElectronicSignatures.AsNoTracking().Where(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == id).ToListAsync(ct)).OrderBy(x => x.SignedAt).ToList();
         var checkIns = (await db.ManagedDocumentCheckIns.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId)).ToListAsync(ct)).OrderBy(x => x.OccurredAt).ToList();
+        var actor = http.UserAccount();
+        var canCorrectFormalScopeByRole = await http.HasProjectRoleAsync(db, identity, document.ProjectId, ct,
+            ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead);
         return Results.Ok(new
         {
             document.Id, document.ProjectId, document.DocumentNumber, document.Acronym, document.DocumentType, document.Title, document.OwnerId, document.CreatedAt, document.UpdatedAt, document.Version,
             lockInfo = active is null ? null : new { active.Id, active.UserName, active.OpenedAt, active.UpdatedAt, active.ExpiresAt }, buildProvenance,
             revisions = revisions.Select(revision => new
             {
-                revision.Id, revision.Revision, revision.ParentRevisionId, revision.ParentReleasedDocxAttachmentId, revision.ParentReleasedDocxSha256, revision.TransformationProfile, displayNumber = $"{document.DocumentNumber}.{revision.Revision:D2}", revision.OwnerId, revision.FormalChangeSummary, revision.FormalSummaryHash, revision.FormalSummaryVersion, revision.FormalSummaryProvenance, state = revision.State.ToString(), revision.CurrentWorkingAttachmentId, revision.ReleasedDocxAttachmentId, revision.ReleasedPdfAttachmentId, revision.SnapshotHash, revision.SubmittedFormalSummaryHash, revision.SubmittedFormalSummaryVersion, revision.ReleaseManifestHash, revision.ReturnReason, revision.SubmittedBy, revision.SubmittedAt, revision.ReleasedBy, revision.ReleasedAt, revision.CreatedAt, revision.UpdatedAt, revision.Version,
+                revision.Id, revision.Revision, revision.ParentRevisionId, revision.ParentReleasedDocxAttachmentId, revision.ParentReleasedDocxSha256, revision.TransformationProfile, displayNumber = $"{document.DocumentNumber}.{revision.Revision:D2}", revision.OwnerId, revision.FormalChangeSummary, revision.FormalSummaryHash, revision.FormalSummaryVersion, revision.FormalSummaryProvenance, canReviseFormalSummary = revision.State is ManagedDocumentState.Draft or ManagedDocumentState.Returned && (string.Equals(revision.OwnerId, actor.UserName, StringComparison.OrdinalIgnoreCase) || canCorrectFormalScopeByRole), state = revision.State.ToString(), revision.CurrentWorkingAttachmentId, revision.ReleasedDocxAttachmentId, revision.ReleasedPdfAttachmentId, revision.SnapshotHash, revision.SubmittedFormalSummaryHash, revision.SubmittedFormalSummaryVersion, revision.ReleaseManifestHash, revision.ReturnReason, revision.SubmittedBy, revision.SubmittedAt, revision.ReleasedBy, revision.ReleasedAt, revision.CreatedAt, revision.UpdatedAt, revision.Version,
                 reviewSteps = revision.ReviewSteps.OrderBy(x => x.Cycle).ThenBy(x => x.Position).Select(x => new { x.Id, x.Cycle, x.Position, x.StageName, x.ApproverId, x.ApproverName, state = x.State.ToString(), x.Rationale, x.DecidedAt }),
                 attachments = attachments.Where(x => x.RevisionId == revision.Id).OrderByDescending(x => x.UploadedAt).Select(Attachment),
                 links = links.Where(x => x.RevisionId == revision.Id).Select(x => new { x.Id, x.ArtifactType, x.ArtifactId, x.DisplayNumber, x.Relationship, x.CreatedBy, x.CreatedAt })
@@ -214,14 +217,15 @@ public static class ManagedDocumentEndpoints
     private static async Task<IResult> ReviseFormalSummaryAsync(Guid revisionId, ReviseManagedDocumentFormalSummaryRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         var data = await RevisionDataAsync(db, revisionId, ct); if (data is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
         var actor = http.UserAccount();
         if (!string.Equals(data.Revision.OwnerId, actor.UserName, StringComparison.OrdinalIgnoreCase)
             && !await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         try
         {
-            var oldHash = data.Revision.FormalSummaryHash; var now = DateTimeOffset.UtcNow;
-            data.Revision.ReviseFormalSummary(request.FormalChangeSummary, request.Reason, request.ExpectedVersion, now);
-            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentFormalSummaryRevised", actor.UserName, $"Revised the formal scope for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} from {oldHash} to {data.Revision.FormalSummaryHash}. Reason: {request.Reason}", now));
+            var oldHash = data.Revision.FormalSummaryHash; var now = DateTimeOffset.UtcNow; var reason = request.Reason.Trim();
+            data.Revision.ReviseFormalSummary(request.FormalChangeSummary, reason, request.ExpectedVersion, now);
+            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentFormalSummaryRevised", actor.UserName, $"Revised the formal scope for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} from {oldHash} to {data.Revision.FormalSummaryHash}. Reason: {reason}", now));
             await db.SaveChangesAsync(ct); return Results.Ok(new { formalChangeSummary = data.Revision.FormalChangeSummary, data.Revision.FormalSummaryHash, data.Revision.FormalSummaryVersion, data.Revision.Version });
         }
         catch (DomainException ex) { return Results.Conflict(new { error = ex.Message }); }

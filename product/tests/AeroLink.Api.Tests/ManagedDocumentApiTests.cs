@@ -83,7 +83,7 @@ public sealed class ManagedDocumentApiTests
         Assert.Equal(HttpStatusCode.Created, created.StatusCode); var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>(); var documentId = createdBody.GetProperty("id").GetGuid(); var revisionId = createdBody.GetProperty("revisionId").GetGuid();
         using var beforeResponse = await client.GetAsync($"/api/managed-documents/{documentId}"); Assert.True(beforeResponse.IsSuccessStatusCode, await beforeResponse.Content.ReadAsStringAsync()); var before = await beforeResponse.Content.ReadFromJsonAsync<JsonElement>(); var version = before.GetProperty("revisions")[0].GetProperty("version").GetInt64();
 
-        using var corrected = await client.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/formal-summary", new { formalChangeSummary = "Reconcile the exact approved lifecycle evidence.", reason = "Corrected the formal revision scope before review.", expectedVersion = version });
+        using var corrected = await client.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/formal-summary", new { formalChangeSummary = "Reconcile the exact approved lifecycle evidence.", reason = "   Corrected the formal revision scope before review.   ", expectedVersion = version });
         Assert.Equal(HttpStatusCode.OK, corrected.StatusCode); var correction = await corrected.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, correction.GetProperty("formalSummaryVersion").GetInt64());
         using var stale = await client.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/formal-summary", new { formalChangeSummary = "Stale overwrite.", reason = "Stale tab.", expectedVersion = version });
@@ -102,7 +102,32 @@ public sealed class ManagedDocumentApiTests
         Assert.Equal("Reconcile the exact approved lifecycle evidence.", revision.GetProperty("formalChangeSummary").GetString());
         Assert.Equal(revision.GetProperty("formalSummaryHash").GetString(), revision.GetProperty("submittedFormalSummaryHash").GetString());
         Assert.Equal(2, revision.GetProperty("submittedFormalSummaryVersion").GetInt64());
-        Assert.Contains(detail.GetProperty("audit").EnumerateArray(), item => item.GetProperty("eventType").GetString() == "DocumentFormalSummaryRevised" && item.GetProperty("detail").GetString()!.Contains("Corrected the formal revision scope before review."));
+        Assert.Contains(detail.GetProperty("audit").EnumerateArray(), item => item.GetProperty("eventType").GetString() == "DocumentFormalSummaryRevised" && item.GetProperty("detail").GetString()!.EndsWith("Reason: Corrected the formal revision scope before review."));
+    }
+
+    [Fact]
+    public async Task Formal_scope_capability_is_server_derived_and_an_ended_owner_cannot_bypass_project_access()
+    {
+        using var factory = new AeroLinkApiFactory(); using var administrator = factory.CreateClient(); await ProblemReportApiTests.BootstrapAndLoginAsync(administrator);
+        var scope = await SeedProjectAsync(factory);
+        using var created = await administrator.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "ICD", documentType = "Interface Control Document", title = "Project interface control", ownerId = "software.lead", formalChangeSummary = "Control the Project interfaces." });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode); var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>(); var documentId = createdBody.GetProperty("id").GetGuid(); var revisionId = createdBody.GetProperty("revisionId").GetGuid();
+        var detail = await administrator.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var revision = detail.GetProperty("revisions")[0];
+        Assert.Equal("software.lead", revision.GetProperty("ownerId").GetString());
+        Assert.True(revision.GetProperty("canReviseFormalSummary").GetBoolean());
+        var version = revision.GetProperty("version").GetInt64();
+
+        using (var serviceScope = factory.Services.CreateScope())
+        {
+            var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var account = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.UserAccounts.Where(x => x.UserName == "software.lead"));
+            var membership = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.ProgramMemberships.Where(x => x.UserId == account.Id && x.EndedAt == null));
+            membership.End("admin", DateTimeOffset.UtcNow); await db.SaveChangesAsync();
+        }
+
+        using var formerOwner = factory.CreateClient(); using (var login = await formerOwner.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(formerOwner);
+        using var refused = await formerOwner.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/formal-summary", new { formalChangeSummary = "Unauthorized correction.", reason = "Membership ended.", expectedVersion = version });
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
     }
 
     [Fact]
