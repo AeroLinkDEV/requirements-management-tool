@@ -24,7 +24,7 @@ public sealed class ManualTestChangeRequestApiTests
 {
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid FirstChangeId, Guid SecondChangeId,
         Guid AutoRaisedChangeId, Guid AutoTcrId, Guid OtherBuildChangeId, Guid ProblemReportId,
-        Guid OtherBuildProblemReportId, Guid AutoItemId);
+        Guid OtherBuildProblemReportId, Guid AutoItemId, Guid HighLevelChangeId, Guid LowLevelChangeId);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -49,15 +49,30 @@ public sealed class ManualTestChangeRequestApiTests
             return scr;
         }
 
+        // Software changes at each level, so "which level drives this package" has a right and a wrong answer
+        // to assert against. A software change must name its level; the domain refuses one without.
+        SystemChangeRequest ApprovedSoftware(string number, string requirement, RequirementLevel level)
+        {
+            var scr = new SystemChangeRequest(number, 0, project.Id, release.Id, "Oceanic", "P", "A", "S", "author", now,
+                type: ChangeRequestType.Software, softwareLevel: level);
+            scr.AddRequirementChange("author", requirement, 0, level, RequirementChangeKind.Introduce,
+                "The FMS software shall sequence oceanic waypoints.", "New capability", "Analysis", now);
+            scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
+            scr.ApproveActiveStage("reviewer", now);
+            return scr;
+        }
+
         var first = Approved("SRCR-00910", "SYSR-00000911", release.Id);
         var second = Approved("SRCR-00911", "SYSR-00000912", release.Id);
         var autoRaised = Approved("SRCR-00912", "SYSR-00000913", release.Id);
         var elsewhere = Approved("SRCR-00913", "SYSR-00000914", otherBuild.Id);
+        var highLevel = ApprovedSoftware("HLRCR-00910", "HLR-00000911", RequirementLevel.HighLevel);
+        var lowLevel = ApprovedSoftware("LLRCR-00910", "LLR-00000911", RequirementLevel.LowLevel);
         var report = new ProblemReport(project.Id, "PR-00910", "Route sequencing disagreement",
             "The observed route differs from the approved plan.", "", "quality", now);
         var otherReport = new ProblemReport(project.Id, "PR-00911", "Future-build problem",
             "This problem belongs to another build.", "", "quality", now);
-        db.AddRange(first, second, autoRaised, elsewhere, report, otherReport,
+        db.AddRange(first, second, autoRaised, elsewhere, highLevel, lowLevel, report, otherReport,
             new ProblemReportLink(report.Id, "Release", release.Id, "BuildScope", "quality", now),
             new ProblemReportLink(otherReport.Id, "Release", otherBuild.Id, "BuildScope", "quality", now));
 
@@ -86,7 +101,7 @@ public sealed class ManualTestChangeRequestApiTests
             .Select(x => x.Id).SingleAsync();
 
         return new(project.Id, release.Id, first.Id, second.Id, autoRaised.Id, autoTcrId, elsewhere.Id,
-            report.Id, otherReport.Id, autoItemId);
+            report.Id, otherReport.Id, autoItemId, highLevel.Id, lowLevel.Id);
     }
 
     private static async Task LoginAsync(HttpClient client, string user)
@@ -103,6 +118,83 @@ public sealed class ManualTestChangeRequestApiTests
             "Verify the package behavior.", "The target build is available.", "Exercise the change.",
             "The changed behavior is observed.", "The current package must name its procedure work.",
             JsonSerializer.Serialize(new[] { Guid.NewGuid() })), now);
+
+    /// <summary>
+    /// A procedure verifies the requirements one level above it, so the package that controls HLR test work
+    /// answers for HLR requirement changes and nothing else. Before this the picker offered every approved
+    /// change in the build, so raising an HLRTCR presented SRCRs and LLRCRs as choices — neither of which can
+    /// drive an HLR procedure.
+    /// </summary>
+    [Theory]
+    [InlineData("HighLevelSoftware", "HLRCR-00910")]
+    [InlineData("LowLevelSoftware", "LLRCR-00910")]
+    [InlineData("System", "SRCR-00910")]
+    public async Task The_picker_offers_only_changes_at_the_level_the_package_controls(string discipline, string expected)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var response = await client.GetAsync(
+            $"/api/releases/{fixture.ReleaseId}/test-change-request-sources?discipline={discipline}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var offered = (await response.Content.ReadFromJsonAsync<SourceChoice[]>())!;
+
+        // The display number carries its revision suffix (HLRCR-00910.00), so the base number is matched.
+        Assert.Contains(offered, x => x.DisplayNumber.StartsWith(expected, StringComparison.Ordinal));
+        // Every offer is at the package's own level: nothing from a level above or below appears at all.
+        var prefix = discipline switch
+        {
+            "HighLevelSoftware" => "HLRCR-",
+            "LowLevelSoftware" => "LLRCR-",
+            _ => "SRCR-",
+        };
+        Assert.All(offered, x => Assert.StartsWith(prefix, x.DisplayNumber));
+    }
+
+    /// <summary>
+    /// Enforced on the server as well as in the picker. A filtered browser list is a convenience; a request
+    /// that never opened the picker has to meet the same rule.
+    /// </summary>
+    [Fact]
+    public async Task A_change_from_another_level_is_refused_even_when_named_directly()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "HighLevelSoftware", changeRequestIds = new[] { fixture.LowLevelChangeId },
+                title = "Wrong level package",
+                problem = "P", analysis = "A", solution = "S" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("change_request_wrong_level", body);
+        Assert.Contains("LLRCR-00910", body);
+    }
+
+    /// <summary>The matching level is accepted, so the refusal above is about the level and nothing else.</summary>
+    [Fact]
+    public async Task A_change_at_the_matching_level_raises_the_package()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "manual.engineer");
+
+        using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new { discipline = "HighLevelSoftware", changeRequestIds = new[] { fixture.HighLevelChangeId },
+                title = "High-level verification package",
+                problem = "P", analysis = "A", solution = "S" });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    private sealed record SourceChoice(Guid ChangeRequestId, string DisplayNumber, string Title, string State,
+        bool Selectable, string? Reason);
 
     [Fact]
     public async Task An_engineer_raises_a_package_covering_two_changes_at_once()
