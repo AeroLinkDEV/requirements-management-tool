@@ -36,7 +36,7 @@ public sealed class ManagedDocumentFileTests
     [Fact]
     public void Starting_the_next_revision_updates_current_control_metadata_but_preserves_history()
     {
-        var original = ProfessionalPublicationRenderer.Render(Publication("Draft", "DRAFT", "00"), "docx", "SDP-000001.00").Content;
+        var original = ProfessionalPublicationRenderer.Render(Publication("Released", null, "00"), "docx", "SDP-000001.00").Content;
 
         var updated = ManagedDocumentFileService.PrepareNextRevisionDraft(original, "SDP-000001", 0, 1);
         using var archive = new System.IO.Compression.ZipArchive(new MemoryStream(updated), System.IO.Compression.ZipArchiveMode.Read);
@@ -47,8 +47,47 @@ public sealed class ManagedDocumentFileTests
         Assert.Contains("<w:t xml:space=\"preserve\">Revision</w:t>", documentXml);
         Assert.Contains("<w:t xml:space=\"preserve\">01</w:t>", documentXml);
         Assert.Contains("SDP-000001 Rev 01 |", footerXml);
+        Assert.Contains("| Draft |", footerXml);
         Assert.Contains("<w:t xml:space=\"preserve\">00</w:t>", documentXml);
         Assert.True(ManagedDocumentFileService.ContainsDraftWatermark(updated));
+    }
+
+    [Fact]
+    public void Starting_a_successor_adds_valid_watermark_namespaces_to_a_clean_word_header()
+    {
+        var original = ProfessionalPublicationRenderer.Render(Publication("Released", null, "00"), "docx", "SDP-000001.00").Content;
+        using var buffer = new MemoryStream(); buffer.Write(original); buffer.Position = 0;
+        using (var archive = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Update, true))
+        {
+            var header = archive.GetEntry("word/header1.xml")!; string xml; using (var reader = new StreamReader(header.Open())) xml = reader.ReadToEnd();
+            header.Delete(); var replacement = archive.CreateEntry("word/header1.xml"); using var writer = new StreamWriter(replacement.Open()); writer.Write(xml.Replace(" xmlns:v=\"urn:schemas-microsoft-com:vml\"", "").Replace(" xmlns:o=\"urn:schemas-microsoft-com:office:office\"", ""));
+        }
+        var updated = ManagedDocumentFileService.PrepareNextRevisionDraft(buffer.ToArray(), "SDP-000001", 0, 1);
+        using var result = new System.IO.Compression.ZipArchive(new MemoryStream(updated), System.IO.Compression.ZipArchiveMode.Read);
+        _ = System.Xml.Linq.XDocument.Parse(Read(result, "word/header1.xml"));
+    }
+
+    [Fact]
+    public void Starting_a_successor_creates_and_relates_a_watermarked_header_when_the_release_has_none()
+    {
+        var original = ProfessionalPublicationRenderer.Render(Publication("Released", null, "00"), "docx", "SDP-000001.00").Content;
+        using var buffer = new MemoryStream(); buffer.Write(original); buffer.Position = 0;
+        using (var archive = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Update, true))
+        {
+            archive.GetEntry("word/header1.xml")!.Delete();
+            RemoveElements(archive, "[Content_Types].xml", x => x.Name.LocalName == "Override" && (string?)x.Attribute("PartName") == "/word/header1.xml");
+            RemoveElements(archive, "word/_rels/document.xml.rels", x => x.Name.LocalName == "Relationship" && (string?)x.Attribute("Target") == "header1.xml");
+            RemoveElements(archive, "word/document.xml", x => x.Name.LocalName == "headerReference");
+        }
+
+        var updated = ManagedDocumentFileService.PrepareNextRevisionDraft(buffer.ToArray(), "SDP-000001", 0, 1);
+        using var result = new System.IO.Compression.ZipArchive(new MemoryStream(updated), System.IO.Compression.ZipArchiveMode.Read);
+
+        Assert.Contains("AeroLinkWatermark", Read(result, "word/headerAeroLink.xml"));
+        Assert.Contains("headerAeroLink.xml", Read(result, "word/_rels/document.xml.rels"));
+        Assert.Contains("rIdAeroLinkDraftHeader", Read(result, "word/document.xml"));
+        Assert.Contains("/word/headerAeroLink.xml", Read(result, "[Content_Types].xml"));
+        ManagedDocumentFileService.ValidateDocx(updated, requireDraftWatermark: true);
     }
 
     [Theory]
@@ -71,5 +110,12 @@ public sealed class ManagedDocumentFileTests
     {
         using var reader = new StreamReader(archive.GetEntry(name)!.Open());
         return reader.ReadToEnd();
+    }
+
+    private static void RemoveElements(System.IO.Compression.ZipArchive archive, string name, Func<System.Xml.Linq.XElement, bool> predicate)
+    {
+        var entry = archive.GetEntry(name)!; string xml; using (var reader = new StreamReader(entry.Open())) xml = reader.ReadToEnd();
+        var document = System.Xml.Linq.XDocument.Parse(xml); foreach (var element in document.Descendants().Where(predicate).ToList()) element.Remove();
+        entry.Delete(); var replacement = archive.CreateEntry(name); using var writer = new StreamWriter(replacement.Open()); writer.Write(document.ToString(System.Xml.Linq.SaveOptions.DisableFormatting));
     }
 }

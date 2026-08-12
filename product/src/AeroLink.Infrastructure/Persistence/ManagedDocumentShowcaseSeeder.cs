@@ -44,17 +44,16 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
         {
             var document = new ManagedDocument(project.Id, $"{seed.Acronym}-000001", seed.Acronym, seed.Type, seed.Title, seed.Owner, now.AddMinutes(index));
             db.ManagedDocuments.Add(document);
-            var released = new ManagedDocumentRevision(document.Id, release15.Id, 0, seed.Owner, "Initial controlled issue for FMS Build 1.5.", now.AddMinutes(index));
+            var released = new ManagedDocumentRevision(document.Id, 0, seed.Owner, "Initial controlled Project issue.", now.AddMinutes(index));
             db.ManagedDocumentRevisions.Add(released);
             await db.SaveChangesAsync(ct);
 
             await SeedReleasedRevisionAsync(document, released, project.Name, release15.Version, program.Id, program.Name, people, now.AddMinutes(index), ct);
-            db.ManagedDocumentBuildSelections.Add(new ManagedDocumentBuildSelection(project.Id, release15.Id, document.Id, released.Id, "cm.fms", now));
-            db.ManagedDocumentBuildSelections.Add(new ManagedDocumentBuildSelection(project.Id, release16.Id, document.Id, released.Id, "cm.fms", now));
-
             if (seed.WorkingState != "Released")
             {
-                var working = new ManagedDocumentRevision(document.Id, release16.Id, 1, seed.Owner, WorkingSummary(seed.Acronym), now.AddDays(1).AddMinutes(index));
+                var parent = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == released.ReleasedDocxAttachmentId, ct);
+                var working = new ManagedDocumentRevision(document.Id, 1, seed.Owner, WorkingSummary(seed.Acronym), now.AddDays(1).AddMinutes(index),
+                    released.Id, parent.Id, parent.Sha256, ManagedDocumentFileService.SuccessorTransformationProfile);
                 db.ManagedDocumentRevisions.Add(working);
                 await db.SaveChangesAsync(ct);
                 await SeedWorkingRevisionAsync(document, working, project.Name, release16.Version, program.Name, seed.WorkingState, people, now.AddDays(1).AddMinutes(index), ct);
@@ -99,7 +98,7 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
         db.ElectronicSignatures.AddRange(
             Signature(people["software.lead"], programId, document, revision, "TechnicalApprove", "Technical review completed", draftAttachment.Sha256, now.AddHours(2)),
             Signature(finalApprover, programId, document, revision, "Release", "SQA or assurance authorizes this exact controlled release", manifest, now.AddHours(3)));
-        Audit(document.Id, "DocumentReleased", finalApproverId, $"Released {document.DocumentNumber}.{revision.Revision:D2} for Build {build} with immutable DOCX and PDF renditions.", now.AddHours(3));
+        Audit(document.Id, "DocumentReleased", finalApproverId, $"Released Project document {document.DocumentNumber}.{revision.Revision:D2} with immutable DOCX and PDF renditions.", now.AddHours(3));
         await db.SaveChangesAsync(ct);
     }
 
@@ -121,7 +120,7 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
             if (state == "Returned") revision.Return("software.lead", "Clarify the external data validity timing and identify the governing interface requirement.", now.AddHours(2));
         }
         Audit(document.Id, state == "Returned" ? "DocumentReturned" : state == "InReview" ? "DocumentSubmitted" : "DocumentCheckedIn",
-            state == "Returned" ? "software.lead" : revision.OwnerId, $"{document.DocumentNumber}.{revision.Revision:D2} is {state} for Build {build}.", now.AddHours(2));
+            state == "Returned" ? "software.lead" : revision.OwnerId, $"Project document {document.DocumentNumber}.{revision.Revision:D2} is {state}.", now.AddHours(2));
         await db.SaveChangesAsync(ct);
     }
 
@@ -134,9 +133,9 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
     {
         var fingerprint = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"{document.DocumentNumber}|{revision.Revision}|{revision.ChangeSummary}|{status}"));
         return new ProfessionalPublication("AeroLink FMS", program, project, document.DocumentType, document.Title,
-            "Controlled lifecycle document", document.DocumentNumber, revision.Revision.ToString("D2"), status, build,
-            $"FMS-{build}", revision.OwnerId, revision.UpdatedAt, fingerprint,
-            [("Document owner", revision.OwnerId), ("Target build", build), ("Change summary", revision.ChangeSummary), ("Storage authority", "AeroLink Documentation Center")],
+            "Controlled Project lifecycle document", document.DocumentNumber, revision.Revision.ToString("D2"), status, "Project-wide",
+            "All software builds", revision.OwnerId, revision.UpdatedAt, fingerprint,
+            [("Document owner", revision.OwnerId), ("Applicability", "Project-wide; build links are contextual only"), ("Change summary", revision.ChangeSummary), ("Storage authority", "AeroLink Documentation Center")],
             approvals, [(revision.Revision.ToString("D2"), status, revision.UpdatedAt.UtcDateTime.ToString("yyyy-MM-dd"), revision.OwnerId)],
             Sections(document, revision)) { Watermark = watermark };
     }
@@ -145,17 +144,17 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
     [
         new("1. Purpose and scope", "This document is part of the controlled lifecycle data for the Flight Management System.",
         [new("1.1", "Purpose", document.Title, Purpose(document.Acronym), [("Applicability", "FMS software product"), ("Target revision", revision.Revision.ToString("D2"))]),
-         new("1.2", "Scope", "Lifecycle scope", "Applies to airborne software planning, development, verification, configuration control and assurance activities performed for the selected build.", [("Exclusions", "Aircraft installation approval and operator procedures")])]),
+         new("1.2", "Scope", "Lifecycle scope", "Applies to airborne software planning, development, verification, configuration control and assurance activities performed for this Project.", [("Exclusions", "Aircraft installation approval and operator procedures")])]),
         new("2. References and responsibilities", "Referenced records are controlled separately; links in AeroLink identify the exact applicable records.",
         [new("2.1", "References", "Governing lifecycle data", "DO-178C objectives, approved project plans, controlled requirements, verification procedures, problem reports and change requests apply as identified by the project configuration.", [("Precedence", "Approved project and certification data")]),
          new("2.2", "Responsibilities", "Lifecycle accountability", "The document owner maintains technical content. Independent reviewers evaluate correctness. Software Quality Assurance confirms conformity and authorizes release of the exact DOCX and PDF pair.", [("Author", revision.OwnerId), ("Final authority", "Software Quality Assurance")])]),
         new("3. Controlled process", "The process below is tailored to this document type and is configuration controlled.",
         [new("3.1", "Lifecycle", "Authoring and change control", Process(document.Acronym), [("Working format", "Macro-free Microsoft Word DOCX"), ("Released formats", "Immutable DOCX and approved PDF")]),
          new("3.2", "Verification", "Review and release", "A technical review evaluates accuracy, completeness, consistency and traceability. A separate final SQA review confirms the exact candidate files, electronic signatures and release evidence.", [("Independence", "The author cannot approve their own revision")]),
-         new("3.3", "Records", "Retained evidence", "AeroLink retains working check-ins, checkout ownership, review decisions, electronic signatures, SHA-256 hashes, approved renditions, build applicability and linked lifecycle artifacts.", [("Audit", "Append-only event history")])]),
+         new("3.3", "Records", "Retained evidence", "AeroLink retains working check-ins, checkout ownership, review decisions, electronic signatures, SHA-256 hashes, approved renditions, Project applicability and linked lifecycle artifacts.", [("Audit", "Append-only event history")])]),
         new("4. Compliance and completion", "Completion is evaluated against objective evidence rather than document status alone.",
         [new("4.1", "Completion criteria", "Ready for release", "All planned content is complete; referenced items are resolved or dispositioned; reviewers are independent; the exact DOCX and PDF candidate hashes are recorded; and SQA release authorization is electronically signed.", [("Release condition", "All review stages approved")]),
-         new("4.2", "Change control", "Subsequent changes", "A change starts a new formal revision inside the target build. Prior released revisions remain immutable and available from History.", [("Current change", revision.ChangeSummary)])])
+         new("4.2", "Change control", "Subsequent changes", "A change starts the single active successor revision for this Project document. Prior released revisions remain immutable and available from History.", [("Current change", revision.ChangeSummary)])])
     ];
 
     private static ElectronicSignature Signature(UserAccount user, Guid programId, ManagedDocument document, ManagedDocumentRevision revision,
@@ -168,11 +167,11 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
     private static string FileStem(ManagedDocument document, ManagedDocumentRevision revision) => $"{document.DocumentNumber}.{revision.Revision:D2}";
     private static string WorkingSummary(string acronym) => acronym switch
     {
-        "SDP" => "Add GitLab merge-request traceability and desktop connector responsibilities for Build 1.6.",
-        "SVP" => "Add mandatory impacted-test selection and pre-release verification evidence for Build 1.6.",
-        "SAS" => "Prepare the Build 1.6 accomplishment summary framework and open-evidence register.",
+        "SDP" => "Add GitLab merge-request traceability and desktop connector responsibilities.",
+        "SVP" => "Add mandatory impacted-test selection and pre-release verification evidence.",
+        "SAS" => "Prepare the accomplishment summary framework and open-evidence register.",
         "ICD" => "Clarify navigation-source validity timing and disagreement annunciation interfaces.",
-        _ => "Update controlled lifecycle content for Build 1.6."
+        _ => "Update controlled Project lifecycle content."
     };
     private static string Purpose(string acronym) => Documents.Single(x => x.Acronym == acronym).Purpose;
     private static string Process(string acronym) => acronym switch

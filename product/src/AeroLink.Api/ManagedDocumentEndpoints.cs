@@ -37,54 +37,47 @@ public static class ManagedDocumentEndpoints
         return app;
     }
 
-    private static async Task<IResult> ListAsync(Guid projectId, Guid releaseId, string? search, string? state, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(Guid projectId, string? search, string? state, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
-        if (!await db.Releases.AnyAsync(x => x.Id == releaseId && x.ProjectId == projectId, ct)) return Results.BadRequest(new { error = "The selected build does not belong to this project." });
         var documents = await db.ManagedDocuments.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
         if (!string.IsNullOrWhiteSpace(search)) { var term = search.Trim(); documents = documents.Where(x => x.DocumentNumber.Contains(term, StringComparison.OrdinalIgnoreCase) || x.Acronym.Contains(term, StringComparison.OrdinalIgnoreCase) || x.Title.Contains(term, StringComparison.OrdinalIgnoreCase) || x.DocumentType.Contains(term, StringComparison.OrdinalIgnoreCase)).ToList(); }
         var ids = documents.Select(x => x.Id).ToList();
         var revisions = await db.ManagedDocumentRevisions.AsNoTracking().Where(x => ids.Contains(x.DocumentId)).ToListAsync(ct);
-        var selections = await db.ManagedDocumentBuildSelections.AsNoTracking().Where(x => x.ReleaseId == releaseId && ids.Contains(x.DocumentId)).ToListAsync(ct);
         var sessions = await ActiveSessionsAsync(db, ids, ct);
-        var items = documents.Select(document => Summary(document, releaseId, revisions.Where(x => x.DocumentId == document.Id).ToList(), selections.SingleOrDefault(x => x.DocumentId == document.Id), sessions.SingleOrDefault(x => x.ArtifactId == document.Id))).ToList();
+        var items = documents.Select(document => Summary(document, revisions.Where(x => x.DocumentId == document.Id).ToList(), sessions.SingleOrDefault(x => x.ArtifactId == document.Id))).ToList();
         if (!string.IsNullOrWhiteSpace(state)) items = items.Where(x => x.InWorkState.Equals(state, StringComparison.OrdinalIgnoreCase) || x.ReleasedState.Equals(state, StringComparison.OrdinalIgnoreCase)).ToList();
         return Results.Ok(new { totalCount = items.Count, items = items.OrderBy(x => x.DocumentNumber) });
     }
 
-    private static async Task<IResult> DashboardAsync(Guid projectId, Guid releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> DashboardAsync(Guid projectId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var ids = await db.ManagedDocuments.AsNoTracking().Where(x => x.ProjectId == projectId).Select(x => x.Id).ToListAsync(ct);
         var revisions = await db.ManagedDocumentRevisions.AsNoTracking().Where(x => ids.Contains(x.DocumentId)).ToListAsync(ct);
         var active = await ActiveSessionsAsync(db, ids, ct);
-        return Results.Ok(new { total = ids.Count, released = revisions.Select(x => x.DocumentId).Distinct().Count(id => revisions.Any(x => x.DocumentId == id && x.State == ManagedDocumentState.Released)), inWork = revisions.Count(x => x.TargetReleaseId == releaseId && x.State is ManagedDocumentState.Draft or ManagedDocumentState.InReview or ManagedDocumentState.Returned), inReview = revisions.Count(x => x.TargetReleaseId == releaseId && x.State == ManagedDocumentState.InReview), returned = revisions.Count(x => x.TargetReleaseId == releaseId && x.State == ManagedDocumentState.Returned), checkedOut = active.Count });
+        return Results.Ok(new { total = ids.Count, released = revisions.Select(x => x.DocumentId).Distinct().Count(id => revisions.Any(x => x.DocumentId == id && x.State == ManagedDocumentState.Released)), inWork = revisions.Count(x => x.State is ManagedDocumentState.Draft or ManagedDocumentState.InReview or ManagedDocumentState.Returned), inReview = revisions.Count(x => x.State == ManagedDocumentState.InReview), returned = revisions.Count(x => x.State == ManagedDocumentState.Returned), checkedOut = active.Count });
     }
 
-    private static async Task<IResult> DetailAsync(Guid id, Guid? releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> DetailAsync(Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         var document = await db.ManagedDocuments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (document is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, document.ProjectId, ct)) return Results.Forbid();
         var revisions = (await db.ManagedDocumentRevisions.AsNoTracking().Where(x => x.DocumentId == id).Include(x => x.ReviewSteps).ToListAsync(ct)).OrderByDescending(x => x.Revision).ToList();
-        if (releaseId is not null)
-        {
-            var selectedRevisionId = await db.ManagedDocumentBuildSelections.AsNoTracking().Where(x => x.DocumentId == id && x.ReleaseId == releaseId).Select(x => (Guid?)x.RevisionId).SingleOrDefaultAsync(ct);
-            revisions = revisions.Where(x => x.TargetReleaseId == releaseId || x.Id == selectedRevisionId).ToList();
-        }
         var revisionIds = revisions.Select(x => x.Id).ToList();
         var attachments = await db.ControlledAttachments.AsNoTracking().Where(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == id).ToListAsync(ct);
         var links = (await db.ManagedDocumentLinks.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId)).ToListAsync(ct)).OrderBy(x => x.CreatedAt).ToList();
-        var selections = await (from selection in db.ManagedDocumentBuildSelections.AsNoTracking() join release in db.Releases.AsNoTracking() on selection.ReleaseId equals release.Id where selection.DocumentId == id select new { selection.ReleaseId, release.Version, selection.RevisionId, selection.SelectedBy, selection.SelectedAt }).ToListAsync(ct);
+        var buildProvenance = await (from provenance in db.ManagedDocumentBuildProvenance.AsNoTracking() join release in db.Releases.AsNoTracking() on provenance.ReleaseId equals release.Id where provenance.DocumentId == id select new { provenance.ReleaseId, release.Version, provenance.RevisionId, provenance.Source, provenance.RecordedBy, provenance.RecordedAt, meaning = "Legacy build association retained as provenance only" }).ToListAsync(ct);
         var active = (await ActiveSessionsAsync(db, [id], ct)).SingleOrDefault();
         var audits = (await db.ManagedDocumentEvents.AsNoTracking().Where(x => x.DocumentId == id).ToListAsync(ct)).OrderByDescending(x => x.OccurredAt).ToList();
         var signatures = (await db.ElectronicSignatures.AsNoTracking().Where(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == id).ToListAsync(ct)).OrderBy(x => x.SignedAt).ToList();
         return Results.Ok(new
         {
             document.Id, document.ProjectId, document.DocumentNumber, document.Acronym, document.DocumentType, document.Title, document.OwnerId, document.CreatedAt, document.UpdatedAt, document.Version,
-            lockInfo = active is null ? null : new { active.Id, active.UserName, active.OpenedAt, active.UpdatedAt, active.ExpiresAt }, selections,
+            lockInfo = active is null ? null : new { active.Id, active.UserName, active.OpenedAt, active.UpdatedAt, active.ExpiresAt }, buildProvenance,
             revisions = revisions.Select(revision => new
             {
-                revision.Id, revision.TargetReleaseId, revision.Revision, displayNumber = $"{document.DocumentNumber}.{revision.Revision:D2}", revision.OwnerId, revision.ChangeSummary, state = revision.State.ToString(), revision.CurrentWorkingAttachmentId, revision.ReleasedDocxAttachmentId, revision.ReleasedPdfAttachmentId, revision.SnapshotHash, revision.ReleaseManifestHash, revision.ReturnReason, revision.SubmittedBy, revision.SubmittedAt, revision.ReleasedBy, revision.ReleasedAt, revision.CreatedAt, revision.UpdatedAt, revision.Version,
+                revision.Id, revision.Revision, revision.ParentRevisionId, revision.ParentReleasedDocxAttachmentId, revision.ParentReleasedDocxSha256, revision.TransformationProfile, displayNumber = $"{document.DocumentNumber}.{revision.Revision:D2}", revision.OwnerId, revision.ChangeSummary, state = revision.State.ToString(), revision.CurrentWorkingAttachmentId, revision.ReleasedDocxAttachmentId, revision.ReleasedPdfAttachmentId, revision.SnapshotHash, revision.ReleaseManifestHash, revision.ReturnReason, revision.SubmittedBy, revision.SubmittedAt, revision.ReleasedBy, revision.ReleasedAt, revision.CreatedAt, revision.UpdatedAt, revision.Version,
                 reviewSteps = revision.ReviewSteps.OrderBy(x => x.Cycle).ThenBy(x => x.Position).Select(x => new { x.Id, x.Cycle, x.Position, x.StageName, x.ApproverId, x.ApproverName, state = x.State.ToString(), x.Rationale, x.DecidedAt }),
                 attachments = attachments.Where(x => x.RevisionId == revision.Id).OrderByDescending(x => x.UploadedAt).Select(Attachment),
                 links = links.Where(x => x.RevisionId == revision.Id).Select(x => new { x.Id, x.ArtifactType, x.ArtifactId, x.DisplayNumber, x.Relationship, x.CreatedBy, x.CreatedAt })
@@ -97,7 +90,6 @@ public static class ManagedDocumentEndpoints
     private static async Task<IResult> CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, CancellationToken ct)
     {
         if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
-        if (!await EnsureActiveReleaseAsync(http, db, request.ProjectId, request.TargetReleaseId, ct)) return BuildMismatch();
         await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         try
         {
@@ -105,13 +97,13 @@ public static class ManagedDocumentEndpoints
             var numbers = await db.ManagedDocuments.Where(x => x.ProjectId == request.ProjectId && x.Acronym == acronym).Select(x => x.DocumentNumber).ToListAsync(ct); var next = numbers.Select(NumberSequence).DefaultIfEmpty(0).Max() + 1;
             var now = DateTimeOffset.UtcNow; var actor = http.UserAccount();
             var document = new ManagedDocument(request.ProjectId, $"{acronym}-{next:D6}", acronym, request.DocumentType, request.Title, request.OwnerId ?? actor.UserName, now);
-            var revision = new ManagedDocumentRevision(document.Id, request.TargetReleaseId, 0, request.OwnerId ?? actor.UserName, request.ChangeSummary ?? "Initial controlled draft.", now);
+            var revision = new ManagedDocumentRevision(document.Id, 0, request.OwnerId ?? actor.UserName, request.ChangeSummary ?? "Initial controlled draft.", now);
             db.ManagedDocuments.Add(document); db.ManagedDocumentRevisions.Add(revision);
-            var context = await ProjectContextAsync(db, request.ProjectId, request.TargetReleaseId, ct);
-            var output = ProfessionalPublicationRenderer.Render(NewDraftPublication(document, revision, context.Project, context.Release, context.Program), "docx", $"{document.DocumentNumber}.00");
+            var context = await ProjectContextAsync(db, request.ProjectId, ct);
+            var output = ProfessionalPublicationRenderer.Render(NewDraftPublication(document, revision, context.Project, context.Program), "docx", $"{document.DocumentNumber}.00");
             var attachment = await files.StoreAsync(document.ProjectId, document.Id, revision.Id, revision.Id, 1, "Working Word document", "Initial AeroLink draft template.", output.FileName, output.ContentType, output.Content, null, actor.UserName, now, ct);
             db.ControlledAttachments.Add(attachment); revision.RecordCheckIn(attachment.Id, actor.UserName, revision.ChangeSummary, now);
-            db.ManagedDocumentEvents.Add(new(document.Id, "DocumentCreated", actor.UserName, $"Created {document.DocumentNumber}.00 as a Draft for Build {context.Release}.", now));
+            db.ManagedDocumentEvents.Add(new(document.Id, "DocumentCreated", actor.UserName, $"Created {document.DocumentNumber}.00 as a Project-wide Draft.", now));
             await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
             return Results.Created($"/api/managed-documents/{document.Id}", new { document.Id, document.DocumentNumber, revisionId = revision.Id });
         }
@@ -123,26 +115,45 @@ public static class ManagedDocumentEndpoints
     {
         var document = await db.ManagedDocuments.SingleOrDefaultAsync(x => x.Id == id, ct); if (document is null) return Results.NotFound();
         if (!await http.HasProjectRoleAsync(db, identity, document.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
-        if (!await EnsureActiveReleaseAsync(http, db, document.ProjectId, request.TargetReleaseId, ct)) return BuildMismatch();
+        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         if (await db.ManagedDocumentRevisions.AnyAsync(x => x.DocumentId == id && (x.State == ManagedDocumentState.Draft || x.State == ManagedDocumentState.InReview || x.State == ManagedDocumentState.Returned), ct)) return Results.Conflict(new { error = "Complete or withdraw the existing in-work revision before starting another." });
-        var prior = (await db.ManagedDocumentRevisions.Where(x => x.DocumentId == id && x.State == ManagedDocumentState.Released).ToListAsync(ct)).OrderByDescending(x => x.Revision).FirstOrDefault();
-        if (prior?.CurrentWorkingAttachmentId is null) return Results.Conflict(new { error = "No prior controlled Word source is available for the next revision." });
-        var priorAttachment = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == prior.CurrentWorkingAttachmentId, ct);
-        var now = DateTimeOffset.UtcNow; var actor = http.UserAccount(); var revision = new ManagedDocumentRevision(id, request.TargetReleaseId, prior.Revision + 1, request.OwnerId ?? actor.UserName, request.ChangeSummary, now);
-        db.ManagedDocumentRevisions.Add(revision); await db.SaveChangesAsync(ct);
+        var released = await db.ManagedDocumentRevisions.Where(x => x.DocumentId == id && x.State == ManagedDocumentState.Released).ToListAsync(ct);
+        if (released.Count != 1) return Results.Conflict(new { error = released.Count == 0 ? "Release the initial revision before starting a successor." : "This document has multiple released heads and requires controlled lineage reconciliation.", code = "document_lineage_reconciliation_required" });
+        var prior = released[0];
+        if (prior.ReleasedDocxAttachmentId is null) return Results.Conflict(new { error = "The released head has no immutable released DOCX source.", code = "document_lineage_reconciliation_required" });
+        var priorAttachment = await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == prior.ReleasedDocxAttachmentId && x.RevisionId == prior.Id, ct);
+        if (priorAttachment is null || !store.Exists(priorAttachment.StorageKey) || priorAttachment.Size != store.GetSize(priorAttachment.StorageKey) || !string.Equals(await store.ComputeSha256Async(priorAttachment.StorageKey, ct), priorAttachment.Sha256, StringComparison.OrdinalIgnoreCase))
+            return Results.Conflict(new { error = "The immutable released parent DOCX is missing or failed size/hash verification.", code = "document_parent_integrity_failure" });
+        var now = DateTimeOffset.UtcNow; var actor = http.UserAccount(); var revision = new ManagedDocumentRevision(id, prior.Revision + 1, request.OwnerId ?? actor.UserName, request.ChangeSummary, now, prior.Id, priorAttachment.Id, priorAttachment.Sha256, ManagedDocumentFileService.SuccessorTransformationProfile);
+        db.ManagedDocumentRevisions.Add(revision);
         await using var input = store.OpenRead(priorAttachment.StorageKey); using var copy = new MemoryStream(); await input.CopyToAsync(copy, ct);
-        var nextDraft = ManagedDocumentFileService.PrepareNextRevisionDraft(copy.ToArray(), document.DocumentNumber, prior.Revision, revision.Revision);
+        byte[] nextDraft;
+        try { nextDraft = ManagedDocumentFileService.PrepareNextRevisionDraft(copy.ToArray(), document.DocumentNumber, prior.Revision, revision.Revision); }
+        catch (DomainException ex) { return Results.Conflict(new { error = ex.Message, code = "document_parent_transform_failure" }); }
         var attachment = await files.StoreAsync(document.ProjectId, id, revision.Id, revision.Id, 1, "Working Word document", "Draft source copied from the last released revision.", $"{document.DocumentNumber}.{revision.Revision:D2}.docx", ManagedDocumentFileService.DocxContentType, nextDraft, null, actor.UserName, now, ct);
         db.ControlledAttachments.Add(attachment); revision.RecordCheckIn(attachment.Id, actor.UserName, request.ChangeSummary, now);
-        db.ManagedDocumentEvents.Add(new(id, "DocumentRevisionStarted", actor.UserName, $"Started {document.DocumentNumber}.{revision.Revision:D2} for the selected build.", now));
-        await db.SaveChangesAsync(ct); return Results.Created($"/api/managed-documents/{id}", new { revision.Id, revision.Revision });
+        db.ManagedDocumentEvents.Add(new(id, "DocumentRevisionStarted", actor.UserName, $"Started {document.DocumentNumber}.{revision.Revision:D2} from verified released parent {document.DocumentNumber}.{prior.Revision:D2} DOCX {priorAttachment.Sha256} using {ManagedDocumentFileService.SuccessorTransformationProfile}.", now));
+        try
+        {
+            await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+            return Results.Created($"/api/managed-documents/{id}", new { revision.Id, revision.Revision });
+        }
+        catch (DbUpdateException)
+        {
+            store.Delete(attachment.StorageKey);
+            return Results.Conflict(new { error = "Another request started the active successor revision first. Refresh the document.", code = "document_successor_conflict" });
+        }
+        catch
+        {
+            store.Delete(attachment.StorageKey);
+            throw;
+        }
     }
 
     private static async Task<IResult> CheckoutAsync(Guid revisionId, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         var data = await RevisionDataAsync(db, revisionId, ct); if (data is null) return Results.NotFound();
         if (!await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
-        if (!await EnsureActiveReleaseAsync(http, db, data.Document.ProjectId, data.Revision.TargetReleaseId, ct)) return BuildMismatch();
         if (data.Revision.State is not (ManagedDocumentState.Draft or ManagedDocumentState.Returned)) return Results.Conflict(new { error = "Only a Draft or returned revision can be checked out." });
         var actor = http.UserAccount(); if (actor.UserName != data.Revision.OwnerId && !actor.IsAdministrator) return Results.Forbid();
         return await CreateGrantAsync(data, "edit", actor.UserName, http, db, ct);
@@ -151,7 +162,6 @@ public static class ManagedDocumentEndpoints
     private static async Task<IResult> PrepareReleaseAsync(Guid revisionId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
-        if (!await EnsureActiveReleaseAsync(http, db, data.Document.ProjectId, data.Revision.TargetReleaseId, ct)) return BuildMismatch();
         var active = data.Revision.ReviewSteps.SingleOrDefault(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active);
         var finalPosition = data.Revision.ReviewSteps.Where(x => x.Cycle == data.Revision.CurrentReviewCycle).Select(x => x.Position).DefaultIfEmpty(-1).Max(); var actor = http.UserAccount();
         if (data.Revision.State != ManagedDocumentState.InReview || active is null || active.Position != finalPosition || active.ApproverId != actor.UserName) return Results.Conflict(new { error = "Release preparation is available only to the active final approver after technical review." });
@@ -174,7 +184,7 @@ public static class ManagedDocumentEndpoints
     private static async Task<IResult> SubmitAsync(Guid revisionId, SubmitManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
-        if (!await EnsureActiveReleaseAsync(http, db, data.Document.ProjectId, data.Revision.TargetReleaseId, ct)) return BuildMismatch(); var actor = http.UserAccount(); if (actor.UserName != data.Revision.OwnerId && !actor.IsAdministrator) return Results.Forbid();
+        var actor = http.UserAccount(); if (actor.UserName != data.Revision.OwnerId && !actor.IsAdministrator) return Results.Forbid();
         if (await db.ArtifactEditSessions.AnyAsync(x => x.ArtifactId == data.Document.Id && x.ArtifactType == "ManagedDocument" && x.State == EditSessionState.Active, ct)) return Results.Conflict(new { error = "Check in or discard the active desktop checkout before submitting." });
         var accounts = await db.UserAccounts.AsNoTracking().Where(x => (x.UserName == request.TechnicalReviewerId || x.UserName == request.FinalApproverId) && x.State == AccountState.Active).ToListAsync(ct); if (accounts.Count != 2) return Results.BadRequest(new { error = "Select two active AeroLink users for document review." });
         var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
@@ -205,7 +215,6 @@ public static class ManagedDocumentEndpoints
             db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ManagedDocument", data.Document.Id, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", final ? "Release" : "Approve", request.Meaning, contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now)); db.ManagedDocumentEvents.Add(new(data.Document.Id, final ? "DocumentReleased" : "DocumentReviewApproved", actor.UserName, final ? $"Released {data.Document.DocumentNumber}.{data.Revision.Revision:D2} as the exact approved DOCX/PDF pair." : $"Approved the active review stage for {data.Document.DocumentNumber}.{data.Revision.Revision:D2}.", now));
             if (final)
             {
-                var selection = await db.ManagedDocumentBuildSelections.SingleOrDefaultAsync(x => x.ReleaseId == data.Revision.TargetReleaseId && x.DocumentId == data.Document.Id, ct); if (selection is null) db.ManagedDocumentBuildSelections.Add(new(data.Document.ProjectId, data.Revision.TargetReleaseId, data.Document.Id, data.Revision.Id, actor.UserName, now)); else selection.Select(data.Revision.Id, actor.UserName, now);
                 var older = await db.ManagedDocumentRevisions.Where(x => x.DocumentId == data.Document.Id && x.Id != data.Revision.Id && x.State == ManagedDocumentState.Released).ToListAsync(ct); foreach (var prior in older.Where(x => x.Revision < data.Revision.Revision)) prior.Supersede(now);
             }
             else { var next = data.Revision.ReviewSteps.Single(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active); db.UserNotifications.Add(new(data.Document.ProjectId, next.ApproverId, "DocumentReviewActivated", $"Review {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Final document release review is ready.", $"managed-document:{data.Document.Id}", data.Document.Id, now)); }
@@ -232,13 +241,13 @@ public static class ManagedDocumentEndpoints
         try { var now = DateTimeOffset.UtcNow; var actor = http.UserAccount(); db.ManagedDocumentLinks.Add(new(request.RevisionId, CanonicalLinkType(request.ArtifactType), request.ArtifactId, request.DisplayNumber, request.Relationship, actor.UserName, now)); db.ManagedDocumentEvents.Add(new(id, "DocumentArtifactLinked", actor.UserName, $"Linked {request.DisplayNumber.ToUpperInvariant()} as {request.Relationship}.", now)); await db.SaveChangesAsync(ct); return Results.Created($"/api/managed-documents/{id}", new { request.ArtifactId }); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); } catch (DbUpdateException) { return Results.Conflict(new { error = "That artifact is already linked to this document revision." }); }
     }
 
-    private static async Task<IResult> LinkOptionsAsync(Guid projectId, Guid releaseId, string artifactType, string? search, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> LinkOptionsAsync(Guid projectId, string artifactType, string? search, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var term = search?.Trim().ToLowerInvariant() ?? ""; var type = CanonicalLinkType(artifactType);
         if (type == "ChangeRequest")
         {
-            var rows = await db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId && x.TargetReleaseId == releaseId).ToListAsync(ct);
+            var rows = await db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
             return Results.Ok(rows.Where(x => term.Length == 0 || x.DisplayNumber.Contains(term, StringComparison.OrdinalIgnoreCase) || x.Title.Contains(term, StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => x.UpdatedAt).Take(100).Select(x => new { x.Id, x.DisplayNumber, x.Title, secondary = x.State.ToString() }));
         }
         if (type == "ProblemReport")
@@ -248,7 +257,7 @@ public static class ManagedDocumentEndpoints
         }
         if (type == "TestChangeRequest")
         {
-            var rows = await db.TestChangeReviews.AsNoTracking().Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId).ToListAsync(ct);
+            var rows = await db.TestChangeReviews.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
             return Results.Ok(rows.Where(x => term.Length == 0 || x.DisplayNumber.Contains(term, StringComparison.OrdinalIgnoreCase) || x.SourceChangeRequestNumber.Contains(term, StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => x.UpdatedAt).Take(100).Select(x => new { x.Id, x.DisplayNumber, title = x.SourceChangeRequestNumber, secondary = x.State.ToString() }));
         }
         if (type == "Release")
@@ -295,18 +304,14 @@ public static class ManagedDocumentEndpoints
     private static async Task<RevisionData?> RevisionDataAsync(AeroLinkDbContext db, Guid revisionId, CancellationToken ct, bool includeReviews = false)
     { var query = db.ManagedDocumentRevisions.AsQueryable(); if (includeReviews) query = query.Include(x => x.ReviewSteps); var revision = await query.SingleOrDefaultAsync(x => x.Id == revisionId, ct); if (revision is null) return null; var document = await db.ManagedDocuments.SingleAsync(x => x.Id == revision.DocumentId, ct); return new(document, revision); }
 
-    private static async Task<bool> EnsureActiveReleaseAsync(HttpContext http, AeroLinkDbContext db, Guid projectId, Guid releaseId, CancellationToken ct)
-    { var release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == releaseId && x.ProjectId == projectId, ct); if (release is null || release.IsReleased) return false; return !http.Request.Headers.TryGetValue("X-AeroLink-Build-Context", out var raw) || Guid.TryParse(raw.FirstOrDefault(), out var active) && active == releaseId; }
-
-    private static IResult BuildMismatch() => Results.Conflict(new { error = "Document changes are allowed only in the selected in-work build.", code = "document_build_read_only" });
     private static object Attachment(ControlledAttachment x) => new { x.Id, x.LogicalId, x.Version, x.Label, x.Description, x.OriginalFileName, x.ContentType, x.Size, x.Sha256, state = x.State.ToString(), x.UploadedBy, x.UploadedAt, downloadUrl = $"/api/managed-documents/attachments/{x.Id}" };
-    private static ManagedDocumentSummary Summary(ManagedDocument document, Guid releaseId, IReadOnlyList<ManagedDocumentRevision> revisions, ManagedDocumentBuildSelection? selection, ArtifactEditSession? session)
-    { var released = selection is null ? revisions.Where(x => x.State is ManagedDocumentState.Released or ManagedDocumentState.Superseded).OrderByDescending(x => x.Revision).FirstOrDefault() : revisions.SingleOrDefault(x => x.Id == selection.RevisionId); var inWork = revisions.Where(x => x.TargetReleaseId == releaseId && x.State is ManagedDocumentState.Draft or ManagedDocumentState.InReview or ManagedDocumentState.Returned).OrderByDescending(x => x.Revision).FirstOrDefault(); return new(document.Id, document.DocumentNumber, document.Acronym, document.DocumentType, document.Title, document.OwnerId, released is null ? "None" : $"{document.DocumentNumber}.{released.Revision:D2}", released?.State.ToString() ?? "NotReleased", inWork is null ? null : $"{document.DocumentNumber}.{inWork.Revision:D2}", inWork?.State.ToString() ?? "None", inWork?.TargetReleaseId, inWork is null ? null : session?.UserName, inWork is null ? null : session?.ExpiresAt, document.UpdatedAt); }
+    private static ManagedDocumentSummary Summary(ManagedDocument document, IReadOnlyList<ManagedDocumentRevision> revisions, ArtifactEditSession? session)
+    { var releasedHeads = revisions.Where(x => x.State == ManagedDocumentState.Released).ToList(); var released = releasedHeads.Count == 1 ? releasedHeads[0] : null; var inWorkHeads = revisions.Where(x => x.State is ManagedDocumentState.Draft or ManagedDocumentState.InReview or ManagedDocumentState.Returned).ToList(); var inWork = inWorkHeads.Count == 1 ? inWorkHeads[0] : null; var reconciliationRequired = releasedHeads.Count > 1 || inWorkHeads.Count > 1; return new(document.Id, document.DocumentNumber, document.Acronym, document.DocumentType, document.Title, document.OwnerId, released is null ? "None" : $"{document.DocumentNumber}.{released.Revision:D2}", reconciliationRequired ? "ReconciliationRequired" : released?.State.ToString() ?? "NotReleased", inWork is null ? null : $"{document.DocumentNumber}.{inWork.Revision:D2}", reconciliationRequired ? "ReconciliationRequired" : inWork?.State.ToString() ?? "None", inWork is null ? null : session?.UserName, inWork is null ? null : session?.ExpiresAt, reconciliationRequired, document.UpdatedAt); }
 
-    private static ProfessionalPublication NewDraftPublication(ManagedDocument document, ManagedDocumentRevision revision, string project, string release, string program)
-    { var hash = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"{document.DocumentNumber}|{revision.Revision}|{revision.ChangeSummary}")); return new ProfessionalPublication("AeroLink", program, project, document.DocumentType, document.Title, "Controlled project document", document.DocumentNumber, revision.Revision.ToString("D2"), "Draft", release, $"Build {release}", revision.OwnerId, revision.CreatedAt, hash, [("Document owner", revision.OwnerId), ("Change summary", revision.ChangeSummary)], [], [(revision.Revision.ToString("D2"), "Draft", revision.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd"), revision.OwnerId)], [new("1. Purpose and scope", "Complete this controlled Word template using the applicable project standard.", [new("1.1", "Author guidance", "Purpose", "State why this document exists, what it governs, and where its applicability begins and ends.", [("Status", "Draft")])]), new("2. Controlled content", "Replace the guidance below with the approved lifecycle content.", [new("2.1", "Author guidance", "Lifecycle content", "Identify responsibilities, inputs, activities, outputs, transition criteria, records and linked AeroLink artifacts.", [("Working format", "Macro-free Microsoft Word DOCX")])]), new("3. Review and release", "AeroLink records review evidence outside the editable document.", [new("3.1", "Release criteria", "Independent approval", "A technical reviewer and a separate final SQA or configuration approver must approve the exact release candidate.", [("Released formats", "DOCX and PDF")])])]) { Watermark = "DRAFT" }; }
+    private static ProfessionalPublication NewDraftPublication(ManagedDocument document, ManagedDocumentRevision revision, string project, string program)
+    { var hash = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"{document.DocumentNumber}|{revision.Revision}|{revision.ChangeSummary}")); return new ProfessionalPublication("AeroLink", program, project, document.DocumentType, document.Title, "Controlled Project document", document.DocumentNumber, revision.Revision.ToString("D2"), "Draft", "Project-wide", "All software builds", revision.OwnerId, revision.CreatedAt, hash, [("Document owner", revision.OwnerId), ("Applicability", "Project-wide; build links are contextual traceability only"), ("Change summary", revision.ChangeSummary)], [], [(revision.Revision.ToString("D2"), "Draft", revision.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd"), revision.OwnerId)], [new("1. Purpose and scope", "Complete this controlled Word template using the applicable project standard.", [new("1.1", "Author guidance", "Purpose", "State why this document exists, what it governs, and where its applicability begins and ends.", [("Status", "Draft")])]), new("2. Controlled content", "Replace the guidance below with the approved lifecycle content.", [new("2.1", "Author guidance", "Lifecycle content", "Identify responsibilities, inputs, activities, outputs, transition criteria, records and linked AeroLink artifacts.", [("Working format", "Macro-free Microsoft Word DOCX")])]), new("3. Review and release", "AeroLink records review evidence outside the editable document.", [new("3.1", "Release criteria", "Independent approval", "A technical reviewer and a separate final SQA or configuration approver must approve the exact release candidate.", [("Released formats", "DOCX and PDF")])])]) { Watermark = "DRAFT" }; }
 
-    private static async Task<(string Program, string Project, string Release)> ProjectContextAsync(AeroLinkDbContext db, Guid projectId, Guid releaseId, CancellationToken ct) => await (from project in db.Projects.AsNoTracking() join program in db.Programs.AsNoTracking() on project.ProgramId equals program.Id join release in db.Releases.AsNoTracking() on project.Id equals release.ProjectId where project.Id == projectId && release.Id == releaseId select new ValueTuple<string, string, string>(program.Name, project.Name, release.Version)).SingleAsync(ct);
+    private static async Task<(string Program, string Project)> ProjectContextAsync(AeroLinkDbContext db, Guid projectId, CancellationToken ct) => await (from project in db.Projects.AsNoTracking() join program in db.Programs.AsNoTracking() on project.ProgramId equals program.Id where project.Id == projectId select new ValueTuple<string, string>(program.Name, project.Name)).SingleAsync(ct);
     private static int NumberSequence(string value) => int.TryParse(value[(value.LastIndexOf('-') + 1)..], out var number) ? number : 0;
     private static string CanonicalLinkType(string type) => type.Trim().ToLowerInvariant() switch { "changerequest" or "change-request" or "srcr" or "hlrcr" or "llrcr" => "ChangeRequest", "testchangerequest" or "test-change-request" or "tcr" => "TestChangeRequest", "problemreport" or "problem-report" or "pr" => "ProblemReport", "release" or "build" => "Release", _ => type.Trim() };
     private static async Task<bool> LinkExistsAsync(string type, Guid id, Guid projectId, AeroLinkDbContext db, CancellationToken ct) => CanonicalLinkType(type) switch { "ChangeRequest" => await db.SystemChangeRequests.AnyAsync(x => x.Id == id && x.ProjectId == projectId, ct), "TestChangeRequest" => await db.TestChangeReviews.AnyAsync(x => x.Id == id && x.ProjectId == projectId, ct), "ProblemReport" => await db.ProblemReports.AnyAsync(x => x.Id == id && x.ProjectId == projectId, ct), "Release" => await db.Releases.AnyAsync(x => x.Id == id && x.ProjectId == projectId, ct), _ => false };
@@ -315,11 +320,11 @@ public static class ManagedDocumentEndpoints
     private static bool FixedEquals(string expected, string actual) => CryptographicOperations.FixedTimeEquals(Convert.FromHexString(expected), Convert.FromHexString(actual));
     private sealed record RevisionData(ManagedDocument Document, ManagedDocumentRevision Revision);
     private sealed record ConnectorAuth(DocumentConnectorGrant? Grant, ArtifactEditSession? Session, IResult? Error);
-    private sealed record ManagedDocumentSummary(Guid Id, string DocumentNumber, string Acronym, string DocumentType, string Title, string OwnerId, string ReleasedRevision, string ReleasedState, string? InWorkRevision, string InWorkState, Guid? TargetReleaseId, string? CheckedOutBy, DateTimeOffset? CheckoutExpiresAt, DateTimeOffset UpdatedAt);
+    private sealed record ManagedDocumentSummary(Guid Id, string DocumentNumber, string Acronym, string DocumentType, string Title, string OwnerId, string ReleasedRevision, string ReleasedState, string? InWorkRevision, string InWorkState, string? CheckedOutBy, DateTimeOffset? CheckoutExpiresAt, bool ReconciliationRequired, DateTimeOffset UpdatedAt);
 }
 
-public sealed record CreateManagedDocumentRequest(Guid ProjectId, Guid TargetReleaseId, string Acronym, string DocumentType, string Title, string? OwnerId, string? ChangeSummary);
-public sealed record StartManagedDocumentRevisionRequest(Guid TargetReleaseId, string ChangeSummary, string? OwnerId);
+public sealed record CreateManagedDocumentRequest(Guid ProjectId, string Acronym, string DocumentType, string Title, string? OwnerId, string? ChangeSummary);
+public sealed record StartManagedDocumentRevisionRequest(string ChangeSummary, string? OwnerId);
 public sealed record SubmitManagedDocumentRequest(string TechnicalReviewerId, string FinalApproverId);
 public sealed record DocumentReviewDecisionRequest(string Password, string Meaning, string Rationale);
 public sealed record ForceUnlockManagedDocumentRequest(string Reason);

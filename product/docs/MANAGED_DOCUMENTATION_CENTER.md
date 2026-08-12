@@ -3,7 +3,7 @@
 ## Purpose and boundary
 
 Documentation Center controls lifecycle documents whose authored source is normally Microsoft Word. AeroLink is
-the system of record for identity, formal revision, build applicability, file history, checkout, review,
+the system of record for identity, one continuous Project-wide formal revision lineage, file history, checkout, review,
 electronic signatures, released DOCX/PDF renditions, hashes, links, and audit evidence. Word remains the authoring
 tool; AeroLink is not intended to reproduce Word editing in the browser.
 
@@ -29,7 +29,8 @@ Working-file versions are retained inside a formal revision and do not create ne
 
 ## Lifecycle
 
-1. An authorized engineer registers a document or starts the next revision for one active build.
+1. An authorized engineer registers a Project document or starts its one active successor revision. No software
+   build is required, and released-build state does not make the document read-only.
 2. AeroLink creates a faintly watermarked **Draft** DOCX. The word Draft is a state label, not a separate acronym.
 3. The owner selects **Open in Word**. The desktop connector obtains a short-lived, one-use grant, downloads the
    exact current source, holds an exclusive renewable checkout, and opens Word.
@@ -43,14 +44,17 @@ Working-file versions are retained inside a formal revision and do not create ne
    Draft watermark or visible Draft state marker. The final electronic signature releases that immutable pair
    and records its combined manifest hash.
 
-Released versions are immutable and can be carried into later builds. Build 1.5 shows only its released
-selection and is read-only. Build 1.6 may show the carried released revision beside one active Draft, returned,
-or in-review successor.
+Each stable Project document has one current released head and at most one active Draft, returned, or in-review
+successor. Starting `.01` uses the verified immutable released DOCX for `.00`; starting `.02` uses `.01` in the
+same way. AeroLink records the parent revision, released attachment, SHA-256, and transformation profile.
+Missing, corrupt, or ambiguous parent evidence fails closed. Build and release links are optional contextual
+traceability only: changing, releasing, or switching a software build never selects, duplicates, freezes, or
+hides these records. Generated requirements and procedure publications remain build-scoped.
 
 ## Lifecycle links
 
 An in-work revision can select and link existing change requests, Problem Reports, Test Change Requests, and
-builds. AeroLink validates that the selected record belongs to the same Project, stores the relationship and
+builds from across the Project. AeroLink validates that the selected record belongs to the same Project, stores the relationship and
 actor, and retains it with the exact document revision.
 
 ## Desktop connector
@@ -70,3 +74,12 @@ markings and its PDF is valid.
 Managed document binaries use the existing controlled evidence store and are included with the PostgreSQL
 database and runtime configuration in `BACKUP_AEROLINK.bat`. The authoritative metadata remains in PostgreSQL;
 copying the evidence folder without its matching database is not a complete backup.
+
+The migration from the former build-scoped model copies prior target-build and build-selection rows into
+`managed_document_build_provenance` before removing lifecycle ownership from revisions. Those rows are retained
+for historical explanation only and never drive current effectivity. Existing attachment IDs, hashes,
+signatures, actors, timestamps, review history, and audit events are not rewritten. If legacy data contains more
+than one released head or more than one active successor, the API reports reconciliation required and refuses to
+silently choose a branch. A legacy successor retains its formal parent revision identity, but its source
+attachment/hash remain unset and its transformation profile is `legacy-working-source-unverified-v1`: the former
+implementation copied a working attachment, so migration must not falsely claim the released DOCX was its source.

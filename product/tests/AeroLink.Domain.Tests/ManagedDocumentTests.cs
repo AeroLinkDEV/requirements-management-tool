@@ -11,11 +11,23 @@ public sealed class ManagedDocumentTests
     public void Draft_is_a_label_and_watermark_state_not_a_different_artifact_acronym()
     {
         var document = new ManagedDocument(Guid.NewGuid(), "SDP-000001", "sdp", "Software Development Plan", "FMS Software Development Plan", "software.author", Now);
-        var revision = new ManagedDocumentRevision(document.Id, Guid.NewGuid(), 1, "software.author", "Update the development lifecycle.", Now);
+        var revision = Successor(document.Id, 1, "Update the development lifecycle.");
 
         Assert.Equal("SDP", document.Acronym);
         Assert.Equal("SDP-000001.01", ArtifactNumber.Display(document.DocumentNumber, revision.Revision));
         Assert.Equal(ManagedDocumentState.Draft, revision.State);
+    }
+
+    [Fact]
+    public void Successor_requires_exact_released_parent_evidence_but_initial_revision_does_not_require_a_build()
+    {
+        var documentId = Guid.NewGuid();
+        var initial = new ManagedDocumentRevision(documentId, 0, "software.author", "Initial Project issue.", Now);
+        Assert.Equal(0, initial.Revision);
+        Assert.Null(initial.ParentRevisionId);
+
+        var error = Assert.Throws<DomainException>(() => new ManagedDocumentRevision(documentId, 1, "software.author", "Successor.", Now));
+        Assert.Contains("exact released parent DOCX", error.Message);
     }
 
     [Fact]
@@ -61,8 +73,11 @@ public sealed class ManagedDocumentTests
 
     private static ManagedDocumentRevision NewCheckedInRevision()
     {
-        var revision = new ManagedDocumentRevision(Guid.NewGuid(), Guid.NewGuid(), 1, "software.author", "Build 1.6 update.", Now);
+        var revision = Successor(Guid.NewGuid(), 1, "Project document update.");
         revision.RecordCheckIn(Guid.NewGuid(), "software.author", "Initial checked-in draft.", Now);
         return revision;
     }
+
+    private static ManagedDocumentRevision Successor(Guid documentId, int revision, string summary) =>
+        new(documentId, revision, "software.author", summary, Now, Guid.NewGuid(), Guid.NewGuid(), new string('a', 64), "aerolink-managed-document-successor-v1");
 }

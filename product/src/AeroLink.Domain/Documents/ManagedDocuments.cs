@@ -45,21 +45,32 @@ public sealed class ManagedDocumentRevision
 {
     private readonly List<ManagedDocumentReviewStep> _reviewSteps = [];
     private ManagedDocumentRevision() { }
-    public ManagedDocumentRevision(Guid documentId, Guid targetReleaseId, int revision, string ownerId,
-        string changeSummary, DateTimeOffset now)
+    public ManagedDocumentRevision(Guid documentId, int revision, string ownerId,
+        string changeSummary, DateTimeOffset now, Guid? parentRevisionId = null,
+        Guid? parentReleasedDocxAttachmentId = null, string? parentReleasedDocxSha256 = null,
+        string? transformationProfile = null)
     {
         if (revision < 0) throw new DomainException("Document revisions cannot be negative.");
-        if (targetReleaseId == Guid.Empty) throw new DomainException("A document revision requires a target build.");
-        Id = Guid.NewGuid(); DocumentId = documentId; TargetReleaseId = targetReleaseId; Revision = revision;
+        if (revision == 0 && (parentRevisionId is not null || parentReleasedDocxAttachmentId is not null || parentReleasedDocxSha256 is not null))
+            throw new DomainException("The initial document revision cannot have a parent revision.");
+        if (revision > 0 && (parentRevisionId is null || parentReleasedDocxAttachmentId is null || string.IsNullOrWhiteSpace(parentReleasedDocxSha256)))
+            throw new DomainException("A successor revision requires the exact released parent DOCX evidence.");
+        Id = Guid.NewGuid(); DocumentId = documentId; Revision = revision;
         OwnerId = Required(ownerId, "A document-revision owner is required.").ToLowerInvariant();
         ChangeSummary = Required(changeSummary, "A document revision requires a change summary.");
+        ParentRevisionId = parentRevisionId; ParentReleasedDocxAttachmentId = parentReleasedDocxAttachmentId;
+        ParentReleasedDocxSha256 = parentReleasedDocxSha256?.Trim().ToLowerInvariant();
+        TransformationProfile = transformationProfile?.Trim() ?? "";
         State = ManagedDocumentState.Draft; CreatedAt = UpdatedAt = now; Version = 1;
     }
 
     public Guid Id { get; private set; }
     public Guid DocumentId { get; private set; }
-    public Guid TargetReleaseId { get; private set; }
     public int Revision { get; private set; }
+    public Guid? ParentRevisionId { get; private set; }
+    public Guid? ParentReleasedDocxAttachmentId { get; private set; }
+    public string? ParentReleasedDocxSha256 { get; private set; }
+    public string TransformationProfile { get; private set; } = "";
     public string OwnerId { get; private set; } = "";
     public string ChangeSummary { get; private set; } = "";
     public ManagedDocumentState State { get; private set; }
@@ -187,20 +198,20 @@ public sealed class ManagedDocumentReviewStep
     private static string Required(string? value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A document review-step value is required.") : value.Trim();
 }
 
-/// <summary>The exact document revision selected for a software build.</summary>
-public sealed class ManagedDocumentBuildSelection
+/// <summary>Historical provenance retained from the former build-scoped document model. It never selects document effectivity.</summary>
+public sealed class ManagedDocumentBuildProvenance
 {
-    private ManagedDocumentBuildSelection() { }
-    public ManagedDocumentBuildSelection(Guid projectId, Guid releaseId, Guid documentId, Guid revisionId, string actor, DateTimeOffset now)
-    { Id = Guid.NewGuid(); ProjectId = projectId; ReleaseId = releaseId; DocumentId = documentId; RevisionId = revisionId; SelectedBy = actor.ToLowerInvariant(); SelectedAt = now; }
+    private ManagedDocumentBuildProvenance() { }
+    public ManagedDocumentBuildProvenance(Guid projectId, Guid releaseId, Guid documentId, Guid revisionId, string source, string actor, DateTimeOffset now)
+    { Id = Guid.NewGuid(); ProjectId = projectId; ReleaseId = releaseId; DocumentId = documentId; RevisionId = revisionId; Source = source; RecordedBy = actor.ToLowerInvariant(); RecordedAt = now; }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public Guid ReleaseId { get; private set; }
     public Guid DocumentId { get; private set; }
     public Guid RevisionId { get; private set; }
-    public string SelectedBy { get; private set; } = "";
-    public DateTimeOffset SelectedAt { get; private set; }
-    public void Select(Guid revisionId, string actor, DateTimeOffset now) { RevisionId = revisionId; SelectedBy = actor.ToLowerInvariant(); SelectedAt = now; }
+    public string Source { get; private set; } = "";
+    public string RecordedBy { get; private set; } = "";
+    public DateTimeOffset RecordedAt { get; private set; }
 }
 
 public sealed class ManagedDocumentLink
