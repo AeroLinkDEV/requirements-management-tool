@@ -82,6 +82,7 @@ public static class DependencyInjection
         services.AddScoped<ControlledEditingCheckInEngine>();
         services.AddScoped<ReqIfExchangeService>();
         services.AddScoped<EnterpriseWorkspaceSeeder>();
+        services.AddScoped<TestProcedureDocumentBootstrap>();
         return services;
     }
 }

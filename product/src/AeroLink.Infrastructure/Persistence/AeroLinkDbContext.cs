@@ -77,6 +77,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ArtifactFieldDefinition> ArtifactFieldDefinitions => Set<ArtifactFieldDefinition>();
     public DbSet<RequirementSpecification> RequirementSpecifications => Set<RequirementSpecification>();
     public DbSet<SpecificationNode> SpecificationNodes => Set<SpecificationNode>();
+    public DbSet<TestProcedureDocument> TestProcedureDocuments => Set<TestProcedureDocument>();
+    public DbSet<TestProcedureDocumentNode> TestProcedureDocumentNodes => Set<TestProcedureDocumentNode>();
     public DbSet<RequirementRevisionProfile> RequirementRevisionProfiles => Set<RequirementRevisionProfile>();
     public DbSet<RequirementRevisionTag> RequirementRevisionTags => Set<RequirementRevisionTag>();
     public DbSet<ArtifactComment> ArtifactComments => Set<ArtifactComment>();
@@ -833,6 +835,34 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<SpecificationNode>(b =>
         {
             b.ToTable("specification_nodes"); b.HasKey(x=>x.Id); b.Property(x=>x.Type).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.Heading).HasMaxLength(500); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x=>new{x.SpecificationId,x.ParentId,x.Position}).IsUnique(); b.HasIndex(x=>x.RequirementArtifactId); b.HasOne<RequirementSpecification>().WithMany().HasForeignKey(x=>x.SpecificationId).OnDelete(DeleteBehavior.Cascade); b.HasOne<SpecificationNode>().WithMany().HasForeignKey(x=>x.ParentId).OnDelete(DeleteBehavior.Restrict); b.HasOne<RequirementArtifact>().WithMany().HasForeignKey(x=>x.RequirementArtifactId).OnDelete(DeleteBehavior.Restrict);
+        });
+        // The verification counterparts, mapped the same way their requirements originals are so the two
+        // sides of the product keep the same shape rather than drifting into two conventions.
+        modelBuilder.Entity<TestProcedureDocument>(b =>
+        {
+            b.ToTable("test_procedure_documents"); b.HasKey(x => x.Id);
+            b.Property(x => x.DocumentNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Title).HasMaxLength(300).IsRequired();
+            b.Property(x => x.Level).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Description).HasMaxLength(4000);
+            b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
+            // One document per level per project, which is what makes "the HLRTD" a thing you can name.
+            b.HasIndex(x => new { x.ProjectId, x.Level }).IsUnique();
+            b.HasIndex(x => x.DocumentNumber).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TestProcedureDocumentNode>(b =>
+        {
+            b.ToTable("test_procedure_document_nodes"); b.HasKey(x => x.Id);
+            b.Property(x => x.Type).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.Heading).HasMaxLength(500);
+            b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.DocumentId, x.ParentId, x.Position }).IsUnique();
+            // A procedure sits in one place in one document. Two nodes claiming the same procedure would make
+            // "where is this procedure" have two answers.
+            b.HasIndex(x => x.ProcedureId).IsUnique().HasFilter("\"ProcedureId\" IS NOT NULL");
+            b.HasOne<TestProcedureDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne<TestProcedure>().WithMany().HasForeignKey(x => x.ProcedureId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<RequirementRevisionProfile>(b =>
         {
