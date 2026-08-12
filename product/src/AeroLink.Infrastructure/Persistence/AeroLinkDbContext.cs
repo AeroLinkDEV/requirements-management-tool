@@ -1089,6 +1089,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired(); b.Property(x => x.ResponsibleOwnerId).HasMaxLength(100).IsRequired(); b.Property(x => x.InitiatedBy).HasMaxLength(100).IsRequired();
             b.Property(x => x.FormalChangeSummary).HasColumnName("ChangeSummary").HasMaxLength(4000).IsRequired(); b.Property(x => x.FormalSummaryHash).HasMaxLength(64).IsRequired(); b.Property(x => x.FormalSummaryProvenance).HasMaxLength(80).IsRequired();
             b.Property(x => x.SnapshotHash).HasMaxLength(64).IsRequired(); b.Property(x => x.SubmittedFormalSummaryHash).HasMaxLength(64).IsRequired();
+            b.Property(x => x.SubmittedRelationshipManifest).IsRequired(); b.Property(x => x.SubmittedRelationshipManifestHash).HasMaxLength(64).IsRequired();
             b.Property(x => x.ParentReleasedDocxSha256).HasMaxLength(64); b.Property(x => x.TransformationProfile).HasMaxLength(120).IsRequired();
             b.Property(x => x.ReleaseManifestHash).HasMaxLength(64).IsRequired(); b.Property(x => x.ReturnReason).HasMaxLength(4000).IsRequired();
             b.Property(x => x.SubmittedBy).HasMaxLength(100); b.Property(x => x.ReleasedBy).HasMaxLength(100); b.Property(x => x.Version).IsConcurrencyToken();
@@ -1147,11 +1148,15 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<ManagedDocumentLink>(b =>
         {
             b.ToTable("managed_document_links"); b.HasKey(x => x.Id); b.Property(x => x.ArtifactType).HasMaxLength(60).IsRequired();
-            b.Property(x => x.DisplayNumber).HasMaxLength(80).IsRequired(); b.Property(x => x.Relationship).HasMaxLength(80).IsRequired();
-            b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
-            b.HasIndex(x => new { x.RevisionId, x.ArtifactType, x.ArtifactId, x.Relationship }).IsUnique();
+            b.Property(x => x.DisplayNumber).HasMaxLength(80).IsRequired(); b.Property(x => x.CanonicalTitle).HasMaxLength(500).IsRequired(); b.Property(x => x.TargetState).HasMaxLength(80).IsRequired();
+            b.Property(x => x.TargetReleaseVersion).HasMaxLength(80).IsRequired(); b.Property(x => x.DeepLink).HasMaxLength(1000).IsRequired(); b.Property(x => x.Relationship).HasMaxLength(80).IsRequired(); b.Property(x => x.Provenance).HasMaxLength(80).IsRequired();
+            b.Property(x => x.SupersedeReason).HasMaxLength(1000).IsRequired(); b.Property(x => x.SupersededBy).HasMaxLength(100); b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.RevisionId, x.IsCurrent }); b.HasIndex(x => new { x.RevisionId, x.ArtifactType, x.ArtifactId, x.Relationship });
             b.HasIndex(x => new { x.ArtifactType, x.ArtifactId });
             b.HasOne<ManagedDocumentRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.TargetProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.TargetReleaseId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ManagedDocumentLink>().WithMany().HasForeignKey(x => x.SupersededByLinkId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ManagedDocumentEvent>(b =>
         {

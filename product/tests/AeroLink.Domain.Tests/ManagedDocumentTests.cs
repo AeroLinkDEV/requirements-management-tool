@@ -173,6 +173,24 @@ public sealed class ManagedDocumentTests
         Assert.Throws<DomainException>(() => revision.ReassignResponsibleOwner("software.author", revision.Version, Now.AddMinutes(4)));
     }
 
+    [Fact]
+    public void Relationship_policy_is_typed_bounded_and_manifest_hash_changes_with_canonical_evidence()
+    {
+        var revisionId = Guid.NewGuid(); var projectId = Guid.NewGuid(); var releaseId = Guid.NewGuid();
+        var first = new ManagedDocumentLink(revisionId, "ChangeRequest", Guid.NewGuid(), "SRCR-00001.00", "Canonical change", "Approved",
+            projectId, releaseId, "1.5", "/canonical/change", "MotivatedBy", "software.author", Now);
+        var second = new ManagedDocumentLink(revisionId, "Release", releaseId, "BUILD-1.5", "Build 1.5", "Released",
+            projectId, releaseId, "1.5", "/canonical/build", "RelatedBuild", "software.author", Now);
+
+        var one = ManagedDocumentRelationshipPolicy.Manifest([first]); var both = ManagedDocumentRelationshipPolicy.Manifest([second, first]);
+
+        Assert.Equal(64, one.Hash.Length); Assert.NotEqual(one.Hash, both.Hash);
+        Assert.Equal(both.Json, ManagedDocumentRelationshipPolicy.Manifest([first, second]).Json);
+        Assert.Throws<DomainException>(() => new ManagedDocumentLink(revisionId, "ChangeRequest", Guid.NewGuid(), "SRCR-00002.00", "Change", "Draft",
+            projectId, releaseId, "1.5", "/canonical/change", "VerificationImpact", "software.author", Now));
+        Assert.Throws<DomainException>(() => ManagedDocumentRelationshipPolicy.CanonicalType("Requirement"));
+    }
+
     private static ManagedDocumentRevision NewCheckedInRevision()
     {
         var revision = Successor(Guid.NewGuid(), 1, "Project document update.");
