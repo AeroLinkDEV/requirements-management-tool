@@ -119,9 +119,12 @@ export default function TestChangeRequestCreateDialog({ api, projectId, releaseI
         </div>
 
         <fieldset className="tcrSourceChoices">
-          <legend>Approved changes this package answers for</legend>
+          <legend>Approved {label} changes this package answers for</legend>
           {choices.length === 0
-            ? <p className="drawerEmpty">No approved change requests are available in this build yet. Approve engineering changes first.</p>
+            ? <p className="drawerEmpty">
+                No approved {label} change requests in this build. A {label} procedure verifies {label} requirements,
+                so only {label} changes can drive this package — changes at other levels are not offered.
+              </p>
             : choices.map(choice => (
               <label key={choice.changeRequestId} className={choice.selectable ? '' : 'tcrSourceUnavailable'}>
                 <input type="checkbox" checked={selected.includes(choice.changeRequestId)}

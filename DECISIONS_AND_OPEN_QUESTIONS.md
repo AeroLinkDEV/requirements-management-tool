@@ -1884,6 +1884,39 @@ Future entries use:
     this authority are expected to record that they were made as backup rather than as holder — with no
     interval to explain the name, that attribution is the only thing that later says why.
 
+### DEC-112 - A Test Change Request Answers Only for Its Own Level
+
+- **Date:** 2026-08-12
+- **Status:** Accepted
+- **Decision:** An HLRTCR answers only for HLR requirement changes, an LLRTCR only for LLR, a SYSTCR only for
+  system. A change at any other level is **refused**, not deprioritised — in the picker and again on the
+  server. Confirmed by the owner as a hard refusal.
+- **Rationale:** A procedure verifies the requirements one level above it, so a change at another level cannot
+  drive it. The picker previously offered every approved change allocated to the build, so an engineer raising
+  an HLRTCR was shown SRCRs and LLRCRs as valid choices; selecting one produced a package claiming to answer
+  for work it could not verify.
+- **Consequences:**
+  - `TestChangeRequestSourceEligibility` gains the level rule in two forms — a predicate for validation and a
+    query for the picker — so the browser list and the server refusal cannot disagree.
+  - Enforced on `POST /api/releases/{id}/test-change-requests` as well as the source list, because a filtered
+    list is a convenience and a request that never opened the picker must still meet the rule
+    ([LES-006](#les-006---a-capability-with-no-caller-is-not-delivered) in reverse: a rule with only a client
+    is not a rule).
+  - The refusal names the level rather than saying "not selectable", so an engineer learns why.
+  - **A consequence worth stating plainly:** where a build has no approved change at the package's own level,
+    the package cannot currently be raised at all, because a test change request still requires an originating
+    change request. Whether a Problem Report alone may originate one is recorded as an open question below.
+
+### Open question - May a Problem Report alone originate a test change request?
+
+The owner's position is that it should: a PR is a legitimate driver of test work on its own. The domain
+currently refuses it — `TestChangeReview` requires a non-empty originating `ChangeRequestId`, its
+`SourceChangeRequestNumber` is required, `DisplayNumber` falls back to it, the covered-sources record always
+emits it as the originating entry, and the versioned case snapshot writes it. Allowing it is therefore a
+change to a controlled evidence contract rather than a validation tweak, and the open design question is what
+such a package is anchored to instead — most likely the Problem Report in the same originating slot, keeping
+"exactly one originating driver" true.
+
 ## Lessons Learned
 
 Findings that cost real time, recorded so they cost it once. These are about how the work is done rather than

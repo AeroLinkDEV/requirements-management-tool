@@ -59,6 +59,53 @@ internal static class TestChangeRequestSourceEligibility
                 "Only approved change requests in Approved or SelectedForBaseline state are eligible.",
             code = "change_request_not_selectable"
         });
+
+    /// <summary>
+    /// Whether a change request is at the level whose test work this package controls.
+    ///
+    /// A procedure is written to verify the requirements one level above it, so an HLR test change request
+    /// answers for HLR requirement changes and nothing else. Before this, the picker offered every approved
+    /// change in the build — an engineer raising an HLRTCR was shown SRCRs and LLRCRs, neither of which could
+    /// drive an HLR procedure. It is a refusal rather than a sort order because selecting one produced a
+    /// package that claimed to answer for work it cannot verify.
+    /// </summary>
+    internal static bool MatchesDiscipline(TestChangeReviewDiscipline discipline, ChangeRequestType type,
+        RequirementLevel? softwareLevel) => discipline switch
+    {
+        TestChangeReviewDiscipline.System => type == ChangeRequestType.System,
+        TestChangeReviewDiscipline.HighLevelSoftware =>
+            type == ChangeRequestType.Software && softwareLevel == RequirementLevel.HighLevel,
+        TestChangeReviewDiscipline.LowLevelSoftware =>
+            type == ChangeRequestType.Software && softwareLevel == RequirementLevel.LowLevel,
+        _ => false,
+    };
+
+    /// <summary>The same rule as a database predicate, so the picker and the server cannot disagree.</summary>
+    internal static IQueryable<SystemChangeRequest> AtLevelOf(IQueryable<SystemChangeRequest> changes,
+        TestChangeReviewDiscipline discipline) => discipline switch
+    {
+        TestChangeReviewDiscipline.System => changes.Where(x => x.Type == ChangeRequestType.System),
+        TestChangeReviewDiscipline.HighLevelSoftware => changes.Where(x =>
+            x.Type == ChangeRequestType.Software && x.SoftwareLevel == RequirementLevel.HighLevel),
+        TestChangeReviewDiscipline.LowLevelSoftware => changes.Where(x =>
+            x.Type == ChangeRequestType.Software && x.SoftwareLevel == RequirementLevel.LowLevel),
+        _ => changes.Where(_ => false),
+    };
+
+    internal static string LevelName(TestChangeReviewDiscipline discipline) => discipline switch
+    {
+        TestChangeReviewDiscipline.System => "system",
+        TestChangeReviewDiscipline.HighLevelSoftware => "high-level software",
+        _ => "low-level software",
+    };
+
+    internal static IResult LevelRefusal(string displayNumber, TestChangeReviewDiscipline discipline) =>
+        Results.BadRequest(new
+        {
+            error = $"{displayNumber} is not a {LevelName(discipline)} requirement change, so it cannot drive " +
+                $"{LevelName(discipline)} test work. A procedure verifies the requirements one level above it.",
+            code = "change_request_wrong_level"
+        });
 }
 
 public static class VerificationImpactEndpoints
@@ -1031,7 +1078,7 @@ public static class VerificationImpactEndpoints
             var changes = await db.SystemChangeRequests.AsNoTracking()
                 .Where(x => request.ChangeRequestIds.Contains(x.Id) && x.ProjectId == release.ProjectId
                     && x.TargetReleaseId == releaseId)
-                .Select(x => new { x.Id, x.DisplayNumber, x.State }).ToListAsync(ct);
+                .Select(x => new { x.Id, x.DisplayNumber, x.State, x.Type, x.SoftwareLevel }).ToListAsync(ct);
             if (changes.Count != request.ChangeRequestIds.Length)
                 return Results.BadRequest(new
                 {
@@ -1041,6 +1088,12 @@ public static class VerificationImpactEndpoints
             var ineligible = changes.FirstOrDefault(x => !TestChangeRequestSourceEligibility.Allows(x.State));
             if (ineligible is not null)
                 return TestChangeRequestSourceEligibility.Refusal(ineligible.DisplayNumber, ineligible.State);
+            // Enforced here as well as in the picker. A filtered browser list is a convenience; the refusal is
+            // the rule, and a request that never opened the picker must meet it too.
+            var wrongLevel = changes.FirstOrDefault(x =>
+                !TestChangeRequestSourceEligibility.MatchesDiscipline(request.Discipline, x.Type, x.SoftwareLevel));
+            if (wrongLevel is not null)
+                return TestChangeRequestSourceEligibility.LevelRefusal(wrongLevel.DisplayNumber, request.Discipline);
             // The first change the caller names is the package's base; the rest are folded in. The database
             // row order is not the caller's order, so it is restored explicitly rather than trusted.
             changes = request.ChangeRequestIds.Select(id => changes.Single(x => x.Id == id)).ToList();
@@ -1199,7 +1252,10 @@ public static class VerificationImpactEndpoints
             if (release is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, release.ProjectId, ct)) return Results.Forbid();
 
-            var changes = await TestChangeRequestSourceEligibility.Apply(db.SystemChangeRequests.AsNoTracking())
+            // Level-filtered before anything else: offering a change the package could never answer for is
+            // not a selectable option that happens to be wrong, it is a wrong answer presented as a choice.
+            var changes = await TestChangeRequestSourceEligibility.AtLevelOf(
+                    TestChangeRequestSourceEligibility.Apply(db.SystemChangeRequests.AsNoTracking()), discipline)
                 .Where(x => x.ProjectId == release.ProjectId && x.TargetReleaseId == releaseId)
                 .Select(x => new { x.Id, x.DisplayNumber, x.Title, x.State }).ToListAsync(ct);
             var ids = changes.Select(x => x.Id).ToList();
