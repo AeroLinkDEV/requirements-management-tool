@@ -127,6 +127,7 @@ public static class ManagedDocumentEndpoints
     private static async Task<IResult> CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct)
     {
         if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
+        var operationError = ValidateOperationKey(request.OperationKey); if (operationError is not null) return operationError;
         var actor = http.UserAccount(); var ownerId = request.OwnerId ?? actor.UserName;
         if (!await ManagedDocumentAssignmentPolicy.IsEligibleAsync(db, identity, request.ProjectId, ownerId, DateTimeOffset.UtcNow, ct)) return Results.BadRequest(new { error = actor.IsAdministrator && request.OwnerId is null ? "Select an active authorized Program author as document steward and responsible owner; administrator status is not document-authoring authority." : "The document steward and responsible owner must be an active authorized member or delegate in this Program." });
         ManagedDocumentStorageOperation? operation = null;
@@ -141,7 +142,7 @@ public static class ManagedDocumentEndpoints
             var output = ProfessionalPublicationRenderer.Render(NewDraftPublication(document, revision, context.Project, context.Program), "docx", $"{document.DocumentNumber}.00");
             var payloadHash = OperationPayloadHash("DocumentCreate", new { request.ProjectId, acronym, request.DocumentType, request.Title, ownerId, formalSummary = revision.FormalChangeSummary });
             var started = await storage.BeginAsync(request.ProjectId, document.Id, revision.Id, "DocumentCreate",
-                request.OperationKey ?? $"legacy-create:{payloadHash}", payloadHash, actor.UserName, now, ct);
+                request.OperationKey!, payloadHash, actor.UserName, now, ct);
             operation = started.Operation; if (started.ExistingResult is not null) return Results.Content(started.ExistingResult, "application/json", statusCode: StatusCodes.Status201Created);
             var staged = await files.StageAsync(operation.Id, "working-docx", document.ProjectId, document.Id, revision.Id, revision.Id, 1,
                 "Working Word document", "Initial AeroLink draft template.", output.FileName, output.ContentType, output.Content, null, actor.UserName, now, ct);
@@ -861,7 +862,7 @@ public static class ManagedDocumentEndpoints
                 await db.SaveChangesAsync(CancellationToken.None);
                 // Reconcile from durable metadata instead of blindly deleting files. The metadata
                 // transaction may have committed immediately before the request observed a fault.
-                await storage.ReconcileProjectAsync(operation.ProjectId, actor, DateTimeOffset.UtcNow, CancellationToken.None);
+                await storage.ReconcileAbandonedOperationAsync(operation, actor, DateTimeOffset.UtcNow, CancellationToken.None);
             }
         }
         catch { /* The durable Pending record and staged names remain available to the reconciler. */ }

@@ -70,7 +70,7 @@ public sealed class ManagedDocumentStorageCoordinatorTests
                 operation.Id, "docx", "candidate.docx", "application/test", default);
 
             var result = await coordinator.ReconcileProjectAsync(project.Id, "configuration.manager",
-                now.AddMinutes(1), default);
+                now.Add(ManagedDocumentStorageCoordinator.PendingOperationLease).AddSeconds(1), default);
 
             Assert.Equal(1, result.RolledBack);
             Assert.Equal(ManagedDocumentStorageOperationState.RolledBack, operation.State);
@@ -82,6 +82,42 @@ public sealed class ManagedDocumentStorageCoordinatorTests
         {
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
+    }
+
+    [Fact]
+    public async Task Reconciler_preserves_a_live_pending_operation_until_its_lease_expires()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-storage-live-lease-{Guid.NewGuid():N}");
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow; var program = new ProgramRecord("Storage Program", "STORAGE");
+            var project = new ProjectRecord(program.Id, "Storage Project", "Controlled documents");
+            db.AddRange(program, project); await db.SaveChangesAsync();
+            var store = new EvidenceFileStore(root);
+            var coordinator = new ManagedDocumentStorageCoordinator(db, store,
+                new ManagedDocumentIntegrityService(db, store), new NoManagedDocumentStorageFaultInjector());
+            var operation = (await coordinator.BeginAsync(project.Id, Guid.NewGuid(), Guid.NewGuid(),
+                "Candidate", "live-candidate", new string('e', 64), "author", now, default)).Operation;
+            var staged = await store.StageAsync(new MemoryStream(Encoding.UTF8.GetBytes("live-candidate")),
+                operation.Id, "docx", "candidate.docx", "application/test", default);
+
+            var live = await coordinator.ReconcileProjectAsync(project.Id, "system.integrity",
+                now.Add(ManagedDocumentStorageCoordinator.PendingOperationLease).AddSeconds(-1), default);
+
+            Assert.Equal(ManagedDocumentStorageOperationState.Pending, operation.State);
+            Assert.DoesNotContain(operation.Id, live.OperationIds);
+            Assert.True(File.Exists(Path.Combine(root, staged.StagingKey.Replace('/', Path.DirectorySeparatorChar))));
+
+            var interrupted = await coordinator.ReconcileProjectAsync(project.Id, "system.integrity",
+                now.Add(ManagedDocumentStorageCoordinator.PendingOperationLease).AddSeconds(1), default);
+            Assert.Equal(ManagedDocumentStorageOperationState.RolledBack, operation.State);
+            Assert.Contains(operation.Id, interrupted.OperationIds);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
     [Fact]
@@ -156,7 +192,8 @@ public sealed class ManagedDocumentStorageCoordinatorTests
             await coordinator.RecordPlanAsync(orphan, [Object("working", orphanAttachment, orphanBytes)], "{\"working\":true}", now, default);
             await coordinator.PromoteAsync(orphan, [orphanBytes], default);
 
-            var result = await coordinator.ReconcileProjectAsync(project.Id, "configuration.manager", now.AddMinutes(1), default);
+            var result = await coordinator.ReconcileProjectAsync(project.Id, "configuration.manager",
+                now.Add(ManagedDocumentStorageCoordinator.PendingOperationLease).AddSeconds(1), default);
 
             Assert.True(result.RepairRequired >= 1); Assert.Equal(1, result.RolledBack);
             Assert.Equal(ManagedDocumentStorageOperationState.RepairRequired, partial.State);

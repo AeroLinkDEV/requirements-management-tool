@@ -26,6 +26,10 @@ public sealed class NoManagedDocumentStorageFaultInjector : IManagedDocumentStor
 public sealed class ManagedDocumentStorageCoordinator(AeroLinkDbContext db, EvidenceFileStore files,
     ManagedDocumentIntegrityService integrity, IManagedDocumentStorageFaultInjector faultInjector)
 {
+    // A pending request is deliberately fenced from reconciliation while it can still be
+    // serving its caller. Requests that survive this conservative lease are treated as
+    // interrupted; known failure paths explicitly surrender the lease below.
+    public static readonly TimeSpan PendingOperationLease = TimeSpan.FromMinutes(30);
     public static string Manifest(IEnumerable<ManagedDocumentStagedObject> objects) => JsonSerializer.Serialize(objects);
 
     public async Task<ManagedDocumentStorageStart> BeginAsync(Guid projectId, Guid documentId, Guid revisionId,
@@ -42,6 +46,9 @@ public sealed class ManagedDocumentStorageCoordinator(AeroLinkDbContext db, Evid
                 throw new ManagedDocumentStorageConflictException("operation_key_reused", "That storage operation key was already used for different content or intent.");
             if (existing.State == ManagedDocumentStorageOperationState.Available)
                 return new(existing, existing.ResultJson);
+            if (existing.State == ManagedDocumentStorageOperationState.Pending
+                && existing.UpdatedAt > now - PendingOperationLease)
+                throw new ManagedDocumentStorageConflictException("storage_operation_pending", "The same storage operation is still pending. Retry after its lease expires or controlled reconciliation completes.");
             await ReconcileOperationAsync(existing, actor, now, ct);
             if (existing.State == ManagedDocumentStorageOperationState.Available) return new(existing, existing.ResultJson);
             if (existing.State == ManagedDocumentStorageOperationState.RepairRequired)
@@ -64,7 +71,17 @@ public sealed class ManagedDocumentStorageCoordinator(AeroLinkDbContext db, Evid
                 ? new(existing, existing.ResultJson)
                 : throw new ManagedDocumentStorageConflictException("storage_operation_pending", "The same storage operation is already pending.");
         }
-        await CheckpointAsync(operation, "pending-recorded", ct); return new(operation, null);
+        try { await CheckpointAsync(operation, "pending-recorded", ct); }
+        catch
+        {
+            // BeginAsync has not returned the durable operation to its caller yet, so it must
+            // explicitly surrender and reconcile its own lease on this failure boundary.
+            operation.RecordFailure("The storage request failed after recording its pending operation.", now);
+            await db.SaveChangesAsync(CancellationToken.None);
+            await ReconcileOperationAsync(operation, actor, DateTimeOffset.UtcNow, CancellationToken.None);
+            throw;
+        }
+        return new(operation, null);
     }
 
     public async Task RecordPlanAsync(ManagedDocumentStorageOperation operation,
@@ -110,8 +127,12 @@ public sealed class ManagedDocumentStorageCoordinator(AeroLinkDbContext db, Evid
     public async Task<ManagedDocumentStorageReconciliation> ReconcileProjectAsync(Guid projectId, string actor,
         DateTimeOffset now, CancellationToken ct)
     {
-        var operations = await db.ManagedDocumentStorageOperations.Where(x => x.ProjectId == projectId
+        var openOperations = await db.ManagedDocumentStorageOperations.Where(x => x.ProjectId == projectId
             && (x.State == ManagedDocumentStorageOperationState.Pending || x.State == ManagedDocumentStorageOperationState.RepairRequired)).ToListAsync(ct);
+        // Filter DateTimeOffset in memory so SQLite qualification and PostgreSQL production
+        // use the same lease rule without provider-specific translation.
+        var operations = openOperations.Where(x => x.State == ManagedDocumentStorageOperationState.RepairRequired
+            || x.UpdatedAt <= now - PendingOperationLease).ToList();
         var completed = 0; var rolledBack = 0; var repair = 0; var quarantined = new List<string>();
         foreach (var operation in operations)
         {
@@ -157,6 +178,10 @@ public sealed class ManagedDocumentStorageCoordinator(AeroLinkDbContext db, Evid
         return new(operations.Count + integrityResult.Checked + revisions.Count, completed, rolledBack, repair,
             quarantined, operations.Select(x => x.Id).ToList(), objectEvidence);
     }
+
+    public Task<IReadOnlyList<string>> ReconcileAbandonedOperationAsync(ManagedDocumentStorageOperation operation,
+        string actor, DateTimeOffset now, CancellationToken ct) =>
+        ReconcileOperationAsync(operation, actor, now, ct);
 
     private async Task<IReadOnlyList<string>> ReconcileOperationAsync(ManagedDocumentStorageOperation operation,
         string actor, DateTimeOffset now, CancellationToken ct)

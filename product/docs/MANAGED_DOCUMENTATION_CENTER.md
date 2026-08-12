@@ -130,11 +130,15 @@ after every attachment row, lifecycle transition, check-in/event row, and object
 The release DOCX and PDF are one candidate set with one operation ID and manifest; neither is exposed as a
 candidate unless both metadata rows and both exact objects commit. Same-key/same-payload retries return the
 original result and cannot create another working version or candidate set. Reusing the key for different
-content or intent returns a conflict.
+content or intent returns a conflict. Document creation requires the caller to supply that one-use operation
+key; AeroLink never infers retry identity from document content, so two intentional documents with equal
+business fields remain distinct when their keys differ.
 
 Known failures roll back metadata and move any staged or promoted object into `_quarantine` before reporting the
 operation RolledBack. The Project storage-reconciliation endpoint, also run by the periodic integrity worker,
-handles process interruptions idempotently: a complete referenced set is verified and finalized; an unreferenced
+fences Pending operations behind a conservative 30-minute lease so it cannot seize a live request. A known
+failed request explicitly surrenders that lease; otherwise only expired operations are treated as interrupted.
+Reconciliation is idempotent: a complete referenced set is verified and finalized; an unreferenced
 set is quarantined and rolled back; a partial candidate/attachment set, dangling editable revision, missing file,
 or hash mismatch opens a deduplicated critical operational alert and remains RepairRequired. Reports identify
 operation IDs and quarantined keys. Operations and health use the configured evidence root and never infer a
