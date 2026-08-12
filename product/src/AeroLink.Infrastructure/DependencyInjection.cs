@@ -42,7 +42,9 @@ public static class DependencyInjection
         services.AddHostedService<NotificationDispatchWorker>();
         services.AddSingleton<EvidenceFileStore>();
         services.AddScoped<ManagedDocumentFileService>();
+        services.AddScoped<ManagedDocumentIntegrityService>();
         services.AddScoped<ManagedDocumentShowcaseSeeder>();
+        services.AddHostedService<ManagedDocumentIntegrityWorker>();
         services.AddHostedService<EnterpriseJobWorker>();
         services.AddDataProtection();
         services.AddHttpClient("AeroLinkWebhooks", client => client.Timeout = TimeSpan.FromSeconds(15));

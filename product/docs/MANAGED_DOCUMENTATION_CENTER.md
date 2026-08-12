@@ -96,6 +96,28 @@ tokens stay in memory; stale-source check-ins fail without overwriting; macro-en
 are rejected; and a final release is accepted only when its DOCX is free of Draft watermarks and Draft state
 markings and its PDF is valid.
 
+## Controlled file integrity
+
+Every material managed-document read is fail-closed. AeroLink opens the exact retained object without write or
+delete sharing, rejects reparse/symbolic-link traversal, verifies the recorded byte count, recomputes SHA-256 over
+that same open handle, and only then resets and returns that handle. This applies to full and range downloads,
+connector source delivery, successor transformation, review submission, release preparation, and final signature
+of the candidate DOCX/PDF set. Range processing therefore cannot expose an unverified prefix.
+
+The connector redemption binds the source attachment ID, size, and SHA-256. The Windows connector downloads to a
+unique temporary file and independently checks both values before replacing its working copy or launching Word.
+An incomplete or mismatched download is deleted and never opened.
+
+A missing, unreadable, unsafe, size-changed, or hash-changed object creates one open critical operational alert,
+one document event, and security-audit evidence. The affected formal revision is shown as integrity-blocked and
+cannot be opened, submitted, transformed, or released. Repeated reads retain the original incident instead of
+creating alert noise. Configuration Management, SQA, or Program authority may recover only bytes whose size and
+SHA-256 exactly match the immutable attachment metadata. Existing altered bytes are moved into the evidence
+quarantine before activation, the historical metadata and signatures remain unchanged, and recovery resolves the
+incident with append-only audit evidence. The Project integrity-scan endpoint and periodic worker apply the same
+verification contract to every managed-document attachment. These Project-document incidents do not implicitly
+block an unrelated software build.
+
 ## Operational notes
 
 Managed document binaries use the existing controlled evidence store and are included with the PostgreSQL
