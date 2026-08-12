@@ -442,6 +442,16 @@ public static class ManagedDocumentEndpoints
             try { await integrity.VerifyAsync(working, actor.UserName, ct); }
             catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
             var contentHash = data.Revision.SnapshotHash; var now = DateTimeOffset.UtcNow;
+            if (data.Revision.ReleaseCandidateDocxAttachmentId is Guid candidateDocxId)
+            {
+                var candidateDocx = await db.ControlledAttachments.SingleOrDefaultAsync(x => x.Id == candidateDocxId, ct);
+                candidateDocx?.Supersede();
+            }
+            if (data.Revision.ReleaseCandidatePdfAttachmentId is Guid candidatePdfId)
+            {
+                var candidatePdf = await db.ControlledAttachments.SingleOrDefaultAsync(x => x.Id == candidatePdfId, ct);
+                candidatePdf?.Supersede();
+            }
             data.Revision.Return(actor.UserName, request.ExpectedStepId, request.ExpectedCycle, request.ExpectedVersion, request.ExpectedStepVersion, request.ExpectedSnapshotHash, request.Rationale, now);
             var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
             db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ManagedDocument", data.Document.Id, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Return", request.Meaning.Trim(), contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, step.GrantedAuthority, step.Id, step.Cycle, step.Position, request.Rationale, step.AuthoritySource, step.WorkflowId, step.WorkflowVersion, step.AuthoritySourceId));
@@ -685,8 +695,28 @@ public static class ManagedDocumentEndpoints
         var payloadHash = ""; var operationKey = $"connector-release-candidate:{grant.Id}"; ManagedDocumentStorageOperation? storageOperation = null;
         try
         {
-            await using var docxStream = docxUpload.OpenReadStream(); var docx = await files.ReadDocxAsync(docxStream, docxUpload.FileName, false, ct); ManagedDocumentFileService.ValidateReleaseDocx(docx);
-            await using var pdfStream = pdfUpload.OpenReadStream(); using var pdfBuffer = new MemoryStream(); await pdfStream.CopyToAsync(pdfBuffer, ct); var pdf = pdfBuffer.ToArray(); ManagedDocumentFileService.ValidatePdf(pdf);
+            byte[] docx;
+            await using (var docxStream = docxUpload.OpenReadStream())
+                docx = await files.ReadDocxAsync(docxStream, docxUpload.FileName, false, ct);
+
+            string pdfFileName;
+            try { pdfFileName = ManagedDocumentFileService.NormalizePdfFileName(pdfUpload.FileName); }
+            catch (DomainException ex) { return Results.UnprocessableEntity(new { error = ex.Message, code = "invalid_pdf_filename" }); }
+
+            byte[] pdf;
+            try
+            {
+                await using var pdfStream = pdfUpload.OpenReadStream();
+                pdf = await ManagedDocumentFileService.ReadPdfAsync(pdfStream, ct);
+            }
+            catch (PdfRenditionTooLargeException)
+            {
+                return Results.Json(new { error = "The PDF rendition exceeds the 100 MB release limit.", code = "rendition_too_large" }, statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
+
+            var pdfValidation = PdfReleaseProfile.Validate(pdf);
+            if (!pdfValidation.IsValid) return Results.UnprocessableEntity(new { error = pdfValidation.Message, code = pdfValidation.Code });
+
             payloadHash = OperationPayloadHash("ConnectorReleaseCandidate", new { expectedVersion, docxSha256 = ManagedDocumentFileService.Sha256(docx), pdfSha256 = ManagedDocumentFileService.Sha256(pdf) });
             var priorOperation = await OperationResultAsync(db, grant.RevisionId, "ConnectorReleaseCandidate", operationKey, payloadHash, ct); if (priorOperation is not null) return priorOperation;
             if (grant.RevokedAt is not null) return Results.Conflict(new { error = "That connector grant completed with a different release-candidate set.", code = "operation_key_reused" });
@@ -702,27 +732,53 @@ public static class ManagedDocumentEndpoints
             if (working is null) return Results.Conflict(new { error = "The reviewed working evidence metadata is missing.", code = "document_integrity_blocked" });
             try { await integrity.VerifyAsync(working, grant.UserName, ct); }
             catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
-            var summaryMetadata = $"Formal revision scope v{data.Revision.FormalSummaryVersion} ({data.Revision.FormalSummaryHash}): {data.Revision.FormalChangeSummary}";
+
+            var snapshotBinding = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"managed-document-review-v2:{working.Sha256}:{data.Revision.FormalSummaryHash}:{data.Revision.FormalSummaryVersion}:{data.Revision.SubmittedRelationshipManifestHash}"));
+            if (!string.Equals(snapshotBinding, data.Revision.SnapshotHash, StringComparison.OrdinalIgnoreCase))
+                return Results.Conflict(new { error = "The candidate was not produced from the exact reviewed working snapshot. Complete technical review again for the current content.", code = "stale_reviewed_source" });
+
+            byte[] reviewed;
+            try
+            {
+                await using var verified = await integrity.OpenVerifiedAsync(working, grant.UserName, ct);
+                using var buffer = new MemoryStream();
+                await verified.CopyToAsync(buffer, ct);
+                reviewed = buffer.ToArray();
+            }
+            catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
+
+            var transformation = ManagedDocumentFileService.ValidateReleaseTransformation(reviewed, docx, data.Document.DocumentNumber, data.Revision.Revision);
+            if (!transformation.IsValid)
+                return transformation.Code is "candidate_source_mismatch" or "stale_reviewed_source"
+                    ? Results.Conflict(new { error = transformation.Message, code = transformation.Code })
+                    : Results.UnprocessableEntity(new { error = transformation.Message, code = transformation.Code });
+
+            var summaryMetadata = $"Formal revision scope v{data.Revision.FormalSummaryVersion} ({data.Revision.FormalSummaryHash}): {data.Revision.FormalChangeSummary}. Reviewed source {working.Sha256}; {ManagedDocumentFileService.ReleaseTransformationProfile} v{ManagedDocumentFileService.ReleaseTransformationVersion}.";
             var started = await storage.BeginAsync(data.Document.ProjectId, data.Document.Id, data.Revision.Id,
                 "ConnectorReleaseCandidate", operationKey, payloadHash, grant.UserName, now, ct);
             storageOperation = started.Operation; if (started.ExistingResult is not null) return Results.Content(started.ExistingResult, "application/json");
+            var priorDocx = data.Revision.ReleaseCandidateDocxAttachmentId is Guid priorDocxId
+                ? await db.ControlledAttachments.SingleOrDefaultAsync(x => x.Id == priorDocxId, ct) : null;
+            var priorPdf = data.Revision.ReleaseCandidatePdfAttachmentId is Guid priorPdfId
+                ? await db.ControlledAttachments.SingleOrDefaultAsync(x => x.Id == priorPdfId, ct) : null;
             var stagedDocx = await files.StageAsync(storageOperation.Id, "candidate-docx", data.Document.ProjectId, data.Document.Id,
-                data.Revision.Id, Guid.NewGuid(), 1, "Release candidate DOCX", summaryMetadata, docxUpload.FileName,
-                ManagedDocumentFileService.DocxContentType, docx, null, grant.UserName, now, ct);
+                data.Revision.Id, Guid.NewGuid(), 1, "Released DOCX", summaryMetadata, docxUpload.FileName,
+                ManagedDocumentFileService.DocxContentType, docx, priorDocx?.Id, grant.UserName, now, ct);
             await storage.CheckpointAsync(storageOperation, "object-staged-1", ct);
             var stagedPdf = await files.StageAsync(storageOperation.Id, "candidate-pdf", data.Document.ProjectId, data.Document.Id,
-                data.Revision.Id, Guid.NewGuid(), 1, "Release candidate PDF", summaryMetadata, pdfUpload.FileName,
-                ManagedDocumentFileService.PdfContentType, pdf, null, grant.UserName, now, ct);
+                data.Revision.Id, Guid.NewGuid(), 1, "Released PDF", summaryMetadata, pdfFileName,
+                ManagedDocumentFileService.PdfContentType, pdf, priorPdf?.Id, grant.UserName, now, ct);
             await storage.CheckpointAsync(storageOperation, "object-staged-2", ct);
             var docxAttachment = stagedDocx.Attachment; var pdfAttachment = stagedPdf.Attachment;
-            var manifest = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"managed-document-release-v2:{docxAttachment.Sha256}:{pdfAttachment.Sha256}:{data.Revision.FormalSummaryHash}:{data.Revision.FormalSummaryVersion}:{data.Revision.SubmittedRelationshipManifestHash}"));
-            var resultJson = JsonSerializer.Serialize(new { manifestHash = manifest, docxSha256 = docxAttachment.Sha256, pdfSha256 = pdfAttachment.Sha256, formalSummaryHash = data.Revision.FormalSummaryHash, formalSummaryVersion = data.Revision.FormalSummaryVersion, relationshipManifestHash = data.Revision.SubmittedRelationshipManifestHash });
+            var manifest = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"managed-document-release-v3:{working.Sha256}:{ManagedDocumentFileService.ReleaseTransformationProfile}:{ManagedDocumentFileService.ReleaseTransformationVersion}:{docxAttachment.Sha256}:{pdfAttachment.Sha256}:{data.Revision.FormalSummaryHash}:{data.Revision.FormalSummaryVersion}:{data.Revision.SubmittedRelationshipManifestHash}"));
+            var resultJson = JsonSerializer.Serialize(new { manifestHash = manifest, reviewedSourceSha256 = working.Sha256, transformationProfile = ManagedDocumentFileService.ReleaseTransformationProfile, transformationVersion = ManagedDocumentFileService.ReleaseTransformationVersion, docxSha256 = docxAttachment.Sha256, pdfSha256 = pdfAttachment.Sha256, formalSummaryHash = data.Revision.FormalSummaryHash, formalSummaryVersion = data.Revision.FormalSummaryVersion, relationshipManifestHash = data.Revision.SubmittedRelationshipManifestHash });
             await storage.RecordPlanAsync(storageOperation,
                 [StorageObject("candidate-docx", docxAttachment, stagedDocx.Staged), StorageObject("candidate-pdf", pdfAttachment, stagedPdf.Staged)], resultJson, now, ct);
             await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+            priorDocx?.Supersede(); priorPdf?.Supersede();
             db.ControlledAttachments.AddRange(docxAttachment, pdfAttachment); data.Revision.RecordReleaseCandidate(docxAttachment.Id, pdfAttachment.Id, manifest, grant.UserName, now);
             auth.Session!.Close(EditSessionState.Committed, expectedVersion, now, grant.UserName, "Prepared exact DOCX and PDF release candidate."); grant.Revoke(now);
-            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentReleaseCandidatePrepared", grant.UserName, $"Prepared the exact DOCX/PDF release candidate for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} with formal summary {data.Revision.FormalSummaryHash} v{data.Revision.FormalSummaryVersion} and relationship manifest {data.Revision.SubmittedRelationshipManifestHash}.", now));
+            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentReleaseCandidatePrepared", grant.UserName, $"Prepared the exact Released DOCX/PDF candidate for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} from reviewed source {working.Sha256} using {ManagedDocumentFileService.ReleaseTransformationProfile} v{ManagedDocumentFileService.ReleaseTransformationVersion}.", now));
             db.ManagedDocumentOperations.Add(new(data.Revision.Id, "ConnectorReleaseCandidate", operationKey, payloadHash, resultJson, now));
             await storage.PromoteAsync(storageOperation, [stagedDocx.Staged, stagedPdf.Staged], ct); await db.SaveChangesAsync(ct); await storage.CheckpointAsync(storageOperation, "metadata-saved", ct); await transaction.CommitAsync(ct);
             await storage.CompleteAsync(storageOperation, now, ct); return Results.Content(resultJson, "application/json");
@@ -759,7 +815,7 @@ public static class ManagedDocumentEndpoints
     { var releasedHeads = revisions.Where(x => x.State == ManagedDocumentState.Released).ToList(); var released = releasedHeads.Count == 1 ? releasedHeads[0] : null; var inWorkHeads = revisions.Where(x => x.State is ManagedDocumentState.Draft or ManagedDocumentState.InReview or ManagedDocumentState.Returned).ToList(); var inWork = inWorkHeads.Count == 1 ? inWorkHeads[0] : null; var reconciliationRequired = releasedHeads.Count > 1 || inWorkHeads.Count > 1; return new(document.Id, document.DocumentNumber, document.Acronym, document.DocumentType, document.Title, document.StewardId, inWork?.ResponsibleOwnerId, released is null ? "None" : $"{document.DocumentNumber}.{released.Revision:D2}", reconciliationRequired ? "ReconciliationRequired" : released?.State.ToString() ?? "NotReleased", inWork is null ? null : $"{document.DocumentNumber}.{inWork.Revision:D2}", reconciliationRequired ? "ReconciliationRequired" : inWork?.State.ToString() ?? "None", inWork is null ? null : session?.UserName, inWork is null ? null : session?.ExpiresAt, reconciliationRequired, document.UpdatedAt); }
 
     private static ProfessionalPublication NewDraftPublication(ManagedDocument document, ManagedDocumentRevision revision, string project, string program)
-    { var hash = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"{document.DocumentNumber}|{revision.Revision}|{revision.FormalChangeSummary}")); return new ProfessionalPublication("AeroLink", program, project, document.DocumentType, document.Title, "Controlled Project document", document.DocumentNumber, revision.Revision.ToString("D2"), "Draft", "Project-wide", "All software builds", revision.ResponsibleOwnerId, revision.CreatedAt, hash, [("Document steward", document.StewardId), ("Revision responsible owner", revision.ResponsibleOwnerId), ("Revision initiated by", revision.InitiatedBy), ("Applicability", "Project-wide; build links are contextual traceability only"), ("Formal change summary", revision.FormalChangeSummary)], [], [(revision.Revision.ToString("D2"), "Draft", revision.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd"), revision.ResponsibleOwnerId)], [new("1. Purpose and scope", "Complete this controlled Word template using the applicable project standard.", [new("1.1", "Author guidance", "Purpose", "State why this document exists, what it governs, and where its applicability begins and ends.", [("Status", "Draft")])]), new("2. Controlled content", "Replace the guidance below with the approved lifecycle content.", [new("2.1", "Author guidance", "Lifecycle content", "Identify responsibilities, inputs, activities, outputs, transition criteria, records and linked AeroLink artifacts.", [("Working format", "Macro-free Microsoft Word DOCX")])]), new("3. Review and release", "AeroLink records review evidence outside the editable document.", [new("3.1", "Release criteria", "Independent approval", "A technical reviewer and a separate final SQA or configuration approver must approve the exact release candidate.", [("Released formats", "DOCX and PDF")])])]) { Watermark = "DRAFT" }; }
+    { var hash = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"{document.DocumentNumber}|{revision.Revision}|{revision.FormalChangeSummary}")); return new ProfessionalPublication("AeroLink", program, project, document.DocumentType, document.Title, "Controlled Project document", document.DocumentNumber, revision.Revision.ToString("D2"), "Draft", "Project-wide", "All software builds", revision.ResponsibleOwnerId, revision.CreatedAt, hash, [("Document steward", document.StewardId), ("Revision responsible owner", revision.ResponsibleOwnerId), ("Revision initiated by", revision.InitiatedBy), ("Applicability", "Project-wide; build links are contextual traceability only"), ("Formal change summary", revision.FormalChangeSummary)], [], [(revision.Revision.ToString("D2"), "Draft", revision.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd"), revision.ResponsibleOwnerId)], [new("1. Purpose and scope", "Complete this controlled Word template using the applicable project standard.", [new("1.1", "Author guidance", "Purpose", "State why this document exists, what it governs, and where its applicability begins and ends.", [("Status", "Draft")])]), new("2. Controlled content", "Replace the guidance below with the approved lifecycle content.", [new("2.1", "Author guidance", "Lifecycle content", "Identify responsibilities, inputs, activities, outputs, transition criteria, records and linked AeroLink artifacts.", [("Working format", "Macro-free Microsoft Word DOCX")])]), new("3. Review and release", "AeroLink records review evidence outside the editable document.", [new("3.1", "Release criteria", "Independent approval", "A technical reviewer and a separate final SQA or configuration approver must approve the exact release candidate.", [("Released formats", "DOCX and PDF")])])]) { Watermark = "DRAFT", ControlledStatusControls = true }; }
 
     private static async Task<(string Program, string Project)> ProjectContextAsync(AeroLinkDbContext db, Guid projectId, CancellationToken ct) => await (from project in db.Projects.AsNoTracking() join program in db.Programs.AsNoTracking() on project.ProgramId equals program.Id where project.Id == projectId select new ValueTuple<string, string>(program.Name, project.Name)).SingleAsync(ct);
     private static int NumberSequence(string value) => int.TryParse(value[(value.LastIndexOf('-') + 1)..], out var number) ? number : 0;

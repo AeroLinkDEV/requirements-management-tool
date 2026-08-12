@@ -47,7 +47,7 @@ internal sealed class ConnectorForm : Form
         Text = grant.Mode == "release" ? "AeroLink — Prepare document release" : "AeroLink — Controlled Word checkout"; Width = 620; Height = 480; MinimumSize = new(540, 440); StartPosition = FormStartPosition.CenterScreen; BackColor = Color.White; Font = new("Segoe UI", 10);
         var title = new Label { AutoSize = true, MaximumSize = new(530, 0), Font = new("Segoe UI Semibold", 18), Text = grant.Title };
         var number = new Label { AutoSize = true, ForeColor = Color.FromArgb(46, 116, 181), Font = new("Segoe UI Semibold", 10), Text = grant.DocumentNumber };
-        var guidance = new Label { AutoSize = true, MaximumSize = new(530, 0), Text = grant.Mode == "release" ? "Word is opening the exact reviewed Draft. Confirm it, then prepare a clean DOCX and PDF. AeroLink hashes both before final signature." : "Edit this exclusive working copy in Microsoft Word, save normally, then return here to check it in. The faint DRAFT watermark must remain." };
+        var guidance = new Label { AutoSize = true, MaximumSize = new(530, 0), Text = grant.Mode == "release" ? "Word is opening the exact reviewed Draft. Only the named AeroLink status controls change to Released and the named DRAFT watermark is removed; all other reviewed content is preserved. AeroLink verifies the exact transformation and hashes both files before final signature." : "Edit this exclusive working copy in Microsoft Word, save normally, then return here to check it in. The faint DRAFT watermark must remain." };
         _primary.Text = grant.Mode == "release" ? "Prepare DOCX + PDF release candidate" : "Check in saved Word document"; _status.Text = $"Checkout active until {grant.ExpiresAt.LocalDateTime:g}";
         var file = new LinkLabel { AutoSize = true, Text = workingFile }; file.LinkClicked += (_,_) => OpenWord();
         var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(26), AutoScroll = true };
@@ -113,31 +113,42 @@ internal sealed class ConnectorForm : Form
 
 internal static class WordReleaseRenderer
 {
+    private const string StatusTag = "AeroLink.Status";
+    private const string WatermarkTag = "AeroLink.Watermark";
+
     public static void Create(string source, string docx, string pdf)
     {
         var wordType = Type.GetTypeFromProgID("Word.Application") ?? throw new InvalidOperationException("Microsoft Word desktop is required to prepare the approved PDF rendition."); dynamic? word = null, document = null;
-        try { word = Activator.CreateInstance(wordType) ?? throw new InvalidOperationException("Microsoft Word could not be started."); word.Visible = false; word.DisplayAlerts = 0; document = word.Documents.Open(source, ReadOnly: false); foreach (dynamic section in document.Sections) foreach (dynamic header in section.Headers) { for (var index = header.Shapes.Count; index >= 1; index--) { dynamic shape = header.Shapes[index]; var name = (string)shape.Name; var text = ""; try { text = (string)shape.TextEffect.Text; } catch { } if (string.Equals(name, "AeroLinkWatermark", StringComparison.OrdinalIgnoreCase) || text.Contains("DRAFT", StringComparison.OrdinalIgnoreCase)) shape.Delete(); Marshal.FinalReleaseComObject(shape); } Marshal.FinalReleaseComObject(header); } RelabelDraftStories(document); document.SaveAs2(docx, 16); document.ExportAsFixedFormat(pdf, 17, OpenAfterExport: false, OptimizeFor: 0, Range: 0, Item: 0, IncludeDocProps: true, KeepIRM: true, CreateBookmarks: 1, DocStructureTags: true, BitmapMissingFonts: true, UseISO19005_1: false); }
+        try { word = Activator.CreateInstance(wordType) ?? throw new InvalidOperationException("Microsoft Word could not be started."); word.Visible = false; word.DisplayAlerts = 0; document = word.Documents.Open(source, ReadOnly: true); var content = document.Content; ApplyStory(content); Marshal.FinalReleaseComObject(content); foreach (dynamic section in document.Sections) { foreach (dynamic header in section.Headers) { var headerRange = header.Range; ApplyStory(headerRange); Marshal.FinalReleaseComObject(headerRange); Marshal.FinalReleaseComObject(header); } foreach (dynamic footer in section.Footers) { var footerRange = footer.Range; ApplyStory(footerRange); Marshal.FinalReleaseComObject(footerRange); Marshal.FinalReleaseComObject(footer); } Marshal.FinalReleaseComObject(section); } document.SaveAs2(docx, 16); document.ExportAsFixedFormat(pdf, 17, OpenAfterExport: false, OptimizeFor: 0, Range: 0, Item: 0, IncludeDocProps: true, KeepIRM: true, CreateBookmarks: 1, DocStructureTags: true, BitmapMissingFonts: true, UseISO19005_1: false); }
         catch (COMException ex) { throw new InvalidOperationException("Microsoft Word could not prepare the release rendition. Close any prompt in Word, save the working copy, and try again.", ex); }
         finally { if (document is not null) { try { document.Close(false); } catch { } Marshal.FinalReleaseComObject(document); } if (word is not null) { try { word.Quit(); } catch { } Marshal.FinalReleaseComObject(word); } }
     }
 
-    private static void RelabelDraftStories(dynamic document)
+    /// <summary>
+    /// Changes only the named AeroLink content controls: every AeroLink.Status control becomes Released and
+    /// every AeroLink.Watermark control is removed with its contents. Ordinary text, shapes and drawings are
+    /// never searched, relabelled or deleted.
+    /// </summary>
+    private static void ApplyStory(dynamic range)
     {
-        foreach (dynamic firstRange in document.StoryRanges)
+        var controls = new List<dynamic>();
+        try
         {
-            dynamic? range = firstRange;
-            while (range is not null)
+            foreach (dynamic control in range.ContentControls)
+                if (control is not null) controls.Add(control);
+        }
+        catch { return; }
+        foreach (dynamic control in controls)
+        {
+            string? tag = null;
+            try { tag = (string)control.Tag; } catch { }
+            try
             {
-                dynamic find = range.Find;
-                find.ClearFormatting();
-                find.Replacement.ClearFormatting();
-                find.Execute(FindText: "DRAFT", MatchCase: true, MatchWholeWord: true, ReplaceWith: "RELEASE CANDIDATE", Replace: 2);
-                find.Execute(FindText: "Draft", MatchCase: true, MatchWholeWord: true, ReplaceWith: "Release Candidate", Replace: 2);
-                dynamic? next = range.NextStoryRange;
-                Marshal.FinalReleaseComObject(find);
-                Marshal.FinalReleaseComObject(range);
-                range = next;
+                if (tag == WatermarkTag) control.Delete(DeleteContents: true);
+                else if (tag == StatusTag) control.Range.Text = "Released";
             }
+            catch { }
+            Marshal.FinalReleaseComObject(control);
         }
     }
 }
