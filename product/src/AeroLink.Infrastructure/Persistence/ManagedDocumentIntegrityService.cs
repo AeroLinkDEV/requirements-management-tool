@@ -2,6 +2,7 @@ using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace AeroLink.Infrastructure.Persistence;
 
@@ -17,8 +18,10 @@ public sealed class ManagedDocumentIntegrityFailure(
 
 public sealed record ManagedDocumentIntegrityScanResult(int Checked, int Healthy, int Failed, IReadOnlyList<Guid> FailedAttachmentIds);
 
-public sealed class ManagedDocumentIntegrityService(AeroLinkDbContext db, EvidenceFileStore store)
+public sealed class ManagedDocumentIntegrityService(AeroLinkDbContext db, EvidenceFileStore store, IConfiguration? configuration = null)
 {
+    private readonly bool readOnlyRestoreValidation = configuration?.GetValue<bool>("RestoreValidation:ReadOnly") == true;
+
     public async Task<FileStream> OpenVerifiedAsync(ControlledAttachment attachment, string actor, CancellationToken ct)
     {
         var signal = Signal(attachment.Id);
@@ -28,13 +31,14 @@ public sealed class ManagedDocumentIntegrityService(AeroLinkDbContext db, Eviden
         try
         {
             var stream = await store.OpenVerifiedReadAsync(attachment.StorageKey, attachment.Size, attachment.Sha256, ct);
-            await db.ControlledAttachments.Where(x => x.Id == attachment.Id)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.IntegrityVerifiedAt, DateTimeOffset.UtcNow), ct);
+            if (!readOnlyRestoreValidation)
+                await db.ControlledAttachments.Where(x => x.Id == attachment.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.IntegrityVerifiedAt, DateTimeOffset.UtcNow), ct);
             return stream;
         }
         catch (EvidenceIntegrityException ex)
         {
-            await RecordFailureAsync(attachment, actor, ex, ct);
+            if (!readOnlyRestoreValidation) await RecordFailureAsync(attachment, actor, ex, ct);
             throw new ManagedDocumentIntegrityFailure(attachment.Id, ex.Code,
                 "Controlled document evidence failed integrity verification. No bytes were returned or used.", ex);
         }

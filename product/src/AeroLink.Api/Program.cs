@@ -26,6 +26,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 using System.Text.Encodings.Web;
 using System.Threading.RateLimiting;
+using System.Net;
 
 // How an AeroLink API process is put together, and nothing else.
 //
@@ -40,10 +41,21 @@ using System.Threading.RateLimiting;
 // see anything declared on an endpoint.
 
 var builder = WebApplication.CreateBuilder(args);
+var restoreValidationReadOnly = builder.Configuration.GetValue<bool>("RestoreValidation:ReadOnly");
+var restoreValidationToken = builder.Configuration["RestoreValidation:Token"] ?? "";
+if (restoreValidationReadOnly && restoreValidationToken.Length < 32)
+    throw new InvalidOperationException("Read-only restore validation requires a one-use token of at least 32 characters.");
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
+if (restoreValidationReadOnly)
+{
+    // The validation host exists only to exercise integrity-verifying reads. Suppress every
+    // worker so restored metadata cannot be seeded, reconciled, dispatched, or otherwise changed.
+    foreach (var worker in builder.Services.Where(x => x.ServiceType == typeof(IHostedService)).ToList())
+        builder.Services.Remove(worker);
+}
 builder.Services.AddAuthentication(AeroLinkAuthorizationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, AeroLinkAuthorizationHandler>(AeroLinkAuthorizationHandler.SchemeName, _ => { });
 builder.Services.AddSingleton<BrowserMutationProtector>();
@@ -86,23 +98,32 @@ await using (var scope = app.Services.CreateAsyncScope())
     if (seedDemoAccounts && !app.Environment.IsDevelopment() && !allowDemoAccounts)
         throw new InvalidOperationException("Demo identity seeding is disabled outside Development. Set Identity:AllowDemoAccounts only for an explicitly isolated non-production showcase.");
     var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-    if (db.Database.IsNpgsql()) await db.Database.MigrateAsync();
+    if (restoreValidationReadOnly)
+    {
+        if (!await db.Database.CanConnectAsync())
+            throw new InvalidOperationException("The read-only restore-validation database is unavailable.");
+        if ((await db.Database.GetPendingMigrationsAsync()).Any())
+            throw new InvalidOperationException("The restored database schema does not match this AeroLink validation build.");
+    }
+    else if (db.Database.IsNpgsql()) await db.Database.MigrateAsync();
     else await db.Database.EnsureCreatedAsync();
-    if (builder.Configuration.GetValue<bool>("DemoData:Enabled"))
+    if (!restoreValidationReadOnly && builder.Configuration.GetValue<bool>("DemoData:Enabled"))
     {
         await scope.ServiceProvider.GetRequiredService<FmsShowcaseSeeder>().EnsureSeededAsync();
         // Before the identity seeding below, which grants the demo directory membership of every Program
         // that exists by then. A practice Program created afterwards would have no members at all.
         await scope.ServiceProvider.GetRequiredService<ImportPracticeSeeder>().EnsureSeededAsync();
     }
-    if (seedDemoAccounts)
+    if (!restoreValidationReadOnly && seedDemoAccounts)
         await scope.ServiceProvider.GetRequiredService<IdentitySeeder>().EnsureSeededAsync();
-    if (builder.Configuration.GetValue<bool>("DemoData:Enabled"))
+    if (!restoreValidationReadOnly && builder.Configuration.GetValue<bool>("DemoData:Enabled"))
         await scope.ServiceProvider.GetRequiredService<ManagedDocumentShowcaseSeeder>().EnsureSeededAsync();
-    await scope.ServiceProvider.GetRequiredService<EnterpriseWorkspaceSeeder>().EnsureAllAsync();
+    if (!restoreValidationReadOnly)
+        await scope.ServiceProvider.GetRequiredService<EnterpriseWorkspaceSeeder>().EnsureAllAsync();
     // Outside the demo-data guard: every Project has test procedure documents, not only a seeded showcase.
     // Additive and idempotent — it creates what is absent and never moves a procedure somebody has filed.
-    await scope.ServiceProvider.GetRequiredService<TestProcedureDocumentBootstrap>().EnsureAllAsync();
+    if (!restoreValidationReadOnly)
+        await scope.ServiceProvider.GetRequiredService<TestProcedureDocumentBootstrap>().EnsureAllAsync();
 }
 
 // Whether this process also serves the built client, decided once at startup. Null means it does not, and
@@ -152,6 +173,25 @@ app.Use(async (context, next) =>
         // Reached from a mail client, where the reader is not authenticated. The link proves it was issued
         // by this deployment through an HMAC over the recipient, so anonymity here is the design.
         || path.Equals("/api/notifications/unsubscribe", StringComparison.OrdinalIgnoreCase);
+    if (restoreValidationReadOnly)
+    {
+        if (path.StartsWith("/health", StringComparison.OrdinalIgnoreCase)) { await next(); return; }
+        var supplied = context.Request.Headers["X-AeroLink-Restore-Validation"].ToString();
+        var loopback = context.Connection.RemoteIpAddress is not null && IPAddress.IsLoopback(context.Connection.RemoteIpAddress);
+        var exactRead = context.Request.Method is "GET" or "HEAD"
+            && path.StartsWith("/api/managed-documents/attachments/", StringComparison.OrdinalIgnoreCase);
+        var validToken = supplied.Length == restoreValidationToken.Length
+            && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(supplied), Encoding.UTF8.GetBytes(restoreValidationToken));
+        if (!loopback || !exactRead || !validToken)
+        {
+            context.Response.StatusCode = exactRead ? StatusCodes.Status401Unauthorized : StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new { error = "This isolated restore-validation process permits only authenticated controlled-attachment reads.", code = "restore_validation_read_only" });
+            return;
+        }
+        context.Items["AeroLink.User"] = new AuthenticatedUser(Guid.Empty, "system.restore-validator",
+            "Restore Validator", "restore-validator@localhost", true, []);
+        await next(); return;
+    }
     if (!isApi || isAnonymous) { await next(); return; }
     if(path.StartsWith("/api/v1",StringComparison.OrdinalIgnoreCase))
     {

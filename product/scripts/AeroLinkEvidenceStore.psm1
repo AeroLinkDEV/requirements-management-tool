@@ -24,7 +24,7 @@ function Get-AeroLinkEvidenceRoot {
 function Get-AeroLinkAttachmentInventory {
     param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
     $sql = 'COPY (SELECT "Id", "StorageKey", "Size", lower("Sha256") AS "Sha256", "ArtifactType", "ArtifactId", "RevisionId" FROM controlled_attachments ORDER BY "StorageKey", "Id") TO STDOUT WITH (FORMAT CSV, HEADER TRUE)'
-    $csv = & $Psql -h 127.0.0.1 -p $Port -U postgres -d $Database -v ON_ERROR_STOP=1 -c $sql
+    $csv = $sql | & $Psql -h 127.0.0.1 -p $Port -U postgres -d $Database -v ON_ERROR_STOP=1 -f -
     if ($LASTEXITCODE -ne 0) { throw "Could not read the controlled-attachment inventory from database '$Database'." }
     return @($csv | ConvertFrom-Csv)
 }
@@ -57,9 +57,21 @@ SELECT
  (SELECT count(*) FROM managed_document_revisions WHERE ("ReleaseCandidateDocxAttachmentId" IS NULL) <> ("ReleaseCandidatePdfAttachmentId" IS NULL)) AS partial_candidates,
  (SELECT count(*) FROM managed_document_revisions WHERE "State" = 'Released' AND (("ReleasedDocxAttachmentId" IS NULL) OR ("ReleasedPdfAttachmentId" IS NULL))) AS incomplete_releases;
 '@
-    $value = (& $Psql -h 127.0.0.1 -p $Port -U postgres -d $Database -v ON_ERROR_STOP=1 -tA -F ',' -c $sql).Trim()
-    if ($LASTEXITCODE -ne 0 -or $value -notmatch '^\d+,\d+,\d+$') { throw "Could not evaluate managed-document storage health in database '$Database'." }
+    $raw = $sql | & $Psql -h 127.0.0.1 -p $Port -U postgres -d $Database -v ON_ERROR_STOP=1 -tA -F ',' -f -
+    if ($LASTEXITCODE -ne 0) { throw "Could not evaluate managed-document storage health in database '$Database'." }
+    $value = ([string]$raw).Trim()
+    if ($value -notmatch '^\d+,\d+,\d+$') { throw "Could not evaluate managed-document storage health in database '$Database'." }
     $parts = $value.Split(','); if ([int]$parts[0] -ne 0 -or [int]$parts[1] -ne 0 -or [int]$parts[2] -ne 0) { throw "Managed-document storage is not backup/restore ready: pending=$($parts[0]), partialCandidates=$($parts[1]), incompleteReleases=$($parts[2])." }
 }
 
-Export-ModuleMember -Function Get-AeroLinkEvidenceRoot,Get-AeroLinkAttachmentInventory,Test-AeroLinkAttachmentInventory,Assert-AeroLinkStorageLifecycleHealthy
+function Copy-AeroLinkEvidenceTree {
+    param([Parameter(Mandatory)][string]$Source,[Parameter(Mandatory)][string]$Destination)
+    $sourcePath=[IO.Path]::GetFullPath($Source);$destinationPath=[IO.Path]::GetFullPath($Destination)
+    if(-not(Test-Path -LiteralPath $sourcePath -PathType Container)){throw "Evidence source directory is missing: $sourcePath"}
+    New-Item -ItemType Directory -Path $destinationPath -Force|Out-Null
+    & robocopy.exe $sourcePath $destinationPath /E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    if($LASTEXITCODE -ge 8){throw "Evidence copy failed with robocopy exit code $LASTEXITCODE."}
+    $global:LASTEXITCODE=0
+}
+
+Export-ModuleMember -Function Get-AeroLinkEvidenceRoot,Get-AeroLinkAttachmentInventory,Test-AeroLinkAttachmentInventory,Assert-AeroLinkStorageLifecycleHealthy,Copy-AeroLinkEvidenceTree
