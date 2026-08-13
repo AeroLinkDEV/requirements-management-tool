@@ -10,7 +10,6 @@ import {
   ControlledArtifactInspector,
   ControlledArtifactInspectorEmpty,
 } from './ControlledArtifactExplorer'
-import type { TestDiscipline } from './TestResultsWorkspace'
 // The requirements explorer's stylesheet, imported rather than copied. Browsing a controlled artifact is the
 // same job whichever discipline owns it, so the inspector is literally the same one.
 import './RequirementsWorkspace.css'
@@ -32,6 +31,7 @@ type Procedure = {
   preconditions?: string
   steps?: string
   expectedResult?: string
+  level: 'System' | 'HighLevel' | 'LowLevel'
   /// The most recent run's outcome, already projected by the listing endpoint.
   lastOutcome?: string
   lastExecutedAt?: string
@@ -101,6 +101,8 @@ type ProcedureTrace = {
 }
 
 type Tab = 'details' | 'trace' | 'history' | 'discussion'
+type ProcedureScope = 'System' | 'Software'
+type ProcedureLevel = ProcedureScope | 'HighLevel' | 'LowLevel'
 /**
  * The two questions this page answers, kept apart.
  *
@@ -108,18 +110,20 @@ type Tab = 'details' | 'trace' | 'history' | 'discussion'
  * build covered, and what is not" is a report about requirements. Both are about procedures as they stand,
  * which is why they are on one page — but they are different questions and a reader is asking one of them.
  */
-/**
- * The scope the procedure list is asked for, which is the discipline's own name.
- *
- * This used to map to "system", "highLevel" and "lowLevel". The endpoint matches "System", "Software",
- * "HighLevelSoftware" and "LowLevelSoftware", so none of those matched anything and no filter was applied:
- * every discipline's Explorer listed all 515 procedures in the Project, System and HLR and LLR together. It
- * went unnoticed because nothing asserted the count, and it matters now that this is the only place
- * procedures are browsed — an HLR engineer confirming coverage could pick an LLR procedure off the list.
- */
-const scopeOf = (discipline: TestDiscipline) => discipline
-const disciplineLabel = (discipline: TestDiscipline) =>
-  discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'Software HLR' : 'Software LLR'
+/** The Requirements-equivalent scope: all software procedures by default, optionally narrowed by level. */
+const scopeOf = (discipline: ProcedureScope, level: ProcedureLevel) => {
+  if (discipline === 'System') return 'System'
+  if (level === 'HighLevel') return 'HighLevelSoftware'
+  if (level === 'LowLevel') return 'LowLevelSoftware'
+  return 'Software'
+}
+const disciplineLabel = (discipline: ProcedureScope) => discipline === 'System' ? 'System' : 'Software'
+const procedureLevelLabel = (level: Procedure['level']) =>
+  level === 'HighLevel' ? 'HLR' : level === 'LowLevel' ? 'LLR' : 'System'
+const validLevel = (value: string | null, discipline: ProcedureScope): ProcedureLevel => {
+  if (discipline === 'Software' && (value === 'HighLevel' || value === 'LowLevel')) return value
+  return discipline
+}
 
 /**
  * Every controlled test procedure in this build, browsed the way requirements are browsed.
@@ -133,14 +137,14 @@ const disciplineLabel = (discipline: TestDiscipline) =>
  * to be verified.
  */
 export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, releaseVersion,
-  released, onBack, onOpenRequirementRevision, onLevelChange }: {
-  api: string; projectId: string; releaseId: string; discipline: TestDiscipline; buildName: string
+  released, onBack, onOpenRequirementRevision, initialLevel }: {
+  api: string; projectId: string; releaseId: string; discipline: ProcedureScope; buildName: string
   /** The build's own version, which the document actions name. `buildName` is the display label, not this. */
   releaseVersion: string
   released: boolean
   onBack?: () => void
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
-  onLevelChange?: (level: 'HighLevel' | 'LowLevel') => void
+  initialLevel?: 'HighLevel' | 'LowLevel'
 }) {
   const [data, setData] = useState<Page>()
   // Seeded from the address, so a link to one procedure opens on that procedure rather than on page one of
@@ -148,6 +152,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // the parameter names the coverage page used before its library moved here, so links already in circulation
   // — and the requirement trace's "Open test procedure" — keep working.
   const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
+  const [level, setLevel] = useState<ProcedureLevel>(() =>
+    validLevel(opening.get('procedureLevel') ?? initialLevel ?? null, discipline))
   const [query, setQuery] = useState(opening.get('procedure') ?? '')
   const [procedureState, setProcedureState] = useState(opening.get('procedureState') ?? '')
   const [procedureOutcome, setProcedureOutcome] = useState(opening.get('procedureOutcome') ?? '')
@@ -179,7 +185,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [coverageRead, setCoverageRead] = useState(false)
   const [showAllCoverage, setShowAllCoverage] = useState(false)
 
-  const scope = scopeOf(discipline)
+  const scope = scopeOf(discipline, level)
   // A page at a time, at the requirements explorer's own default. A build holds hundreds of procedures, and
   // the reader is looking for one of them.
   // Only the newest request may write the list.
@@ -214,12 +220,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // is structure, not a result set, and re-reading it on every keystroke would make it flicker.
   useEffect(() => {
     let active = true
-    fetch(`${api}/api/projects/${projectId}/test-procedure-documents?scope=${scope}`)
+    fetch(`${api}/api/projects/${projectId}/test-procedure-documents?scope=${discipline}`)
       .then(response => response.ok ? response.json() : [])
       .then((value: ProcedureDocument[]) => { if (active) setDocuments(value) })
       .catch(() => { if (active) setDocuments([]) })
     return () => { active = false }
-  }, [api, projectId, scope])
+  }, [api, projectId, discipline])
   useEffect(() => { void load() }, [load])
 
   /**
@@ -255,6 +261,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setQuery(saved.search || '')
       setProcedureState(saved.state || '')
       setProcedureOutcome(saved.outcome || '')
+      setLevel(validLevel(saved.level || null, discipline))
       setDocumentId(saved.documentId || '')
       setSectionId(saved.sectionId || '')
       setViewId(view.id)
@@ -262,7 +269,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     } catch {
       setError('Saved view configuration is invalid.')
     }
-  }, [])
+  }, [discipline])
   // A link to a saved view opens that worklist, once. Re-applying it on every list refresh would undo the
   // reader's own filtering the moment they changed anything.
   useEffect(() => {
@@ -289,6 +296,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
             search: query,
             state: procedureState,
             outcome: procedureOutcome,
+            level,
             documentId,
             sectionId,
           }),
@@ -310,6 +318,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     apply('procedure', query)
     apply('procedureState', procedureState)
     apply('procedureOutcome', procedureOutcome)
+    apply('procedureLevel', level === discipline ? '' : level)
     apply('procedurePage', page > 1 ? String(page) : '')
     apply('procedureRows', pageSize === 25 ? '' : String(pageSize))
     apply('procedureDocument', documentId)
@@ -317,7 +326,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     apply('procedureView', viewId)
     // Seeded from what the address already says, so the reader's first change after a reload still earns a
     // history entry rather than being mistaken for arrival.
-    const discrete = `${procedureState}|${procedureOutcome}|${page}|${pageSize}|${documentId}|${sectionId}|${viewId}`
+    const discrete = `${level}|${procedureState}|${procedureOutcome}|${page}|${pageSize}|${documentId}|${sectionId}|${viewId}`
     if (lastDiscreteState.current === null) lastDiscreteState.current = discrete
     if (params.toString() === before) return
     const next = `${location.pathname}${params.toString() ? `?${params}` : ''}`
@@ -329,7 +338,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     // window.history explicitly: this component has its own `history` — the revision history of a procedure —
     // and the bare name resolves to that, which throws rather than navigating.
     if (push) window.history.pushState({}, '', next); else window.history.replaceState({}, '', next)
-  }, [query, procedureState, procedureOutcome, page, pageSize, documentId, sectionId, viewId])
+  }, [discipline, level, query, procedureState, procedureOutcome, page, pageSize, documentId, sectionId, viewId])
 
   // The browser's own navigation must move the list, not just the address bar.
   useEffect(() => {
@@ -338,6 +347,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setQuery(params.get('procedure') ?? '')
       setProcedureState(params.get('procedureState') ?? '')
       setProcedureOutcome(params.get('procedureOutcome') ?? '')
+      setLevel(validLevel(params.get('procedureLevel'), discipline))
       setPage(Number(params.get('procedurePage') ?? '1') || 1)
       setPageSize(Number(params.get('procedureRows') ?? '25') || 25)
       setDocumentId(params.get('procedureDocument') ?? '')
@@ -348,7 +358,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     }
     addEventListener('popstate', restore)
     return () => removeEventListener('popstate', restore)
-  }, [])
+  }, [discipline])
 
   const procedures = data?.items ?? []
   // Read once, defensively. A build with no effective procedures answers with a deliberately empty page, and
@@ -445,20 +455,20 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     setCoverage(undefined)
     setCoverageRead(false)
     setShowAllCoverage(false)
-  }, [api, projectId, releaseId, discipline])
+  }, [api, projectId, releaseId, scope])
 
   useEffect(() => {
     if (!showAdvanced || coverageRead) return
     let active = true
     void (async () => {
-      const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, discipline)
+      const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, scope)
       if (!active) return
       setCoverageRead(true)
       if (next) setCoverage(next)
       if (failed) setError('The requirement coverage for this build could not be read.')
     })()
     return () => { active = false }
-  }, [api, projectId, releaseId, discipline, showAdvanced, coverageRead])
+  }, [api, projectId, releaseId, scope, showAdvanced, coverageRead])
 
   const uncovered = coverage?.items.filter(item => item.disposition === 'Uncovered') ?? []
   const suspect = coverage?.items.filter(item => item.disposition === 'Suspect') ?? []
@@ -506,7 +516,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       api={api}
       projectId={projectId}
       release={{ id: releaseId, version: releaseVersion, isReleased: released }}
-      targets={procedureTargetsFor(discipline)}
+      targets={procedureTargetsFor(discipline, level)}
       heading={released ? `Approved documents for ${releaseVersion}` : `Draft documents for ${releaseVersion}`}
     />
 
@@ -528,10 +538,14 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
             size you cannot see is a list you cannot trust you have read all of. */}
         <kbd className="resultCount">{(data?.totalCount ?? 0).toLocaleString()} found</kbd>
       </div>
-      {discipline !== 'System' && onLevelChange && (
+      {discipline === 'Software' && (
         <select aria-label="Level filter"
-          value={discipline === 'LowLevelSoftware' ? 'LowLevel' : 'HighLevel'}
-          onChange={event => onLevelChange(event.target.value as 'HighLevel' | 'LowLevel')}>
+          value={level}
+          onChange={event => {
+            setLevel(event.target.value as ProcedureLevel)
+            setDocumentId(''); setSectionId(''); setPage(1)
+          }}>
+          <option value="Software">All software test procedures</option>
           <option value="HighLevel">Software HLR</option>
           <option value="LowLevel">Software LLR</option>
         </select>
@@ -555,10 +569,11 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         Advanced
       </button>
       <button type="button" className="clear"
-        disabled={!query && !procedureState && !procedureOutcome && !documentId && !sectionId && !viewId}
+        disabled={level === discipline && !query && !procedureState && !procedureOutcome && !documentId && !sectionId && !viewId}
         onClick={() => {
           setViewId('')
           setQuery(''); setProcedureState(''); setProcedureOutcome('')
+          setLevel(discipline)
           setDocumentId(''); setSectionId(''); setPage(1)
         }}>
         Clear
@@ -647,14 +662,14 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
             <button type="button" data-document={document.documentNumber}
               className={documentId === document.id && !sectionId ? 'railEntry selected' : 'railEntry'}
               aria-pressed={documentId === document.id && !sectionId}
-              onClick={() => { setDocumentId(document.id); setSectionId(''); setPage(1) }}>
+              onClick={() => { setDocumentId(document.id); setSectionId(''); setLevel(discipline); setPage(1) }}>
               <b>{document.documentNumber}</b>
               <small>{document.procedureCount} · {document.title}</small>
             </button>
             {document.sections.map(section => (
               <button type="button" key={section.id} className={sectionId === section.id ? 'railSection selected' : 'railSection'}
                 aria-pressed={sectionId === section.id}
-                onClick={() => { setDocumentId(document.id); setSectionId(section.id); setPage(1) }}>
+                onClick={() => { setDocumentId(document.id); setSectionId(section.id); setLevel(discipline); setPage(1) }}>
                 {section.heading} <i>{section.procedureCount}</i>
               </button>
             ))}
@@ -771,7 +786,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                         <b>{procedure.displayNumber}</b>
                         <p>{procedure.title}</p>
                       </button>
-                    <span>{disciplineLabel(discipline)}</span>
+                    <span>{procedureLevelLabel(procedure.level)}</span>
                     <span>{procedure.requirementCount}</span>
                     <span>{procedure.lastOutcome ?? 'Not run'}</span>
                     <i className={procedure.state.toLowerCase()}>{stateLabel(procedure.state)}</i>
@@ -795,7 +810,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       </section>
 
       {selected ? <ControlledArtifactInspector
-        artifactType={`${disciplineLabel(discipline).toUpperCase()} TEST PROCEDURE`}
+        artifactType={`${procedureLevelLabel(selected.level).toUpperCase()} TEST PROCEDURE`}
         displayNumber={selected.displayNumber}
         closeLabel="Close procedure detail"
         onClose={close}

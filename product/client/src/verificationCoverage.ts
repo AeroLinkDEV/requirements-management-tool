@@ -1,5 +1,7 @@
 import type { TestDiscipline } from './TestResultsWorkspace'
 
+export type VerificationScope = TestDiscipline | 'Software'
+
 /**
  * What a build's requirements are verified by, read once and shared.
  *
@@ -33,6 +35,9 @@ export type Coverage = {
 export const requirementPrefix = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'SYSR-' : discipline === 'HighLevelSoftware' ? 'HLR-' : 'LLR-'
 
+const requirementPrefixes = (scope: VerificationScope) =>
+  scope === 'Software' ? ['HLR-', 'LLR-'] : [requirementPrefix(scope)]
+
 /**
  * The baseline or build whose requirements this release actually carries.
  *
@@ -53,9 +58,9 @@ export async function coverageConfiguration(api: string, projectId: string, rele
 }
 
 /** Narrows raw coverage to one discipline and recounts it, so the totals describe what is on screen. */
-export function summarise(raw: Coverage, discipline: TestDiscipline): Coverage {
-  const prefix = requirementPrefix(discipline)
-  const items = raw.items.filter(x => x.displayNumber.startsWith(prefix))
+export function summarise(raw: Coverage, discipline: VerificationScope): Coverage {
+  const prefixes = requirementPrefixes(discipline)
+  const items = raw.items.filter(x => prefixes.some(prefix => x.displayNumber.startsWith(prefix)))
   return {
     items,
     total: items.length,
@@ -73,7 +78,7 @@ export function summarise(raw: Coverage, discipline: TestDiscipline): Coverage {
  * — a build whose requirements have not been materialized — and not an error.
  */
 export async function loadCoverage(
-  api: string, projectId: string, releaseId: string, discipline: TestDiscipline,
+  api: string, projectId: string, releaseId: string, discipline: VerificationScope,
 ): Promise<{ coverage?: Coverage; failed: boolean }> {
   const { query } = await coverageConfiguration(api, projectId, releaseId)
   if (!query) return { coverage: undefined, failed: false }

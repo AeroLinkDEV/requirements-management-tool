@@ -676,21 +676,19 @@ function App() {
   if (view === "procedureExplorer" && project && release)
     return inShell(
       <TestProcedureExplorer
-        key={discipline === "softwareTest" ? selectedArtifactKind || "HighLevel" : "System"}
+        key={discipline === "softwareTest" ? "Software" : "System"}
         api={API}
         projectId={project.project.id}
         releaseId={release.id}
-        discipline={discipline === "softwareTest"
-          ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
-          : "System"}
+        discipline={discipline === "softwareTest" ? "Software" : "System"}
+        initialLevel={discipline === "softwareTest" && (selectedArtifactKind === "HighLevel" || selectedArtifactKind === "LowLevel")
+          ? selectedArtifactKind
+          : undefined}
         buildName={`Build ${release.version}`}
         releaseVersion={release.version}
         released={release.isReleased}
         onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
-        onLevelChange={discipline === "softwareTest"
-          ? level => navigate("procedureExplorer", "softwareTest", undefined, level)
-          : undefined}
       />
     );
   // Downstream assessments and the register are one change-control workspace. Historical coverage URLs still

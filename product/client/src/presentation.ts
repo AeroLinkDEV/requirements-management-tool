@@ -211,16 +211,14 @@ export const artifactTypeLabel = (kind: string, identifier?: string) => {
   return labels[acronym] ?? stateLabel(kind.replace(/-/g, ' '))
 }
 
-/**
- * The procedure document a verification discipline speaks for.
- *
- * The twin of `targetsFor` below. A discipline is one level, so it offers one document and never a choice
- * between documents the reader would have to get right.
- */
-export const procedureTargetsFor = (discipline: 'System' | 'HighLevelSoftware' | 'LowLevelSoftware'): DocumentTarget[] => {
-  if (discipline === 'System') return [{ type: 'SystemTestProcedures', label: documentTypeLabels.SystemTestProcedures }]
-  if (discipline === 'HighLevelSoftware') return [{ type: 'HighLevelTestProcedures', label: documentTypeLabels.HighLevelTestProcedures }]
-  return [{ type: 'LowLevelTestProcedures', label: documentTypeLabels.LowLevelTestProcedures }]
+/** The procedure documents offered by the Explorer, following the same scope/level rule as requirements. */
+export const procedureTargetsFor = (scope: 'System' | 'Software', level?: string): DocumentTarget[] => {
+  if (scope === 'System') return [{ type: 'SystemTestProcedures', label: documentTypeLabels.SystemTestProcedures }]
+  const high: DocumentTarget = { type: 'HighLevelTestProcedures', label: documentTypeLabels.HighLevelTestProcedures }
+  const low: DocumentTarget = { type: 'LowLevelTestProcedures', label: documentTypeLabels.LowLevelTestProcedures }
+  if (level === 'HighLevel') return [high]
+  if (level === 'LowLevel') return [low]
+  return [high, low]
 }
 
 export const targetsFor = (scope: 'System' | 'Software', level?: string): DocumentTarget[] => {

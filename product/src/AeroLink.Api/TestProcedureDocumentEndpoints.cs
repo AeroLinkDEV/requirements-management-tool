@@ -24,7 +24,8 @@ public static class TestProcedureDocumentEndpoints
                 .Where(x => x.ProjectId == projectId)
                 .OrderBy(x => x.Level).ThenBy(x => x.DocumentNumber)
                 .ToListAsync(ct);
-            // One discipline's Explorer speaks for one level, exactly as the requirements side does.
+            // Software mirrors the Requirements Explorer and carries both levels; an exact level remains
+            // available for compatible deep links and other focused readers.
             var levels = ScopeLevels(scope);
             if (levels is not null) documents = documents.Where(x => levels.Contains(x.Level)).ToList();
 
