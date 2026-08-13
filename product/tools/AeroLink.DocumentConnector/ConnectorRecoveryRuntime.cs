@@ -32,6 +32,8 @@ internal static class ConnectorLocalRuntime
         {
             var expected = evidence.RootElement.TryGetProperty("sha256", out var canonical)
                 ? canonical.GetString() : evidence.RootElement.GetProperty("Sha256").GetString();
+            if (metadata.AcceptedAttachmentId is Guid acceptedId && evidence.RootElement.GetProperty("attachmentId").GetGuid() != acceptedId)
+                throw new ConnectorProtocolException("connector_cleanup_evidence_mismatch", "The server completion attachment ID does not match this retained workspace. The workspace was preserved.");
             var actual = await HashFileAsync(Path.Combine(workspacePath, metadata.WorkingFileName));
             if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
                 throw new ConnectorProtocolException("connector_cleanup_evidence_mismatch", "The server completion hash does not match the retained local Word file. The workspace was preserved.");
@@ -44,7 +46,9 @@ internal static class ConnectorLocalRuntime
         var pdf = Directory.EnumerateFiles(candidateRoot, "*.pdf", SearchOption.TopDirectoryOnly).Single();
         var expectedDocx = evidence.RootElement.GetProperty("docxSha256").GetString();
         var expectedPdf = evidence.RootElement.GetProperty("pdfSha256").GetString();
-        if (!string.Equals(expectedDocx, await HashFileAsync(docx), StringComparison.OrdinalIgnoreCase)
+        if ((metadata.CandidateDocxAttachmentId is Guid docxId && evidence.RootElement.GetProperty("docxAttachmentId").GetGuid() != docxId)
+            || (metadata.CandidatePdfAttachmentId is Guid pdfId && evidence.RootElement.GetProperty("pdfAttachmentId").GetGuid() != pdfId)
+            || !string.Equals(expectedDocx, await HashFileAsync(docx), StringComparison.OrdinalIgnoreCase)
             || !string.Equals(expectedPdf, await HashFileAsync(pdf), StringComparison.OrdinalIgnoreCase))
             throw new ConnectorProtocolException("connector_cleanup_evidence_mismatch", "The server completion hashes do not match the retained release-candidate pair. The workspace was preserved.");
     }

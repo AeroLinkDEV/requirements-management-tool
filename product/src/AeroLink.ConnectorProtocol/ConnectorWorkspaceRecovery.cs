@@ -39,7 +39,10 @@ public sealed record ConnectorWorkspaceMetadata(
     string? CandidateDirectoryName = null,
     string? CandidateDocxSha256 = null,
     string? CandidatePdfSha256 = null,
-    DateTimeOffset? RetainUntil = null);
+    DateTimeOffset? RetainUntil = null,
+    Guid? AcceptedAttachmentId = null,
+    Guid? CandidateDocxAttachmentId = null,
+    Guid? CandidatePdfAttachmentId = null);
 
 public sealed class ConnectorWorkspaceStore(
     string rootPath,
@@ -114,7 +117,9 @@ public sealed class ConnectorWorkspaceStore(
             || !value.BaseSha256.All(Uri.IsHexDigit) || string.IsNullOrWhiteSpace(value.WorkingFileName)
             || Path.GetFileName(value.WorkingFileName) != value.WorkingFileName || value.HeartbeatFailures < 0
             || !ValidOptionalHash(value.LocalSha256) || !ValidOptionalHash(value.CandidateDocxSha256)
-            || !ValidOptionalHash(value.CandidatePdfSha256) || !ValidRelativeDirectory(value.CandidateDirectoryName))
+            || !ValidOptionalHash(value.CandidatePdfSha256) || !ValidRelativeDirectory(value.CandidateDirectoryName)
+            || value.AcceptedAttachmentId == Guid.Empty || value.CandidateDocxAttachmentId == Guid.Empty
+            || value.CandidatePdfAttachmentId == Guid.Empty)
             throw new ConnectorProtocolException("connector_workspace_invalid", "The connector workspace metadata is incomplete or unsafe.");
         _ = ConnectorLaunchProtocol.NormalizeOrigin(value.Origin, allowInsecureLoopback: true);
     }
