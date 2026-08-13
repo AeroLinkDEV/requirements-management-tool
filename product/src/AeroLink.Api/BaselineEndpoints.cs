@@ -404,7 +404,7 @@ public static class BaselineEndpoints
                 baseline = baseline.DisplayNumber, baseline.Name, baseline.RequirementsHash, baseline.RequirementsMaterializedAt, requirementCount = rows.Count, requirements = rows });
         });
 
-        app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, EmptyMutationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, EmptyMutationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ControlledOutputGenerator generator, EvidenceFileStore store, CancellationToken ct) =>
         {
             var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (baseline is null) return Results.NotFound(); if (baseline.RequirementsMaterializedAt is null) return Results.BadRequest(new { error = "Materialize the requirement baseline before generating controlled outputs." });
             if(!await http.HasProjectRoleAsync(db,identity,baseline.ProjectId,ct,ProgramRole.ConfigurationManager))return Results.Forbid();
@@ -436,6 +436,8 @@ public static class BaselineEndpoints
             var procedureManifestReady = baseline.TestProceduresMaterializedAt is not null && baseline.TestProceduresHash is not null;
             var existing = await db.ControlledDocuments.Where(x => x.BaselineId == id).ToListAsync(ct);
             var skipped = new List<ControlledDocumentType>();
+            var created = new List<ControlledDocument>();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
             foreach (var spec in specs.Where(s => existing.All(x => x.Type != s.Item1)))
             {
                 var procedureDocument = spec.Item1 is ControlledDocumentType.SystemTestProcedures or ControlledDocumentType.HighLevelTestProcedures or ControlledDocumentType.LowLevelTestProcedures;
@@ -447,10 +449,31 @@ public static class BaselineEndpoints
                 var manifestHash = procedureDocument ? baseline.TestProceduresHash! : baseline.RequirementsHash!;
                 var content = $"{manifestHash}|{spec.Item1}|{spec.Item4}|{http.UserAccount().UserName}";
                 var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
-                db.ControlledDocuments.Add(new ControlledDocument(project.Id, release.Id, baseline.Id, spec.Item1, spec.Item2, spec.Item3, 0, hash, spec.Item4, DateTimeOffset.UtcNow, approvedTemplates.GetValueOrDefault(spec.Item1)));
+                var document = new ControlledDocument(project.Id, release.Id, baseline.Id, spec.Item1, spec.Item2, spec.Item3, 0, hash, spec.Item4, DateTimeOffset.UtcNow, approvedTemplates.GetValueOrDefault(spec.Item1));
+                db.ControlledDocuments.Add(document);
+                created.Add(document);
             }
             await db.SaveChangesAsync(ct);
-            return Results.Ok(new { generated = await db.ControlledDocuments.CountAsync(x => x.BaselineId == id, ct), skipped = skipped.Select(x => x.ToString()).ToArray() });
+            // A controlled publication is frozen bytes, not a recipe. Render each format once at creation and
+            // keep the exact artifact; downloads serve these bytes so later trace, coverage, metadata or
+            // template activity can never silently rewrite what this document record represents.
+            var artifacts = new List<ControlledDocumentArtifact>();
+            foreach (var document in created)
+            {
+                foreach (var format in new[] { "docx", "pdf" })
+                {
+                    var output = await generator.GenerateAsync(document.Id, format, ct);
+                    if (output is null) continue;
+                    await using var content = new MemoryStream(output.Content);
+                    var stored = await store.StoreAsync(content, output.FileName, output.ContentType, ct);
+                    artifacts.Add(new ControlledDocumentArtifact(document.Id, format, stored.StorageKey,
+                        stored.OriginalFileName, stored.ContentType, stored.Size, stored.Sha256, DateTimeOffset.UtcNow));
+                }
+            }
+            db.ControlledDocumentArtifacts.AddRange(artifacts);
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return Results.Ok(new { generated = created.Count, skipped = skipped.Select(x => x.ToString()).ToArray(), artifacts = artifacts.Count });
         });
 
         app.MapGet("/api/release-comparison", async (Guid projectId, Guid fromReleaseId, Guid toReleaseId, AeroLinkDbContext db, CancellationToken ct) =>

@@ -56,6 +56,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<VerificationImpactDecisionHistory> VerificationImpactDecisionHistory => Set<VerificationImpactDecisionHistory>();
     public DbSet<RequirementTraceLink> RequirementTraces => Set<RequirementTraceLink>();
     public DbSet<ControlledDocument> ControlledDocuments => Set<ControlledDocument>();
+    public DbSet<ControlledDocumentArtifact> ControlledDocumentArtifacts => Set<ControlledDocumentArtifact>();
     public DbSet<ReleaseCampaign> ReleaseCampaigns => Set<ReleaseCampaign>();
     public DbSet<ReleaseApproval> ReleaseApprovals => Set<ReleaseApproval>();
     public DbSet<ReleaseCampaignEvent> ReleaseCampaignEvents => Set<ReleaseCampaignEvent>();
@@ -727,6 +728,14 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ControlledDocumentArtifact>(b =>
+        {
+            b.ToTable("controlled_document_artifacts"); b.HasKey(x => x.Id);
+            b.Property(x => x.Format).HasMaxLength(8).IsRequired(); b.Property(x => x.StorageKey).HasMaxLength(500).IsRequired();
+            b.Property(x => x.OriginalFileName).HasMaxLength(260).IsRequired(); b.Property(x => x.ContentType).HasMaxLength(200);
+            b.Property(x => x.Sha256).HasMaxLength(64).IsRequired(); b.HasIndex(x => new { x.DocumentId, x.Format }).IsUnique();
+            b.HasOne<ControlledDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ReleaseCampaign>(b =>
         {

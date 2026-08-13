@@ -58,3 +58,33 @@ public sealed class ControlledDocument
     public DateTimeOffset GeneratedAt { get; private set; }
     public Guid? TemplateRevisionId { get; private set; }
 }
+
+/// <summary>
+/// One frozen rendition of a controlled document.
+///
+/// A controlled publication is a record of what was approved at a moment, not a recipe re-evaluated against
+/// whatever happens to be live when somebody asks to download it years later. When a document is created the
+/// exact bytes of each supported format are rendered once and stored here; downloads serve those bytes and the
+/// manifest reports the stored SHA-256. Records created before artifact freezing carry no artifact rows and are
+/// explicitly reported as legacy on-demand regeneration rather than pretending to be deterministic.
+/// </summary>
+public sealed class ControlledDocumentArtifact
+{
+    private ControlledDocumentArtifact() { }
+    public ControlledDocumentArtifact(Guid documentId, string format, string storageKey, string originalFileName,
+        string contentType, long size, string sha256, DateTimeOffset renderedAt)
+    {
+        Id = Guid.NewGuid(); DocumentId = documentId; Format = format.Trim().ToLowerInvariant();
+        StorageKey = storageKey; OriginalFileName = originalFileName.Trim(); ContentType = contentType.Trim();
+        Size = size; Sha256 = sha256.Trim().ToLowerInvariant(); RenderedAt = renderedAt;
+    }
+    public Guid Id { get; private set; }
+    public Guid DocumentId { get; private set; }
+    public string Format { get; private set; } = string.Empty;
+    public string StorageKey { get; private set; } = string.Empty;
+    public string OriginalFileName { get; private set; } = string.Empty;
+    public string ContentType { get; private set; } = string.Empty;
+    public long Size { get; private set; }
+    public string Sha256 { get; private set; } = string.Empty;
+    public DateTimeOffset RenderedAt { get; private set; }
+}
