@@ -228,7 +228,7 @@ public sealed class TestChangeRequestConsolidationTests
             var fresh = await db.TestChangeReviews.SingleAsync(x => x.Id == secondItem.TestChangeReviewId);
             Assert.Equal(TestChangeReviewDiscipline.System, fresh.Discipline);
             Assert.Equal(TestChangeReviewOutcome.Pending, fresh.Outcome);
-            Assert.Equal(TestChangeReviewState.Open, fresh.State);
+            Assert.Equal(TestChangeReviewState.Draft, fresh.State);
             Assert.Equal(1, fresh.Revision);
             // The fresh assessment is actionable, not a copy of the superseded history.
             Assert.Equal("", fresh.BaseNumber);
@@ -359,7 +359,7 @@ public sealed class TestChangeRequestConsolidationTests
             Assert.Equal(impactCountBefore, await db.VerificationImpactItems.CountAsync());
             Assert.Equal(domainAuditBeforeFold, await db.AuditEvents.CountAsync());
             Assert.Equal(securityAuditBeforeFold, await db.SecurityAuditEvents.CountAsync());
-            Assert.Equal(TestChangeReviewState.Open,
+            Assert.Equal(TestChangeReviewState.Draft,
                 (await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.SecondReviewId)).State);
         }
     }
@@ -409,7 +409,7 @@ public sealed class TestChangeRequestConsolidationTests
             x.ChangeRequestId == fixture.SecondChangeId));
         Assert.Equal(versionBefore, await verificationDb.TestChangeReviews.Where(x => x.Id == fixture.FirstReviewId)
             .Select(x => x.Version).SingleAsync());
-        Assert.Equal(TestChangeReviewState.Open,
+        Assert.Equal(TestChangeReviewState.Draft,
             (await verificationDb.TestChangeReviews.SingleAsync(x => x.Id == fixture.SecondReviewId)).State);
         Assert.Equal(fixture.SecondReviewId,
             (await verificationDb.VerificationImpactItems.SingleAsync(x => x.Id == fixture.SecondItemId)).TestChangeReviewId);
@@ -560,7 +560,7 @@ public sealed class TestChangeRequestConsolidationTests
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var fresh = await db.TestChangeReviews.SingleAsync(x =>
                 x.ChangeRequestId == noItemChangeId
-                && x.Discipline == TestChangeReviewDiscipline.System && x.State == TestChangeReviewState.Open);
+                && x.Discipline == TestChangeReviewDiscipline.System && x.State == TestChangeReviewState.Draft);
             Assert.Equal(TestChangeReviewOutcome.Pending, fresh.Outcome);
             Assert.Equal(0, fresh.Revision);
             Assert.Equal("", fresh.BaseNumber);

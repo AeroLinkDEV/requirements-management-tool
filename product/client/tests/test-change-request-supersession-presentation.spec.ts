@@ -26,7 +26,7 @@ test('a cross-release superseded review remains visible when its successor is no
 
 test('a same-release predecessor moves under the exact successor rather than remaining a peer row', () => {
   const predecessor = review('old', 'SYSTCR-000102.00', 'Superseded', 'new')
-  const successor = review('new', 'SYSTCR-000102.01', 'Open')
+  const successor = review('new', 'SYSTCR-000102.01', 'Draft')
   const currentRelease = [predecessor, successor]
 
   expect(reviewsVisibleInCurrentRelease(currentRelease)).toEqual([successor])
@@ -38,7 +38,7 @@ test('a same-release predecessor moves under the exact successor rather than rem
 })
 
 test('folding several automatic assessments preserves every sibling and earlier ancestor', () => {
-  const current = review('current', 'SYSTCR-000200.02', 'Open')
+  const current = review('current', 'SYSTCR-000200.02', 'Draft')
   const siblingA = review('a', 'SYSTCR-000200.00', 'Superseded', current.id)
   const siblingB = review('b', 'SYSTCR-000201.00', 'Superseded', current.id)
   const ancestor = review('ancestor', 'SYSTCR-000199.00', 'Superseded', siblingB.id)

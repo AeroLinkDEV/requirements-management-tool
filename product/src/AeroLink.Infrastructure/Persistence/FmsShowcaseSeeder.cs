@@ -506,7 +506,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         await db.SaveChangesAsync(ct);
 
         var releasedReviews = await db.TestChangeReviews
-            .Where(x => x.ReleaseId == released.Id && x.State == TestChangeReviewState.Open).ToListAsync(ct);
+            .Where(x => x.ReleaseId == released.Id && x.State == TestChangeReviewState.Draft).ToListAsync(ct);
         var incompleteReviewIds = (await db.VerificationImpactItems
                 .Where(x => x.ReleaseId == released.Id && x.State != VerificationImpactState.Resolved)
                 .Select(x => x.TestChangeReviewId).Distinct().ToListAsync(ct))

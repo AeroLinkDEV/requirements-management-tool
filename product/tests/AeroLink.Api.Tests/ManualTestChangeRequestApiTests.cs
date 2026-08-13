@@ -465,7 +465,7 @@ public sealed class ManualTestChangeRequestApiTests
             // package, concluded and numbered, not a second row that would fight it for the unique key.
             var manual = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.AutoTcrId);
             Assert.Equal(packageId, manual.Id);
-            Assert.Equal(TestChangeReviewState.Open, manual.State);
+            Assert.Equal(TestChangeReviewState.Draft, manual.State);
             Assert.Matches("^SYSTCR-", manual.BaseNumber);
             Assert.Equal("Manual package over the pending automatic review", manual.Title);
             Assert.Equal("manual.engineer", manual.AssignedEngineerId);
@@ -1265,7 +1265,7 @@ public sealed class ManualTestChangeRequestApiTests
             Assert.False(await db.UserNotifications.AnyAsync(x =>
                 x.ArtifactId == reviewId && x.Type == "TestChangeRequestApprovalRequested"));
             Assert.False(await db.ElectronicSignatures.AnyAsync(x => x.ArtifactId == reviewId));
-            Assert.Equal(TestChangeReviewState.Open,
+            Assert.Equal(TestChangeReviewState.Draft,
                 (await db.TestChangeReviews.SingleAsync(x => x.Id == reviewId)).State);
         }
     }
@@ -1363,7 +1363,7 @@ public sealed class ManualTestChangeRequestApiTests
             Assert.False(await db.ReviewCycles.AnyAsync(x => x.TestChangeReviewId == reviewId));
             Assert.Equal(VerificationImpactState.Open,
                 (await db.VerificationImpactItems.SingleAsync(x => x.Id == fixture.AutoItemId)).State);
-            Assert.Equal(TestChangeReviewState.Open,
+            Assert.Equal(TestChangeReviewState.Draft,
                 (await db.TestChangeReviews.SingleAsync(x => x.Id == reviewId)).State);
             Assert.False(await db.ElectronicSignatures.AnyAsync(x => x.ArtifactId == reviewId));
         }
@@ -1384,7 +1384,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var reopenInReview = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.AutoItemId}/reopen",
             new { rationale = "Too late." });
         Assert.Equal(HttpStatusCode.Conflict, reopenInReview.StatusCode);
-        Assert.Contains("only while the test change request is Open", await reopenInReview.Content.ReadAsStringAsync());
+        Assert.Contains("only while the test change request is a Draft", await reopenInReview.Content.ReadAsStringAsync());
 
         await LoginAsync(client, "manual.reviewer");
         using var approved = await client.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/approve",

@@ -223,7 +223,7 @@ test('a procedure modification shows retained coverage and records an explicit r
     }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
       id: '30000000-0000-0000-0000-000000000001', displayNumber: 'SYSTCR-000401.00',
-      baseNumber: 'SYSTCR-000401', revision: 0, discipline: 'System', state: 'Open',
+      baseNumber: 'SYSTCR-000401', revision: 0, discipline: 'System', state: 'Draft',
       outcome: 'ChangeRequired', procedureLevel: 'System', sourceChangeRequestNumber: 'SRCR-000401.00',
       assignedEngineerId: 'test.engineer', version: recorded ? 2 : 1,
       title: 'Govern procedure coverage', problem: 'Coverage must remain exact.', analysis: 'Use an explicit delta.',
@@ -322,7 +322,7 @@ test('a stale Modify target reloads controlled state and requires an explicit re
     }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
       id: '30000000-0000-0000-0000-000000000002', displayNumber: 'SYSTCR-000402.00',
-      baseNumber: 'SYSTCR-000402', revision: 0, discipline: 'System', state: 'Open',
+      baseNumber: 'SYSTCR-000402', revision: 0, discipline: 'System', state: 'Draft',
       outcome: 'ChangeRequired', procedureLevel: 'System', sourceChangeRequestNumber: 'SRCR-000402.00',
       assignedEngineerId: 'test.engineer', version: 1,
       title: 'Recover stale procedure target', problem: 'The selected revision may change.', analysis: 'Refresh authoritative effectivity.',

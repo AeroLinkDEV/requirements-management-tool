@@ -337,7 +337,7 @@ public static class WorkspaceEndpoints
                 .Select(x => new { id = x.Id, type = "Draft to complete", artifact = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, title = x.Title, priority = "Normal", dueAt = x.UpdatedAt.AddDays(10), ageDays = (int)(now - x.UpdatedAt).TotalDays, route = "scr", discipline = x.Type == ChangeRequestType.Software ? "software" : "system" }).ToListAsync(ct))
                 .OrderBy(x => x.dueAt).ToList();
             var assignedTestWork = (await db.TestChangeReviews.AsNoTracking().Where(x =>
-                    x.AssignedEngineerId == actor.UserName && x.State == TestChangeReviewState.Open
+                    x.AssignedEngineerId == actor.UserName && x.State == TestChangeReviewState.Draft
                     && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.ReleaseId == releaseId))
                 .ToListAsync(ct)).OrderBy(x => x.UpdatedAt).Select(x => new
                 {
