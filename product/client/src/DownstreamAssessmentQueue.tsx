@@ -71,6 +71,10 @@ export default function DownstreamAssessmentQueue({api,projectId,releaseId,targe
   const load=useCallback(async()=>{const [assessments,requests]=await Promise.all([fetch(`${api}/api/downstream-assessments?projectId=${projectId}&releaseId=${releaseId}&targetLevel=${targetLevel}`),fetch(`${api}/api/history/change-requests?projectId=${projectId}&releaseId=${releaseId}&type=Software&level=${targetLevel}&state=Draft&page=1&pageSize=100`)]);if(assessments.ok)setRows(await assessments.json());if(requests.ok)setDrafts((await requests.json()).items)},[api,projectId,releaseId,targetLevel])
   useEffect(()=>{void load()},[load,revision])
   useEffect(()=>{setSelectedId(initialAssessmentId??'')},[initialAssessmentId])
+  // A deep link restored through Back can be re-derived only once the queue's data has arrived. The
+  // prop-change effect above may run while rows are still empty, so re-apply the intent after load:
+  // the URL must be sufficient to re-open the drawer no matter which fetch wins the race.
+  useEffect(()=>{if(rows.length&&initialAssessmentId&&!rows.some(row=>row.id===selectedId))setSelectedId(initialAssessmentId)},[rows,initialAssessmentId,selectedId])
   const selected=useMemo(()=>rows.find(row=>row.id===selectedId),[rows,selectedId])
   useEffect(()=>{if(!selected){setImpacts([]);return}let active=true;setImpactBusy(true);Promise.all(selected.sourceChanges.map(change=>fetch(`${api}/api/authoring/impact?projectId=${projectId}&baseNumber=${encodeURIComponent(change.displayNumber.replace(/\.\d{2}$/,''))}`).then(response=>response.ok?response.json():undefined))).then(values=>{if(active)setImpacts(values.filter(Boolean) as Impact[])}).catch(()=>{if(active)setImpacts([])}).finally(()=>{if(active)setImpactBusy(false)});return()=>{active=false}},[api,projectId,selected])
   const openAssessment=(id:string)=>{setSelectedId(id);onAssessmentSelected(id)},closeAssessment=()=>{setSelectedId('');onAssessmentSelected(undefined)}
@@ -82,7 +86,7 @@ export default function DownstreamAssessmentQueue({api,projectId,releaseId,targe
     const body=decision.kind==='reopen'?{reason:rationale.trim()}:{rationale:rationale.trim()}
     if(await act(decision.assessmentId,decision.kind,body)){setDecision(undefined);setRationale('')}}
   const downward=impacts.flatMap(impact=>impact.derivedRequirements)
-  if(!rows.length)return null
+  if(!rows.length)return <section className="downstreamQueue" aria-labelledby="downstream-title"><header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>Approved upstream changes waiting for an explicit HLR or LLR engineering conclusion.</p></div></header><p className="downstreamHelp">Loading assessments…</p></section>
   return <section className="downstreamQueue" aria-labelledby="downstream-title">
     <header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>Approved upstream changes waiting for an explicit HLR or LLR engineering conclusion.</p></div></header>{error&&<div className="workspaceError" role="alert">{error}</div>}
     {rows.map(row=><article className={`downstreamAssessment ${row.state.toLowerCase()}`} data-state={row.state} key={row.id}>

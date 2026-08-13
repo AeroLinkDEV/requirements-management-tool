@@ -368,7 +368,7 @@ public sealed class TestChangeReview
         if (State != TestChangeReviewState.InReview)
             throw new DomainException("Only a submitted test change request can be approved.");
         var cycle = ActiveReviewCycle ?? throw new DomainException("This test change request has no active review.");
-        if (cycle.Approve(actorId, now))
+        if (cycle.Approve(actorId, rationale, now))
         {
             ApprovedBy = Required(actorId, "approving reviewer");
             ApprovalRationale = Required(rationale, "approval rationale");
@@ -656,7 +656,7 @@ public sealed class TestChangeReview
             && string.Equals(x.ApproverId, actorId, StringComparison.OrdinalIgnoreCase));
         if (active is null)
             throw new DomainException("Only the active approver can request changes.");
-        cycle.RequestChanges(rationale, now);
+        cycle.ReturnActiveStep(actorId, rationale, now);
         SubmittedBy = null;
         SelectedApproverId = null;
         SubmittedAt = null;

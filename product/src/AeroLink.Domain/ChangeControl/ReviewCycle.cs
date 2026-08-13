@@ -4,7 +4,7 @@ using AeroLink.Domain.Identity;
 namespace AeroLink.Domain.ChangeControl;
 
 public enum ReviewCycleState { Active, ChangesRequested, Cancelled, Approved }
-public enum ApprovalStepState { Pending, Active, Approved }
+public enum ApprovalStepState { Pending, Active, Approved, Returned }
 public enum ReviewMode { Sequential, Parallel }
 
 public sealed class ApprovalStep
@@ -38,10 +38,21 @@ public sealed class ApprovalStep
     /// </summary>
     public ReviewStageKind StageKind { get; private set; }
     public string Authority { get; private set; } = string.Empty;
+    /// <summary>
+    /// Why this reviewer decided as they did. Approval rationale is the reviewer's own reasoning about the
+    /// exact content they examined; it is distinct from the engineering rationale carried by the artifact
+    /// and from the electronic-signature meaning. Legacy records have no recorded reasoning and remain "".
+    /// </summary>
+    public string Rationale { get; private set; } = string.Empty;
     public ApprovalStepState State { get; private set; }
     public DateTimeOffset? DecidedAt { get; private set; }
 
-    internal void Approve(DateTimeOffset now) { State = ApprovalStepState.Approved; DecidedAt = now; }
+    internal void Approve(DateTimeOffset now, string? rationale = null) { State = ApprovalStepState.Approved; DecidedAt = now; if (!string.IsNullOrWhiteSpace(rationale)) Rationale = rationale.Trim(); }
+    internal void Return(string rationale, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(rationale)) throw new DomainException("A return reason is required.");
+        State = ApprovalStepState.Returned; Rationale = rationale.Trim(); DecidedAt = now;
+    }
     internal void Activate() => State = ApprovalStepState.Active;
     internal void Replace(string id, string name, ProgramRole? role)
     {
@@ -137,14 +148,14 @@ public sealed class ReviewCycle
     public IReadOnlyCollection<ApprovalStep> Steps => _steps.AsReadOnly();
     public int ActivePosition => _steps.Where(x => x.State == ApprovalStepState.Active).OrderBy(x => x.Position).FirstOrDefault()?.Position ?? -1;
 
-    internal bool Approve(string actorId, DateTimeOffset now)
+    internal bool Approve(string actorId, string? rationale, DateTimeOffset now)
     {
         EnsureActive();
         var active = _steps.SingleOrDefault(x => x.State == ApprovalStepState.Active && string.Equals(x.ApproverId, actorId, StringComparison.OrdinalIgnoreCase));
         if (active is null)
             throw new DomainException("Only the active approver can approve this review stage.");
         var position = active.Position;
-        active.Approve(now);
+        active.Approve(now, rationale);
         if (_steps.All(x => x.State == ApprovalStepState.Approved))
         {
             State = ReviewCycleState.Approved;
@@ -154,6 +165,23 @@ public sealed class ReviewCycle
 
         if (Mode == ReviewMode.Sequential) _steps.Single(x => x.Position == position + 1).Activate();
         return false;
+    }
+
+    /// <summary>
+    /// The active reviewer returns the package to the author with their own reason. The step is recorded as
+    /// Returned so history shows exactly which reviewer asked for what; the cycle closes as ChangesRequested
+    /// and the author's next submission starts a new cycle, retaining this one and any earlier signatures.
+    /// </summary>
+    internal void ReturnActiveStep(string actorId, string rationale, DateTimeOffset now)
+    {
+        EnsureActive();
+        var active = _steps.SingleOrDefault(x => x.State == ApprovalStepState.Active && string.Equals(x.ApproverId, actorId, StringComparison.OrdinalIgnoreCase));
+        if (active is null)
+            throw new DomainException("Only the active approver can return the review to the author.");
+        active.Return(rationale, now);
+        State = ReviewCycleState.ChangesRequested;
+        ClosureReason = rationale.Trim();
+        CompletedAt = now;
     }
 
     internal void ReplaceFutureApprover(int position, ApproverSelection replacement,
@@ -169,14 +197,6 @@ public sealed class ReviewCycle
         var stage = workflow?.Stages.SingleOrDefault(x => x.Position == position);
         if (stage is not null) workflow!.ValidateStage(stage, replacement);
         _steps[position].Replace(replacement.UserId, replacement.Name, replacement.Role);
-    }
-
-    internal void RequestChanges(string reason, DateTimeOffset now)
-    {
-        EnsureActive();
-        State = ReviewCycleState.ChangesRequested;
-        ClosureReason = reason.Trim();
-        CompletedAt = now;
     }
 
     internal void Cancel(string reason, DateTimeOffset now)

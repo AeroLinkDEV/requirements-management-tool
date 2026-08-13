@@ -3,6 +3,7 @@ using System;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    partial class AeroLinkDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260813102721_AddApprovalStepRationale")]
+    partial class AddApprovalStepRationale
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3260,9 +3263,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("CampaignId")
                         .HasColumnType("uuid");
 
-                    b.Property<int>("Cycle")
-                        .HasColumnType("integer");
-
                     b.Property<int>("Position")
                         .HasColumnType("integer");
 
@@ -3273,7 +3273,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CampaignId", "Cycle", "Position")
+                    b.HasIndex("CampaignId", "Position")
                         .IsUnique();
 
                     b.ToTable("release_approvals", (string)null);
@@ -3321,13 +3321,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("Version")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint");
 
                     b.HasKey("Id");
 
@@ -6518,54 +6511,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.ToTable("controlled_documents", (string)null);
                 });
 
-            modelBuilder.Entity("AeroLink.Domain.Traceability.ControlledDocumentArtifact", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<Guid>("DocumentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Format")
-                        .IsRequired()
-                        .HasMaxLength(8)
-                        .HasColumnType("character varying(8)");
-
-                    b.Property<string>("OriginalFileName")
-                        .IsRequired()
-                        .HasMaxLength(260)
-                        .HasColumnType("character varying(260)");
-
-                    b.Property<DateTimeOffset>("RenderedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Sha256")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<long>("Size")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("StorageKey")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DocumentId", "Format")
-                        .IsUnique();
-
-                    b.ToTable("controlled_document_artifacts", (string)null);
-                });
-
             modelBuilder.Entity("AeroLink.Domain.Traceability.RequirementTraceLink", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8585,15 +8530,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.HasOne("AeroLink.Domain.Programs.SoftwareRelease", null)
                         .WithMany()
                         .HasForeignKey("ReleaseId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Traceability.ControlledDocumentArtifact", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Traceability.ControlledDocument", null)
-                        .WithMany()
-                        .HasForeignKey("DocumentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
