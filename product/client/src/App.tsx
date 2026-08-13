@@ -852,6 +852,7 @@ function App() {
         onOpenRelease={() => navigate("release")}
         onOpenVerification={(resolved) => navigate("testingCoverage", resolved === "System" ? "systemTest" : "softwareTest", undefined,
           resolved === "LowLevelSoftware" ? "LowLevel" : resolved === "HighLevelSoftware" ? "HighLevel" : undefined)}
+        onOpenManagedDocument={(id) => navigate("managedDocuments","system",id)}
       />
     );
   if (view === "admin" && active)

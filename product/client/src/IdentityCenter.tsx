@@ -769,6 +769,7 @@ export function MyWorkCenter({
   onOpenScr,
   onOpenRelease,
   onOpenVerification,
+  onOpenManagedDocument,
 }: {
   api: string;
   projectId: string;
@@ -778,6 +779,7 @@ export function MyWorkCenter({
   onOpenScr: (id: string, discipline: "system" | "software") => void;
   onOpenRelease: () => void;
   onOpenVerification: (discipline: string) => void;
+  onOpenManagedDocument: (id: string) => void;
 }) {
   const [data, setData] = useState<{
     generatedAt: string;
@@ -821,6 +823,8 @@ export function MyWorkCenter({
         )
       : task.route === "testingCoverage"
         ? onOpenVerification(task.discipline)
+        : task.route === "managedDocuments"
+          ? onOpenManagedDocument(task.id)
         : onOpenRelease();
   return (
     <main className="identityPage">
