@@ -156,48 +156,136 @@ jobs:
   # Windows minutes bill at roughly twice Linux and the runners are slower to provision. That is the price of
   # testing what is actually shipped, and it is a better trade than paying less for evidence about a platform
   # that will never be used.
-  validate:
-    name: Build, test, and exercise product journeys
+  # Four jobs where there was one. They used to run in series inside `validate`, so a pull request waited for
+  # the sum of them: ~12 minutes of API tests, then ~3 of domain and infrastructure, then ~3 of client lint,
+  # type-check and build, then the operator script contracts. Nothing about that order was necessary — no step
+  # consumed a previous step's output — and the measured critical path for the whole gate was this job.
+  #
+  # Split, the gate waits for the slowest rather than the total. `AeroLink.Api.Tests` is ~12 minutes against
+  # ~3 for the other two assemblies combined, so it gets a runner to itself and everything else finishes
+  # underneath it. See BROWSER_AND_BACKEND_FEEDBACK_TIME.md for the measurements.
+  #
+  # Both backend jobs build the whole solution rather than only the projects under test. `dotnet test` builds
+  # just the dependency graph it needs, which silently stops proving that the tools and product projects
+  # outside that graph still compile — a green suite over code that no longer builds. The duplicated build is
+  # the price of keeping "everything compiles" true in a world where the assemblies run apart.
+  backend-api:
+    name: API test suite
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
-        if: needs.changes.outputs.backend == 'true'
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
         with:
           dotnet-version: 10.0.x
       - name: Cache NuGet packages
-        if: needs.changes.outputs.backend == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets') }}
           restore-keys: nuget-${{ runner.os }}-
-      - name: Restore, build, and test backend
-        if: needs.changes.outputs.backend == 'true'
+      - name: Restore and build the solution
         run: |
           dotnet restore product/AeroLink.slnx
           dotnet build product/AeroLink.slnx --configuration Release --no-restore
-          dotnet test product/AeroLink.slnx --configuration Release --no-build --logger "console;verbosity=normal"
+      - name: Run the API test suite
+        run: dotnet test product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal"
+
+  backend-core:
+    name: Domain and infrastructure test suites
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - name: Restore and build the solution
+        run: |
+          dotnet restore product/AeroLink.slnx
+          dotnet build product/AeroLink.slnx --configuration Release --no-restore
+      # Naming the assemblies individually is what makes them splittable, and it introduces the one failure
+      # mode the old `dotnet test <solution>` could not have: a new test project that no job runs. It would
+      # still build, so nothing would fail — the suite would simply be invisible, which is the most expensive
+      # kind of green. This refuses to pass in that state rather than leaving it to be noticed.
+      - name: Refuse a test project that no job runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          known="AeroLink.Api.Tests AeroLink.Domain.Tests AeroLink.Infrastructure.Tests"
+          unrun=""
+          for path in product/tests/*/; do
+            name="$(basename "$path")"
+            case " $known " in
+              *" $name "*) ;;
+              *) unrun="$unrun $name" ;;
+            esac
+          done
+          if [ -n "$unrun" ]; then
+            echo "::error::These test projects are not run by any CI job:$unrun"
+            echo "Add each to a backend job in .github/workflows/ci.yml and to the list in this guard."
+            exit 1
+          fi
+          echo "All test projects under product/tests are claimed by a job."
+      - name: Run the domain and infrastructure test suites
+        run: |
+          dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal"
+          dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal"
+
+  client:
+    name: Client lint, type-check, and build
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.client == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Node.js
-        if: needs.changes.outputs.client == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: product/client/package-lock.json
       - name: Lint, type-check, and build client
-        if: needs.changes.outputs.client == 'true'
         working-directory: product/client
         run: |
           npm ci
           npm run lint
           npm run typecheck
           npm run build
+
+  # The operator scripts are PowerShell and reference no compiled output, so this job needs neither .NET nor
+  # Node — a checkout is the whole environment. It stayed on the critical path for years only because it
+  # happened to live in the same job as the things that do need a toolchain.
+  #
+  # Gated on the change not being documentation-only rather than on `backend`, which preserves exactly when
+  # these ran before: a client-only change still proves the backup, evidence, restore, migration-posture and
+  # remote-demo contracts, because those scripts are not client code and their coverage should not depend on
+  # how a diff happened to be classified.
+  script-contracts:
+    name: Operator and recovery script contracts
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Validate the non-mutating backup schedule contract
         shell: powershell
@@ -246,21 +334,11 @@ jobs:
           & ./product/scripts/AeroLinkRemoteDemoRecovery.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Remote-demo recovery regression failed.' }
 
-      # This job is a required gate, so it must never pass without having proved something. Every step above is
-      # conditional, and a combination of conditions that skipped all of them still reported success — a green
-      # tick that had run no test, no build and no type-check. The classifier now avoids selecting nothing, and
-      # this refuses to be the evidence for a change it did not examine even if that ever regresses.
-      - name: Refuse a pass that validated nothing
-        if: needs.changes.outputs.backend != 'true' && needs.changes.outputs.client != 'true'
-        run: |
-          echo "::error::This gate ran no backend tests and no client validation, so its result is not evidence."
-          echo "Classify the changed paths in the changes job, or mark the change as documentation-only."
-          exit 1
-
   # Still two shards. Adding more was considered and measured against, twice now: the browser shards run
-  # 11–16 minutes while `validate` runs 21–27, so the journeys are not on the critical path and a third or
-  # fourth runner would shorten a job nobody is waiting for while paying setup for it. What governs elapsed
-  # time is the backend test assembly — see BROWSER_AND_BACKEND_FEEDBACK_TIME.md.
+  # 11–16 minutes, and the backend job they would have to beat to become the critical path is `backend-api`
+  # at roughly the same. A third or fourth runner would shorten a job nobody is waiting for while paying
+  # setup for it. Worth revisiting only once `backend-api` itself comes down — see
+  # BROWSER_AND_BACKEND_FEEDBACK_TIME.md.
   #
   # `fail-fast: false` is the change. The opposite cancelled the sibling shard the moment one failed, so a
   # single flake cost a rerun purely to discover whether anything else had also failed. A cancelled shard
@@ -588,13 +666,16 @@ jobs:
   gate:
     name: Report what this run validated
     if: always()
-    needs: [changes, validate, browser-pr, browser-production, postgresql-smoke]
+    needs: [changes, backend-api, backend-core, client, script-contracts, browser-pr, browser-production, postgresql-smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Summarise and enforce
         env:
-          VALIDATE: ${{ needs.validate.result }}
+          BACKEND_API: ${{ needs.backend-api.result }}
+          BACKEND_CORE: ${{ needs.backend-core.result }}
+          CLIENT: ${{ needs.client.result }}
+          CONTRACTS: ${{ needs.script-contracts.result }}
           BROWSER: ${{ needs.browser-pr.result }}
           PRODUCTION: ${{ needs.browser-production.result }}
           POSTGRESQL: ${{ needs.postgresql-smoke.result }}
@@ -613,7 +694,10 @@ jobs:
           {
             echo "## What this run validated"
             echo
-            describe "Backend suites and client validation" "$VALIDATE"
+            describe "API test suite" "$BACKEND_API"
+            describe "Domain and infrastructure test suites" "$BACKEND_CORE"
+            describe "Client lint, type-check, and build" "$CLIENT"
+            describe "Operator and recovery script contracts" "$CONTRACTS"
             describe "Browser journeys" "$BROWSER"
             describe "Browser journeys on the production build" "$PRODUCTION"
             describe "PostgreSQL migrations and secure bootstrap" "$POSTGRESQL"
@@ -627,7 +711,7 @@ jobs:
           # than relying on this job's own dependency behaviour, which treats a skipped dependency as a reason
           # to skip and would take this reporter down with it.
           failed=""
-          for pair in "validate:$VALIDATE" "browser-pr:$BROWSER" "browser-production:$PRODUCTION" "postgresql-smoke:$POSTGRESQL"; do
+          for pair in "backend-api:$BACKEND_API" "backend-core:$BACKEND_CORE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION" "postgresql-smoke:$POSTGRESQL"; do
             name="${pair%%:*}"
             result="${pair#*:}"
             case "$result" in
@@ -636,6 +720,17 @@ jobs:
           done
           if [ -n "$failed" ]; then
             echo "::error::These gates did not pass:$failed"
+            exit 1
+          fi
+
+          # The guard that used to live inside `validate`, moved here because the thing it protects against is
+          # now spread over four jobs and no single one of them can see it. A change that is not documentation
+          # must have had its backend tested or its client validated; if neither ran, this tick is not evidence
+          # about the product and must not be usable as one. The classifier already avoids selecting nothing —
+          # this stays machine-checkable in case that ever regresses.
+          if [ "$DOCS_ONLY" != "true" ] && [ "$BACKEND_API" != "success" ] && [ "$CLIENT" != "success" ]; then
+            echo "::error::This run tested no backend and validated no client, so its result is not evidence."
+            echo "Classify the changed paths in the changes job, or mark the change as documentation-only."
             exit 1
           fi
 
@@ -648,7 +743,7 @@ jobs:
           # in a way that is invisible — a job gated on `pull_request` silently disappears in a queue.
           if [ "$EVENT_NAME" = "merge_group" ] && [ "$DOCS_ONLY" != "true" ]; then
             missing=""
-            for pair in "validate:$VALIDATE" "browser-pr:$BROWSER" "browser-production:$PRODUCTION"; do
+            for pair in "backend-api:$BACKEND_API" "backend-core:$BACKEND_CORE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION"; do
               name="${pair%%:*}"
               result="${pair#*:}"
               [ "$result" = "success" ] || missing="$missing $name"

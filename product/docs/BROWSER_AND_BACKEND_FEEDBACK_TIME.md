@@ -9,9 +9,15 @@ Date: 2026-08-13
 ## Why this exists
 
 A pull request that is green is not a pull request that is merged. Branch protection is **strict** (a branch
-must be up to date with `main`) and **auto-merge is disabled**, so every unrelated merge to `main` invalidates
-a passing run and starts the whole gate again. On a day when `main` moved six times, one parity pull request
-was re-tested end to end six times and found nothing new on any of them.
+must be up to date with `main`), so every unrelated merge to `main` invalidates a passing run and starts the
+whole gate again. On a day when `main` moved six times, one parity pull request was re-tested end to end six
+times and found nothing new on any of them.
+
+**Auto-merge is now enabled** (it was not when this was first measured), which removes the half of that cost
+that came from a green run sitting unnoticed. It does not remove the other half: strict protection still
+blocks a pull request that has fallen behind, and an armed pull request in that state waits rather than
+merging. A merge queue would remove the rest and cannot be enabled here — see
+[Merging into main](MERGING.md).
 
 That makes elapsed time per run the number worth optimizing, and it makes it worth knowing which job actually
 governs it. Optimizing the wrong job costs runners and buys nothing.
@@ -37,18 +43,23 @@ Inside `validate`, measured locally on the same commit:
 | `AeroLink.Infrastructure.Tests` (355 tests) | ~3m |
 | `AeroLink.Domain.Tests` (400 tests) | ~0.2s |
 
-`validate` also runs the client lint, type-check and build **after** the backend tests, in the same job, in
-series.
+`validate` also ran the client lint, type-check and build **after** the backend tests, in the same job, in
+series, along with the PowerShell operator-script contracts. It has since been split — see below.
 
 ## What this rules out
 
 **Adding browser shards.** The July increment moved three shards to two and reasoned that "two shards are
-~123s each against a ~200s+ backend job". The ratio still holds even though both numbers have grown roughly
-5×: the journeys are 11–16 minutes against a 21–27 minute `validate`. A third or fourth shard would shorten a
-job nobody is waiting on, and pay a full runner setup to do it. This was proposed on 2026-08-13, measured, and
+~123s each against a ~200s+ backend job". The ratio still held even though both numbers had grown roughly 5×:
+the journeys were 11–16 minutes against a 21–27 minute `validate`. A third or fourth shard would shorten a job
+nobody is waiting on, and pay a full runner setup to do it. This was proposed on 2026-08-13, measured, and
 dropped before it shipped.
 
-The lever is `AeroLink.Api.Tests`, which is roughly half the critical-path job on its own.
+The lever is `AeroLink.Api.Tests`, which was roughly half the critical-path job on its own.
+
+**This is the conclusion most likely to expire.** Splitting `validate` cut the job the shards were being
+compared against, so the margin is now much narrower: 11–16 minutes of journeys against a `backend-api` job of
+roughly the same. Shards become worth revisiting the moment `backend-api` comes down — but measure the two
+against each other again first, because that comparison is exactly what has changed.
 
 ## Implemented here
 
@@ -72,24 +83,54 @@ The opposite cancelled the sibling shard the moment one failed, so a rerun was n
 whether anything else had also failed — twice on 2026-08-13. A cancelled shard reports nothing, and then costs
 a full gate to obtain the nothing it should have reported the first time.
 
+### `validate` split into four parallel jobs
+
+`backend-api`, `backend-core`, `client` and `script-contracts`, where there was one serial `validate`.
+
+Nothing in that job consumed a previous step's output, so the ordering bought nothing and the gate waited for
+the **sum**: ~12 minutes of API tests, then ~3 of domain and infrastructure, then ~3 of client checks, then the
+script contracts. Split, it waits for the slowest instead. `AeroLink.Api.Tests` is ~12 minutes against ~3 for
+the other two assemblies combined, so it gets a runner to itself and everything else finishes underneath it.
+
+Two details that are easy to get wrong, and were deliberately handled:
+
+- **Both backend jobs still build the whole solution.** `dotnet test <project>` builds only that project's
+  dependency graph, which would quietly stop proving that the tools and product projects outside it still
+  compile. The duplicated build is the price of keeping "everything compiles" true once the assemblies run
+  apart.
+- **Naming assemblies individually introduces a new failure mode**: a test project that no job runs. It would
+  still build, so nothing would fail — the suite would simply become invisible. `backend-core` carries a guard
+  that enumerates `product/tests/*` and fails on any project not claimed by a job.
+
+The "refuse a pass that validated nothing" guard moved from inside `validate` to the `gate` job, because what
+it protects against is now spread across four jobs and no single one can see it. The required check name is
+unchanged, so branch protection needed no edit.
+
 ## Not implemented here, and why
 
 Tracked as a GitHub issue rather than done in this increment, because each is a real piece of work rather than
 a setting:
 
-1. **`AeroLink.Api.Tests` is the critical path.** Most tests stand up a `WebApplicationFactory` over a fresh
-   SQLite file. The repository already contains the fix in miniature: `ShowcaseApiFixture` copies a pre-seeded
-   template database instead of re-seeding, and cut 177 of 552 CPU-seconds across **three** tests. Generalizing
-   that to the tests that seed a workspace per test is the single largest available saving.
-2. **Splitting `validate` into parallel backend and client jobs.** The client checks run after the backend
-   tests in the same job. Splitting them removes ~3 minutes from the critical path but changes the required
-   check topology and the "refuse a pass that validated nothing" guard, so it needs deliberate review.
-3. **Journey parallelism (`workers: 1`).** Every journey shares one API and one database and mutates it, so
+1. **`AeroLink.Api.Tests` is still the critical path**, and it is now the *whole* critical path rather than
+   half of a job. The obvious fix has been tried and **disproved**: generalizing the `ShowcaseApiFixture`
+   template-copy so every factory copies a pre-built schema made the assembly **22% worse** in summed CPU
+   (median 13.4s → 19.4s, p75 20.4s → 26.9s). The template is 2.45 MB and roughly nine tests run concurrently,
+   so it trades cheap page-cached DDL for contended disk I/O. p10 improved, which is the tell — that is where
+   concurrency is lowest.
+
+   What the measurement did establish is the shape of the cost: p10 **5.8s** against a **13.4s** median, with
+   no class above 7% of the total. That is a fixed per-test floor of roughly 39%, not a few slow tests. Any
+   further attempt has to remove that floor **without adding per-test file I/O**. The unexplored direction with
+   the best ratio: many tests boot a full API to assert a rule the domain assembly answers directly — 400
+   domain tests run in **0.2 seconds**.
+2. **Journey parallelism (`workers: 1`).** Every journey shares one API and one database and mutates it, so
    workers cannot simply be raised. Per-test isolation — each test owning its Program and Project, as the
    newer specs already do via `seedWorkspace` — is the prerequisite.
-4. **The strict-branch-protection treadmill.** A merge queue would let GitHub perform the
-   rebase-retest-merge cycle without a human holding the window open, which is the actual cause of repeated
-   full-gate runs. This is a repository setting rather than a code change.
+3. **The strict-branch-protection treadmill.** A merge queue would let GitHub perform the rebase-retest-merge
+   cycle without a human holding the window open. It **cannot be enabled on this repository**: merge queues
+   require an organization-owned repository and this one is owned by a personal account. Auto-merge was
+   enabled instead and takes back the part of the cost that came from waiting on a human. See
+   [Merging into main](MERGING.md).
 
 ## For anyone changing CI after this
 
@@ -97,6 +138,11 @@ Measure before optimizing, and measure the *job*, not the suite. Both times some
 counts here, the reasoning was about the browser suite in isolation and the answer depended entirely on what
 `validate` was doing at the time. The numbers in this file will go stale the same way; re-read the run
 summaries before trusting them.
+
+And be willing to throw the change away. The schema-template optimization above looked obviously correct,
+was implemented, measured **22% worse**, and was reverted. Measuring first is only worth anything if a
+disappointing result actually changes the decision — so record the negative results too. They are the ones
+that stop the same idea being reimplemented in three months.
 
 ### The browser job timeout was inside the noise
 
