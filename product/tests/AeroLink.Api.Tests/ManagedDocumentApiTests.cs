@@ -558,6 +558,84 @@ public sealed class ManagedDocumentApiTests
     }
 
     [Fact]
+    public async Task Repreparing_a_candidate_supersedes_the_prior_pair_and_releases_only_the_latest()
+    {
+        using var factory = new AeroLinkApiFactory(); using var owner = factory.CreateClient(); await ProblemReportApiTests.BootstrapAndLoginAsync(owner); var scope = await SeedProjectAsync(factory);
+        using var created = await owner.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "RSP", documentType = "Re-preparation Plan", title = "Supersession plan", ownerId = "software.author", changeSummary = "Prove candidate supersession.", operationKey = Guid.NewGuid().ToString("N") });
+        var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>(); var documentId = createdBody.GetProperty("id").GetGuid(); var revisionId = createdBody.GetProperty("revisionId").GetGuid();
+        using var submitted = await SubmitAsync(owner, documentId, revisionId, "software.lead", "quality.analyst"); Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+
+        using var technical = factory.CreateClient(); using (var login = await technical.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(technical);
+        using var technicalApproval = await DecideAsync(technical, documentId, revisionId, "approve", "I confirm the technical review is complete.", "The snapshot is technically complete."); Assert.Equal(HttpStatusCode.OK, technicalApproval.StatusCode);
+
+        using var quality = factory.CreateClient(); using (var login = await quality.PostAsJsonAsync("/api/auth/login", new { userName = "quality.analyst", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(quality);
+
+        byte[] workingBytes;
+        using (var serviceScope = factory.Services.CreateScope())
+        {
+            var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var store = serviceScope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            var revision = await db.ManagedDocumentRevisions.SingleAsync(x => x.Id == revisionId);
+            var working = await db.ControlledAttachments.SingleAsync(x => x.Id == revision.CurrentWorkingAttachmentId);
+            workingBytes = await File.ReadAllBytesAsync(Path.Combine(store.RootPath, working.StorageKey.Replace('/', Path.DirectorySeparatorChar)));
+        }
+        var candidateDocx = ManagedDocumentFileService.ApplyReleaseMarking(workingBytes);
+        static byte[] Pdf(string title) => ProfessionalPublicationRenderer.Render(new ProfessionalPublication("AeroLink", "Program", "Project", "Re-preparation Plan", title, "Controlled Project document", "RSP-000001", "00", "Released", "Project-wide", "All software builds", "admin", DateTimeOffset.UtcNow, new string('c', 64), [], [], [], [new("Purpose", "Scope", [new("1", "Plan", "Purpose", "Controlled content.", [])])]), "pdf", "RSP-000001.00").Content;
+        var firstPdf = Pdf("First candidate");
+        var secondPdf = Pdf("Second candidate");
+
+        async Task<(Guid GrantId, string Token, long Version)> OpenPreparationAsync()
+        {
+            using var preparation = await quality.PostAsync($"/api/managed-documents/revisions/{revisionId}/release-preparation", null); Assert.Equal(HttpStatusCode.OK, preparation.StatusCode);
+            var body = await preparation.Content.ReadFromJsonAsync<JsonElement>();
+            var ticket = Query(new Uri(body.GetProperty("launchUri").GetString()!))["ticket"];
+            using var redeemed = await quality.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(ticket)}", null);
+            var grant = await redeemed.Content.ReadFromJsonAsync<JsonElement>();
+            return (grant.GetProperty("id").GetGuid(), grant.GetProperty("accessToken").GetString()!, grant.GetProperty("sessionVersion").GetInt64());
+        }
+        async Task<HttpStatusCode> PostAsync(Guid grantId, string token, long version, byte[] pdf)
+        {
+            using var form = new MultipartFormDataContent { { new StringContent(version.ToString()), "expectedVersion" } };
+            var docxPart = new ByteArrayContent(candidateDocx); docxPart.Headers.ContentType = new(ManagedDocumentFileService.DocxContentType); form.Add(docxPart, "docx", "RSP-000001.00.docx");
+            var pdfPart = new ByteArrayContent(pdf); pdfPart.Headers.ContentType = new(ManagedDocumentFileService.PdfContentType); form.Add(pdfPart, "pdf", "RSP-000001.00.pdf");
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/release-candidate") { Content = form };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var response = await quality.SendAsync(request);
+            return response.StatusCode;
+        }
+
+        var (firstGrant, firstToken, firstVersion) = await OpenPreparationAsync();
+        Assert.Equal(HttpStatusCode.OK, await PostAsync(firstGrant, firstToken, firstVersion, firstPdf));
+        var firstDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+        var firstRevision = firstDetail.GetProperty("revisions")[0];
+        var firstDocxId = firstRevision.GetProperty("releaseCandidateDocxAttachmentId").GetGuid();
+        var firstPdfId = firstRevision.GetProperty("releaseCandidatePdfAttachmentId").GetGuid();
+
+        var (secondGrant, secondToken, secondVersion) = await OpenPreparationAsync();
+        Assert.Equal(HttpStatusCode.OK, await PostAsync(secondGrant, secondToken, secondVersion, secondPdf));
+        var secondDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+        var secondRevision = secondDetail.GetProperty("revisions")[0];
+        var secondDocxId = secondRevision.GetProperty("releaseCandidateDocxAttachmentId").GetGuid();
+        var secondPdfId = secondRevision.GetProperty("releaseCandidatePdfAttachmentId").GetGuid();
+        Assert.NotEqual(firstPdfId, secondPdfId);
+
+        using (var serviceScope = factory.Services.CreateScope())
+        {
+            var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(ControlledAttachmentState.Superseded, (await db.ControlledAttachments.SingleAsync(x => x.Id == firstDocxId)).State);
+            Assert.Equal(ControlledAttachmentState.Superseded, (await db.ControlledAttachments.SingleAsync(x => x.Id == firstPdfId)).State);
+            Assert.Equal(ControlledAttachmentState.Active, (await db.ControlledAttachments.SingleAsync(x => x.Id == secondDocxId)).State);
+            Assert.Equal(ControlledAttachmentState.Active, (await db.ControlledAttachments.SingleAsync(x => x.Id == secondPdfId)).State);
+        }
+
+        var approved = await DecideAsync(quality, documentId, revisionId, "approve", "I authorize this exact controlled release.", "Only the latest candidate is the controlled release."); Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+        var releasedDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+        var releasedRevision = releasedDetail.GetProperty("revisions")[0];
+        Assert.Equal(secondDocxId, releasedRevision.GetProperty("releasedDocxAttachmentId").GetGuid());
+        Assert.Equal(secondPdfId, releasedRevision.GetProperty("releasedPdfAttachmentId").GetGuid());
+    }
+
+    [Fact]
     public async Task Draft_and_returned_withdrawal_closes_checkouts_but_reviewed_and_released_revisions_fail_closed()
     {
         using var factory = new AeroLinkApiFactory(); using var administrator = factory.CreateClient();
