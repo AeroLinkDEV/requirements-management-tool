@@ -163,3 +163,49 @@ test('Clear returns the whole library', async ({ page }) => {
   await expect.poll(async () => Number((await count.textContent())!.replace(/[^\d]/g, '')), { timeout: 30_000 })
     .toBe(whole)
 })
+
+/**
+ * The two Explorers are the same page over different artifacts.
+ *
+ * Screenshots of them side by side were the complaint: the requirements Explorer names its discipline, states
+ * how many records answer and where in them you are, and puts its filters in one row. The procedure Explorer
+ * carried none of that — the same title on all three disciplines, no position in the results, and a caption
+ * stacked over every control.
+ */
+test('the Explorer names its discipline, as the requirements one does', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await login(page)
+  await openExplorer(page, 'software-verification/hlr')
+
+  // "Test Procedure Explorer" was the title of all three, so a link or a screenshot could not say which.
+  await expect(page.getByRole('heading', { name: 'HLR Test Procedure Explorer', level: 1 })).toBeVisible()
+})
+
+test('the result summary says how many answer and where in them you are', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await login(page)
+  await openExplorer(page, 'software-verification/hlr')
+
+  const summary = page.locator('.resultSummary')
+  await expect(summary).toBeVisible({ timeout: 30_000 })
+  await expect(summary).toContainText('procedures')
+  // Where you are in the results, which the count in the search box could never say.
+  await expect(summary).toContainText(/Page \d+ of \d+ · exact current revisions/)
+  await expect(summary).toContainText('Permission-aware · Live index')
+})
+
+test('the filters read as one row rather than a stack of captioned fields', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await login(page)
+  await openExplorer(page, 'software-verification/hlr')
+
+  // The names moved onto the controls rather than being lost: still addressable, still announced.
+  await expect(page.getByLabel('Find a procedure')).toBeVisible()
+  await expect(page.getByLabel('Procedure state')).toBeVisible()
+  await expect(page.getByLabel('Latest result')).toBeVisible()
+  // The captions that made the bar a form are gone.
+  await expect(page.locator('.procedureFilters label span')).toHaveCount(1)
+})

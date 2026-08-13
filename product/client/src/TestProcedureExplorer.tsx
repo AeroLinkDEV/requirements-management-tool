@@ -495,7 +495,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     <header className="procedureExplorerHead">
       <div>
         <p className="eyebrow">VERIFICATION / {disciplineLabel(discipline).toUpperCase()}</p>
-        <h1>Test Procedure Explorer</h1>
+        {/* Named for the discipline, as the requirements Explorer is. "Test Procedure Explorer" is the same
+            title on all three pages, so a link, a bookmark or a screenshot could not say which one it was. */}
+        <h1>{disciplineLabel(discipline)} Test Procedure Explorer</h1>
         <p>Every controlled {disciplineLabel(discipline)} procedure {buildName} carries, and what it covers.</p>
       </div>
     </header>
@@ -599,32 +601,31 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         before you could look for it. State and latest result are how somebody actually narrows this: "the
         drafts", "what failed last time". */}
     <div className="procedureFilters">
+      {/* Inline, unlabelled controls, as the requirements Explorer has: a filter bar reads as one row of
+          things you can narrow by, and a caption stacked over every control turns it into a form. The names
+          are carried by `aria-label`, so nothing is lost to a screen reader or to a test. */}
       <label className="procedureFind">
-        <span>Find a procedure</span>
-        <input value={query} onChange={event => { setQuery(event.target.value); setPage(1) }}
+        <input aria-label="Find a procedure" value={query}
+          onChange={event => { setQuery(event.target.value); setPage(1) }}
           placeholder="Search any identifier fragment or title…" />
         {/* The count belongs on the search, where the requirements Explorer puts it: a filtered list whose
             size you cannot see is a list you cannot trust you have read all of. */}
         <b className="resultCount">{(data?.totalCount ?? 0).toLocaleString()} found</b>
       </label>
-      <label>
-        <span>Procedure state</span>
-        <select value={procedureState} onChange={event => { setProcedureState(event.target.value); setPage(1) }}>
-          <option value="">All states</option>
-          <option value="Draft">Draft</option>
-          <option value="InReview">In review</option>
-          <option value="Approved">Approved</option>
-        </select>
-      </label>
-      <label>
-        <span>Latest result</span>
-        <select value={procedureOutcome} onChange={event => { setProcedureOutcome(event.target.value); setPage(1) }}>
-          <option value="">All outcomes</option>
-          <option value="Pass">Pass</option>
-          <option value="Fail">Fail</option>
-          <option value="Blocked">Blocked</option>
-        </select>
-      </label>
+      <select aria-label="Procedure state" value={procedureState}
+        onChange={event => { setProcedureState(event.target.value); setPage(1) }}>
+        <option value="">All states</option>
+        <option value="Draft">Draft</option>
+        <option value="InReview">In review</option>
+        <option value="Approved">Approved</option>
+      </select>
+      <select aria-label="Latest result" value={procedureOutcome}
+        onChange={event => { setProcedureOutcome(event.target.value); setPage(1) }}>
+        <option value="">All outcomes</option>
+        <option value="Pass">Pass</option>
+        <option value="Fail">Fail</option>
+        <option value="Blocked">Blocked</option>
+      </select>
       <button type="button" className="clear"
         disabled={!query && !procedureState && !procedureOutcome && !documentId && !sectionId && !viewId}
         onClick={() => {
@@ -741,6 +742,23 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       </div>
 
       <section className="procedureList" aria-label="Test procedures">
+        {/* What the requirements Explorer puts above its list, in the same markup and from the same
+            stylesheet: how many records answer, where in them you are, and that the index is live and
+            permission-aware. The count alone was in the search box; where you were in the results was
+            nowhere. */}
+        <div className="resultSummary">
+          <div>
+            <b>{(data?.totalCount ?? 0).toLocaleString()} procedures</b>
+            <span>
+              {!data
+                ? 'Refreshing controlled index…'
+                : `Page ${data.page} of ${data.totalPages} · exact current revisions`}
+            </span>
+          </div>
+          <div className="confidence">
+            <i /> Permission-aware · Live index
+          </div>
+        </div>
         {procedures.length === 0
           ? <p className="procedureEmpty">{query || procedureState || procedureOutcome || documentId || sectionId
             ? 'No procedure matches that. Clear the search or the filters to see the rest.'
