@@ -113,7 +113,9 @@ public sealed class ConnectorWorkspaceStore(
     {
         if (value.Version != 2 || value.WorkspaceId == Guid.Empty || value.ProgramId == Guid.Empty || value.ProjectId == Guid.Empty
             || value.DocumentId == Guid.Empty || value.RevisionId == Guid.Empty || value.EditSessionId == Guid.Empty
-            || value.ActiveGrantId == Guid.Empty || value.BaseAttachmentId == Guid.Empty || value.BaseSha256.Length != 64
+            || value.ActiveGrantId == Guid.Empty || value.BaseAttachmentId == Guid.Empty || !ValidText(value.DeploymentId, 100)
+            || !ValidText(value.DocumentNumber, 100) || !ValidText(value.RevisionNumber, 100)
+            || value.Mode is not ("edit" or "release") || string.IsNullOrWhiteSpace(value.BaseSha256) || value.BaseSha256.Length != 64
             || !value.BaseSha256.All(Uri.IsHexDigit) || string.IsNullOrWhiteSpace(value.WorkingFileName)
             || Path.GetFileName(value.WorkingFileName) != value.WorkingFileName || value.HeartbeatFailures < 0
             || !ValidOptionalHash(value.LocalSha256) || !ValidOptionalHash(value.CandidateDocxSha256)
@@ -125,6 +127,8 @@ public sealed class ConnectorWorkspaceStore(
     }
 
     private static bool ValidOptionalHash(string? value) => value is null || (value.Length == 64 && value.All(Uri.IsHexDigit));
+    private static bool ValidText(string? value, int maximum) => !string.IsNullOrWhiteSpace(value) && value.Length <= maximum
+        && value.All(character => !char.IsControl(character));
 
     private static bool ValidRelativeDirectory(string? value)
     {
