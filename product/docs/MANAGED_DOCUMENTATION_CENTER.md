@@ -73,6 +73,37 @@ Project search and My Work use the formal revision scope when describing a manag
 selected software build may narrow genuinely build-owned records, but it never hides or relabels Project-wide
 document work.
 
+## Bounded Project queries
+
+The Project register returns at most 50 records by default and enforces a maximum of 100. Its opaque cursor is
+bound to the authorized Project, filters, sort, direction, and first-page snapshot; changing any of those inputs
+requires a new first-page request. Document number is the default stable order, with `updatedAt` available as an
+explicit alternative. Search, lifecycle state, type, acronym, responsible owner, and steward predicates run in
+the database before the page is selected. The dashboard applies the same Project-wide head predicates, so its
+counts reconcile to the complete filtered register rather than only the visible page.
+
+Long-lived evidence is not part of the current operational record query. Formal revisions, check-ins, review
+steps, signatures, relationships, contributors, assignments, and audit events are available under
+`/api/managed-documents/{documentId}/history/{surface}` as snapshot-bound pages. Relationship target lookup is
+also cursor-paged and Project-scoped before materialization. New rows after the first request appear when the
+operator refreshes from page one; they cannot shift records between pages in an existing snapshot. Invalid,
+cross-filter, or oversized cursors fail closed with `400`. The browser shows the total register size and loads
+additional records on request, while a direct document URL loads the current record independently of its page.
+
+Production PostgreSQL indexes cover the Project/type/steward/register orders, document/state/revision heads,
+review assignee/state, check-in time, attachment revision/logical version, relationship revision/time, and event
+document/time paths. Qualification targets a maximum response page of 100 and verifies multi-page uniqueness,
+filter binding, history isolation, dashboard reconciliation, payload bounds, and PostgreSQL query plans. SQLite
+is retained only as a fast functional test provider; PostgreSQL is the authoritative performance provider.
+
+The qualification budget is a maximum eight SQL commands and 256 KiB JSON for an inventory/dashboard request,
+eight SQL commands and 128 KiB for one history page (including identity and Project-authorization reads), and two seconds of API latency for a 100-row page on the
+reference local PostgreSQL installation. The 5,000-document/20,000-event fixture completed the selective
+inventory plan in 1.7 ms and the indexed 51-row history plan in 0.1 ms; history used
+`IX_managed_document_events_DocumentId_OccurredAt`. These database timings exclude HTTP and test-host startup.
+Memory retained for a response is bounded by the requested page plus the current-head joins; histories and
+relationship candidates are never accumulated server-side across pages.
+
 ## Lifecycle links
 
 An authorized revision owner or Project configuration authority can link existing change requests, Problem

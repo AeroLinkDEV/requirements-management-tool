@@ -42,6 +42,11 @@ public sealed class ManagedDocumentApiTests
                 new RoleDelegation(scope.ProgramId, configuration.Id, delegated.Id, ProgramRole.ConfigurationManager, now.AddMinutes(-1), now.AddDays(1), "Relationship control coverage.", "admin", now)); await db.SaveChangesAsync();
             releasedChangeId = releasedChange.Id; activeChangeId = activeChange.Id; foreignChangeId = foreignChange.Id; reportId = report.Id; testChangeId = testChange.Id;
         }
+        var targetPage = await administrator.GetFromJsonAsync<JsonElement>($"/api/managed-documents/link-options?projectId={scope.ProjectId}&artifactType=ChangeRequest&pageSize=1");
+        Assert.Single(targetPage.GetProperty("items").EnumerateArray()); Assert.True(targetPage.GetProperty("hasMore").GetBoolean());
+        var targetPageTwo = await administrator.GetFromJsonAsync<JsonElement>($"/api/managed-documents/link-options?projectId={scope.ProjectId}&artifactType=ChangeRequest&pageSize=1&cursor={Uri.EscapeDataString(targetPage.GetProperty("nextCursor").GetString()!)}");
+        var targetIds = targetPage.GetProperty("items").EnumerateArray().Concat(targetPageTwo.GetProperty("items").EnumerateArray()).Select(x => x.GetProperty("id").GetGuid()).ToList();
+        Assert.Contains(releasedChangeId, targetIds); Assert.Contains(activeChangeId, targetIds); Assert.DoesNotContain(foreignChangeId, targetIds);
         using var created = await administrator.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SCMP", documentType = "Software Configuration Management Plan", title = "Relationship-controlled plan", ownerId = "software.author", formalChangeSummary = "Control lifecycle relationships.", operationKey = Guid.NewGuid().ToString("N") });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode); var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>(); var documentId = createdBody.GetProperty("id").GetGuid(); var revisionId = createdBody.GetProperty("revisionId").GetGuid();
         var initial = await administrator.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var initialVersion = initial.GetProperty("revisions")[0].GetProperty("version").GetInt64();
@@ -901,6 +906,79 @@ public sealed class ManagedDocumentApiTests
         var secondDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{secondDocumentId}"); var secondRevision = secondDetail.GetProperty("revisions")[0]; var secondStep = secondRevision.GetProperty("reviewSteps").EnumerateArray().Single(x => x.GetProperty("state").GetString() == "Active");
         using (var serviceScope = factory.Services.CreateScope()) { var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var account = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.UserAccounts.Where(x => x.Id == delegateAccountId)); account.Disable(DateTimeOffset.UtcNow); await db.SaveChangesAsync(); }
         using var disabled = await reviewer.PostAsJsonAsync($"/api/managed-documents/revisions/{secondRevisionId}/review/approve", DecisionPayload(secondRevision, secondStep, Guid.NewGuid().ToString("N"), "Must not sign", "Disabled accounts cannot exercise even frozen authority.")); Assert.Equal(HttpStatusCode.Unauthorized, disabled.StatusCode);
+    }
+
+    [Fact]
+    public async Task Project_inventory_and_histories_are_bounded_filtered_and_cursor_scoped()
+    {
+        var commands = new ProblemReportPagingCommandInterceptor();
+        using var factory = new AeroLinkApiFactory(commandInterceptor: commands); using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client); var scope = await SeedProjectAsync(factory);
+        Guid historyDocumentId;
+        using (var serviceScope = factory.Services.CreateScope())
+        {
+            var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var now = DateTimeOffset.UtcNow.AddMinutes(-10);
+            var documents = new List<ManagedDocument>(); var revisions = new List<ManagedDocumentRevision>(); var events = new List<ManagedDocumentEvent>();
+            for (var index = 1; index <= 123; index++)
+            {
+                var document = new ManagedDocument(scope.ProjectId, $"DOC-{index:D6}", "DOC", index % 2 == 0 ? "Project Plan" : "Assurance Plan",
+                    $"Scale document {index:D3}", index % 3 == 0 ? "software.lead" : "software.author", now.AddMilliseconds(index), "admin");
+                documents.Add(document); revisions.Add(new ManagedDocumentRevision(document.Id, 0, index % 3 == 0 ? "software.lead" : "software.author", "Scale qualification.", now.AddMilliseconds(index), initiatedBy: "admin"));
+                if (index == 1) for (var eventIndex = 1; eventIndex <= 27; eventIndex++)
+                    events.Add(new ManagedDocumentEvent(document.Id, "ScaleEvent", "admin", $"Bounded history event {eventIndex:D2}", now.AddSeconds(eventIndex)));
+            }
+            historyDocumentId = documents[0].Id; db.AddRange(documents); db.AddRange(revisions); db.AddRange(events); await db.SaveChangesAsync();
+        }
+
+        commands.Clear();
+        var first = await client.GetFromJsonAsync<JsonElement>($"/api/managed-documents?projectId={scope.ProjectId}&pageSize=25");
+        Assert.Equal(123, first.GetProperty("totalCount").GetInt32()); Assert.Equal(25, first.GetProperty("items").GetArrayLength()); Assert.True(first.GetProperty("hasMore").GetBoolean());
+        Assert.InRange(commands.Commands.Count, 1, 8); Assert.InRange(JsonSerializer.SerializeToUtf8Bytes(first).Length, 1, 256 * 1024);
+        var inventorySql = commands.Commands.Where(command => command.Contains("managed_documents", StringComparison.OrdinalIgnoreCase)).ToArray();
+        Assert.Contains(inventorySql, command => command.Contains("COUNT", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(inventorySql, command => command.Contains("LIMIT", StringComparison.OrdinalIgnoreCase));
+        using (var serviceScope = factory.Services.CreateScope())
+        {
+            var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var addedAfterSnapshot = new ManagedDocument(scope.ProjectId, "DOC-000000", "DOC", "Project Plan", "Added while paging", "software.author", DateTimeOffset.UtcNow.AddMinutes(1), "admin");
+            db.AddRange(addedAfterSnapshot, new ManagedDocumentRevision(addedAfterSnapshot.Id, 0, "software.author", "Concurrent addition.", DateTimeOffset.UtcNow.AddMinutes(1), initiatedBy: "admin"));
+            await db.SaveChangesAsync();
+        }
+        var numbers = first.GetProperty("items").EnumerateArray().Select(x => x.GetProperty("documentNumber").GetString()!).ToList();
+        var cursor = first.GetProperty("nextCursor").GetString();
+        while (!string.IsNullOrEmpty(cursor))
+        {
+            var page = await client.GetFromJsonAsync<JsonElement>($"/api/managed-documents?projectId={scope.ProjectId}&pageSize=25&cursor={Uri.EscapeDataString(cursor)}");
+            numbers.AddRange(page.GetProperty("items").EnumerateArray().Select(x => x.GetProperty("documentNumber").GetString()!));
+            cursor = page.GetProperty("nextCursor").ValueKind == JsonValueKind.Null ? null : page.GetProperty("nextCursor").GetString();
+        }
+        Assert.Equal(123, numbers.Count); Assert.Equal(123, numbers.Distinct().Count()); Assert.Equal(numbers.Order(), numbers); Assert.DoesNotContain("DOC-000000", numbers);
+
+        var filtered = await client.GetFromJsonAsync<JsonElement>($"/api/managed-documents?projectId={scope.ProjectId}&documentType=Project%20Plan&owner=software.lead&pageSize=100");
+        Assert.All(filtered.GetProperty("items").EnumerateArray(), item => Assert.Equal("Project Plan", item.GetProperty("documentType").GetString()));
+        var dashboard = await client.GetFromJsonAsync<JsonElement>($"/api/managed-documents/dashboard?projectId={scope.ProjectId}&documentType=Project%20Plan&owner=software.lead");
+        Assert.Equal(filtered.GetProperty("totalCount").GetInt32(), dashboard.GetProperty("total").GetInt32());
+        commands.Clear(); var completeDashboard = await client.GetFromJsonAsync<JsonElement>($"/api/managed-documents/dashboard?projectId={scope.ProjectId}");
+        Assert.Equal(124, completeDashboard.GetProperty("total").GetInt32()); Assert.Equal(124, completeDashboard.GetProperty("inWork").GetInt32()); Assert.Equal(0, completeDashboard.GetProperty("released").GetInt32());
+        Assert.InRange(commands.Commands.Count, 1, 8);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/managed-documents?projectId={scope.ProjectId}&pageSize=101")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/managed-documents?projectId={scope.ProjectId}&cursor=not-a-cursor")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/managed-documents?projectId={scope.ProjectId}&search=changed&cursor={Uri.EscapeDataString(first.GetProperty("nextCursor").GetString()!)}")).StatusCode);
+
+        commands.Clear(); var auditFirst = await client.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{historyDocumentId}/history/audit?pageSize=10");
+        Assert.Equal(10, auditFirst.GetProperty("items").GetArrayLength()); Assert.True(auditFirst.GetProperty("hasMore").GetBoolean());
+        Assert.InRange(commands.Commands.Count, 1, 8); Assert.InRange(JsonSerializer.SerializeToUtf8Bytes(auditFirst).Length, 1, 128 * 1024);
+        var auditSecond = await client.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{historyDocumentId}/history/audit?pageSize=10&cursor={Uri.EscapeDataString(auditFirst.GetProperty("nextCursor").GetString()!)}");
+        Assert.Equal(10, auditSecond.GetProperty("items").GetArrayLength());
+        Assert.Empty(auditFirst.GetProperty("items").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).Intersect(auditSecond.GetProperty("items").EnumerateArray().Select(x => x.GetProperty("id").GetGuid())));
+
+        foreach (var surface in new[] { "revisions", "check-ins", "reviews", "signatures", "relationships", "contributors", "assignments" })
+        {
+            using var response = await client.GetAsync($"/api/managed-documents/{historyDocumentId}/history/{surface}?pageSize=10");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var page = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.InRange(page.GetProperty("items").GetArrayLength(), 0, 10);
+        }
     }
 
     private static async Task<HttpResponseMessage> SubmitAsync(HttpClient client, Guid documentId, Guid revisionId, string technicalReviewerId, string finalApproverId)
