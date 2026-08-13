@@ -114,7 +114,7 @@ async function orderedBaselineRequirements(
 
 async function openSystemAssessment(page: Page, displayNumber: string) {
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
   const row = page.locator('.downstreamAssessment').filter({ hasText: displayNumber }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.getByRole('button', { name: 'Open assessment' }).click()

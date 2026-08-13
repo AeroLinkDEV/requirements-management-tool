@@ -16,6 +16,10 @@ test('a procedure opens onto the same four-tab inspector a requirement does', as
 
   await expect(page.getByRole('heading', { name: 'Test Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
 
+  const emptyInspector = page.getByRole('complementary', { name: 'Procedure detail' })
+  await expect(emptyInspector.getByText('Select a procedure')).toBeVisible()
+  await expect(page.getByRole('separator')).toHaveCount(2, { timeout: 30_000 })
+
   const rows = page.locator('.procedureRow')
   await expect(rows.first()).toBeVisible({ timeout: 30_000 })
   const number = (await rows.first().locator('b').textContent())!.trim()
@@ -115,17 +119,18 @@ test('software HLR and LLR each have their own procedures and coverage', async (
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('button', { name: 'Software' }).last().click()
 
-  await page.getByRole('link', { name: 'Software HLR Test Procedure Explorer' }).click()
+  await page.getByRole('link', { name: 'Software Test Procedure Explorer' }).click()
   await expect(page).toHaveURL(/software-verification\/hlr\/procedures$/, { timeout: 30_000 })
-  await expect(page.getByText('VERIFICATION / SOFTWARE HLR')).toBeVisible()
+  await expect(page.getByText('CONTROLLED TEST PROCEDURES / READ-ONLY EXPLORER')).toBeVisible()
+  await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
   await expect(page.locator('.pager')).toContainText('of 160', { timeout: 30_000 })
   await expect(page.locator('.procedureList')).not.toContainText('LLRTP-')
   await page.getByRole('tab', { name: 'Requirement coverage' }).click()
   await expect(page.locator('.coverageSummary article').first().locator('b')).toHaveText('400', { timeout: 30_000 })
 
-  await page.getByRole('link', { name: 'Software LLR Test Procedure Explorer' }).click()
+  await page.getByLabel('Level filter').selectOption('LowLevel')
   await expect(page).toHaveURL(/software-verification\/llr\/procedures$/, { timeout: 30_000 })
-  await expect(page.getByText('VERIFICATION / SOFTWARE LLR')).toBeVisible()
+  await expect(page.getByLabel('Level filter')).toHaveValue('LowLevel')
   await expect(page.locator('.pager')).toContainText('of 280', { timeout: 30_000 })
   await expect(page.locator('.procedureList')).not.toContainText('HLRTP-')
   await page.getByRole('tab', { name: 'Requirement coverage' }).click()

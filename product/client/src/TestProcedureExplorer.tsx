@@ -131,12 +131,14 @@ const disciplineLabel = (discipline: TestDiscipline) =>
  * to be verified.
  */
 export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, releaseVersion,
-  released, onOpenRequirementRevision }: {
+  released, onBack, onOpenRequirementRevision, onLevelChange }: {
   api: string; projectId: string; releaseId: string; discipline: TestDiscipline; buildName: string
   /** The build's own version, which the document actions name. `buildName` is the display label, not this. */
   releaseVersion: string
   released: boolean
+  onBack?: () => void
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
+  onLevelChange?: (level: 'HighLevel' | 'LowLevel') => void
 }) {
   const [data, setData] = useState<Page>()
   // Seeded from the address, so a link to one procedure opens on that procedure rather than on page one of
@@ -491,14 +493,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   }
 
   // A workspace is its own <main>: the shell supplies the navigation and context bar, not the landmark.
-  return <main className="procedureExplorer">
-    <header className="procedureExplorerHead">
+  return <main className="reqWorkspace procedureExplorer">
+    <header className="reqHeader">
       <div>
-        <p className="eyebrow">VERIFICATION / {disciplineLabel(discipline).toUpperCase()}</p>
-        {/* Named for the discipline, as the requirements Explorer is. "Test Procedure Explorer" is the same
-            title on all three pages, so a link, a bookmark or a screenshot could not say which one it was. */}
-        <h1>{disciplineLabel(discipline)} Test Procedure Explorer</h1>
-        <p>Every controlled {disciplineLabel(discipline)} procedure {buildName} carries, and what it covers.</p>
+        {onBack && <button className="back" onClick={onBack}>← Command Center</button>}
+        <p className="eyebrow">CONTROLLED TEST PROCEDURES / READ-ONLY EXPLORER</p>
+        <h1>{discipline === 'System' ? 'System Test Procedure Explorer' : 'Software Test Procedure Explorer'}</h1>
       </div>
     </header>
     {error && <div className="workspaceError" role="alert">{error}</div>}
@@ -525,6 +525,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
 
     {pageTab === 'coverage' && (
       <div className="explorerCoverage">
+        {discipline !== 'System' && onLevelChange && (
+          <section className="reqCommand procedureFilters coverageLevelFilter">
+            <select aria-label="Level filter"
+              value={discipline === 'LowLevelSoftware' ? 'LowLevel' : 'HighLevel'}
+              onChange={event => onLevelChange(event.target.value as 'HighLevel' | 'LowLevel')}>
+              <option value="HighLevel">Software HLR</option>
+              <option value="LowLevel">Software LLR</option>
+            </select>
+          </section>
+        )}
         <section className="coverageSummary" aria-label="Coverage summary">
           <article><b>{coverage?.total ?? 0}</b><span>Requirements</span></article>
           <article><b>{coverage?.covered ?? 0}</b><span>With a procedure</span></article>
@@ -600,18 +610,27 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         so a list that could only be searched meant knowing the number of the thing you were looking for
         before you could look for it. State and latest result are how somebody actually narrows this: "the
         drafts", "what failed last time". */}
-    <div className="procedureFilters">
+    <section className="reqCommand procedureFilters">
       {/* Inline, unlabelled controls, as the requirements Explorer has: a filter bar reads as one row of
           things you can narrow by, and a caption stacked over every control turns it into a form. The names
           are carried by `aria-label`, so nothing is lost to a screen reader or to a test. */}
-      <label className="procedureFind">
+      <div className="reqSearch procedureFind">
+        <span>⌕</span>
         <input aria-label="Find a procedure" value={query}
           onChange={event => { setQuery(event.target.value); setPage(1) }}
           placeholder="Search any identifier fragment or title…" />
         {/* The count belongs on the search, where the requirements Explorer puts it: a filtered list whose
             size you cannot see is a list you cannot trust you have read all of. */}
-        <b className="resultCount">{(data?.totalCount ?? 0).toLocaleString()} found</b>
-      </label>
+        <kbd className="resultCount">{(data?.totalCount ?? 0).toLocaleString()} found</kbd>
+      </div>
+      {discipline !== 'System' && onLevelChange && (
+        <select aria-label="Level filter"
+          value={discipline === 'LowLevelSoftware' ? 'LowLevel' : 'HighLevel'}
+          onChange={event => onLevelChange(event.target.value as 'HighLevel' | 'LowLevel')}>
+          <option value="HighLevel">Software HLR</option>
+          <option value="LowLevel">Software LLR</option>
+        </select>
+      )}
       <select aria-label="Procedure state" value={procedureState}
         onChange={event => { setProcedureState(event.target.value); setPage(1) }}>
         <option value="">All states</option>
@@ -644,15 +663,15 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           <option value={100}>100</option>
         </select>
       </label>
-    </div>
+    </section>
 
-    <div className="procedureExplorerSplit">
+    <div className="reqLayout inspecting procedureExplorerSplit" data-resizable-layout="horizontal" data-resizable-key="test-procedure-explorer">
       {/* The documents these procedures are written into, in the place and shape the requirements Explorer
           puts its specifications. Procedures had no container until they were given one; this is the rail
           that was impossible before. */}
-      <div className="procedureRailColumn">
+      <div className="specRail procedureRailColumn">
       <nav className="procedureDocumentRail" aria-label="Test procedure documents">
-        <h2>Documents</h2>
+        <div className="railTitle"><b>Documents</b><span>{documents.length}</span></div>
         <button type="button" className={!documentId && !sectionId ? 'railEntry selected' : 'railEntry'}
           aria-pressed={!documentId && !sectionId}
           onClick={() => { setDocumentId(''); setSectionId(''); setPage(1) }}>
@@ -741,7 +760,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       </section>
       </div>
 
-      <section className="procedureList" aria-label="Test procedures">
+      <section className="reqResults procedureList" aria-label="Test procedures">
         {/* What the requirements Explorer puts above its list, in the same markup and from the same
             stylesheet: how many records answer, where in them you are, and that the index is live and
             permission-aware. The count alone was in the search box; where you were in the results was
@@ -816,8 +835,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         </div>
       </section>
 
-      {selected && (
-        <aside className="requirementInspector" aria-label={`${selected.displayNumber} detail`}>
+      <aside className="requirementInspector procedureInspector"
+        aria-label={selected ? `${selected.displayNumber} detail` : 'Procedure detail'}>
+        {selected ? <>
           <div className="inspectorTop">
             <div>
               <b>{selected.displayNumber}</b>
@@ -965,8 +985,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
               ))}
             </div>
           )}
-        </aside>
-      )}
+        </> : <div className="procedureInspectorEmpty">
+          <span aria-hidden="true">≡</span>
+          <b>Select a procedure</b>
+          <p>Choose a controlled procedure to review its overview, trace, history, and discussion.</p>
+        </div>}
+      </aside>
     </div>
     </>}
   </main>

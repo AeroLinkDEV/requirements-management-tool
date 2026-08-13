@@ -10,11 +10,11 @@ import type {
   RequirementLevel,
 } from "./ControlledRequirementEditor";
 import PersonPicker from "./PersonPicker";
-import { demoPerson } from "./PeopleRegistry";
 import ControlledAttachments from "./ControlledAttachments";
 import ChangeRequestJiraLink from "./ChangeRequestJiraLink";
 import { PersonName } from "./People";
 import { personLabel } from "./PeopleRegistry";
+import ReviewCycleCard from "./ReviewCycleCard";
 import { RichCaseField, RichContentView } from "./RichContent";
 import { useDebouncedSave } from "./autosave";
 import { emptyRichContent, fromPlainText, toPlainText } from "./richContentModel";
@@ -44,28 +44,6 @@ type Requirement = {
 /// rather than as the thing being proposed.
 const changeKindLabel = (kind: string) =>
   kind === "Introduce" ? "Introduction" : kind === "Modify" ? "Modification" : kind === "Retire" ? "Retirement" : kind;
-
-/// What this approver is to the review: their recorded stage, their authority, or the role they hold here.
-///
-/// This printed "Authority unresolved" whenever neither of the first two was populated, which on the showcase
-/// is always. That is an internal admission that a field is empty, dressed up as a fact about a colleague.
-const approverRole = (step: { approverId: string; stageName: string; authority: string }) =>
-  step.stageName || step.authority || demoPerson(step.approverId)?.role || "Reviewer";
-
-/// Where an approver stands, said the way somebody waiting on them would say it.
-///
-/// The old line paired every step with its stored state — "Active", "Pending" — which describes rows in a
-/// table, not people in a queue. "Pending" in particular was given to everybody who had not been reached
-/// yet, so second-in-line and sixth-in-line read identically, and neither told the reader whose move it was.
-///
-/// A parallel review has no queue: everyone is being waited on at once, so everyone says so.
-const approvalStanding = (cycle: { mode: string; steps: { position: number; state: string }[] }, step: { position: number; state: string }) => {
-  if (step.state === "Approved") return "Approved";
-  if (cycle.mode === "Parallel" || step.state === "Active") return "Awaiting approval";
-  const ahead = cycle.steps.filter((other) => other.position < step.position && other.state !== "Approved").length;
-  if (ahead <= 1) return "Next in line for approval";
-  return `Waiting on ${ahead} earlier approvals`;
-};
 
 /// The headline of an audit entry, written for a reader rather than derived from a type name.
 ///
@@ -1371,14 +1349,7 @@ export default function ChangeRequestWorkspace({
             </section>
 
             {latest && (
-              <section className="workspaceCard">
-                <div className="workspaceTitle"><div><h2>Review cycle {latest.sequence}</h2><p>{stateLabel(latest.state)}</p></div></div>
-                <div className="approvalPath">
-                  {latest.steps.map((step) => (
-                    <div className={`approvalStep ${step.state.toLowerCase()}`} key={step.position}><span>{step.state === "Approved" ? "✓" : step.state === "Returned" ? "↩" : step.position + 1}</span><div><b><PersonName userName={step.approverId} displayName={step.approverName} /></b><small>{approverRole(step)} · {approvalStanding(latest, step)}</small>{step.rationale && <small className="stepRationale">{step.rationale}</small>}</div></div>
-                  ))}
-                </div>
-                {latest.closureReason && <div className="closure"><b>Closure reason</b><p>{latest.closureReason}</p></div>}
+              <ReviewCycleCard cycle={latest}>
                 {scr.state === "InReview" && active && (
                   <div className="reviewActions">
                     <p><b><PersonName userName={active.approverId} displayName={active.approverName} /></b> is the active reviewer.</p>
@@ -1396,7 +1367,7 @@ export default function ChangeRequestWorkspace({
                     )}
                   </div>
                 )}
-              </section>
+              </ReviewCycleCard>
             )}
           </aside>
         </div>

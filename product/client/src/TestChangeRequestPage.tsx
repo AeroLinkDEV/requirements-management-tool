@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import ControlledAttachments from './ControlledAttachments'
 import { PersonName } from './People'
+import ReviewCycleCard, { type ReviewCycleSummary } from './ReviewCycleCard'
+import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
 import { apiRequest, operationError } from './apiClient'
 import { changeRequestAllocation, changeRequestState, stateLabel } from './presentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
@@ -54,6 +56,14 @@ type Package = {
   discipline: string
   sourceChangeRequestNumber: string
   version: number
+  capabilities?: {
+    canProposeProcedureChange?: boolean
+    canWithdrawProcedureChange?: boolean
+    canRevise?: boolean
+    canApprove?: boolean
+    canReturn?: boolean
+  }
+  reviewCycle?: ReviewCycleSummary
   procedureChanges: ProcedureChange[]
   coveredChangeRequests: { id: string; number: string; title: string; originating: boolean }[]
 }
@@ -66,6 +76,7 @@ const changeKindLabel = (kind: string) =>
 
 export default function TestChangeRequestPage({
   api, releaseId, releases, packageId, discipline, currentUser, onBack,
+  onOpenRequirementRevision, onOpenTestChangeRequest,
 }: {
   api: string
   releaseId: string
@@ -74,11 +85,14 @@ export default function TestChangeRequestPage({
   discipline: TestDiscipline
   currentUser: string
   onBack: () => void
+  onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
+  onOpenTestChangeRequest: (id: string) => void
 }) {
   const [item, setItem] = useState<Package>()
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
   const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState(false)
 
   const load = useCallback(async () => {
     setError('')
@@ -91,7 +105,12 @@ export default function TestChangeRequestPage({
       const list = await apiRequest<{ items: Package[] }>(`${api}/api/releases/${releaseId}/test-change-reviews`)
       const row = list.items.find(x => x.id === packageId)
       if (!row && !detail) { setError('That test change request is not in this build.'); return }
-      setItem({ ...detail, ...(row ?? {}), procedureChanges: detail.procedureChanges ?? [] })
+      setItem({
+        ...detail,
+        ...(row ?? {}),
+        capabilities: { ...detail.capabilities, ...(row?.capabilities ?? {}) },
+        procedureChanges: detail.procedureChanges ?? [],
+      })
     } catch (reason) {
       setError(operationError(reason, 'The test change request could not be loaded.'))
     }
@@ -123,6 +142,18 @@ export default function TestChangeRequestPage({
     }),
     'The package could not be reinstated.', 'Back off the shelf.')
 
+  const revise = () => void (async () => {
+    setBusy(true); setError(''); setSaved('')
+    try {
+      const next = await apiRequest<{ id: string }>(`${api}/api/test-change-reviews/${packageId}/revise`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      })
+      onOpenTestChangeRequest(next.id)
+    } catch (reason) {
+      setError(operationError(reason, 'The next test change request revision could not be started.'))
+    } finally { setBusy(false) }
+  })()
+
   if (!item) {
     return <main className="scrWorkspace">
       {error
@@ -141,6 +172,8 @@ export default function TestChangeRequestPage({
   }
   const isAuthor = !item.authorId || item.authorId.toLowerCase() === currentUser.toLowerCase()
   const editable = item.state === 'Draft'
+  const canAuthor = Boolean(item.capabilities?.canProposeProcedureChange
+    || item.capabilities?.canWithdrawProcedureChange || item.capabilities?.canRevise)
   const raisedFrom = item.coveredChangeRequests.find(x => x.originating)
 
   return <main className="scrWorkspace">
@@ -173,10 +206,15 @@ export default function TestChangeRequestPage({
           <div className="workspaceTitle">
             <div><h2>Change case</h2><p>Problem, analysis, and proposed solution</p></div>
             <div className="workspaceActions">
-              {editable && isAuthor && (
+              {editable && canAuthor && (
                 <button type="button" className="primary" disabled={busy}
-                  onClick={() => { window.location.href = `${window.location.pathname.replace(/\/[^/]*$/, '')}/new?package=${item.id}` }}>
+                  onClick={() => setEditing(true)}>
                   Check out &amp; edit
+                </button>
+              )}
+              {item.state === 'Approved' && item.capabilities?.canRevise && (
+                <button type="button" className="primary" disabled={busy} onClick={revise}>
+                  {busy ? 'Creating revision…' : 'Revise'}
                 </button>
               )}
               {editable && isAuthor && (
@@ -217,7 +255,7 @@ export default function TestChangeRequestPage({
             projectId={item.projectId}
             artifactType="TestChangeRequest"
             artifactId={item.id}
-            canAttach={editable && isAuthor}
+            canAttach={editable && canAuthor}
           />
         </section>
 
@@ -258,7 +296,20 @@ export default function TestChangeRequestPage({
             </div>
           )}
         </section>
+        <ReviewCycleCard cycle={item.reviewCycle} />
       </aside>
     </div>
+    {editing && (
+      <TestChangeRequestWorkspace
+        api={api}
+        projectId={item.projectId}
+        reviewId={item.id}
+        canAuthor={canAuthor}
+        onClose={() => setEditing(false)}
+        onChanged={() => { void load() }}
+        onOpenRequirementRevision={onOpenRequirementRevision}
+        onOpenTestChangeRequest={onOpenTestChangeRequest}
+      />
+    )}
   </main>
 }

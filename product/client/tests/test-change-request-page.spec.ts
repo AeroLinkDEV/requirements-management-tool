@@ -55,6 +55,25 @@ test('the page carries the same sections the requirements change request page ca
   const control = page.locator('.controlStatusCard')
   await expect(control.getByText('Allocation')).toBeVisible()
   await expect(control.getByText('State', { exact: true })).toBeVisible()
+  // The review-cycle rail stays present even when a historical package has no cycle evidence to show.
+  // That keeps the page structure aligned without inventing a workflow the record never entered.
+  await expect(page.getByRole('heading', { name: /Review cycle(?: \d+)?/, level: 2 })).toBeVisible()
+})
+
+test('check out and edit opens the existing package workspace instead of a new-package URL', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await login(page)
+  await openRegister(page)
+  await page.getByLabel('Lifecycle state filter').selectOption('Draft')
+  await page.locator('[data-register-row]').first().click()
+  const exactUrl = page.url()
+
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  const workspace = page.getByRole('dialog', { name: /procedure decisions/ })
+  await expect(workspace).toBeVisible()
+  await expect(workspace.getByRole('heading', { name: 'Engineering case' })).toBeVisible()
+  await expect(page).toHaveURL(exactUrl)
 })
 
 test('the controlled publication is offered from the package', async ({ page }) => {

@@ -162,12 +162,11 @@ test('HLR and LLR Change Requests pages offer their own creation actions', async
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('button', { name: 'Software' }).last().click()
 
-  await page.getByRole('link', { name: 'Software HLR Test Change Requests' }).click()
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('link', { name: 'Software Test Change Requests' }).click()
+  await expect(page.getByRole('heading', { name: 'Software Test Change Requests' })).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole('button', { name: '+ New HLR Test Change Request' })).toBeVisible()
 
-  await page.getByRole('link', { name: 'Software LLR Test Change Requests' }).click()
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('tab', { name: 'LLR' }).click()
   await expect(page.getByRole('button', { name: '+ New LLR Test Change Request' })).toBeVisible()
 
   await page.getByRole('button', { name: 'System', exact: true }).last().click()

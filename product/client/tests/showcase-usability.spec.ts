@@ -74,7 +74,7 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   await page.goto(page.url().replace(/\/traceability.*$/,'/system-verification'))
   await expect(page.getByRole('heading',{name:'Verification'})).toBeVisible()
   await page.getByRole('button',{name:'Open Downstream Assessments →'}).click()
-  await expect(page.getByRole('heading',{name:'Downstream test assessments'})).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Downstream Assessments'})).toBeVisible()
   // The procedures those change requests produce are browsed in the Explorer, which is its own destination
   // rather than a section underneath this queue.
   await openNavigationGroup(page,'ASSURANCE')

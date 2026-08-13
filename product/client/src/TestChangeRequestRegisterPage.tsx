@@ -51,16 +51,17 @@ const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
 
 export default function TestChangeRequestRegisterPage({
-  api, projectId, releases, activeReleaseId, discipline, onBack, onOpen, onCreate,
+  api, projectId, releases, activeReleaseId, discipline, onBack, onOpen, onCreate, embedded = false,
 }: {
   api: string
   projectId: string
   releases: Release[]
   activeReleaseId: string
   discipline: TestDiscipline
-  onBack: () => void
+  onBack?: () => void
   onOpen: (id: string) => void
-  onCreate: () => void
+  onCreate?: () => void
+  embedded?: boolean
 }) {
   const [query, setQuery] = useState('')
   const [stateIntent, setStateIntent] = useState('')
@@ -103,31 +104,35 @@ export default function TestChangeRequestRegisterPage({
     return body.items.map(toRegisterRow)
   }
 
+  const register = <ChangeRequestRegister
+    changeNoun="procedure changes"
+    recordNoun={`${disciplineLabel(discipline)} test change requests`}
+    contextLabel={`${disciplineArea(discipline)} area`}
+    activeRelease={activeRelease} releases={releases}
+    rows={rows.map(toRegisterRow)} totalCount={totalCount}
+    page={page} totalPages={totalPages} onPageChange={setPage}
+    query={query} onQueryChange={value => { setQuery(value); setPage(1) }}
+    stateIntent={stateIntent} onStateIntentChange={value => { setStateIntent(value); setPage(1) }}
+    stateOptions={stateOptions}
+    onOpen={onOpen} onLoadRevisions={loadRevisions} />
+
+  if (embedded) return register
+
   return <main className="historyPage">
     <header className="historyHeader">
       <div>
-        <button className="back" onClick={onBack}>← Command Center</button>
+        {onBack && <button className="back" onClick={onBack}>← Command Center</button>}
         <p className="eyebrow">{disciplineArea(discipline).toUpperCase()} TEST CHANGE CONTROL / BUILD {activeRelease?.version}</p>
         <h1>{disciplineLabel(discipline)} Test Change Requests</h1>
         <p>{activeRelease?.isReleased
           ? `Released ${disciplineLabel(discipline)} test change history owned by Build ${activeRelease.version}.`
           : `Active and deferred ${disciplineLabel(discipline)} test change requests owned by Build ${activeRelease?.version}.`}</p>
       </div>
-      {!activeRelease?.isReleased && (
+      {!activeRelease?.isReleased && onCreate && (
         <button className="recordBuild" onClick={onCreate}>+ New {disciplineLabel(discipline)} Test Change Request</button>
       )}
     </header>
 
-    <ChangeRequestRegister
-      changeNoun="procedure changes"
-      recordNoun={`${disciplineLabel(discipline)} test change requests`}
-      contextLabel={`${disciplineArea(discipline)} area`}
-      activeRelease={activeRelease} releases={releases}
-      rows={rows.map(toRegisterRow)} totalCount={totalCount}
-      page={page} totalPages={totalPages} onPageChange={setPage}
-      query={query} onQueryChange={value => { setQuery(value); setPage(1) }}
-      stateIntent={stateIntent} onStateIntentChange={value => { setStateIntent(value); setPage(1) }}
-      stateOptions={stateOptions}
-      onOpen={onOpen} onLoadRevisions={loadRevisions} />
+    {register}
   </main>
 }
