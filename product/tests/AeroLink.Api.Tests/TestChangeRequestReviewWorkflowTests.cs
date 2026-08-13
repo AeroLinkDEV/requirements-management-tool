@@ -1373,4 +1373,27 @@ public sealed class TestChangeRequestReviewWorkflowTests
             new { reason = "Not mine to shelve." });
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
     }
+    /// <summary>
+    /// The controlled publication and the working copy, which a package had neither of.
+    ///
+    /// A change request could be checked out, corrected, downloaded as a controlled document and deferred. A
+    /// test change request governs procedure change in exactly the same way and could do none of it.
+    /// </summary>
+    [Fact]
+    public async Task A_package_publishes_a_controlled_document()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await PreparePackageAsync(client, fixture);
+
+        using var docx = await client.GetAsync($"/api/test-change-reviews/{fixture.ReviewId}/download?format=docx");
+        Assert.Equal(HttpStatusCode.OK, docx.StatusCode);
+        Assert.NotEmpty(await docx.Content.ReadAsByteArrayAsync());
+
+        using var pdf = await client.GetAsync($"/api/test-change-reviews/{fixture.ReviewId}/download?format=pdf");
+        Assert.Equal(HttpStatusCode.OK, pdf.StatusCode);
+        Assert.NotEmpty(await pdf.Content.ReadAsByteArrayAsync());
+    }
+
 }

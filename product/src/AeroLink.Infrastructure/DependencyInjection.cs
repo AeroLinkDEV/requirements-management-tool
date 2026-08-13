@@ -64,6 +64,7 @@ public static class DependencyInjection
         services.AddScoped<VariantConfigurationProjectionService>();
         services.AddScoped<VariantPublicationGenerator>();
         services.AddScoped<ChangeRequestOutputGenerator>();
+        services.AddScoped<TestChangeRequestOutputGenerator>();
         services.AddScoped<ReleaseExecutionService>();
         services.AddScoped<VerificationImpactService>();
         services.AddScoped<ProblemReportLinkService>();
@@ -81,6 +82,7 @@ public static class DependencyInjection
         services.AddScoped<IControlledEditingAdapter, DocumentTemplateControlledEditingAdapter>();
         services.AddScoped<IControlledEditingAdapter, ProblemReportControlledEditingAdapter>();
         services.AddScoped<IControlledEditingAdapter, ConfigurationChangeSetControlledEditingAdapter>();
+        services.AddScoped<IControlledEditingAdapter, TestChangeRequestControlledEditingAdapter>();
         services.AddScoped<ControlledEditingCheckInEngine>();
         services.AddScoped<ReqIfExchangeService>();
         services.AddScoped<EnterpriseWorkspaceSeeder>();

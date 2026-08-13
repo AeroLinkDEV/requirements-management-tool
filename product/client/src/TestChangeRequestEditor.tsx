@@ -3,6 +3,7 @@ import type { AuthUser } from './IdentityCenter'
 import { RichCaseField } from './RichContent'
 import ProblemReportPicker from './ProblemReportPicker'
 import { fromPlainText, toPlainText } from './richContentModel'
+import ControlledProcedureEditor from './ControlledProcedureEditor'
 import { apiRequest, operationError } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './ChangeRequestEditor.css'
@@ -35,6 +36,8 @@ type ProcedureChangeDraft = {
   key: string
   kind: ProcedureChangeKind
   baseNumber: string
+  /** The revision this proposal becomes, locked from the library for Modify and Retire. */
+  revision: number
   title: string
   objective: string
   preconditions: string
@@ -49,13 +52,12 @@ const acronymFor = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'SYSTCR' : discipline === 'HighLevelSoftware' ? 'HLRTCR' : 'LLRTCR'
 const levelFor = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel'
-const procedurePrefix = (discipline: TestDiscipline) =>
-  discipline === 'System' ? 'SYSTP' : discipline === 'HighLevelSoftware' ? 'HLRTP' : 'LLRTP'
 
-const emptyDraft = (): ProcedureChangeDraft => ({
+const emptyDraft = (kind: ProcedureChangeKind = 'Introduce'): ProcedureChangeDraft => ({
   key: `draft-${Math.random().toString(36).slice(2)}`,
-  kind: 'Introduce',
+  kind,
   baseNumber: '',
+  revision: 0,
   title: '',
   objective: '',
   preconditions: '',
@@ -118,6 +120,43 @@ export default function TestChangeRequestEditor({
   const updateDraft = (key: string, change: Partial<ProcedureChangeDraft>) =>
     setProcedureChanges(current => current.map(draft => draft.key === key ? { ...draft, ...change } : draft))
 
+  // The act is chosen before the card exists, as it is on the requirements side, so a reader never commits to
+  // a proposal and then has to tell it what it is.
+  const addProposal = (kind: ProcedureChangeKind) =>
+    setProcedureChanges(current => [...current, emptyDraft(kind)])
+
+  /**
+   * The procedures that already verify what the selected changes touched, offered as Modify proposals.
+   *
+   * When an assessment concludes a change needs test work, the work is almost always re-aligning the
+   * procedures that verify the changed requirement — and the engineer had to go and find them by hand. These
+   * arrive as ordinary proposals: editable, removable, and not saved until the package is.
+   */
+  const suggestCoverage = useCallback(async () => {
+    if (!selected.length) return
+    try {
+      const suggestions = await apiRequest<{ baseNumber: string; currentRevision: number; title: string }[]>(
+        `${api}/api/releases/${releaseId}/test-change-request-coverage` +
+        `?discipline=${discipline}&changeRequestIds=${selected.join(',')}`)
+      setProcedureChanges(current => {
+        // Never replace what the engineer has written, and never suggest the same procedure twice.
+        const already = new Set(current.map(x => x.baseNumber.trim().toUpperCase()).filter(Boolean))
+        const additions = suggestions
+          .filter(x => !already.has(x.baseNumber.toUpperCase()))
+          .map(x => ({
+            ...emptyDraft('Modify'),
+            baseNumber: x.baseNumber,
+            revision: x.currentRevision + 1,
+            title: x.title,
+          }))
+        return additions.length ? [...current, ...additions] : current
+      })
+    } catch {
+      // A suggestion that cannot be fetched is not an error the author needs to act on; the package can still
+      // be raised and the procedures added by hand.
+    }
+  }, [api, discipline, releaseId, selected])
+
   const load = useCallback(async () => {
     try {
       setLoadError('')
@@ -172,7 +211,7 @@ export default function TestChangeRequestEditor({
             solutionRich,
             procedureChanges: procedureChanges.map(draft => ({
               baseNumber: draft.baseNumber.trim(),
-              revision: 0,
+              revision: draft.revision,
               level: levelFor(discipline),
               kind: draft.kind,
               title: draft.title.trim(),
@@ -311,89 +350,39 @@ export default function TestChangeRequestEditor({
             requirement changes it proposes. A package may also be raised with none and its procedure work
             written afterwards.
           </p>
+          {/* The three acts a package can propose, offered as three buttons, exactly as the requirements
+              editor offers them. One button labelled "add a procedure decision" made the reader choose the
+              act from a dropdown after committing to a card. */}
+          <div className="proposalActions" aria-label="Add procedure proposal">
+            <span>Add a focused proposal:</span>
+            <button type="button" onClick={() => addProposal("Introduce")}>+ Introduce {label} test procedure</button>
+            <button type="button" onClick={() => addProposal("Modify")}>Modify existing</button>
+            <button type="button" onClick={() => addProposal("Retire")}>Retire existing</button>
+            {/* The common case, one click instead of a hunt: the procedures that already verify what the
+                selected changes touched, brought in as Modify proposals to re-align. */}
+            {selected.length > 0 && (
+              <button type="button" className="suggestCoverage" onClick={() => void suggestCoverage()}>
+                Add the procedures these changes affect
+              </button>
+            )}
+          </div>
 
-          {procedureChanges.map((draft, index) => (
-            <article key={draft.key} className="procedureProposal" data-procedure-proposal={index}>
-              <div className="proposalHead">
-                <strong>Decision {index + 1}</strong>
-                <button type="button" className="quiet"
-                  onClick={() => setProcedureChanges(current => current.filter(x => x.key !== draft.key))}>
-                  Remove
-                </button>
-              </div>
-              <div className="fields three">
-                <label>
-                  What this does
-                  <select value={draft.kind}
-                    onChange={event => updateDraft(draft.key, { kind: event.target.value as ProcedureChangeKind })}>
-                    <option value="Introduce">Introduce a procedure</option>
-                    <option value="Modify">Modify a procedure</option>
-                    <option value="Retire">Retire a procedure</option>
-                  </select>
-                </label>
-                <label>
-                  Procedure number
-                  <input value={draft.baseNumber}
-                    onChange={event => updateDraft(draft.key, { baseNumber: event.target.value })}
-                    placeholder={`${procedurePrefix(discipline)}-000123`} />
-                </label>
-                <label>
-                  Title
-                  <input value={draft.title} disabled={draft.kind === 'Retire'}
-                    onChange={event => updateDraft(draft.key, { title: event.target.value })}
-                    placeholder="What the procedure verifies" />
-                </label>
-              </div>
-              {draft.kind !== 'Retire' && (
-                <div className="fields two">
-                  <label>
-                    Objective
-                    <textarea value={draft.objective} rows={2}
-                      onChange={event => updateDraft(draft.key, { objective: event.target.value })}
-                      placeholder="What this procedure sets out to show" />
-                  </label>
-                  <label>
-                    Preconditions
-                    <textarea value={draft.preconditions} rows={2}
-                      onChange={event => updateDraft(draft.key, { preconditions: event.target.value })}
-                      placeholder="What must be true before it runs" />
-                  </label>
-                  <label>
-                    Steps
-                    <textarea value={draft.steps} rows={3}
-                      onChange={event => updateDraft(draft.key, { steps: event.target.value })}
-                      placeholder="What the operator does" />
-                  </label>
-                  <label>
-                    Expected result
-                    <textarea value={draft.expectedResult} rows={3}
-                      onChange={event => updateDraft(draft.key, { expectedResult: event.target.value })}
-                      placeholder="What must be observed for a pass" />
-                  </label>
-                </div>
-              )}
-              <label className="wide">
-                Rationale
-                <textarea value={draft.rationale} rows={2}
-                  onChange={event => updateDraft(draft.key, { rationale: event.target.value })}
-                  placeholder={draft.kind === 'Retire'
-                    ? 'Why this procedure is being withdrawn'
-                    : 'Why this procedure work is required'} />
-              </label>
-              {!draftComplete(draft) && (
-                <p className="tcrDriverHint">
-                  This decision is incomplete. {draft.kind === 'Retire'
-                    ? 'A retirement needs the procedure it withdraws and the reason.'
-                    : 'A procedure needs its number, title, objective, steps, expected result and rationale.'}
-                </p>
-              )}
-            </article>
-          ))}
-
-          <button type="button" className="quiet addProposal"
-            onClick={() => setProcedureChanges(current => [...current, emptyDraft()])}>
-            + Add a procedure decision
-          </button>
+          <div className="proposalStack">
+            {procedureChanges.map((draft, index) => (
+              <ControlledProcedureEditor
+                key={draft.key}
+                api={api}
+                projectId={projectId}
+                releaseId={releaseId}
+                scope={discipline}
+                levelLabel={label}
+                item={draft}
+                index={index}
+                onChange={(field, value) => updateDraft(draft.key, { [field]: value } as Partial<ProcedureChangeDraft>)}
+                onRemove={() => setProcedureChanges(current => current.filter(x => x.key !== draft.key))}
+              />
+            ))}
+          </div>
         </section>
 
         <div className="editorActions">

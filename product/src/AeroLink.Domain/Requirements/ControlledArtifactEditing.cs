@@ -15,7 +15,13 @@ public enum ControlledArtifactFamily
     ReleasePlanning,
     DocumentTemplate,
     ProblemReport,
-    ConfigurationChangeSet
+    ConfigurationChangeSet,
+    /// <summary>
+    /// The package that governs procedure change. <see cref="TestProcedure"/> above is deliberately not
+    /// editable — DEC-103 governs a procedure through a test change request — and this is the record that
+    /// does the governing, so it is the one that can be checked out.
+    /// </summary>
+    TestChangeRequest
 }
 
 public sealed record ControlledArtifactEditPolicy(
@@ -71,7 +77,12 @@ public static class ControlledArtifactEditPolicies
                 "Investigating", "ResolutionProposed", "AwaitingClosureApproval"),
             Set("ProblemReport", "PR")),
         new(ControlledArtifactFamily.ConfigurationChangeSet, "ConfigurationChangeSet", true, 15, 2, 120,
-            Set("Draft", "InWork", "Conflict"), Set("ConfigurationChangeSet", "ChangeSet"))
+            Set("Draft", "InWork", "Conflict"), Set("ConfigurationChangeSet", "ChangeSet")),
+        // Editable only as a Draft, exactly like the change request it mirrors: once a package is in review
+        // the approvers are looking at a frozen case, and once approved it is controlled evidence. The
+        // aliases cover the three controlled prefixes a package can carry.
+        new(ControlledArtifactFamily.TestChangeRequest, "TestChangeRequest", true, 15, 2, 120,
+            Set("Draft"), Set("TestChangeRequest", "TCR", "SYSTCR", "HLRTCR", "LLRTCR"))
     ];
 
     private static readonly IReadOnlyDictionary<string, ControlledArtifactEditPolicy> ByAlias =

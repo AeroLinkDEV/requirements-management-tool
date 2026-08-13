@@ -1708,6 +1708,88 @@ public static class VerificationImpactEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        /// <summary>
+        /// The procedures that already verify what these approved changes touched.
+        ///
+        /// When an assessment concludes that a change needs test work, the work is almost always to re-align
+        /// the procedures that verify the changed requirement — and the engineer had to go and find them.
+        /// This answers "what already covers this" so the package can be raised with those procedures already
+        /// proposed for modification, which is the common case rather than a special one.
+        ///
+        /// Suggestions only. Nothing is proposed until the engineer saves the package, and every suggestion
+        /// can be edited or removed first.
+        /// </summary>
+        app.MapGet("/api/releases/{releaseId:guid}/test-change-request-coverage", async (Guid releaseId,
+            TestChangeReviewDiscipline discipline, string? changeRequestIds,
+            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
+                .Select(x => new { x.ProjectId }).SingleOrDefaultAsync(ct);
+            if (release is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, release.ProjectId, ct)) return Results.Forbid();
+
+            var ids = (changeRequestIds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => Guid.TryParse(x.Trim(), out var value) ? value : Guid.Empty)
+                .Where(x => x != Guid.Empty).Distinct().ToList();
+            if (ids.Count == 0) return Results.Ok(Array.Empty<object>());
+
+            // The controlled identities those changes touched. Introductions are excluded deliberately: a
+            // requirement being introduced has nothing verifying it yet, so there is nothing to re-align.
+            var touched = await db.RequirementChanges.AsNoTracking()
+                .Where(x => ids.Contains(x.ChangeRequestId) && x.Kind != RequirementChangeKind.Introduce)
+                .Select(x => x.BaseNumber).Distinct().ToListAsync(ct);
+            if (touched.Count == 0) return Results.Ok(Array.Empty<object>());
+
+            var requirementRevisionIds = await (from artifact in db.Requirements.AsNoTracking()
+                    where artifact.ProjectId == release.ProjectId && touched.Contains(artifact.BaseNumber)
+                    join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId
+                    select revision.Id).ToListAsync(ct);
+            if (requirementRevisionIds.Count == 0) return Results.Ok(Array.Empty<object>());
+
+            var level = discipline switch
+            {
+                TestChangeReviewDiscipline.System => TestProcedureLevel.System,
+                TestChangeReviewDiscipline.HighLevelSoftware => TestProcedureLevel.HighLevel,
+                _ => TestProcedureLevel.LowLevel,
+            };
+            var covering = await (from coverage in db.TestCoverage.AsNoTracking()
+                    where requirementRevisionIds.Contains(coverage.RequirementRevisionId)
+                    join procedureRevision in db.TestProcedureRevisions.AsNoTracking()
+                        on coverage.ProcedureRevisionId equals procedureRevision.Id
+                    join procedure in db.TestProcedures.AsNoTracking()
+                        on procedureRevision.ProcedureId equals procedure.Id
+                    where procedure.ProjectId == release.ProjectId && procedure.Level == level
+                    // The title is the procedure's, not the revision's — a revision carries objective, steps
+                    // and expected result, and what the procedure is called belongs to the procedure.
+                    select new { procedure.BaseNumber, procedureRevision.Revision, procedure.Title })
+                .ToListAsync(ct);
+
+            // One suggestion per procedure, at its highest revision, because a procedure covering two changed
+            // requirements is still one procedure to re-align.
+            var suggestions = covering
+                .GroupBy(x => x.BaseNumber)
+                .Select(group => group.OrderByDescending(x => x.Revision).First())
+                .OrderBy(x => x.BaseNumber)
+                .Select(x => new { baseNumber = x.BaseNumber, currentRevision = x.Revision, title = x.Title })
+                .ToList();
+            return Results.Ok(suggestions);
+        });
+
+        // The controlled publication, as a change request has. An approver reading a package outside the
+        // product needed the same document the requirements side has always produced.
+        app.MapGet("/api/test-change-reviews/{id:guid}/download", async (Guid id, string? format,
+            HttpContext http, AeroLinkDbContext db, TestChangeRequestOutputGenerator generator, CancellationToken ct) =>
+        {
+            var package = await db.TestChangeReviews.AsNoTracking()
+                .Where(x => x.Id == id).Select(x => new { x.ProjectId }).SingleOrDefaultAsync(ct);
+            if (package is null) return Results.NotFound();
+            // Gated on Project access. The change request's own download predates the project-scoped guard and
+            // is reachable to any authenticated caller; a new route inheriting that would be a new hole.
+            if (!await http.HasProjectAccessAsync(db, package.ProjectId, ct)) return Results.Forbid();
+            var output = await generator.GenerateAsync(id, format ?? "docx", ct);
+            return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
+        });
+
         // Deferral, the same capability a change request has. A package the programme has decided to drop had
         // nowhere to go: it sat in review holding a gate that would never clear.
         app.MapPost("/api/test-change-reviews/{id:guid}/defer", async (Guid id, DeferTestChangeReviewRequest request,
