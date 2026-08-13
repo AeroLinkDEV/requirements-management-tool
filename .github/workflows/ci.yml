@@ -71,7 +71,16 @@ jobs:
             exit 0
           fi
 
-          files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          # Three dots, not two. A two-dot diff compares the two trees directly, so once `main` moves ahead of
+          # the branch, every file changed on `main` appears in this list as though the pull request had
+          # touched it. Three dots diffs from the merge base, which is the pull request's own change and
+          # nothing else.
+          #
+          # This is not cosmetic: it silently changed which gates ran. On 2026-08-13 a pull request that
+          # modified only this workflow classified as backend on its first run and, after an unrelated merge to
+          # `main` dragged client files into the two-dot diff, classified as client-only on its second — so the
+          # backend suites skipped and the gate went green having never run the tests the change was about.
+          files="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
           echo "$files"
           product_files="$(printf '%s\n' "$files" | grep -Ev '(^|/)(docs?|design|showcase)/|\.md$' || true)"
           backend=false
@@ -80,8 +89,12 @@ jobs:
           postgresql=false
           docs_only=true
           [[ -n "$product_files" ]] && docs_only=false
-          printf '%s\n' "$files" | grep -Eq '^product/(src|tests)/|^product/.*\.(cs|csproj|slnx|props|targets)$' && backend=true || true
-          printf '%s\n' "$files" | grep -Eq '^product/client/' && client=true || true
+          # This workflow selects and shards the suites, so a change to it can alter any gate — including by
+          # not running one. It already keyed `browser` and `postgresql`; leaving it out of `backend` and
+          # `client` meant a change to how the backend tests run did not run the backend tests, and was only
+          # caught because an unrelated merge exposed it.
+          printf '%s\n' "$files" | grep -Eq '^product/(src|tests)/|^product/.*\.(cs|csproj|slnx|props|targets)$|^\.github/workflows/ci\.yml$' && backend=true || true
+          printf '%s\n' "$files" | grep -Eq '^product/client/|^\.github/workflows/ci\.yml$' && client=true || true
           printf '%s\n' "$files" | grep -Eq '^product/(client|src/AeroLink.Api|src/AeroLink.Domain|src/AeroLink.Infrastructure)/|^\.github/workflows/ci\.yml$' && browser=true || true
           # Keyed on persistence as well as the migration/identity keywords. A change to an EF query needs
           # the real provider even when no schema moves: translation is not portable, and the SQLite path
@@ -169,12 +182,25 @@ jobs:
   # just the dependency graph it needs, which silently stops proving that the tools and product projects
   # outside that graph still compile — a green suite over code that no longer builds. The duplicated build is
   # the price of keeping "everything compiles" true in a world where the assemblies run apart.
+  # Sharded across two runners because this one `dotnet test` is 89% of the critical path: 1328 of the job's
+  # 1487 seconds, against 103 for the build and 49 for setup. Splitting `validate` did not touch it, and this
+  # is the only remaining change with the arithmetic to matter.
+  #
+  # The runner has four cores and xunit parallelises to core count, so the suite runs at half the concurrency
+  # it does on a developer machine — ~22 minutes on CI against ~12 locally. A second runner buys four more
+  # cores, which is why this shortens the job where making the tests individually cheaper did not.
   backend-api:
-    name: API test suite
+    name: API test suite (${{ matrix.shard }}/2)
     needs: changes
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
+    strategy:
+      # Independently, for the same reason as the browser shards: a cancelled sibling reports nothing, and
+      # buying that nothing costs a full gate to re-run.
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -192,8 +218,77 @@ jobs:
         run: |
           dotnet restore product/AeroLink.slnx
           dotnet build product/AeroLink.slnx --configuration Release --no-restore
-      - name: Run the API test suite
-        run: dotnet test product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal"
+      # xunit has no sharding of its own, so the split is computed rather than configured. Both shards run the
+      # identical deterministic partition over the same discovered class list, so their union is every class
+      # and their intersection is empty *by construction* — there is no list to maintain and no way for a new
+      # test class to land outside both halves.
+      #
+      # Heaviest-class-first onto the lighter shard, rather than alphabetically or round-robin: the classes are
+      # very uneven (42 tests in the largest against 1 in the smallest), and at the time of writing this
+      # balances 243 against 242. The tie-break on class name matters more than it looks — without it, two
+      # equal-count classes could sort differently on the two runners, and the shards would silently overlap
+      # on one class and skip another.
+      - name: Run this shard of the API test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          project=product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj
+
+          dotnet test "$project" --configuration Release --no-build --list-tests > listed.txt
+          grep -E '^    AeroLink' listed.txt \
+            | sed 's/^ *//; s/(.*$//; s/\.[^.]*$//' \
+            | sort | uniq -c | sed 's/^ *//' \
+            | sort -k1,1rn -k2,2 > counts.txt
+
+          awk -v shard="${{ matrix.shard }}" '
+            { count[NR] = $1; class[NR] = $2 }
+            END {
+              first = 0; second = 0; mine = 0; filter = ""
+              for (i = 1; i <= NR; i++) {
+                if (first <= second) { first += count[i]; owner = 1 } else { second += count[i]; owner = 2 }
+                if (owner == shard) {
+                  mine += count[i]
+                  filter = filter (filter == "" ? "" : "|") "FullyQualifiedName~" class[i] "."
+                }
+              }
+              print mine
+              print filter
+            }' counts.txt > partition.txt
+
+          expected="$(head -1 partition.txt)"
+          filter="$(tail -1 partition.txt)"
+
+          # An empty filter would run the whole assembly on both shards, which looks like a pass and doubles
+          # the work it was meant to halve.
+          if [ -z "$filter" ] || [ "$expected" = "0" ]; then
+            echo "::error::Shard ${{ matrix.shard }} selected no test classes. Test discovery or the partition is broken."
+            exit 1
+          fi
+          echo "Shard ${{ matrix.shard }} of 2: $expected tests across $(grep -c . counts.txt) discovered classes."
+
+          # The count is read from the TRX rather than the console summary. Piping this command through `tee`
+          # to capture its text produced an empty file and an empty job log on the Windows runner — the tests
+          # ran for eight minutes and exited clean, and the guard read zero from nothing. A structured result
+          # file has a schema; console output is a presentation detail that differs by SDK, verbosity and
+          # whether anything is attached to stdout.
+          dotnet test "$project" --configuration Release --no-build \
+            --filter "$filter" --logger "console;verbosity=normal" \
+            --logger "trx;LogFileName=shard.trx" --results-directory TestResults
+
+          # `~` is a substring match, so a class whose name is a prefix of another would quietly pull in tests
+          # from both, and a malformed filter would quietly run fewer. Neither fails on its own. Comparing what
+          # ran against what this shard claimed turns both into a failure instead of a smaller green suite.
+          trx=TestResults/shard.trx
+          if [ ! -f "$trx" ]; then
+            echo "::error::No test results file at $trx, so this shard cannot prove what it ran."
+            exit 1
+          fi
+          actual="$(grep -oE '<Counters[^>]*\btotal="[0-9]+"' "$trx" | grep -oE '[0-9]+' | head -1)"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Shard ${{ matrix.shard }} claimed $expected tests but ran ${actual:-no}. The filter does not match the partition."
+            exit 1
+          fi
+          echo "Shard ${{ matrix.shard }} ran exactly the $expected tests it selected."
 
   backend-core:
     name: Domain and infrastructure test suites
