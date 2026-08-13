@@ -125,7 +125,7 @@ internal static class ManagedDocumentHistoryEndpoints
             {
                 var rows = (await source.ToListAsync(ct)).Where(x => x.step.AssignedAt == null || x.step.AssignedAt <= snapshotAt)
                     .OrderByDescending(x => x.revision.Revision).ThenByDescending(x => x.step.Cycle).ThenByDescending(x => x.step.Position)
-                    .Select(x => new { x.step.Id, x.step.RevisionId, revision = x.revision.Revision, x.step.Cycle, x.step.Position, x.step.StageName, x.step.ApproverId, x.step.ApproverName, x.step.RequiredAuthority, x.step.GrantedAuthority, x.step.AuthoritySource, x.step.AuthoritySourceId, x.step.WorkflowId, x.step.WorkflowName, x.step.WorkflowVersion, x.step.AuthorityPolicy, x.step.AssignedAt, x.step.Version, state = x.step.State.ToString(), x.step.Rationale, x.step.DecidedAt });
+                    .Select(x => new { x.step.Id, x.step.RevisionId, revision = x.revision.Revision, x.step.Cycle, x.step.Position, x.step.StageName, kind = x.step.Kind.ToString(), x.step.ApproverId, x.step.ApproverName, x.step.RequiredAuthority, x.step.GrantedAuthority, x.step.AuthoritySource, x.step.AuthoritySourceId, x.step.WorkflowId, x.step.WorkflowName, x.step.WorkflowVersion, x.step.AuthorityPolicy, x.step.AssignedAt, x.step.Version, state = x.step.State.ToString(), x.step.Rationale, x.step.DecidedAt });
                 return PageInMemory(rows, normalized, filterKey, snapshotAt, offset, size.Value);
             }
             var query = from row in source
@@ -133,7 +133,7 @@ internal static class ManagedDocumentHistoryEndpoints
                         let step = row.step
                         let revision = row.revision
                         orderby revision.Revision descending, step.Cycle descending, step.Position descending
-                        select new { step.Id, step.RevisionId, revision = revision.Revision, step.Cycle, step.Position, step.StageName, step.ApproverId, step.ApproverName, step.RequiredAuthority, step.GrantedAuthority, step.AuthoritySource, step.AuthoritySourceId, step.WorkflowId, step.WorkflowName, step.WorkflowVersion, step.AuthorityPolicy, step.AssignedAt, step.Version, state = step.State.ToString(), step.Rationale, step.DecidedAt };
+                        select new { step.Id, step.RevisionId, revision = revision.Revision, step.Cycle, step.Position, step.StageName, kind = step.Kind.ToString(), step.ApproverId, step.ApproverName, step.RequiredAuthority, step.GrantedAuthority, step.AuthoritySource, step.AuthoritySourceId, step.WorkflowId, step.WorkflowName, step.WorkflowVersion, step.AuthorityPolicy, step.AssignedAt, step.Version, state = step.State.ToString(), step.Rationale, step.DecidedAt };
             return await PageAsync(query, normalized, filterKey, snapshotAt, offset, size.Value, ct);
         }
         if (normalized == "signatures")

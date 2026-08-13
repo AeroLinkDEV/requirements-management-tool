@@ -1193,7 +1193,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("managed_document_review_steps"); b.HasKey(x => x.Id);
             b.Property(x => x.ApproverId).HasMaxLength(100).IsRequired(); b.Property(x => x.ApproverName).HasMaxLength(200).IsRequired();
-            b.Property(x => x.StageName).HasMaxLength(120).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.StageName).HasMaxLength(120).IsRequired(); b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.RequiredAuthority).HasMaxLength(80).IsRequired(); b.Property(x => x.GrantedAuthority).HasMaxLength(80).IsRequired();
             b.Property(x => x.AuthoritySource).HasMaxLength(80).IsRequired(); b.Property(x => x.WorkflowName).HasMaxLength(200).IsRequired();
             b.Property(x => x.AuthorityPolicy).HasMaxLength(80).IsRequired(); b.Property(x => x.Version).IsConcurrencyToken();

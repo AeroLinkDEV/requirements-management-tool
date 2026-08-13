@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Documents;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
 using Microsoft.EntityFrameworkCore;
@@ -78,7 +79,7 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
         var cycle = revision.SubmitForReview(revision.ResponsibleOwnerId, draftAttachment.Sha256,
         [
             new("software.lead", people["software.lead"].DisplayName, "Technical review"),
-            new(finalApproverId, finalApprover.DisplayName, "SQA / assurance release authorization")
+            new(finalApproverId, finalApprover.DisplayName, "SQA / assurance release authorization", Kind: ReviewStageKind.Approval)
         ], now.AddHours(1));
         db.ManagedDocumentReviewSteps.AddRange(revision.ReviewSteps.Where(x => x.Cycle == cycle));
         db.ManagedDocumentReviewContributors.Add(new(revision.Id, cycle, revision.ResponsibleOwnerId, draftAttachment.Sha256, now.AddHours(1)));
@@ -121,7 +122,7 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
             var cycle = revision.SubmitForReview(revision.ResponsibleOwnerId, attachment.Sha256,
             [
                 new("software.lead", people["software.lead"].DisplayName, "Technical review"),
-                new("quality.analyst", people["quality.analyst"].DisplayName, "SQA release authorization")
+                new("quality.analyst", people["quality.analyst"].DisplayName, "SQA release authorization", Kind: ReviewStageKind.Approval)
             ], now.AddHours(1));
             db.ManagedDocumentReviewSteps.AddRange(revision.ReviewSteps.Where(x => x.Cycle == cycle));
             db.ManagedDocumentReviewContributors.Add(new(revision.Id, cycle, revision.ResponsibleOwnerId, attachment.Sha256, now.AddHours(1)));

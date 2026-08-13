@@ -877,6 +877,75 @@ public sealed class ManagedDocumentApiTests
     }
 
     [Fact]
+    public async Task Author_can_submit_and_reroute_an_ordered_named_review_and_approval_chain()
+    {
+        using var factory = new AeroLinkApiFactory(); using var owner = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(owner); var scope = await SeedProjectAsync(factory);
+        using (var serviceScope = factory.Services.CreateScope())
+        {
+            var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var now = DateTimeOffset.UtcNow;
+            var otherProgram = new ProgramRecord("Other review Program", $"OR{Guid.NewGuid():N}"[..12]);
+            var outsider = new UserAccount("other.program.reviewer", "Other Program Reviewer", "other.review@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(otherProgram, outsider, new ProgramMembership(outsider.Id, otherProgram.Id, ProgramRole.Reviewer, "admin", now));
+            await db.SaveChangesAsync();
+        }
+        using var created = await owner.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "RTP", documentType = "Review Test Plan", title = "Configurable review route", ownerId = "software.author", formalChangeSummary = "Prove ordered per-cycle routing.", operationKey = Guid.NewGuid().ToString("N") });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>(); var documentId = createdBody.GetProperty("id").GetGuid(); var revisionId = createdBody.GetProperty("revisionId").GetGuid();
+
+        using var tooShort = await SubmitRouteAsync(owner, documentId, revisionId,
+            [("quality.analyst", "Release authorization", "Approval")]);
+        Assert.Equal(HttpStatusCode.BadRequest, tooShort.StatusCode);
+        using var duplicate = await SubmitRouteAsync(owner, documentId, revisionId,
+            [("system.reviewer", "Peer review", "Review"), ("system.reviewer", "Release authorization", "Approval")]);
+        Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
+        using var ownerInRoute = await SubmitRouteAsync(owner, documentId, revisionId,
+            [("software.author", "Self review", "Review"), ("quality.analyst", "Release authorization", "Approval")]);
+        Assert.Equal(HttpStatusCode.BadRequest, ownerInRoute.StatusCode);
+        using var crossProgram = await SubmitRouteAsync(owner, documentId, revisionId,
+            [("other.program.reviewer", "Foreign Program review", "Review"), ("quality.analyst", "Release authorization", "Approval")]);
+        Assert.Equal(HttpStatusCode.BadRequest, crossProgram.StatusCode);
+        using var wrongOrder = await SubmitRouteAsync(owner, documentId, revisionId,
+            [("system.reviewer", "Premature approval", "Approval"), ("software.lead", "Late review", "Review"), ("quality.analyst", "Release authorization", "Approval")]);
+        Assert.Equal(HttpStatusCode.BadRequest, wrongOrder.StatusCode);
+        using var invalidKind = await SubmitRouteAsync(owner, documentId, revisionId,
+            [("system.reviewer", "Unclassified stage", (object)999), ("quality.analyst", "Release authorization", "Approval")]);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidKind.StatusCode);
+
+        using var submitted = await SubmitRouteAsync(owner, documentId, revisionId,
+        [
+            ("system.reviewer", "Peer architecture review", "Review"),
+            ("software.lead", "Software discipline review", "Review"),
+            ("quality.analyst", "Independent release approval", "Approval")
+        ]);
+        Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        var detail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var revision = detail.GetProperty("revisions")[0];
+        var firstCycle = revision.GetProperty("reviewSteps").EnumerateArray().Where(x => x.GetProperty("cycle").GetInt32() == 1).OrderBy(x => x.GetProperty("position").GetInt32()).ToList();
+        Assert.Equal(["Peer architecture review", "Software discipline review", "Independent release approval"], firstCycle.Select(x => x.GetProperty("stageName").GetString()));
+        Assert.Equal(["Review", "Review", "Approval"], firstCycle.Select(x => x.GetProperty("kind").GetString()));
+        Assert.Equal(["Active", "Pending", "Pending"], firstCycle.Select(x => x.GetProperty("state").GetString()));
+
+        using var reviewer = factory.CreateClient();
+        using (var login = await reviewer.PostAsJsonAsync("/api/auth/login", new { userName = "system.reviewer", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(reviewer);
+        using var returned = await reviewer.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/review/return",
+            DecisionPayload(revision, firstCycle[0], Guid.NewGuid().ToString("N"), "Return for correction", "Route this revision through the revised discipline chain."));
+        Assert.Equal(HttpStatusCode.OK, returned.StatusCode);
+
+        using var rerouted = await SubmitRouteAsync(owner, documentId, revisionId,
+        [
+            ("software.lead", "Corrected software review", "Review"),
+            ("quality.analyst", "Corrected release approval", "Approval")
+        ]);
+        Assert.Equal(HttpStatusCode.OK, rerouted.StatusCode);
+        var reroutedDetail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var reroutedRevision = reroutedDetail.GetProperty("revisions")[0];
+        var secondCycle = reroutedRevision.GetProperty("reviewSteps").EnumerateArray().Where(x => x.GetProperty("cycle").GetInt32() == 2).OrderBy(x => x.GetProperty("position").GetInt32()).ToList();
+        Assert.Equal(["Corrected software review", "Corrected release approval"], secondCycle.Select(x => x.GetProperty("stageName").GetString()));
+        Assert.Equal(["Review", "Approval"], secondCycle.Select(x => x.GetProperty("kind").GetString()));
+        Assert.Contains(reroutedRevision.GetProperty("reviewSteps").EnumerateArray(), x => x.GetProperty("cycle").GetInt32() == 1 && x.GetProperty("state").GetString() == "Returned");
+    }
+
+    [Fact]
     public async Task Delegated_authority_is_frozen_at_assignment_but_disabled_signers_fail_closed()
     {
         using var factory = new AeroLinkApiFactory(); using var owner = factory.CreateClient();
@@ -982,6 +1051,11 @@ public sealed class ManagedDocumentApiTests
     }
 
     private static async Task<HttpResponseMessage> SubmitAsync(HttpClient client, Guid documentId, Guid revisionId, string technicalReviewerId, string finalApproverId)
+        => await SubmitRouteAsync(client, documentId, revisionId,
+            [(technicalReviewerId, "Technical review", "Review"), (finalApproverId, "SQA / configuration release authorization", "Approval")]);
+
+    private static async Task<HttpResponseMessage> SubmitRouteAsync(HttpClient client, Guid documentId, Guid revisionId,
+        IReadOnlyList<(string UserId, string StageName, object Kind)> reviewers)
     {
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
         var revision = detail.GetProperty("revisions").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == revisionId);
@@ -989,8 +1063,7 @@ public sealed class ManagedDocumentApiTests
         var working = revision.GetProperty("attachments").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == workingId);
         return await client.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new
         {
-            technicalReviewerId,
-            finalApproverId,
+            reviewers = reviewers.Select(x => new { userId = x.UserId, stageName = x.StageName, kind = x.Kind }).ToArray(),
             expectedVersion = revision.GetProperty("version").GetInt64(),
             expectedWorkingAttachmentId = workingId,
             expectedWorkingSha256 = working.GetProperty("sha256").GetString(),
@@ -1060,7 +1133,7 @@ public sealed class ManagedDocumentApiTests
         var now = DateTimeOffset.UtcNow; var document = new ManagedDocument(projectId, $"{acronym}-000001", acronym, "Project Plan", $"{acronym} Project Plan", "admin", now); var revision = new ManagedDocumentRevision(document.Id, 0, "admin", "Initial controlled Project issue.", now);
         var publication = new ProfessionalPublication("AeroLink", "Program", "Project", "Project Plan", document.Title, "Controlled Project document", document.DocumentNumber, "00", "Draft", "Project-wide", "All software builds", "admin", now, new string('a', 64), [], [], [], [new("Purpose", "Scope", [new("1", "Plan", "Purpose", "Controlled content.", [])])]) { Watermark = "DRAFT" };
         var draft = ProfessionalPublicationRenderer.Render(publication, "docx", $"{document.DocumentNumber}.00"); var draftAttachment = await files.StoreAsync(projectId, document.Id, revision.Id, revision.Id, 1, "Working Word document", "Initial draft.", draft.FileName, draft.ContentType, draft.Content, null, "admin", now, default); revision.RecordCheckIn(draftAttachment.Id, now);
-        var cycle = revision.SubmitForReview("admin", draftAttachment.Sha256, [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Maya Patel", "Final")], now); revision.Approve("software.lead", "Complete.", now);
+        var cycle = revision.SubmitForReview("admin", draftAttachment.Sha256, [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Maya Patel", "Final", Kind: ReviewStageKind.Approval)], now); revision.Approve("software.lead", "Complete.", now);
         var releasedPublication = publication with { Status = "Released", Watermark = null }; var docx = ProfessionalPublicationRenderer.Render(releasedPublication, "docx", $"{document.DocumentNumber}.00"); var pdf = ProfessionalPublicationRenderer.Render(releasedPublication, "pdf", $"{document.DocumentNumber}.00");
         var releasedDocx = await files.StoreAsync(projectId, document.Id, revision.Id, Guid.NewGuid(), 1, "Released DOCX", "Immutable source.", docx.FileName, docx.ContentType, docx.Content, null, "quality.analyst", now, default); var releasedPdf = await files.StoreAsync(projectId, document.Id, revision.Id, Guid.NewGuid(), 1, "Released PDF", "Immutable rendition.", pdf.FileName, pdf.ContentType, pdf.Content, null, "quality.analyst", now, default);
         revision.RecordReleaseCandidate(releasedDocx.Id, releasedPdf.Id, ManagedDocumentFileService.Sha256(System.Text.Encoding.UTF8.GetBytes($"{releasedDocx.Sha256}:{releasedPdf.Sha256}:{revision.FormalSummaryHash}:{revision.FormalSummaryVersion}")), "quality.analyst", now); revision.Approve("quality.analyst", "Release.", now);
@@ -1074,7 +1147,7 @@ public sealed class ManagedDocumentApiTests
     {
         using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var files = scope.ServiceProvider.GetRequiredService<ManagedDocumentFileService>();
         var document = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.ManagedDocuments.Where(x => x.Id == documentId)); var revision = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.ManagedDocumentRevisions.Where(x => x.Id == revisionId)); var working = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.ControlledAttachments.Where(x => x.Id == revision.CurrentWorkingAttachmentId)); var now = DateTimeOffset.UtcNow;
-        var cycle = revision.SubmitForReview("admin", working.Sha256, [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Maya Patel", "Final")], now); revision.Approve("software.lead", "Complete.", now);
+        var cycle = revision.SubmitForReview("admin", working.Sha256, [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Maya Patel", "Final", Kind: ReviewStageKind.Approval)], now); revision.Approve("software.lead", "Complete.", now);
         var publication = new ProfessionalPublication("AeroLink", "Program", "Project", "Project Plan", document.Title, "Controlled Project document", document.DocumentNumber, revision.Revision.ToString("D2"), "Released", "Project-wide", "All software builds", "admin", now, new string('b', 64), [], [], [], [new("Purpose", "Scope", [new("1", "Plan", "Purpose", "Controlled content.", [])])]);
         var docx = ProfessionalPublicationRenderer.Render(publication, "docx", $"{document.DocumentNumber}.{revision.Revision:D2}"); var pdf = ProfessionalPublicationRenderer.Render(publication, "pdf", $"{document.DocumentNumber}.{revision.Revision:D2}");
         var releasedDocx = await files.StoreAsync(document.ProjectId, document.Id, revision.Id, Guid.NewGuid(), 1, "Released DOCX", "Immutable source.", docx.FileName, docx.ContentType, docx.Content, null, "quality.analyst", now, default); var releasedPdf = await files.StoreAsync(document.ProjectId, document.Id, revision.Id, Guid.NewGuid(), 1, "Released PDF", "Immutable rendition.", pdf.FileName, pdf.ContentType, pdf.Content, null, "quality.analyst", now, default);

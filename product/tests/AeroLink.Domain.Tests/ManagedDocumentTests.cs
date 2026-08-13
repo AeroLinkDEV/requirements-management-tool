@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Documents;
 
 namespace AeroLink.Domain.Tests;
@@ -35,19 +36,66 @@ public sealed class ManagedDocumentTests
     {
         var revision = NewCheckedInRevision();
         var duplicate = Assert.Throws<DomainException>(() => revision.SubmitForReview("software.author", "abc",
-            [new("software.lead", "Rina Shah", "Technical"), new("software.lead", "Rina Shah", "Final")], Now));
+            [new("software.lead", "Rina Shah", "Technical"), new("software.lead", "Rina Shah", "Final", Kind: ReviewStageKind.Approval)], Now));
         Assert.Contains("cannot appear twice", duplicate.Message);
 
         var self = Assert.Throws<DomainException>(() => revision.SubmitForReview("software.author", "abc",
-            [new("software.author", "Author", "Technical"), new("quality.analyst", "Marcus Hale", "Final")], Now));
+            [new("software.author", "Author", "Technical"), new("quality.analyst", "Marcus Hale", "Final", Kind: ReviewStageKind.Approval)], Now));
         Assert.Contains("author cannot approve", self.Message);
+    }
+
+    [Fact]
+    public void Author_selected_review_route_preserves_order_names_and_kinds()
+    {
+        var revision = NewCheckedInRevision();
+
+        revision.SubmitForReview("software.author", "snapshot",
+        [
+            new("peer.reviewer", "Peer Reviewer", "Peer architecture review"),
+            new("discipline.reviewer", "Discipline Reviewer", "Software discipline review"),
+            new("quality.analyst", "Quality Analyst", "Independent quality approval", Kind: ReviewStageKind.Approval),
+            new("configuration.manager", "Configuration Manager", "Controlled release approval", Kind: ReviewStageKind.Approval)
+        ], Now);
+
+        Assert.Equal(
+            ["Peer architecture review", "Software discipline review", "Independent quality approval", "Controlled release approval"],
+            revision.ReviewSteps.OrderBy(x => x.Position).Select(x => x.StageName));
+        Assert.Equal(
+            [ReviewStageKind.Review, ReviewStageKind.Review, ReviewStageKind.Approval, ReviewStageKind.Approval],
+            revision.ReviewSteps.OrderBy(x => x.Position).Select(x => x.Kind));
+        Assert.Equal(ManagedDocumentReviewStepState.Active, revision.ReviewSteps.Single(x => x.Position == 0).State);
+        Assert.All(revision.ReviewSteps.Where(x => x.Position > 0), x => Assert.Equal(ManagedDocumentReviewStepState.Pending, x.State));
+    }
+
+    [Fact]
+    public void Review_route_requires_content_review_before_a_final_release_approval()
+    {
+        var fewerThanTwo = NewCheckedInRevision();
+        Assert.Contains("technical reviewer", Assert.Throws<DomainException>(() => fewerThanTwo.SubmitForReview("software.author", "snapshot",
+            [new("quality.analyst", "Quality Analyst", "Release", Kind: ReviewStageKind.Approval)], Now)).Message);
+
+        var noReview = NewCheckedInRevision();
+        Assert.Contains("content review", Assert.Throws<DomainException>(() => noReview.SubmitForReview("software.author", "snapshot",
+            [new("quality.analyst", "Quality Analyst", "Quality approval", Kind: ReviewStageKind.Approval), new("configuration.manager", "Configuration Manager", "Release approval", Kind: ReviewStageKind.Approval)], Now)).Message);
+
+        var invalidKind = NewCheckedInRevision();
+        Assert.Contains("classified", Assert.Throws<DomainException>(() => invalidKind.SubmitForReview("software.author", "snapshot",
+            [new("peer.reviewer", "Peer Reviewer", "Peer review", Kind: (ReviewStageKind)999), new("configuration.manager", "Configuration Manager", "Release approval", Kind: ReviewStageKind.Approval)], Now)).Message);
+
+        var nonFinalApproval = NewCheckedInRevision();
+        Assert.Contains("final", Assert.Throws<DomainException>(() => nonFinalApproval.SubmitForReview("software.author", "snapshot",
+            [new("peer.reviewer", "Peer Reviewer", "Peer review"), new("discipline.reviewer", "Discipline Reviewer", "Discipline review")], Now)).Message);
+
+        var reviewAfterApproval = NewCheckedInRevision();
+        Assert.Contains("precede", Assert.Throws<DomainException>(() => reviewAfterApproval.SubmitForReview("software.author", "snapshot",
+            [new("peer.reviewer", "Peer Reviewer", "Peer review"), new("quality.analyst", "Quality Analyst", "Quality approval", Kind: ReviewStageKind.Approval), new("discipline.reviewer", "Discipline Reviewer", "Late review"), new("configuration.manager", "Configuration Manager", "Release approval", Kind: ReviewStageKind.Approval)], Now)).Message);
     }
 
     [Fact]
     public void Final_signature_is_refused_until_exact_docx_and_pdf_candidate_exists()
     {
         var revision = NewCheckedInRevision();
-        revision.SubmitForReview("software.author", "abc", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final")], Now);
+        revision.SubmitForReview("software.author", "abc", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final", Kind: ReviewStageKind.Approval)], Now);
         Assert.False(revision.Approve("software.lead", "Technically complete.", Now.AddMinutes(1)));
         var error = Assert.Throws<DomainException>(() => revision.Approve("quality.analyst", "Release.", Now.AddMinutes(2)));
         Assert.Contains("exact DOCX and PDF", error.Message);
@@ -61,7 +109,7 @@ public sealed class ManagedDocumentTests
     public void Return_preserves_prior_review_evidence_and_reopens_the_same_formal_revision()
     {
         var revision = NewCheckedInRevision();
-        revision.SubmitForReview("software.author", "abc", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final")], Now);
+        revision.SubmitForReview("software.author", "abc", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final", Kind: ReviewStageKind.Approval)], Now);
         revision.Return("software.lead", "Clarify the interface timing.", Now.AddMinutes(1));
         Assert.Equal(ManagedDocumentState.Returned, revision.State);
         Assert.Contains(revision.ReviewSteps, step => step.State == ManagedDocumentReviewStepState.Returned);
@@ -105,7 +153,7 @@ public sealed class ManagedDocumentTests
 
         Assert.NotEqual(priorHash, revision.FormalSummaryHash);
         Assert.Equal(2, revision.FormalSummaryVersion);
-        revision.SubmitForReview("software.author", "snapshot", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final")], Now.AddMinutes(2));
+        revision.SubmitForReview("software.author", "snapshot", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final", Kind: ReviewStageKind.Approval)], Now.AddMinutes(2));
         Assert.Equal(revision.FormalSummaryHash, revision.SubmittedFormalSummaryHash);
         Assert.Equal(revision.FormalSummaryVersion, revision.SubmittedFormalSummaryVersion);
     }
@@ -117,7 +165,7 @@ public sealed class ManagedDocumentTests
         var stale = Assert.Throws<DomainException>(() => revision.ReviseFormalSummary("New scope.", "Correction.", revision.Version - 1, Now));
         Assert.Contains("changed after this page loaded", stale.Message);
 
-        revision.SubmitForReview("software.author", "snapshot", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final")], Now);
+        revision.SubmitForReview("software.author", "snapshot", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final", Kind: ReviewStageKind.Approval)], Now);
         var reviewed = Assert.Throws<DomainException>(() => revision.ReviseFormalSummary("New scope.", "Correction.", revision.Version, Now));
         Assert.Contains("Draft or returned", reviewed.Message, StringComparison.OrdinalIgnoreCase);
 
@@ -132,14 +180,14 @@ public sealed class ManagedDocumentTests
     public void Returned_revision_allows_an_audited_formal_scope_correction()
     {
         var revision = NewCheckedInRevision();
-        revision.SubmitForReview("software.author", "snapshot", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final")], Now);
+        revision.SubmitForReview("software.author", "snapshot", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final", Kind: ReviewStageKind.Approval)], Now);
         revision.Return("software.lead", "Clarify the exact lifecycle evidence.", Now.AddMinutes(1));
 
         revision.ReviseFormalSummary("Clarify the exact lifecycle evidence and release scope.", "Resolve returned scope ambiguity.", revision.Version, Now.AddMinutes(2));
         var correctedAttachment = Guid.NewGuid();
         var resolution = new ManagedDocumentCheckIn(revision.Id, correctedAttachment, 2, "software.author", "Updated section 4 after review.", Guid.NewGuid(), new string('a', 64), new string('b', 64), Guid.NewGuid(), Guid.NewGuid(), "return-resolution", Now.AddMinutes(3), "Resolved the exact lifecycle-evidence wording.");
         revision.RecordCheckIn(correctedAttachment, Now.AddMinutes(3));
-        revision.SubmitForReview("software.author", "corrected-snapshot", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final")], Now.AddMinutes(4));
+        revision.SubmitForReview("software.author", "corrected-snapshot", [new("software.lead", "Rina Shah", "Technical"), new("quality.analyst", "Marcus Hale", "Final", Kind: ReviewStageKind.Approval)], Now.AddMinutes(4));
 
         Assert.Equal(ManagedDocumentState.InReview, revision.State);
         Assert.Equal(2, revision.CurrentReviewCycle);
@@ -169,7 +217,7 @@ public sealed class ManagedDocumentTests
         Assert.Equal("software.author", priorOwner); Assert.Equal("software.lead", revision.ResponsibleOwnerId); Assert.Equal("configuration.manager", revision.InitiatedBy);
         Assert.Throws<DomainException>(() => revision.ReassignResponsibleOwner("software.author", revision.Version - 1, Now.AddMinutes(2)));
         revision.RecordCheckIn(Guid.NewGuid(), Now.AddMinutes(2));
-        revision.SubmitForReview("software.lead", "snapshot", [new("system.reviewer", "Reviewer", "Technical"), new("quality.analyst", "Quality", "Final")], Now.AddMinutes(3));
+        revision.SubmitForReview("software.lead", "snapshot", [new("system.reviewer", "Reviewer", "Technical"), new("quality.analyst", "Quality", "Final", Kind: ReviewStageKind.Approval)], Now.AddMinutes(3));
         Assert.Throws<DomainException>(() => revision.ReassignResponsibleOwner("software.author", revision.Version, Now.AddMinutes(4)));
     }
 

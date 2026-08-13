@@ -169,8 +169,10 @@ test('review signature dialog exposes and submits the exact frozen intent', asyn
   const revision = detail.revisions.find((item:{id:string}) => item.id === created.revisionId)
   const working = revision.attachments.find((item:{id:string}) => item.id === revision.currentWorkingAttachmentId)
   const submitResponse = await request.post(`${apiBase}/api/managed-documents/revisions/${revision.id}/submit`, { data: {
-    technicalReviewerId: 'software.lead',
-    finalApproverId: 'quality.analyst',
+    reviewers: [
+      { userId: 'software.lead', stageName: 'Technical review', kind: 'Review' },
+      { userId: 'quality.analyst', stageName: 'SQA / configuration release authorization', kind: 'Approval' },
+    ],
     expectedVersion: revision.version,
     expectedWorkingAttachmentId: working.id,
     expectedWorkingSha256: working.sha256,
@@ -199,6 +201,71 @@ test('review signature dialog exposes and submits the exact frozen intent', asyn
   await page.getByRole('button', { name: 'Review & release' }).click()
   await expect(page.locator('.mdReview').getByText('I confirm this exact submitted snapshot is technically complete.')).toBeVisible()
   await expect(page.getByText('Rationale: The formal scope, working file, and relationship manifest are acceptable.')).toBeVisible()
+})
+
+test('author builds and persists an ordered named document review route', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  const showcase = await showcaseSeed(request)
+  await apiLogin(request, 'software.author')
+  const suffix = Date.now().toString().slice(-6)
+  const createdResponse = await request.post(`${apiBase}/api/managed-documents`, { data: {
+    projectId: showcase.projectId,
+    acronym: 'ORP',
+    documentType: 'Ordered Review Plan',
+    title: `Ordered document review ${suffix}`,
+    ownerId: 'software.author',
+    formalChangeSummary: 'Prove the author-selected sequential review route.',
+    operationKey: crypto.randomUUID(),
+  } })
+  expect(createdResponse.ok(), await createdResponse.text()).toBeTruthy()
+  const created = await createdResponse.json()
+
+  await login(page, 'software.author', { openProject: false })
+  await page.goto(`/programs/${showcase.programId}/projects/${showcase.projectId}/documentation-center/${created.id}`)
+  await page.getByRole('button', { name: 'Submit for review' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Documentation Center action' })
+  await expect(dialog.getByRole('group')).toHaveCount(2)
+
+  await dialog.getByRole('button', { name: '+ Add review step' }).click()
+  await expect(dialog.getByRole('group')).toHaveCount(3)
+  await dialog.getByRole('button', { name: '+ Add review step' }).click()
+  await expect(dialog.getByRole('group')).toHaveCount(4)
+  await dialog.getByRole('button', { name: 'Remove step 4' }).click()
+  await expect(dialog.getByRole('group')).toHaveCount(3)
+  await dialog.getByRole('button', { name: 'Move step 3 up' }).click()
+
+  const steps = dialog.getByRole('group')
+  await steps.nth(0).getByLabel('Stage name').fill('Peer architecture review')
+  await steps.nth(1).getByLabel('Stage name').fill('Software discipline review')
+  await steps.nth(2).getByLabel('Stage name').fill('Independent release approval')
+
+  const assignments = [
+    ['Step 1 assigned person search', 'Systems', 'systems.reviewer'],
+    ['Step 2 assigned person search', 'Rina', 'software.lead'],
+    ['Step 3 assigned person search', 'Maya', 'lead.reviewer'],
+  ] as const
+  for (const [label, query, userName] of assignments) {
+    const picker = dialog.getByLabel(label)
+    await picker.fill(query)
+    const option = dialog.locator(`.personSuggestions button[data-user-name="${userName}"]`)
+    await expect(option).toBeVisible()
+    await option.click()
+  }
+
+  await dialog.getByRole('button', { name: /Submit exact checked-in version/ }).click()
+  await expect(page.getByText(/submitted to the ordered 3-step review route/i)).toBeVisible()
+  await page.getByRole('button', { name: 'Review & release' }).click()
+  const route = page.locator('.mdReview ol')
+  await expect(route.locator('li')).toHaveCount(3)
+  await expect(route.locator('li').nth(0)).toContainText('Peer architecture review')
+  await expect(route.locator('li').nth(0)).toContainText('Review · Active')
+  await expect(route.locator('li').nth(1)).toContainText('Software discipline review')
+  await expect(route.locator('li').nth(2)).toContainText('Independent release approval')
+  await expect(route.locator('li').nth(2)).toContainText('Approval · Pending')
+
+  await page.reload({ waitUntil: 'load' })
+  await page.getByRole('button', { name: 'Review & release' }).click()
+  await expect(page.locator('.mdReview ol li').nth(2)).toContainText('Independent release approval')
 })
 
 test('an integrity-blocked revision is explicit and cannot launch or submit from the browser', async ({ page, request }) => {

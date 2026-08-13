@@ -52,9 +52,14 @@ browser action that returns a new signed, one-use command bound to the exact wor
 5. The formal revision scope is defined once when the revision starts. While Draft or Returned, an authorized
    owner or project authority may correct it through the explicit audited action with an optimistic-concurrency
    version and reason. It cannot be changed while in review or after release.
-6. The owner submits the exact current working attachment plus the exact formal-summary hash and version to an independent technical reviewer and a different final SQA
-   or configuration approver. The owner cannot fill either role.
-7. A return preserves the completed review evidence and creates a new review cycle after correction.
+6. The owner builds an ordered, per-cycle route of two or more named stages, assigns a different active Program
+   member to every stage, and classifies each as content **Review** or release **Approval** before submitting the
+   exact current working attachment, formal-summary hash/version, and relationship manifest. Content reviews
+   precede approvals and the final stage is an approval. The responsible owner, initiator, contributors, and any
+   duplicate assignee are refused. Stage names, kinds, order, people, and authority evidence are frozen on the
+   submitted cycle rather than inferred from fixed product slots.
+7. A return preserves the completed review evidence and permits the owner to define a different ordered route
+   for the next review cycle after correction.
    The next accepted working version records its check-in comment and, separately, the return-resolution note;
    the original reviewer rationale remains on the immutable review step.
 8. At the final step, the connector removes the Draft watermark, relabels visible Draft state markers as
@@ -274,8 +279,9 @@ Submission freezes the attributable contributor set from accepted check-ins for 
 
 Each newly assigned review step records the required authority, authority actually exercised, exact direct
 membership/delegation/standing-backup source row, workflow identity and version, assignment time, and policy.
-Technical review accepts the configured reviewer and engineering-lead authorities. Final release authorization
-accepts SQA, Configuration Management, approval, or Program authority. An explicitly identified administrator
+Review-kind stages accept the configured reviewer and engineering-lead authorities. Approval-kind stages accept
+SQA, Configuration Management, approval, or Program authority. Only the final Approval step may prepare and sign
+the immutable release candidate. An explicitly identified administrator
 substitution is retained as such; administrator privilege is never silently described as SQA. Future, expired,
 or revoked delegations cannot create a review assignment.
 
@@ -286,6 +292,12 @@ meaning and engineering rationale are separately required, bounded fields. The s
 cycle, step, frozen authority source, workflow version, and submitted or release-candidate hash. Historical
 steps and signatures for which those facts were never stored remain visibly `LegacyUnspecified` or blank; the
 migration does not manufacture modern authority evidence.
+
+Migration `20260813085734_AddManagedDocumentReviewRouting` records the explicit Review/Approval kind on every
+step. Historical routes were created only by the former fixed endpoint: it always stored the last position as
+the SQA/configuration release authorization and all preceding positions as technical review. The migration
+preserves that known semantic by classifying only those last positions as Approval; it does not invent stage
+names, assignees, authority, or decision evidence.
 
 Submission and review commands carry the exact revision version, working attachment/hash, formal-summary
 version/hash, relationship-manifest hash, cycle, step ID/version, submitted snapshot hash, and—at final

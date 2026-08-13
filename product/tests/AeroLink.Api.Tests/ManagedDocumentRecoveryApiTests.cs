@@ -146,7 +146,11 @@ public sealed class ManagedDocumentRecoveryApiTests
         var working = revision.GetProperty("attachments").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == workingId);
         return await client.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/submit", new
         {
-            technicalReviewerId = "recovery.technical", finalApproverId = "recovery.quality",
+            reviewers = new object[]
+            {
+                new { userId = "recovery.technical", stageName = "Technical recovery review", kind = "Review" },
+                new { userId = "recovery.quality", stageName = "Recovery release authorization", kind = "Approval" }
+            },
             expectedVersion = revision.GetProperty("version").GetInt64(), expectedWorkingAttachmentId = workingId,
             expectedWorkingSha256 = working.GetProperty("sha256").GetString(),
             expectedFormalSummaryVersion = revision.GetProperty("formalSummaryVersion").GetInt64(),
