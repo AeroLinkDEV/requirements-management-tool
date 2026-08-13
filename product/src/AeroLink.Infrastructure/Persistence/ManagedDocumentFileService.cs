@@ -162,8 +162,8 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
     /// <summary>
     /// The exact reviewed-source gate for a connector release candidate. The candidate must carry the
     /// controlled Released status and the correct number/revision, contain no controlled watermark, and
-    /// have technical content (story text outside the named controls, embedded resources, relationships)
-    /// identical to the reviewed snapshot. Any other difference fails closed.
+    /// have technical content (story text outside the named controls, embedded binary resources, external
+    /// hyperlink targets) identical to the reviewed snapshot. Any other difference fails closed.
     /// </summary>
     public static ReleaseTransformationValidation ValidateReleaseTransformation(byte[] reviewedSource, byte[] candidate, string documentNumber, int revision)
     {

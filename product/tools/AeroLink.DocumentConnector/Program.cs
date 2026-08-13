@@ -113,6 +113,10 @@ internal sealed class ConnectorForm : Form
 
 internal static class WordReleaseRenderer
 {
+    // These tags must stay identical to WordDocumentStructure.StatusTag / WatermarkTag in
+    // AeroLink.Infrastructure. The connector intentionally does not reference that assembly
+    // (it would drag the ASP.NET/EF stack into the desktop tool), so the server validates
+    // whatever the connector produced and fails closed if the two ever drift.
     private const string StatusTag = "AeroLink.Status";
     private const string WatermarkTag = "AeroLink.Watermark";
 
