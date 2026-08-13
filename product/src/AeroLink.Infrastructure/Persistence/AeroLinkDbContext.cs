@@ -1244,11 +1244,12 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<DocumentConnectorGrant>(b =>
         {
             b.ToTable("document_connector_grants"); b.HasKey(x => x.Id); b.Property(x => x.UserName).HasMaxLength(100).IsRequired(); b.Property(x => x.Mode).HasMaxLength(16).IsRequired();
-            b.Property(x => x.LaunchTokenHash).HasMaxLength(64).IsRequired(); b.Property(x => x.AccessTokenHash).HasMaxLength(64); b.Property(x => x.RedeemedAt).IsConcurrencyToken();
+            b.Property(x => x.LaunchTokenHash).HasMaxLength(64).IsRequired(); b.Property(x => x.AccessTokenHash).HasMaxLength(64); b.Property(x => x.RedeemedAt).IsConcurrencyToken(); b.Property(x => x.RevokedAt).IsConcurrencyToken();
             b.Property(x => x.DeploymentId).HasMaxLength(100); b.Property(x => x.Origin).HasMaxLength(500); b.Property(x => x.KeyId).HasMaxLength(100);
             b.Property(x => x.SourceSha256).HasMaxLength(64); b.Property(x => x.DocumentNumber).HasMaxLength(100); b.Property(x => x.RevisionNumber).HasMaxLength(100);
             b.HasIndex(x => x.LaunchTokenHash).IsUnique(); b.HasIndex(x => x.AccessTokenHash).IsUnique(); b.HasIndex(x => x.EditSessionId);
             b.HasIndex(x => new { x.DeploymentId, x.SourceAttachmentId });
+            b.HasIndex(x => x.RecoveryWorkspaceId).IsUnique().HasFilter("\"RevokedAt\" IS NULL AND \"RecoveryWorkspaceId\" IS NOT NULL");
             b.HasOne<ManagedDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<ManagedDocumentRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<ArtifactEditSession>().WithMany().HasForeignKey(x => x.EditSessionId).OnDelete(DeleteBehavior.Restrict);

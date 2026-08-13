@@ -25,6 +25,13 @@ public static class ConnectorWorkspaceLayout
         return path;
     }
 
+    public static string ResolveExisting(string workingRoot, ConnectorLaunchEnvelope envelope, Guid workspaceId)
+    {
+        var root = Path.GetFullPath(workingRoot); var path = WorkspacePath(root, envelope, workspaceId);
+        if (!Directory.Exists(path)) throw new ConnectorProtocolException("connector_workspace_missing", "The signed recovery workspace was not found on this Windows account.");
+        return path;
+    }
+
     public static string SafeDocumentFileName(string revisionNumber)
     {
         var value = string.Concat(revisionNumber.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
@@ -36,5 +43,15 @@ public static class ConnectorWorkspaceLayout
         var readable = string.Concat(value.Take(48).Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' ? c : '_'));
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..12].ToLowerInvariant();
         return $"{readable}-{hash}";
+    }
+
+    private static string WorkspacePath(string root, ConnectorLaunchEnvelope envelope, Guid workspaceId)
+    {
+        if (workspaceId == Guid.Empty) throw new ConnectorProtocolException("connector_workspace_invalid", "The connector workspace identity is invalid.");
+        var path = Path.Combine(root, SafeSegment(envelope.DeploymentId), envelope.ProjectId.ToString("N"), envelope.DocumentId.ToString("N"),
+            envelope.RevisionId.ToString("N"), workspaceId.ToString("N"));
+        if (!Path.GetFullPath(path).StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new ConnectorProtocolException("connector_workspace_invalid", "The connector workspace path escaped its controlled root.");
+        return path;
     }
 }

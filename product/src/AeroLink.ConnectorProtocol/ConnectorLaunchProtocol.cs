@@ -21,7 +21,10 @@ public sealed record ConnectorLaunchEnvelope(
     string Mode,
     Guid SourceAttachmentId,
     long SourceSize,
-    string SourceSha256);
+    string SourceSha256,
+    Guid EditSessionId,
+    Guid? RecoveryWorkspaceId = null,
+    string? CompletionEvidenceJson = null);
 
 public sealed record ConnectorEnrollmentManifest(
     string ProtocolVersion,
@@ -36,7 +39,7 @@ public sealed record ConnectorEnrollmentManifest(
 
 public sealed record ConnectorRedemptionIdentity(string Mode, string DeploymentId, string Origin, Guid ProjectId,
     Guid DocumentId, string DocumentNumber, Guid RevisionId, string RevisionNumber, Guid SourceAttachmentId,
-    long SourceSize, string SourceSha256);
+    long SourceSize, string SourceSha256, Guid EditSessionId, Guid? RecoveryWorkspaceId);
 
 public static class ConnectorLaunchProtocol
 {
@@ -133,7 +136,8 @@ public static class ConnectorLaunchProtocol
             && redemption.ProjectId == envelope.ProjectId && redemption.DocumentId == envelope.DocumentId
             && redemption.DocumentNumber == envelope.DocumentNumber && redemption.RevisionId == envelope.RevisionId
             && redemption.RevisionNumber == envelope.RevisionNumber && redemption.SourceAttachmentId == envelope.SourceAttachmentId
-            && redemption.SourceSize == envelope.SourceSize && string.Equals(redemption.SourceSha256, envelope.SourceSha256, StringComparison.OrdinalIgnoreCase);
+            && redemption.SourceSize == envelope.SourceSize && string.Equals(redemption.SourceSha256, envelope.SourceSha256, StringComparison.OrdinalIgnoreCase)
+            && redemption.EditSessionId == envelope.EditSessionId && redemption.RecoveryWorkspaceId == envelope.RecoveryWorkspaceId;
         if (!exact) throw new ConnectorProtocolException("connector_redemption_mismatch", "The server redemption response does not match the signed Project, document, revision, mode, or source evidence.");
     }
 
@@ -157,10 +161,17 @@ public static class ConnectorLaunchProtocol
             throw new ConnectorProtocolException("connector_version_unsupported", "The connector launch protocol or document profile is not supported.");
         if (!ValidToken(value.DeploymentId, 100) || !ValidToken(value.KeyId, 100) || !ValidToken(value.Nonce, 256))
             throw new ConnectorProtocolException("connector_envelope_invalid", "The connector deployment, key, or nonce is invalid.");
-        if (value.ProjectId == Guid.Empty || value.DocumentId == Guid.Empty || value.RevisionId == Guid.Empty || value.SourceAttachmentId == Guid.Empty)
+        if (value.ProjectId == Guid.Empty || value.DocumentId == Guid.Empty || value.RevisionId == Guid.Empty
+            || value.SourceAttachmentId == Guid.Empty || value.EditSessionId == Guid.Empty)
             throw new ConnectorProtocolException("connector_envelope_invalid", "The connector target identity is incomplete.");
-        if (!ValidText(value.DocumentNumber, 100) || !ValidText(value.RevisionNumber, 100) || value.Mode is not ("edit" or "release"))
+        if (!ValidText(value.DocumentNumber, 100) || !ValidText(value.RevisionNumber, 100)
+            || value.Mode is not ("edit" or "release" or "discard" or "cleanup"))
             throw new ConnectorProtocolException("connector_envelope_invalid", "The connector document, revision, or mode is invalid.");
+        if (value.Mode is "discard" or "cleanup" && value.RecoveryWorkspaceId is null)
+            throw new ConnectorProtocolException("connector_envelope_invalid", "A connector cleanup command must bind the recovery workspace.");
+        if ((value.Mode == "cleanup" && !ValidText(value.CompletionEvidenceJson, 4000))
+            || (value.Mode != "cleanup" && value.CompletionEvidenceJson is not null))
+            throw new ConnectorProtocolException("connector_envelope_invalid", "The connector completion evidence is invalid.");
         if (value.SourceSize <= 0 || value.SourceSize > 100L * 1024 * 1024 || value.SourceSha256.Length != 64
             || !value.SourceSha256.All(Uri.IsHexDigit))
             throw new ConnectorProtocolException("connector_envelope_invalid", "The connector source evidence is invalid.");
