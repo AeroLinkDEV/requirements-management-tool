@@ -938,6 +938,13 @@ button.coverageState:hover {
   color: #a23e50;
 }
 @media (max-width: 1360px) {
+  /* The inspector becomes a fixed right-hand overlay at this width. Keep the canonical command bar above it
+     and below the global context bar, including after a client-side route preserves the prior scroll offset. */
+  .reqCommand {
+    position: sticky;
+    top: 47px;
+    z-index: 12;
+  }
   .reqLayout,
   .reqLayout.inspecting {
     grid-template-columns: 210px 1fr;

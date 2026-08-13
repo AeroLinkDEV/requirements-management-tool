@@ -44,6 +44,7 @@ test('the Explorer groups procedures by the document they are written into', asy
   await expect(page.locator('.specRail')).toBeVisible()
   await expect(page.locator('.reqResults')).toBeVisible()
   await expect(page.locator('.requirementInspector')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Advanced' })).toBeVisible()
   await expect(page.getByRole('tablist', { name: 'Test procedure views' })).toHaveCount(0)
 
   const rail = page.getByRole('navigation', { name: 'Test procedure documents' })

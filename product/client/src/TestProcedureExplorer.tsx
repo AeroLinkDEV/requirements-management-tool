@@ -3,6 +3,7 @@ import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
 import { procedureTargetsFor, stateLabel } from './presentation'
 import DocumentActions from './DocumentActions'
+import { loadCoverage, type Coverage } from './verificationCoverage'
 import {
   ControlledArtifactExplorerHeader,
   ControlledArtifactExplorerLayout,
@@ -13,6 +14,7 @@ import type { TestDiscipline } from './TestResultsWorkspace'
 // The requirements explorer's stylesheet, imported rather than copied. Browsing a controlled artifact is the
 // same job whichever discipline owns it, so the inspector is literally the same one.
 import './RequirementsWorkspace.css'
+import './TestingCoverageWorkspace.css'
 import './TestProcedureExplorer.css'
 
 type Procedure = {
@@ -172,6 +174,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [traceError, setTraceError] = useState(false)
   const [comments, setComments] = useState<Comment[]>([])
   const [error, setError] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [coverage, setCoverage] = useState<Coverage>()
+  const [coverageRead, setCoverageRead] = useState(false)
+  const [showAllCoverage, setShowAllCoverage] = useState(false)
 
   const scope = scopeOf(discipline)
   // A page at a time, at the requirements explorer's own default. A build holds hundreds of procedures, and
@@ -431,6 +437,32 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     } catch (problem) { setError(operationError(problem, 'The comment could not be resolved.')) }
   }
 
+  // Coverage is an advanced report over the same inventory, not a second page mode. It stays behind the
+  // same Advanced control the Requirements Explorer uses, so the two Explorers remain identical by default
+  // without deleting the governed suspect-coverage workflow.
+  useEffect(() => {
+    setShowAdvanced(false)
+    setCoverage(undefined)
+    setCoverageRead(false)
+    setShowAllCoverage(false)
+  }, [api, projectId, releaseId, discipline])
+
+  useEffect(() => {
+    if (!showAdvanced || coverageRead) return
+    let active = true
+    void (async () => {
+      const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, discipline)
+      if (!active) return
+      setCoverageRead(true)
+      if (next) setCoverage(next)
+      if (failed) setError('The requirement coverage for this build could not be read.')
+    })()
+    return () => { active = false }
+  }, [api, projectId, releaseId, discipline, showAdvanced, coverageRead])
+
+  const uncovered = coverage?.items.filter(item => item.disposition === 'Uncovered') ?? []
+  const suspect = coverage?.items.filter(item => item.disposition === 'Suspect') ?? []
+
   const open = (procedure: Procedure) => {
     setSelectedId(procedure.id); setTab('details'); setHistory(undefined); setTrace(undefined); setTraceError(false)
     const params = new URLSearchParams(location.search)
@@ -518,6 +550,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         <option value="Fail">Fail</option>
         <option value="Blocked">Blocked</option>
       </select>
+      <button type="button" className={showAdvanced ? 'advanced active' : 'advanced'}
+        aria-expanded={showAdvanced} onClick={() => setShowAdvanced(current => !current)}>
+        Advanced
+      </button>
       <button type="button" className="clear"
         disabled={!query && !procedureState && !procedureOutcome && !documentId && !sectionId && !viewId}
         onClick={() => {
@@ -537,6 +573,61 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         </select>
       </label>
     </section>
+
+    {showAdvanced && <div className="explorerCoverage" aria-label="Advanced requirement coverage">
+      <section className="coverageSummary" aria-label="Coverage summary">
+        <article><b>{coverage?.total ?? 0}</b><span>Requirements</span></article>
+        <article><b>{coverage?.covered ?? 0}</b><span>With a procedure</span></article>
+        <article className={uncovered.length ? 'attention' : ''}><b>{uncovered.length}</b><span>With none</span></article>
+        <article className={suspect.length ? 'attention' : ''}><b>{suspect.length}</b><span>Suspect coverage</span></article>
+      </section>
+
+      {(uncovered.length > 0 || suspect.length > 0) && <section className="coverageCard">
+        <div className="cardTitle">
+          <h2>Requirements needing attention</h2>
+          <p>A requirement with no procedure cannot be verified, and coverage carried across a change nobody reconfirmed does not count.</p>
+        </div>
+        {uncovered.slice(0, 25).map(item => <article className="coverageRow attention" key={item.revisionId}>
+          <div><b>{item.displayNumber}</b><i>No procedure</i></div>
+          <p>{item.statement}</p>
+        </article>)}
+        {suspect.slice(0, 25).map(item => <article className="coverageRow attention" key={`suspect-${item.revisionId}`}>
+          <div><b>{item.displayNumber}</b><i>Suspect</i></div>
+          <p>{item.statement}</p>
+          <small>Covered by {item.coveredBy.map(procedure => procedure.displayNumber).join(', ')}, written against earlier wording.</small>
+        </article>)}
+      </section>}
+
+      <section className="coverageCard">
+        <div className="cardTitle">
+          <h2>Requirement coverage</h2>
+          <p>Every effective requirement in this build and the procedures that verify it.</p>
+        </div>
+        <button type="button" className="quiet" onClick={() => setShowAllCoverage(current => !current)}>
+          {showAllCoverage ? 'Show only what needs attention' : `Show all ${coverage?.total ?? 0} requirements`}
+        </button>
+        {showAllCoverage && <div className="fullCoverage">
+          {(coverage?.items ?? []).map(item => <article
+            className={`coverageRow ${item.covered ? '' : 'attention'}`} key={`all-${item.revisionId}`}>
+            <div>
+              <b>{item.displayNumber}</b>
+              <i>{item.verified ? 'Verified'
+                : item.coveredBy.some(procedure => procedure.coverageState === 'Suspect') ? 'Suspect'
+                : item.covered ? 'Covered'
+                : 'No procedure'}</i>
+            </div>
+            <p>{item.statement}</p>
+            {item.coveredBy.length > 0 && <small>
+              {item.coveredBy.map(procedure => `${procedure.displayNumber} (${procedure.state})`).join(', ')}
+            </small>}
+          </article>)}
+        </div>}
+      </section>
+
+      {coverageRead && !coverage && <p className="coverageNone">
+        This build has not materialized its requirements, so there is nothing to report coverage against yet.
+      </p>}
+    </div>}
 
     <ControlledArtifactExplorerLayout inspecting resizableKey="test-procedure-explorer">
       {/* The documents these procedures are written into, in the place and shape the requirements Explorer
@@ -706,7 +797,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       {selected ? <ControlledArtifactInspector
         artifactType={`${disciplineLabel(discipline).toUpperCase()} TEST PROCEDURE`}
         displayNumber={selected.displayNumber}
-        closeLabel="Close procedure inspector"
+        closeLabel="Close procedure detail"
         onClose={close}
         tabs={[
           { id: 'details', label: 'Overview' },

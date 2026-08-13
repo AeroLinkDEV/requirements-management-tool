@@ -131,7 +131,7 @@ test('modified requirement coverage stays suspect until an exact approved proced
     await openNavigationGroup(page, 'ASSURANCE')
     await page.getByRole('link', { name: 'System Test Procedure Explorer' }).click()
     await expect(page.getByRole('heading', { name: 'Test Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
-    await page.getByRole('tab', { name: 'Requirement coverage' }).click()
+    await page.getByRole('button', { name: 'Advanced' }).click()
     // The whole inventory, because this requirement is covered — it is the applicability of that coverage
     // that is in question, and the tab opens on what has no coverage at all.
     const showAll = page.getByRole('button', { name: /Show all \d+ requirements/ })
