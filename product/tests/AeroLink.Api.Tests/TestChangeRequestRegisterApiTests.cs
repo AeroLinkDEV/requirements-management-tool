@@ -206,4 +206,28 @@ public sealed class TestChangeRequestRegisterApiTests
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
+
+    /// <summary>A package is the record that governs procedure change, so it is the record with a working copy.</summary>
+    [Fact]
+    public async Task A_draft_package_can_be_checked_out()
+    {
+        await using var factory = new AeroLinkApiFactory();
+        var seeded = await SeedAsync(factory);
+        using var client = await SignInAsync(factory);
+        var listed = await RegisterAsync(client, $"projectId={seeded.ProjectId}&discipline=System&page=1&pageSize=50");
+        var id = listed.GetProperty("items").EnumerateArray()
+            // The package nobody raised: it has no author, so it is open to any test engineer in the Project — the
+            // same people who could always author its decisions.
+            .First(x => x.GetProperty("authorId").GetString() == "").GetProperty("id").GetGuid();
+
+        using var opened = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "TestChangeRequest", artifactId = id });
+
+        var body = await opened.Content.ReadAsStringAsync();
+        Assert.True(opened.StatusCode is HttpStatusCode.Created or HttpStatusCode.OK, $"{(int)opened.StatusCode}: {body}");
+        // Checked out as a test change request, through the universal mechanism rather than a private one.
+        Assert.Contains("\"artifactType\":\"TestChangeRequest\"", body);
+        // The working copy carries the package as it stands, so the engineer edits what is there.
+        Assert.Contains("procedureChanges", body);
+    }
 }

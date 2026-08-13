@@ -34,7 +34,8 @@ type Attachment = {
 type Props = {
   api: string;
   projectId: string;
-  artifactType: "Requirement" | "ChangeRequest" | "ProblemReport";
+  /** The record the evidence belongs to. A test change request governs procedure change and carries its own. */
+  artifactType: "Requirement" | "ChangeRequest" | "ProblemReport" | "TestChangeRequest";
   artifactId: string;
   revisionId?: string;
   /** Attaching is an authoring act. A reader sees the files; they do not add to them. */

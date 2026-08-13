@@ -765,3 +765,93 @@ public sealed class ConfigurationChangeSetControlledEditingAdapter(AeroLinkDbCon
     }
     private sealed record ChangeSetDraft(Guid Id, Guid ProjectId, string? ChangeSetNumber, string? Title, string? Description, string? OwnerId, string? State, long Version);
 }
+
+/// <summary>
+/// Checking out a test change request, the way a change request is checked out.
+///
+/// The package is the record that governs procedure change (DEC-103), so it is the record that gets a working
+/// copy — a test procedure itself has no editing path and deliberately never gains one.
+///
+/// The draft carries the engineering case and the procedure changes together, exactly as the change request's
+/// draft carries its case and its requirement changes: an engineer correcting a package is usually correcting
+/// both, and a check-in that applied only half of what they wrote would silently discard the other half.
+/// </summary>
+public sealed class TestChangeRequestControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+{
+    private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
+    public ControlledArtifactFamily Family => ControlledArtifactFamily.TestChangeRequest;
+    public string Name => "TestChangeRequestControlledEditingAdapter";
+
+    public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
+    {
+        var item = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
+            .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+        return item is null
+            ? null
+            : new(item.ProjectId, item.State.ToString(), item, item.Version, item.Revision.ToString(), item.Id);
+    }
+
+    public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) =>
+        Snapshot((TestChangeReview)artifact.Aggregate, versionOverride);
+
+    public static string Snapshot(TestChangeReview item, long? versionOverride = null) =>
+        JsonSerializer.Serialize(new
+        {
+            packageVersion = versionOverride ?? item.Version,
+            title = item.Title,
+            problem = item.Problem,
+            analysis = item.Analysis,
+            solution = item.Solution,
+            problemRich = item.ProblemRich,
+            analysisRich = item.AnalysisRich,
+            solutionRich = item.SolutionRich,
+            // Ordered so a snapshot is a function of content and not of the order rows came back in.
+            procedureChanges = item.ProcedureChanges
+                .OrderBy(x => x.BaseNumber).ThenBy(x => x.Revision)
+                .Select(x => new
+                {
+                    baseNumber = x.BaseNumber, revision = x.Revision, level = x.Level.ToString(),
+                    kind = x.Kind.ToString(), title = x.Title, objective = x.Objective,
+                    preconditions = x.Preconditions, steps = x.Steps, expectedResult = x.ExpectedResult,
+                    rationale = x.Rationale, drivingRequirementRevisionIdsJson = x.DrivingRequirementRevisionIdsJson,
+                    removedRequirementRevisionIdsJson = x.RemovedRequirementRevisionIdsJson,
+                    coverageChangeRationale = x.CoverageChangeRationale,
+                }),
+        });
+
+    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
+        bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
+    {
+        var item = (TestChangeReview)artifact.Aggregate;
+        var draft = JsonSerializer.Deserialize<TestChangeRequestDraft>(draftJson, DraftOptions)
+            ?? throw new JsonException("The latest autosaved test change request draft is empty.");
+        if (draft.ProcedureChanges is null)
+            throw new JsonException("The latest autosaved test change request draft does not contain procedure changes.");
+
+        item.WriteCase(actor, draft.Title ?? "", draft.Problem ?? "", draft.Analysis ?? "", draft.Solution ?? "",
+            now, draft.ProblemRich, draft.AnalysisRich, draft.SolutionRich);
+
+        // Replaced rather than merged, because the draft is the whole of what the engineer wrote. Merging
+        // would leave a proposal they deleted still attached to the package they checked in.
+        foreach (var existing in item.ProcedureChanges.ToList()) item.RemoveProcedureChange(existing.Id, now);
+        foreach (var change in draft.ProcedureChanges)
+            item.AddProcedureChange(actor, new TestProcedureChangeDraft(
+                change.BaseNumber ?? "", change.Revision,
+                Enum.TryParse<TestProcedureLevel>(change.Level, true, out var level) ? level : TestProcedureLevel.System,
+                Enum.TryParse<TestProcedureChangeKind>(change.Kind, true, out var kind) ? kind : TestProcedureChangeKind.Introduce,
+                change.Title ?? "", change.Objective ?? "", change.Preconditions ?? "", change.Steps ?? "",
+                change.ExpectedResult ?? "", change.Rationale ?? "",
+                change.DrivingRequirementRevisionIdsJson ?? "[]", change.RemovedRequirementRevisionIdsJson ?? "[]",
+                change.CoverageChangeRationale ?? ""), now);
+        return Task.CompletedTask;
+    }
+
+    private sealed record TestChangeRequestDraft(string? Title, string? Problem, string? Analysis, string? Solution,
+        string? ProblemRich, string? AnalysisRich, string? SolutionRich,
+        IReadOnlyList<TestProcedureChangeDraftPayload>? ProcedureChanges);
+
+    private sealed record TestProcedureChangeDraftPayload(string? BaseNumber, int Revision, string? Level,
+        string? Kind, string? Title, string? Objective, string? Preconditions, string? Steps,
+        string? ExpectedResult, string? Rationale, string? DrivingRequirementRevisionIdsJson,
+        string? RemovedRequirementRevisionIdsJson, string? CoverageChangeRationale);
+}

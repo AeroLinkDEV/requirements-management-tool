@@ -334,6 +334,24 @@ public static class ControlledEditingEndpoints
                     SystemChangeRequestControlledEditingAdapter.Snapshot(item, reportIds),
                     "ChangeRequest", item.Id, item.AuthorId);
             }
+            case ControlledArtifactFamily.TestChangeRequest:
+            {
+                var item = await db.TestChangeReviews.AsNoTracking().Include(x => x.ProcedureChanges)
+                    .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+                if (item is null) return null;
+                // The governing author is the person who raised it. A package raised by an assessment has
+                // none, which leaves it open to any test engineer in the Project — the same people who could
+                // always author its decisions.
+                // No audit aggregate. `AuditEvent` is the change request's own append-only trail and its
+                // aggregate id is a foreign key into that table, so handing it a package's id fails the
+                // insert — which surfaced as a checkout that reported a lock nobody held. A test change
+                // request carries no audit trail of its own; that is why deferral records its reason on the
+                // record rather than as an event.
+                return new(item.ProjectId, item.State.ToString(), null,
+                    TestChangeRequestControlledEditingAdapter.Snapshot(item),
+                    "TestChangeRequest", null,
+                    string.IsNullOrWhiteSpace(item.AuthorId) ? null : item.AuthorId);
+            }
             case ControlledArtifactFamily.RequirementProposal:
             {
                 var item = await db.RequirementChanges.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);

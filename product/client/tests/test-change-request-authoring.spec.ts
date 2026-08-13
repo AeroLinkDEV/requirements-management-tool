@@ -105,15 +105,16 @@ test('an engineer raises a System test change request with its case from the Cha
 
   // Stage two: a procedure decision authored on the page and saved with the package, exactly as a change
   // request is created together with the requirement changes it proposes.
-  await editor.getByRole('button', { name: '+ Add a procedure decision' }).click()
+  // The act is chosen before the card exists, as it is on the requirements side.
+  await editor.getByRole('button', { name: '+ Introduce System test procedure' }).click()
   const proposal = editor.locator('[data-procedure-proposal="0"]')
   await expect(proposal).toBeVisible()
   await proposal.getByLabel('Procedure number').fill('SYSTP-009901')
-  await proposal.getByLabel('Title').fill('Verify oceanic sequencing under the new behaviour')
-  await proposal.getByLabel('Objective').fill('Show the sequencing holds across the transition.')
-  await proposal.getByLabel('Steps').fill('Exercise the changed behaviour on the rig.')
-  await proposal.getByLabel('Expected result').fill('The sequencing is observed to hold.')
-  await proposal.getByLabel('Rationale').fill('The approved change introduces behaviour with no procedure.')
+  await proposal.getByLabel('Title 1').fill('Verify oceanic sequencing under the new behaviour')
+  await proposal.getByLabel('Objective 1').fill('Show the sequencing holds across the transition.')
+  await proposal.getByLabel('Steps 1').fill('Exercise the changed behaviour on the rig.')
+  await proposal.getByLabel('Expected result 1').fill('The sequencing is observed to hold.')
+  await proposal.getByLabel('Rationale 1').fill('The approved change introduces behaviour with no procedure.')
 
   // An incomplete decision holds the package back rather than being silently dropped on save.
   await expect(editor.getByRole('button', { name: 'Raise SYSTCR' })).toBeEnabled()
