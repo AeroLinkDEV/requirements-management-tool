@@ -643,6 +643,41 @@
   padding: 28px;
   box-shadow: 0 24px 70px #0b1d2c66;
 }
+.mdRouteBuilder {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+}
+.mdRouteBuilder fieldset {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.35fr 0.65fr;
+  gap: 10px 12px;
+  padding: 14px;
+  border: 1px solid #d4dfe5;
+  border-radius: 9px;
+}
+.mdRouteBuilder fieldset > label:last-child {
+  grid-column: 1 / -1;
+}
+.mdRouteBuilder legend {
+  padding: 0 6px;
+  color: #315269;
+  font-size: 12px;
+  font-weight: 700;
+}
+.mdRouteControls {
+  position: absolute;
+  top: -17px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+}
+.mdRouteControls button {
+  min-width: 32px;
+  padding: 4px 8px;
+  background: #fff;
+}
 .mdModalCard .close {
   position: absolute;
   right: 15px;

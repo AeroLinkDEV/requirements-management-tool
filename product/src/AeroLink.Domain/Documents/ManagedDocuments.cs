@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.ChangeControl;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -13,7 +14,7 @@ public sealed record ManagedDocumentReviewer(string UserId, string Name, string 
     string RequiredAuthority = "LegacyUnspecified", string GrantedAuthority = "LegacyUnspecified",
     string AuthoritySource = "LegacyUnspecified", Guid? AuthoritySourceId = null, Guid? WorkflowId = null,
     string WorkflowName = "Legacy managed-document review", int WorkflowVersion = 0,
-    string AuthorityPolicy = "LegacyUnspecified");
+    string AuthorityPolicy = "LegacyUnspecified", ReviewStageKind Kind = ReviewStageKind.Review);
 
 /// <summary>A stable project document such as SDP-000001, independent of any one formal revision.</summary>
 public sealed class ManagedDocument
@@ -138,6 +139,14 @@ public sealed class ManagedDocumentRevision
         EnsureEditable();
         if (CurrentWorkingAttachmentId is null) throw new DomainException("Check in a Word working copy before submitting this revision.");
         if (reviewers.Count < 2) throw new DomainException("Document release requires a technical reviewer and an independent final approver.");
+        if (reviewers.Any(x => !Enum.IsDefined(x.Kind)))
+            throw new DomainException("Every document review step must be classified as Review or Approval.");
+        if (!reviewers.Any(x => x.Kind == ReviewStageKind.Review))
+            throw new DomainException("Document release requires at least one content review stage.");
+        if (reviewers[^1].Kind != ReviewStageKind.Approval)
+            throw new DomainException("The final document review route step must be a release approval.");
+        if (reviewers.SkipWhile(x => x.Kind == ReviewStageKind.Review).Any(x => x.Kind == ReviewStageKind.Review))
+            throw new DomainException("Content review stages must precede release approval stages.");
         if (reviewers.Select(x => x.UserId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != reviewers.Count)
             throw new DomainException("A document reviewer cannot appear twice in one review cycle.");
         if (reviewers.Any(x => string.Equals(x.UserId, actor, StringComparison.OrdinalIgnoreCase) || string.Equals(x.UserId, ResponsibleOwnerId, StringComparison.OrdinalIgnoreCase)))
@@ -160,7 +169,8 @@ public sealed class ManagedDocumentRevision
     {
         EnsureInReview();
         var active = ActiveStep();
-        if (active.Position != _reviewSteps.Where(x => x.Cycle == CurrentReviewCycle).Max(x => x.Position))
+        if (active.Kind != ReviewStageKind.Approval
+            || active.Position != _reviewSteps.Where(x => x.Cycle == CurrentReviewCycle).Max(x => x.Position))
             throw new DomainException("The release candidate is prepared only after technical review is complete.");
         if (!string.Equals(active.ApproverId, actor, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("Only the active final approver can prepare this release candidate.");
@@ -178,7 +188,7 @@ public sealed class ManagedDocumentRevision
         if (!string.Equals(step.ApproverId, actor, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("Only the active document reviewer can approve this stage.");
         var cycleSteps = _reviewSteps.Where(x => x.Cycle == CurrentReviewCycle).OrderBy(x => x.Position).ToList();
-        var final = step.Position == cycleSteps[^1].Position;
+        var final = step.Kind == ReviewStageKind.Approval && step.Position == cycleSteps[^1].Position;
         if (final && (ReleaseCandidateDocxAttachmentId is null || ReleaseCandidatePdfAttachmentId is null || string.IsNullOrWhiteSpace(ReleaseManifestHash)))
             throw new DomainException("Prepare the exact DOCX and PDF release candidate before final approval.");
         if (final && (expectedCandidateDocxAttachmentId != ReleaseCandidateDocxAttachmentId
@@ -376,7 +386,8 @@ public sealed class ManagedDocumentReviewStep
     {
         Id = Guid.NewGuid(); RevisionId = revisionId; Cycle = cycle; Position = position;
         ApproverId = Required(reviewer.UserId).ToLowerInvariant(); ApproverName = Required(reviewer.Name);
-        StageName = Required(reviewer.StageName); State = active ? ManagedDocumentReviewStepState.Active : ManagedDocumentReviewStepState.Pending;
+        StageName = Bounded(reviewer.StageName, 120, "A document review stage name is required.", "A document review stage name cannot exceed 120 characters.");
+        Kind = reviewer.Kind; State = active ? ManagedDocumentReviewStepState.Active : ManagedDocumentReviewStepState.Pending;
         RequiredAuthority = Required(reviewer.RequiredAuthority); GrantedAuthority = Required(reviewer.GrantedAuthority);
         AuthoritySource = Required(reviewer.AuthoritySource); AuthoritySourceId = reviewer.AuthoritySourceId; WorkflowId = reviewer.WorkflowId;
         WorkflowName = Required(reviewer.WorkflowName);
@@ -392,6 +403,7 @@ public sealed class ManagedDocumentReviewStep
     public string ApproverId { get; private set; } = "";
     public string ApproverName { get; private set; } = "";
     public string StageName { get; private set; } = "";
+    public ReviewStageKind Kind { get; private set; }
     public string RequiredAuthority { get; private set; } = "LegacyUnspecified";
     public string GrantedAuthority { get; private set; } = "LegacyUnspecified";
     public string AuthoritySource { get; private set; } = "LegacyUnspecified";
@@ -409,6 +421,8 @@ public sealed class ManagedDocumentReviewStep
     internal void Approve(string rationale, DateTimeOffset now) { State = ManagedDocumentReviewStepState.Approved; Rationale = rationale; DecidedAt = now; Version++; }
     internal void Return(string rationale, DateTimeOffset now) { State = ManagedDocumentReviewStepState.Returned; Rationale = rationale; DecidedAt = now; Version++; }
     private static string Required(string? value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A document review-step value is required.") : value.Trim();
+    private static string Bounded(string? value, int maximum, string requiredError, string lengthError)
+    { var result = string.IsNullOrWhiteSpace(value) ? throw new DomainException(requiredError) : value.Trim(); return result.Length > maximum ? throw new DomainException(lengthError) : result; }
 }
 
 /// <summary>One durable result for a caller supplied one-use review operation key.</summary>

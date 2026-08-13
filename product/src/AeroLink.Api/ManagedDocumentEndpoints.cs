@@ -186,7 +186,7 @@ public static class ManagedDocumentEndpoints
                 integrityBlocked = integrityFailures.Any(failure => attachments.Any(attachment => attachment.RevisionId == revision.Id && attachment.Id == failure.AttachmentId)),
                 integrityFailures = integrityFailures.Where(failure => attachments.Any(attachment => attachment.RevisionId == revision.Id && attachment.Id == failure.AttachmentId)),
                 currentRelationshipManifestHash = ManagedDocumentRelationshipPolicy.Manifest(links.Where(x => x.RevisionId == revision.Id).ToList()).Hash,
-                reviewSteps = revision.ReviewSteps.OrderBy(x => x.Cycle).ThenBy(x => x.Position).Select(x => new { x.Id, x.Cycle, x.Position, x.StageName, x.ApproverId, x.ApproverName, x.RequiredAuthority, x.GrantedAuthority, x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowName, x.WorkflowVersion, x.AuthorityPolicy, x.AssignedAt, x.Version, state = x.State.ToString(), x.Rationale, x.DecidedAt }),
+                reviewSteps = revision.ReviewSteps.OrderBy(x => x.Cycle).ThenBy(x => x.Position).Select(x => new { x.Id, x.Cycle, x.Position, x.StageName, kind = x.Kind.ToString(), x.ApproverId, x.ApproverName, x.RequiredAuthority, x.GrantedAuthority, x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowName, x.WorkflowVersion, x.AuthorityPolicy, x.AssignedAt, x.Version, state = x.State.ToString(), x.Rationale, x.DecidedAt }),
                 attachments = attachments.Where(x => x.RevisionId == revision.Id).OrderByDescending(x => x.UploadedAt).Select(Attachment),
                 links = links.Where(x => x.RevisionId == revision.Id).Select(x => new { x.Id, x.ArtifactType, x.ArtifactId, x.DisplayNumber, x.CanonicalTitle, x.TargetState, x.TargetProjectId, x.TargetReleaseId, x.TargetReleaseVersion, x.DeepLink, x.Relationship, x.PolicyVersion, x.Provenance, x.IsCurrent, x.SupersededByLinkId, x.SupersedeReason, x.SupersededBy, x.SupersededAt, x.CreatedBy, x.CreatedAt })
                 , checkIns = checkIns.Where(x => x.RevisionId == revision.Id).Select(x => new { x.Id, x.WorkingAttachmentId, x.WorkingVersion, x.ActorId, x.Comment, x.BaseAttachmentId, x.BaseSha256, x.ResultSha256, x.SupersededAttachmentId, x.ConnectorSessionId, x.OperationId, x.OccurredAt, x.ReturnResolutionNote })
@@ -316,7 +316,7 @@ public static class ManagedDocumentEndpoints
         var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
         var active = data.Revision.ReviewSteps.SingleOrDefault(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active);
         var finalPosition = data.Revision.ReviewSteps.Where(x => x.Cycle == data.Revision.CurrentReviewCycle).Select(x => x.Position).DefaultIfEmpty(-1).Max(); var actor = http.UserAccount();
-        if (data.Revision.State != ManagedDocumentState.InReview || active is null || active.Position != finalPosition || active.ApproverId != actor.UserName) return Results.Conflict(new { error = "Release preparation is available only to the active final approver after technical review." });
+        if (data.Revision.State != ManagedDocumentState.InReview || active is null || active.Kind != ReviewStageKind.Approval || active.Position != finalPosition || active.ApproverId != actor.UserName) return Results.Conflict(new { error = "Release preparation is available only to the active final approver after technical review." });
         return await CreateGrantAsync(data, "release", actor.UserName, http, db, integrity, signing, ct);
     }
 
@@ -391,7 +391,7 @@ public static class ManagedDocumentEndpoints
         {
             var active = data.Revision.ReviewSteps.SingleOrDefault(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active);
             var final = data.Revision.ReviewSteps.Where(x => x.Cycle == data.Revision.CurrentReviewCycle).Select(x => x.Position).DefaultIfEmpty(-1).Max();
-            if (data.Revision.State != ManagedDocumentState.InReview || active is null || active.Position != final || active.ApproverId != actor.UserName)
+            if (data.Revision.State != ManagedDocumentState.InReview || active is null || active.Kind != ReviewStageKind.Approval || active.Position != final || active.ApproverId != actor.UserName)
                 return Results.Conflict(new { error = "Release preparation is no longer at the same authorized final-review stage. Preserve the candidate files.", code = "document_recovery_revision_advanced" });
         }
         if (data.Revision.CurrentWorkingAttachmentId != original.SourceAttachmentId)
@@ -493,18 +493,38 @@ public static class ManagedDocumentEndpoints
             || !string.Equals(data.Revision.FormalSummaryHash, request.ExpectedFormalSummaryHash, StringComparison.OrdinalIgnoreCase))
             return ReviewConflict("submission_evidence_changed", "The document changed after this page loaded. Refresh and review the exact working evidence before submitting.", data.Revision);
         if (await db.ArtifactEditSessions.AnyAsync(x => x.ArtifactId == data.Document.Id && x.ArtifactType == "ManagedDocument" && x.State == EditSessionState.Active, ct)) return Results.Conflict(new { error = "Check in or discard the active desktop checkout before submitting." });
-        var accounts = await db.UserAccounts.AsNoTracking().Where(x => (x.UserName == request.TechnicalReviewerId || x.UserName == request.FinalApproverId) && x.State == AccountState.Active).ToListAsync(ct); if (accounts.Count != 2) return Results.BadRequest(new { error = "Select two active AeroLink users for document review." });
+        if (request.Reviewers is null || request.Reviewers.Count < 2)
+            return Results.BadRequest(new { error = "Document release requires at least two ordered review steps." });
+        if (request.Reviewers.Any(x => !Enum.IsDefined(x.Kind)))
+            return Results.BadRequest(new { error = "Every document review step must be classified as Review or Approval." });
+        if (request.Reviewers.Any(x => string.IsNullOrWhiteSpace(x.UserId) || string.IsNullOrWhiteSpace(x.StageName)))
+            return Results.BadRequest(new { error = "Every document review step requires a person and stage name." });
+        var route = request.Reviewers.Select(x => x with { UserId = x.UserId.Trim().ToLowerInvariant(), StageName = x.StageName.Trim() }).ToList();
+        if (route.Select(x => x.UserId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != route.Count)
+            return Results.BadRequest(new { error = "A document reviewer cannot appear twice in one review cycle." });
+        var selectedIds = route.Select(x => x.UserId).ToList();
+        var accounts = await db.UserAccounts.AsNoTracking().Where(x => selectedIds.Contains(x.UserName) && x.State == AccountState.Active).ToListAsync(ct);
+        if (accounts.Count != route.Count) return Results.BadRequest(new { error = "Every document review step must name a different active AeroLink user." });
         var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
-        var now = DateTimeOffset.UtcNow; var technicalAccount = accounts.Single(x => x.UserName == request.TechnicalReviewerId); var finalAccount = accounts.Single(x => x.UserName == request.FinalApproverId);
-        var technicalAuthority = await ManagedDocumentReviewAuthority.ResolveTechnicalAsync(db, programId, technicalAccount, now, ct);
-        var finalAuthority = await ManagedDocumentReviewAuthority.ResolveFinalAsync(db, programId, finalAccount, now, ct);
-        if (technicalAuthority is null) return Results.BadRequest(new { error = "The technical reviewer needs current review or engineering-lead authority in this Program." });
-        if (finalAuthority is null) return Results.BadRequest(new { error = "The final approver needs current SQA, configuration, approval, Program, or authorized administrator-substitution authority." });
+        var now = DateTimeOffset.UtcNow; var accountsById = accounts.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
+        var resolvedRoute = new List<(SubmitManagedDocumentReviewerRequest Route, UserAccount Account, ManagedDocumentAuthorityEvidence Evidence)>();
+        foreach (var item in route)
+        {
+            var account = accountsById[item.UserId];
+            var authority = item.Kind == ReviewStageKind.Approval
+                ? await ManagedDocumentReviewAuthority.ResolveFinalAsync(db, programId, account, now, ct)
+                : await ManagedDocumentReviewAuthority.ResolveTechnicalAsync(db, programId, account, now, ct);
+            if (authority is null)
+                return Results.BadRequest(new { error = item.Kind == ReviewStageKind.Approval
+                    ? $"{account.DisplayName} needs current SQA, configuration, approval, Program, or authorized administrator-substitution authority for the '{item.StageName}' approval stage."
+                    : $"{account.DisplayName} needs current review or engineering-lead authority in this Program for the '{item.StageName}' review stage." });
+            resolvedRoute.Add((item, account, authority));
+        }
         var acceptedCheckIns = await db.ManagedDocumentCheckIns.AsNoTracking().Where(x => x.RevisionId == revisionId).ToListAsync(ct);
         var contributionEvidence = acceptedCheckIns.GroupBy(x => x.ActorId, StringComparer.OrdinalIgnoreCase)
             .Select(group => new { ContributorId = group.Key, EvidenceHash = group.OrderByDescending(x => x.WorkingVersion).First().ResultSha256 }).ToList();
         var contributorIds = contributionEvidence.Select(x => x.ContributorId).Append(data.Revision.InitiatedBy).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (contributorIds.Contains(request.TechnicalReviewerId) || contributorIds.Contains(request.FinalApproverId))
+        if (route.Any(x => contributorIds.Contains(x.UserId)))
             return Results.BadRequest(new { error = "A contributor to this exact submitted snapshot cannot serve as an independent reviewer." });
         try
         {
@@ -516,16 +536,18 @@ public static class ManagedDocumentEndpoints
                 || !string.Equals(relationshipEvidence.Hash, request.ExpectedRelationshipManifestHash, StringComparison.OrdinalIgnoreCase))
                 return ReviewConflict("submission_evidence_changed", "The working file or relationship manifest changed after this page loaded. Refresh before submitting.", data.Revision);
             var snapshotHash = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"managed-document-review-v2:{attachment.Sha256}:{data.Revision.FormalSummaryHash}:{data.Revision.FormalSummaryVersion}:{relationshipEvidence.Hash}"));
-            ManagedDocumentReviewer Reviewer(UserAccount account, string stage, ManagedDocumentAuthorityEvidence evidence) => new(account.UserName, account.DisplayName, stage,
+            ManagedDocumentReviewer Reviewer(SubmitManagedDocumentReviewerRequest item, UserAccount account, ManagedDocumentAuthorityEvidence evidence) => new(account.UserName, account.DisplayName, item.StageName,
                 evidence.RequiredAuthority, evidence.GrantedAuthority.ToString(), evidence.Source, evidence.SourceId, ManagedDocumentReviewAuthority.PolicyId,
-                ManagedDocumentReviewAuthority.PolicyName, ManagedDocumentReviewAuthority.PolicyVersion, ManagedDocumentReviewAuthority.FrozenPolicy);
-            var cycle = data.Revision.SubmitForReview(actor.UserName, snapshotHash, [Reviewer(technicalAccount, "Technical review", technicalAuthority), Reviewer(finalAccount, "SQA / configuration release authorization", finalAuthority)], now, relationshipEvidence.Json, relationshipEvidence.Hash);
+                ManagedDocumentReviewAuthority.PolicyName, ManagedDocumentReviewAuthority.PolicyVersion, ManagedDocumentReviewAuthority.FrozenPolicy, item.Kind);
+            var reviewers = resolvedRoute.Select(x => Reviewer(x.Route, x.Account, x.Evidence)).ToList();
+            var cycle = data.Revision.SubmitForReview(actor.UserName, snapshotHash, reviewers, now, relationshipEvidence.Json, relationshipEvidence.Hash);
             db.ManagedDocumentReviewSteps.AddRange(data.Revision.ReviewSteps.Where(x => x.Cycle == cycle));
             foreach (var contribution in contributionEvidence)
                 db.ManagedDocumentReviewContributors.Add(new(revisionId, cycle, contribution.ContributorId, contribution.EvidenceHash, now));
             if (!contributionEvidence.Any(x => string.Equals(x.ContributorId, data.Revision.InitiatedBy, StringComparison.OrdinalIgnoreCase)))
                 db.ManagedDocumentReviewContributors.Add(new(revisionId, cycle, data.Revision.InitiatedBy, snapshotHash, now));
-            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentSubmitted", actor.UserName, $"Submitted {data.Document.DocumentNumber}.{data.Revision.Revision:D2} for independent review.", now)); db.UserNotifications.Add(new(data.Document.ProjectId, request.TechnicalReviewerId, "DocumentReviewActivated", $"Review {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Technical document review is ready.", $"managed-document:{data.Document.Id}", data.Document.Id, now));
+            var first = reviewers[0];
+            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentSubmitted", actor.UserName, $"Submitted {data.Document.DocumentNumber}.{data.Revision.Revision:D2} to the ordered {reviewers.Count}-step independent review route.", now)); db.UserNotifications.Add(new(data.Document.ProjectId, first.UserId, "DocumentReviewActivated", $"Review {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", $"{first.StageName} is ready.", $"managed-document:{data.Document.Id}", data.Document.Id, now));
             var resultJson = JsonSerializer.Serialize(new { state = data.Revision.State.ToString(), data.Revision.Version, cycle, snapshotHash });
             db.ManagedDocumentOperations.Add(new(revisionId, "Submit", request.OperationKey, payloadHash, resultJson, now));
             await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");
@@ -608,7 +630,7 @@ public static class ManagedDocumentEndpoints
             if (step is null) return ReviewConflict("stale_review_intent", "The review step changed after this page loaded. Refresh before acting.", data.Revision);
             var attachmentsToVerify = new List<Guid>();
             if (data.Revision.CurrentWorkingAttachmentId is Guid workingId) attachmentsToVerify.Add(workingId);
-            var isFinalStep = step.Position == data.Revision.ReviewSteps.Where(x => x.Cycle == step.Cycle).Max(x => x.Position);
+            var isFinalStep = step.Kind == ReviewStageKind.Approval && step.Position == data.Revision.ReviewSteps.Where(x => x.Cycle == step.Cycle).Max(x => x.Position);
             if (isFinalStep)
             {
                 if (data.Revision.ReleaseCandidateDocxAttachmentId is Guid docxId) attachmentsToVerify.Add(docxId);
@@ -632,7 +654,7 @@ public static class ManagedDocumentEndpoints
             {
                 var older = await db.ManagedDocumentRevisions.Where(x => x.DocumentId == data.Document.Id && x.Id != data.Revision.Id && x.State == ManagedDocumentState.Released).ToListAsync(ct); foreach (var prior in older.Where(x => x.Revision < data.Revision.Revision)) prior.Supersede(now);
             }
-            else { var next = data.Revision.ReviewSteps.Single(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active); db.UserNotifications.Add(new(data.Document.ProjectId, next.ApproverId, "DocumentReviewActivated", $"Review {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Final document release review is ready.", $"managed-document:{data.Document.Id}", data.Document.Id, now)); }
+            else { var next = data.Revision.ReviewSteps.Single(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active); db.UserNotifications.Add(new(data.Document.ProjectId, next.ApproverId, "DocumentReviewActivated", $"Review {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", $"{next.StageName} is ready.", $"managed-document:{data.Document.Id}", data.Document.Id, now)); }
             var resultJson = JsonSerializer.Serialize(new { final, state = data.Revision.State.ToString(), data.Revision.Version, reviewStepId = step.Id, cycle = step.Cycle, authority = step.GrantedAuthority, authoritySource = step.AuthoritySource, contentHash });
             db.ManagedDocumentOperations.Add(new(revisionId, "Approve", request.OperationKey, payloadHash, resultJson, now));
             await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");
@@ -1016,7 +1038,7 @@ public static class ManagedDocumentEndpoints
             if (auth.Session!.Version != expectedVersion) return Results.Conflict(new { error = "The connector session changed after this candidate upload began.", code = "stale_connector_session" });
             var active = data.Revision.ReviewSteps.SingleOrDefault(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active);
             var finalPosition = data.Revision.ReviewSteps.Where(x => x.Cycle == data.Revision.CurrentReviewCycle).Select(x => x.Position).DefaultIfEmpty(-1).Max();
-            if (data.Revision.State != ManagedDocumentState.InReview || active is null || active.Position != finalPosition || !string.Equals(active.ApproverId, grant.UserName, StringComparison.OrdinalIgnoreCase))
+            if (data.Revision.State != ManagedDocumentState.InReview || active is null || active.Kind != ReviewStageKind.Approval || active.Position != finalPosition || !string.Equals(active.ApproverId, grant.UserName, StringComparison.OrdinalIgnoreCase))
                 return Results.Conflict(new { error = "Release preparation is no longer at the authorized final review stage.", code = "release_stage_changed" });
             if (data.Revision.CurrentWorkingAttachmentId is not Guid workingId) return Results.Conflict(new { error = "The reviewed working evidence metadata is missing.", code = "document_integrity_blocked" });
             var working = await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == workingId, ct);
@@ -1270,7 +1292,8 @@ public static class ManagedDocumentEndpoints
 
 public sealed record CreateManagedDocumentRequest(Guid ProjectId, string Acronym, string DocumentType, string Title, string? OwnerId, string? FormalChangeSummary, string? ChangeSummary = null, string? OperationKey = null);
 public sealed record StartManagedDocumentRevisionRequest(string? FormalChangeSummary, string? ChangeSummary = null, string? OwnerId = null, string? OperationKey = null);
-public sealed record SubmitManagedDocumentRequest(string TechnicalReviewerId, string FinalApproverId, long ExpectedVersion,
+public sealed record SubmitManagedDocumentReviewerRequest(string UserId, string StageName, ReviewStageKind Kind);
+public sealed record SubmitManagedDocumentRequest(IReadOnlyList<SubmitManagedDocumentReviewerRequest>? Reviewers, long ExpectedVersion,
     Guid ExpectedWorkingAttachmentId, string ExpectedWorkingSha256, long ExpectedFormalSummaryVersion,
     string ExpectedFormalSummaryHash, string ExpectedRelationshipManifestHash, string OperationKey);
 public sealed record ReviseManagedDocumentFormalSummaryRequest(string FormalChangeSummary, string Reason, long ExpectedVersion);
