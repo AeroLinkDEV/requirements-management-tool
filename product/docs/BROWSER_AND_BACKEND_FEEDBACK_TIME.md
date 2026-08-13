@@ -106,6 +106,57 @@ The "refuse a pass that validated nothing" guard moved from inside `validate` to
 it protects against is now spread across four jobs and no single one can see it. The required check name is
 unchanged, so branch protection needed no edit.
 
+**Measured outcome: no wall-clock saving.** The critical path went from 21m37s / 25m53s / 26m53s to
+**24m47s** — inside the old range. Two assumptions in the original plan were simply wrong:
+
+- The client checks were estimated at ~3 minutes. They take **28 seconds** — `npm ci`, lint, type-check and
+  build combined. The script contracts take 24. Together they were ~50 seconds of genuinely serial work, not
+  three minutes.
+- `dotnet test <solution>` already runs the test projects **concurrently**, so putting the assemblies on
+  separate runners moved work that was already overlapping.
+
+It was kept rather than reverted, for two reasons that are not wall clock: a client lint failure now costs
+**47 seconds** to re-verify instead of re-running a 25-minute job, and it is the prerequisite for the shard
+below. But it should be recorded as what it was — a change that did not do the thing it was predicted to do.
+
+### The API suite sharded across two runners
+
+What the split *did* deliver was an exact measurement of where the time is:
+
+| Step of `backend-api` | Duration |
+|---|---|
+| Setup, checkout, .NET | 49s |
+| Restore and build the solution | 103s |
+| **Run the API test suite** | **1328s (22m8s)** |
+
+**89% of the critical path is one `dotnet test` invocation.** Nothing else is worth touching until it moves.
+
+The reason it is 22 minutes on CI and ~12 on a developer machine is not that CI is mysteriously slow: xunit
+parallelises to the core count, and `windows-latest` has **four cores** against a workstation's many more.
+**Every local timing in this document understates CI by roughly 1.85×** — measure on the runner, not the
+laptop.
+
+That is also why a second runner helps where making the tests individually cheaper did not: it buys four more
+cores. The suite splits across two shards, and since xunit has no sharding of its own, the partition is
+computed:
+
+1. Discover the test list with `--list-tests`.
+2. Reduce to classes with their test counts, sorted heaviest first, **ties broken by class name**.
+3. Assign each class to whichever shard is lighter, and run the shard's own classes by filter.
+
+Both runners execute the identical deterministic computation over the same list, so the union is every class
+and the intersection is empty *by construction* — there is no list to maintain and no way for a new test class
+to land outside both halves. The classes are very uneven (42 tests in the largest, 1 in the smallest), so
+heaviest-first matters: it balances 243 against 242, where round-robin or alphabetical would not.
+
+Two guards, because both failure modes look like success:
+
+- **An empty filter runs the whole assembly**, on both shards — which passes, and doubles the work it was
+  meant to halve. A shard that selects no classes fails instead.
+- **`~` is a substring match.** A class whose name prefixes another would pull in tests from both, and a
+  malformed filter would quietly run fewer. Each shard compares the test count it actually ran against the
+  count it claimed, so either becomes a failure rather than a smaller green suite.
+
 ## Not implemented here, and why
 
 Tracked as a GitHub issue rather than done in this increment, because each is a real piece of work rather than
