@@ -2,11 +2,10 @@ import { expect, test } from "@playwright/test";
 import { apiBase, apiLogin, login, selectProgram } from "./auth";
 
 /**
- * The verification workspace rendered every procedure it was given. The software HLR side holds 160 of them, so
+ * The verification workspace rendered every procedure it was given. The software side holds 440 of them, so
  * finding one meant scrolling past the rest, and the client received far more than it could show.
  *
- * Software HLR is driven deliberately rather than the smaller System inventory, and it must remain isolated
- * from the LLR procedures that live beside it.
+ * Software is driven deliberately rather than the smaller System inventory, including both HLR and LLR.
  */
 test("the procedure workspace pages, filters and deep-links instead of rendering everything", async ({ page, request }) => {
   test.setTimeout(240_000);
@@ -19,16 +18,16 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   const fms = workspaces.find((x: { program: { name: string } }) => x.program.name === "Flight Management System Live Program");
   const projectId = fms.projects[0].project.id;
   const all = await (await page.request.get(
-    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=HighLevelSoftware&pageSize=1`)).json();
-  expect(all.totalCount, "this only means something at showcase volume").toBeGreaterThanOrEqual(150);
+    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=Software&pageSize=1`)).json();
+  expect(all.totalCount, "this only means something at showcase volume").toBeGreaterThanOrEqual(400);
 
   // Asked of the Test Procedure Explorer. This browsing behaviour was built on the change request page, which
   // used to carry a procedure library; the library moved here, and the filters came with it rather than being
   // dropped — this is now the only place procedures are browsed, so it had to be the most capable one.
   await page.getByRole("button", { name: /Search & navigate/ }).click();
   const palette = page.getByRole("dialog", { name: "Quick navigation" });
-  await palette.getByPlaceholder(/Search pages/).fill("Software HLR Test Procedure Explorer");
-  await palette.getByRole("link", { name: /Software HLR Test Procedure Explorer/ }).click();
+  await palette.getByPlaceholder(/Search pages/).fill("Software Test Procedure Explorer");
+  await palette.getByRole("link", { name: /Software Test Procedure Explorer/ }).click();
   await expect(page.getByRole("heading", { name: "Test Procedure Explorer" })).toBeVisible({ timeout: 30_000 });
 
   // The whole point: hundreds of records, a bounded number of them on the page.
@@ -42,7 +41,7 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   await page.getByLabel("Procedure state").selectOption("Approved");
   await expect(page).toHaveURL(/procedureState=Approved/, { timeout: 30_000 });
   const approvedTotal = (await (await page.request.get(
-    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=HighLevelSoftware&state=Approved&pageSize=1`)).json()).totalCount;
+    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=Software&state=Approved&pageSize=1`)).json()).totalCount;
   await expect(page.locator(".pager")).toContainText(`of ${approvedTotal.toLocaleString()}`, { timeout: 30_000 });
 
   // A filtered worklist survives being reloaded, which is what makes it worth sharing.

@@ -15,20 +15,18 @@ const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:st
   {label:'Software Requirements Explorer',view:'requirements',discipline:'software',detail:'Read, trace, and compare controlled HLRs and LLRs',icon:'≡'},
   {label:'System Verification',view:'verification',discipline:'systemTest',detail:'The two halves of system test work',icon:'✓'},
   {label:'Software Verification',view:'verification',discipline:'softwareTest',detail:'The two halves of software test work, HLR and LLR',icon:'✓'},
-  // The pages themselves, not only the fork between them. Somebody who knows they want results should not
-  // have to arrive at a chooser first, and the software pairs are separate destinations rather than one page
-  // with a switch on it.
+  // The pages themselves, not only the fork between them. Results remain separate HLR and LLR destinations;
+  // the procedure Explorer matches Requirements and browses both software levels in one place.
   {label:'System Test Change Requests',view:'testChangeRequests',discipline:'systemTest',detail:'The SYSTCRs controlling this build’s test procedures',icon:'◫'},
   {label:'System Downstream Assessments',view:'testingCoverage',discipline:'systemTest',detail:'Approved changes waiting for a SYSTCR conclusion',icon:'⊞'},
   {label:'System Test Procedure Explorer',view:'procedureExplorer',discipline:'systemTest',detail:'Browse controlled system procedures and what this build covers',icon:'≡'},
   {label:'System Test Results',view:'testResults',discipline:'systemTest',detail:'What this build runs, and the determinations recorded against it',icon:'▦'},
   {label:'Software HLR Test Change Requests',view:'testChangeRequests',discipline:'softwareTest',artifactKind:'HighLevel',detail:'The HLRTCRs controlling high-level software test procedures',icon:'◫'},
   {label:'Software HLR Downstream Assessments',view:'testingCoverage',discipline:'softwareTest',artifactKind:'HighLevel',detail:'Approved changes waiting for an HLRTCR conclusion',icon:'⊞'},
-  {label:'Software HLR Test Procedure Explorer',view:'procedureExplorer',discipline:'softwareTest',artifactKind:'HighLevel',detail:'Browse controlled HLR procedures and what this build covers',icon:'≡'},
+  {label:'Software Test Procedure Explorer',view:'procedureExplorer',discipline:'softwareTest',detail:'Browse controlled HLR and LLR procedures and what this build covers',icon:'≡'},
   {label:'Software HLR Test Results',view:'testResults',discipline:'softwareTest',artifactKind:'HighLevel',detail:'High-level software test set and recorded determinations',icon:'▦'},
   {label:'Software LLR Test Change Requests',view:'testChangeRequests',discipline:'softwareTest',artifactKind:'LowLevel',detail:'The LLRTCRs controlling low-level software test procedures',icon:'◫'},
   {label:'Software LLR Downstream Assessments',view:'testingCoverage',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Approved changes waiting for an LLRTCR conclusion',icon:'⊞'},
-  {label:'Software LLR Test Procedure Explorer',view:'procedureExplorer',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Browse controlled LLR procedures and what this build covers',icon:'≡'},
   {label:'Software LLR Test Results',view:'testResults',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Low-level software test set and recorded determinations',icon:'▦'},
   {label:'Digital Thread',view:'lifecycle',discipline:'system',detail:'Traceability and outputs across the released evidence path',icon:'↗'},
   {label:'Lifecycle Decision Room',view:'release',discipline:'system',detail:'Release readiness, change impact, evidence, and authority',icon:'◆'},

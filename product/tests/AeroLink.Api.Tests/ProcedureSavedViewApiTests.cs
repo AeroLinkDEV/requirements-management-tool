@@ -64,7 +64,7 @@ public sealed class ProcedureSavedViewApiTests
         using var client = await SignInAsync(factory, Member);
 
         var created = await client.PostAsJsonAsync("/api/test-procedures/views",
-            Create(seeded.ProjectId, "Blocked runs", """{"outcome":"Blocked","state":"Approved"}"""));
+            Create(seeded.ProjectId, "Blocked runs", """{"level":"Software","outcome":"Blocked","state":"Approved"}"""));
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
 
         // Carried on the list response, exactly as the requirements workspace carries its own.
@@ -74,6 +74,7 @@ public sealed class ProcedureSavedViewApiTests
         var view = Assert.Single(views);
         Assert.Equal("Blocked runs", view.GetProperty("name").GetString());
         Assert.True(view.GetProperty("owned").GetBoolean());
+        Assert.Contains("\"level\":\"Software\"", view.GetProperty("queryJson").GetString());
         Assert.Contains("\"outcome\":\"Blocked\"", view.GetProperty("queryJson").GetString());
     }
 
@@ -85,6 +86,7 @@ public sealed class ProcedureSavedViewApiTests
     // Vocabularies the Explorer cannot apply.
     [InlineData("""{"outcome":"Passed"}""", """["identifier"]""")]
     [InlineData("""{"state":"Cancelled"}""", """["identifier"]""")]
+    [InlineData("""{"level":"Component"}""", """["identifier"]""")]
     // An id that is not one filters to nothing while looking like a worklist.
     [InlineData("""{"documentId":"not-a-guid"}""", """["identifier"]""")]
     // A column this Explorer does not show.

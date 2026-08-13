@@ -91,22 +91,20 @@ test('Documentation Center has a canonical Project route while legacy build rout
 })
 
 /**
- * The six verification pages, and the corrective action that hangs off one of them.
+ * The verification pages, and the corrective action that hangs off one of them.
  *
- * The software level rides on artifactKind rather than on a Discipline value, so a round trip through the
- * address is the only thing that proves HLR and LLR are actually distinct destinations rather than the same
- * page reached twice.
+ * Change control and results keep distinct HLR and LLR routes. The Software procedure Explorer is the one
+ * combined exception, matching the Software Requirements Explorer rather than duplicating it by level.
  */
 test('each verification page round-trips, and a results route may carry a problem report', () => {
   const pages = [
     { view: 'testingCoverage', discipline: 'systemTest', kind: undefined, path: 'system-verification/coverage' },
     { view: 'procedureExplorer', discipline: 'systemTest', kind: undefined, path: 'system-verification/procedures' },
     { view: 'testResults', discipline: 'systemTest', kind: undefined, path: 'system-verification/results' },
+    { view: 'procedureExplorer', discipline: 'softwareTest', kind: undefined, path: 'software-verification/procedures' },
     { view: 'testingCoverage', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/coverage' },
-    { view: 'procedureExplorer', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/procedures' },
     { view: 'testResults', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/results' },
     { view: 'testingCoverage', discipline: 'softwareTest', kind: 'LowLevel', path: 'software-verification/llr/coverage' },
-    { view: 'procedureExplorer', discipline: 'softwareTest', kind: 'LowLevel', path: 'software-verification/llr/procedures' },
     { view: 'testResults', discipline: 'softwareTest', kind: 'LowLevel', path: 'software-verification/llr/results' },
   ] as const
 
@@ -119,6 +117,12 @@ test('each verification page round-trips, and a results route may carry a proble
         : { view: page.view, discipline: page.discipline },
     )
   }
+
+  // Existing level-specific Explorer links still open on their requested filter.
+  expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/hlr/procedures'))
+    .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'HighLevel' })
+  expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/llr/procedures'))
+    .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'LowLevel' })
 
   // The branch root is the chooser between the two, and carries nothing else.
   expect(routePath(context, 'verification', 'systemTest')).toBe('/programs/program-a/projects/project-a/releases/release-a/system-verification')

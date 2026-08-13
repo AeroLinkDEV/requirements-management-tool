@@ -23,7 +23,11 @@ public static class ProcedureSavedViewContract
 
     /// <summary>Query fields the Explorer can actually apply. Anything else is rejected rather than kept.</summary>
     private static readonly HashSet<string> Fields = new(StringComparer.OrdinalIgnoreCase)
-    { "version", "search", "state", "outcome", "documentId", "sectionId" };
+    { "version", "search", "level", "state", "outcome", "documentId", "sectionId" };
+
+    /// <summary>The combined software scope and the three exact procedure levels the Explorer can apply.</summary>
+    private static readonly HashSet<string> Levels = new(StringComparer.OrdinalIgnoreCase)
+    { "System", "Software", "HighLevel", "LowLevel" };
 
     /// <summary>
     /// Procedure states as the list endpoint names them, plus the empty string for "any". Kept here rather
@@ -67,6 +71,8 @@ public static class ProcedureSavedViewContract
             if (value is not JsonValue) return Invalid($"'{key}' must be a single value.");
 
             var text = value.ToString();
+            if (string.Equals(key, "level", StringComparison.OrdinalIgnoreCase) && !Levels.Contains(text))
+                return Invalid($"'{text}' is not a procedure level.");
             if (string.Equals(key, "state", StringComparison.OrdinalIgnoreCase) && !States.Contains(text))
                 return Invalid($"'{text}' is not a procedure state.");
             if (string.Equals(key, "outcome", StringComparison.OrdinalIgnoreCase) && !Outcomes.Contains(text))

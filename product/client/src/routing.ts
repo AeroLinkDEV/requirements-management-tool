@@ -147,6 +147,7 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "system-verification/coverage") return { ...base, view: "testingCoverage", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "coverage" && tail[2]) return { ...base, view: "testingCoverage", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (path === "system-verification/procedures") return { ...base, view: "procedureExplorer", discipline: "systemTest" };
+  if (path === "software-verification/procedures") return { ...base, view: "procedureExplorer", discipline: "softwareTest" };
   if (path === "system-verification/results") return { ...base, view: "testResults", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "results" && tail[2]) return { ...base, view: "testResults", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (path === "software-verification/hlr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: "HighLevel" };
@@ -249,7 +250,9 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "testChangeRequests": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests`;
     case "testChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/${encodeURIComponent(artifactId ?? "")}`;
     case "createTestChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/new`;
-    case "procedureExplorer": return `${root}/${verificationBranch(discipline, artifactKind)}/procedures`;
+    case "procedureExplorer": return discipline === "softwareTest"
+      ? `${root}/software-verification/procedures`
+      : `${root}/system-verification/procedures`;
     case "testResults": return `${root}/${verificationBranch(discipline, artifactKind)}/results${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
     case "documents": {
       if (discipline === "systemTest" || discipline === "softwareTest")
