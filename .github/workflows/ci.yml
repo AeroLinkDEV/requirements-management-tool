@@ -190,7 +190,7 @@ jobs:
   # it does on a developer machine — ~22 minutes on CI against ~12 locally. A second runner buys four more
   # cores, which is why this shortens the job where making the tests individually cheaper did not.
   backend-api:
-    name: API test suite (${{ matrix.shard }}/2)
+    name: API test suite (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: changes
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
     runs-on: windows-latest
@@ -200,7 +200,11 @@ jobs:
       # buying that nothing costs a full gate to re-run.
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        # Three. Two took the suite from 1328s to 656/771s, at which point the browser journeys became the
+        # critical path and a third shard here started paying for itself again. The count is read from
+        # `strategy.job-total` everywhere below rather than written twice — a matrix that says three while a
+        # divisor says two would silently run a third of the tests and pass.
+        shard: [1, 2, 3]
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -240,13 +244,18 @@ jobs:
             | sort | uniq -c | sed 's/^ *//' \
             | sort -k1,1rn -k2,2 > counts.txt
 
-          awk -v shard="${{ matrix.shard }}" '
+          awk -v shard="${{ matrix.shard }}" -v shards="${{ strategy.job-total }}" '
             { count[NR] = $1; class[NR] = $2 }
             END {
-              first = 0; second = 0; mine = 0; filter = ""
+              for (s = 1; s <= shards; s++) load[s] = 0
+              mine = 0; filter = ""
               for (i = 1; i <= NR; i++) {
-                if (first <= second) { first += count[i]; owner = 1 } else { second += count[i]; owner = 2 }
-                if (owner == shard) {
+                # Lightest shard takes the next heaviest class; ties go to the lowest index, which is what
+                # keeps every runner computing the identical assignment.
+                best = 1
+                for (s = 2; s <= shards; s++) if (load[s] < load[best]) best = s
+                load[best] += count[i]
+                if (best == shard) {
                   mine += count[i]
                   filter = filter (filter == "" ? "" : "|") "FullyQualifiedName~" class[i] "."
                 }
@@ -264,7 +273,7 @@ jobs:
             echo "::error::Shard ${{ matrix.shard }} selected no test classes. Test discovery or the partition is broken."
             exit 1
           fi
-          echo "Shard ${{ matrix.shard }} of 2: $expected tests across $(grep -c . counts.txt) discovered classes."
+          echo "Shard ${{ matrix.shard }} of ${{ strategy.job-total }}: $expected tests across $(grep -c . counts.txt) discovered classes."
 
           # The count is read from the TRX rather than the console summary. Piping this command through `tee`
           # to capture its text produced an empty file and an empty job log on the Windows runner — the tests
@@ -429,18 +438,25 @@ jobs:
           & ./product/scripts/AeroLinkRemoteDemoRecovery.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Remote-demo recovery regression failed.' }
 
-  # Still two shards. Adding more was considered and measured against, twice now: the browser shards run
-  # 11–16 minutes, and the backend job they would have to beat to become the critical path is `backend-api`
-  # at roughly the same. A third or fourth runner would shorten a job nobody is waiting for while paying
-  # setup for it. Worth revisiting only once `backend-api` itself comes down — see
-  # BROWSER_AND_BACKEND_FEEDBACK_TIME.md.
+  # Four shards now, and the reasoning that held them at two is what changed rather than anyone's opinion.
+  # Twice the answer was "the journeys are not the critical path, so splitting them shortens a job nobody is
+  # waiting for". Sharding `backend-api` removed the job they were being compared against, and the journeys
+  # became the critical path at 997s — so the same test now points the other way.
+  #
+  # Measured on the run that made this true: 603s and 807s of journeys against ~175s of setup per shard.
+  # Four splits 1410 seconds of journeys about four ways while paying setup once more, which is worth it while
+  # the journeys are still the longest thing in the gate. It stops being worth it when a shard's setup is a
+  # large fraction of its run — at four, setup is roughly a third, which is the point to stop.
+  #
+  # Playwright shards by test file, not by duration, so the halves were 25% apart. More shards makes each
+  # imbalance smaller in absolute terms, which is a second reason four beats three here.
   #
   # `fail-fast: false` is the change. The opposite cancelled the sibling shard the moment one failed, so a
   # single flake cost a rerun purely to discover whether anything else had also failed. A cancelled shard
   # reports nothing, which is the most expensive kind of nothing — it buys runner minutes with information
   # and then spends twenty-five minutes buying the information back.
   browser-pr:
-    name: Browser journeys (${{ matrix.shard }}/2)
+    name: Browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: changes
     # Merge-group runs as well as pull requests. Gated on `pull_request` alone, these shards skip inside a
     # merge queue — and a skipped job is not a failed one, so the queue would merge on a green tick having run
@@ -460,7 +476,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -506,7 +522,7 @@ jobs:
         working-directory: product/client
         env:
           AEROLINK_E2E_SKIP_BUILD: "true"
-        run: npx playwright test --shard=${{ matrix.shard }}/2
+        run: npx playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       - name: Upload failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -587,7 +603,7 @@ jobs:
           retention-days: 7
 
   browser-full:
-    name: Full browser journeys (${{ matrix.shard }}/3)
+    name: Full browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: changes
     # Schedule and manual dispatch only. A squash merge of a green pull request puts a tree on main that
     # is identical to the one browser-pr tested minutes earlier, so re-running the journeys on push buys
@@ -633,7 +649,7 @@ jobs:
         working-directory: product/client
         env:
           AEROLINK_E2E_SKIP_BUILD: "true"
-        run: npx playwright test --shard=${{ matrix.shard }}/3
+        run: npx playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       - name: Upload diagnostics and timings
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
