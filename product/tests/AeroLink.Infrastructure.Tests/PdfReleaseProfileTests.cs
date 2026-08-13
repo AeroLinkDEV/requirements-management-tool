@@ -122,6 +122,34 @@ public sealed class PdfReleaseProfileTests
     }
 
     [Fact]
+    public void Word_style_empty_trailing_xref_section_is_not_classified_as_an_incremental_update()
+    {
+        var valid = ProfessionalPublicationRenderer.Render(Publication(), "pdf", "SDP-000001.00").Content;
+        var text = Encoding.ASCII.GetString(valid);
+        var startxref = text.LastIndexOf("startxref", StringComparison.Ordinal);
+        var offsetStart = startxref + 9;
+        var offsetEnd = offsetStart;
+        while (offsetEnd < text.Length && char.IsDigit(text[offsetEnd])) offsetEnd++;
+        var offset = text[offsetStart..offsetEnd];
+        var sizeMark = text.IndexOf("/Size ", StringComparison.Ordinal);
+        var sizeEnd = sizeMark + 6;
+        while (sizeEnd < text.Length && char.IsDigit(text[sizeEnd])) sizeEnd++;
+        var size = text[(sizeMark + 6)..sizeEnd];
+        var wordShaped = valid.Concat(Encoding.ASCII.GetBytes($"\r\nxref\r\n0 0\r\ntrailer\r\n<</Size {size} /Root 1 0 R>>\r\nstartxref\r\n{offset}\r\n%%EOF")).ToArray();
+        Assert.False(PdfReleaseProfile.HasDisallowedIncrementalUpdate(wordShaped));
+    }
+
+    [Fact]
+    public void A_real_incremental_update_with_entries_is_rejected()
+    {
+        var valid = ProfessionalPublicationRenderer.Render(Publication(), "pdf", "SDP-000001.00").Content;
+        var incremental = valid.Concat(Encoding.ASCII.GetBytes("\r\nxref\r\n0 1\r\n0000000000 65535 f \r\ntrailer\r\n<</Size 150 /Root 1 0 R>>\r\nstartxref\r\n99999\r\n%%EOF")).ToArray();
+        var validation = PdfReleaseProfile.Validate(incremental);
+        Assert.False(validation.IsValid);
+        Assert.Equal("pdf_structure_invalid", validation.Code);
+    }
+
+    [Fact]
     public void Corrupt_cross_reference_offsets_are_rejected()
     {
         var valid = ProfessionalPublicationRenderer.Render(Publication(), "pdf", "SDP-000001.00").Content;

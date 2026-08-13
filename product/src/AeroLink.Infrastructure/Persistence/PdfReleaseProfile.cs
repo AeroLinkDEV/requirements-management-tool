@@ -89,7 +89,7 @@ public static class PdfReleaseProfile
             return "The release PDF declares an unsupported version.";
         if (!EndsWithEndOfFileMarker(bytes))
             return "The release PDF is truncated or carries trailing data after its end marker.";
-        if (CountToken(bytes, "startxref") != 1)
+        if (HasDisallowedIncrementalUpdate(bytes))
             return "The release PDF must be a single-version export without incremental updates.";
         return null;
     }
@@ -109,15 +109,48 @@ public static class PdfReleaseProfile
         return true;
     }
 
-    private static int CountToken(byte[] bytes, string token)
+    /// <summary>
+    /// True when the PDF carries a real incremental update rather than Microsoft Word's harmless
+    /// trailing empty cross-reference section (<c>xref\n0 0\ntrailer ...</c>).
+    /// </summary>
+    public static bool HasDisallowedIncrementalUpdate(byte[] bytes)
     {
-        var needle = Encoding.ASCII.GetBytes(token);
-        var count = 0;
-        for (var index = 0; index + needle.Length <= bytes.Length; index++)
-        {
-            if (bytes.AsSpan(index, needle.Length).SequenceEqual(needle)) count++;
-        }
-        return count;
+        const int tailWindow = 65536;
+        var offset = Math.Max(0, bytes.Length - tailWindow);
+        var tail = Encoding.ASCII.GetString(bytes, offset, bytes.Length - offset);
+        var lastEndMarker = tail.LastIndexOf("%%EOF", StringComparison.Ordinal);
+        if (lastEndMarker < 0) return false; // the end-marker check reports the clearer failure first
+        var previousEndMarker = tail.LastIndexOf("%%EOF", lastEndMarker - 1, StringComparison.Ordinal);
+        if (previousEndMarker < 0) return false;
+        return !IsBenignEmptyXrefSection(tail[(previousEndMarker + 5)..lastEndMarker]);
+    }
+
+    /// <summary>
+    /// Microsoft Word's PDF export appends a harmless empty cross-reference section
+    /// (<c>xref\n0 0\ntrailer ...</c>). Any additional section that actually adds entries is
+    /// a real incremental update and is refused.
+    /// </summary>
+    private static bool IsBenignEmptyXrefSection(string section)
+    {
+        if (section.Any(character => character != '\r' && character != '\n' && character != ' ' && character != '\t'
+            && (character < 32 || character > 126)))
+            return false;
+        var xref = section.IndexOf("xref", StringComparison.Ordinal);
+        if (xref < 0 || section.IndexOf("trailer", StringComparison.Ordinal) < 0
+            || section.IndexOf("startxref", StringComparison.Ordinal) < 0)
+            return false;
+        var index = xref + 4;
+        return TryReadInteger(section, ref index, out var first) && first == 0
+            && TryReadInteger(section, ref index, out var second) && second == 0;
+    }
+
+    private static bool TryReadInteger(string text, ref int index, out int value)
+    {
+        value = 0;
+        while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
+        var start = index;
+        while (index < text.Length && char.IsDigit(text[index])) index++;
+        return index > start && int.TryParse(text.AsSpan(start, index - start), out value);
     }
 
     private static string? FindProhibitedFeature(PdfInternals internals)

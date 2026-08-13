@@ -227,6 +227,17 @@ public sealed class WordDocumentStructureTests
         ManagedDocumentFileService.ValidateDocx(successor, requireDraftWatermark: true);
     }
 
+    [Fact]
+    public void Word_part_renames_do_not_change_the_technical_fingerprint_or_release_validation()
+    {
+        var draft = ProfessionalPublicationRenderer.Render(ControlledPublication("Draft", "DRAFT", "01"), "docx", "SDP-000001.01").Content;
+        var released = ManagedDocumentFileService.ApplyReleaseMarking(draft);
+        var renamed = RenameStoryPart(RenameStoryPart(released, "header1.xml", "header2.xml"), "footer1.xml", "footer2.xml");
+
+        Assert.Equal(WordDocumentStructure.TechnicalContentFingerprint(released), WordDocumentStructure.TechnicalContentFingerprint(renamed));
+        Assert.True(ManagedDocumentFileService.ValidateReleaseTransformation(draft, renamed, "SDP-000001", 1).IsValid);
+    }
+
     private const string HeaderType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header";
 
     private static ProfessionalPublication ControlledPublication(string status, string? watermark, string? revision = null) =>
@@ -318,5 +329,36 @@ public sealed class WordDocumentStructureTests
             writer.Write(xml.Replace(from, to, StringComparison.Ordinal));
         }
         return output.ToArray();
+    }
+
+    private static byte[] RenameStoryPart(byte[] bytes, string from, string to)
+    {
+        using var output = new MemoryStream();
+        output.Write(bytes);
+        output.Position = 0;
+        using (var archive = new ZipArchive(output, ZipArchiveMode.Update, true))
+        {
+            ReplaceEntryText(archive, "word/_rels/document.xml.rels", xml => xml.Replace($"Target=\"{from}\"", $"Target=\"{to}\"", StringComparison.Ordinal));
+            ReplaceEntryText(archive, "[Content_Types].xml", xml => xml.Replace($"/word/{from}", $"/word/{to}", StringComparison.Ordinal));
+            var entry = archive.GetEntry($"word/{from}")!;
+            string content;
+            using (var reader = new StreamReader(entry.Open())) content = reader.ReadToEnd();
+            entry.Delete();
+            var replacement = archive.CreateEntry($"word/{to}");
+            using var writer = new StreamWriter(replacement.Open(), new UTF8Encoding(false));
+            writer.Write(content);
+        }
+        return output.ToArray();
+    }
+
+    private static void ReplaceEntryText(ZipArchive archive, string entryName, Func<string, string> transform)
+    {
+        var entry = archive.GetEntry(entryName)!;
+        string content;
+        using (var reader = new StreamReader(entry.Open())) content = reader.ReadToEnd();
+        entry.Delete();
+        var replacement = archive.CreateEntry(entryName);
+        using var writer = new StreamWriter(replacement.Open(), new UTF8Encoding(false));
+        writer.Write(transform(content));
     }
 }

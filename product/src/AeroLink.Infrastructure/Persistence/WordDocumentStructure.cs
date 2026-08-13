@@ -41,11 +41,6 @@ public static class WordDocumentStructure
         "word/document.xml", "word/footnotes.xml", "word/endnotes.xml", "word/comments.xml", "word/glossary/document.xml"
     ];
 
-    private static bool IsStoryPart(string name) =>
-        StoryParts.Contains(name, StringComparer.OrdinalIgnoreCase)
-        || name.StartsWith("word/header", StringComparison.OrdinalIgnoreCase)
-        || name.StartsWith("word/footer", StringComparison.OrdinalIgnoreCase);
-
     /// <summary>Reads package parts as UTF-8 text, rejecting unsafe paths and excessive packages.</summary>
     public static IReadOnlyDictionary<string, string> ReadWordParts(byte[] bytes)
     {
@@ -193,6 +188,7 @@ public static class WordDocumentStructure
             if (node.Name != W + "t" && node.Name != W + "tab" && node.Name != W + "br" && node.Name != W + "cr")
                 continue;
             if (InsideSkippedRegion(node)) continue;
+            if (node.Name == W + "tab" && node.Ancestors(W + "tabs").Any()) continue;
             if (node.Name == W + "t")
             {
                 if (!node.Ancestors(W + "del").Any()) builder.Append(node.Value);
@@ -223,36 +219,74 @@ public static class WordDocumentStructure
 
     /// <summary>
     /// A stable fingerprint of the technical content of a document: story text outside the named
-    /// status/watermark controls, embedded binary resources, and relationship targets. Word package
-    /// metadata (styles, settings, docProps, fonts, theme, custom XML) is deliberately excluded because
-    /// Word rewrites it on every save without changing what the document renders or links to.
+    /// status/watermark controls (document body, effective headers, footers, notes and comments),
+    /// embedded binary resources, and external hyperlink targets. Word rewrites part names,
+    /// relationships and package metadata (styles, settings, docProps, fonts, theme, custom XML) on
+    /// every save without changing what the document renders, so those are deliberately not compared.
     /// </summary>
     public static string TechnicalContentFingerprint(byte[] bytes)
     {
         var parts = ReadWordParts(bytes);
+        var binaries = EmbeddedResourceHashes(bytes);
         var builder = new StringBuilder();
-        foreach (var name in parts.Keys.Where(IsStoryPart).OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+        foreach (var name in StoryParts)
         {
-            var text = StoryText(parts[name]);
+            if (!parts.TryGetValue(name, out var xml)) continue;
+            var text = StoryText(xml);
             if (text.Length == 0) continue;
             builder.Append("T|").Append(name).Append('|').Append(text).Append('\n');
         }
-        foreach (var pair in EmbeddedResourceHashes(bytes).OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
-            builder.Append("B|").Append(pair.Key).Append('|').Append(pair.Value).Append('\n');
-        foreach (var name in parts.Keys.Where(name => name.EndsWith(".rels", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
-            builder.Append("R|").Append(name).Append('|').Append(RelationshipSignature(parts[name])).Append('\n');
+        var resolution = ResolveHeaders(bytes);
+        foreach (var section in resolution.Sections)
+        {
+            foreach (var (variant, part) in section.RequiredVariants())
+            {
+                var text = part is null ? "" : StoryText(parts[part]);
+                if (text.Length == 0) continue;
+                builder.Append("H|").Append(section.Index).Append('|').Append(variant).Append('|').Append(text).Append('\n');
+            }
+        }
+        var footerTexts = parts.Keys
+            .Where(name => name.StartsWith("word/footer", StringComparison.OrdinalIgnoreCase))
+            .Select(name => StoryText(parts[name]))
+            .Where(text => text.Length > 0)
+            .OrderBy(text => text, StringComparer.Ordinal)
+            .ToList();
+        if (footerTexts.Count > 0) builder.Append("F|").Append(string.Join(";", footerTexts)).Append('\n');
+        foreach (var hash in binaries.Values.OrderBy(hash => hash, StringComparer.Ordinal))
+            builder.Append("B|").Append(hash).Append('\n');
+        foreach (var target in ExternalHyperlinkTargets(parts).OrderBy(target => target, StringComparer.Ordinal))
+            builder.Append("X|").Append(target).Append('\n');
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString()))).ToLowerInvariant();
     }
 
-    private static string RelationshipSignature(string xml)
+    /// <summary>All external hyperlink targets in story parts, resolved through their relationships.</summary>
+    private static IEnumerable<string> ExternalHyperlinkTargets(IReadOnlyDictionary<string, string> parts)
     {
-        var document = XDocument.Parse(xml);
-        var entries = document.Root!.Elements(PR + "Relationship")
-            .Select(relationship => $"{relationship.Attribute("Type")?.Value ?? ""}|{relationship.Attribute("Target")?.Value ?? ""}|{relationship.Attribute("TargetMode")?.Value ?? ""}")
-            .OrderBy(entry => entry, StringComparer.Ordinal)
-            .ToList();
-        return string.Join(";", entries);
+        var targets = new List<string>();
+        foreach (var name in parts.Keys.Where(name => name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (name.EndsWith(".rels", StringComparison.OrdinalIgnoreCase)) continue;
+            var relationships = ParseRelationships(parts.TryGetValue(RelationshipsName(name), out var rels) ? rels : "");
+            XDocument document;
+            try { document = XDocument.Parse(parts[name], LoadOptions.PreserveWhitespace); }
+            catch (System.Xml.XmlException) { continue; }
+            foreach (var hyperlink in document.Descendants(W + "hyperlink"))
+            {
+                var id = (string?)hyperlink.Attribute(R + "id");
+                if (id is null || !relationships.TryGetValue(id, out var target)) continue;
+                if (target.External && !string.IsNullOrWhiteSpace(target.Target)) targets.Add(target.Target);
+            }
+        }
+        return targets;
+    }
+
+    private static string RelationshipsName(string partName)
+    {
+        var separator = partName.LastIndexOf('/');
+        var directory = separator < 0 ? "" : partName[..separator];
+        var file = separator < 0 ? partName : partName[(separator + 1)..];
+        return directory.Length == 0 ? $"_rels/{file}.rels" : $"{directory}/_rels/{file}.rels";
     }
 
     /// <summary>The controlled field values present in a DOCX.</summary>
