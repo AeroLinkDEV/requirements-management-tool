@@ -26,7 +26,7 @@ test('author creates, edits, submits, and sequentially approves a change request
     await selectProgram(page,programName)
   }
 
-  await openPageFromPalette(page,'Software HLR Test Change Requests')
+  await openPageFromPalette(page,'Software HLR Downstream Assessments')
   await expect(page.getByText('Procedure authoring waits for governed requirement materialization')).toBeVisible()
   await expect(page.getByText(/no immutable requirement revisions yet/)).toBeVisible()
   await expect(page.getByText(/Existing inherited procedures remain visible/)).toBeVisible()

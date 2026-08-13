@@ -71,6 +71,75 @@ public static class BaselineEndpoints
             return Results.Ok(new { page, pageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)pageSize), items });
         });
 
+        // The verification twin of the endpoint above, deliberately next to it: the two registers are meant to
+        // be the same register over different artifacts, and a difference between them should be visible in a
+        // diff rather than discovered on the page.
+        //
+        // Same query parameters, same page envelope, same row fields. Where a change request has a target
+        // release a package has the build it belongs to, and where a change request counts requirement changes
+        // a package counts procedure changes.
+        app.MapGet("/api/history/test-change-requests", async (Guid projectId, string? search, Guid? releaseId,
+            TestChangeReviewDiscipline? discipline, string? state, string? baseNumber, int page, int pageSize,
+            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
+            var source = db.TestChangeReviews.AsNoTracking().Where(x => x.ProjectId == projectId);
+            if (discipline is not null) source = source.Where(x => x.Discipline == discipline);
+            if (!string.IsNullOrWhiteSpace(state))
+            {
+                if (Enum.TryParse<TestChangeReviewState>(state, true, out var parsedState))
+                    source = source.Where(x => x.State == parsedState);
+                else return Results.BadRequest(new { error = "The requested lifecycle state is not recognized." });
+            }
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var q = search.Trim().ToLower();
+                source = source.Where(x => x.BaseNumber.ToLower().Contains(q) || x.Title.ToLower().Contains(q)
+                    || x.Problem.ToLower().Contains(q) || x.Analysis.ToLower().Contains(q) || x.Solution.ToLower().Contains(q)
+                    || x.SourceChangeRequestNumber.ToLower().Contains(q) || x.SourceProblemReportNumber.ToLower().Contains(q));
+            }
+            if (releaseId is not null) source = source.Where(x => x.ReleaseId == releaseId);
+            if (!string.IsNullOrWhiteSpace(baseNumber))
+                source = source.Where(x => x.BaseNumber == baseNumber);
+            else
+                // Latest revision per controlled number, as the requirements register does — but packages that
+                // predate controlled numbering carry an empty one, and grouping those together would collapse
+                // every unnumbered package in the Project into whichever happened to hold the highest revision.
+                source = source.Where(x => x.BaseNumber == "" || x.Revision == db.TestChangeReviews
+                    .Where(other => other.ProjectId == projectId && other.BaseNumber == x.BaseNumber)
+                    .Max(other => other.Revision));
+            var total = await source.CountAsync(ct);
+            // SQLite can neither order nor aggregate a DateTimeOffset, so the newest-first ordering the
+            // requirements register uses is available only on PostgreSQL. Same compromise, same reason.
+            var ordered = db.Database.IsSqlite()
+                ? source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
+                : source.OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.BaseNumber).ThenByDescending(x => x.Revision);
+            var items = await ordered.Skip((page - 1) * pageSize).Take(pageSize)
+                .Select(x => new
+                {
+                    x.Id,
+                    displayNumber = x.BaseNumber == ""
+                        ? (x.ChangeRequestId != null ? x.SourceChangeRequestNumber : x.SourceProblemReportNumber)
+                        : x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision,
+                    x.BaseNumber,
+                    x.Revision,
+                    x.Title,
+                    state = x.State.ToString(),
+                    deferredFromState = x.DeferredFromState == null ? null : x.DeferredFromState.ToString(),
+                    x.AuthorId,
+                    // A package belongs to the build it was raised against; that is its allocation.
+                    targetReleaseId = x.ReleaseId,
+                    discipline = x.Discipline.ToString(),
+                    procedureCount = x.ProcedureChanges.Count,
+                    x.CreatedAt,
+                    x.UpdatedAt,
+                    revisionCount = x.BaseNumber == "" ? 1 : db.TestChangeReviews
+                        .Count(other => other.ProjectId == projectId && other.BaseNumber == x.BaseNumber),
+                }).ToListAsync(ct);
+            return Results.Ok(new { page, pageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)pageSize), items });
+        });
+
         app.MapGet("/api/history/requirements", async (Guid projectId, string? search, Guid? releaseId, Guid? baselineId, Guid? buildId,
             int page, int pageSize, AeroLinkDbContext db, CancellationToken ct) =>
         {

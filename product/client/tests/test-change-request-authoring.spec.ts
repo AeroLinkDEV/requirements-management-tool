@@ -149,7 +149,7 @@ test('released builds offer no new test change request action', async ({ page, r
   await page.goto(
     `/programs/${seeded.workspace.program.id}/projects/${seeded.workspace.project.id}/releases/${seeded.workspace.release.id}/system-verification/coverage`,
     { waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole('button', { name: /New System Test Change Request/ })).toHaveCount(0)
 })
 

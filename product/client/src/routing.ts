@@ -1,6 +1,6 @@
 export type View =
   | "projects" | "builds" | "baselineImports" | "personnel" | "approvalConfiguration" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "testingCoverage" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
+  | "verification" | "testingCoverage" | "testChangeRequests" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
@@ -130,6 +130,14 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
     return { ...base, view: "createTestChangeRequest", discipline: "softwareTest", artifactKind: "HighLevel" };
   if (path === "software-verification/llr/change-requests/new")
     return { ...base, view: "createTestChangeRequest", discipline: "softwareTest", artifactKind: "LowLevel" };
+  // The register, which is a page of its own here as it is on the requirements side. Declared after the
+  // `/new` routes above so raising one is not read as a package whose id happens to be "new".
+  if (path === "system-verification/change-requests")
+    return { ...base, view: "testChangeRequests", discipline: "systemTest" };
+  if (path === "software-verification/hlr/change-requests")
+    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: "HighLevel" };
+  if (path === "software-verification/llr/change-requests")
+    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: "LowLevel" };
   if (path === "system-verification/coverage") return { ...base, view: "testingCoverage", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "coverage" && tail[2]) return { ...base, view: "testingCoverage", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (path === "system-verification/procedures") return { ...base, view: "procedureExplorer", discipline: "systemTest" };
@@ -232,6 +240,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
     case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification`;
     case "testingCoverage": return `${root}/${verificationBranch(discipline, artifactKind)}/coverage${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
+    case "testChangeRequests": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests`;
     case "createTestChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/new`;
     case "procedureExplorer": return `${root}/${verificationBranch(discipline, artifactKind)}/procedures`;
     case "testResults": return `${root}/${verificationBranch(discipline, artifactKind)}/results${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;

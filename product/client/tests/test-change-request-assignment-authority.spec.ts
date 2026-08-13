@@ -81,7 +81,7 @@ test('TCR assignment authority drives the controls the browser shows', async ({ 
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, programName)
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
+  await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
   await page.locator('.downstreamAssessment').filter({ hasText: 'SRCR-' }).getByRole('button', { name: 'Open assessment' }).click()
   const adminDrawer = page.getByRole('dialog', { name: /test impact/ })
   await expect(adminDrawer.getByRole('button', { name: 'Decide' }).first()).toBeVisible({ timeout: 30_000 })

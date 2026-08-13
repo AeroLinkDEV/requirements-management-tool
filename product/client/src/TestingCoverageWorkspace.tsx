@@ -6,7 +6,6 @@ import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import { pickerSummary } from './pickerText'
-import { stateLabel } from './presentation'
 import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, successorReferenceFor, supersededHistoryFor } from './testChangeReviewPresentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './DownstreamAssessmentQueue.css'
@@ -91,10 +90,6 @@ const assessmentName = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System Test' : discipline === 'HighLevelSoftware' ? 'HLR Test' : 'LLR Test'
 const tcrAcronym = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'SYSTCR' : discipline === 'HighLevelSoftware' ? 'HLRTCR' : 'LLRTCR'
-/// The package's own state, read the way a person says it rather than the way the enum spells it.
-// The requirements side's own label helper, so a state cannot read one way on one side and another way on
-// the other. It already splits InReview into "In review"; the local copy of that rule is gone.
-const registerStateLabel = (state: string) => stateLabel(state)
 const missingCaseFields = (request: TestChangeRequest) => [
   ['Title', request.title], ['Problem', request.problem],
   ['Analysis', request.analysis], ['Solution', request.solution],
@@ -416,12 +411,6 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   const mine = requests.filter(x => x.discipline === discipline)
   const visibleMine = reviewsVisibleInCurrentRelease(mine)
   // Only packages that have been numbered are listed as change requests. An assessment that has not yet
-  // concluded is not a TCR — it carries its source change request's number rather than its own, and it is
-  // already shown, as an assessment, in the section above.
-  const numberedRegister = visibleMine
-    .filter(x => x.displayNumber.startsWith(tcrAcronym(discipline)))
-    .slice()
-    .sort((a, b) => a.displayNumber.localeCompare(b.displayNumber))
   const authoringRequest = mine.find(x => x.id === authoring)
   const authoringSuccessor = authoringRequest
     ? successorReferenceFor(authoringRequest, mine)
@@ -592,8 +581,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
       <header>
         <div>
           <p className="eyebrow">VERIFICATION / {disciplineLabel(discipline).toUpperCase()}</p>
-          <h1>Change Requests</h1>
-          <p>The {tcrAcronym(discipline)}s controlling {buildName}'s test procedures, and the approved changes waiting for one.</p>
+          {/* Named for what it answers now that the register is its own page. This page is where an approved
+              change is assessed for test impact; the packages that assessment raises are listed under Change
+              Requests, and calling both pages the same thing made one of them impossible to find. */}
+          <h1>Downstream Assessments</h1>
+          <p>Approved changes waiting for a {tcrAcronym(discipline)} conclusion, and what {buildName}'s procedures cover.</p>
         </div>
         {canCreate && (
           <button type="button" className="newTcrAction" onClick={onRaiseTestChangeRequest}>
@@ -691,63 +683,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           for every requirement the change touched.
         </p>
       </section>
-
-      {/* The packages themselves, listed the way the requirements side lists its change requests.
-          Until now a TCR could only be seen from inside the assessment that raised it, so the page named
-          Change Requests never showed the change requests it controls — an engineer could not answer "what
-          {tcrAcronym(discipline)}s does this build have, and where has each one got to" without opening
-          every assessment in turn. */}
-      <section className="coverageCard tcrRegister" aria-labelledby="tcr-register-heading">
-        <div className="cardTitle">
-          <h2 id="tcr-register-heading">{tcrAcronym(discipline)}s in this build</h2>
-          <p>
-            Every {disciplineLabel(discipline)} test change request controlling this build's test procedures,
-            and what state it is in.
-          </p>
-        </div>
-        {!numberedRegister.length ? (
-          <div className="coverageEmpty">
-            <b>No {tcrAcronym(discipline)}s in this build yet</b>
-            <span>
-              A package appears here once an assessment concludes test work is required, or once somebody
-              raises one deliberately.
-            </span>
-          </div>
-        ) : (
-          <div className="tcrRegisterTableWrap">
-            <table className="tcrRegisterTable">
-              <thead>
-                <tr>
-                  <th scope="col">{tcrAcronym(discipline)}</th>
-                  <th scope="col">Title</th>
-                  <th scope="col">Answers for</th>
-                  <th scope="col">Procedure decisions</th>
-                  <th scope="col">State</th>
-                </tr>
-              </thead>
-              <tbody>
-                {numberedRegister.map(request => (
-                  <tr key={request.id} data-tcr={request.displayNumber}>
-                    <td className="tcrRegisterNumber">
-                      <button type="button" onClick={() => setOpened(request.id)}>{request.displayNumber}</button>
-                    </td>
-                    <td>{request.title || <i>Not written up yet</i>}</td>
-                    <td className="tcrRegisterSources">
-                      {request.coveredChangeRequests.length
-                        ? request.coveredChangeRequests.map(x => x.number).join(', ')
-                        : <i>Raised from a Problem Report</i>}
-                    </td>
-                    <td className="tcrRegisterCount">{request.procedureDecisionCount}</td>
-                    <td>
-                      <span className={`tcrRegisterState ${request.state.toLowerCase()}`}>{registerStateLabel(request.state)}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      {/* The register itself is a page of its own now, at Verification → Change Requests, rendered by the
+          same component the requirements side uses. It lived here because there was nowhere else for it to
+          live; a build's packages are not a section of its coverage report. */}
 
       {/* What Open assessment opens. Everything that used to sit on the row lives here, which is where the
           requirements queue has always put it. */}

@@ -38,9 +38,9 @@ test('the page lists the change requests controlling test work, and nothing else
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
+  await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
 
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
 
   // The queue: the packages this build's approved changes created.
   // Named for the question the page asks, matching the requirements-side queue word for word.
@@ -71,8 +71,8 @@ test('a package opens onto its decisions, and each one is an explicit judgement'
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
+  await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
 
   // One control per row, in every state — the requirements queue's anatomy. Everything the assessment offers
   // is inside it, so the row stays a summary and stops being a control panel.
@@ -116,7 +116,7 @@ test('software HLR and LLR each have their own change request page', async ({ pa
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('button', { name: 'Software' }).last().click()
 
-  await page.getByRole('link', { name: 'Software HLR Test Change Requests' }).click()
+  await page.getByRole('link', { name: 'Software HLR Downstream Assessments' }).click()
   await expect(page).toHaveURL(/software-verification\/hlr\/coverage$/, { timeout: 30_000 })
   await expect(page.getByText('VERIFICATION / SOFTWARE HLR')).toBeVisible()
   // The showcase raises one HLR package for this build. This page reported none for a while, and nothing had
@@ -128,7 +128,7 @@ test('software HLR and LLR each have their own change request page', async ({ pa
   // The other discipline's packages are not on this page.
   await expect(page.locator('.downstreamAssessment').filter({ hasText: /LLRTCR-/ })).toHaveCount(0)
 
-  await page.getByRole('link', { name: 'Software LLR Test Change Requests' }).click()
+  await page.getByRole('link', { name: 'Software LLR Downstream Assessments' }).click()
   await expect(page).toHaveURL(/software-verification\/llr\/coverage$/, { timeout: 30_000 })
   await expect(page.getByText('VERIFICATION / SOFTWARE LLR')).toBeVisible()
   // The showcase raises no LLR package for this build, so what this asserts is isolation rather than presence:
@@ -200,8 +200,8 @@ test('a decision can ask for a procedure that does not exist, and author it from
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, `Decision Authoring ${suffix}`)
   await openNavigationGroup(page, 'VERIFICATION')
-  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
+  await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
 
   // A row leads with the change it is assessing, not with a test change request number it may not have yet:
   // the number is what an assessment produces once it concludes test work is required.
@@ -247,8 +247,8 @@ test('a test change request opens onto its source changes, its requirements and 
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
+  await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
 
   const queueRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
   await expect(queueRow).toBeVisible({ timeout: 30_000 })

@@ -19,12 +19,19 @@ test('verification offers the two pages by name, and both open on real work', as
   await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
 
   const cards = page.locator('.landingCards button')
-  await expect(cards).toHaveCount(2)
+  await expect(cards).toHaveCount(3)
   await expect(cards.nth(0)).toContainText('Change Requests')
-  await expect(cards.nth(1)).toContainText('Test Results')
+  await expect(cards.nth(1)).toContainText('Downstream Assessments')
+  await expect(cards.nth(2)).toContainText('Test Results')
 
+  // The register and the assessments queue are two pages now, and the landing offers both by name.
   await cards.nth(0).click()
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'System Test Change Requests' })).toBeVisible({ timeout: 30_000 })
+  expect(page.url()).toContain('/system-verification/change-requests')
+
+  await page.goBack()
+  await page.locator('.landingCards button').nth(1).click()
+  await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
   expect(page.url()).toContain('/system-verification/coverage')
 
   // The queue is above the inventory, because a reader arriving to do work needs what nobody has picked up
@@ -41,7 +48,7 @@ test('verification offers the two pages by name, and both open on real work', as
 
   await page.goBack()
   await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
-  await page.locator('.landingCards button').nth(1).click()
+  await page.locator('.landingCards button').nth(2).click()
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
   expect(page.url()).toContain('/system-verification/results')
 })
@@ -58,7 +65,7 @@ test('software verification offers an HLR pair and an LLR pair', async ({ page, 
   await page.goto(`${page.url().replace(/\/command-center$/,'')}/software-verification`)
   await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
 
-  await expect(page.locator('.landingCards button')).toHaveCount(4)
+  await expect(page.locator('.landingCards button')).toHaveCount(6)
   const llr = page.locator('section').filter({ hasText: 'Software LLR' }).last()
   await llr.getByRole('button', { name: /Open Test Results/ }).click()
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
