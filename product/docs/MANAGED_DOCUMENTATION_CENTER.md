@@ -108,6 +108,21 @@ The connector redemption binds the source attachment ID, size, and SHA-256. The 
 unique temporary file and independently checks both values before replacing its working copy or launching Word.
 An incomplete or mismatched download is deleted and never opened.
 
+Every accepted DOCX also passes the shared `aerolink-ooxml-safe-v1` profile in both the API and Windows connector.
+The profile bounds the compressed package, entry count, per-part and aggregate expansion, compression ratio, XML
+bytes/depth/nodes/attributes, media size/dimensions, and total processing time. It canonicalizes ZIP part names;
+requires an unambiguous macro-free Word root and content-type manifest; resolves the complete internal
+relationship graph; and rejects missing targets, cycles, active or embedded content, external templates/images,
+unsafe external schemes, DTD/entity processing, and DDE/LINK/INCLUDE/DATABASE fields. Ordinary HTTPS/mailto
+hyperlinks remain supported. Validation streams ZIP/XML content instead of materializing expanded parts.
+
+New managed-document DOCX attachment rows retain the exact validation profile and accepted result. Historical
+rows remain null rather than being retroactively claimed as validated, but every material read re-runs the
+current profile after exact size/hash verification. Thus a restored or legacy package that matches its historical
+hash but violates the safe profile is blocked operationally and never reaches Word, transformation, review,
+release, or download. Profile rejection occurs before staging, so rejected uploads leave no attachment row or
+evidence object.
+
 A missing, unreadable, unsafe, size-changed, or hash-changed object creates one open critical operational alert,
 one document event, and security-audit evidence. The affected formal revision is shown as integrity-blocked and
 cannot be opened, submitted, transformed, or released. Repeated reads retain the original incident instead of

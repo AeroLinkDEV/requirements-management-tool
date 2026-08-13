@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\AeroLink.DocumentSecurity\AeroLink.DocumentSecurity.csproj" />
     <ProjectReference Include="..\AeroLink.Domain\AeroLink.Domain.csproj" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>

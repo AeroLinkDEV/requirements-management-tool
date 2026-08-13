@@ -255,6 +255,9 @@ public sealed class WordDocumentStructureTests
         using var output = new MemoryStream();
         using (var zip = new ZipArchive(output, ZipArchiveMode.Create, true))
         {
+            var rootRelationships = zip.CreateEntry("_rels/.rels");
+            using (var writer = new StreamWriter(rootRelationships.Open(), new UTF8Encoding(false)))
+                writer.Write($"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"{PRel}\"><Relationship Id=\"rIdRoot\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>");
             foreach (var (name, content) in parts)
             {
                 var entry = zip.CreateEntry(name);

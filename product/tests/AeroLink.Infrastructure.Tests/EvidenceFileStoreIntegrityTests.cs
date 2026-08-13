@@ -1,5 +1,11 @@
 using System.Text;
+using System.IO.Compression;
+using AeroLink.Domain.Documents;
+using AeroLink.Domain.Programs;
+using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -88,6 +94,58 @@ public sealed class EvidenceFileStoreIntegrityTests
         });
     }
 
+    [Fact]
+    public async Task Exact_hash_legacy_docx_is_still_blocked_when_the_current_safe_profile_rejects_it()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-integrity-ooxml-{Guid.NewGuid():N}");
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var program = new ProgramRecord("Integrity Program", "INTEGRITY");
+            var project = new ProjectRecord(program.Id, "Integrity Project", "Controlled documents");
+            var document = new ManagedDocument(project.Id, "SDP-000001", "SDP", "Software Development Plan",
+                "Integrity plan", "legacy.author", DateTimeOffset.UtcNow);
+            var revision = new ManagedDocumentRevision(document.Id, 0, "legacy.author", "Initial scope.", DateTimeOffset.UtcNow);
+            db.AddRange(program, project, document, revision);
+            var store = new EvidenceFileStore(root);
+            var unsafeDocx = UnsafeExternalRelationshipDocx();
+            var stored = await store.StoreAsync(new MemoryStream(unsafeDocx), "legacy.docx",
+                ManagedDocumentFileService.DocxContentType, default);
+            var attachment = new ControlledAttachment(project.Id, "ManagedDocument", document.Id, revision.Id,
+                Guid.NewGuid(), 1, "Legacy working DOCX", "Predates the safe profile.", stored.OriginalFileName,
+                stored.ContentType, stored.Size, stored.Sha256, stored.StorageKey, null, "legacy.author", DateTimeOffset.UtcNow);
+            db.ControlledAttachments.Add(attachment);
+            await db.SaveChangesAsync();
+            var service = new ManagedDocumentIntegrityService(db, store);
+
+            var failure = await Assert.ThrowsAsync<ManagedDocumentIntegrityFailure>(() =>
+                service.OpenVerifiedAsync(attachment, "quality.analyst", default));
+
+            Assert.Equal("ooxml_relationship_external", failure.Code);
+            Assert.Contains(await db.OperationalAlerts.ToListAsync(), item =>
+                item.Signal == $"managed-document-integrity:{attachment.Id:N}");
+            Assert.Contains(await db.ManagedDocumentEvents.ToListAsync(), item =>
+                item.EventType == "DocumentIntegrityBlocked");
+            Assert.Contains(await db.SecurityAuditEvents.ToListAsync(), item =>
+                item.EventType == "ManagedDocumentIntegrityFailure");
+
+            var recovery = await Assert.ThrowsAsync<ManagedDocumentIntegrityFailure>(() => service.RestoreAsync(
+                attachment, new MemoryStream(unsafeDocx), "quality.analyst", "Exact historical recovery attempt.", default));
+            Assert.Equal("ooxml_relationship_external", recovery.Code);
+            Assert.Contains(await db.OperationalAlerts.ToListAsync(), item =>
+                item.Signal == $"managed-document-integrity:{attachment.Id:N}" && item.State != OperationalAlertState.Resolved);
+            Assert.Contains(await db.SecurityAuditEvents.ToListAsync(), item =>
+                item.EventType == "ManagedDocumentIntegrityRecoveryRejected");
+            Assert.Contains(await db.ManagedDocumentEvents.ToListAsync(), item =>
+                item.EventType == "DocumentIntegrityRecoveryRejected");
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     private static async Task<StoredEvidence> StoreAsync(EvidenceFileStore store, string value) =>
         await store.StoreAsync(new MemoryStream(Encoding.UTF8.GetBytes(value)), "plan.docx", "application/test", default);
 
@@ -99,5 +157,34 @@ public sealed class EvidenceFileStoreIntegrityTests
         var root = Path.Combine(Path.GetTempPath(), $"aerolink-integrity-{Guid.NewGuid():N}");
         try { await test(new EvidenceFileStore(root), root); }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    private static byte[] UnsafeExternalRelationshipDocx()
+    {
+        const string contentTypes = """
+            <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+              <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+              <Default Extension="xml" ContentType="application/xml"/>
+              <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+            </Types>
+            """;
+        const string relationships = """
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+              <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="https://example.test/tracker.png" TargetMode="External"/>
+            </Relationships>
+            """;
+        const string document = "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body/></w:document>";
+        using var output = new MemoryStream();
+        using (var archive = new ZipArchive(output, ZipArchiveMode.Create, true))
+        {
+            foreach (var (name, value) in new[] { ("[Content_Types].xml", contentTypes), ("_rels/.rels", relationships), ("word/document.xml", document) })
+            {
+                var entry = archive.CreateEntry(name);
+                using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
+                writer.Write(value);
+            }
+        }
+        return output.ToArray();
     }
 }

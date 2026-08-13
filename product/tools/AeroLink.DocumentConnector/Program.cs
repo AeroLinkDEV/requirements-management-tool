@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
+using AeroLink.DocumentSecurity;
 using Microsoft.Win32;
 
 namespace AeroLink.DocumentConnector;
@@ -80,6 +81,7 @@ internal sealed class ConnectorForm : Form
                 if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actualHash), Convert.FromHexString(grant.SourceSha256)))
                     throw new InvalidOperationException("The downloaded controlled document hash does not match the connector grant. Word was not opened.");
             }
+            AeroLinkOoxmlProfile.ValidateFile(temporaryPath, grant.SourceSize, grant.SourceSha256);
             File.Move(temporaryPath, path, true);
         }
         finally { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
@@ -93,10 +95,11 @@ internal sealed class ConnectorForm : Form
         Toggle(false); try { if (_grant.Mode == "release") await UploadReleaseAsync(); else await UploadDraftAsync(); _completed = true; _heartbeat.Stop(); MessageBox.Show(_grant.Mode == "release" ? "The exact DOCX and PDF candidate is ready for final AeroLink signature." : "The Word document was checked in. Its prior working version remains in History.", "AeroLink connector", MessageBoxButtons.OK, MessageBoxIcon.Information); Close(); } catch (Exception ex) { _status.Text = ex.Message; Toggle(true); }
     }
     private async Task UploadDraftAsync()
-    { using var form = new MultipartFormDataContent(); form.Add(new StringContent(_comment.Text.Trim()), "comment"); form.Add(new StringContent(_sessionVersion.ToString()), "expectedVersion"); var file = new StreamContent(File.OpenRead(_workingFile)); file.Headers.ContentType = new("application/vnd.openxmlformats-officedocument.wordprocessingml.document"); form.Add(file, "file", Path.GetFileName(_workingFile)); using var response = await _client.PostAsync($"/api/document-connector/{_grant.Id}/check-in", form); await EnsureAsync(response); }
+    { AeroLinkOoxmlProfile.ValidateFile(_workingFile); using var form = new MultipartFormDataContent(); form.Add(new StringContent(_comment.Text.Trim()), "comment"); form.Add(new StringContent(_sessionVersion.ToString()), "expectedVersion"); var file = new StreamContent(File.OpenRead(_workingFile)); file.Headers.ContentType = new("application/vnd.openxmlformats-officedocument.wordprocessingml.document"); form.Add(file, "file", Path.GetFileName(_workingFile)); using var response = await _client.PostAsync($"/api/document-connector/{_grant.Id}/check-in", form); await EnsureAsync(response); }
     private async Task UploadReleaseAsync()
     {
         var outputRoot = Path.Combine(Path.GetDirectoryName(_workingFile)!, "release"); Directory.CreateDirectory(outputRoot); var docx = Path.Combine(outputRoot, SafeFileName(_grant.DocumentNumber) + "-RELEASE-CANDIDATE.docx"); var pdf = Path.Combine(outputRoot, SafeFileName(_grant.DocumentNumber) + "-RELEASE-CANDIDATE.pdf"); WordReleaseRenderer.Create(_workingFile, docx, pdf);
+        AeroLinkOoxmlProfile.ValidateFile(docx);
         using var form = new MultipartFormDataContent(); form.Add(new StringContent(_sessionVersion.ToString()), "expectedVersion"); var docxFile = new StreamContent(File.OpenRead(docx)); docxFile.Headers.ContentType = new("application/vnd.openxmlformats-officedocument.wordprocessingml.document"); form.Add(docxFile, "docx", Path.GetFileName(docx)); var pdfFile = new StreamContent(File.OpenRead(pdf)); pdfFile.Headers.ContentType = new("application/pdf"); form.Add(pdfFile, "pdf", Path.GetFileName(pdf)); using var response = await _client.PostAsync($"/api/document-connector/{_grant.Id}/release-candidate", form); await EnsureAsync(response);
     }
     private async Task HeartbeatAsync()
