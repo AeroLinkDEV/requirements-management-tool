@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aerolink.local/ci-metrics/schema/v1-fragment.json",
+  "title": "AeroLink CI metrics fragment v1",
+  "description": "One bounded, sanitised performance/reliability record produced by one quality-gate job. CI-only; never product telemetry.",
+  "type": "object",
+  "required": ["schemaVersion", "run", "job", "timings", "counts", "cache", "classification", "missing"],
+  "properties": {
+    "schemaVersion": { "const": "aerolink-ci-fragment/v1" },
+    "run": {
+      "type": "object",
+      "required": ["id", "attempt", "event", "sha", "tree", "ref", "workflow", "workflowRef", "repository"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "event": { "type": "string", "enum": ["pull_request", "merge_group", "push", "schedule", "workflow_dispatch"] },
+        "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "ref": { "type": "string", "maxLength": 200 },
+        "pr": { "type": ["integer", "null"], "minimum": 1 },
+        "baseSha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+        "headSha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+        "workflow": { "type": "string", "maxLength": 200 },
+        "workflowRef": { "type": "string", "maxLength": 300 },
+        "repository": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "job": {
+      "type": "object",
+      "required": ["id", "name", "needs", "result"],
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "name": { "type": "string", "maxLength": 200 },
+        "matrix": { "type": ["object", "null"] },
+        "needs": { "type": "array", "items": { "type": "string", "maxLength": 100 }, "maxItems": 12 },
+        "result": { "type": "string", "enum": ["success", "failure", "cancelled", "skipped", "unavailable"] }
+      }
+    },
+    "timings": {
+      "type": "object",
+      "required": ["jobStartMs", "setupEndMs", "testEndMs", "jobEndMs", "setupMs", "testMs", "uploadAndCleanupMs", "missing"],
+      "properties": {
+        "jobStartMs": { "type": ["integer", "null"], "minimum": 0 },
+        "setupEndMs": { "type": ["integer", "null"], "minimum": 0 },
+        "testEndMs": { "type": ["integer", "null"], "minimum": 0 },
+        "jobEndMs": { "type": ["integer", "null"], "minimum": 0 },
+        "setupMs": { "type": ["integer", "null"], "minimum": 0 },
+        "testMs": { "type": ["integer", "null"], "minimum": 0 },
+        "uploadAndCleanupMs": { "type": ["integer", "null"], "minimum": 0 },
+        "missing": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "maxLength": 300 }
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "required": ["expected", "executed", "passed", "failed", "skipped", "flaky", "source", "missing"],
+      "properties": {
+        "expected": { "type": ["integer", "null"], "minimum": 0 },
+        "executed": { "type": ["integer", "null"], "minimum": 0 },
+        "passed": { "type": ["integer", "null"], "minimum": 0 },
+        "failed": { "type": ["integer", "null"], "minimum": 0 },
+        "skipped": { "type": ["integer", "null"], "minimum": 0 },
+        "flaky": { "type": ["integer", "null"], "minimum": 0 },
+        "source": { "type": ["string", "null"], "enum": ["trx", "playwright-json", null] },
+        "missing": { "type": ["string", "null"], "maxLength": 300 }
+      }
+    },
+    "slowest": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": ["name", "durationMs", "kind"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 300 },
+          "durationMs": { "type": "integer", "minimum": 0 },
+          "kind": { "type": "string", "enum": ["class", "spec"] }
+        }
+      }
+    },
+    "flakyTests": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "maxLength": 400 }
+    },
+    "cache": {
+      "type": "object",
+      "required": ["nuget", "npm", "chromium", "missing"],
+      "properties": {
+        "nuget": { "type": ["string", "null"], "enum": ["hit", "miss", null] },
+        "npm": { "type": ["string", "null"], "enum": ["hit", "miss", null] },
+        "chromium": { "type": ["string", "null"], "enum": ["hit", "miss", null] },
+        "missing": { "type": "object", "additionalProperties": { "type": "string", "maxLength": 300 } }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "required": ["docsOnly", "backend", "client", "browser", "postgresql", "unavailable"],
+      "properties": {
+        "docsOnly": { "type": ["boolean", "null"] },
+        "backend": { "type": ["boolean", "null"] },
+        "client": { "type": ["boolean", "null"] },
+        "browser": { "type": ["boolean", "null"] },
+        "postgresql": { "type": ["boolean", "null"] },
+        "unavailable": { "type": "boolean" }
+      }
+    },
+    "missing": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "maxLength": 300 }
+    }
+  },
+  "additionalProperties": false
+}
