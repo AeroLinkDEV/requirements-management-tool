@@ -646,14 +646,13 @@ public static class ManagedDocumentEndpoints
         return Results.Json(manifest);
     }
 
-    private static async Task<IResult> RedeemAsync(string launchToken, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> RedeemAsync(string launchToken, AeroLinkDbContext db, ILogger<ConnectorSigningService> logger, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow; var tokenHash = Hash(launchToken);
         var grant = await db.DocumentConnectorGrants.SingleOrDefaultAsync(x => x.LaunchTokenHash == tokenHash, ct);
         if (grant is null)
         {
-            db.SecurityAuditEvents.Add(new("ConnectorLaunchRejected", "system.connector", tokenHash[..16], "Rejected",
-                "Rejected an unknown connector launch nonce.", "connector", now)); await db.SaveChangesAsync(ct);
+            logger.LogWarning("Rejected unknown connector launch nonce {LaunchNonceHashPrefix}.", tokenHash[..16]);
             return Results.Unauthorized();
         }
         try

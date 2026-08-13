@@ -7,6 +7,7 @@ namespace AeroLink.Api;
 public sealed class ConnectorSigningService : IDisposable
 {
     private readonly ECDsa _key;
+    private readonly Lock _keyLock = new();
     private readonly string? _publicOrigin;
     public string DeploymentId { get; }
     public string KeyId { get; }
@@ -56,12 +57,18 @@ public sealed class ConnectorSigningService : IDisposable
             new Uri(normalized).Scheme == Uri.UriSchemeHttp, now);
     }
 
-    public string Sign(ConnectorLaunchEnvelope envelope) => ConnectorLaunchProtocol.Sign(envelope, _key);
+    public string Sign(ConnectorLaunchEnvelope envelope)
+    {
+        lock (_keyLock) return ConnectorLaunchProtocol.Sign(envelope, _key);
+    }
 
     public string ResolveOrigin(HttpContext context) => _publicOrigin
         ?? ConnectorLaunchProtocol.NormalizeOrigin($"{context.Request.Scheme}://{context.Request.Host}", allowInsecureLoopback: true);
 
-    public void Dispose() => _key.Dispose();
+    public void Dispose()
+    {
+        lock (_keyLock) _key.Dispose();
+    }
 
     private static string DefaultDeploymentId()
     {
