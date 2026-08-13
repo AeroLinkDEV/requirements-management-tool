@@ -48,18 +48,18 @@ series, along with the PowerShell operator-script contracts. It has since been s
 
 ## What this rules out
 
-**Adding browser shards.** The July increment moved three shards to two and reasoned that "two shards are
-~123s each against a ~200s+ backend job". The ratio still held even though both numbers had grown roughly 5×:
-the journeys were 11–16 minutes against a 21–27 minute `validate`. A third or fourth shard would shorten a job
-nobody is waiting on, and pay a full runner setup to do it. This was proposed on 2026-08-13, measured, and
-dropped before it shipped.
+**Adding browser shards — ruled out twice, and then correct.** The July increment moved three shards to two
+and reasoned that "two shards are ~123s each against a ~200s+ backend job". The ratio still held when both
+numbers had grown roughly 5×: 11–16 minutes of journeys against a 21–27 minute `validate`. A third or fourth
+shard would have shortened a job nobody was waiting on. Proposed on 2026-08-13, measured, and dropped.
 
-The lever is `AeroLink.Api.Tests`, which was roughly half the critical-path job on its own.
+Then sharding `AeroLink.Api.Tests` removed the job the journeys were being compared against, the journeys
+became the critical path at 997s, and the same test pointed the other way. They went to four.
 
-**This is the conclusion most likely to expire.** Splitting `validate` cut the job the shards were being
-compared against, so the margin is now much narrower: 11–16 minutes of journeys against a `backend-api` job of
-roughly the same. Shards become worth revisiting the moment `backend-api` comes down — but measure the two
-against each other again first, because that comparison is exactly what has changed.
+**This is the useful shape of the thing.** The answer was never "shards are good" or "shards are bad" — it was
+always a comparison against whatever else was in the run, and it flipped when that changed. Any conclusion in
+this file is a claim about a ratio at a moment. When one side of a ratio moves, re-measure rather than
+re-reading.
 
 ## Implemented here
 
@@ -156,6 +156,35 @@ Two guards, because both failure modes look like success:
 - **`~` is a substring match.** A class whose name prefixes another would pull in tests from both, and a
   malformed filter would quietly run fewer. Each shard compares the test count it actually ran against the
   count it claimed, so either becomes a failure rather than a smaller green suite.
+
+### Measured result of the shards, and the second round
+
+Two API shards took the critical path from **24m47s to 16m37s**, and both self-verified: 243 and 242 of the
+485 discovered tests, the whole suite between them.
+
+That moved the bottleneck rather than removing it. With `backend-api` at 656s and 771s, the longest thing in
+the gate became a browser shard at 997s — so the next round was decided by measurement rather than by
+symmetry:
+
+| Job | Setup | Actual testing |
+|---|---|---|
+| Browser 1/2 | 167s | 603s |
+| Browser 2/2 | 190s | 807s |
+| API shard 1 | ~150s | 506s |
+| API shard 2 | ~150s | 621s |
+
+1410 seconds of journeys and 1127 of API tests, against ~150–190s of setup per runner. The journeys went to
+**four** shards and the API suite to **three**, which is where setup becomes a large enough fraction of each
+shard to stop.
+
+Note the second column: Playwright shards by test *file*, not by duration, so its two halves were **25%
+apart** — 603s against 807s. The computed API partition balances by test count and still came out 506 against
+621. **Neither balances by time**, because neither has time data. More shards makes each imbalance smaller in
+absolute terms, which is the cheap mitigation; carrying per-test durations between runs is the real fix and is
+not done.
+
+Every shard count in the workflow now derives from `strategy.job-total` rather than being written beside the
+matrix. A matrix saying four next to a divisor saying two would run half the tests and pass.
 
 ## Not implemented here, and why
 
