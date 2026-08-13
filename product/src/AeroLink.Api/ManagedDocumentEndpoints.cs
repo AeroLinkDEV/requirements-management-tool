@@ -27,6 +27,7 @@ public static class ManagedDocumentEndpoints
         group.MapPost("/projects/{projectId:guid}/integrity/scan", ScanIntegrityAsync);
         group.MapPost("/projects/{projectId:guid}/storage/reconcile", ReconcileStorageAsync);
         group.MapGet("/{id:guid}", DetailAsync);
+        group.MapGet("/{id:guid}/history/{surface}", ManagedDocumentHistoryEndpoints.ListAsync);
         group.MapPost("/{id:guid}/revisions", StartRevisionAsync);
         group.MapPost("/{id:guid}/links", AddLinkAsync);
         group.MapPatch("/{id:guid}/links/{linkId:guid}", CorrectLinkAsync);
@@ -54,35 +55,89 @@ public static class ManagedDocumentEndpoints
         return app;
     }
 
-    private static async Task<IResult> ListAsync(Guid projectId, string? search, string? state, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(Guid projectId, string? search, string? state, string? documentType,
+        string? acronym, string? owner, string? steward, string? sort, bool? descending, int? pageSize,
+        string? cursor, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
-        var documents = await db.ManagedDocuments.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
-        if (!string.IsNullOrWhiteSpace(search)) { var term = search.Trim(); documents = documents.Where(x => x.DocumentNumber.Contains(term, StringComparison.OrdinalIgnoreCase) || x.Acronym.Contains(term, StringComparison.OrdinalIgnoreCase) || x.Title.Contains(term, StringComparison.OrdinalIgnoreCase) || x.DocumentType.Contains(term, StringComparison.OrdinalIgnoreCase)).ToList(); }
+        var size = ManagedDocumentPaging.PageSize(pageSize); if (size.Error is not null) return size.Error;
+        var order = string.IsNullOrWhiteSpace(sort) ? "documentNumber" : sort.Trim();
+        if (order is not ("documentNumber" or "updatedAt")) return Results.BadRequest(new { error = "Sort must be documentNumber or updatedAt.", code = "invalid_sort" });
+        var desc = descending ?? false;
+        var filterKey = ManagedDocumentPaging.FilterKey(projectId, search, state, documentType, acronym, owner, steward, order, desc);
+        var decoded = ManagedDocumentPaging.Decode(cursor, "inventory", filterKey); if (decoded.Error is not null) return decoded.Error;
+        var snapshotAt = decoded.Cursor?.SnapshotAt ?? DateTimeOffset.UtcNow;
+        var query = db.ManagedDocuments.AsNoTracking().Where(x => x.ProjectId == projectId);
+        if (db.Database.IsNpgsql()) query = query.Where(x => x.CreatedAt <= snapshotAt);
+        query = ApplyDocumentFilters(query, db, search, state, documentType, acronym, owner, steward);
+        var totalCount = await query.CountAsync(ct);
+        if (decoded.Cursor is not null)
+        {
+            if (order == "documentNumber")
+                query = desc ? query.Where(x => string.Compare(x.DocumentNumber, decoded.Cursor.Value) < 0)
+                    : query.Where(x => string.Compare(x.DocumentNumber, decoded.Cursor.Value) > 0);
+            else
+            {
+                if (!DateTimeOffset.TryParse(decoded.Cursor.Value, out var updatedAt)) return ManagedDocumentPaging.InvalidCursor();
+                query = desc
+                    ? query.Where(x => x.UpdatedAt < updatedAt || (x.UpdatedAt == updatedAt && string.Compare(x.DocumentNumber, decoded.Cursor.TieBreaker) < 0))
+                    : query.Where(x => x.UpdatedAt > updatedAt || (x.UpdatedAt == updatedAt && string.Compare(x.DocumentNumber, decoded.Cursor.TieBreaker) > 0));
+            }
+        }
+        query = order == "updatedAt"
+            ? (desc ? query.OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.DocumentNumber) : query.OrderBy(x => x.UpdatedAt).ThenBy(x => x.DocumentNumber))
+            : (desc ? query.OrderByDescending(x => x.DocumentNumber) : query.OrderBy(x => x.DocumentNumber));
+        var documents = await query.Take(size.Value + 1).ToListAsync(ct); var hasMore = documents.Count > size.Value;
+        if (hasMore) documents.RemoveAt(documents.Count - 1);
         var ids = documents.Select(x => x.Id).ToList();
         var revisions = await db.ManagedDocumentRevisions.AsNoTracking().Where(x => ids.Contains(x.DocumentId)).ToListAsync(ct);
         var sessions = await ActiveSessionsAsync(db, ids, ct);
         var items = documents.Select(document => Summary(document, revisions.Where(x => x.DocumentId == document.Id).ToList(), sessions.SingleOrDefault(x => x.ArtifactId == document.Id))).ToList();
-        if (!string.IsNullOrWhiteSpace(state)) items = items.Where(x => x.InWorkState.Equals(state, StringComparison.OrdinalIgnoreCase) || x.ReleasedState.Equals(state, StringComparison.OrdinalIgnoreCase)).ToList();
-        return Results.Ok(new { totalCount = items.Count, items = items.OrderBy(x => x.DocumentNumber) });
+        var last = documents.LastOrDefault();
+        var nextCursor = hasMore && last is not null
+            ? ManagedDocumentPaging.Encode("inventory", filterKey, snapshotAt, order == "updatedAt" ? last.UpdatedAt.ToString("O") : last.DocumentNumber, last.DocumentNumber)
+            : null;
+        return Results.Ok(new { totalCount, pageSize = size.Value, snapshotAt, hasMore, nextCursor, items });
     }
 
-    private static async Task<IResult> DashboardAsync(Guid projectId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> DashboardAsync(Guid projectId, string? search, string? state, string? documentType,
+        string? acronym, string? owner, string? steward, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
-        var ids = await db.ManagedDocuments.AsNoTracking().Where(x => x.ProjectId == projectId).Select(x => x.Id).ToListAsync(ct);
-        var revisions = await db.ManagedDocumentRevisions.AsNoTracking().Where(x => ids.Contains(x.DocumentId)).ToListAsync(ct);
-        var active = await ActiveSessionsAsync(db, ids, ct);
-        return Results.Ok(new { total = ids.Count, released = revisions.Select(x => x.DocumentId).Distinct().Count(id => revisions.Any(x => x.DocumentId == id && x.State == ManagedDocumentState.Released)), inWork = revisions.Count(x => x.State is ManagedDocumentState.Draft or ManagedDocumentState.InReview or ManagedDocumentState.Returned), inReview = revisions.Count(x => x.State == ManagedDocumentState.InReview), returned = revisions.Count(x => x.State == ManagedDocumentState.Returned), checkedOut = active.Count });
+        var documents = ApplyDocumentFilters(db.ManagedDocuments.AsNoTracking().Where(x => x.ProjectId == projectId), db,
+            search, state, documentType, acronym, owner, steward);
+        var counts = await documents.GroupBy(_ => 1).Select(group => new DashboardCounts(
+            group.Count(),
+            group.Count(document => db.ManagedDocumentRevisions.Any(revision => revision.DocumentId == document.Id && revision.State == ManagedDocumentState.Released)),
+            group.Count(document => db.ManagedDocumentRevisions.Any(revision => revision.DocumentId == document.Id && (revision.State == ManagedDocumentState.Draft || revision.State == ManagedDocumentState.InReview || revision.State == ManagedDocumentState.Returned))),
+            group.Count(document => db.ManagedDocumentRevisions.Any(revision => revision.DocumentId == document.Id && revision.State == ManagedDocumentState.InReview)),
+            group.Count(document => db.ManagedDocumentRevisions.Any(revision => revision.DocumentId == document.Id && revision.State == ManagedDocumentState.Returned)))).SingleOrDefaultAsync(ct)
+            ?? new DashboardCounts(0, 0, 0, 0, 0);
+        var checkedOut = await (from session in db.ArtifactEditSessions.AsNoTracking()
+            join document in documents on session.ArtifactId equals document.Id
+            where session.ArtifactType == "ManagedDocument" && session.State == EditSessionState.Active
+            select session.ArtifactId).Distinct().CountAsync(ct);
+        return Results.Ok(new { total = counts.Total, released = counts.Released, inWork = counts.InWork, inReview = counts.InReview, returned = counts.Returned, checkedOut });
     }
 
     private static async Task<IResult> DetailAsync(Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         var document = await db.ManagedDocuments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (document is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, document.ProjectId, ct)) return Results.Forbid();
-        var revisions = (await db.ManagedDocumentRevisions.AsNoTracking().Where(x => x.DocumentId == id).Include(x => x.ReviewSteps).ToListAsync(ct)).OrderByDescending(x => x.Revision).ToList();
+        // The operational detail is deliberately limited to the current released head and active successor.
+        // Superseded/withdrawn formal revisions and append-only histories are exposed through bounded history pages.
+        var currentRevisionQuery = db.ManagedDocumentRevisions.AsNoTracking().Where(x => x.DocumentId == id
+            && (x.State == ManagedDocumentState.Released || x.State == ManagedDocumentState.Draft
+                || x.State == ManagedDocumentState.InReview || x.State == ManagedDocumentState.Returned))
+            .Include(x => x.ReviewSteps.OrderByDescending(step => step.Cycle).ThenBy(step => step.Position).Take(100));
+        var revisions = (await currentRevisionQuery.ToListAsync(ct)).OrderByDescending(x => x.Revision).Take(4).ToList();
         var revisionIds = revisions.Select(x => x.Id).ToList();
-        var attachments = await db.ControlledAttachments.AsNoTracking().Where(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == id).ToListAsync(ct);
+        var checkIns = (await db.ManagedDocumentCheckIns.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId)).OrderByDescending(x => x.WorkingVersion).Take(100).ToListAsync(ct)).OrderBy(x => x.OccurredAt).ToList();
+        var attachmentIds = revisions.SelectMany(x => new Guid?[] { x.ParentReleasedDocxAttachmentId, x.CurrentWorkingAttachmentId,
+                x.ReleaseCandidateDocxAttachmentId, x.ReleaseCandidatePdfAttachmentId, x.ReleasedDocxAttachmentId, x.ReleasedPdfAttachmentId })
+            .Concat(checkIns.SelectMany(x => new Guid?[] { x.WorkingAttachmentId, x.BaseAttachmentId, x.SupersededAttachmentId }))
+            .Where(x => x is not null).Select(x => x!.Value).Distinct().ToList();
+        var attachments = await db.ControlledAttachments.AsNoTracking().Where(x => attachmentIds.Contains(x.Id)).ToListAsync(ct);
         var integritySignals = await db.OperationalAlerts.AsNoTracking().Where(x => x.ProjectId == document.ProjectId
             && x.State != OperationalAlertState.Resolved && x.Signal.StartsWith("managed-document-integrity:"))
             .Select(x => new { x.Signal, x.Detail, x.OpenedAt }).ToListAsync(ct);
@@ -92,14 +147,29 @@ public static class ManagedDocumentEndpoints
             x.Detail,
             x.OpenedAt
         }).Where(x => x.AttachmentId != Guid.Empty).ToList();
-        var links = (await db.ManagedDocumentLinks.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId)).ToListAsync(ct)).OrderBy(x => x.CreatedAt).ToList();
-        var buildProvenance = await (from provenance in db.ManagedDocumentBuildProvenance.AsNoTracking() join release in db.Releases.AsNoTracking() on provenance.ReleaseId equals release.Id where provenance.DocumentId == id select new { provenance.ReleaseId, release.Version, provenance.RevisionId, provenance.Source, provenance.RecordedBy, provenance.RecordedAt, meaning = "Legacy build association retained as provenance only" }).ToListAsync(ct);
+        var linksQuery = db.ManagedDocumentLinks.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId));
+        var links = db.Database.IsNpgsql()
+            ? await linksQuery.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id).Take(100).ToListAsync(ct)
+            : (await linksQuery.ToListAsync(ct)).OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id).Take(100).ToList();
+        var provenanceQuery = from provenance in db.ManagedDocumentBuildProvenance.AsNoTracking()
+                              join release in db.Releases.AsNoTracking() on provenance.ReleaseId equals release.Id
+                              where provenance.DocumentId == id && revisionIds.Contains(provenance.RevisionId)
+                              select new { provenance.ReleaseId, release.Version, provenance.RevisionId, provenance.Source, provenance.RecordedBy, provenance.RecordedAt, meaning = "Legacy build association retained as provenance only" };
+        var buildProvenance = db.Database.IsNpgsql() ? await provenanceQuery.OrderByDescending(x => x.RecordedAt).Take(100).ToListAsync(ct)
+            : (await provenanceQuery.ToListAsync(ct)).OrderByDescending(x => x.RecordedAt).Take(100).ToList();
         var active = (await ActiveSessionsAsync(db, [id], ct)).SingleOrDefault();
-        var audits = (await db.ManagedDocumentEvents.AsNoTracking().Where(x => x.DocumentId == id).ToListAsync(ct)).OrderByDescending(x => x.OccurredAt).ToList();
-        var signatures = (await db.ElectronicSignatures.AsNoTracking().Where(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == id).ToListAsync(ct)).OrderBy(x => x.SignedAt).ToList();
-        var checkIns = (await db.ManagedDocumentCheckIns.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId)).ToListAsync(ct)).OrderBy(x => x.OccurredAt).ToList();
-        var contributors = await db.ManagedDocumentReviewContributors.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId)).ToListAsync(ct);
-        var assignments = (await db.ManagedDocumentAssignments.AsNoTracking().Where(x => x.DocumentId == id).ToListAsync(ct)).OrderBy(x => x.EffectiveAt).ToList();
+        var auditQuery = db.ManagedDocumentEvents.AsNoTracking().Where(x => x.DocumentId == id);
+        var audits = db.Database.IsNpgsql() ? await auditQuery.OrderByDescending(x => x.OccurredAt).ThenByDescending(x => x.Id).Take(100).ToListAsync(ct)
+            : (await auditQuery.ToListAsync(ct)).OrderByDescending(x => x.OccurredAt).ThenByDescending(x => x.Id).Take(100).ToList();
+        var signatureQuery = db.ElectronicSignatures.AsNoTracking().Where(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == id);
+        var signatures = db.Database.IsNpgsql() ? await signatureQuery.OrderByDescending(x => x.SignedAt).ThenByDescending(x => x.Id).Take(100).ToListAsync(ct)
+            : (await signatureQuery.ToListAsync(ct)).OrderByDescending(x => x.SignedAt).ThenByDescending(x => x.Id).Take(100).ToList();
+        var contributorQuery = db.ManagedDocumentReviewContributors.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId));
+        var contributors = db.Database.IsNpgsql() ? await contributorQuery.OrderByDescending(x => x.CapturedAt).Take(100).ToListAsync(ct)
+            : (await contributorQuery.ToListAsync(ct)).OrderByDescending(x => x.CapturedAt).Take(100).ToList();
+        var assignmentQuery = db.ManagedDocumentAssignments.AsNoTracking().Where(x => x.DocumentId == id);
+        var assignments = db.Database.IsNpgsql() ? await assignmentQuery.OrderByDescending(x => x.EffectiveAt).ThenByDescending(x => x.Id).Take(100).ToListAsync(ct)
+            : (await assignmentQuery.ToListAsync(ct)).OrderByDescending(x => x.EffectiveAt).ThenByDescending(x => x.Id).Take(100).ToList();
         var actor = http.UserAccount();
         var canCorrectFormalScopeByRole = await http.HasProjectRoleAsync(db, identity, document.ProjectId, ct,
             ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead);
@@ -705,31 +775,64 @@ public static class ManagedDocumentEndpoints
         catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "The document revision changed after this page loaded. Refresh and try again." }); }
     }
 
-    private static async Task<IResult> LinkOptionsAsync(Guid projectId, string artifactType, string? search, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> LinkOptionsAsync(Guid projectId, string artifactType, string? search, int? pageSize,
+        string? cursor, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+        var size = ManagedDocumentPaging.PageSize(pageSize); if (size.Error is not null) return size.Error;
         var term = search?.Trim().ToLowerInvariant() ?? ""; string type; try { type = ManagedDocumentRelationshipPolicy.CanonicalType(artifactType); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        var filterKey = ManagedDocumentPaging.FilterKey(projectId, type, term); var decoded = ManagedDocumentPaging.Decode(cursor, "link-options", filterKey); if (decoded.Error is not null) return decoded.Error;
+        var after = decoded.Cursor?.Value; var snapshotAt = decoded.Cursor?.SnapshotAt ?? DateTimeOffset.UtcNow;
+        var afterRevision = 0;
+        if (after is not null && !int.TryParse(decoded.Cursor!.TieBreaker, out afterRevision)) return ManagedDocumentPaging.InvalidCursor();
         if (type == "ChangeRequest")
         {
-            var rows = await db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
-            return Results.Ok(rows.Where(x => term.Length == 0 || x.DisplayNumber.Contains(term, StringComparison.OrdinalIgnoreCase) || x.Title.Contains(term, StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => x.UpdatedAt).Take(100).Select(x => new { x.Id, x.DisplayNumber, x.Title, secondary = x.State.ToString(), relationships = ManagedDocumentRelationshipPolicy.Relationships(type) }));
+            var query = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId);
+            if (db.Database.IsNpgsql()) query = query.Where(x => x.CreatedAt <= snapshotAt);
+            if (term.Length > 0) query = query.Where(x => x.BaseNumber.ToLower().Contains(term) || x.Title.ToLower().Contains(term));
+            if (after is not null) query = query.Where(x => string.Compare(x.BaseNumber, after) > 0 || (x.BaseNumber == after && x.Revision > afterRevision));
+            var found = await query.OrderBy(x => x.BaseNumber).ThenBy(x => x.Revision).Take(size.Value + 1).ToListAsync(ct);
+            return LinkOptionPage(found.Select(x => new LinkOptionRow(x.Id, x.DisplayNumber, x.Title, x.State.ToString(), x.BaseNumber, x.Revision)).ToList(), type, size.Value, filterKey, snapshotAt);
         }
         if (type == "ProblemReport")
         {
-            var rows = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
-            return Results.Ok(rows.Where(x => term.Length == 0 || x.DisplayNumber.Contains(term, StringComparison.OrdinalIgnoreCase) || x.Title.Contains(term, StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => x.UpdatedAt).Take(100).Select(x => new { x.Id, x.DisplayNumber, x.Title, secondary = x.State.ToString(), relationships = ManagedDocumentRelationshipPolicy.Relationships(type) }));
+            var query = db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId);
+            if (db.Database.IsNpgsql()) query = query.Where(x => x.CreatedAt <= snapshotAt);
+            if (term.Length > 0) query = query.Where(x => x.ReportNumber.ToLower().Contains(term) || x.Title.ToLower().Contains(term));
+            if (after is not null) query = query.Where(x => string.Compare(x.ReportNumber, after) > 0 || (x.ReportNumber == after && x.Revision > afterRevision));
+            var found = await query.OrderBy(x => x.ReportNumber).ThenBy(x => x.Revision).Take(size.Value + 1).ToListAsync(ct);
+            return LinkOptionPage(found.Select(x => new LinkOptionRow(x.Id, x.DisplayNumber, x.Title, x.State.ToString(), x.ReportNumber, x.Revision)).ToList(), type, size.Value, filterKey, snapshotAt);
         }
         if (type == "TestChangeRequest")
         {
-            var rows = await db.TestChangeReviews.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
-            return Results.Ok(rows.Where(x => term.Length == 0 || x.DisplayNumber.Contains(term, StringComparison.OrdinalIgnoreCase) || x.SourceChangeRequestNumber.Contains(term, StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => x.UpdatedAt).Take(100).Select(x => new { x.Id, x.DisplayNumber, title = x.SourceChangeRequestNumber, secondary = x.State.ToString(), relationships = ManagedDocumentRelationshipPolicy.Relationships(type) }));
+            var query = db.TestChangeReviews.AsNoTracking().Where(x => x.ProjectId == projectId);
+            if (db.Database.IsNpgsql()) query = query.Where(x => x.CreatedAt <= snapshotAt);
+            if (term.Length > 0) query = query.Where(x => x.BaseNumber.ToLower().Contains(term) || x.SourceChangeRequestNumber.ToLower().Contains(term) || x.SourceProblemReportNumber.ToLower().Contains(term));
+            var projected = query.Select(x => new { Item = x, SortNumber = x.BaseNumber == "" ? (x.SourceChangeRequestNumber == "" ? x.SourceProblemReportNumber : x.SourceChangeRequestNumber) : x.BaseNumber });
+            if (after is not null) projected = projected.Where(x => string.Compare(x.SortNumber, after) > 0 || (x.SortNumber == after && x.Item.Revision > afterRevision));
+            var found = await projected.OrderBy(x => x.SortNumber).ThenBy(x => x.Item.Revision).Take(size.Value + 1).ToListAsync(ct);
+            return LinkOptionPage(found.Select(x => new LinkOptionRow(x.Item.Id, x.Item.DisplayNumber, x.Item.SourceDisplayNumber, x.Item.State.ToString(), x.SortNumber, x.Item.Revision)).ToList(), type, size.Value, filterKey, snapshotAt);
         }
         if (type == "Release")
         {
-            var rows = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
-            return Results.Ok(rows.Select(x => new { x.Id, displayNumber = $"BUILD-{x.Version}", title = $"Build {x.Version}", secondary = x.IsReleased ? "Released" : "In work", relationships = ManagedDocumentRelationshipPolicy.Relationships(type) }));
+            var query = db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId);
+            if (term.Length > 0) query = query.Where(x => x.Version.ToLower().Contains(term));
+            if (after is not null) query = query.Where(x => string.Compare(x.Version, after) > 0);
+            var found = await query.OrderBy(x => x.Version).Take(size.Value + 1).ToListAsync(ct);
+            return LinkOptionPage(found.Select(x => new LinkOptionRow(x.Id, $"BUILD-{x.Version}", $"Build {x.Version}", x.IsReleased ? "Released" : "In work", x.Version, 0)).ToList(), type, size.Value, filterKey, snapshotAt);
         }
         return Results.BadRequest(new { error = "Choose a supported lifecycle artifact type." });
+    }
+
+    private static IResult LinkOptionPage(List<LinkOptionRow> rows, string type, int pageSize, string filterKey, DateTimeOffset snapshotAt)
+    {
+        var hasMore = rows.Count > pageSize; if (hasMore) rows.RemoveAt(rows.Count - 1); var last = rows.LastOrDefault();
+        return Results.Ok(new
+        {
+            pageSize, hasMore,
+            nextCursor = hasMore && last is not null ? ManagedDocumentPaging.Encode("link-options", filterKey, snapshotAt, last.SortNumber, last.Revision.ToString()) : null,
+            items = rows.Select(x => new { x.Id, x.DisplayNumber, x.Title, x.Secondary, relationships = ManagedDocumentRelationshipPolicy.Relationships(type) })
+        });
     }
 
     private static async Task<IResult> DownloadAttachmentAsync(Guid attachmentId, HttpContext http, AeroLinkDbContext db, ManagedDocumentIntegrityService integrity, CancellationToken ct)
@@ -1004,6 +1107,32 @@ public static class ManagedDocumentEndpoints
     { var query = db.ManagedDocumentRevisions.AsQueryable(); if (includeReviews) query = query.Include(x => x.ReviewSteps); var revision = await query.SingleOrDefaultAsync(x => x.Id == revisionId, ct); if (revision is null) return null; var document = await db.ManagedDocuments.SingleAsync(x => x.Id == revision.DocumentId, ct); return new(document, revision); }
 
     private static object Attachment(ControlledAttachment x) => new { x.Id, x.LogicalId, x.Version, x.Label, x.Description, x.OriginalFileName, x.ContentType, x.Size, x.Sha256, x.ValidationProfile, x.ValidationResult, state = x.State.ToString(), x.UploadedBy, x.UploadedAt, x.IntegrityVerifiedAt, downloadUrl = $"/api/managed-documents/attachments/{x.Id}" };
+
+    private static IQueryable<ManagedDocument> ApplyDocumentFilters(IQueryable<ManagedDocument> query, AeroLinkDbContext db,
+        string? search, string? state, string? documentType, string? acronym, string? owner, string? steward)
+    {
+        var term = search?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrEmpty(term)) query = query.Where(x => x.DocumentNumber.ToLower().Contains(term)
+            || x.Acronym.ToLower().Contains(term) || x.Title.ToLower().Contains(term) || x.DocumentType.ToLower().Contains(term));
+        if (!string.IsNullOrWhiteSpace(documentType)) { var value = documentType.Trim().ToLowerInvariant(); query = query.Where(x => x.DocumentType.ToLower() == value); }
+        if (!string.IsNullOrWhiteSpace(acronym)) { var value = acronym.Trim().ToLowerInvariant(); query = query.Where(x => x.Acronym.ToLower() == value); }
+        if (!string.IsNullOrWhiteSpace(steward)) { var value = steward.Trim().ToLowerInvariant(); query = query.Where(x => x.StewardId == value); }
+        if (!string.IsNullOrWhiteSpace(owner))
+        {
+            var value = owner.Trim().ToLowerInvariant();
+            query = query.Where(document => db.ManagedDocumentRevisions.Any(revision => revision.DocumentId == document.Id
+                && revision.ResponsibleOwnerId == value && (revision.State == ManagedDocumentState.Draft
+                    || revision.State == ManagedDocumentState.InReview || revision.State == ManagedDocumentState.Returned)));
+        }
+        if (!string.IsNullOrWhiteSpace(state))
+        {
+            if (!Enum.TryParse<ManagedDocumentState>(state.Trim(), true, out var parsed)
+                || parsed is ManagedDocumentState.Superseded or ManagedDocumentState.Withdrawn)
+                return query.Where(_ => false);
+            query = query.Where(document => db.ManagedDocumentRevisions.Any(revision => revision.DocumentId == document.Id && revision.State == parsed));
+        }
+        return query;
+    }
     private static ManagedDocumentSummary Summary(ManagedDocument document, IReadOnlyList<ManagedDocumentRevision> revisions, ArtifactEditSession? session)
     { var releasedHeads = revisions.Where(x => x.State == ManagedDocumentState.Released).ToList(); var released = releasedHeads.Count == 1 ? releasedHeads[0] : null; var inWorkHeads = revisions.Where(x => x.State is ManagedDocumentState.Draft or ManagedDocumentState.InReview or ManagedDocumentState.Returned).ToList(); var inWork = inWorkHeads.Count == 1 ? inWorkHeads[0] : null; var reconciliationRequired = releasedHeads.Count > 1 || inWorkHeads.Count > 1; return new(document.Id, document.DocumentNumber, document.Acronym, document.DocumentType, document.Title, document.StewardId, inWork?.ResponsibleOwnerId, released is null ? "None" : $"{document.DocumentNumber}.{released.Revision:D2}", reconciliationRequired ? "ReconciliationRequired" : released?.State.ToString() ?? "NotReleased", inWork is null ? null : $"{document.DocumentNumber}.{inWork.Revision:D2}", reconciliationRequired ? "ReconciliationRequired" : inWork?.State.ToString() ?? "None", inWork is null ? null : session?.UserName, inWork is null ? null : session?.ExpiresAt, reconciliationRequired, document.UpdatedAt); }
 
@@ -1134,6 +1263,8 @@ public static class ManagedDocumentEndpoints
     private sealed record ConnectorAuth(DocumentConnectorGrant? Grant, ArtifactEditSession? Session, IResult? Error);
     private sealed record RelationshipRevision(ManagedDocument? Document, ManagedDocumentRevision? Revision, IResult? Error);
     private sealed record CanonicalLinkTarget(string ArtifactType, Guid ArtifactId, string DisplayNumber, string Title, string State, Guid ProjectId, Guid? ReleaseId, string ReleaseVersion, string DeepLink);
+    private sealed record LinkOptionRow(Guid Id, string DisplayNumber, string Title, string Secondary, string SortNumber, int Revision);
+    private sealed record DashboardCounts(int Total, int Released, int InWork, int InReview, int Returned);
     private sealed record ManagedDocumentSummary(Guid Id, string DocumentNumber, string Acronym, string DocumentType, string Title, string StewardId, string? ResponsibleOwnerId, string ReleasedRevision, string ReleasedState, string? InWorkRevision, string InWorkState, string? CheckedOutBy, DateTimeOffset? CheckoutExpiresAt, bool ReconciliationRequired, DateTimeOffset UpdatedAt);
 }
 

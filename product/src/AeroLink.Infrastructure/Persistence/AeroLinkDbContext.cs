@@ -1009,7 +1009,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<ControlledAttachment>(b =>
         {
-            b.ToTable("controlled_attachments");b.HasKey(x=>x.Id);b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired();b.Property(x=>x.Label).HasMaxLength(300).IsRequired();b.Property(x=>x.Description).HasMaxLength(4000);b.Property(x=>x.OriginalFileName).HasMaxLength(260).IsRequired();b.Property(x=>x.ContentType).HasMaxLength(200).IsRequired();b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired();b.Property(x=>x.StorageKey).HasMaxLength(500).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.UploadedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.ValidationProfile).HasMaxLength(100);b.Property(x=>x.ValidationResult).HasMaxLength(100);b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.State});b.HasIndex(x=>new{x.LogicalId,x.Version}).IsUnique();b.HasIndex(x=>new{x.ProjectId,x.Sha256});b.HasOne<ControlledAttachment>().WithMany().HasForeignKey(x=>x.SupersedesId).OnDelete(DeleteBehavior.Restrict);
+            b.ToTable("controlled_attachments");b.HasKey(x=>x.Id);b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired();b.Property(x=>x.Label).HasMaxLength(300).IsRequired();b.Property(x=>x.Description).HasMaxLength(4000);b.Property(x=>x.OriginalFileName).HasMaxLength(260).IsRequired();b.Property(x=>x.ContentType).HasMaxLength(200).IsRequired();b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired();b.Property(x=>x.StorageKey).HasMaxLength(500).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.UploadedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.ValidationProfile).HasMaxLength(100);b.Property(x=>x.ValidationResult).HasMaxLength(100);b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.State});b.HasIndex(x=>new{x.RevisionId,x.LogicalId,x.Version});b.HasIndex(x=>new{x.LogicalId,x.Version}).IsUnique();b.HasIndex(x=>new{x.ProjectId,x.Sha256});b.HasOne<ControlledAttachment>().WithMany().HasForeignKey(x=>x.SupersedesId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ArtifactEditSession>(b =>
         {
@@ -1137,6 +1137,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.DocumentType).HasMaxLength(160).IsRequired(); b.Property(x => x.Title).HasMaxLength(300).IsRequired();
             b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired(); b.Property(x => x.StewardId).HasMaxLength(100).IsRequired(); b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x => x.Version).IsConcurrencyToken();
             b.HasIndex(x => new { x.ProjectId, x.DocumentNumber }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.Acronym });
+            b.HasIndex(x => new { x.ProjectId, x.DocumentType, x.DocumentNumber });
+            b.HasIndex(x => new { x.ProjectId, x.StewardId, x.DocumentNumber });
+            b.HasIndex(x => new { x.ProjectId, x.UpdatedAt, x.DocumentNumber });
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ManagedDocumentRevision>(b =>
@@ -1150,7 +1153,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ReleaseManifestHash).HasMaxLength(64).IsRequired(); b.Property(x => x.ReturnReason).HasMaxLength(4000).IsRequired();
             b.Property(x => x.SubmittedBy).HasMaxLength(100); b.Property(x => x.ReleasedBy).HasMaxLength(100); b.Property(x => x.Version).IsConcurrencyToken();
             b.Ignore(x => x.CurrentReviewCycle); b.HasIndex(x => new { x.DocumentId, x.Revision }).IsUnique();
-            b.HasIndex(x => new { x.DocumentId, x.State }); b.HasIndex(x => x.ParentRevisionId);
+            b.HasIndex(x => new { x.DocumentId, x.State }); b.HasIndex(x => new { x.ResponsibleOwnerId, x.State, x.DocumentId }); b.HasIndex(x => x.ParentRevisionId);
             b.HasOne<ManagedDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<ManagedDocumentRevision>().WithMany().HasForeignKey(x => x.ParentRevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<ControlledAttachment>().WithMany().HasForeignKey(x => x.ParentReleasedDocxAttachmentId).OnDelete(DeleteBehavior.Restrict);
@@ -1163,6 +1166,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ActorId).HasMaxLength(100).IsRequired(); b.Property(x => x.Comment).HasMaxLength(4000).IsRequired();
             b.Property(x => x.BaseSha256).HasMaxLength(64); b.Property(x => x.ResultSha256).HasMaxLength(64).IsRequired(); b.Property(x => x.OperationId).HasMaxLength(160).IsRequired(); b.Property(x => x.ReturnResolutionNote).HasMaxLength(4000);
             b.HasIndex(x => new { x.RevisionId, x.WorkingVersion }).IsUnique(); b.HasIndex(x => x.WorkingAttachmentId).IsUnique();
+            b.HasIndex(x => new { x.RevisionId, x.OccurredAt });
             b.HasOne<ManagedDocumentRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<ControlledAttachment>().WithMany().HasForeignKey(x => x.WorkingAttachmentId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<ControlledAttachment>().WithMany().HasForeignKey(x => x.BaseAttachmentId).OnDelete(DeleteBehavior.Restrict);
@@ -1194,6 +1198,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.AuthoritySource).HasMaxLength(80).IsRequired(); b.Property(x => x.WorkflowName).HasMaxLength(200).IsRequired();
             b.Property(x => x.AuthorityPolicy).HasMaxLength(80).IsRequired(); b.Property(x => x.Version).IsConcurrencyToken();
             b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired(); b.HasIndex(x => new { x.RevisionId, x.Cycle, x.Position }).IsUnique();
+            b.HasIndex(x => new { x.ApproverId, x.State, x.AssignedAt });
         });
         modelBuilder.Entity<ManagedDocumentOperation>(b =>
         {
@@ -1228,7 +1233,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.DisplayNumber).HasMaxLength(80).IsRequired(); b.Property(x => x.CanonicalTitle).HasMaxLength(500).IsRequired(); b.Property(x => x.TargetState).HasMaxLength(80).IsRequired();
             b.Property(x => x.TargetReleaseVersion).HasMaxLength(80).IsRequired(); b.Property(x => x.DeepLink).HasMaxLength(1000).IsRequired(); b.Property(x => x.Relationship).HasMaxLength(80).IsRequired(); b.Property(x => x.Provenance).HasMaxLength(80).IsRequired();
             b.Property(x => x.SupersedeReason).HasMaxLength(1000).IsRequired(); b.Property(x => x.SupersededBy).HasMaxLength(100); b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
-            b.HasIndex(x => new { x.RevisionId, x.IsCurrent }); b.HasIndex(x => new { x.RevisionId, x.ArtifactType, x.ArtifactId, x.Relationship });
+            b.HasIndex(x => new { x.RevisionId, x.IsCurrent }); b.HasIndex(x => new { x.RevisionId, x.CreatedAt }); b.HasIndex(x => new { x.RevisionId, x.ArtifactType, x.ArtifactId, x.Relationship });
             b.HasIndex(x => new { x.ArtifactType, x.ArtifactId });
             b.HasOne<ManagedDocumentRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.TargetProjectId).OnDelete(DeleteBehavior.Restrict);

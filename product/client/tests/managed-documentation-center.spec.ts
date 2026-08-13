@@ -21,7 +21,7 @@ test('controlled relationship links use canonical targets and exact browser rout
   for(const artifactType of Object.keys(meanings)){
     const optionsResponse=await request.get(`${apiBase}/api/managed-documents/link-options?projectId=${showcase.projectId}&artifactType=${artifactType}`)
     expect(optionsResponse.ok(),await optionsResponse.text()).toBeTruthy()
-    const options=await optionsResponse.json() as {id:string}[]
+    const options=(await optionsResponse.json() as {items:{id:string}[]}).items
     if(artifactType==='ProblemReport')options.unshift({id:report.id})
     expect(options.length,`Expected a showcase ${artifactType} target`).toBeGreaterThan(0)
     const detail=await (await request.get(`${apiBase}/api/managed-documents/${created.id}`)).json()
@@ -69,7 +69,7 @@ test('managed Word documents remain one Project-wide register across build navig
   expect(trust.protocolVersion).toBe('aerolink-connector-launch-v1')
   expect(trust.profileVersion).toBe('aerolink-ooxml-safe-v1')
   expect(trust.publicKeyFingerprint).toMatch(/^[0-9a-f]{64}$/)
-  await expect(page.getByText('7 matching records')).toBeVisible()
+  await expect(page.getByText('7 of 7 matching records')).toBeVisible()
   await expect(page.locator('.mdMetrics').getByText('4', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: /SDP SDP-000001/ }).click()
@@ -92,7 +92,7 @@ test('managed Word documents remain one Project-wide register across build navig
   await page.reload({ waitUntil: 'load' })
   await expect(page.getByText('Add GitLab traceability and preserve immutable check-in evidence.')).toBeVisible()
   await page.getByRole('button', { name: 'Versions' }).click()
-  await expect(page.getByText('Most recent checked-in draft.')).toBeVisible()
+  await expect(page.locator('.mdVersions').getByText('Most recent checked-in draft.', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Review & release' }).click()
   await expect(page.getByRole('heading', { name: 'Electronic signatures for SDP-000001.01' })).toBeVisible()
@@ -102,9 +102,49 @@ test('managed Word documents remain one Project-wide register across build navig
   await page.getByRole('button', { name: 'Open build 1.5' }).click()
   await page.goto(page.url().replace(/command-center$/, 'documentation-center'))
   await expect(page).toHaveURL(/\/programs\/[0-9a-f-]+\/projects\/[0-9a-f-]+\/documentation-center$/)
-  await expect(page.getByText('7 matching records')).toBeVisible()
+  await expect(page.getByText('7 of 7 matching records')).toBeVisible()
   await expect(page.getByRole('button', { name: '+ New document' })).toBeVisible()
   await expect(page.locator('.mdList').getByText(/\.01 · (Draft|In Review|Returned)/)).toHaveCount(4)
+})
+
+test('the Project register loads bounded pages while direct document URLs remain reachable', async ({ page, request }) => {
+  const showcase = await showcaseSeed(request)
+  await apiLogin(request, 'software.author')
+  const response = await request.get(`${apiBase}/api/managed-documents?projectId=${showcase.projectId}&pageSize=100`)
+  expect(response.ok(), await response.text()).toBeTruthy()
+  const realItems = (await response.json()).items
+  const direct = realItems.find((item:{acronym:string}) => item.acronym === 'SDP')
+  const template = realItems.find((item:{id:string}) => item.id !== direct.id)
+  expect(direct).toBeTruthy(); expect(template).toBeTruthy()
+
+  await page.route('**/api/managed-documents?*', async route => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get('cursor') === 'mock-next') {
+      await route.fulfill({ json: { totalCount: 51, pageSize: 50, hasMore: false, nextCursor: null, items: [{ ...template, id: crypto.randomUUID(), documentNumber: 'DOC-999999', title: 'Last paged document' }] } })
+      return
+    }
+    const items = Array.from({ length: 50 }, (_, index) => ({ ...template, id: crypto.randomUUID(), documentNumber: `DOC-${String(index + 1).padStart(6, '0')}`, title: `Paged document ${index + 1}` }))
+    await route.fulfill({ json: { totalCount: 51, pageSize: 50, hasMore: true, nextCursor: 'mock-next', items } })
+  })
+  await page.route('**/history/audit?*', async route => {
+    const cursor = new URL(route.request().url()).searchParams.get('cursor')
+    const items = cursor
+      ? [{ id: crypto.randomUUID(), eventType: 'PagedAuditEvent51', actorId: 'software.author', detail: 'Final retained event', occurredAt: new Date().toISOString() }]
+      : Array.from({ length: 50 }, (_, index) => ({ id: crypto.randomUUID(), eventType: `PagedAuditEvent${index + 1}`, actorId: 'software.author', detail: `Retained event ${index + 1}`, occurredAt: new Date().toISOString() }))
+    await route.fulfill({ json: { pageSize: 50, hasMore: !cursor, nextCursor: cursor ? null : 'mock-audit-next', items } })
+  })
+
+  await login(page, 'software.author', { openProject: false })
+  await page.goto(`/programs/${showcase.programId}/projects/${showcase.projectId}/documentation-center/${direct.id}`)
+  await expect(page.getByRole('heading', { name: direct.title })).toBeVisible()
+  await expect(page.getByText('50 of 51 matching records')).toBeVisible()
+  await page.getByRole('button', { name: 'Load more documents' }).click()
+  await expect(page.getByText('51 of 51 matching records')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Last paged document/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Audit' }).click()
+  await expect(page.getByRole('heading', { name: 'Complete retained evidence' })).toBeVisible()
+  await page.getByRole('button', { name: 'Load more Audit' }).click()
+  await expect(page.getByText('Paged Audit Event51')).toBeVisible()
 })
 
 test('review signature dialog exposes and submits the exact frozen intent', async ({ page, request }) => {
@@ -157,7 +197,7 @@ test('review signature dialog exposes and submits the exact frozen intent', asyn
   await expect(page.getByText(/was approved/)).toBeVisible()
   await page.reload({ waitUntil: 'load' })
   await page.getByRole('button', { name: 'Review & release' }).click()
-  await expect(page.getByText('I confirm this exact submitted snapshot is technically complete.')).toBeVisible()
+  await expect(page.locator('.mdReview').getByText('I confirm this exact submitted snapshot is technically complete.')).toBeVisible()
   await expect(page.getByText('Rationale: The formal scope, working file, and relationship manifest are acceptable.')).toBeVisible()
 })
 
@@ -223,7 +263,7 @@ test('a Draft revision can be withdrawn with retained history and survives refre
   await page.reload({ waitUntil: 'load' })
   await expect(page.getByText('The released head has no active successor revision.')).toBeVisible()
   await page.getByRole('button', { name: /^audit$/i }).click()
-  await expect(page.getByText(/Document Revision Withdrawn/i)).toBeVisible()
+  await expect(page.locator('.mdAudit').getByText(/Document Revision Withdrawn/i)).toBeVisible()
 })
 
 test('configuration authority can explicitly reassign document stewardship in the browser', async ({ page, request }) => {
