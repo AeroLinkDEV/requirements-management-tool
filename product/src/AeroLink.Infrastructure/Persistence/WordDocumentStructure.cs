@@ -411,7 +411,7 @@ public static class WordDocumentStructure
                 new XElement(W + "p", new XElement(W + "r",
                     new XElement(W + "rPr", new XElement(W + "noProof")),
                     WatermarkShape()))));
-        root.AddFirst(new XElement(W + "p", watermark));
+        root.AddFirst(watermark);
         return document.ToString(SaveOptions.DisableFormatting);
     }
 

@@ -138,7 +138,7 @@ public static class ProfessionalPublicationRenderer
         var watermark = DocxWatermark(p);
         var watermarkBlock = watermark.Length == 0 ? ""
             : p.ControlledStatusControls
-                ? $"<w:p><w:sdt><w:sdtPr><w:tag w:val=\"{WordDocumentStructure.WatermarkTag}\"/></w:sdtPr><w:sdtContent><w:p>{watermark}</w:p></w:sdtContent></w:sdt></w:p>"
+                ? $"<w:sdt><w:sdtPr><w:tag w:val=\"{WordDocumentStructure.WatermarkTag}\"/></w:sdtPr><w:sdtContent><w:p>{watermark}</w:p></w:sdtContent></w:sdt>"
                 : watermark;
         return $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\">{watermarkBlock}<w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"168578\"/></w:pBdr></w:pPr><w:r><w:rPr><w:b/><w:color w:val=\"102A43\"/><w:sz w:val=\"18\"/></w:rPr><w:t>{SecurityElement.Escape(p.Product)}  |  {SecurityElement.Escape(p.DocumentType.ToUpperInvariant())}</w:t></w:r></w:p></w:hdr>";
     }

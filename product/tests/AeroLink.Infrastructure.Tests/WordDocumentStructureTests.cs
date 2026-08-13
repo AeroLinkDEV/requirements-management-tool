@@ -302,9 +302,9 @@ public sealed class WordDocumentStructureTests
     private static string OffPageShapeHeader() => HeaderXml("<w:p><w:r><w:pict><v:shape id=\"AeroLinkWatermark\" type=\"#_x0000_t136\" fillcolor=\"#c8d0d8\"><v:textpath string=\"DRAFT\"/></v:shape></w:pict></w:r></w:p>");
 
     private static string WatermarkSdt() =>
-        "<w:p><w:sdt><w:sdtPr><w:tag w:val=\"AeroLink.Watermark\"/></w:sdtPr><w:sdtContent><w:p><w:r><w:rPr><w:noProof/></w:rPr><w:pict>"
+        "<w:sdt><w:sdtPr><w:tag w:val=\"AeroLink.Watermark\"/></w:sdtPr><w:sdtContent><w:p><w:r><w:rPr><w:noProof/></w:rPr><w:pict>"
         + "<v:shape id=\"AeroLinkWatermark\" o:spid=\"_x0000_s2049\" type=\"#_x0000_t136\" style=\"position:absolute;margin-left:0;margin-top:0;width:468pt;height:117pt;rotation:315;z-index:-251658752;mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin\" o:allowincell=\"f\" fillcolor=\"#c8d0d8\" stroked=\"f\">"
-        + "<v:textpath style=\"font-family:&quot;Calibri&quot;;font-size:1pt\" string=\"DRAFT\"/><v:fill opacity=\".45\"/></v:shape></w:pict></w:r></w:p></w:sdtContent></w:sdt></w:p>";
+        + "<v:textpath style=\"font-family:&quot;Calibri&quot;;font-size:1pt\" string=\"DRAFT\"/><v:fill opacity=\".45\"/></v:shape></w:pict></w:r></w:p></w:sdtContent></w:sdt>";
 
     private static string ReadPart(byte[] bytes, string name)
     {
