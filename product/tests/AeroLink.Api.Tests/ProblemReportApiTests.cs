@@ -425,6 +425,27 @@ public sealed class ProblemReportApiTests
         Assert.Equal("Critical", artifact.GetProperty("details").GetProperty("severity").GetString());
     }
 
+    [Fact]
+    public async Task Queue_search_finds_a_report_by_its_exact_displayed_number_and_revision()
+    {
+        using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory);
+        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { projectId, title = "Searchable identity", problem = "The displayed identifier must be searchable." });
+        var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var displayNumber = createdBody.GetProperty("displayNumber").GetString()!;
+
+        var byDisplay = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/problem-reports?projectId={projectId}&search={Uri.EscapeDataString(displayNumber)}");
+        Assert.Contains(byDisplay.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("displayNumber").GetString() == displayNumber);
+
+        var stableNumber = displayNumber.Split('.')[0];
+        var byNumber = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/problem-reports?projectId={projectId}&search={Uri.EscapeDataString(stableNumber)}");
+        Assert.Contains(byNumber.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("displayNumber").GetString() == displayNumber);
+    }
+
     private static async Task<Guid> SeedProjectAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();

@@ -88,6 +88,35 @@ public sealed class ProblemReportClosureVerificationPolicyTests
             Assert.Equal(revision1.Id, Assert.Single(manualProjection.PermittedProcedureRevisionIds));
             var manualDecision = await policy.ValidateAsync(manual, manualPass, default);
             Assert.True(manualDecision.Accepted, manualDecision.Error);
+
+            // The deterministic same-instant case: the retest's server recording instant equals the instant
+            // the corrective action entered verification. Equality is not evidence the retest came first,
+            // and the structural lineage proves it succeeded the failure, so it must be accepted.
+            var equalInstant = new TestExecution(project.Id, revision1.Id, targetBuild.Id, failure.Id, TestOutcome.Pass,
+                "test", "Rig", "Passed", "controlled://equal-instant", start.AddMinutes(5), start.AddMinutes(5), targetRelease.Id);
+            db.TestExecutions.Add(equalInstant);
+            await db.SaveChangesAsync();
+            var equalDecision = await policy.ValidateAsync(report, equalInstant, default);
+            Assert.True(equalDecision.Accepted, equalDecision.Error);
+            var earlierRecording = new TestExecution(project.Id, revision1.Id, targetBuild.Id, failure.Id, TestOutcome.Pass,
+                "test", "Rig", "Passed", "controlled://earlier-recording", start.AddMinutes(4), start.AddMinutes(4), targetRelease.Id);
+            db.TestExecutions.Add(earlierRecording);
+            await db.SaveChangesAsync();
+            var earlierDecision = await policy.ValidateAsync(report, earlierRecording, default);
+            Assert.False(earlierDecision.Accepted);
+            Assert.Equal("pr_verification_not_successor", earlierDecision.Code);
+
+            // Once verification has transitioned away, the verification-ready instant must come from the
+            // structural ResolutionProposed event selected by its monotonic revision number - never from
+            // wall-clock order. An older-revision event carrying a later clock value must not win.
+            db.ProblemReportRevisions.AddRange(
+                new ProblemReportRevision(report.Id, 3, "ResolutionProposed", "engineer", new string('a', 64), "{}", start.AddMinutes(9)),
+                new ProblemReportRevision(report.Id, 5, "ResolutionProposed", "engineer", new string('a', 64), "{}", start.AddMinutes(5)));
+            await db.SaveChangesAsync();
+            report.RecordResolutionVerification("engineer", successor.Id, start.AddMinutes(10));
+            await db.SaveChangesAsync();
+            var afterTransition = await policy.ResolveAsync(report, default);
+            Assert.Equal(start.AddMinutes(5), afterTransition.VerificationReadyAt);
         }
         finally
         {

@@ -126,7 +126,24 @@ public static class ProblemReportEndpoints
         if (type is not null) query = query.Where(x => x.Type == type);
         if (!string.IsNullOrWhiteSpace(owner)) { var normalizedOwner = owner.Trim().ToLower(); query = query.Where(x => x.ResponsibleEngineerId.ToLower().Contains(normalizedOwner)); }
         if (blockersOnly == true) query = query.Where(x => x.IsReleaseBlocker);
-        if (!string.IsNullOrWhiteSpace(search)) { var term = search.Trim().ToLower(); query = query.Where(x => x.ReportNumber.ToLower().Contains(term) || x.Title.ToLower().Contains(term) || x.Problem.ToLower().Contains(term) || x.RootCause.ToLower().Contains(term)); }
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim(); var lowered = term.ToLower();
+            // DisplayNumber ("PR-00013.00") is a computed identity, so an exact number.revision search is
+            // translated onto the mapped columns. The general substring match remains an OR, so a title or
+            // description containing a dot-terminated number keeps working.
+            var separator = term.LastIndexOf('.');
+            string? exactNumber = null; int? exactRevision = null;
+            if (separator > 0 && int.TryParse(term[(separator + 1)..], out var parsedRevision))
+            {
+                exactNumber = term[..separator];
+                exactRevision = parsedRevision;
+            }
+            query = query.Where(x => x.ReportNumber.ToLower().Contains(lowered) || x.Title.ToLower().Contains(lowered)
+                || x.Problem.ToLower().Contains(lowered) || x.RootCause.ToLower().Contains(lowered)
+                || (exactNumber != null && exactRevision != null
+                    && x.ReportNumber.ToLower() == exactNumber.ToLower() && x.Revision == exactRevision.Value));
+        }
         var now = DateTimeOffset.UtcNow;
         // SQLite does not translate DateTimeOffset ordering/comparison. Resolve only the independent waiver
         // candidates first, then use their bounded ID set in the authoritative count/page predicate. This

@@ -1005,8 +1005,12 @@ public static class VerificationEndpoints
                 // make a legitimate revised corrective test impossible to record.
                 if (predecessor.ProcedureId != procedure.Id)
                     return Results.BadRequest(new { error = "A retest must reference an earlier execution in the same controlled procedure lineage.", code = "retest_procedure_mismatch" });
-                if (predecessor.Execution.ExecutedAt >= request.ExecutedAt)
-                    return Results.BadRequest(new { error = "A retest cannot predate the execution it supersedes.", code = "retest_not_successor" });
+                // The retest link is the structural succession proof. ExecutedAt is a reported fact checked
+                // only for consistency: a retest must not be reported as strictly earlier than the execution
+                // it supersedes. An equal instant is not evidence of priority (client clocks and second-level
+                // input precision can collide), so only a strictly earlier reported time is refused.
+                if (predecessor.Execution.ExecutedAt > request.ExecutedAt)
+                    return Results.BadRequest(new { error = "A retest cannot be reported earlier than the execution it supersedes.", code = "retest_not_successor" });
             }
             try { var execution = new TestExecution(request.ProjectId, request.ProcedureRevisionId, request.SoftwareBuildId, request.RetestOfExecutionId,
                 request.Outcome, http.UserAccount().UserName, request.Configuration, request.Determination, request.EvidenceReference, request.ExecutedAt, DateTimeOffset.UtcNow, executionReleaseId);

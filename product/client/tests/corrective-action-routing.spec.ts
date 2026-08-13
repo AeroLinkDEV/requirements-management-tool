@@ -104,7 +104,12 @@ test("a corrective action opens the discipline, report and procedure it belongs 
   }
   await page.goto(new URL(root + "/problem-reports", page.url()).toString(), { waitUntil: "load" })
   await expect(page.getByRole("heading", { name: "Problem Reports" })).toBeVisible({ timeout: 30_000 })
+  // The queue is Project-wide and paginated, and neighbouring journeys raise their own reports. Discover the
+  // exact raised records through the search surface instead of assuming they sit on the first page.
+  const queueSearch = page.getByLabel('Search')
+  await queueSearch.fill(system.report.displayNumber)
   await expect(page.getByRole("button", { name: new RegExp(system.report.displayNumber.replace('.', '\\.')) })).toBeVisible()
+  await queueSearch.fill(software.report.displayNumber)
   await expect(page.getByRole("button", { name: new RegExp(software.report.displayNumber.replace('.', '\\.')) })).toBeVisible()
   await page.reload({ waitUntil: "load" })
   await expect(page.getByRole("heading", { name: "Problem Reports" })).toBeVisible()
@@ -112,7 +117,10 @@ test("a corrective action opens the discipline, report and procedure it belongs 
   await page.goto(new URL(historicalRoot + "/problem-reports", page.url()).toString(), { waitUntil: "load" })
   await expect(page.getByRole("heading", { name: "Problem Reports" })).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole("button", { name: "+ Record problem" })).toBeVisible()
+  const historicalSearch = page.getByLabel('Search')
+  await historicalSearch.fill(system.report.displayNumber)
   await expect(page.getByRole("button", { name: new RegExp(system.report.displayNumber.replace('.', '\\.')) })).toBeVisible()
+  await historicalSearch.fill(software.report.displayNumber)
   await expect(page.getByRole("button", { name: new RegExp(software.report.displayNumber.replace('.', '\\.')) })).toBeVisible()
 });
 
