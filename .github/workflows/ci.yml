@@ -253,15 +253,26 @@ jobs:
           fi
           echo "Shard ${{ matrix.shard }} of 2: $expected tests across $(grep -c . counts.txt) discovered classes."
 
+          # The count is read from the TRX rather than the console summary. Piping this command through `tee`
+          # to capture its text produced an empty file and an empty job log on the Windows runner — the tests
+          # ran for eight minutes and exited clean, and the guard read zero from nothing. A structured result
+          # file has a schema; console output is a presentation detail that differs by SDK, verbosity and
+          # whether anything is attached to stdout.
           dotnet test "$project" --configuration Release --no-build \
-            --filter "$filter" --logger "console;verbosity=normal" | tee run.log
+            --filter "$filter" --logger "console;verbosity=normal" \
+            --logger "trx;LogFileName=shard.trx" --results-directory TestResults
 
           # `~` is a substring match, so a class whose name is a prefix of another would quietly pull in tests
           # from both, and a malformed filter would quietly run fewer. Neither fails on its own. Comparing what
           # ran against what this shard claimed turns both into a failure instead of a smaller green suite.
-          actual="$(grep -oE 'Total:[[:space:]]+[0-9]+' run.log | tail -1 | grep -oE '[0-9]+' || echo 0)"
+          trx=TestResults/shard.trx
+          if [ ! -f "$trx" ]; then
+            echo "::error::No test results file at $trx, so this shard cannot prove what it ran."
+            exit 1
+          fi
+          actual="$(grep -oE '<Counters[^>]*\btotal="[0-9]+"' "$trx" | grep -oE '[0-9]+' | head -1)"
           if [ "$actual" != "$expected" ]; then
-            echo "::error::Shard ${{ matrix.shard }} claimed $expected tests but ran $actual. The filter does not match the partition."
+            echo "::error::Shard ${{ matrix.shard }} claimed $expected tests but ran ${actual:-no}. The filter does not match the partition."
             exit 1
           fi
           echo "Shard ${{ matrix.shard }} ran exactly the $expected tests it selected."
