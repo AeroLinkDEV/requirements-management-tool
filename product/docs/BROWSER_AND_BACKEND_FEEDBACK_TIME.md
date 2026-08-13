@@ -242,6 +242,31 @@ would otherwise quietly pull in a file that shard was never given.
 Refresh the file from the artifacts these jobs upload when the numbers drift. Nothing breaks if it is stale —
 it just packs less well.
 
+**Measured result.** The shards went from a 2.0× spread to 1.1×:
+
+| Split by | Shard wall clock | Spread |
+|---|---|---|
+| Test count (`--shard`) | 852s / 550s / 461s / 424s | 2.0× |
+| Recorded duration | **614s / 603s / 593s / 555s** | **1.1×** |
+
+Critical path **14m12s → 10m14s**. Each shard reported running exactly the tests it planned — 46, 55, 50 and
+74, totalling all 225.
+
+Note that the packed shards sum to more wall clock than the recorded durations predict (296s each). The JSON
+report times test *execution*; a shard also pays worker startup, the web server, and fixtures. Recorded
+durations are good enough to rank files, which is all the packing needs — they are not a wall-clock model, and
+should not be read as one.
+
+## Where it stops
+
+`backend-api` is now 526s against the journeys' 614s, so the two are within a shard's setup cost of each
+other and neither is worth splitting further. What remains is the ~175s of setup every shard pays and the
+per-test overhead inside the assemblies, not the way work is divided across runners.
+
+Sharing one API build across the browser shards was considered and rejected on the numbers: the 86s build
+currently overlaps inside each parallel job, so centralising it would add a serial wait plus artifact
+transfer and make the critical path *worse*.
+
 ## Not implemented here, and why
 
 Tracked as a GitHub issue rather than done in this increment, because each is a real piece of work rather than
