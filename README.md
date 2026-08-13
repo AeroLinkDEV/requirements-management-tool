@@ -98,6 +98,7 @@ demonstrations use the `FMSLIVE` dataset described in
 | [Massive enterprise update report](MASSIVE_ENTERPRISE_UPDATE_REPORT.md) | Historical acceptance report for its completed enterprise increment; current state is in Project State |
 | [Showcase and usability refresh](SHOWCASE_USABILITY_REFRESH_REPORT.md) | Readable design system, simplified shell, progressive disclosure, critical-surface redesign, and visual validation evidence |
 | [Operations and recovery](product/docs/OPERATIONS.md) | Startup, stop, diagnostics, backup verification, isolated restore, and production recovery |
+| [Merging into main](product/docs/MERGING.md) | **Read before merging.** Arm auto-merge and walk away; when a rebase is actually needed; why there is no merge queue |
 | [Feedback time](product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md) | **Read before changing CI.** Which job actually governs a pull request's wall clock, measured; why shard counts are not the lever; what is deferred and why |
 | [Quality attributes](QUALITY_ATTRIBUTES.md) | Security, integrity, operations, and production targets |
 | [Decisions and open questions](DECISIONS_AND_OPEN_QUESTIONS.md) | Accepted decisions, assumptions, and unresolved choices |
@@ -107,6 +108,8 @@ demonstrations use the `FMSLIVE` dataset described in
 ## Working Conventions
 
 - Markdown in Git is authoritative. Generated Word or PDF copies are snapshots, not source records.
+- Arm a pull request with `gh pr merge <n> --squash --auto` as soon as it is ready; it lands itself when the
+  gate passes. Rebase only when `mergeStateStatus` is actually `BEHIND`. See [Merging into main](product/docs/MERGING.md).
 - Product decisions are recorded in [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md); they are not silently changed in another document.
 - New capabilities receive a stable feature identifier in [FEATURE_CATALOG.md](FEATURE_CATALOG.md).
 - Terms use the definitions in [DOMAIN_MODEL_AND_GLOSSARY.md](DOMAIN_MODEL_AND_GLOSSARY.md).
