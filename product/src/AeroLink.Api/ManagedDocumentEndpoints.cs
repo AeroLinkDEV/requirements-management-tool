@@ -295,9 +295,10 @@ public static class ManagedDocumentEndpoints
 
         var recoveryGrants = await db.DocumentConnectorGrants.Where(x => x.RecoveryWorkspaceId == original.Id).ToListAsync(ct);
         var latestRecovery = recoveryGrants.OrderByDescending(x => x.CreatedAt).FirstOrDefault(); var basis = latestRecovery ?? original;
-        if (latestRecovery is { RedeemedAt: null, RevokedAt: null })
+        var now = DateTimeOffset.UtcNow;
+        if (latestRecovery is { RedeemedAt: null, RevokedAt: null } && latestRecovery.ExpiresAt > now)
             return Results.Conflict(new { error = "A recovery launch was already issued for this workspace. Open it or retry after it expires.", code = "document_recovery_already_issued" });
-        var priorSession = await db.ArtifactEditSessions.SingleAsync(x => x.Id == basis.EditSessionId, ct); var now = DateTimeOffset.UtcNow;
+        var priorSession = await db.ArtifactEditSessions.SingleAsync(x => x.Id == basis.EditSessionId, ct);
         if (priorSession.State == EditSessionState.Active && priorSession.ExpiresAt <= now) priorSession.Expire(now);
         if (priorSession.State == EditSessionState.Committed)
         {
