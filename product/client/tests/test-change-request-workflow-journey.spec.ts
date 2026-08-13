@@ -114,8 +114,8 @@ test('a configured two-stage sequential TCR review completes through the UI', as
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, programName)
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
+  await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
 
   const row = page.locator('.downstreamAssessment').filter({ hasText: sourceDisplay })
   await expect(row).toBeVisible({ timeout: 30_000 })

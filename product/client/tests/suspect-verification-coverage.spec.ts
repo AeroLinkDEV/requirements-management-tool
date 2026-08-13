@@ -140,8 +140,8 @@ test('modified requirement coverage stays suspect until an exact approved proced
   }
   const openChangeRequests = async () => {
     await openNavigationGroup(page, 'ASSURANCE')
-    await page.getByRole('link', { name: 'System Test Change Requests' }).click()
-    await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
+    await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
     // Waited for, not assumed. The queue is fetched after the heading paints, and the helper below enumerates
     // it with .all(), which does not retry — so arriving a moment early means looping over nothing and never
     // finding the decision at all.

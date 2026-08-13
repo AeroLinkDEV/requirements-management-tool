@@ -227,7 +227,7 @@ test('verification actions follow authority in the selected Program',async({page
   // There is no procedure to approve either — approving a procedure is approving the test change request that
   // carries it, which happens on that package.
   await page.goto(`/programs/${approvalWorkspace.program.id}/projects/${approvalWorkspace.project.id}/releases/${approvalWorkspace.release.id}/system-verification/coverage`)
-  await expect(page.getByRole('heading',{name:'Change Requests'})).toBeVisible({timeout:30_000})
+  await expect(page.getByRole('heading',{name:'Downstream Assessments'})).toBeVisible({timeout:30_000})
   await expect(page.getByRole('button',{name:/New test procedure/})).toHaveCount(0)
   await expect(page.getByRole('button',{name:'Review & approve'})).toHaveCount(0)
 

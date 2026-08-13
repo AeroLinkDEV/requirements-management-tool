@@ -14,7 +14,7 @@ import './VerificationLanding.css'
 export default function VerificationLanding({ scope, buildName, onOpen }: {
   scope: 'System' | 'Software'
   buildName: string
-  onOpen: (view: 'testingCoverage' | 'testResults', level?: 'HighLevel' | 'LowLevel') => void
+  onOpen: (view: 'testChangeRequests' | 'testingCoverage' | 'testResults', level?: 'HighLevel' | 'LowLevel') => void
 }) {
   const pairs: { level?: 'HighLevel' | 'LowLevel'; title: string; note: string }[] = scope === 'System'
     ? [{ title: 'System', note: 'Verification of the system requirements this build carries.' }]
@@ -38,10 +38,17 @@ export default function VerificationLanding({ scope, buildName, onOpen }: {
             <span>{pair.note}</span>
           </div>
           <div className="landingCards">
-            <button type="button" onClick={() => onOpen('testingCoverage', pair.level)}>
+            {/* Two cards, because these became two pages. The card said "Change Requests" and opened the
+                assessments page, which is the confusion that made the register impossible to find. */}
+            <button type="button" onClick={() => onOpen('testChangeRequests', pair.level)}>
               <b>Change Requests</b>
-              <span>The test change requests controlling this build's procedures, and the approved changes still waiting for one.</span>
+              <span>The test change requests controlling this build's procedures, and where each one has got to.</span>
               <i>Open Change Requests →</i>
+            </button>
+            <button type="button" onClick={() => onOpen('testingCoverage', pair.level)}>
+              <b>Downstream Assessments</b>
+              <span>Approved changes still waiting for a test conclusion, and what this build's procedures cover.</span>
+              <i>Open Downstream Assessments →</i>
             </button>
             <button type="button" onClick={() => onOpen('testResults', pair.level)}>
               <b>Test Results</b>

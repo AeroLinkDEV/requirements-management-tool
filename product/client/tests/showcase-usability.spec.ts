@@ -69,11 +69,11 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   expect(await traceDetails.count()).toBeGreaterThan(0)
   await expect(traceDetails.first()).not.toHaveAttribute('open','')
 
-  // Verification is a fork between two pages rather than a workspace with tabs: the question a reader
+  // Verification is a fork between pages rather than a workspace with tabs: the question a reader
   // arrives with decides which page they open, and both are named on the way in.
   await page.goto(page.url().replace(/\/traceability.*$/,'/system-verification'))
   await expect(page.getByRole('heading',{name:'Verification'})).toBeVisible()
-  await page.getByRole('button',{name:'Open Change Requests →'}).click()
+  await page.getByRole('button',{name:'Open Downstream Assessments →'}).click()
   await expect(page.getByRole('heading',{name:'Downstream test assessments'})).toBeVisible()
   // The procedures those change requests produce are browsed in the Explorer, which is its own destination
   // rather than a section underneath this queue.

@@ -65,7 +65,7 @@ test('build-specific PR pickers preserve the explicit target while the Project d
   await expect(changePicker.getByText(activeTitle)).toBeVisible()
 
   await page.goto(`${root}/system-verification/coverage`)
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: '+ New System Test Change Request' }).click()
   // The authoring page, not a dialog — raising a package is the same act as raising a change request.
   await expect(page.getByRole('heading', { name: 'Create System Test Change Request', level: 1 }))
