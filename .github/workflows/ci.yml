@@ -2,6 +2,11 @@ name: Product quality gate
 
 on:
   pull_request:
+  # A merge queue validates each candidate against the exact tree it will land on, including whatever is
+  # queued ahead of it. That is what strict branch protection reaches for and cannot deliver: "up to date at
+  # some point" is not "tested against what it becomes". Without this trigger the queue enqueues, waits for
+  # required checks that never start, and times out — so the trigger and the setting have to arrive together.
+  merge_group:
   push:
     branches: [main]
   schedule:
@@ -21,6 +26,10 @@ on:
 permissions:
   contents: read
 
+# A pull request groups by its number, so a new push cancels the run it supersedes. Everything else groups by
+# ref — and a merge-queue entry's ref is its own `gh-readonly-queue/...` branch, unique per candidate. Queue
+# entries therefore cannot cancel each other, and a pull request's own run cannot cancel its queue run. That
+# matters more than it looks: a queue whose runs cancel one another does not fail, it deadlocks.
 concurrency:
   group: quality-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -49,7 +58,11 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [[ "$EVENT_NAME" == "schedule" || "$EVENT_NAME" == "workflow_dispatch" || "$EVENT_NAME" == "push" ]]; then
+          # `merge_group` belongs with these and not with the diff below. A merge-group event carries no base
+          # to diff against — both `pull_request.base.sha` and `event.before` are null — so the classifier
+          # would run `git diff` with an empty base. It is also the last gate before the commit is on main,
+          # which is the moment to classify broadly rather than narrowly.
+          if [[ "$EVENT_NAME" == "schedule" || "$EVENT_NAME" == "workflow_dispatch" || "$EVENT_NAME" == "push" || "$EVENT_NAME" == "merge_group" ]]; then
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
             echo "backend=true" >> "$GITHUB_OUTPUT"
             echo "client=true" >> "$GITHUB_OUTPUT"
@@ -256,7 +269,11 @@ jobs:
   browser-pr:
     name: Browser journeys (${{ matrix.shard }}/2)
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.browser == 'true'
+    # Merge-group runs as well as pull requests. Gated on `pull_request` alone, these shards skip inside a
+    # merge queue — and a skipped job is not a failed one, so the queue would merge on a green tick having run
+    # no browser journey at all. That is a quieter gate at the exact moment the commit lands, which is the
+    # opposite of what the queue is for.
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.browser == 'true'
     runs-on: windows-latest
     # Thirty, because twenty is now inside the noise. A shard is roughly four minutes of setup — checkout,
     # .NET, Node, NuGet restore, the Release API build, Chromium — plus its half of the journeys, and that
@@ -582,6 +599,7 @@ jobs:
           PRODUCTION: ${{ needs.browser-production.result }}
           POSTGRESQL: ${{ needs.postgresql-smoke.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           describe() {
@@ -619,4 +637,24 @@ jobs:
           if [ -n "$failed" ]; then
             echo "::error::These gates did not pass:$failed"
             exit 1
+          fi
+
+          # A merge-group run is the last thing between a commit and main, so "skipped" is not an acceptable
+          # answer from the gates that decide whether the product works. On a pull request a skip is a
+          # deliberate classification; here it means the queue is about to merge on evidence nobody produced.
+          #
+          # This is the same principle as the guard in `validate`, applied to the moment it matters most: the
+          # check cannot be skipped into a pass. It exists because the conditions above are easy to get wrong
+          # in a way that is invisible — a job gated on `pull_request` silently disappears in a queue.
+          if [ "$EVENT_NAME" = "merge_group" ] && [ "$DOCS_ONLY" != "true" ]; then
+            missing=""
+            for pair in "validate:$VALIDATE" "browser-pr:$BROWSER" "browser-production:$PRODUCTION"; do
+              name="${pair%%:*}"
+              result="${pair#*:}"
+              [ "$result" = "success" ] || missing="$missing $name"
+            done
+            if [ -n "$missing" ]; then
+              echo "::error::A merge-queue run must actually execute the product gates. These did not run:$missing"
+              exit 1
+            fi
           fi
