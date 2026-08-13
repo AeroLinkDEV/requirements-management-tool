@@ -71,7 +71,16 @@ jobs:
             exit 0
           fi
 
-          files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          # Three dots, not two. A two-dot diff compares the two trees directly, so once `main` moves ahead of
+          # the branch, every file changed on `main` appears in this list as though the pull request had
+          # touched it. Three dots diffs from the merge base, which is the pull request's own change and
+          # nothing else.
+          #
+          # This is not cosmetic: it silently changed which gates ran. On 2026-08-13 a pull request that
+          # modified only this workflow classified as backend on its first run and, after an unrelated merge to
+          # `main` dragged client files into the two-dot diff, classified as client-only on its second — so the
+          # backend suites skipped and the gate went green having never run the tests the change was about.
+          files="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
           echo "$files"
           product_files="$(printf '%s\n' "$files" | grep -Ev '(^|/)(docs?|design|showcase)/|\.md$' || true)"
           backend=false
@@ -80,8 +89,12 @@ jobs:
           postgresql=false
           docs_only=true
           [[ -n "$product_files" ]] && docs_only=false
-          printf '%s\n' "$files" | grep -Eq '^product/(src|tests)/|^product/.*\.(cs|csproj|slnx|props|targets)$' && backend=true || true
-          printf '%s\n' "$files" | grep -Eq '^product/client/' && client=true || true
+          # This workflow selects and shards the suites, so a change to it can alter any gate — including by
+          # not running one. It already keyed `browser` and `postgresql`; leaving it out of `backend` and
+          # `client` meant a change to how the backend tests run did not run the backend tests, and was only
+          # caught because an unrelated merge exposed it.
+          printf '%s\n' "$files" | grep -Eq '^product/(src|tests)/|^product/.*\.(cs|csproj|slnx|props|targets)$|^\.github/workflows/ci\.yml$' && backend=true || true
+          printf '%s\n' "$files" | grep -Eq '^product/client/|^\.github/workflows/ci\.yml$' && client=true || true
           printf '%s\n' "$files" | grep -Eq '^product/(client|src/AeroLink.Api|src/AeroLink.Domain|src/AeroLink.Infrastructure)/|^\.github/workflows/ci\.yml$' && browser=true || true
           # Keyed on persistence as well as the migration/identity keywords. A change to an EF query needs
           # the real provider even when no schema moves: translation is not portable, and the SQLite path
