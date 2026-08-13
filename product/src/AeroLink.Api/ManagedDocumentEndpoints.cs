@@ -692,7 +692,7 @@ public static class ManagedDocumentEndpoints
         var form = await http.Request.ReadFormAsync(ct); var docxUpload = form.Files.GetFile("docx"); var pdfUpload = form.Files.GetFile("pdf");
         if (docxUpload is null || pdfUpload is null) return Results.BadRequest(new { error = "The exact clean DOCX and PDF release renditions are both required." });
         if (!long.TryParse(form["expectedVersion"], out var expectedVersion)) return Results.BadRequest(new { error = "The connector session version is required." });
-        var payloadHash = ""; var operationKey = $"connector-release-candidate:{grant.Id}"; ManagedDocumentStorageOperation? storageOperation = null;
+        var payloadHash = ""; var operationKey = $"connector-release-candidate:{grant.Id}"; ManagedDocumentStorageOperation? storageOperation = null; string? pdfStagingPath = null;
         try
         {
             byte[] docx;
@@ -703,21 +703,21 @@ public static class ManagedDocumentEndpoints
             try { pdfFileName = ManagedDocumentFileService.NormalizePdfFileName(pdfUpload.FileName); }
             catch (DomainException ex) { return Results.UnprocessableEntity(new { error = ex.Message, code = "invalid_pdf_filename" }); }
 
-            byte[] pdf;
+            string pdfSha256;
             try
             {
                 await using var pdfStream = pdfUpload.OpenReadStream();
-                pdf = await ManagedDocumentFileService.ReadPdfAsync(pdfStream, ct);
+                (pdfStagingPath, pdfSha256, _) = await ManagedDocumentFileService.ReadPdfToStagedFileAsync(pdfStream, ct);
             }
             catch (PdfRenditionTooLargeException)
             {
                 return Results.Json(new { error = "The PDF rendition exceeds the 100 MB release limit.", code = "rendition_too_large" }, statusCode: StatusCodes.Status413PayloadTooLarge);
             }
 
-            var pdfValidation = PdfReleaseProfile.Validate(pdf);
+            var pdfValidation = PdfReleaseProfile.ValidateFile(pdfStagingPath);
             if (!pdfValidation.IsValid) return Results.UnprocessableEntity(new { error = pdfValidation.Message, code = pdfValidation.Code });
 
-            payloadHash = OperationPayloadHash("ConnectorReleaseCandidate", new { expectedVersion, docxSha256 = ManagedDocumentFileService.Sha256(docx), pdfSha256 = ManagedDocumentFileService.Sha256(pdf) });
+            payloadHash = OperationPayloadHash("ConnectorReleaseCandidate", new { expectedVersion, docxSha256 = ManagedDocumentFileService.Sha256(docx), pdfSha256 });
             var priorOperation = await OperationResultAsync(db, grant.RevisionId, "ConnectorReleaseCandidate", operationKey, payloadHash, ct); if (priorOperation is not null) return priorOperation;
             if (grant.RevokedAt is not null) return Results.Conflict(new { error = "That connector grant completed with a different release-candidate set.", code = "operation_key_reused" });
             var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error;
@@ -765,9 +765,10 @@ public static class ManagedDocumentEndpoints
                 data.Revision.Id, Guid.NewGuid(), 1, "Released DOCX", summaryMetadata, docxUpload.FileName,
                 ManagedDocumentFileService.DocxContentType, docx, priorDocx?.Id, grant.UserName, now, ct);
             await storage.CheckpointAsync(storageOperation, "object-staged-1", ct);
+            await using var pdfSource = System.IO.File.OpenRead(pdfStagingPath);
             var stagedPdf = await files.StageAsync(storageOperation.Id, "candidate-pdf", data.Document.ProjectId, data.Document.Id,
                 data.Revision.Id, Guid.NewGuid(), 1, "Released PDF", summaryMetadata, pdfFileName,
-                ManagedDocumentFileService.PdfContentType, pdf, priorPdf?.Id, grant.UserName, now, ct);
+                ManagedDocumentFileService.PdfContentType, pdfSource, priorPdf?.Id, grant.UserName, now, ct);
             await storage.CheckpointAsync(storageOperation, "object-staged-2", ct);
             var docxAttachment = stagedDocx.Attachment; var pdfAttachment = stagedPdf.Attachment;
             var manifest = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"managed-document-release-v3:{working.Sha256}:{ManagedDocumentFileService.ReleaseTransformationProfile}:{ManagedDocumentFileService.ReleaseTransformationVersion}:{docxAttachment.Sha256}:{pdfAttachment.Sha256}:{data.Revision.FormalSummaryHash}:{data.Revision.FormalSummaryVersion}:{data.Revision.SubmittedRelationshipManifestHash}"));
@@ -789,6 +790,10 @@ public static class ManagedDocumentEndpoints
         catch (DbUpdateException ex) when (IsManagedDocumentOperationKeyConflict(ex))
         { if (storageOperation is not null) await RollBackStorageAsync(db, storage, storageOperation.Id, "The connector operation key completed concurrently.", grant.UserName); db.ChangeTracker.Clear(); return await OperationResultAsync(db, grant.RevisionId, "ConnectorReleaseCandidate", operationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The connector operation completed concurrently.", code = "operation_key_conflict" }); }
         catch { if (storageOperation is not null) await RollBackStorageAsync(db, storage, storageOperation.Id, "The release-candidate operation failed before atomic completion.", grant.UserName); throw; }
+        finally
+        {
+            if (pdfStagingPath is not null && System.IO.File.Exists(pdfStagingPath)) System.IO.File.Delete(pdfStagingPath);
+        }
     }
 
     private static async Task<IResult> ConnectorDiscardAsync(Guid grantId, ConnectorDiscardRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)

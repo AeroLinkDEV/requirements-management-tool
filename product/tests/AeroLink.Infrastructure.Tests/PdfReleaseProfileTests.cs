@@ -172,11 +172,45 @@ public sealed class PdfReleaseProfileTests
     }
 
     [Fact]
-    public async Task Oversized_pdf_is_bounded_while_streaming()
+    public async Task Oversized_pdf_is_bounded_while_streaming_to_staging()
     {
         var payload = new byte[64];
         await Assert.ThrowsAsync<PdfRenditionTooLargeException>(() =>
-            ManagedDocumentFileService.ReadPdfAsync(new MemoryStream(payload), 32, default));
+            ManagedDocumentFileService.ReadPdfToStagedFileAsync(new MemoryStream(payload), 32, default));
+    }
+
+    [Fact]
+    public async Task Staged_file_validation_streams_and_matches_the_content_hash()
+    {
+        var bytes = ProfessionalPublicationRenderer.Render(Publication(), "pdf", "SDP-000001.00").Content;
+        var (path, sha, size) = await ManagedDocumentFileService.ReadPdfToStagedFileAsync(new MemoryStream(bytes), default);
+        try
+        {
+            Assert.Equal(ManagedDocumentFileService.Sha256(bytes), sha);
+            Assert.Equal(bytes.Length, size);
+            var validation = PdfReleaseProfile.ValidateFile(path);
+            Assert.True(validation.IsValid, validation.Message);
+        }
+        finally
+        {
+            if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Staged_file_validation_rejects_a_fake_pdf_and_a_missing_file()
+    {
+        var fakePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"aerolink-pdf-test-{Guid.NewGuid():N}.pdf");
+        try
+        {
+            System.IO.File.WriteAllBytes(fakePath, Encoding.ASCII.GetBytes("%PDF-not-a-pdf"));
+            Assert.Equal("pdf_structure_invalid", PdfReleaseProfile.ValidateFile(fakePath).Code);
+        }
+        finally
+        {
+            if (System.IO.File.Exists(fakePath)) System.IO.File.Delete(fakePath);
+        }
+        Assert.Equal("pdf_structure_invalid", PdfReleaseProfile.ValidateFile(System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"aerolink-missing-{Guid.NewGuid():N}.pdf")).Code);
     }
 
     private static ProfessionalPublication Publication() =>

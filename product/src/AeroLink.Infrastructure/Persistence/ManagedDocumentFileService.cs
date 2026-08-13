@@ -72,22 +72,44 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
         }
     }
 
-    /// <summary>Streams the PDF to memory while enforcing the explicit rendition limit before further allocation.</summary>
-    public static Task<byte[]> ReadPdfAsync(Stream input, CancellationToken ct) => ReadPdfAsync(input, MaximumPdfBytes, ct);
+    /// <summary>
+    /// Streams an uploaded PDF to a bounded staging file while hashing and counting bytes, so an upload is
+    /// never materialized in one large byte buffer. The caller owns the returned file and deletes it.
+    /// </summary>
+    public static Task<(string Path, string Sha256, long Size)> ReadPdfToStagedFileAsync(Stream input, CancellationToken ct) =>
+        ReadPdfToStagedFileAsync(input, MaximumPdfBytes, ct);
 
-    /// <summary>Streams the PDF to memory while enforcing the given explicit rendition limit before further allocation.</summary>
-    public static async Task<byte[]> ReadPdfAsync(Stream input, int maximumBytes, CancellationToken ct)
+    /// <summary>Streams an uploaded PDF to a bounded staging file under the given explicit limit.</summary>
+    public static async Task<(string Path, string Sha256, long Size)> ReadPdfToStagedFileAsync(Stream input, int maximumBytes, CancellationToken ct)
     {
-        using var output = new MemoryStream();
-        var buffer = new byte[81920];
-        int read;
-        while ((read = await input.ReadAsync(buffer, ct)) > 0)
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-pdf-candidate-{Guid.NewGuid():N}.upload");
+        try
         {
-            if (output.Length + read > maximumBytes) throw new PdfRenditionTooLargeException();
-            await output.WriteAsync(buffer.AsMemory(0, read), ct);
+            long size = 0;
+            string hash;
+            await using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920,
+                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                var buffer = new byte[81920];
+                int read;
+                while ((read = await input.ReadAsync(buffer, ct)) > 0)
+                {
+                    if (size + read > maximumBytes) throw new PdfRenditionTooLargeException();
+                    size += read;
+                    sha.AppendData(buffer, 0, read);
+                    await output.WriteAsync(buffer.AsMemory(0, read), ct);
+                }
+                if (size == 0) throw new DomainException("The PDF rendition cannot be empty.");
+                hash = Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant();
+            }
+            return (path, hash, size);
         }
-        if (output.Length == 0) throw new DomainException("The PDF rendition cannot be empty.");
-        return output.ToArray();
+        catch
+        {
+            if (File.Exists(path)) File.Delete(path);
+            throw;
+        }
     }
 
     /// <summary>
@@ -450,6 +472,16 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
         string actor, DateTimeOffset now, CancellationToken ct)
     {
         await using var source = new MemoryStream(content, false);
+        return await StageAsync(operationId, slot, projectId, documentId, revisionId, logicalId, version, label,
+            description, fileName, contentType, source, supersedesId, actor, now, ct);
+    }
+
+    /// <summary>Stages evidence from a stream so the evidence store can bound, hash and write it without an in-memory copy.</summary>
+    public async Task<(ControlledAttachment Attachment, StagedEvidence Staged)> StageAsync(Guid operationId, string slot,
+        Guid projectId, Guid documentId, Guid revisionId, Guid logicalId, int version, string label,
+        string description, string fileName, string contentType, Stream source, Guid? supersedesId,
+        string actor, DateTimeOffset now, CancellationToken ct)
+    {
         var staged = await files.StageAsync(source, operationId, slot, fileName, contentType, ct);
         var attachment = new ControlledAttachment(projectId, "ManagedDocument", documentId, revisionId, logicalId,
             version, label, description, staged.OriginalFileName, staged.ContentType, staged.Size, staged.Sha256,

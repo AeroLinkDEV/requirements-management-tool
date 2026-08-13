@@ -37,47 +37,99 @@ public static class PdfReleaseProfile
         try
         {
             using var stream = new MemoryStream(bytes, false);
-            PdfDocument? document = null;
-            try
-            {
-                document = PdfReader.Open(stream, PdfDocumentOpenMode.Import);
-                if (document.SecuritySettings.IsEncrypted)
-                    return PdfProfileValidation.Reject("pdf_encrypted", "Password-protected or encrypted PDFs are not accepted as release renditions.");
-                if (document.PageCount < 1)
-                    return PdfProfileValidation.Reject("pdf_no_pages", "The release PDF renders no pages.");
-                if (document.PageCount > MaximumPageCount)
-                    return PdfProfileValidation.Reject("pdf_too_complex", "The release PDF contains an unreasonable number of pages.");
-                if (document.Internals.GetAllObjects().Count() > MaximumObjectCount)
-                    return PdfProfileValidation.Reject("pdf_too_complex", "The release PDF contains an unreasonable number of objects.");
-                foreach (var page in document.Pages)
-                {
-                    var width = page.Width.Point;
-                    var height = page.Height.Point;
-                    if (width is < 1 or > MaximumPageExtentPoints || height is < 1 or > MaximumPageExtentPoints)
-                        return PdfProfileValidation.Reject("pdf_page_geometry_invalid", "A release PDF page has an unsupported size.");
-                }
-                var feature = FindProhibitedFeature(document.Internals);
-                if (feature is not null)
-                    return PdfProfileValidation.Reject("pdf_prohibited_feature", $"The release PDF contains a prohibited active or embedded capability ({feature}). Only static Word-export renditions are accepted.");
-                return PdfProfileValidation.Valid();
-            }
-            catch (PdfReaderException)
-            {
-                return PdfProfileValidation.Reject("pdf_structure_invalid", "The release PDF is malformed, truncated, or password protected.");
-            }
-            catch (Exception) when (document is not null && document.SecuritySettings.IsEncrypted)
-            {
-                return PdfProfileValidation.Reject("pdf_encrypted", "Password-protected or encrypted PDFs are not accepted as release renditions.");
-            }
-            finally
-            {
-                document?.Dispose();
-            }
+            return ValidateOpen(() => PdfReader.Open(stream, PdfDocumentOpenMode.Import));
         }
         catch (Exception)
         {
             return PdfProfileValidation.Reject("pdf_structure_invalid", "The release PDF could not be structurally validated as a static rendition.");
         }
+    }
+
+    /// <summary>
+    /// Validates a PDF already staged to disk, reading only bounded slices into memory. This is the
+    /// endpoint path so an upload is never materialized in one large byte buffer.
+    /// </summary>
+    public static PdfProfileValidation ValidateFile(string path)
+    {
+        try
+        {
+            var header = HeaderFailureFromFile(path);
+            if (header is not null) return PdfProfileValidation.Reject("pdf_structure_invalid", header);
+            return ValidateOpen(() => PdfReader.Open(path, PdfDocumentOpenMode.Import));
+        }
+        catch (FileNotFoundException)
+        {
+            return PdfProfileValidation.Reject("pdf_structure_invalid", "The release PDF staging file is missing.");
+        }
+        catch (Exception)
+        {
+            return PdfProfileValidation.Reject("pdf_structure_invalid", "The release PDF could not be structurally validated as a static rendition.");
+        }
+    }
+
+    private static PdfProfileValidation ValidateOpen(Func<PdfDocument> open)
+    {
+        PdfDocument? document = null;
+        try
+        {
+            document = open();
+            if (document.SecuritySettings.IsEncrypted)
+                return PdfProfileValidation.Reject("pdf_encrypted", "Password-protected or encrypted PDFs are not accepted as release renditions.");
+            if (document.PageCount < 1)
+                return PdfProfileValidation.Reject("pdf_no_pages", "The release PDF renders no pages.");
+            if (document.PageCount > MaximumPageCount)
+                return PdfProfileValidation.Reject("pdf_too_complex", "The release PDF contains an unreasonable number of pages.");
+            if (document.Internals.GetAllObjects().Count() > MaximumObjectCount)
+                return PdfProfileValidation.Reject("pdf_too_complex", "The release PDF contains an unreasonable number of objects.");
+            foreach (var page in document.Pages)
+            {
+                var width = page.Width.Point;
+                var height = page.Height.Point;
+                if (width is < 1 or > MaximumPageExtentPoints || height is < 1 or > MaximumPageExtentPoints)
+                    return PdfProfileValidation.Reject("pdf_page_geometry_invalid", "A release PDF page has an unsupported size.");
+            }
+            var feature = FindProhibitedFeature(document.Internals);
+            if (feature is not null)
+                return PdfProfileValidation.Reject("pdf_prohibited_feature", $"The release PDF contains a prohibited active or embedded capability ({feature}). Only static Word-export renditions are accepted.");
+            return PdfProfileValidation.Valid();
+        }
+        catch (PdfReaderException)
+        {
+            return PdfProfileValidation.Reject("pdf_structure_invalid", "The release PDF is malformed, truncated, or password protected.");
+        }
+        catch (Exception) when (document is not null && document.SecuritySettings.IsEncrypted)
+        {
+            return PdfProfileValidation.Reject("pdf_encrypted", "Password-protected or encrypted PDFs are not accepted as release renditions.");
+        }
+        finally
+        {
+            document?.Dispose();
+        }
+    }
+
+    private static string? HeaderFailureFromFile(string path)
+    {
+        var head = new byte[8];
+        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.SequentialScan))
+            _ = stream.Read(head, 0, head.Length);
+        if (head[0] != (byte)'%' || head[1] != (byte)'P' || head[2] != (byte)'D' || head[3] != (byte)'F' || head[4] != (byte)'-')
+            return "The release rendition is not a PDF file.";
+        var major = head[5] - (byte)'0';
+        if (head[6] != (byte)'.' || major is < 1 or > 2 || head[7] < (byte)'0' || head[7] > (byte)'9')
+            return "The release PDF declares an unsupported version.";
+        var length = new FileInfo(path).Length;
+        var windowLength = (int)Math.Min(length, 65536);
+        var window = new byte[windowLength];
+        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.SequentialScan))
+        {
+            stream.Seek(length - windowLength, SeekOrigin.Begin);
+            _ = stream.Read(window, 0, windowLength);
+        }
+        if (!EndsWithEndOfFileMarker(window))
+            return "The release PDF is truncated or carries trailing data after its end marker.";
+        if (HasDisallowedIncrementalUpdate(window))
+            return "The release PDF must be a single-version export without incremental updates.";
+        return null;
     }
 
     private static string? HeaderFailure(byte[] bytes)
